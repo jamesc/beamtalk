@@ -51,6 +51,71 @@ is_utf8_test() ->
     %% Truncated multi-byte sequence — incomplete, not valid.
     ?assertNot(beamtalk_primitive:is_utf8(<<16#E4, 16#BD>>)).
 
+%%% ============================================================================
+%%% BT-3033: selector-aware UTF-8 scan skip — send/3 and responds_to/2 on a
+%%% non-UTF-8 binary must still answer correctly for the "shared" selectors
+%%% (String and Binary agree), even though the scan that would normally prove
+%%% the receiver is Binary is skipped for them.
+%%% ============================================================================
+
+send_shared_selector_on_non_utf8_binary_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Bin = <<255, 254, 253, 0, 200>>,
+        ?assertNot(beamtalk_primitive:is_utf8(Bin)),
+        ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
+        ?assertEqual(255, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
+        ?assertEqual(5, beamtalk_primitive:send(Bin, byteSize, [])),
+        ?assertEqual([255, 254, 253, 0, 200], beamtalk_primitive:send(Bin, toBytes, []))
+    end}.
+
+send_shared_selector_on_valid_utf8_binary_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Same selectors, valid-UTF-8 receiver — must agree with the
+        %% byte-level answer regardless of the "String" classification.
+        Bin = <<"hello">>,
+        ?assertEqual('String', beamtalk_primitive:class_of(Bin)),
+        ?assertEqual(104, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
+        ?assertEqual(5, beamtalk_primitive:send(Bin, byteSize, []))
+    end}.
+
+responds_to_shared_selector_on_non_utf8_binary_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Bin = crypto:strong_rand_bytes(64),
+        ?assert(beamtalk_primitive:responds_to(Bin, 'byteAt:')),
+        ?assert(beamtalk_primitive:responds_to(Bin, byteSize)),
+        ?assert(beamtalk_primitive:responds_to(Bin, 'part:size:'))
+    end}.
+
+send_non_shared_selector_still_classifies_correctly_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% `size`/`at:`/`do:` genuinely differ between String and Binary, so
+        %% these must still route by the real is_utf8/1 answer.
+        NonUtf8 = <<255, 254, 253, 0, 200>>,
+        ?assertEqual(5, beamtalk_primitive:send(NonUtf8, size, [])),
+        ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'at:', [1])),
+        Utf8 = <<"café"/utf8>>,
+        ?assertEqual(4, beamtalk_primitive:send(Utf8, size, [])),
+        ?assertEqual(<<"c"/utf8>>, beamtalk_primitive:send(Utf8, 'at:', [1]))
+    end}.
+
+send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% A String-only selector (not on Binary at all) must still DNU on
+        %% invalid UTF-8 — never silently routed through the String module.
+        NonUtf8 = <<255, 254, 253>>,
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = does_not_understand,
+                    class = 'Binary',
+                    selector = uppercase
+                }
+            },
+            beamtalk_primitive:send(NonUtf8, uppercase, [])
+        )
+    end}.
+
 class_of_boolean_test() ->
     ?assertEqual('True', beamtalk_primitive:class_of(true)),
     ?assertEqual('False', beamtalk_primitive:class_of(false)).

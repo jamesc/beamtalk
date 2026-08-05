@@ -510,7 +510,7 @@ responds_to_map(X, Selector) ->
 -doc "Dispatch a value using its mapped stdlib module.".
 -spec dispatch_via_module(term(), atom(), list()) -> term().
 dispatch_via_module(X, Selector, Args) ->
-    case module_for_value(X) of
+    case module_for_value(X, Selector) of
         undefined ->
             beamtalk_error:raise(
                 beamtalk_error:new(
@@ -527,10 +527,60 @@ dispatch_via_module(X, Selector, Args) ->
 -doc "Check method support using the mapped stdlib module.".
 -spec responds_via_module(term(), atom()) -> boolean().
 responds_via_module(X, Selector) ->
-    case module_for_value(X) of
+    case module_for_value(X, Selector) of
         undefined -> false;
         Mod -> Mod:has_method(Selector)
     end.
+
+-doc """
+Map a runtime value to its stdlib dispatch module, selector-aware (BT-3033).
+
+Overload of `module_for_value/1` for the dynamic-dispatch call sites that
+already have the selector in hand (`dispatch_via_module/3`,
+`responds_via_module/2`). For a bare binary whose selector is in
+`is_string_binary_shared_selector/1`, skips the O(byte_size) `is_utf8/1`
+validating scan entirely — String and Binary agree on that selector's
+behaviour regardless of which one the value "really" is, so either module
+answers identically. Falls back to `module_for_value/1` (and its UTF-8 scan)
+for every other selector.
+""".
+-spec module_for_value(term(), atom()) -> atom() | undefined.
+module_for_value(X, Selector) when is_binary(X) ->
+    case is_string_binary_shared_selector(Selector) of
+        true -> 'bt@stdlib@string';
+        false -> module_for_value(X)
+    end;
+module_for_value(X, _Selector) ->
+    module_for_value(X).
+
+-doc """
+True for selectors where `String` and `Binary` behave identically (BT-3033).
+
+Derived from `Binary.bt`'s own instance methods that `String.bt` does *not*
+redefine — per ADR 0086's method override table, these are the byte-level
+primitives String inherits unchanged (`byteAt:`, `byteSize`, `part:size:`,
+`concat:`, `toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
+`asHex`). Every other Binary-defined selector (`size`, `at:`, `do:`,
+`printString`, `asString`) is overridden by `String` with grapheme-aware
+behaviour, and every String-only selector (`uppercase`, `split:`, …) simply
+doesn't exist on `Binary` — both cases need the real `is_utf8/1` answer to
+dispatch (or reject) correctly.
+
+Kept in sync with the two source files by
+`build_stdlib.rs`'s `test_binary_string_shared_selectors_stay_in_sync`,
+which fails the build if either file's method list drifts from this set.
+""".
+-spec is_string_binary_shared_selector(atom()) -> boolean().
+is_string_binary_shared_selector('byteAt:') -> true;
+is_string_binary_shared_selector(byteSize) -> true;
+is_string_binary_shared_selector('part:size:') -> true;
+is_string_binary_shared_selector('concat:') -> true;
+is_string_binary_shared_selector(toBytes) -> true;
+is_string_binary_shared_selector(asStringUnchecked) -> true;
+is_string_binary_shared_selector(asBase64) -> true;
+is_string_binary_shared_selector(asBase64Url) -> true;
+is_string_binary_shared_selector(asHex) -> true;
+is_string_binary_shared_selector(_) -> false.
 
 -doc "Map a runtime value to its stdlib dispatch module.".
 -spec module_for_value(term()) -> atom() | undefined.
@@ -538,7 +588,9 @@ module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
 module_for_value(X) when is_binary(X) ->
     %% BT-2999: keep dynamic dispatch consistent with class_of/1 — a binary
     %% that isn't valid UTF-8 is a Binary, so grapheme-aware String methods
-    %% (`size`, `at:`, `do:`, …) would only fail on it.
+    %% (`size`, `at:`, `do:`, …) would only fail on it. BT-3033: callers that
+    %% already know the selector should prefer module_for_value/2, which
+    %% skips this scan for selectors where String and Binary agree.
     case is_utf8(X) of
         true -> 'bt@stdlib@string';
         false -> 'bt@stdlib@binary'
@@ -847,10 +899,16 @@ sending to the *same* multi-megabyte binary through dynamic dispatch re-scans
 it every send (~0.4 ms per send at 1 MB), so an N-iteration loop is O(N x size).
 Annotate such a receiver `:: Binary` or `:: String` to compile the sends
 statically and skip this entirely. Note the grapheme-aware String selectors
-(`size`, `at:`, `do:`) were already O(size) per call before this check existed —
-only the O(1) byte-level selectors (`byteSize`, `byteAt:`) gain a per-send scan,
-and only when dispatched dynamically. Tracked for a selector-aware fix in
-BT-3033.
+(`size`, `at:`, `do:`) were already O(size) per call before this check existed.
+
+BT-3033: for the O(1) byte-level selectors that gain a per-send scan
+(`byteSize`, `byteAt:`, `part:size:`, `concat:`, `toBytes`,
+`asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`), `send/3` and
+`responds_to/2` skip this scan entirely via
+`module_for_value/2`/`is_string_binary_shared_selector/1` — those selectors
+behave identically whether the receiver "really" is a String or a Binary, so
+there is no need to tell them apart. Every other selector still pays the
+scan here.
 """.
 -spec is_utf8(binary()) -> boolean().
 is_utf8(Bin) when is_binary(Bin) ->
