@@ -116,6 +116,34 @@ send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
         )
     end}.
 
+%% ADR 0066: extending a sealed primitive (`String >> byteAt: => ...`) is
+%% legal today for any selector `String.bt` doesn't locally define — which
+%% includes every shared selector. `'bt@stdlib@string':dispatch/3` checks the
+%% extension registry *before* delegating to `'bt@stdlib@binary'`, so the
+%% fast path must not route a genuinely non-UTF-8 binary through it when a
+%% String extension shadows the selector — that would let String-only logic
+%% run against raw bytes `class_of/1` still reports as Binary (caught in
+%% review of the initial BT-3033 patch).
+send_shared_selector_with_string_extension_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_extensions:init(),
+            ExtFun = fun(_Args, _Self) -> string_extension_fired end,
+            ok = beamtalk_extensions:register('String', 'byteAt:', ExtFun, bt3033_test)
+        end,
+        fun(_) -> beamtalk_extensions:unregister('String', 'byteAt:') end, fun() ->
+            %% A genuine Binary must still hit Binary's own byteAt: primitive
+            %% — the String extension must not fire for it.
+            NonUtf8 = <<255, 254, 253, 0, 200>>,
+            ?assertEqual('Binary', beamtalk_primitive:class_of(NonUtf8)),
+            ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'byteAt:', [0])),
+            %% A genuine String (valid UTF-8) is correctly still subject to
+            %% the extension it was registered on.
+            Utf8 = <<"hello">>,
+            ?assertEqual('String', beamtalk_primitive:class_of(Utf8)),
+            ?assertEqual(string_extension_fired, beamtalk_primitive:send(Utf8, 'byteAt:', [0]))
+        end}.
+
 class_of_boolean_test() ->
     ?assertEqual('True', beamtalk_primitive:class_of(true)),
     ?assertEqual('False', beamtalk_primitive:class_of(false)).
