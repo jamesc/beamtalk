@@ -7,6 +7,8 @@
 // on handles from File open:mode: and File open:mode:do:.
 //
 // All paths are relative to the stdlib test working directory — never /tmp.
+//
+// Fixtures: stdlib/test/fixtures/file_handle_owner_actor.bt (BT-3020)
 
 TestCase subclass: FileHandleIoTest
 
@@ -215,6 +217,38 @@ TestCase subclass: FileHandleIoTest
     handle close
     self deny: handle isOpen
     self assert: (File readAll: "target/bt-test-tmp/handle_owned.log") unwrap equals: "owned" ++ nl
+
+  // === BT-3020: open:mode: registers its handle against a resolved owner ===
+
+  // A test method runs in a plain spawned process (beamtalk_test_case's
+  // spawn_test_execution/6) — no REPL session, and not itself a Beamtalk
+  // actor — so open:mode: called directly from here resolves to tier 3:
+  // unowned, listed for diagnostics but reclaimed by nothing but `close`.
+  testOpenModeFromCompiledCodeIsUnowned =>
+    path := "target/bt-test-tmp/handle_unowned.txt"
+    File delete: path
+    handle := (File open: path mode: #write) unwrap
+    entry := File openHandles detect: [:e | (e at: 1) =:= path]
+    self assert: (entry at: 2) equals: #write
+    self assert: (entry at: 3) isNil
+    handle close
+    self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
+
+  // Tier 2: an actor that opens a handle from one of its own methods and
+  // never closes it — the exact leak this issue fixes — is reclaimed when
+  // the actor dies, and until then is listed under the actor's own pid.
+  testActorOwnedHandleReclaimedOnDeath =>
+    path := "target/bt-test-tmp/handle_actor_owned.txt"
+    File delete: path
+    actor := FileHandleOwnerActor spawn
+    actor openUnclosed: path
+    entry := File openHandles detect: [:e | (e at: 1) =:= path]
+    self assert: (entry at: 3) equals: actor pid
+    Erlang erlang unlink: actor pid
+    actor kill
+    50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
 
   // === closed-handle errors ===
   testReadOnClosedHandleErrors =>
