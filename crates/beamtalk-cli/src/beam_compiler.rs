@@ -100,6 +100,22 @@ pub(crate) fn is_valid_module_name(name: &str) -> bool {
             .all(|c| c == '_' || c == '@' || c.is_ascii_alphanumeric())
 }
 
+fn validate_module_name(name: &str) -> Result<()> {
+    if !is_valid_module_name(name) {
+        miette::bail!(
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
+            name
+        );
+    }
+    Ok(())
+}
+
+fn write_core_erlang_bytes(bytes: impl AsRef<[u8]>, output_path: &Utf8Path) -> Result<()> {
+    std::fs::write(output_path, bytes)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))
+}
+
 /// BEAM bytecode compiler.
 ///
 /// Handles compilation of Core Erlang to BEAM bytecode using the embedded
@@ -596,15 +612,8 @@ pub fn write_core_erlang_with_source(
     output_path: &Utf8Path,
     source_text: Option<&str>,
 ) -> Result<()> {
-    // Validate module name to prevent path traversal and injection
-    if !is_valid_module_name(module_name) {
-        miette::bail!(
-            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
-            module_name
-        );
-    }
+    validate_module_name(module_name)?;
 
-    // Generate Core Erlang
     let core_erlang = beamtalk_core::erlang::generate_module(
         module,
         beamtalk_core::erlang::CodegenOptions::new(module_name)
@@ -618,12 +627,7 @@ pub fn write_core_erlang_with_source(
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
 
-    // Write to file
-    std::fs::write(output_path, core_erlang)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
-
-    Ok(())
+    write_core_erlang_bytes(&core_erlang, output_path)
 }
 
 /// Cross-file class hierarchy data needed during compilation.
@@ -719,12 +723,7 @@ pub fn write_core_erlang_with_bindings(
     source: Option<(&str, Option<&str>)>,
     native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<()> {
-    if !is_valid_module_name(module_name) {
-        miette::bail!(
-            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
-            module_name
-        );
-    }
+    validate_module_name(module_name)?;
 
     let (source_text, source_path) = match source {
         Some((text, path)) => (Some(text), path),
@@ -758,11 +757,7 @@ pub fn write_core_erlang_with_bindings(
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
 
-    std::fs::write(output_path, core_erlang)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
-
-    Ok(())
+    write_core_erlang_bytes(&core_erlang, output_path)
 }
 
 /// Compiles a Beamtalk source file (.bt) to Core Erlang (.core).
