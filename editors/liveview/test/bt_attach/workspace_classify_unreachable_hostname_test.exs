@@ -16,82 +16,73 @@ defmodule BtAttach.WorkspaceClassifyUnreachableHostnameTest do
   `classify_unreachable/2`'s catch-all is `{:error, _} -> :epmd_absent`, that
   collapsed both `:bad_cookie` and `:dead_workspace` into `:epmd_absent`.
 
-  `async: false`: this reproduces the bug by mutating global VM resolver
-  state (`:inet_db` lookup order + a fabricated hosts entry) and briefly
-  starting distribution, all restored in `on_exit`. ExUnit runs `async: false`
-  modules after all `async: true` ones (never interleaved), so this can't
-  race concurrent tests doing real hostname/network work.
+  This is exercised by stubbing `:net_adm.names/0` and `:net_adm.names/1`
+  independently with `:meck` — giving them different results is exactly what
+  proves *which* arity `classify_unreachable/1`'s default argument calls —
+  rather than starting real distribution to reproduce the failure against a
+  live epmd: dynamically bringing up `:net_kernel` isn't reliable across CI
+  containers (some can't start distribution post-boot at all), so a
+  live-epmd version of this test would be flaky by construction on the one
+  thing it most needs to be deterministic about.
+
+  `async: false`: `:meck` globally replaces the `:net_adm` module for the
+  whole VM, so this can't run concurrently with anything else touching it.
+  Nothing else in this suite does.
   """
   use ExUnit.Case, async: false
 
   alias BtAttach.Workspace
 
-  # RFC 5737 TEST-NET-1: guaranteed non-routable, so a connect attempt to it
-  # fails fast and deterministically instead of hanging or (worse) actually
-  # reaching some host on the network.
-  @unroutable_ip {192, 0, 2, 1}
-
   setup do
-    {:ok, my_host} = :inet.gethostname()
-    old_lookup = :inet_db.res_option(:lookup)
+    :meck.new(:net_adm, [:unstick, :passthrough])
 
-    # Register a node with the real local epmd so we have a name we know is
-    # present, without depending on whatever else happens to be registered
-    # on this (possibly shared) machine. Skip start/stop if this VM is
-    # already distributed for some other reason — reuse its identity instead.
-    already_alive? = Node.alive?()
-
-    registered_node =
-      if already_alive? do
-        node()
-      else
-        short_name = :"bt3003hostbug#{System.unique_integer([:positive])}"
-        {:ok, _pid} = :net_kernel.start([short_name, :shortnames])
-        node()
-      end
-
-    on_exit(fn ->
-      :inet_db.del_host(@unroutable_ip)
-      :inet_db.set_lookup(old_lookup)
-      unless already_alive?, do: :net_kernel.stop()
-    end)
-
-    %{my_host: my_host, registered_node: registered_node}
+    # `:meck.unload/0` (no args), not `:meck.unload(:net_adm)`: meck ties a
+    # mock's lifecycle to its owning process and auto-unloads when that
+    # process exits, which — for `on_exit` callbacks — has already happened
+    # by the time this runs (they execute in a separate runner process after
+    # the test process itself has terminated). The no-arg form silently
+    # tolerates a mock that's already gone; the 1-arg form raises
+    # `{not_mocked, _}` on it.
+    on_exit(fn -> :meck.unload() end)
+    :ok
   end
 
   describe "classify_unreachable/1 default arg — hostname self-resolution failure (BT-3003)" do
-    test "epmd still distinguishes bad_cookie/dead_workspace when the machine's own hostname doesn't self-resolve",
-         %{my_host: my_host, registered_node: registered_node} do
-      # Sanity check: epmd genuinely knows about our just-started node via the
-      # explicit-host form, before we break anything.
-      assert {:ok, names} = :net_adm.names(:localhost)
-      short_name = registered_node |> Atom.to_string() |> String.split("@") |> List.first()
-      assert List.keymember?(names, String.to_charlist(short_name), 0)
+    test "bad_cookie: epmd knows the target node, reachable only via the explicit :localhost host" do
+      # Simulate the WSL2 bug precisely: the bare zero-arg query fails (as it
+      # does when the machine's own hostname doesn't self-resolve), while the
+      # explicit-host query the fixed default now uses succeeds against the
+      # same epmd, with the target node's short name present.
+      :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
 
-      # Reproduce the WSL2 bug: make the machine's own hostname resolve to an
-      # unroutable address, so an epmd query built from `inet:gethostname/0`
-      # (the zero-arg `:net_adm.names/0` path) fails, while the explicit
-      # `:localhost` path is untouched and keeps working against the same epmd.
-      :inet_db.set_lookup([:file])
-      :ok = :inet_db.add_host(@unroutable_ip, [my_host])
+      :meck.expect(:net_adm, :names, fn :localhost ->
+        {:ok, [{~c"beamtalk_workspace_spike", 45678}]}
+      end)
 
-      # Confirm the forced failure actually reproduces the reported symptom
-      # (the WSL2 report saw `{:error, :address}` specifically) rather than
-      # accidentally still succeeding. Match on the shape, not the exact
-      # reason atom — that's platform/OTP-version-specific and irrelevant to
-      # classify_unreachable/2's own catch-all, which is `{:error, _}`.
-      assert {:error, _reason} = :net_adm.names()
-      assert {:ok, _} = :net_adm.names(:localhost)
+      # The regression: with the old `:net_adm.names()` default, this would
+      # hit the stubbed zero-arg failure above and misreport `:epmd_absent`.
+      assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost) == :bad_cookie
+    end
 
-      # The regression: with the old `:net_adm.names()` default, both calls
-      # below would misreport `:epmd_absent` right here, because the default
-      # arg's own lookup would hit the same forced failure.
-      assert Workspace.classify_unreachable(registered_node) == :bad_cookie
+    test "dead_workspace: epmd is reachable via :localhost but has no record of the target node" do
+      :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
+      :meck.expect(:net_adm, :names, fn :localhost -> {:ok, []} end)
 
-      unregistered_node =
-        :"bt3003_no_such_workspace_#{System.unique_integer([:positive])}@localhost"
+      assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost) ==
+               :dead_workspace
+    end
 
-      assert Workspace.classify_unreachable(unregistered_node) == :dead_workspace
+    test "the default argument calls names/1 with :localhost, not names/0" do
+      # Belt-and-braces: assert on the call itself, not just the classification
+      # outcome, so a regression to the bare form fails here even if some
+      # future classification change happened to produce the same atom either way.
+      :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
+      :meck.expect(:net_adm, :names, fn :localhost -> {:ok, []} end)
+
+      Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost)
+
+      assert :meck.called(:net_adm, :names, [:localhost])
+      refute :meck.called(:net_adm, :names, [])
     end
   end
 end
