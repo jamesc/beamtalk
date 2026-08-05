@@ -41,13 +41,25 @@
 //!
 //! **DDD Context:** Desktop Shell
 
-use std::process::Command;
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use beamtalk_desktop_broker::readiness::{self, ProbeTimeouts, ReadinessState};
 use beamtalk_desktop_broker::sname::predict_short_name;
 use beamtalk_desktop_broker::spawn::{self, DEFAULT_BIND_FAILURE_GRACE, SpawnConfig};
 use beamtalk_desktop_broker::{SpawnAttemptConfig, spawn_front_with_port_retry};
+
+/// Kills the wrapped front on drop, including on a mid-test panic (an
+/// `assert!` failure otherwise skips any explicit `child.kill()` below it,
+/// leaking a live BEAM process — and its held port — past the failing test).
+struct KillOnDrop(Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
 
 /// Resolve a required env var, panicking with the setup instructions above
 /// (not a silent skip — these tests are `#[ignore]`d specifically so they
@@ -94,9 +106,10 @@ fn predict_node_name_matches_a_live_epmd_registration() {
     let mut config = SpawnAttemptConfig::new(launcher(), ws.clone());
     config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
 
-    let (mut child, port) =
+    let (child, port) =
         spawn_front_with_port_retry(&config).expect("live front should spawn and bind");
     let pid = child.id();
+    let _guard = KillOnDrop(child);
 
     // Force distribution to actually start (lazy, first-/readiness-call).
     let state = drive_to_terminal(port, ProbeTimeouts::default_local());
@@ -112,9 +125,6 @@ fn predict_node_name_matches_a_live_epmd_registration() {
         names.contains(&expected),
         "predicted short name {expected:?} not found in epmd's registered names {names:?}"
     );
-
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 /// BT-3004 acceptance criterion 2: deliberately trigger a bad-cookie attach
@@ -142,17 +152,15 @@ fn bad_cookie_readiness_resolves_within_the_default_budget() {
     cmd.env("BT_ATTACH_BIND_IP", "127.0.0.1");
     cmd.env("BT_ATTACH_NODE_SUFFIX", "bt3004_bad_cookie_probe");
     cmd.env("RELEASE_DISTRIBUTION", "none");
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .expect("front should spawn even with a bad cookie");
+    let _guard = KillOnDrop(child);
 
     let timeouts = ProbeTimeouts::default_local();
     let start = Instant::now();
     let state = drive_to_terminal(port, timeouts);
     let elapsed = start.elapsed();
-
-    let _ = child.kill();
-    let _ = child.wait();
 
     assert_eq!(
         state,
@@ -185,25 +193,28 @@ fn a_real_port_conflict_exits_within_the_calibrated_grace_period() {
 
     // Front A: binds and holds the port.
     let winner_config = SpawnConfig::new(launcher(), ws.clone(), port);
-    let mut winner = spawn::spawn_front(&winner_config).expect("winner should spawn");
+    let mut winner = KillOnDrop(spawn::spawn_front(&winner_config).expect("winner should spawn"));
     // Give it a real chance to actually bind before racing the loser —
     // measured healthy boots reach HTTP-up in under 1s (see
     // DEFAULT_BIND_FAILURE_GRACE's doc comment).
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(
-        winner.try_wait().expect("try_wait should succeed"),
+        winner.0.try_wait().expect("try_wait should succeed"),
         None,
         "winner should still be running (holding the port) before the race"
     );
 
-    // Front B: loses the eaddrinuse race for the same port.
+    // Front B: loses the eaddrinuse race for the same port. Guarded too: if
+    // the 30s assert below ever fires, the loser genuinely never crashed and
+    // would otherwise leak a process holding this port.
     let loser_config = SpawnConfig::new(launcher(), ws, port);
-    let mut loser =
-        spawn::spawn_front(&loser_config).expect("loser should spawn (exec succeeds, bind fails)");
+    let mut loser = KillOnDrop(
+        spawn::spawn_front(&loser_config).expect("loser should spawn (exec succeeds, bind fails)"),
+    );
 
     let start = Instant::now();
     let exit_status = loop {
-        if let Some(status) = loser.try_wait().expect("try_wait should succeed") {
+        if let Some(status) = loser.0.try_wait().expect("try_wait should succeed") {
             break status;
         }
         assert!(
@@ -213,9 +224,6 @@ fn a_real_port_conflict_exits_within_the_calibrated_grace_period() {
         std::thread::sleep(Duration::from_millis(20));
     };
     let elapsed = start.elapsed();
-
-    let _ = winner.kill();
-    let _ = winner.wait();
 
     assert!(
         !exit_status.success(),

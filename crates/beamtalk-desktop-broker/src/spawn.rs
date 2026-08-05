@@ -203,6 +203,17 @@ impl SpawnAttemptConfig {
 /// but that still can't return early on the *success* path (a still-running
 /// process can't be told apart from one about to crash without waiting out
 /// the full window), so it was not pursued here.
+///
+/// This also compounds with [`port::DEFAULT_MAX_ATTEMPTS`]: the pathological
+/// worst case (every one of 10 fresh, OS-assigned candidate ports conflicts)
+/// now takes up to 50s before [`spawn_front_with_port_retry`] gives up,
+/// versus 15s at the old 1.5s grace. In practice each candidate is a
+/// distinct ephemeral port from a fresh [`port::find_free_port`] call, not
+/// the same port retried, so an all-10-conflict run is far less likely than
+/// the single-attempt TOCTOU race [`port`]'s module docs describe — but a
+/// future caller setting a tight overall UI timeout around the whole spawn
+/// call should size it with this worst case in mind, not just the common
+/// one-attempt path.
 pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
 
 /// Spawn a front with automatic retry on port conflict (ADR 0097 Broker §2;
