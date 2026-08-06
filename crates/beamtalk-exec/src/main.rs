@@ -927,6 +927,214 @@ mod tests {
         assert!(result.is_err());
     }
 
+    // ── reader thread coverage (Unix) ───────────────────────────
+    //
+    // The existing `spawn_true_succeeds_and_exits` test uses `/usr/bin/env
+    // true` which produces no output, so the `Ok(n)` arm of `spawn_reader_thread`
+    // and the `stdout_event` / `stderr_event` call sites are never reached.
+    // These tests exercise those paths by spawning processes that write output.
+
+    #[test]
+    #[cfg(unix)]
+    fn spawn_with_stdout_covers_reader_thread() {
+        // `echo hello` writes to stdout — exercises the Ok(n) arm of the
+        // stdout reader thread (lines 416, 420, 422 in spawn_reader_thread).
+        use eetf::List;
+        let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+
+        let args_term = Term::from(List::from(vec![
+            binary_term(b"echo"),
+            binary_term(b"hello"),
+        ]));
+        let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
+        let req = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(10)),
+            (atom("executable"), binary_term(b"/usr/bin/env")),
+            (atom("args"), args_term),
+            (atom("env"), env_term),
+        ]));
+
+        let result = handle_command(&req, &writer, &children);
+        assert!(
+            result.is_ok(),
+            "spawn `env echo hello` should succeed: {result:?}"
+        );
+
+        // When the map entry is gone the child process has exited and its
+        // pipe ends are closed, so the reader threads will have seen EOF.
+        // Note: the reaper removes the map entry *before* joining the reader
+        // threads (main.rs:389-394), so breaking here doesn't guarantee the
+        // join has completed — only that the child has exited and EOF is
+        // imminent. In practice the readers drain within microseconds.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let map = children.lock().unwrap();
+                if !map.contains_key(&10) {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "child 10 not reaped within 5s");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn spawn_with_stderr_covers_stderr_reader_thread() {
+        // `sh -c 'echo err >&2'` writes to stderr — exercises the stderr_event
+        // branch of the reader thread (lines 417–418 in spawn_reader_thread).
+        use eetf::List;
+        let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+
+        let args_term = Term::from(List::from(vec![
+            binary_term(b"sh"),
+            binary_term(b"-c"),
+            binary_term(b"echo err >&2"),
+        ]));
+        let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
+        let req = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(11)),
+            (atom("executable"), binary_term(b"/usr/bin/env")),
+            (atom("args"), args_term),
+            (atom("env"), env_term),
+        ]));
+
+        let result = handle_command(&req, &writer, &children);
+        assert!(
+            result.is_ok(),
+            "spawn stderr writer should succeed: {result:?}"
+        );
+
+        // Same ordering caveat as spawn_with_stdout_covers_reader_thread: map
+        // removal precedes the reader-thread joins in the reaper (main.rs:389-394),
+        // so breaking here means child exit + EOF delivered, not join complete.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let map = children.lock().unwrap();
+                if !map.contains_key(&11) {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "child 11 not reaped within 5s");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn spawn_with_working_dir_succeeds() {
+        // The `dir` field in the spawn command sets the working directory via
+        // `cmd.current_dir(d)` (line 290). The existing tests never pass `dir`.
+        use eetf::List;
+        let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+
+        let args_term = Term::from(List::from(vec![binary_term(b"true")]));
+        let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
+        let req = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(12)),
+            (atom("executable"), binary_term(b"/usr/bin/env")),
+            (atom("args"), args_term),
+            (atom("env"), env_term),
+            (atom("dir"), binary_term(b"/tmp")),
+        ]));
+
+        let result = handle_command(&req, &writer, &children);
+        assert!(
+            result.is_ok(),
+            "spawn with dir=/tmp should succeed: {result:?}"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let map = children.lock().unwrap();
+                if !map.contains_key(&12) {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "child 12 not reaped within 5s");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn spawn_duplicate_child_id_is_rejected() {
+        // The duplicate-child-id guard (lines 343–346) kills and rejects a
+        // second spawn when the requested child_id is already occupied.
+        // `sleep 60` blocks so the map entry is still present for the second
+        // spawn attempt; the test kills it explicitly to clean up.
+        use eetf::List;
+        // Drop guard: always kill child 20, even if an assert! below panics.
+        // Defined before any `let` statements to satisfy clippy::items_after_statements.
+        struct KillChild20 {
+            children: ChildMap,
+        }
+        impl Drop for KillChild20 {
+            fn drop(&mut self) {
+                let req = Map::from([(atom("child_id"), int_term(20))]);
+                let _ = handle_kill(&req, &self.children);
+            }
+        }
+
+        let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+        let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
+        let _guard = KillChild20 {
+            children: Arc::clone(&children),
+        };
+
+        let args_sleep = Term::from(List::from(vec![binary_term(b"sleep"), binary_term(b"60")]));
+        let req1 = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(20)),
+            (atom("executable"), binary_term(b"/usr/bin/env")),
+            (atom("args"), args_sleep),
+            (atom("env"), env_term.clone()),
+        ]));
+        handle_command(&req1, &writer, &children).expect("first spawn must succeed");
+
+        // Attempt a second spawn with the same child_id — must fail.
+        let args_true = Term::from(List::from(vec![binary_term(b"true")]));
+        let req2 = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(20)),
+            (atom("executable"), binary_term(b"/usr/bin/env")),
+            (atom("args"), args_true),
+            (atom("env"), env_term),
+        ]));
+        let result = handle_command(&req2, &writer, &children);
+        assert!(result.is_err(), "duplicate child_id must be rejected");
+        assert!(
+            result.unwrap_err().contains("already in use"),
+            "error must mention 'already in use'"
+        );
+
+        // Kill the sleeping child so the test doesn't hold a process open.
+        let kill_req = Map::from([(atom("child_id"), int_term(20))]);
+        handle_kill(&kill_req, &children).expect("kill must succeed");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let map = children.lock().unwrap();
+                if !map.contains_key(&20) {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "child 20 not reaped within 5s");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     #[test]
     #[cfg(windows)]
     fn spawn_cmd_exit_zero_succeeds_on_windows() {
