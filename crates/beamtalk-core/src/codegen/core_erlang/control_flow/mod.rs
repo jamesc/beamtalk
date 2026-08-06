@@ -696,17 +696,24 @@ impl ThreadingPlan {
     /// `param_names` are the Core Erlang names of each threaded local IN THE CURRENT
     /// ITERATION (i.e. the fun parameter names at the point of the false arm).
     /// For the false-arm case these are the initial parameter names, not updated ones.
+    ///
+    /// BT-3055: mirrors `generate_pack_prefix`'s `ValueType`/`in_class_method` check —
+    /// this is the direct-params fast path's own `StateAcc` rebuild, and class methods
+    /// have no `State` to rebuild from here either.
     pub fn generate_exit_stateacc(
         &self,
         param_names: &[String],
         generator: &mut CoreErlangGenerator,
     ) -> Document<'static> {
-        if self.threaded_locals.is_empty() {
+        let starts_from_fresh_map =
+            matches!(self.context, CodeGenContext::ValueType) || generator.in_class_method();
+        if self.threaded_locals.is_empty() && !starts_from_fresh_map {
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
         let mut docs: Vec<Document<'static>> = Vec::new();
-        // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
-        let mut current = if matches!(self.context, CodeGenContext::ValueType) {
+        // BT-1053/BT-3055: Value-type methods and class methods have no actor State
+        // to rebuild from — start from a fresh empty map instead.
+        let mut current = if starts_from_fresh_map {
             let exit_var = generator.fresh_temp_var("ExitSA");
             docs.push(docvec![
                 "let ",

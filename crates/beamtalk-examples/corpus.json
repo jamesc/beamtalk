@@ -13486,22 +13486,28 @@
       "tags": [
         "BT3055ClassMethodCountedLoopTest",
         "TestCase",
+        "async",
         "bt3055_class_method_counted_loop_test",
+        "concurrent",
         "extends",
         "for each",
         "for-each",
         "forEach",
+        "gen_server",
+        "genserver",
         "inherit",
         "inheritance",
         "iterate",
         "iteration",
         "loop",
         "object",
+        "process",
         "subclassing",
-        "testCountedLoopWithEarlyReturnInClassMethodCompilesAndRuns"
+        "testCountedLoopWithEarlyReturnInClassMethodCompilesAndRuns",
+        "testCountedLoopWithNoStateEffectsInClassMethodCompilesAndRuns"
       ],
-      "source": "// BT-3055: `^` inside a `to:do:` counted loop in a class method used to fail\n// to compile with `{core_lint, {unbound_var, 'State', ...}}` — the counted\n// loop's map-accumulator packing hardcoded `State` as its base without\n// checking whether the enclosing method was a class method (which has no\n// `State` parameter). See fixtures/bt3055_ancestor.bt and\n// fixtures/bt3055_child.bt.\n\nTestCase subclass: BT3055ClassMethodCountedLoopTest\n\n  testCountedLoopWithEarlyReturnInClassMethodCompilesAndRuns =>\n    self assert: BT3055Child run equals: #FromAncestor",
-      "explanation": "BT-3055: `^` inside a `to:do:` counted loop in a class method used to fail to compile with `{core_lint, {unbound_var, 'State', ...}}` — the counted loop's map-accumulator packing hardcoded `State` as its base without checking whether the enclosing method was a class method (which has no `State` parameter). See fixtures/bt3055_ancestor.bt and fixtures/bt3055_child.bt."
+      "source": "// BT-3055: `^` inside a `to:do:` counted loop in a class method used to fail\n// to compile with `{core_lint, {unbound_var, 'State', ...}}` — the counted\n// loop's StateAcc pack/unpack helpers hardcoded `State` as their base without\n// checking whether the enclosing method was a class method (which has no\n// `State` parameter). See fixtures/bt3055_actor.bt for the two distinct\n// codegen paths this covers.\n\nTestCase subclass: BT3055ClassMethodCountedLoopTest\n\n  testCountedLoopWithEarlyReturnInClassMethodCompilesAndRuns =>\n    self assert: BT3055Actor runWithSelfSend equals: #FromAncestor\n\n  testCountedLoopWithNoStateEffectsInClassMethodCompilesAndRuns =>\n    self assert: BT3055Actor runPlainSum equals: 15",
+      "explanation": "BT-3055: `^` inside a `to:do:` counted loop in a class method used to fail to compile with `{core_lint, {unbound_var, 'State', ...}}` — the counted loop's StateAcc pack/unpack helpers hardcoded `State` as their base without checking whether the enclosing method was a class method (which has no `State` parameter). See fixtures/bt3055_actor.bt for the two distinct codegen paths this covers."
     },
     {
       "id": "stdlib-test-cast-send-test",
@@ -17977,36 +17983,20 @@
       "explanation": "BT-3054: exercises `self superclass` (backed by beamtalk_behaviour_intrinsics:classSuperclass/1, which calls beamtalk_object_class:module_name_safe/1) inside a block that executes in a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's `self new class`, but for the classSuperclass/1 call site migrated to module_name_safe/1 in this PR rather than class_of_object_by_name/1 (BT-3052's own fix). `self` here is the class object itself (closure-captured via `ClassSelf`, per BT-3047).  The corresponding test compares the result to the Symbol `#BT3047Ancestor` rather than the class object `BT3047Ancestor` — see BT-3057 (filed during this test's development): a class-object (`#beamtalk_object{}`) returned out of a class method, via any return path, currently degrades to a bare Symbol carrying the class's name, independent of this PR's changes. That Symbol is still a faithful witness that `classSuperclass/1` resolved the *correct* class (not a deadlock hang, not the wrong class) via module_name_safe/1, which is what this test targets."
     },
     {
-      "id": "stdlib-test-fixtures-bt3055-ancestor",
-      "title": "BT3055Ancestor",
+      "id": "stdlib-test-fixtures-bt3055-actor",
+      "title": "BT3055Actor",
       "category": "stdlib-fixtures",
       "tags": [
-        "BT3055Ancestor",
-        "Object",
-        "bt3055_ancestor",
-        "extends",
-        "foo",
-        "inherit",
-        "inheritance",
-        "object",
-        "subclassing"
-      ],
-      "source": "// BT-3055: minimal ancestor providing `foo`, sent via `^self foo` inside the\n// counted loop in bt3055_child.bt. The self-send is what routes the loop's\n// codegen through the map-accumulator (`StateAcc`) path instead of the\n// tuple-acc or direct-params optimizations (see `BodyEffects::has_self_sends`\n// in `crates/beamtalk-core/src/codegen/core_erlang/control_flow/mod.rs`).\n\nObject subclass: BT3055Ancestor\n\n  class foo => #FromAncestor",
-      "explanation": "BT-3055: minimal ancestor providing `foo`, sent via `^self foo` inside the counted loop in bt3055_child.bt. The self-send is what routes the loop's codegen through the map-accumulator (`StateAcc`) path instead of the tuple-acc or direct-params optimizations (see `BodyEffects::has_self_sends` in `crates/beamtalk-core/src/codegen/core_erlang/control_flow/mod.rs`)."
-    },
-    {
-      "id": "stdlib-test-fixtures-bt3055-child",
-      "title": "BT3055Child",
-      "category": "stdlib-fixtures",
-      "tags": [
-        "BT3055Ancestor",
-        "BT3055Child",
+        "Actor",
+        "BT3055Actor",
+        "actor",
         "assign",
         "assignment",
         "async",
-        "bt3055_child",
+        "bt3055_actor",
         "concurrent",
         "extends",
+        "foo",
         "for each",
         "for-each",
         "forEach",
@@ -18019,14 +18009,14 @@
         "loop",
         "mutate",
         "mutation",
-        "object",
         "process",
-        "run",
+        "runPlainSum",
+        "runWithSelfSend",
         "set",
         "subclassing"
       ],
-      "source": "// BT-3055: `^` inside a `to:do:` counted loop in a class method used to emit\n// a reference to an unbound `State` variable. A class method's Core Erlang\n// signature is `(ClassSelf, ClassVars, Args...)` — there is no `State`\n// parameter, only actor *instance* methods have one — but the counted loop's\n// map-accumulator packing (`ThreadingPlan::generate_pack_prefix`) hardcoded\n// `State` as the base to pack from whenever `self.context` wasn't\n// `CodeGenContext::ValueType`. Class methods on an actor-backed class (like\n// this one, since `BT3055Ancestor` is `Object subclass:`) still run with\n// `context == Actor`, so the `ValueType`-only check never caught them.\n\nBT3055Ancestor subclass: BT3055Child\n\n  class run =>\n    count := 0\n    1\n      to: 3\n      do: [:i |\n        count := count + 1\n        ^self foo\n      ]\n    #wrong",
-      "explanation": "BT-3055: `^` inside a `to:do:` counted loop in a class method used to emit a reference to an unbound `State` variable. A class method's Core Erlang signature is `(ClassSelf, ClassVars, Args...)` — there is no `State` parameter, only actor *instance* methods have one — but the counted loop's map-accumulator packing (`ThreadingPlan::generate_pack_prefix`) hardcoded `State` as the base to pack from whenever `self.context` wasn't `CodeGenContext::ValueType`. Class methods on an actor-backed class (like this one, since `BT3055Ancestor` is `Object subclass:`) still run with `context == Actor`, so the `ValueType`-only check never caught them."
+      "source": "// BT-3055: `^` inside a `to:do:` counted loop in an Actor class's *class*\n// method used to emit a reference to an unbound `State` variable. A class\n// method's Core Erlang signature is `(ClassSelf, ClassVars, Args...)` — there\n// is no `State` parameter, only actor *instance* methods have one — but the\n// counted loop's StateAcc pack/unpack helpers (`ThreadingPlan::generate_pack_prefix`\n// and `ThreadingPlan::generate_exit_stateacc`) hardcoded `State` as their base\n// whenever `CodeGenContext` wasn't `ValueType`, without checking for class\n// methods specifically.\n//\n// Two class methods below exercise two distinct codegen paths that both hit\n// this bug independently:\n// - `runWithSelfSend` contains a self-send (`self foo`), which forces the\n//   loop through the map-accumulator `StateAcc` fallback path\n//   (`generate_pack_prefix`).\n// - `runPlainSum` has no self-send or field write, so it takes the\n//   direct-params fast path instead (BT-1275) — a distinct code path\n//   (`generate_exit_stateacc`) with the same bug, not caught by fixing only\n//   the fallback path.\n//\n// `Actor subclass:` (rather than `Object subclass:`) is used deliberately:\n// an indirect `Object subclass:` ancestry only resolves to a non-actor\n// `CodeGenContext` when the full class hierarchy is known at compile time\n// (see `CoreErlangGenerator::is_actor_class`'s cross-file fallback), so it\n// doesn't reliably reproduce this bug inside a full-stdlib compilation unit.\n// `Actor` is recognized unconditionally, regardless of hierarchy completeness.\n\nActor subclass: BT3055Actor\n\n  class foo => #FromAncestor\n\n  class runWithSelfSend =>\n    count := 0\n    1\n      to: 3\n      do: [:i |\n        count := count + 1\n        ^self foo\n      ]\n    #wrong\n\n  class runPlainSum =>\n    total := 0\n    1 to: 5 do: [:i | total := total + i]\n    total",
+      "explanation": "BT-3055: `^` inside a `to:do:` counted loop in an Actor class's *class* method used to emit a reference to an unbound `State` variable. A class method's Core Erlang signature is `(ClassSelf, ClassVars, Args...)` — there is no `State` parameter, only actor *instance* methods have one — but the counted loop's StateAcc pack/unpack helpers (`ThreadingPlan::generate_pack_prefix` and `ThreadingPlan::generate_exit_stateacc`) hardcoded `State` as their base whenever `CodeGenContext` wasn't `ValueType`, without checking for class methods specifically.  Two class methods below exercise two distinct codegen paths that both hit this bug independently: - `runWithSelfSend` contains a self-send (`self foo`), which forces the   loop through the map-accumulator `StateAcc` fallback path   (`generate_pack_prefix`). - `runPlainSum` has no self-send or field write, so it takes the   direct-params fast path instead (BT-1275) — a distinct code path   (`generate_exit_stateacc`) with the same bug, not caught by fixing only   the fallback path.  `Actor subclass:` (rather than `Object subclass:`) is used deliberately: an indirect `Object subclass:` ancestry only resolves to a non-actor `CodeGenContext` when the full class hierarchy is known at compile time (see `CoreErlangGenerator::is_actor_class`'s cross-file fallback), so it doesn't reliably reproduce this bug inside a full-stdlib compilation unit. `Actor` is recognized unconditionally, regardless of hierarchy completeness."
     },
     {
       "id": "stdlib-test-fixtures-calculator",

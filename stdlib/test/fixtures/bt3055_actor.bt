@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3055: `^` inside a `to:do:` counted loop in an Actor class's *class*
+// method used to emit a reference to an unbound `State` variable. A class
+// method's Core Erlang signature is `(ClassSelf, ClassVars, Args...)` — there
+// is no `State` parameter, only actor *instance* methods have one — but the
+// counted loop's StateAcc pack/unpack helpers (`ThreadingPlan::generate_pack_prefix`
+// and `ThreadingPlan::generate_exit_stateacc`) hardcoded `State` as their base
+// whenever `CodeGenContext` wasn't `ValueType`, without checking for class
+// methods specifically.
+//
+// Two class methods below exercise two distinct codegen paths that both hit
+// this bug independently:
+// - `runWithSelfSend` contains a self-send (`self foo`), which forces the
+//   loop through the map-accumulator `StateAcc` fallback path
+//   (`generate_pack_prefix`).
+// - `runPlainSum` has no self-send or field write, so it takes the
+//   direct-params fast path instead (BT-1275) — a distinct code path
+//   (`generate_exit_stateacc`) with the same bug, not caught by fixing only
+//   the fallback path.
+//
+// `Actor subclass:` (rather than `Object subclass:`) is used deliberately:
+// an indirect `Object subclass:` ancestry only resolves to a non-actor
+// `CodeGenContext` when the full class hierarchy is known at compile time
+// (see `CoreErlangGenerator::is_actor_class`'s cross-file fallback), so it
+// doesn't reliably reproduce this bug inside a full-stdlib compilation unit.
+// `Actor` is recognized unconditionally, regardless of hierarchy completeness.
+
+Actor subclass: BT3055Actor
+
+  class foo => #FromAncestor
+
+  class runWithSelfSend =>
+    count := 0
+    1
+      to: 3
+      do: [:i |
+        count := count + 1
+        ^self foo
+      ]
+    #wrong
+
+  class runPlainSum =>
+    total := 0
+    1 to: 5 do: [:i | total := total + i]
+    total
