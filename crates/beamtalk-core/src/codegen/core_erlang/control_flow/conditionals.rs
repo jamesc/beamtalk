@@ -118,7 +118,7 @@ impl CoreErlangGenerator {
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (cond_preamble, cond_val_doc) = match cond_open_scope {
             Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
-            // BT-3053: no single value â substitute do:'s own `nil` contract.
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
             Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
             None => (Document::Nil, cond_chain),
         };
@@ -165,7 +165,7 @@ impl CoreErlangGenerator {
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (cond_preamble, cond_val_doc) = match cond_open_scope {
             Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
-            // BT-3053: no single value â substitute do:'s own `nil` contract.
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
             Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
             None => (Document::Nil, cond_chain),
         };
@@ -211,7 +211,7 @@ impl CoreErlangGenerator {
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (cond_preamble, cond_val_doc) = match cond_open_scope {
             Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
-            // BT-3053: no single value â substitute do:'s own `nil` contract.
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
             Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
             None => (Document::Nil, cond_chain),
         };
@@ -270,7 +270,7 @@ impl CoreErlangGenerator {
         let (recv_chain, recv_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (recv_preamble, recv_val_doc) = match recv_open_scope {
             Some(OpenScopeResult::Value(result_var)) => (recv_chain, leaf::var(result_var)),
-            // BT-3053: no single value â substitute do:'s own `nil` contract.
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
             Some(OpenScopeResult::NoValue) => (recv_chain, Document::Str("'nil'")),
             None => (Document::Nil, recv_chain),
         };
