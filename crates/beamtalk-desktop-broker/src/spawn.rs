@@ -211,8 +211,12 @@ impl std::ops::DerefMut for SpawnedFront {
 ///
 /// Returns [`BrokerError::OidcConfigured`] or [`BrokerError::UnknownWorkspace`]
 /// per the refusal conditions above, or [`BrokerError::Io`] if the launcher
-/// process fails to spawn (Unix), or additionally if creating/assigning the
-/// job object fails (Windows).
+/// process fails to spawn or (Windows only) if assigning it to the job
+/// object fails. On Windows, [`build_launch_command`]'s own workspace lookups
+/// can additionally propagate [`BrokerError::MissingCookie`] (no `cookie`
+/// file), [`BrokerError::Json`] (malformed `metadata.json`), or
+/// [`BrokerError::Workspace`] (a `beamtalk-workspace` failure) before any
+/// process is spawned.
 pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     if let Some(source) = oidc_configured(&config.ide_toml_path) {
         return Err(BrokerError::OidcConfigured(source.to_string()));
@@ -227,6 +231,17 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 
     let mut cmd = build_launch_command(config)?;
     detach(&mut cmd);
+
+    // Created before `cmd.spawn()` (not after) so there is no
+    // JobHandle-creation-fails-after-spawn case to unwind: if this errors,
+    // nothing has been spawned yet and the `?` below can propagate directly.
+    #[cfg(windows)]
+    let job = crate::winjob::JobHandle::new()?;
+
+    // `mut` is only needed on the `#[cfg(windows)]` path below, which kills
+    // `child` itself if job-object assignment fails; the non-Windows arm
+    // never mutates it.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut child = cmd.spawn()?;
 
     #[cfg(windows)]
@@ -241,13 +256,6 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         // catch it either (a PID file is only written after `spawn_front`
         // returns `Ok`), leaving a live, untracked `cmd.exe`/`erl.exe` tree
         // behind.
-        let job = match crate::winjob::JobHandle::new() {
-            Ok(job) => job,
-            Err(e) => {
-                kill_orphaned_child(&mut child);
-                return Err(e.into());
-            }
-        };
         if let Err(e) = job.assign(&child) {
             kill_orphaned_child(&mut child);
             return Err(e.into());
@@ -260,12 +268,12 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     }
 }
 
-/// Kill and reap `child` after it was successfully spawned but a later,
-/// Windows-only setup step (job-object creation/assignment) failed — see the
-/// call sites in [`spawn_front`]. Best-effort: swallows its own errors rather
-/// than shadowing the setup failure that's already being propagated, since
-/// there's no better recovery available for a failure to kill a process we're
-/// already trying to kill.
+/// Kill and reap `child` after it was successfully spawned but
+/// [`crate::winjob::JobHandle::assign`] then failed to attach it to the
+/// job created before `spawn` — see the call site in [`spawn_front`].
+/// Best-effort: swallows its own errors rather than shadowing the setup
+/// failure that's already being propagated, since there's no better recovery
+/// available for a failure to kill a process we're already trying to kill.
 #[cfg(windows)]
 fn kill_orphaned_child(child: &mut std::process::Child) {
     let _ = child.kill();
@@ -707,10 +715,10 @@ mod tests {
             a, b,
             "must not reuse the same ephemeral secret across boots"
         );
-        assert!(
-            a.len() >= 40,
-            "expected a substantial base64-encoded 48-byte value, got {} chars",
-            a.len()
+        assert_eq!(
+            a.len(),
+            64,
+            "expected standard (padded) base64 of a 48-byte buffer, which is always 64 chars"
         );
     }
 
