@@ -962,8 +962,12 @@ mod tests {
             "spawn `env echo hello` should succeed: {result:?}"
         );
 
-        // The reaper joins both reader threads before sending the exit event,
-        // so by the time the map entry is gone the reader code has run.
+        // When the map entry is gone the child process has exited and its
+        // pipe ends are closed, so the reader threads will have seen EOF.
+        // Note: the reaper removes the map entry *before* joining the reader
+        // threads (main.rs:389-394), so breaking here doesn't guarantee the
+        // join has completed — only that the child has exited and EOF is
+        // imminent. In practice the readers drain within microseconds.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             {
@@ -1006,6 +1010,9 @@ mod tests {
             "spawn stderr writer should succeed: {result:?}"
         );
 
+        // Same ordering caveat as spawn_with_stdout_covers_reader_thread: map
+        // removal precedes the reader-thread joins in the reaper (main.rs:389-394),
+        // so breaking here means child exit + EOF delivered, not join complete.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             {
@@ -1079,6 +1086,20 @@ mod tests {
             (atom("env"), env_term.clone()),
         ]));
         handle_command(&req1, &writer, &children).expect("first spawn must succeed");
+
+        // Drop guard: always kill child 20, even if an assert! below panics.
+        struct KillChild20 {
+            children: ChildMap,
+        }
+        impl Drop for KillChild20 {
+            fn drop(&mut self) {
+                let req = Map::from([(atom("child_id"), int_term(20))]);
+                let _ = handle_kill(&req, &self.children);
+            }
+        }
+        let _guard = KillChild20 {
+            children: Arc::clone(&children),
+        };
 
         // Attempt a second spawn with the same child_id — must fail.
         let args_true = Term::from(List::from(vec![binary_term(b"true")]));
