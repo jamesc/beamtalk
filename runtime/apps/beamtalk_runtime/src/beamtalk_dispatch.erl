@@ -368,7 +368,7 @@ walk or raises `does_not_understand` accordingly.
     dispatch_result() | {continue, class_name() | none}.
 invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
     %% Get the module name for this class
-    case beamtalk_object_class:module_name(ClassPid) of
+    case beamtalk_object_class:module_name_safe(ClassPid) of
         undefined ->
             %% Dynamic class or no module — continue to superclass (BT-427)
             {continue, beamtalk_object_class:superclass(ClassPid)};

@@ -727,7 +727,7 @@ caller, consistent with the "stale entries dropped silently" miss policy).
 """.
 -spec class_object_for_pid(atom(), pid()) -> beamtalk_object() | 'nil'.
 class_object_for_pid(ClassName, Pid) ->
-    try beamtalk_object_class:module_name(Pid) of
+    try beamtalk_object_class:module_name_safe(Pid) of
         ModuleName ->
             ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
             {beamtalk_object, ClassTag, ModuleName, Pid}

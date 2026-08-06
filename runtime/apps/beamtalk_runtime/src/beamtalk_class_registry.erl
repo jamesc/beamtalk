@@ -108,7 +108,7 @@ live_class_entries() ->
             fun(Pid) ->
                 try
                     Name = beamtalk_object_class:class_name(Pid),
-                    Mod = beamtalk_object_class:module_name(Pid),
+                    Mod = beamtalk_object_class:module_name_safe(Pid),
                     {true, {Name, Mod, Pid}}
                 catch
                     exit:{noproc, _} -> false;
@@ -142,7 +142,7 @@ user_classes() ->
             fun(Pid) ->
                 try
                     ClassName = beamtalk_object_class:class_name(Pid),
-                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    ModuleName = beamtalk_object_class:module_name_safe(Pid),
                     case beamtalk_reflection:source_file_from_module(ModuleName) of
                         nil ->
                             false;
@@ -174,7 +174,7 @@ is `==` to the registry reference).
 -spec class_object_from_pid(pid()) -> #beamtalk_object{}.
 class_object_from_pid(Pid) when is_pid(Pid) ->
     ClassName = beamtalk_object_class:class_name(Pid),
-    ModuleName = beamtalk_object_class:module_name(Pid),
+    ModuleName = beamtalk_object_class:module_name_safe(Pid),
     ClassTag = class_object_tag(ClassName),
     #beamtalk_object{class = ClassTag, class_mod = ModuleName, pid = Pid}.
 

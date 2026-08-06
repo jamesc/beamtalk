@@ -107,7 +107,7 @@ rewritten shape (bare tuple or re-wrapped Result) to the caller.
 startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case Module:start_link() of
         {ok, Pid} ->
             ?LOG_INFO("Supervisor started", #{
@@ -211,7 +211,7 @@ Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 current(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name(ClassPid),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case whereis(Module) of
         undefined ->
             nil;

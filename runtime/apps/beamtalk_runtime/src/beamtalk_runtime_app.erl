@@ -88,6 +88,15 @@ verify_metaclass_self_grounding() ->
             %% Metaclass not registered — bootstrap may not have run yet.
             ok;
         MetaclassPid ->
+            %% BT-3054: deliberately module_name/1, not module_name_safe/1 —
+            %% this runs during application startup, verifying an invariant
+            %% right after bootstrap. beamtalk_class_metadata's ETS table may
+            %% not be populated yet at this exact point (the `undefined ->
+            %% bootstrap may not have run yet` clause above exists for the
+            %% same reason), so the metadata-first lookup could spuriously
+            %% miss here in a way it never would once the system is live —
+            %% the plain gen_server call is the safe choice specifically at
+            %% this one-time, pre-user-code call site.
             Module = beamtalk_object_class:module_name(MetaclassPid),
             Tag = beamtalk_class_registry:class_object_tag('Metaclass'),
             %% MetaclassRef is the Metaclass class reference (tag='Metaclass class')
