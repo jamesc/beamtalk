@@ -931,6 +931,46 @@ class_of_object_by_name_test_() ->
             {"unknown class returns atom", fun() ->
                 Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
                 ?assertEqual('NonExistentClass', Result)
+            end},
+            {"resolves module via beamtalk_class_metadata, matching the metadata row (BT-3052)",
+                fun() ->
+                    %% BT-3052: class_of_object_by_name/1 used to resolve the module via
+                    %% beamtalk_object_class:module_name/1 (a gen_server:call to the class's
+                    %% own pid), which deadlocks when called from a process that class's pid
+                    %% is itself synchronously blocked waiting on (e.g. `self new class`
+                    %% inside a block ADR 0109 runs in a different class's process). The fix
+                    %% reads beamtalk_class_metadata's ETS-backed row instead — no message
+                    %% send, so no such cycle. Pin that the resolved module actually matches
+                    %% the metadata table's row, not just that a result comes back.
+                    {ok, ExpectedModule} = beamtalk_class_metadata:lookup_module('Integer'),
+                    {beamtalk_object, _, ActualModule, _} =
+                        beamtalk_primitive:class_of_object_by_name('Integer'),
+                    ?assertEqual(ExpectedModule, ActualModule)
+                end},
+            {"falls back to gen_server:call when the metadata row is missing (BT-3052)", fun() ->
+                %% Flagged by the Claude review bot: the not_found fallback branch (still
+                %% the old beamtalk_object_class:module_name/1 gen_server:call) had no
+                %% direct coverage — it was only indirectly "covered" by being currently
+                %% unreachable. Delete 'Integer's live metadata row to force the fallback,
+                %% and confirm it still resolves correctly via the gen_server call, so a
+                %% future change that breaks the fallback doesn't go unnoticed. Save and
+                %% restore the row (in an after-clause, so it survives an assertion
+                %% failure) since 'Integer' is a shared bootstrap class other tests in
+                %% this suite depend on.
+                {ok, SavedModule} = beamtalk_class_metadata:lookup_module('Integer'),
+                {ok, SavedSuperclass} = beamtalk_class_metadata:lookup_superclass('Integer'),
+                {ok, _, SavedSelectors} = beamtalk_class_metadata:lookup_methods('Integer'),
+                {ok, SavedIsAbstract} = beamtalk_class_metadata:lookup_is_abstract('Integer'),
+                beamtalk_class_metadata:delete('Integer'),
+                try
+                    ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Integer')),
+                    Result = beamtalk_primitive:class_of_object_by_name('Integer'),
+                    ?assertMatch({beamtalk_object, _, SavedModule, _}, Result)
+                after
+                    beamtalk_class_metadata:insert(
+                        'Integer', SavedModule, SavedSelectors, SavedSuperclass, SavedIsAbstract
+                    )
+                end
             end}
         ]}.
 

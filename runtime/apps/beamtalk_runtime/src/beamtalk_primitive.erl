@@ -154,14 +154,40 @@ class_of_object(X) ->
 class_of_object_inner(ClassName) ->
     class_of_object_by_name(ClassName).
 
--doc "Return a class object given a class name atom (BT-412).".
+-doc """
+Return a class object given a class name atom (BT-412).
+
+BT-3052: resolves the module via the `beamtalk_class_metadata` ETS table
+(populated unconditionally alongside the class's own identity at
+init/reload, same precedent as BT-3047's `resolve_module_or_raise/2`)
+rather than `beamtalk_object_class:module_name/1`'s `gen_server:call(Pid,
+module_name)`. `class_of_object`/`class` is reachable from *any* value —
+including one constructed via `self new` inside a block that ADR 0109
+runs in a different class's process. If that different class was itself
+synchronously invoked by `ClassName`'s own process (e.g. `ClassName`
+called `otherClass someBlockTakingMethod: [...]` and the block does `self
+new class`), a `gen_server:call` back to `ClassName`'s pid here deadlocks:
+`ClassName`'s process is blocked waiting on the very process now trying to
+call it back. This is a different shape from BT-893's guarded case
+(`ClassPid =:= self()`, a *direct* self-call) — here the two pids differ,
+so no existing check catches it. The metadata-table read sidesteps the
+problem entirely: no message send, so no cycle to deadlock on. Falls back
+to the gen_server call only for the practically-unreachable case where a
+class object exists in the registry but hasn't (yet) written its metadata
+row — accepting the old deadlock exposure there rather than raising, since
+that miss should not happen for a class that can already be instantiated.
+""".
 -spec class_of_object_by_name(atom()) -> tuple() | atom().
 class_of_object_by_name(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             ClassName;
         Pid when is_pid(Pid) ->
-            ModuleName = beamtalk_object_class:module_name(Pid),
+            ModuleName =
+                case beamtalk_class_metadata:lookup_module(ClassName) of
+                    {ok, Module} -> Module;
+                    not_found -> beamtalk_object_class:module_name(Pid)
+                end,
             ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
             {beamtalk_object, ClassTag, ModuleName, Pid}
     end.
