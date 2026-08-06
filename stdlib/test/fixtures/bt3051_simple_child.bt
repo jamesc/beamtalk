@@ -10,5 +10,4 @@
 
 BT3047Ancestor subclass: BT3051SimpleChild
 
-  class returnFoo -> Symbol =>
-    ^self foo
+  class returnFoo -> Symbol => ^self foo

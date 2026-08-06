@@ -11,9 +11,5 @@
 BT3047Ancestor subclass: BT3051Parent
 
   class returnFooThrough: aDriverClass over: aList :: List -> Symbol =>
-    aDriverClass
-      run: [:x |
-        ^self foo
-      ]
-      over: aList
+    aDriverClass run: [:x | ^self foo] over: aList
     #wrong
