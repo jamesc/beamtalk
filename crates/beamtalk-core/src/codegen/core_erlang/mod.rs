@@ -1181,6 +1181,31 @@ impl ValueTypeContext {
 /// - **Variable context**: Scope management and variable generation
 /// - **State threading**: Simulated mutation via State, State1, State2...
 ///
+/// BT-3053: what an open let-chain produced via `last_open_scope_result`
+/// stands for, once the chain is closed.
+///
+/// Before this type existed, the field was `Option<String>` and `"_"` did
+/// double duty as a pure "still open" boolean sentinel alongside genuine
+/// bound variable names — any consumer that pattern-matched `Some(var) =>
+/// leaf::var(var)` without checking for the literal string `"_"` risked
+/// emitting a *reference* to a variable that was never bound (a mutation-
+/// threaded `do:`/dict-`do:` nested in a direct-params loop has several
+/// rebound accumulator vars, not one meaningful "result", so its producer
+/// could only signal "stay open," not name a value). This enum makes the
+/// two cases distinct types instead of one type with a magic string, so a
+/// consumer that needs a value is forced to decide what `NoValue` means at
+/// its own call site rather than silently referencing an unbound `_`.
+enum OpenScopeResult {
+    /// A real, referenceable result variable bound by the open let-chain.
+    Value(String),
+    /// The chain stays open — more statements may follow directly after it
+    /// — but there is no single value to reference by name. Matches the
+    /// producing construct's own return-value contract when substituted
+    /// (e.g. `do:` always answers `nil`, so a consumer needing a value here
+    /// substitutes the `'nil'` atom rather than a variable reference).
+    NoValue,
+}
+
 /// The generator delegates to specialized submodules:
 /// - [`control_flow`] - Iteration and loop compilation
 /// - [`dispatch_codegen`] - Message sending and dispatch
@@ -1293,7 +1318,7 @@ pub(crate) struct CoreErlangGenerator {
     /// this field directly. Functions that produce their own open let-chains
     /// (`generate_field_assignment_open`, `generate_self_field_at_put_open`,
     /// `generate_local_var_assignment_in_loop`) return the result variable explicitly.
-    last_open_scope_result: Option<String>,
+    last_open_scope_result: Option<OpenScopeResult>,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,
@@ -2882,7 +2907,16 @@ impl CoreErlangGenerator {
                         self.current_self_var()
                     };
                     let (preamble, value_doc) = match open_scope {
-                        Some(result_var) => (Some(val_preamble), leaf::var(result_var)),
+                        Some(OpenScopeResult::Value(result_var)) => {
+                            (Some(val_preamble), leaf::var(result_var))
+                        }
+                        // BT-3053: e.g. `^(items do: [...])` inside a direct-params
+                        // loop — no single value was bound, so substitute do:'s own
+                        // `nil` return-value contract rather than referencing a
+                        // nonexistent variable.
+                        Some(OpenScopeResult::NoValue) => {
+                            (Some(val_preamble), Document::Str("'nil'"))
+                        }
                         None => (None, val_preamble),
                     };
                     let throw_doc = docvec![

@@ -6,7 +6,7 @@
 use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result};
 use super::super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -95,9 +95,13 @@ impl CoreErlangGenerator {
                 // BT-1329: In direct-params loop context, skip StateAcc repack and omit
                 // trailing 'nil'. The extracted vars are left as open let-bindings so they
                 // escape to the outer scope (the caller chains the next expression directly).
-                // BT-1448: Signal open scope so the annotation guard in generate_expression
-                // does not wrap this open let-chain in `( ... -| [...] )`.
-                self.last_open_scope_result = Some("_".to_string());
+                // BT-1448/BT-3053: Signal open scope with no single value (multiple
+                // accumulator vars may have been rebound; `do:` itself always answers
+                // `nil`) so the annotation guard in generate_expression does not wrap
+                // this open let-chain in `( ... -| [...] )`, and a consumer that needs
+                // to reference a value substitutes `do:`'s own `nil` contract instead
+                // of a nonexistent variable.
+                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
