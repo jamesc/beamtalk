@@ -17860,6 +17860,47 @@
       "explanation": "BT-3047 / ADR 0109 amendment: owns the block containing an inherited self-send (and, separately, an instantiation intrinsic) that gets handed to another class's block-taking method. The block executes inside that other class's gen_server process (ADR 0109), so both `self foo` and `self new` must resolve against THIS class's lexical identity — closure-captured via `ClassSelf` — not the process the block happens to execute in."
     },
     {
+      "id": "stdlib-test-fixtures-bt3051-parent",
+      "title": "BT3051Parent",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3047Ancestor",
+        "BT3051Parent",
+        "assign",
+        "assignment",
+        "bt3051_parent",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "returnFooThrough:over:",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-3051: exercises `^self <inheritedSelector>` directly — a self-send fed\n// straight to `^` as its own argument, rather than assigned to a local first\n// (`result := self foo. ^result`, the workaround BT-3047's own fixtures used\n// to sidestep this exact bug). `foo` is inherited from BT3047Ancestor and the\n// block executes inside another class's process (ADR 0109), so this also\n// exercises the NLR-throw codegen path, not just the plain-return path.\n\nBT3047Ancestor subclass: BT3051Parent\n\n  class returnFooThrough: aDriverClass over: aList :: List -> Symbol =>\n    aDriverClass\n      run: [:x |\n        ^self foo\n      ]\n      over: aList\n    #wrong",
+      "explanation": "BT-3051: exercises `^self <inheritedSelector>` directly — a self-send fed straight to `^` as its own argument, rather than assigned to a local first (`result := self foo. ^result`, the workaround BT-3047's own fixtures used to sidestep this exact bug). `foo` is inherited from BT3047Ancestor and the block executes inside another class's process (ADR 0109), so this also exercises the NLR-throw codegen path, not just the plain-return path."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3051-simple-child",
+      "title": "BT3051SimpleChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3047Ancestor",
+        "BT3051SimpleChild",
+        "bt3051_simple_child",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "returnFoo",
+        "subclassing"
+      ],
+      "source": "// BT-3051: `^self <inheritedSelector>` with no block involved at all — the\n// plain-return codegen path (no active NLR token), not the throw/catch path\n// `bt3051_parent.bt` exercises. Already worked before the fix (the method-body\n// generator closes the open scope for a body's final statement independently\n// of `Expression::Return`'s own codegen); pinned here as a regression guard\n// against the throw-path fix accidentally affecting this path too.\n\nBT3047Ancestor subclass: BT3051SimpleChild\n\n  class returnFoo -> Symbol =>\n    ^self foo",
+      "explanation": "BT-3051: `^self <inheritedSelector>` with no block involved at all — the plain-return codegen path (no active NLR token), not the throw/catch path `bt3051_parent.bt` exercises. Already worked before the fix (the method-body generator closes the open scope for a body's final statement independently of `Expression::Return`'s own codegen); pinned here as a regression guard against the throw-path fix accidentally affecting this path too."
+    },
+    {
       "id": "stdlib-test-fixtures-calculator",
       "title": "Calculator",
       "category": "stdlib-fixtures",
@@ -25870,6 +25911,29 @@
       ],
       "source": "// BT-2880: match: arm with self-mutating multi-statement block returns\n// internal state tuple instead of value. Verifies bumpMatch returns the\n// mutated Integer (not an internal state-threading Tuple), and that the\n// mutation is actually visible in subsequent state reads. Also covers the\n// generalized shape — a match: arm whose body is itself a nested\n// ifTrue:/ifFalse: mutation with no `[...] value` wrapper — and a match:\n// with two adjacent arms that each mutate a different field.\n\nTestCase subclass: NilTypeMatchSelfMutationActorTest\n\n  testBumpMatchReturnsIntegerNotTuple =>\n    a := NilTypeMatchSelfMutationRegistry spawn\n    result := a bumpMatch\n    self assert: result equals: 1\n    self assert: a currentCount equals: 1\n\n  testBumpMatchThreadsStateAcrossCalls =>\n    a := NilTypeMatchSelfMutationRegistry spawn\n    a bumpMatch\n    a bumpMatch\n    result := a bumpMatch\n    self assert: result equals: 3\n    self assert: a currentCount equals: 3\n\n  testBumpMatchIfTrueReturnsIntegerNotTuple =>\n    a := NilTypeMatchSelfMutationRegistry spawn\n    result := a bumpMatchIfTrue: true\n    self assert: result equals: 1\n    self assert: a currentCount equals: 1\n\n  testBumpMatchIfTrueThreadsStateAcrossCalls =>\n    // count: 0 -> 1 -> 2 -> 1 (the last call passes false, taking the\n    // ifFalse: branch, self.count := self.count - 1 = 1). The assignment's\n    // value is what's returned, so `result` is that decremented count, not\n    // the pre-decrement value.\n    a := NilTypeMatchSelfMutationRegistry spawn\n    a bumpMatchIfTrue: true\n    a bumpMatchIfTrue: true\n    result := a bumpMatchIfTrue: false\n    self assert: result equals: 1\n    self assert: a currentCount equals: 1\n\n  testBumpEitherOfMutatesOnlyTheMatchingArmsField =>\n    // Each arm must start from the same pre-match state: bumping the `2`\n    // arm after two `1` bumps must not see (or leak into) the count the\n    // `1` arm mutated, and vice versa.\n    a := NilTypeMatchSelfMutationRegistry spawn\n    r1 := a bumpEitherOf: 1\n    r2 := a bumpEitherOf: 1\n    r3 := a bumpEitherOf: 2\n    self assert: r1 equals: 1\n    self assert: r2 equals: 2\n    self assert: r3 equals: 1\n    self assert: a currentCount equals: 2\n    self assert: a currentOtherCount equals: 1",
       "explanation": "BT-2880: match: arm with self-mutating multi-statement block returns internal state tuple instead of value. Verifies bumpMatch returns the mutated Integer (not an internal state-threading Tuple), and that the mutation is actually visible in subsequent state reads. Also covers the generalized shape — a match: arm whose body is itself a nested ifTrue:/ifFalse: mutation with no `[...] value` wrapper — and a match: with two adjacent arms that each mutate a different field."
+    },
+    {
+      "id": "stdlib-test-nlr-open-scope-self-send-test",
+      "title": "NlrOpenScopeSelfSendTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "NlrOpenScopeSelfSendTest",
+        "TestCase",
+        "anonymous function",
+        "callback",
+        "closure",
+        "extends",
+        "inherit",
+        "inheritance",
+        "lambda",
+        "nlr_open_scope_self_send_test",
+        "object",
+        "subclassing",
+        "testReturnOfInheritedSelfSendInsideForeignBlockCompilesAndRuns",
+        "testReturnOfInheritedSelfSendWithNoBlockStillWorks"
+      ],
+      "source": "// BT-3051: `^self <selector>` — a self-send fed directly as `^`'s argument —\n// produced invalid Core Erlang when the self-send went through the open-scope\n// codegen pattern (`emit_class_var_result_unwrap`/`finalize_dispatch_with_preamble`):\n// `Expression::Return`'s NLR-throw codegen inserted the dangling open let-chain\n// straight into the `{'$bt_nlr', Token, Value, State}` tuple literal instead of\n// closing it, and never cleared `last_open_scope_result`, so a stale result\n// variable leaked out and was appended a second time by the enclosing block's\n// codegen. See `crates/beamtalk-core/src/codegen/core_erlang/mod.rs`'s\n// `Expression::Return` arm.\n//\n// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,\n// fixtures/bt3051_parent.bt, fixtures/bt3051_simple_child.bt.\n\nTestCase subclass: NlrOpenScopeSelfSendTest\n\n  // The bug's actual trigger: `^self foo` as a block's last statement, where\n  // the block executes in a foreign class's process (ADR 0109) — so `^`\n  // compiles via the NLR throw/catch path, not the plain-return path.\n  testReturnOfInheritedSelfSendInsideForeignBlockCompilesAndRuns =>\n    self assert: (BT3051Parent returnFooThrough: BT3047DriverPlain over: #(1)) equals: #FromAncestor\n\n  // No block involved — pins that the plain-return path (unaffected by this\n  // fix) continues to work for the same `^self <inheritedSelector>` shape.\n  testReturnOfInheritedSelfSendWithNoBlockStillWorks =>\n    self assert: BT3051SimpleChild returnFoo equals: #FromAncestor",
+      "explanation": "BT-3051: `^self <selector>` — a self-send fed directly as `^`'s argument — produced invalid Core Erlang when the self-send went through the open-scope codegen pattern (`emit_class_var_result_unwrap`/`finalize_dispatch_with_preamble`): `Expression::Return`'s NLR-throw codegen inserted the dangling open let-chain straight into the `{'$bt_nlr', Token, Value, State}` tuple literal instead of closing it, and never cleared `last_open_scope_result`, so a stale result variable leaked out and was appended a second time by the enclosing block's codegen. See `crates/beamtalk-core/src/codegen/core_erlang/mod.rs`'s `Expression::Return` arm.  Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt, fixtures/bt3051_parent.bt, fixtures/bt3051_simple_child.bt."
     },
     {
       "id": "stdlib-test-nlr-state-threading-test",
