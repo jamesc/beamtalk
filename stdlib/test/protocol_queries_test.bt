@@ -8,17 +8,15 @@
 TestCase subclass: ProtocolQueriesTest
 
   // --- Protocol.isProtocol: ---
-  testIsProtocolTrue =>
-    self assert: (Protocol isProtocol: #Displayable) equals: true
+  testIsProtocolTrue => self assert: (Protocol isProtocol: #Displayable)
 
-  testIsProtocolFalse =>
-    self assert: (Protocol isProtocol: #NotARealProtocol) equals: false
+  testIsProtocolFalse => self deny: (Protocol isProtocol: #NotARealProtocol)
 
   // --- Protocol.requiredMethods: ---
   testRequiredMethodsDisplayable =>
     methods := Protocol requiredMethods: #Displayable
-    self assert: (methods includes: #asString) equals: true
-    self assert: (methods includes: #printString) equals: true
+    self assert: (methods includes: #asString)
+    self assert: (methods includes: #printString)
     self assert: methods size equals: 2
 
   testRequiredMethodsUnknown =>
@@ -28,31 +26,30 @@ TestCase subclass: ProtocolQueriesTest
   // --- Protocol.allProtocols ---
   testAllProtocolsIncludesRegistered =>
     protos := Protocol allProtocols
-    self assert: (protos includes: #Displayable) equals: true
-    self assert: (protos includes: #HasSize) equals: true
+    self assert: (protos includes: #Displayable)
+    self assert: (protos includes: #HasSize)
 
   // --- conformsTo: (Behaviour method on class objects) ---
   testStringConformsToDisplayable =>
-    self assert: (String conformsTo: #Displayable) equals: true
+    self assert: (String conformsTo: #Displayable)
 
   testIntegerConformsToDisplayable =>
-    self assert: (Integer conformsTo: #Displayable) equals: true
+    self assert: (Integer conformsTo: #Displayable)
 
-  testStringConformsToHasSize =>
-    self assert: (String conformsTo: #HasSize) equals: true
+  testStringConformsToHasSize => self assert: (String conformsTo: #HasSize)
 
   testIntegerConformsToHasSize =>
     // Integer does not have size
-    self assert: (Integer conformsTo: #HasSize) equals: false
+    self deny: (Integer conformsTo: #HasSize)
 
   // --- protocols (Behaviour method on class objects) ---
   testStringProtocolsIncludesDisplayable =>
     protos := String protocols
-    self assert: (protos includes: #Displayable) equals: true
+    self assert: (protos includes: #Displayable)
 
   testStringProtocolsIncludesHasSize =>
     protos := String protocols
-    self assert: (protos includes: #HasSize) equals: true
+    self assert: (protos includes: #HasSize)
 
   // --- Protocol.conformingClasses: ---
 
@@ -66,28 +63,27 @@ TestCase subclass: ProtocolQueriesTest
     self assert: classes size equals: 0
 
   // --- BT-1611: Class method protocol tests ---
-  testCreatableIsProtocol =>
-    self assert: (Protocol isProtocol: #Creatable) equals: true
+  testCreatableIsProtocol => self assert: (Protocol isProtocol: #Creatable)
 
   testRequiredMethodsCreatable =>
     // Creatable has one class method requirement: `class create`
     // Required methods returns class methods with "class " prefix
     methods := Protocol requiredMethods: #Creatable
     self assert: methods size equals: 1
-    self assert: (methods includes: #'class create') equals: true
+    self assert: (methods includes: #'class create')
 
   // --- ADR 0068: Protocol objects as first-class class objects ---
   // Protocols are sealed abstract subclasses of Protocol with class methods.
   testProtocolObjectRequiredMethods =>
     // Direct message send on protocol object (not via Protocol class)
     methods := Displayable requiredMethods
-    self assert: (methods includes: #asString) equals: true
-    self assert: (methods includes: #printString) equals: true
+    self assert: (methods includes: #asString)
+    self assert: (methods includes: #printString)
 
   testProtocolObjectConformingClasses =>
     // Direct message send returns conforming class names (atoms)
     classes := HasSize conformingClasses
-    self assert: (classes includes: #String) equals: true
+    self assert: (classes includes: #String)
 
   testProtocolObjectSuperclass =>
     // Protocol objects are subclasses of Protocol
@@ -96,4 +92,4 @@ TestCase subclass: ProtocolQueriesTest
   testProtocolObjectInAllClasses =>
     // Protocol objects appear in allClasses (returned as class objects)
     all := (Erlang beamtalk_interface) allClasses
-    self assert: (all includes: Displayable) equals: true
+    self assert: (all includes: Displayable)
