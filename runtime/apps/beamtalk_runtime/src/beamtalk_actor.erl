@@ -2906,7 +2906,7 @@ allRegistered(_Self) ->
 class_self_to_name_and_module(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
     try
         ClassName = beamtalk_object_class:class_name(ClassPid),
-        Module = beamtalk_object_class:module_name(ClassPid),
+        Module = beamtalk_object_class:module_name_safe(ClassPid),
         {ok, ClassName, Module}
     catch
         exit:_ ->

@@ -48,6 +48,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     is_constructible/1,
     class_name/1,
     module_name/1,
+    module_name_safe/1,
     class_send/3,
     local_call/3,
     set_class_var/3,
@@ -225,6 +226,55 @@ module_name(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_module);
 module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
+
+-doc """
+Get the module name, preferring a deadlock-safe metadata lookup (BT-3054).
+
+`module_name/1`'s `gen_server:call(ClassPid, module_name)` only guards the
+*direct* self-call case (`ClassPid =:= self()`, BT-893). It deadlocks when
+called from a process that `ClassPid` is itself synchronously blocked
+waiting on — e.g. a block that ADR 0109 runs in a foreign class's process,
+where that foreign process was invoked by `ClassPid`'s own process (see
+BT-3052, which fixed exactly this shape for
+`beamtalk_primitive:class_of_object_by_name/1`).
+
+This resolves the module via `beamtalk_class_registry:class_name_for_pid/1`
+(a pure ETS reverse lookup, no message send) followed by
+`beamtalk_class_metadata:lookup_module/1` (same table, populated
+unconditionally alongside a class's own identity at init/reload) — no
+message send anywhere in the common case, so no cycle to deadlock on.
+Falls back to `module_name/1`'s gen_server call only if either lookup
+misses, which should not happen for a live, instantiable class.
+
+Prefer this over `module_name/1` at any call site reachable from inside a
+block (ADR 0109) or otherwise not provably running on the class's own
+"direct caller" path.
+
+Caveat: callers that rely on `module_name/1`'s `gen_server:call` raising
+`noproc`/`timeout` to detect a dead class process should keep using
+`module_name/1`, or double-check their assumption. This function never
+raises on a dead process — `beamtalk_class_pids`' reverse index is
+deliberately kept for a process killed via an untrappable `kill` (it skips
+`terminate/2`, so the ETS rows this function reads survive "for auto-restart
+recovery"), so it will resolve a plausible module for that class name
+instead of signalling death. Ordinary graceful death (`gen_server:stop`,
+a trapped crash, supervisor shutdown) still runs `terminate/2` first, which
+clears both ETS rows, so this function correctly falls back to
+`module_name/1` and preserves the noproc/timeout contract in that case.
+""".
+-spec module_name_safe(pid()) -> atom().
+module_name_safe(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_module);
+module_name_safe(ClassPid) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_module(ClassName) of
+                {ok, Module} -> Module;
+                not_found -> module_name(ClassPid)
+            end;
+        not_found ->
+            module_name(ClassPid)
+    end.
 
 -doc """
 Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).

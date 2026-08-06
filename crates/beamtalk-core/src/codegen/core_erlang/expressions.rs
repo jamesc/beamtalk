@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 use super::document::Document;
 use super::document::leaf;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
     Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
@@ -603,7 +603,7 @@ impl CoreErlangGenerator {
                     shadow_doc,
                 ];
                 // Store result var name for callers that need to reference it
-                self.last_open_scope_result = Some(val_var);
+                self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
                 return Ok(doc);
             }
             return Err(CodeGenError::UnsupportedFeature {
@@ -1190,37 +1190,54 @@ impl CoreErlangGenerator {
                     let state = self.current_state_var();
                     // BT-1397: If the expression left an open scope, close it with
                     // the result variable then wrap in the Tier 2 tuple.
-                    if let Some(result_var) = open_scope {
-                        docs.push(docvec![
-                            doc,
-                            "{",
-                            leaf::var(result_var),
-                            ", ",
-                            leaf::var(state),
-                            "}"
-                        ]);
-                    } else {
-                        let result_var = self.fresh_temp_var("T2Res");
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(result_var.clone()),
-                            " = ",
-                            doc,
-                            " in {",
-                            leaf::var(result_var),
-                            ", ",
-                            leaf::var(state),
-                            "}"
-                        ]);
+                    match open_scope {
+                        Some(OpenScopeResult::Value(result_var)) => {
+                            docs.push(docvec![
+                                doc,
+                                "{",
+                                leaf::var(result_var),
+                                ", ",
+                                leaf::var(state),
+                                "}"
+                            ]);
+                        }
+                        // BT-3053: no single value — substitute do:'s own `nil` contract.
+                        Some(OpenScopeResult::NoValue) => {
+                            docs.push(docvec![doc, "{'nil', ", leaf::var(state), "}"]);
+                        }
+                        None => {
+                            let result_var = self.fresh_temp_var("T2Res");
+                            docs.push(docvec![
+                                "let ",
+                                leaf::var(result_var.clone()),
+                                " = ",
+                                doc,
+                                " in {",
+                                leaf::var(result_var),
+                                ", ",
+                                leaf::var(state),
+                                "}"
+                            ]);
+                        }
                     }
-                } else if let Some(result_var) = open_scope {
-                    // BT-1397: Open scope from class method self-send — emit chain
-                    // then discard the result.
-                    docs.push(docvec![doc, "let _ = ", leaf::var(result_var), " in "]);
                 } else {
-                    docs.push(Document::Str("let _ = "));
-                    docs.push(doc);
-                    docs.push(Document::Str(" in "));
+                    match open_scope {
+                        Some(OpenScopeResult::Value(result_var)) => {
+                            // BT-1397: Open scope from class method self-send — emit chain
+                            // then discard the result.
+                            docs.push(docvec![doc, "let _ = ", leaf::var(result_var), " in "]);
+                        }
+                        // BT-3053: no single value to discard — its own rebindings
+                        // are already visible; nothing to bind here.
+                        Some(OpenScopeResult::NoValue) => {
+                            docs.push(doc);
+                        }
+                        None => {
+                            docs.push(Document::Str("let _ = "));
+                            docs.push(doc);
+                            docs.push(Document::Str(" in "));
+                        }
+                    }
                 }
             }
         }
@@ -1560,10 +1577,13 @@ impl CoreErlangGenerator {
                 // The generated code leaves an open scope ending with `in ` — close it
                 // with the unwrapped result variable (same pattern as generate_class_method_body).
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                if let Some(result_var) = open_scope {
-                    Ok(docvec![expr_doc, leaf::var(result_var)])
-                } else {
-                    Ok(expr_doc)
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => {
+                        Ok(docvec![expr_doc, leaf::var(result_var)])
+                    }
+                    // BT-3053: no single value — substitute do:'s own `nil` contract.
+                    Some(OpenScopeResult::NoValue) => Ok(docvec![expr_doc, "'nil'"]),
+                    None => Ok(expr_doc),
                 }
             }
             BlockExprKind::LastExpr => {
@@ -1577,10 +1597,13 @@ impl CoreErlangGenerator {
                 // saving/restoring class_var_version and clearing
                 // last_open_scope_result.
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                if let Some(result_var) = open_scope {
-                    Ok(docvec![expr_doc, leaf::var(result_var)])
-                } else {
-                    Ok(expr_doc)
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => {
+                        Ok(docvec![expr_doc, leaf::var(result_var)])
+                    }
+                    // BT-3053: no single value — substitute do:'s own `nil` contract.
+                    Some(OpenScopeResult::NoValue) => Ok(docvec![expr_doc, "'nil'"]),
+                    None => Ok(expr_doc),
                 }
             }
             BlockExprKind::FieldAssignment => {
@@ -1597,15 +1620,17 @@ impl CoreErlangGenerator {
                 // BT-1397: Class method self-send as non-last expression in a block body.
                 // The generated code leaves an open scope — emit it and discard the result.
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                if let Some(result_var) = open_scope {
-                    Ok(docvec![
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
                         expr_doc,
                         "let _Unit = ",
                         leaf::var(result_var),
                         " in "
-                    ])
-                } else {
-                    Ok(docvec!["let _Unit = ", expr_doc, " in "])
+                    ]),
+                    // BT-3053: no single value to discard — its own rebindings
+                    // are already visible; nothing to bind here.
+                    Some(OpenScopeResult::NoValue) => Ok(expr_doc),
+                    None => Ok(docvec!["let _Unit = ", expr_doc, " in "]),
                 }
             }
             BlockExprKind::SideEffect => {
@@ -1614,15 +1639,17 @@ impl CoreErlangGenerator {
                 // receiver/args contain class method self-sends, by closing
                 // the chain here and binding the result var.
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                if let Some(result_var) = open_scope {
-                    Ok(docvec![
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
                         expr_doc,
                         "let _Unit = ",
                         leaf::var(result_var),
                         " in "
-                    ])
-                } else {
-                    Ok(docvec!["let _Unit = ", expr_doc, " in "])
+                    ]),
+                    // BT-3053: no single value to discard — its own rebindings
+                    // are already visible; nothing to bind here.
+                    Some(OpenScopeResult::NoValue) => Ok(expr_doc),
+                    None => Ok(docvec!["let _Unit = ", expr_doc, " in "]),
                 }
             }
         }
@@ -1792,23 +1819,29 @@ impl CoreErlangGenerator {
         self.bind_var(var_name, &core_var);
         // BT-1397: If the RHS produced an open scope (class method self-send),
         // emit the open scope then bind the variable to its result.
-        if let Some(open_scope_result) = open_scope {
-            Ok(docvec![
+        match open_scope {
+            Some(OpenScopeResult::Value(open_scope_result)) => Ok(docvec![
                 val_doc,
                 "let ",
                 leaf::var(core_var),
                 " = ",
                 leaf::var(open_scope_result),
                 " in "
-            ])
-        } else {
-            Ok(docvec![
+            ]),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => Ok(docvec![
+                val_doc,
+                "let ",
+                leaf::var(core_var),
+                " = 'nil' in "
+            ]),
+            None => Ok(docvec![
                 "let ",
                 leaf::var(core_var.clone()),
                 " = ",
                 val_doc,
                 " in "
-            ])
+            ]),
         }
     }
 

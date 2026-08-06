@@ -114,7 +114,7 @@ for dynamic classes created via beamtalk_class_builder.
 -spec classSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 classSuperclass(Self) ->
     ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     SuperclassName =
         case meta_for_module(Module) of
             {ok, Meta} ->
@@ -188,7 +188,7 @@ classLocalMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     maps:keys(beamtalk_object_class:local_class_methods_map(ClassPid));
 classLocalMethods(Self) ->
     ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
             maps:keys(maps:get(method_info, Meta));
@@ -283,7 +283,7 @@ classMethods(Self) ->
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
-            Module = beamtalk_object_class:module_name(CPid),
+            Module = beamtalk_object_class:module_name_safe(CPid),
             Methods =
                 case meta_for_module(Module) of
                     {ok, Meta} ->
@@ -330,7 +330,7 @@ classAllFieldNames(Self) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, Acc) ->
-            Module = beamtalk_object_class:module_name(CPid),
+            Module = beamtalk_object_class:module_name_safe(CPid),
             IVars =
                 case meta_for_module(Module) of
                     {ok, Meta} ->
@@ -365,7 +365,7 @@ classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Sel
     %% BT-2189: Use __beamtalk_meta/0 fast path when available, matching the
     %% instance-side clause below. Avoids per-call gen_server hops during the
     %% bulk iteration done by `SystemNavigation implementorsOf:`.
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
             maps:is_key(Selector, maps:get(class_method_info, Meta, #{}));
@@ -375,7 +375,7 @@ classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Sel
     end;
 classIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
             maps:is_key(Selector, maps:get(method_info, Meta));
@@ -393,7 +393,7 @@ for dynamic classes created via beamtalk_class_builder.
 -spec classFieldNames(#beamtalk_object{}) -> [atom()].
 classFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
             maps:get(fields, Meta);
@@ -417,7 +417,7 @@ Behaviour method table.
 -spec classClassVarNames(#beamtalk_object{}) -> [atom()].
 classClassVarNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
             maps:get(class_fields, Meta, []);
@@ -441,7 +441,7 @@ classAllClassVarNames(Self) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, Acc) ->
-            Module = beamtalk_object_class:module_name(CPid),
+            Module = beamtalk_object_class:module_name_safe(CPid),
             CVars =
                 case meta_for_module(Module) of
                     {ok, Meta} ->
@@ -658,7 +658,7 @@ Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
 -spec classSourceFile(#beamtalk_object{}) -> binary() | 'nil'.
 classSourceFile(Self) ->
     ClassPid = erlang:element(4, Self),
-    ModuleName = beamtalk_object_class:module_name(ClassPid),
+    ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
     beamtalk_reflection:source_file_from_module(ModuleName).
 
 -doc """
@@ -674,7 +674,7 @@ beamtalk_workspace (follows the beamtalk_actor_registry registered-name pattern)
 classReload(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
-    ModuleName = beamtalk_object_class:module_name(ClassPid),
+    ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
     SourceFile = beamtalk_reflection:source_file_from_module(ModuleName),
     case SourceFile of
         nil ->
@@ -1082,7 +1082,7 @@ metaclassAllMethods(Self) ->
     BehaviourMethodsOrdset = walk_hierarchy(
         'Class',
         fun(_CN, CPid, A) ->
-            Module = beamtalk_object_class:module_name(CPid),
+            Module = beamtalk_object_class:module_name_safe(CPid),
             Methods =
                 case meta_for_module(Module) of
                     {ok, Meta} ->

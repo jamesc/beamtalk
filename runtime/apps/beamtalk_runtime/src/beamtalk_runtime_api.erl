@@ -207,7 +207,7 @@ remove_class_from_system(ClassName) ->
         ModuleName =
             case beamtalk_class_registry:whereis_class(ClassName) of
                 undefined -> undefined;
-                ClassPid -> beamtalk_object_class:module_name(ClassPid)
+                ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
             end,
         beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName),
         {ok, ModuleName}
@@ -225,7 +225,7 @@ class_name(Pid) ->
 
 -spec module_name(pid()) -> module().
 module_name(Pid) ->
-    beamtalk_object_class:module_name(Pid).
+    beamtalk_object_class:module_name_safe(Pid).
 
 -spec set_class_var(atom(), atom(), term()) -> term().
 set_class_var(ClassName, VarName, Value) ->
