@@ -13480,6 +13480,30 @@
       "explanation": "BT-2017: notNil narrowing must work for locals bound from method calls. Previously, `local := someObj method` where `method` returns `Integer | Nil` produced Known(\"Integer | Nil\") instead of Union([Integer, UndefinedObject]), causing false binary-operand warnings.  BT-2872: `local notNil and: [...]` narrows `local` to non-Nil for the rest of the block, including doubly-nested block-argument positions of binary sends (`5 >= local` inside `local > 0 and: [5 >= local]`), not just receiver positions (`local > 0`). BT-2843 made binary-send argument checking union-aware (matching pre-existing keyword-send behavior), which had surfaced this as a false-positive `@expect type` diagnostic until the `and:`-narrowing fix below."
     },
     {
+      "id": "stdlib-test-bt3055-class-method-counted-loop-test",
+      "title": "BT3055ClassMethodCountedLoopTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "BT3055ClassMethodCountedLoopTest",
+        "TestCase",
+        "bt3055_class_method_counted_loop_test",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "object",
+        "subclassing",
+        "testCountedLoopWithEarlyReturnInClassMethodCompilesAndRuns"
+      ],
+      "source": "// BT-3055: `^` inside a `to:do:` counted loop in a class method used to fail\n// to compile with `{core_lint, {unbound_var, 'State', ...}}` — the counted\n// loop's map-accumulator packing hardcoded `State` as its base without\n// checking whether the enclosing method was a class method (which has no\n// `State` parameter). See fixtures/bt3055_ancestor.bt and\n// fixtures/bt3055_child.bt.\n\nTestCase subclass: BT3055ClassMethodCountedLoopTest\n\n  testCountedLoopWithEarlyReturnInClassMethodCompilesAndRuns =>\n    self assert: BT3055Child run equals: #FromAncestor",
+      "explanation": "BT-3055: `^` inside a `to:do:` counted loop in a class method used to fail to compile with `{core_lint, {unbound_var, 'State', ...}}` — the counted loop's map-accumulator packing hardcoded `State` as its base without checking whether the enclosing method was a class method (which has no `State` parameter). See fixtures/bt3055_ancestor.bt and fixtures/bt3055_child.bt."
+    },
+    {
       "id": "stdlib-test-cast-send-test",
       "title": "CastSendTest",
       "category": "stdlib-tests",
@@ -17951,6 +17975,58 @@
       ],
       "source": "// BT-3054: exercises `self superclass` (backed by\n// beamtalk_behaviour_intrinsics:classSuperclass/1, which calls\n// beamtalk_object_class:module_name_safe/1) inside a block that executes in\n// a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's\n// `self new class`, but for the classSuperclass/1 call site migrated to\n// module_name_safe/1 in this PR rather than class_of_object_by_name/1\n// (BT-3052's own fix). `self` here is the class object itself\n// (closure-captured via `ClassSelf`, per BT-3047).\n//\n// The corresponding test compares the result to the Symbol `#BT3047Ancestor`\n// rather than the class object `BT3047Ancestor` — see BT-3057 (filed during\n// this test's development): a class-object (`#beamtalk_object{}`) returned\n// out of a class method, via any return path, currently degrades to a bare\n// Symbol carrying the class's name, independent of this PR's changes. That\n// Symbol is still a faithful witness that `classSuperclass/1` resolved the\n// *correct* class (not a deadlock hang, not the wrong class) via\n// module_name_safe/1, which is what this test targets.\n\nBT3047Ancestor subclass: BT3054Parent\n\n  class makeSelfSuperclassThrough: aDriverClass over: aList :: List =>\n    aDriverClass\n      run: [:x |\n        result := self superclass\n        ^result\n      ]\n      over: aList\n    #wrong",
       "explanation": "BT-3054: exercises `self superclass` (backed by beamtalk_behaviour_intrinsics:classSuperclass/1, which calls beamtalk_object_class:module_name_safe/1) inside a block that executes in a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's `self new class`, but for the classSuperclass/1 call site migrated to module_name_safe/1 in this PR rather than class_of_object_by_name/1 (BT-3052's own fix). `self` here is the class object itself (closure-captured via `ClassSelf`, per BT-3047).  The corresponding test compares the result to the Symbol `#BT3047Ancestor` rather than the class object `BT3047Ancestor` — see BT-3057 (filed during this test's development): a class-object (`#beamtalk_object{}`) returned out of a class method, via any return path, currently degrades to a bare Symbol carrying the class's name, independent of this PR's changes. That Symbol is still a faithful witness that `classSuperclass/1` resolved the *correct* class (not a deadlock hang, not the wrong class) via module_name_safe/1, which is what this test targets."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3055-ancestor",
+      "title": "BT3055Ancestor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3055Ancestor",
+        "Object",
+        "bt3055_ancestor",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-3055: minimal ancestor providing `foo`, sent via `^self foo` inside the\n// counted loop in bt3055_child.bt. The self-send is what routes the loop's\n// codegen through the map-accumulator (`StateAcc`) path instead of the\n// tuple-acc or direct-params optimizations (see `BodyEffects::has_self_sends`\n// in `crates/beamtalk-core/src/codegen/core_erlang/control_flow/mod.rs`).\n\nObject subclass: BT3055Ancestor\n\n  class foo => #FromAncestor",
+      "explanation": "BT-3055: minimal ancestor providing `foo`, sent via `^self foo` inside the counted loop in bt3055_child.bt. The self-send is what routes the loop's codegen through the map-accumulator (`StateAcc`) path instead of the tuple-acc or direct-params optimizations (see `BodyEffects::has_self_sends` in `crates/beamtalk-core/src/codegen/core_erlang/control_flow/mod.rs`)."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3055-child",
+      "title": "BT3055Child",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3055Ancestor",
+        "BT3055Child",
+        "assign",
+        "assignment",
+        "async",
+        "bt3055_child",
+        "concurrent",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "run",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-3055: `^` inside a `to:do:` counted loop in a class method used to emit\n// a reference to an unbound `State` variable. A class method's Core Erlang\n// signature is `(ClassSelf, ClassVars, Args...)` — there is no `State`\n// parameter, only actor *instance* methods have one — but the counted loop's\n// map-accumulator packing (`ThreadingPlan::generate_pack_prefix`) hardcoded\n// `State` as the base to pack from whenever `self.context` wasn't\n// `CodeGenContext::ValueType`. Class methods on an actor-backed class (like\n// this one, since `BT3055Ancestor` is `Object subclass:`) still run with\n// `context == Actor`, so the `ValueType`-only check never caught them.\n\nBT3055Ancestor subclass: BT3055Child\n\n  class run =>\n    count := 0\n    1\n      to: 3\n      do: [:i |\n        count := count + 1\n        ^self foo\n      ]\n    #wrong",
+      "explanation": "BT-3055: `^` inside a `to:do:` counted loop in a class method used to emit a reference to an unbound `State` variable. A class method's Core Erlang signature is `(ClassSelf, ClassVars, Args...)` — there is no `State` parameter, only actor *instance* methods have one — but the counted loop's map-accumulator packing (`ThreadingPlan::generate_pack_prefix`) hardcoded `State` as the base to pack from whenever `self.context` wasn't `CodeGenContext::ValueType`. Class methods on an actor-backed class (like this one, since `BT3055Ancestor` is `Object subclass:`) still run with `context == Actor`, so the `ValueType`-only check never caught them."
     },
     {
       "id": "stdlib-test-fixtures-calculator",
