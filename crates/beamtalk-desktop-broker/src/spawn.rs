@@ -227,22 +227,49 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 
     let mut cmd = build_launch_command(config)?;
     detach(&mut cmd);
-    let child = cmd.spawn()?;
+    let mut child = cmd.spawn()?;
 
     #[cfg(windows)]
     {
-        let job = crate::winjob::JobHandle::new()?;
         // Best-effort-but-checked: assign right away (minimizes, per
         // `crate::winjob`'s doc, the residual pre-assignment race) and
         // surface a failure rather than silently returning a front this
-        // job object does not actually protect.
-        job.assign(&child)?;
+        // job object does not actually protect. `cmd.spawn()` above already
+        // succeeded, so a failure past this point must kill `child` itself
+        // before propagating — otherwise the job object we failed to attach
+        // never exists to reap it, and `crate::reap`'s PID-file sweep can't
+        // catch it either (a PID file is only written after `spawn_front`
+        // returns `Ok`), leaving a live, untracked `cmd.exe`/`erl.exe` tree
+        // behind.
+        let job = match crate::winjob::JobHandle::new() {
+            Ok(job) => job,
+            Err(e) => {
+                kill_orphaned_child(&mut child);
+                return Err(e.into());
+            }
+        };
+        if let Err(e) = job.assign(&child) {
+            kill_orphaned_child(&mut child);
+            return Err(e.into());
+        }
         Ok(SpawnedFront { child, job })
     }
     #[cfg(not(windows))]
     {
         Ok(SpawnedFront { child })
     }
+}
+
+/// Kill and reap `child` after it was successfully spawned but a later,
+/// Windows-only setup step (job-object creation/assignment) failed — see the
+/// call sites in [`spawn_front`]. Best-effort: swallows its own errors rather
+/// than shadowing the setup failure that's already being propagated, since
+/// there's no better recovery available for a failure to kill a process we're
+/// already trying to kill.
+#[cfg(windows)]
+fn kill_orphaned_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Build the OS process invocation for `config`, platform-specific per this
