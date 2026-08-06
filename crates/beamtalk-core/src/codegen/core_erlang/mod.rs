@@ -2866,8 +2866,7 @@ impl CoreErlangGenerator {
                     // call and reference `last_open_scope_result`'s variable
                     // directly at the tuple's Value position, keeping both it
                     // and the rebound class-var snapshot in scope for `state`.
-                    let (val_preamble, open_scope) =
-                        self.expression_doc_with_open_scope(value)?;
+                    let (val_preamble, open_scope) = self.expression_doc_with_open_scope(value)?;
                     // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
                     // Actor methods use the current gen_server state; value type
                     // methods use the latest Self{N} snapshot so field mutations
