@@ -1073,9 +1073,24 @@ mod tests {
         // `sleep 60` blocks so the map entry is still present for the second
         // spawn attempt; the test kills it explicitly to clean up.
         use eetf::List;
+        // Drop guard: always kill child 20, even if an assert! below panics.
+        // Defined before any `let` statements to satisfy clippy::items_after_statements.
+        struct KillChild20 {
+            children: ChildMap,
+        }
+        impl Drop for KillChild20 {
+            fn drop(&mut self) {
+                let req = Map::from([(atom("child_id"), int_term(20))]);
+                let _ = handle_kill(&req, &self.children);
+            }
+        }
+
         let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
         let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
         let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
+        let _guard = KillChild20 {
+            children: Arc::clone(&children),
+        };
 
         let args_sleep = Term::from(List::from(vec![binary_term(b"sleep"), binary_term(b"60")]));
         let req1 = Term::from(Map::from([
@@ -1086,20 +1101,6 @@ mod tests {
             (atom("env"), env_term.clone()),
         ]));
         handle_command(&req1, &writer, &children).expect("first spawn must succeed");
-
-        // Drop guard: always kill child 20, even if an assert! below panics.
-        struct KillChild20 {
-            children: ChildMap,
-        }
-        impl Drop for KillChild20 {
-            fn drop(&mut self) {
-                let req = Map::from([(atom("child_id"), int_term(20))]);
-                let _ = handle_kill(&req, &self.children);
-            }
-        }
-        let _guard = KillChild20 {
-            children: Arc::clone(&children),
-        };
 
         // Attempt a second spawn with the same child_id — must fail.
         let args_true = Term::from(List::from(vec![binary_term(b"true")]));
