@@ -95,8 +95,12 @@ stacker = "0.1"
 tungstenite = "0.30"
 tokio-tungstenite = "0.30"
 
-# Windows process management (native replacement for sysinfo, BT-1039)
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# Windows process management (native replacement for sysinfo, BT-1039).
+# Win32_System_Diagnostics_ToolHelp: process-tree enumeration, used only in
+# beamtalk-desktop-broker's spawn.rs tests (BT-3046) to verify the winjob
+# JobHandle kill-on-close actually reaps a spawned .bat's grandchild process,
+# not just the immediate cmd.exe wrapper.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 # Diff generation (for beamtalk fmt-check unified diff output)
 similar = "3"

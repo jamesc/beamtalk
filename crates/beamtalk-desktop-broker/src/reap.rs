@@ -19,7 +19,26 @@
 //! front's process start time at spawn time (the same technique
 //! `beamtalk-cli`'s `NodeInfo.start_time` already uses for its own PID-reuse
 //! detection) and refusing to signal a PID whose *current* start time
-//! doesn't match what was recorded.
+//! doesn't match what was recorded. [`read_start_time`] was inert on Windows
+//! until BT-3046 (`None` unconditionally, which `classify_record` treats as
+//! "unknown, trust liveness" — every sweep matched, closing nothing); it now
+//! reads a real value there via `GetProcessTimes`.
+//!
+//! **What "the recorded PID" means on Windows** (BT-2988): the caller
+//! persists `Child::id()` after `spawn_front`, which per [`crate::winjob`]'s
+//! doc comment is `cmd.exe`'s PID, not `erl.exe`'s (`.bat` launches can only
+//! run via a console-subsystem wrapper). A `Reap` here terminates that
+//! `cmd.exe` — usually enough on its own, since Windows tears down a process
+//! whose parent has already exited, though not synchronously or
+//! unconditionally the way [`crate::winjob::JobHandle`]'s kill-on-close
+//! guarantees the whole tree dies. This module's PID-reuse hardening is
+//! still real and worth having (it stops a *different*, unrelated process
+//! from being killed), but a stale record reaching this sweep at all should
+//! be rare in the crash scenario it exists for: `JobHandle`'s kill-on-close
+//! already tears down the entire `cmd.exe`/`erl.exe` tree the moment a live
+//! broker dies, before any future broker's sweep would ever run. This
+//! module is the fallback net for what that misses — see `crate::winjob`'s
+//! doc comment for its own residual (assign-after-spawn) race.
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -260,10 +279,12 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
 /// exists to close, on the kill path itself: `sweep` only calls this after
 /// `classify_record` has already confirmed the PID is alive and (best-effort)
 /// still the recorded process — but that confirmation is a snapshot from
-/// *before* `SIGTERM`. During [`TERMINATE_GRACE`], the process could exit and
-/// the OS could recycle its PID for something unrelated; sending `SIGKILL`
-/// without re-checking would hit that unrelated process. Re-verifying here
-/// closes the window rather than just narrowing it.
+/// *before* the kill signal. On Unix, the process could exit and the OS
+/// could recycle its PID for something unrelated during [`TERMINATE_GRACE`];
+/// on Windows, that same window exists (just smaller, with no grace-period
+/// sleep) between `classify_record`'s check and `OpenProcess` here. Both
+/// arms re-verify via [`still_same_process`] immediately before the actual
+/// kill call, closing the window rather than just narrowing it.
 fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
     #[cfg(unix)]
     {
@@ -285,17 +306,20 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
         };
         // No grace-window sleep on this path (a single forceful
         // TerminateProcess, no graceful-signal equivalent to wait out first),
-        // so there's no extra PID-reuse window opened here beyond the
-        // inherent, much smaller gap between `classify_record`'s check and
-        // this call — hence no re-verification against `expected_start_time`
-        // (kept as a parameter for signature symmetry with the Unix path).
-        let _ = expected_start_time;
+        // so the PID-reuse window this re-check closes is inherently much
+        // smaller than the Unix arm's `TERMINATE_GRACE` — but now that
+        // `read_start_time` is real on Windows too (BT-3046), re-verifying
+        // costs nothing and closes it anyway rather than merely accepting it
+        // as "small enough", matching the Unix arm's own belt-and-suspenders
+        // stance.
         // SAFETY: Windows API call with documented parameters; handle is
         // checked for null before use and closed afterward.
         unsafe {
             let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
             if !handle.is_null() {
-                TerminateProcess(handle, 1);
+                if still_same_process(pid, expected_start_time) {
+                    TerminateProcess(handle, 1);
+                }
                 CloseHandle(handle);
             }
         }
@@ -304,10 +328,11 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
 
 /// Re-read `pid`'s *current* start time and check it against
 /// `expected_start_time` — the same [`start_time_matches`] comparison
-/// [`classify_record`] uses, applied again immediately before `SIGKILL` to
-/// close the PID-reuse window [`TERMINATE_GRACE`] opens (see
-/// `terminate_process`'s doc comment).
-#[cfg(unix)]
+/// [`classify_record`] uses, applied again immediately before killing to
+/// close the PID-reuse window between `classify_record`'s check and the
+/// actual kill call (see `terminate_process`'s doc comment). Available
+/// wherever [`read_start_time`] returns a real value (Linux, Windows).
+#[cfg(any(unix, windows))]
 fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
     start_time_matches(expected_start_time, read_start_time(pid))
 }
@@ -374,7 +399,71 @@ pub fn read_start_time(pid: u32) -> Option<u64> {
     starttime_str.parse::<u64>().ok()
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Read process creation time via `GetProcessTimes` (BT-3046). Mirrors the
+/// Linux `/proc` read above: without this, `classify_record`'s "unknown
+/// start time falls back to trusting liveness" stance (see its doc comment)
+/// meant the PID-reuse guard was **inert** on Windows — a stale on-disk
+/// [`FrontRecord`] always classified as [`Disposition::Reap`], so a recycled
+/// PID (Windows reuses them more aggressively than Linux) would get an
+/// unconditional `TerminateProcess` against whatever unrelated process now
+/// holds it.
+///
+/// Returns `None` if the process can't be opened (already gone, or a
+/// permissions issue) or the call otherwise fails — same "unknown, fall back
+/// to liveness" contract the Linux arm has.
+#[cfg(windows)]
+#[must_use]
+pub fn read_start_time(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    // SAFETY: Windows API call with documented parameters; handle is checked
+    // for null before use and closed afterward. PROCESS_QUERY_LIMITED_INFORMATION
+    // is sufficient per GetProcessTimes' own documented access-right
+    // requirement (the same right `is_process_alive` above already requests).
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+    if handle.is_null() {
+        return None;
+    }
+
+    let mut creation = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exit = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut kernel = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut user = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    // SAFETY: handle is valid (checked above); the four out-params are valid,
+    // local, correctly-typed FILETIME buffers for the duration of this call.
+    let ok = unsafe {
+        GetProcessTimes(
+            handle,
+            &raw mut creation,
+            &raw mut exit,
+            &raw mut kernel,
+            &raw mut user,
+        )
+    };
+    // SAFETY: handle is valid, obtained from OpenProcess above.
+    unsafe { CloseHandle(handle) };
+    if ok == FALSE {
+        return None;
+    }
+    Some((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 #[must_use]
 pub fn read_start_time(_pid: u32) -> Option<u64> {
     None
@@ -383,6 +472,11 @@ pub fn read_start_time(_pid: u32) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `TERMINATE_GRACE` (crate-level import above) only exists on
+    // `cfg(unix)`; this module's own `#[cfg(windows)]` tests below need
+    // `Duration` too (BT-3046).
+    #[cfg(windows)]
+    use std::time::Duration;
 
     fn record(pid: u32, start_time: Option<u64>) -> FrontRecord {
         FrontRecord {
@@ -510,24 +604,27 @@ mod tests {
         assert!(load_all_records(tmp.path()).unwrap().is_empty());
     }
 
-    // Linux-only: `read_start_time` only returns a real value on Linux (see
-    // its doc comment) — `classify_record`'s fallback for a platform where
-    // the *observed* start time is unavailable is `Reap` (best effort,
-    // matching `beamtalk-cli`'s own stance), which on a non-Linux CI runner
-    // would make this test SIGTERM its own test process. Gating to Linux
-    // keeps that real behavior safe to exercise here; `classify_record`'s
-    // fallback branch itself is covered platform-independently by
-    // `alive_with_no_observed_start_time_falls_back_to_reap` above.
-    #[cfg(target_os = "linux")]
+    // Linux/Windows-only: `read_start_time` only returns a real value on
+    // those two platforms (see its doc comments; BT-3046 added the Windows
+    // `GetProcessTimes` arm) — `classify_record`'s fallback for a platform
+    // where the *observed* start time is unavailable is `Reap` (best effort,
+    // matching `beamtalk-cli`'s own stance), which on a CI runner without a
+    // real `read_start_time` would make this test SIGTERM/TerminateProcess
+    // its own test process. Gating this way keeps that real behavior safe to
+    // exercise here; `classify_record`'s fallback branch itself is covered
+    // platform-independently by `alive_with_no_observed_start_time_falls_back_to_reap`
+    // above.
+    #[cfg(any(target_os = "linux", windows))]
     #[test]
     fn sweep_skips_and_clears_a_pid_reused_record_without_reaping() {
         let tmp = tempfile::TempDir::new().unwrap();
         // This test process's own PID is alive, but its recorded start_time
         // is deliberately wrong — simulates PID reuse. `is_process_alive`
-        // will report true; the actual `/proc`-read start time won't equal
-        // `Some(1)`, so this must land in SkipPidReused rather than Reap
-        // (which would SIGTERM this very test process — catastrophic if this
-        // assertion is wrong).
+        // will report true; the actual observed start time (`/proc` on
+        // Linux, `GetProcessTimes` on Windows) won't equal `Some(1)`, so
+        // this must land in SkipPidReused rather than Reap (which would
+        // SIGTERM/TerminateProcess this very test process — catastrophic if
+        // this assertion is wrong).
         let own_pid = std::process::id();
         let rec = record(own_pid, Some(1));
         save_record(tmp.path(), &rec).unwrap();
@@ -601,5 +698,137 @@ mod tests {
         // of the assertion above.
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    // Windows counterparts of the two Linux `terminate_process` tests above
+    // (BT-3046) — exercise the real `GetProcessTimes`/`TerminateProcess`
+    // path rather than only `start_time_matches`'s pure logic. `ping` (not
+    // `sleep`, which doesn't exist on Windows) gives a real, long-running
+    // `.exe` to target — no `cmd.exe` wrapper involved, since `ping.exe` is
+    // a real Win32 executable `Command::new` can exec directly. Windows now
+    // re-verifies before `TerminateProcess` too (adversarial-review
+    // follow-up during this same issue — `still_same_process` is no longer
+    // Unix-only), so both cases apply here symmetrically with the Linux arm.
+
+    #[cfg(windows)]
+    #[test]
+    fn terminate_process_kills_when_start_time_matches_windows() {
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .spawn()
+            .expect("failed to spawn `ping -n 30 127.0.0.1` — is ping.exe on PATH?");
+        let pid = child.id();
+        // Give the process a moment to be fully queryable before reading it.
+        std::thread::sleep(Duration::from_millis(50));
+        let real_start_time = read_start_time(pid);
+        assert!(
+            real_start_time.is_some(),
+            "should be able to read the freshly-spawned child's start time"
+        );
+
+        terminate_process(pid, real_start_time);
+
+        // wait() blocks until the process is actually gone.
+        let status = child.wait().expect("wait on killed child should succeed");
+        assert!(
+            !status.success(),
+            "child should have been terminated, not exit(0)"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminate_process_does_not_kill_on_start_time_mismatch_windows() {
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .spawn()
+            .expect("failed to spawn `ping -n 30 127.0.0.1` — is ping.exe on PATH?");
+        let pid = child.id();
+
+        // A deliberately wrong expected start time — simulates the PID
+        // having been reused by an unrelated process since the record was made.
+        terminate_process(pid, Some(1));
+
+        assert!(
+            is_process_alive(pid),
+            "must not signal a process whose start time doesn't match"
+        );
+
+        // Cleanup: the test owns this child and must not leak it regardless
+        // of the assertion above.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    // ── read_start_time: sanity checks (BT-3046) ────────────────────────
+
+    #[cfg(windows)]
+    #[test]
+    fn read_start_time_returns_some_for_a_live_process() {
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "5", "127.0.0.1"])
+            .spawn()
+            .expect("failed to spawn `ping -n 5 127.0.0.1` — is ping.exe on PATH?");
+        let pid = child.id();
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert!(
+            read_start_time(pid).is_some(),
+            "GetProcessTimes should succeed for a live, queryable process"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// Regression test for a mis-ordered `GetProcessTimes` out-param (BT-3046
+    /// adversarial-review follow-up): the call takes four `*mut FILETIME`
+    /// slots (creation, exit, kernel, user) and it's easy to read the wrong
+    /// one back. `read_start_time_returns_some_for_a_live_process` above only
+    /// asserts `.is_some()`, which a swapped-in `exit`/`kernel`/`user` read
+    /// would still satisfy — `lpExitTime` is specifically documented to stay
+    /// the zero `FILETIME` for a process that hasn't exited yet, so a
+    /// same-process repeated read that's stable *and* non-zero is a much
+    /// stronger signal that `dwLowDateTime`/`dwHighDateTime` came from the
+    /// right (creation) slot.
+    #[cfg(windows)]
+    #[test]
+    fn read_start_time_is_stable_and_nonzero_for_a_live_process() {
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "10", "127.0.0.1"])
+            .spawn()
+            .expect("failed to spawn `ping -n 10 127.0.0.1` — is ping.exe on PATH?");
+        let pid = child.id();
+        std::thread::sleep(Duration::from_millis(50));
+
+        let first = read_start_time(pid);
+        std::thread::sleep(Duration::from_millis(50));
+        let second = read_start_time(pid);
+
+        assert_ne!(
+            first,
+            Some(0),
+            "a live process's creation time should never be the zero FILETIME \
+             sentinel — Some(0) would indicate the wrong out-param (e.g. the \
+             still-running process's zeroed lpExitTime) was read instead of \
+             lpCreationTime"
+        );
+        assert_eq!(
+            first, second,
+            "repeated reads of the same live process's creation time must be stable"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn read_start_time_returns_none_for_a_nonexistent_pid() {
+        assert_eq!(
+            read_start_time(u32::MAX),
+            None,
+            "OpenProcess should fail for a PID essentially guaranteed not to exist"
+        );
     }
 }

@@ -140,10 +140,10 @@ impl SpawnConfig {
 
 /// The env vars this broker sets on **every** platform, in a stable order
 /// (for deterministic logging/tests — `Command::envs` doesn't care about
-/// order). On Windows, [`build_launch_command`] sets four more
+/// order). On Windows, [`build_launch_command`] sets five more
 /// (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`, `SECRET_KEY_BASE`,
-/// `PHX_SERVER`) that don't go through this function — it does not
-/// report the full env set there, only the cross-platform baseline.
+/// `PHX_SERVER`, `RELEASE_TMP`) that don't go through this function — it
+/// does not report the full env set there, only the cross-platform baseline.
 #[must_use]
 pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
     vec![
@@ -212,11 +212,15 @@ impl std::ops::DerefMut for SpawnedFront {
 /// Returns [`BrokerError::OidcConfigured`] or [`BrokerError::UnknownWorkspace`]
 /// per the refusal conditions above, or [`BrokerError::Io`] if the launcher
 /// process fails to spawn or (Windows only) if assigning it to the job
-/// object fails. On Windows, [`build_launch_command`]'s own workspace lookups
-/// can additionally propagate [`BrokerError::MissingCookie`] (no `cookie`
-/// file), [`BrokerError::Json`] (malformed `metadata.json`), or
-/// [`BrokerError::Workspace`] (a `beamtalk-workspace` failure) before any
-/// process is spawned.
+/// object fails. [`build_launch_command`] can additionally return
+/// [`BrokerError::LauncherPlatformMismatch`] (BT-3046 — `config.launcher`
+/// doesn't look like a real entry point for the current platform) before any
+/// process is spawned. On Windows, its workspace lookups and per-front
+/// `RELEASE_TMP` setup can additionally propagate [`BrokerError::MissingCookie`]
+/// (no `cookie` file), [`BrokerError::Json`] (malformed `metadata.json`),
+/// [`BrokerError::Workspace`] (a `beamtalk-workspace` failure), or
+/// [`BrokerError::Io`] (failed to create the `RELEASE_TMP` directory) before
+/// any process is spawned.
 pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     if let Some(source) = oidc_configured(&config.ide_toml_path) {
         return Err(BrokerError::OidcConfigured(source.to_string()));
@@ -285,19 +289,55 @@ fn kill_orphaned_child(child: &mut std::process::Child) {
 /// Windows `bin\bt_attach.bat start` with every env var `bin/server` would
 /// otherwise have set resolved and set here instead.
 ///
-/// Returns `Result` even though this Unix arm never fails: it must share a
-/// signature with its `#[cfg(windows)]` sibling below, which does (a missing
-/// cookie file, or a `read_node_name` failure) — `spawn_front` calls whichever
-/// one this build compiles through one shared call site.
+/// Shares a `Result`-returning signature with its `#[cfg(windows)]` sibling
+/// below so `spawn_front` calls whichever one this build compiles through one
+/// shared call site — this arm can now fail too (BT-3046's
+/// [`check_launcher_platform`] guard), not only the Windows one (a missing
+/// cookie file, or a `read_node_name` failure).
+///
+/// # Errors
+///
+/// Returns [`BrokerError::LauncherPlatformMismatch`] if `config.launcher`
+/// doesn't look like a Unix entry point.
 #[cfg(unix)]
-#[allow(clippy::unnecessary_wraps)]
 fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
+    check_launcher_platform(&config.launcher)?;
     let mut cmd = Command::new(&config.launcher);
     cmd.arg(&config.workspace_id);
     for (key, value) in build_env(config) {
         cmd.env(key, value);
     }
     Ok(cmd)
+}
+
+/// Guard against [`SpawnConfig::launcher`] (or its `BEAMTALK_ATTACH_LAUNCHER`
+/// override — see `desktop/src-tauri/src/launcher.rs`) pointing at the wrong
+/// platform's entry point (BT-3046 adversarial-review follow-up): a Unix
+/// `bin/server` shell script has no extension, while the Windows
+/// `bin\bt_attach.bat` always does — a cheap, reliable discriminator without
+/// needing to actually open or exec the file. Unix arm: refuses a `.bat`/
+/// `.cmd`/`.exe` extension (all three are Windows-only conventions this
+/// crate has no legitimate reason to see here — `.exe` isn't the *other*
+/// platform's actual launcher, but it's an equally clear tell). Windows arm
+/// (below): requires `.bat`/`.cmd`.
+///
+/// # Errors
+///
+/// Returns [`BrokerError::LauncherPlatformMismatch`] if `launcher` has a
+/// `.bat`/`.cmd`/`.exe` extension — none of those make sense on Unix.
+#[cfg(unix)]
+fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
+    let ext = launcher
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("bat" | "cmd" | "exe") => Err(BrokerError::LauncherPlatformMismatch(
+            launcher.display().to_string(),
+            "this is a Unix build, but the launcher has a Windows .bat/.cmd/.exe extension",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// Windows counterpart of the Unix `build_launch_command` above (BT-2988) —
@@ -311,12 +351,15 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
 ///
 /// # Errors
 ///
-/// Returns [`BrokerError::MissingCookie`] if the workspace directory has no
-/// (or an empty) `cookie` file, or propagates a [`crate::discovery::read_node_name`]
-/// failure (malformed `metadata.json` — `spawn_front` already checked it
-/// exists before calling this).
+/// Returns [`BrokerError::LauncherPlatformMismatch`] if `config.launcher`
+/// doesn't look like a Windows entry point, [`BrokerError::MissingCookie`] if
+/// the workspace directory has no (or an empty) `cookie` file, propagates a
+/// [`crate::discovery::read_node_name`] failure (malformed `metadata.json` —
+/// `spawn_front` already checked it exists before calling this), or
+/// [`BrokerError::Io`] if the per-front [`release_tmp_dir`] can't be created.
 #[cfg(windows)]
 fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
+    check_launcher_platform(&config.launcher)?;
     let node_name = crate::discovery::read_node_name(&config.workspace_id)?;
     let cookie = beamtalk_workspace::read_cookie_file(&config.workspace_id)?
         .ok_or_else(|| BrokerError::MissingCookie(config.workspace_id.clone()))?;
@@ -330,7 +373,74 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
     cmd.env("BT_WORKSPACE_COOKIE", cookie);
     cmd.env("SECRET_KEY_BASE", generate_secret_key_base());
     cmd.env("PHX_SERVER", "true");
+
+    // BT-3046 adversarial-review follow-up: a bundled MSI/NSIS install lands
+    // under `C:\Program Files\Beamtalk\...`, which a standard (non-admin)
+    // Windows user cannot write to. Mix releases resolve `RELEASE_TMP`
+    // (default `$RELEASE_ROOT/tmp`) and write the boot's resolved
+    // `sys.config` there on every boot — left at the default, first attach
+    // on a real install would fail with a permission error before the VM
+    // even finishes booting. Point it at a per-user-writable, per-front
+    // directory instead.
+    let release_tmp = release_tmp_dir(&config.workspace_id, config.port);
+    std::fs::create_dir_all(&release_tmp)?;
+    cmd.env("RELEASE_TMP", release_tmp);
+
     Ok(cmd)
+}
+
+/// Guard against [`SpawnConfig::launcher`] pointing at the wrong platform's
+/// entry point (BT-3046) — see the `#[cfg(unix)]` sibling above for the full
+/// rationale. Windows arm: requires a `.bat`/`.cmd` extension, since
+/// `bin\bt_attach.bat` (the only real Windows launcher) always has one and a
+/// Unix `bin/server` shell script never does.
+///
+/// # Errors
+///
+/// Returns [`BrokerError::LauncherPlatformMismatch`] if `launcher` has no
+/// `.bat`/`.cmd` extension.
+#[cfg(windows)]
+fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
+    let ext = launcher
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("bat" | "cmd") => Ok(()),
+        _ => Err(BrokerError::LauncherPlatformMismatch(
+            launcher.display().to_string(),
+            "this is a Windows build, but the launcher has no .bat/.cmd extension",
+        )),
+    }
+}
+
+/// Per-front `RELEASE_TMP` directory (BT-3046) — see [`build_launch_command`]'s
+/// doc comment for why the release's own default (under `RELEASE_ROOT`, which
+/// a standard install puts under `Program Files`) isn't usable.
+///
+/// Prefers `dirs::cache_dir()` (`%LOCALAPPDATA%` on Windows — the same
+/// per-user, app-local scratch location [`crate::reap::state_dir`] uses
+/// `dirs::home_dir()` to build its own directory under) over the more
+/// loosely-defined `std::env::temp_dir()`: the latter reads whatever `TMP`/
+/// `TEMP` happen to resolve to for the current process, which under an
+/// unusual environment (a service/SYSTEM context, an enterprise policy
+/// redirecting `%TEMP%`) is not guaranteed to be exclusively
+/// user-writable — and this directory ends up holding the resolved
+/// `sys.config`, including the workspace's `SECRET_KEY_BASE`/cookie values,
+/// so a predictable path under a *possibly*-shared location is worth
+/// avoiding when a definitely-per-user one is one call away. Falls back to
+/// `std::env::temp_dir()` (never `None`) only if `dirs::cache_dir()` itself
+/// can't be resolved.
+///
+/// Scoped by workspace id *and* port (not just workspace id) so two fronts
+/// for the same workspace — e.g. a stale one mid-reap while a new one spawns
+/// on retry — never race on the same `sys.config`/boot files.
+#[cfg(windows)]
+fn release_tmp_dir(workspace_id: &str, port: u16) -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("beamtalk-release-tmp")
+        .join(format!("{workspace_id}-{port}"))
 }
 
 /// Generate an ephemeral `SECRET_KEY_BASE` for one Windows front boot —
@@ -668,6 +778,58 @@ mod tests {
             envs.contains_key("SECRET_KEY_BASE"),
             "must set an ephemeral SECRET_KEY_BASE itself — there is no bin/server to do it"
         );
+        // BT-3046: RELEASE_TMP must be a per-user-writable path, not the
+        // release's own default under RELEASE_ROOT (a bundled install puts
+        // that under Program Files, which a standard user can't write to).
+        let release_tmp = envs
+            .get("RELEASE_TMP")
+            .expect("must set RELEASE_TMP to a writable directory");
+        let expected_base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+        assert!(
+            PathBuf::from(release_tmp).starts_with(&expected_base),
+            "RELEASE_TMP {release_tmp:?} should live under {expected_base:?} \
+             (dirs::cache_dir(), i.e. %LOCALAPPDATA% on Windows)"
+        );
+        assert!(
+            std::path::Path::new(release_tmp).is_dir(),
+            "RELEASE_TMP {release_tmp:?} should already exist (created by build_launch_command) \
+             — this also doubles as a real writability check: create_dir_all only succeeds if \
+             the current user can actually write there"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn release_tmp_dir_is_scoped_by_workspace_and_port() {
+        let a = release_tmp_dir("workspace_a", 4567);
+        let b = release_tmp_dir("workspace_a", 4568);
+        let c = release_tmp_dir("workspace_b", 4567);
+        assert_ne!(
+            a, b,
+            "different ports for the same workspace must not collide"
+        );
+        assert_ne!(
+            a, c,
+            "different workspaces on the same port must not collide"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_launch_command_errors_on_launcher_platform_mismatch() {
+        let ws = WindowsTestWorkspaceDir::new("win_launch_mismatch", None, Some("c"));
+        // A Unix-shaped launcher path (no .bat/.cmd extension) handed to a
+        // Windows build — the exact adversarial-review scenario BT-3046
+        // flagged: this used to fail with an opaque OS error instead of a
+        // named one.
+        let config = SpawnConfig::new(PathBuf::from(r"bin\server"), ws.id.clone(), 4567);
+
+        let result = build_launch_command(&config);
+
+        assert!(
+            matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
+            "expected LauncherPlatformMismatch, got {result:?}"
+        );
     }
 
     #[cfg(windows)]
@@ -797,6 +959,36 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn build_launch_command_errors_on_launcher_platform_mismatch() {
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), "abc123", 4567);
+
+        let result = build_launch_command(&config);
+
+        assert!(
+            matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
+            "expected LauncherPlatformMismatch, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_launch_command_errors_on_exe_launcher_extension() {
+        // Not `bin/server`'s actual Windows counterpart's extension, but an
+        // equally clear tell that this launcher was built for Windows
+        // (adversarial-review follow-up: the original denylist only caught
+        // .bat/.cmd, silently accepting an obviously-wrong-platform .exe).
+        let config = SpawnConfig::new(PathBuf::from("bin/bt_attach.exe"), "abc123", 4567);
+
+        let result = build_launch_command(&config);
+
+        assert!(
+            matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
+            "expected LauncherPlatformMismatch, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn spawn_front_with_port_retry_returns_a_live_child_on_the_first_attempt() {
         let ws = TestWorkspaceDir::new("port_retry_ok");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -876,5 +1068,239 @@ mod tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    // ── spawn_front_with_port_retry: real spawn (BT-3046) ───────────────
+    //
+    // The `build_launch_command_*` tests above only assert that the
+    // `cmd.env(...)` calls that produced a `Command` ran, via
+    // `get_program`/`get_args`/`get_envs` introspection — they never
+    // actually spawn anything, so they can't catch anything about real
+    // Windows process-spawning behavior (the `cmd.exe` wrapping a `.bat`
+    // triggers per `Command`'s "BatBadBut" fix, whether `creation_flags`
+    // actually applied, whether the job-object assignment in `spawn_front`
+    // succeeds against a real child). `spawn_front_with_port_retry` — the
+    // function the desktop app actually calls — previously had zero Windows
+    // test coverage; these two mirror the `#[cfg(unix)]`
+    // `spawn_front_with_port_retry_*` tests above, using a throwaway `.bat`
+    // in place of a `#!/bin/sh` script.
+    //
+    // Both hold `ENV_LOCK` across the actual spawn: unlike the Unix
+    // `write_launcher_script` tests (which exec their throwaway script
+    // directly), a `.bat` here runs via `cmd.exe`, which resolves bare
+    // commands like `ping` against the **current** `%PATH%` — and
+    // `cli_ops::tests::resolve_cli_path_{finds_an_executable_on_path,errors_when_nothing_found}`
+    // temporarily replace `PATH` process-globally (also under `ENV_LOCK`).
+    // Without sharing that lock here, a `.bat`-launched `cmd.exe` can race
+    // one of those tests and fail to find `ping` on a wiped `PATH` — this
+    // was reproduced locally before adding the guard.
+
+    /// Write a throwaway `.bat` launcher to `dir` that ignores its argv (the
+    /// `start` positional arg `build_launch_command`'s Windows arm always
+    /// appends) and runs `body`. Unlike the Unix `write_launcher_script`
+    /// above, no `cp`-via-child-process dance is needed: Windows doesn't
+    /// `fork()`, so there is no descriptor-inherited-by-a-sibling-fork
+    /// `ETXTBSY`-equivalent to work around here.
+    #[cfg(windows)]
+    fn write_launcher_batch(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(format!("{name}.bat"));
+        std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap();
+        path
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn spawn_front_with_port_retry_returns_a_live_child_on_the_first_attempt_windows() {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let ws = WindowsTestWorkspaceDir::new(
+            "port_retry_ok_win",
+            Some("bt_attach_port_retry_ok_win@localhost"),
+            Some("testcookie"),
+        );
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A short ping-based sleep — no coreutils `sleep` on Windows.
+        let launcher = write_launcher_batch(tmp.path(), "bt_attach", "ping -n 6 127.0.0.1 >nul");
+
+        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
+        config.bind_failure_grace = Duration::from_millis(300);
+
+        let (mut child, port) =
+            spawn_front_with_port_retry(&config).expect("should spawn and bind on first try");
+        assert!(port >= 1024);
+        assert_eq!(
+            child.try_wait().unwrap(),
+            None,
+            "child should still be running (the launcher is mid-ping-sleep)"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn spawn_front_with_port_retry_gives_up_after_max_attempts_when_launcher_always_exits_windows()
+    {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let ws = WindowsTestWorkspaceDir::new(
+            "port_retry_fail_win",
+            Some("bt_attach_port_retry_fail_win@localhost"),
+            Some("testcookie"),
+        );
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Simulates an immediate `:eaddrinuse`-style crash on every attempt.
+        let launcher = write_launcher_batch(tmp.path(), "bt_attach", "exit /b 1");
+
+        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        config.ide_toml_path = tmp.path().join("ide.toml");
+        // Wider than the Unix counterpart's 50ms: a freshly-written `.bat` in
+        // a fresh tempdir is a plausible target for Windows Defender's
+        // real-time-scan-on-first-exec latency, on top of `cmd.exe`'s own
+        // (larger than a POSIX shell's) process-creation overhead — a tight
+        // grace here risks misclassifying a genuinely-crashing launcher as
+        // still bound under CI load.
+        config.bind_failure_grace = Duration::from_millis(750);
+        config.max_port_attempts = 3;
+
+        let result = spawn_front_with_port_retry(&config);
+        assert!(
+            matches!(result, Err(BrokerError::PortsExhausted(3))),
+            "expected PortsExhausted(3), got {result:?}"
+        );
+    }
+
+    // ── SpawnedFront's JobHandle actually kills the whole tree (BT-3046) ──
+    //
+    // Adversarial-review follow-up: the two tests above kill/wait `child`
+    // (the `cmd.exe` wrapper `Child::id()` refers to — see this module's doc
+    // comment) and treat that as proof the front is "reachable/killable
+    // through spawn_front/SpawnedFront". That's true of `cmd.exe`, but it
+    // was never proof about the process `crate::winjob::JobHandle` actually
+    // exists to reach: `erl.exe` (here, `ping.exe`) underneath it. Every doc
+    // comment in this module and `crate::winjob` about the job-object
+    // mechanism says some variant of "this has not been exercised against a
+    // real Windows boot — no Windows sandbox was available to test it
+    // against." This test closes that: it finds the grandchild via a real
+    // `CreateToolhelp32Snapshot` process-tree walk, drops `SpawnedFront`
+    // (closing the job handle, which `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+    // turns into killing every process still assigned to the job), and
+    // asserts the grandchild is actually gone — not just the immediate
+    // `cmd.exe` child.
+
+    /// Find a live process whose `th32ParentProcessID` is `parent_pid`, via
+    /// `CreateToolhelp32Snapshot` (no `wmic`/`PowerShell` dependency — a
+    /// plain Win32 API call, consistent with how the rest of this crate
+    /// talks to Windows directly rather than shelling out).
+    #[cfg(windows)]
+    fn find_child_pid(parent_pid: u32) -> Option<u32> {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+            TH32CS_SNAPPROCESS,
+        };
+
+        // SAFETY: Windows API call with documented parameters — a snapshot
+        // of all processes (0 as th32ProcessID, per the API contract) is
+        // requested, and the returned handle is checked before further use.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return None;
+        }
+
+        let mut entry = PROCESSENTRY32W {
+            dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>())
+                .expect("struct size fits in u32"),
+            ..Default::default()
+        };
+        let mut found = None;
+        // SAFETY: `snapshot` is the just-created, still-owned handle above;
+        // `entry` is a validly-initialized, correctly-sized buffer for this
+        // call (`dwSize` set per the API's documented requirement).
+        if unsafe { Process32FirstW(snapshot, &raw mut entry) } != 0 {
+            loop {
+                if entry.th32ParentProcessID == parent_pid {
+                    found = Some(entry.th32ProcessID);
+                    break;
+                }
+                // SAFETY: same snapshot/entry as above, called in a loop
+                // until it reports no more entries.
+                if unsafe { Process32NextW(snapshot, &raw mut entry) } == 0 {
+                    break;
+                }
+            }
+        }
+        // SAFETY: `snapshot` is a valid handle owned by this function, not
+        // used again after this point.
+        unsafe { CloseHandle(snapshot) };
+        found
+    }
+
+    /// Poll `condition` until it's true or `timeout` elapses, sleeping
+    /// briefly between checks — used below in place of a single fixed sleep,
+    /// since both "`ping.exe` has started" and "the job-object kill has
+    /// propagated" are OS-scheduling-dependent, not deterministic delays.
+    #[cfg(windows)]
+    fn poll_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if condition() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dropping_spawned_front_kills_the_whole_process_tree_not_just_cmd_exe() {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let ws = WindowsTestWorkspaceDir::new(
+            "job_kill_win",
+            Some("bt_attach_job_kill_win@localhost"),
+            Some("testcookie"),
+        );
+        let tmp = tempfile::TempDir::new().unwrap();
+        let launcher = write_launcher_batch(tmp.path(), "bt_attach", "ping -n 30 127.0.0.1 >nul");
+
+        let mut config = SpawnConfig::new(launcher, ws.id.clone(), 54_321);
+        config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
+
+        let front = spawn_front(&config).expect("should spawn");
+        let cmd_pid = front.id();
+
+        let ping_pid = {
+            let mut found = None;
+            poll_until(Duration::from_secs(5), || {
+                found = find_child_pid(cmd_pid);
+                found.is_some()
+            });
+            found.expect(
+                "ping.exe should appear as a child of the cmd.exe wrapper within 5s — \
+                 if this fails, either the .bat didn't launch ping in time, or Windows' \
+                 BatBadBut cmd.exe-wrapping behavior this module's doc comment describes \
+                 no longer holds",
+            )
+        };
+        assert!(
+            crate::reap::is_process_alive(ping_pid),
+            "the discovered grandchild should be alive before the kill"
+        );
+
+        drop(front);
+
+        let died = poll_until(Duration::from_secs(5), || {
+            !crate::reap::is_process_alive(ping_pid)
+        });
+        assert!(
+            died,
+            "dropping SpawnedFront should kill the whole process tree via \
+             crate::winjob::JobHandle's JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE — \
+             ping.exe (pid {ping_pid}) survived cmd.exe (pid {cmd_pid}) being \
+             dropped, which would mean every front's erl.exe orphans on detach"
+        );
     }
 }
