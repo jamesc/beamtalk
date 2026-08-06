@@ -946,7 +946,32 @@ class_of_object_by_name_test_() ->
                     {beamtalk_object, _, ActualModule, _} =
                         beamtalk_primitive:class_of_object_by_name('Integer'),
                     ?assertEqual(ExpectedModule, ActualModule)
-                end}
+                end},
+            {"falls back to gen_server:call when the metadata row is missing (BT-3052)", fun() ->
+                %% Flagged by the Claude review bot: the not_found fallback branch (still
+                %% the old beamtalk_object_class:module_name/1 gen_server:call) had no
+                %% direct coverage — it was only indirectly "covered" by being currently
+                %% unreachable. Delete 'Integer's live metadata row to force the fallback,
+                %% and confirm it still resolves correctly via the gen_server call, so a
+                %% future change that breaks the fallback doesn't go unnoticed. Save and
+                %% restore the row (in an after-clause, so it survives an assertion
+                %% failure) since 'Integer' is a shared bootstrap class other tests in
+                %% this suite depend on.
+                {ok, SavedModule} = beamtalk_class_metadata:lookup_module('Integer'),
+                {ok, SavedSuperclass} = beamtalk_class_metadata:lookup_superclass('Integer'),
+                {ok, _, SavedSelectors} = beamtalk_class_metadata:lookup_methods('Integer'),
+                {ok, SavedIsAbstract} = beamtalk_class_metadata:lookup_is_abstract('Integer'),
+                beamtalk_class_metadata:delete('Integer'),
+                try
+                    ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Integer')),
+                    Result = beamtalk_primitive:class_of_object_by_name('Integer'),
+                    ?assertMatch({beamtalk_object, _, SavedModule, _}, Result)
+                after
+                    beamtalk_class_metadata:insert(
+                        'Integer', SavedModule, SavedSelectors, SavedSuperclass, SavedIsAbstract
+                    )
+                end
+            end}
         ]}.
 
 %%% ============================================================================
