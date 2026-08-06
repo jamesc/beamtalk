@@ -931,7 +931,22 @@ class_of_object_by_name_test_() ->
             {"unknown class returns atom", fun() ->
                 Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
                 ?assertEqual('NonExistentClass', Result)
-            end}
+            end},
+            {"resolves module via beamtalk_class_metadata, matching the metadata row (BT-3052)",
+                fun() ->
+                    %% BT-3052: class_of_object_by_name/1 used to resolve the module via
+                    %% beamtalk_object_class:module_name/1 (a gen_server:call to the class's
+                    %% own pid), which deadlocks when called from a process that class's pid
+                    %% is itself synchronously blocked waiting on (e.g. `self new class`
+                    %% inside a block ADR 0109 runs in a different class's process). The fix
+                    %% reads beamtalk_class_metadata's ETS-backed row instead — no message
+                    %% send, so no such cycle. Pin that the resolved module actually matches
+                    %% the metadata table's row, not just that a result comes back.
+                    {ok, ExpectedModule} = beamtalk_class_metadata:lookup_module('Integer'),
+                    {beamtalk_object, _, ActualModule, _} =
+                        beamtalk_primitive:class_of_object_by_name('Integer'),
+                    ?assertEqual(ExpectedModule, ActualModule)
+                end}
         ]}.
 
 %%% ============================================================================

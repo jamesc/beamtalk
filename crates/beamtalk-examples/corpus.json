@@ -17901,6 +17901,32 @@
       "explanation": "BT-3051: `^self <inheritedSelector>` with no block involved at all — the plain-return codegen path (no active NLR token), not the throw/catch path `bt3051_parent.bt` exercises. Already worked before the fix (the method-body generator closes the open scope for a body's final statement independently of `Expression::Return`'s own codegen); pinned here as a regression guard against the throw-path fix accidentally affecting this path too."
     },
     {
+      "id": "stdlib-test-fixtures-bt3052-parent",
+      "title": "BT3052Parent",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3047Ancestor",
+        "BT3052Parent",
+        "assign",
+        "assignment",
+        "bt3052_parent",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "makeSelfClassThrough:over:",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-3052: exercises `self new class` as a single expression inside a block\n// that executes in a foreign class's process (ADR 0109), as opposed to\n// `bt3047_parent.bt`'s `makeSelfThrough:` which keeps `.class` outside the\n// block. This combination used to deadlock — see\n// stdlib/test/self_new_class_in_foreign_block_test.bt for the full story.\n\nBT3047Ancestor subclass: BT3052Parent\n\n  class makeSelfClassThrough: aDriverClass over: aList :: List =>\n    aDriverClass\n      run: [:x |\n        result := self new class\n        ^result\n      ]\n      over: aList\n    #wrong",
+      "explanation": "BT-3052: exercises `self new class` as a single expression inside a block that executes in a foreign class's process (ADR 0109), as opposed to `bt3047_parent.bt`'s `makeSelfThrough:` which keeps `.class` outside the block. This combination used to deadlock — see stdlib/test/self_new_class_in_foreign_block_test.bt for the full story."
+    },
+    {
       "id": "stdlib-test-fixtures-calculator",
       "title": "Calculator",
       "category": "stdlib-fixtures",
@@ -27341,6 +27367,27 @@
       ],
       "source": "// BT-2005: Regression tests for `self class spawnWith:as:` /\n// `self class spawnAs:` inside a class factory method. Before the fix, the\n// metaclass dispatch path routed through `gen_server:call` on the class\n// process, which is the *same* process executing the class method — the call\n// deadlocked with `{calling_self, gen_server:call([...])}`.\n//\n// Fixture: stdlib/test/fixtures/self_class_named_factory_actor.bt\n\nTestCase subclass: SelfClassSpawnTest\n\n  testSelfClassSpawnAsRegistersName =>\n    name := #bt2005_self_class_spawnas_success\n    result := SelfClassNamedFactoryActor startViaClassAs: name\n    self assert: result isOk\n    actor := result unwrap\n    self assert: actor registeredName equals: name\n    self assert: actor isRegistered\n    actor stop\n\n  testSelfClassSpawnWithAsRegistersName =>\n    name := #bt2005_self_class_spawnwithas_success\n    result := SelfClassNamedFactoryActor startViaClassWith: #{\n      #value => 42\n    } as: name\n    self assert: result isOk\n    actor := result unwrap\n    self assert: actor getValue equals: 42\n    self assert: actor registeredName equals: name\n    actor stop\n\n  testSelfClassSpawnWithAsDuplicateReturnsError =>\n    name := #bt2005_self_class_spawnwithas_dup\n    first := (SelfClassNamedFactoryActor startViaClassWith: #{\n      #value => 1\n    } as: name) unwrap\n    second := SelfClassNamedFactoryActor startViaClassWith: #{\n      #value => 2\n    } as: name\n    self assert: second isError\n    self assert: second error kind equals: #name_registered\n    first stop\n\n  testSelfClassSpawnAsReservedNameReturnsError =>\n    result := SelfClassNamedFactoryActor startViaClassAs: #logger\n    self assert: result isError\n    self assert: result error kind equals: #reserved_name\n\n  testSelfClassSpawnPlain =>\n    actor := SelfClassNamedFactoryActor startViaClassPlain\n    self assert: actor getValue equals: 0\n    actor stop\n\n  testSelfClassSpawnWithMap =>\n    actor := SelfClassNamedFactoryActor startViaClassWithMap: #{#value => 7}\n    self assert: actor getValue equals: 7\n    actor stop",
       "explanation": "BT-2005: Regression tests for `self class spawnWith:as:` / `self class spawnAs:` inside a class factory method. Before the fix, the metaclass dispatch path routed through `gen_server:call` on the class process, which is the *same* process executing the class method — the call deadlocked with `{calling_self, gen_server:call([...])}`.  Fixture: stdlib/test/fixtures/self_class_named_factory_actor.bt"
+    },
+    {
+      "id": "stdlib-test-self-new-class-in-foreign-block-test",
+      "title": "SelfNewClassInForeignBlockTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SelfNewClassInForeignBlockTest",
+        "TestCase",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "object",
+        "self_new_class_in_foreign_block_test",
+        "subclassing",
+        "testSelfNewClassInsideForeignBlockDoesNotDeadlock"
+      ],
+      "source": "// BT-3052: `self new class` inside a block that executes in a foreign\n// class's process (ADR 0109) used to deadlock. `self new` (closure-captured\n// via `ClassSelf`, per BT-3047) constructs an instance of the block's\n// lexical home class — but sending `.class` to it resolved the class's\n// module via a `gen_server:call` to that class's own pid\n// (`beamtalk_object_class:module_name/1`). Since the block executes inside\n// the *driver's* process, and the driver was itself synchronously invoked\n// by this class's own process (which is now blocked waiting on the\n// driver), that call cycles straight back to the blocked caller — a\n// gen_server:call deadlock distinct from BT-893's guarded direct-self-call\n// case (the two pids genuinely differ here). Fixed in\n// `beamtalk_primitive:class_of_object_by_name/1` by resolving the module\n// via the `beamtalk_class_metadata` ETS table instead (no message send).\n//\n// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,\n// fixtures/bt3052_parent.bt.\n\nTestCase subclass: SelfNewClassInForeignBlockTest\n\n  testSelfNewClassInsideForeignBlockDoesNotDeadlock =>\n    self assert: (BT3052Parent makeSelfClassThrough: BT3047DriverPlain over: #(1)) equals: BT3052Parent",
+      "explanation": "BT-3052: `self new class` inside a block that executes in a foreign class's process (ADR 0109) used to deadlock. `self new` (closure-captured via `ClassSelf`, per BT-3047) constructs an instance of the block's lexical home class — but sending `.class` to it resolved the class's module via a `gen_server:call` to that class's own pid (`beamtalk_object_class:module_name/1`). Since the block executes inside the *driver's* process, and the driver was itself synchronously invoked by this class's own process (which is now blocked waiting on the driver), that call cycles straight back to the blocked caller — a gen_server:call deadlock distinct from BT-893's guarded direct-self-call case (the two pids genuinely differ here). Fixed in `beamtalk_primitive:class_of_object_by_name/1` by resolving the module via the `beamtalk_class_metadata` ETS table instead (no message send).  Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt, fixtures/bt3052_parent.bt."
     },
     {
       "id": "stdlib-test-self-reference-test",
