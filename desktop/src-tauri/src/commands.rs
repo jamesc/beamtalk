@@ -22,6 +22,7 @@
 //! Tauri's async-runtime thread pool instead, off the UI thread, without
 //! requiring the function itself to be `async fn` or to `.await` anything.
 
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -38,12 +39,51 @@ use crate::dto::{
 };
 use crate::state::AppState;
 
-/// Overall attach timeout: generous enough for a slow-but-healthy front boot
-/// plus the worst-case bad-cookie `/readiness` wait (Erlang's ~7s
-/// `net_setuptime` — see `beamtalk_desktop_broker::readiness::ProbeTimeouts`'s
-/// doc comment).
+/// Overall timeout for the `wait_ready` readiness-polling phase only —
+/// generous headroom above a healthy boot, not a measured requirement. It
+/// does **not** bound `spawn_front_with_port_retry` above, which runs first
+/// and can itself block synchronously for up to
+/// `port::DEFAULT_MAX_ATTEMPTS * spawn::DEFAULT_BIND_FAILURE_GRACE`
+/// (currently up to 50s in the pathological worst case — every candidate
+/// port conflicting) before `wait_ready` is ever called; `attach`'s true
+/// worst-case latency is that plus this timeout, not just this timeout. In
+/// practice each candidate is a fresh, distinct OS-assigned ephemeral port
+/// (not the same port retried), so an all-conflict run is far less likely
+/// than the single-attempt TOCTOU race `beamtalk_desktop_broker::port`'s
+/// module docs describe — noted here rather than acted on, since bounding
+/// the combined worst case is a product-judgment call (drop
+/// `max_port_attempts` for this caller? wrap both phases in one timeout?)
+/// beyond what BT-3004's calibration pass itself changed.
+///
+/// Originally sized against an assumption that a bad-cookie `/readiness`
+/// blocks for Erlang's ~7s `net_setuptime` — measured wrong on loopback
+/// (BT-3004): a real bad-cookie/dead-workspace `503` arrives in
+/// milliseconds. `30s` is kept as safe headroom for a slow-but-healthy
+/// front boot, not because the bad-cookie path needs it — see
+/// `beamtalk_desktop_broker::readiness::ProbeTimeouts`'s doc comment for the
+/// measurement.
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
 const ATTACH_POLL_INTERVAL: Duration = Duration::from_millis(300);
+
+/// Lock `mutex`, recovering from poisoning instead of propagating it.
+///
+/// `state.attach`/`state.children` are each locked from several independent
+/// commands (`list_workspaces`, `attach`, `detach`, `quit`, the post-attach
+/// monitor thread, …). A `.map_err(|e| e.to_string())?` on `.lock()` — the
+/// std default — means a single panic anywhere while holding either lock
+/// poisons it permanently, and every subsequent command that touches it
+/// (including `quit`/`detach_all`, the one path that could otherwise clean
+/// up a still-attached front left behind by that panic) starts failing for
+/// the rest of the process's life, leaking any front still running. The
+/// protected data itself is usually still perfectly usable after a panic —
+/// a poisoned `Mutex` is std's conservative default (the panic *might* have
+/// happened mid-mutation, leaving inconsistent state), not a guarantee that
+/// it did — so recovering with `into_inner()` and carrying on is the safer
+/// choice for a long-lived desktop app than making the picker permanently
+/// unusable until restart.
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// List discovered workspaces plus the picker's first-run empty-state
 /// classification (ADR 0097 Broker §5 / User Impact: "never a silent empty
@@ -51,7 +91,7 @@ const ATTACH_POLL_INTERVAL: Duration = Duration::from_millis(300);
 #[tauri::command(async)]
 pub fn list_workspaces(state: State<'_, AppState>) -> Result<PickerView, String> {
     let summaries = discovery::discover_workspaces().map_err(|e| e.to_string())?;
-    let attach = state.attach.lock().map_err(|e| e.to_string())?;
+    let attach = locked(&state.attach);
     let workspaces: Vec<WorkspaceView> = summaries
         .iter()
         .map(|s| WorkspaceView::from_summary(s, attach.is_attached(&s.id)))
@@ -81,12 +121,9 @@ pub fn attach(
     // coordinator, where two near-simultaneous attach clicks for the same
     // workspace both saw "nothing tracked" and both spawned a front. See
     // `beamtalk_desktop_shell::attach`'s module docs.
-    let decision = {
-        let mut attach = state.attach.lock().map_err(|e| e.to_string())?;
-        attach.decide_and_claim(&workspace_id)
-    };
+    let decision = locked(&state.attach).decide_and_claim(&workspace_id);
 
-    match decision {
+    let generation = match decision {
         AttachDecision::FocusExisting { window_id, .. } => {
             if let Some(window) = app.get_webview_window(&window_id) {
                 let _ = window.set_focus();
@@ -94,19 +131,17 @@ pub fn attach(
             return Ok(AttachOutcome::Focused);
         }
         AttachDecision::AlreadyInFlight => return Ok(AttachOutcome::AlreadyAttaching),
-        AttachDecision::Spawn => {}
-    }
+        AttachDecision::Spawn { generation } => generation,
+    };
 
     // From here on, the workspace is claimed: every exit path (including
     // early returns below) must release the claim on failure, or record the
     // real attachment on success, so a future attach click is never stuck
     // behind a claim nothing will resolve.
-    match attach_and_open_window(&app, &state, &workspace_id) {
+    match attach_and_open_window(&app, &state, &workspace_id, generation) {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
-            if let Ok(mut attach) = state.attach.lock() {
-                attach.release_claim(&workspace_id);
-            }
+            locked(&state.attach).release_claim(&workspace_id, generation);
             Err(err)
         }
     }
@@ -114,11 +149,16 @@ pub fn attach(
 
 /// The claimed part of [`attach`]: spawn, wait for readiness, open a window,
 /// and record the attachment. Split out so [`attach`] can release the claim
-/// uniformly on any `Err` this returns, from any step.
+/// uniformly on any `Err` this returns, from any step. `generation` is the
+/// claim's generation number (from [`AttachDecision::Spawn`]) — threaded
+/// through to the recorded [`AttachedFront`] and [`spawn_monitor`] so the
+/// post-attach monitor's stop condition survives ephemeral-port reuse (see
+/// [`beamtalk_desktop_shell::attach::AttachManager::is_current_front`]).
 fn attach_and_open_window(
     app: &AppHandle,
     state: &AppState,
     workspace_id: &str,
+    generation: u64,
 ) -> Result<AttachOutcome, String> {
     emit_progress(app, workspace_id, "spawning");
 
@@ -149,11 +189,7 @@ fn attach_and_open_window(
     // a local `child.kill()` — the child is no longer this function's to
     // kill directly once it's in the shared map.
     persist_front_record(workspace_id, port, pid);
-    state
-        .children
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(workspace_id.to_string(), child);
+    locked(&state.children).insert(workspace_id.to_string(), child);
 
     emit_progress(app, workspace_id, "probing");
 
@@ -225,14 +261,12 @@ fn attach_and_open_window(
         });
     }
 
-    let recorded = {
-        let mut attach = state.attach.lock().map_err(|e| e.to_string())?;
-        attach.record_attached_if_claiming(AttachedFront {
-            workspace_id: workspace_id.to_string(),
-            port,
-            pid,
-        })
-    };
+    let recorded = locked(&state.attach).record_attached_if_claiming(AttachedFront {
+        workspace_id: workspace_id.to_string(),
+        port,
+        pid,
+        generation,
+    });
 
     if !recorded {
         // A concurrent `detach`/`quit` cleared this workspace's claim while
@@ -261,7 +295,7 @@ fn attach_and_open_window(
     // The child is already tracked in `state.children` (inserted right
     // after spawn, above) — nothing more to do there on the success path.
 
-    spawn_monitor(app.clone(), workspace_id.to_string(), port);
+    spawn_monitor(app.clone(), workspace_id.to_string(), port, generation);
 
     Ok(AttachOutcome::Opened)
 }
@@ -274,11 +308,9 @@ fn attach_and_open_window(
 /// comment) — killing it locally without untracking would leave a dangling
 /// map entry for an already-dead process.
 fn kill_and_untrack(state: &AppState, workspace_id: &str, port: u16) {
-    if let Ok(mut children) = state.children.lock() {
-        if let Some(mut child) = children.remove(workspace_id) {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+    if let Some(mut child) = locked(&state.children).remove(workspace_id) {
+        let _ = child.kill();
+        let _ = child.wait();
     }
     remove_front_record(workspace_id, port);
 }
@@ -316,11 +348,7 @@ pub fn detach_internal(
     state: &AppState,
     workspace_id: &str,
 ) -> Result<(), String> {
-    let removed = state
-        .attach
-        .lock()
-        .map_err(|e| e.to_string())?
-        .remove(workspace_id);
+    let removed = locked(&state.attach).remove(workspace_id);
 
     if let Some(front) = removed {
         if let Ok(dir) = reap::state_dir() {
@@ -328,12 +356,7 @@ pub fn detach_internal(
         }
     }
 
-    if let Some(mut child) = state
-        .children
-        .lock()
-        .map_err(|e| e.to_string())?
-        .remove(workspace_id)
-    {
+    if let Some(mut child) = locked(&state.children).remove(workspace_id) {
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -387,14 +410,15 @@ pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
 /// still kill that front within this session rather than leaving it for the
 /// next restart's orphan sweep to find.
 ///
-/// Best-effort: a poisoned `children` mutex means nothing is known to be
-/// tracked, so there is nothing safe to detach — silently does nothing
-/// rather than panicking on the way out during app exit.
+/// Uses [`locked`] (recovers from a poisoned `children` mutex rather than
+/// giving up) precisely because this is the one path that could otherwise
+/// clean up after a panic elsewhere left a front still attached — bailing
+/// out here on a poisoned lock, as a plain `.lock()?` would, is the single
+/// worst place in this file to do that: it would leak every still-attached
+/// front for the rest of the OS process's life, on the exact path (quit)
+/// meant to guarantee they get killed.
 pub fn detach_all(app: &AppHandle, state: &AppState) {
-    let ids: Vec<String> = match state.children.lock() {
-        Ok(children) => children.keys().cloned().collect(),
-        Err(_) => return,
-    };
+    let ids: Vec<String> = locked(&state.children).keys().cloned().collect();
     for id in ids {
         let _ = detach_internal(app, state, &id);
     }
@@ -442,24 +466,27 @@ fn remove_front_record(workspace_id: &str, port: u16) {
 /// disconnected window instead of the front's RPCs silently hanging or the
 /// LiveView page filling with socket-error noise (spike criterion (f)).
 ///
-/// Stops once `(workspace_id, port)` is no longer the *current* attachment —
-/// checked via [`beamtalk_desktop_shell::attach::AttachManager::is_current_front`],
-/// not merely `is_attached`. A bare id check would let a stale monitor from
-/// a detach-then-re-attach cycle survive: the new attach spawns on a fresh
-/// port (free-port allocation, not a reused one) and starts its own
-/// monitor, but the *old* monitor would see `is_attached` flip back to
-/// `true` for the same id and wrongly keep polling the dead old port,
-/// fighting the new monitor over the same window's title/events.
-fn spawn_monitor(app: AppHandle, workspace_id: String, port: u16) {
+/// Stops once `generation` is no longer the *current* attachment's
+/// generation — checked via
+/// [`beamtalk_desktop_shell::attach::AttachManager::is_current_front`], not
+/// merely `is_attached` and not `port`. A bare id check would let a stale
+/// monitor from a detach-then-re-attach cycle survive: the new attach starts
+/// its own monitor, but the *old* monitor would see `is_attached` flip back
+/// to `true` for the same id and wrongly keep polling the dead old port,
+/// fighting the new monitor over the same window's title/events. `port`
+/// alone isn't a reliable discriminator either — the OS's ephemeral-port
+/// allocator can (rarely) hand the fresh attach the *same* port the old one
+/// used, which a `(workspace_id, port)` check would then treat as still
+/// current. `generation` (assigned once per claim, by
+/// [`beamtalk_desktop_shell::attach::AttachManager::decide_and_claim`], and
+/// never reused) doesn't have that gap.
+fn spawn_monitor(app: AppHandle, workspace_id: String, port: u16, generation: u64) {
     std::thread::spawn(move || {
         let mut monitor = Monitor::new();
         loop {
             let still_current = {
                 let state = app.state::<AppState>();
-                let Ok(attach) = state.attach.lock() else {
-                    return;
-                };
-                attach.is_current_front(&workspace_id, port)
+                locked(&state.attach).is_current_front(&workspace_id, generation)
             };
             if !still_current {
                 return;
@@ -508,10 +535,8 @@ fn spawn_monitor(app: AppHandle, workspace_id: String, port: u16) {
 /// [`spawn_monitor`]'s call site).
 fn reap_if_exited(app: &AppHandle, workspace_id: &str) {
     let state = app.state::<AppState>();
-    if let Ok(mut children) = state.children.lock() {
-        if let Some(child) = children.get_mut(workspace_id) {
-            let _ = child.try_wait();
-        }
+    if let Some(child) = locked(&state.children).get_mut(workspace_id) {
+        let _ = child.try_wait();
     }
 }
 
@@ -550,4 +575,42 @@ fn reflect_connection_state(
             state: ConnectionStateView::from(connection_state),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locked_recovers_from_a_poisoned_mutex() {
+        // The exact scenario `locked` exists to survive: some thread panics
+        // while holding the lock (a bug elsewhere in a command handler, not
+        // anything `locked` itself does), poisoning the `Mutex`. A plain
+        // `.lock()?` would make this mutex permanently unusable for the rest
+        // of the process's life; `locked` must instead keep handing back a
+        // usable guard.
+        let mutex = Mutex::new(vec![1, 2, 3]);
+
+        std::thread::scope(|scope| {
+            let handle = scope.spawn(|| {
+                let mut guard = mutex.lock().unwrap();
+                guard.push(4);
+                panic!("simulated panic while holding the lock");
+            });
+            // The panic is expected and deliberately triggered — just
+            // confirm the thread actually unwound rather than propagating
+            // it into this test.
+            assert!(handle.join().is_err());
+        });
+
+        assert!(mutex.is_poisoned());
+
+        // Recovers the guard *and* carries forward the in-progress mutation
+        // (`push(4)`) rather than discarding it — `into_inner()` hands back
+        // the data exactly as the panicking thread left it, which is the
+        // whole basis for `locked`'s doc comment claim that the protected
+        // data is "usually still perfectly usable after a panic".
+        let guard = locked(&mutex);
+        assert_eq!(*guard, vec![1, 2, 3, 4]);
+    }
 }

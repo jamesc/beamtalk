@@ -298,15 +298,35 @@ struct ErrBody {
 /// shared duration, because the stages have very different latency profiles.
 ///
 /// The HTTP-up check is a cheap local TCP round trip to a server this broker
-/// just spawned — a couple of seconds is generous. `/readiness` is not: it
-/// forces the front's `connect/0`, and on a bad cookie that blocks for
-/// Erlang's connection-setup timeout (`net_kernel`'s `net_setuptime`, 7s by
-/// default) before the front can even answer `503`. A single timeout tuned
-/// for the cheap HTTP-up check would make the `/readiness` read time out
-/// *first*, which `http_probe` reports as [`ProbeOutcome::HttpDown`] — and
+/// just spawned — a couple of seconds is generous. `/readiness` was
+/// budgeted more generously still, on the assumption that a bad-cookie
+/// `connect/0` blocks for Erlang's connection-setup timeout (`net_kernel`'s
+/// `net_setuptime`, 7s by default) before the front can even answer `503`.
+///
+/// **Measured against a real `dist-liveview` release (BT-3004), that
+/// assumption does not hold on loopback** — the only topology this broker
+/// ever spawns into (ADR 0091 "Local-only posture"). Racing a bad cookie and
+/// a dead-workspace target against a real front, both `503`s came back in
+/// single-digit-to-low-double-digit milliseconds (bad cookie: ~7–27ms across
+/// 3 runs; dead workspace: ~15ms), not after any multi-second wait.
+/// `net_setuptime` is a ceiling for a peer that never responds at all (a
+/// network black hole); on loopback, epmd's answer and the dist handshake's
+/// cookie check both resolve immediately — either an active rejection or an
+/// immediate "name not registered," never a silent timeout. The `10s`
+/// budget below is therefore *far* more generous than actually needed on
+/// this broker's real (loopback-only) posture, but there is no evidence it
+/// causes harm, so it was left as a safety ceiling rather than tightened —
+/// unlike [`crate::spawn::DEFAULT_BIND_FAILURE_GRACE`], being *slower* than
+/// necessary here has no failure mode (it does not misclassify a state; it
+/// just leaves headroom no one so far has needed).
+///
+/// The two timeouts are still deliberately **separate**, not one shared
+/// duration, because a single timeout tuned for the cheap HTTP-up check
+/// would make the `/readiness` read time out *first* on a genuinely slow
+/// host, which `http_probe` reports as [`ProbeOutcome::HttpDown`] — and
 /// [`advance`] responds to that by regressing `WaitingReadiness` back to
 /// `WaitingHttp`, so the definitive `Failed(BadCookie)` answer never
-/// surfaces. That silently defeats the two-stage probe's whole purpose
+/// surfaces. That would silently defeat the two-stage probe's whole purpose
 /// (surfacing a bad cookie / dead workspace before the window opens).
 #[derive(Debug, Clone, Copy)]
 pub struct ProbeTimeouts {
@@ -320,9 +340,11 @@ pub struct ProbeTimeouts {
 
 impl ProbeTimeouts {
     /// 2s for the HTTP-up check (a healthy, already-spawned local Phoenix
-    /// answers near-instantly); 10s for `/readiness`, comfortably above
-    /// Erlang's default 7s `net_setuptime` so a bad-cookie 503 has time to
-    /// actually arrive.
+    /// answers near-instantly); 10s for `/readiness` — a generous ceiling,
+    /// not a measured requirement: a real bad-cookie or dead-workspace `503`
+    /// on loopback arrives in milliseconds (measured, BT-3004; see the
+    /// [`ProbeTimeouts`] doc comment), so this budget has ample headroom
+    /// rather than being tuned tight against `net_setuptime`.
     #[must_use]
     pub fn default_local() -> Self {
         Self {

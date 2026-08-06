@@ -32,13 +32,57 @@ const attachProgress = new Map();
 // attached workspaces the post-attach monitor has flagged as unhealthy.
 const connectionBadges = new Map();
 
-async function refresh() {
+// Coalescing window for `scheduleRefresh` (below) — chosen to smooth out a
+// flapping connection or several concurrent attaches firing `attach-progress`/
+// `connection-state-changed` several times a second, while still feeling
+// immediate for a single user action.
+const REFRESH_DEBOUNCE_MS = 150;
+let refreshDebounceTimer = null;
+// True while a `list_workspaces` invoke is in flight, so a refresh request
+// that lands mid-invoke queues one more run afterwards instead of firing a
+// second overlapping invoke.
+let refreshInFlight = false;
+// Set by any refresh request (direct call or event) that arrives while one
+// is already in flight — consumed by that in-flight refresh's `finally` to
+// run exactly one more time, so the latest state always wins without
+// unbounded queuing.
+let refreshPending = false;
+
+// Coalesce refresh requests within `REFRESH_DEBOUNCE_MS` of each other into
+// a single `runRefresh()` call. Bursty callers (the `attach-progress`/
+// `connection-state-changed` event listeners, the periodic poll) go through
+// this; a direct response to a single user action (attach/detach/create
+// completing) calls `runRefresh()` itself instead, for immediate feedback —
+// see `reconcileWorkspaceList`'s doc comment for why an uncoalesced flood of
+// overlapping invokes was a problem worth fixing either way.
+function scheduleRefresh() {
+  if (refreshDebounceTimer !== null) {
+    return;
+  }
+  refreshDebounceTimer = setTimeout(() => {
+    refreshDebounceTimer = null;
+    runRefresh();
+  }, REFRESH_DEBOUNCE_MS);
+}
+
+async function runRefresh() {
+  if (refreshInFlight) {
+    refreshPending = true;
+    return;
+  }
+  refreshInFlight = true;
   try {
     const view = await invoke("list_workspaces");
     render(view);
   } catch (err) {
     statusEl.hidden = false;
     statusEl.textContent = `Failed to list workspaces: ${err}`;
+  } finally {
+    refreshInFlight = false;
+    if (refreshPending) {
+      refreshPending = false;
+      scheduleRefresh();
+    }
   }
 }
 
@@ -50,12 +94,64 @@ function render(view) {
 
   if (!hasWorkspaces) {
     renderEmptyState(view.empty_state);
+    // Nothing to reconcile against once the list is empty — clear any rows
+    // left over from a prior non-empty render so the next transition back
+    // to non-empty starts from a clean slate.
+    workspaceListEl.replaceChildren();
     return;
   }
 
-  workspaceListEl.innerHTML = "";
-  for (const workspace of view.workspaces) {
-    workspaceListEl.appendChild(renderWorkspaceRow(workspace));
+  reconcileWorkspaceList(view.workspaces);
+}
+
+// Update `workspaceListEl` to match `workspaces` by reusing existing row
+// elements (keyed by `li.dataset.workspaceId`) wherever possible, instead
+// of `innerHTML = ""` + a full rebuild every refresh. Two problems that
+// full teardown caused, both worth avoiding given how often a refresh can
+// now fire (a flapping connection or several concurrent attaches, each
+// driving its own `attach-progress`/`connection-state-changed` events):
+//
+// - A click can land on a button mid-replacement: `innerHTML = ""` detaches
+//   every existing button from the document an instant before its
+//   replacement is appended, so a click that lands in that window is lost
+//   (dispatched to a node no longer in the DOM) rather than reaching the
+//   freshly created button's handler.
+// - Rebuilding every row's DOM nodes on every refresh is wasted work when,
+//   as is by far the common case, only a badge or a button's text/disabled
+//   state actually changed for one row out of many.
+function reconcileWorkspaceList(workspaces) {
+  const existingRows = new Map();
+  for (const li of workspaceListEl.children) {
+    existingRows.set(li.dataset.workspaceId, li);
+  }
+
+  let previousRow = null;
+  for (const workspace of workspaces) {
+    let li = existingRows.get(workspace.id);
+    if (li) {
+      updateWorkspaceRow(li, workspace);
+      existingRows.delete(workspace.id);
+    } else {
+      li = renderWorkspaceRow(workspace);
+    }
+
+    const referenceNode = previousRow
+      ? previousRow.nextSibling
+      : workspaceListEl.firstChild;
+    // `insertBefore` with a node already positioned right before
+    // `referenceNode` is a documented no-op, so an already-correctly-placed
+    // row's DOM position (and thus its subtree, including the button) is
+    // left completely untouched.
+    if (referenceNode !== li) {
+      workspaceListEl.insertBefore(li, referenceNode);
+    }
+    previousRow = li;
+  }
+
+  // Anything left in `existingRows` is a row for a workspace no longer in
+  // `workspaces` (e.g. it stopped being discoverable) — drop it.
+  for (const staleRow of existingRows.values()) {
+    staleRow.remove();
   }
 }
 
@@ -71,6 +167,11 @@ function renderEmptyState(emptyState) {
   }
 }
 
+// Build a brand-new row's DOM structure (name, live badge, connection
+// badge, path, action button — each a stable element `updateWorkspaceRow`
+// can find again on a later refresh instead of recreating), then populate
+// it via the same `updateWorkspaceRow` a reused row goes through, so the
+// initial-render and update paths can't drift apart.
 function renderWorkspaceRow(workspace) {
   const li = document.createElement("li");
   li.className = "workspace-row";
@@ -81,49 +182,68 @@ function renderWorkspaceRow(workspace) {
 
   const name = document.createElement("span");
   name.className = "workspace-name";
-  name.textContent = workspace.id;
   info.appendChild(name);
 
   const liveBadge = document.createElement("span");
-  liveBadge.className = workspace.alive
-    ? "badge badge-alive"
-    : "badge badge-dead";
-  liveBadge.textContent = workspace.alive ? "live" : "not running";
+  liveBadge.className = "workspace-live-badge";
   info.appendChild(liveBadge);
 
-  const connectionLabel = connectionBadges.get(workspace.id);
-  if (connectionLabel) {
-    const connBadge = document.createElement("span");
-    connBadge.className = "badge badge-warning";
-    connBadge.textContent = connectionLabel;
-    info.appendChild(connBadge);
-  }
+  const connBadge = document.createElement("span");
+  connBadge.className = "badge badge-warning workspace-connection-badge";
+  info.appendChild(connBadge);
 
-  if (workspace.project_path) {
-    const path = document.createElement("span");
-    path.className = "workspace-path";
-    path.textContent = workspace.project_path;
-    info.appendChild(path);
-  }
+  const path = document.createElement("span");
+  path.className = "workspace-path";
+  info.appendChild(path);
 
   li.appendChild(info);
-  li.appendChild(renderActionButton(workspace));
+
+  const button = document.createElement("button");
+  button.className = "workspace-action-button";
+  li.appendChild(button);
+
+  updateWorkspaceRow(li, workspace);
   return li;
 }
 
-function renderActionButton(workspace) {
-  const button = document.createElement("button");
+// Refresh an existing row's badges/text/button in place — no child
+// elements are created, removed, or reordered here, so a row already
+// showing (e.g.) an open dropdown or mid-click button is left otherwise
+// undisturbed by an unrelated refresh.
+function updateWorkspaceRow(li, workspace) {
+  const name = li.querySelector(".workspace-name");
+  name.textContent = workspace.id;
+
+  const liveBadge = li.querySelector(".workspace-live-badge");
+  liveBadge.className = workspace.alive
+    ? "badge badge-alive workspace-live-badge"
+    : "badge badge-dead workspace-live-badge";
+  liveBadge.textContent = workspace.alive ? "live" : "not running";
+
+  const connBadge = li.querySelector(".workspace-connection-badge");
+  const connectionLabel = connectionBadges.get(workspace.id);
+  connBadge.hidden = !connectionLabel;
+  connBadge.textContent = connectionLabel ?? "";
+
+  const path = li.querySelector(".workspace-path");
+  path.hidden = !workspace.project_path;
+  path.textContent = workspace.project_path ?? "";
+
+  updateActionButton(li.querySelector(".workspace-action-button"), workspace);
+}
+
+function updateActionButton(button, workspace) {
   if (workspace.attached) {
     button.textContent = "Detach";
+    button.disabled = false;
     button.onclick = () => detach(workspace.id, button);
-    return button;
+    return;
   }
 
   const progress = attachProgress.get(workspace.id);
   button.textContent = progress ? `${progress}…` : "Attach";
   button.disabled = Boolean(progress);
   button.onclick = () => attach(workspace.id, button);
-  return button;
 }
 
 async function attach(workspaceId, button) {
@@ -136,7 +256,11 @@ async function attach(workspaceId, button) {
     statusEl.textContent = `Could not attach to '${workspaceId}': ${err}`;
   } finally {
     attachProgress.delete(workspaceId);
-    await refresh();
+    // A direct response to this user action, not the flapping-event case
+    // `scheduleRefresh`'s debounce exists for — refresh right away (still
+    // single-flight-guarded by `runRefresh` against any concurrently
+    // in-flight event-triggered refresh).
+    await runRefresh();
   }
 }
 
@@ -146,7 +270,7 @@ async function detach(workspaceId, button) {
     await invoke("detach", { workspaceId });
   } finally {
     connectionBadges.delete(workspaceId);
-    await refresh();
+    await runRefresh();
   }
 }
 
@@ -164,7 +288,7 @@ createWorkspaceButton.addEventListener("click", async () => {
     statusEl.textContent = `Could not create workspace '${workspaceId}': ${err}`;
   } finally {
     createWorkspaceButton.disabled = false;
-    await refresh();
+    await runRefresh();
   }
 });
 
@@ -172,9 +296,13 @@ quitButton.addEventListener("click", () => {
   invoke("quit");
 });
 
+// These two events are the flapping/bursty case `scheduleRefresh`'s debounce
+// exists for: a shaky connection or several concurrent attaches can each
+// fire several times a second, and without coalescing, each one used to
+// trigger its own overlapping `list_workspaces` invoke.
 listen("attach-progress", (event) => {
   attachProgress.set(event.payload.workspace_id, event.payload.stage);
-  refresh();
+  scheduleRefresh();
 });
 
 listen("connection-state-changed", (event) => {
@@ -186,8 +314,8 @@ listen("connection-state-changed", (event) => {
   } else {
     connectionBadges.set(workspaceId, "unreachable");
   }
-  refresh();
+  scheduleRefresh();
 });
 
-refresh();
-setInterval(refresh, 3000);
+runRefresh();
+setInterval(scheduleRefresh, 3000);
