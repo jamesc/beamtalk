@@ -249,6 +249,18 @@ misses, which should not happen for a live, instantiable class.
 Prefer this over `module_name/1` at any call site reachable from inside a
 block (ADR 0109) or otherwise not provably running on the class's own
 "direct caller" path.
+
+Caveat: callers that rely on `module_name/1`'s `gen_server:call` raising
+`noproc`/`timeout` to detect a dead class process should keep using
+`module_name/1`, or double-check their assumption. This function never
+raises on a dead process — `beamtalk_class_pids`' reverse index is
+deliberately kept for a process killed via an untrappable `kill` (it skips
+`terminate/2`, so the ETS rows this function reads survive "for auto-restart
+recovery"), so it will resolve a plausible module for that class name
+instead of signalling death. Ordinary graceful death (`gen_server:stop`,
+a trapped crash, supervisor shutdown) still runs `terminate/2` first, which
+clears both ETS rows, so this function correctly falls back to
+`module_name/1` and preserves the noproc/timeout contract in that case.
 """.
 -spec module_name_safe(pid()) -> atom().
 module_name_safe(ClassPid) when ClassPid =:= self() ->
