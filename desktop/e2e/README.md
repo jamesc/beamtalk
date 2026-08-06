@@ -49,9 +49,11 @@ verifiable without one, split across two test surfaces:
    (`BT_ATTACH_BIND_IP`/`BT_ATTACH_NODE_SUFFIX`/ephemeral `PORT`,
    `crates/beamtalk-desktop-broker/src/spawn.rs`'s `build_env`). `attach-
    cycle.sh` spawns the front with that exact contract (`PORT=<port>
-   BT_ATTACH_BIND_IP=127.0.0.1 BT_ATTACH_NODE_SUFFIX=<id>_<pid>
+   BT_ATTACH_BIND_IP=127.0.0.1 BT_ATTACH_NODE_SUFFIX=<id>
    RELEASE_DISTRIBUTION=none bin/server <id>` — copied from `spawn.rs`'s own
-   module doc, not re-derived), polls `/readiness` the way the broker does,
+   module doc, not re-derived; the OS pid is appended to the epmd sname
+   automatically downstream, not part of the suffix itself), polls
+   `/readiness` the way the broker does,
    then drives `eval-roundtrip.mjs` (raw Playwright, reusing the browser
    dependency `editors/liveview/assets/package.json` already declares) at the
    real URL to confirm an eval genuinely round-trips through the connected

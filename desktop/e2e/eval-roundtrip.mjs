@@ -66,9 +66,7 @@ async function main() {
     // real typing would, rather than poking `.value` on a plain textarea
     // (there isn't one — CmEditor is CodeMirror 6, not a <textarea>).
     await page.evaluate((source) => {
-      const el = document.querySelector(
-        "#workspace-editor-overlay .cm-content",
-      );
+      const el = document.querySelector("#workspace-editor-overlay");
       if (!el || !el.cmView) {
         throw new Error(
           "CmEditor (cmView) never mounted on #workspace-editor-overlay",

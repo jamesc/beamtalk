@@ -107,7 +107,7 @@ echo "==> workspace is live: $node_name"
 #      broker contract (spawn.rs's build_env: PORT, BT_ATTACH_BIND_IP,
 #      BT_ATTACH_NODE_SUFFIX, RELEASE_DISTRIBUTION=none). ───────────────────
 port=$(free_port)
-suffix="${WORKSPACE_ID}_$$"
+suffix="$WORKSPACE_ID"
 echo "==> spawning a front on port $port (suffix $suffix)"
 PORT="$port" BT_ATTACH_BIND_IP=127.0.0.1 BT_ATTACH_NODE_SUFFIX="$suffix" RELEASE_DISTRIBUTION=none \
   "$BT_ATTACH_LAUNCHER" "$WORKSPACE_ID" &
@@ -158,7 +158,7 @@ echo "==> stopping the workspace, then re-attaching to exercise the dead-workspa
 "$BEAMTALK_BIN" workspace stop "$WORKSPACE_ID"
 
 dead_port=$(free_port)
-dead_suffix="${WORKSPACE_ID}_dead_$$"
+dead_suffix="$WORKSPACE_ID"
 PORT="$dead_port" BT_ATTACH_BIND_IP=127.0.0.1 BT_ATTACH_NODE_SUFFIX="$dead_suffix" RELEASE_DISTRIBUTION=none \
   "$BT_ATTACH_LAUNCHER" "$WORKSPACE_ID" &
 DEAD_FRONT_PID=$!
