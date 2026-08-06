@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3051: exercises `^self <inheritedSelector>` directly — a self-send fed
+// straight to `^` as its own argument, rather than assigned to a local first
+// (`result := self foo. ^result`, the workaround BT-3047's own fixtures used
+// to sidestep this exact bug). `foo` is inherited from BT3047Ancestor and the
+// block executes inside another class's process (ADR 0109), so this also
+// exercises the NLR-throw codegen path, not just the plain-return path.
+
+BT3047Ancestor subclass: BT3051Parent
+
+  class returnFooThrough: aDriverClass over: aList :: List -> Symbol =>
+    aDriverClass run: [:x | ^self foo] over: aList
+    #wrong

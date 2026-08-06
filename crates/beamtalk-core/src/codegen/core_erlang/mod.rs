@@ -2851,12 +2851,29 @@ impl CoreErlangGenerator {
                         },
                         *span,
                     );
-                    let val_doc = self.generate_expression(value)?;
+                    // BT-3051: `value` may be a self-send that goes through the
+                    // open-scope pattern (`emit_class_var_result_unwrap`/
+                    // `finalize_dispatch_with_preamble`), returning a dangling
+                    // `let ... in ` chain via `last_open_scope_result` rather
+                    // than a closed expression — and critically, the chain also
+                    // rebinds the class-var snapshot (e.g. `ClassVars1`) that
+                    // `state` below must reference. Wrapping the chain into its
+                    // own closed sub-expression (as at other open-scope call
+                    // sites) would scope that rebind away before `state` could
+                    // see it — the class-var version `state` needs is exactly
+                    // the one this chain just produced. So instead of closing
+                    // the chain, thread it as a preamble ahead of the `throw`
+                    // call and reference `last_open_scope_result`'s variable
+                    // directly at the tuple's Value position, keeping both it
+                    // and the rebound class-var snapshot in scope for `state`.
+                    let (val_preamble, open_scope) = self.expression_doc_with_open_scope(value)?;
                     // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
                     // Actor methods use the current gen_server state; value type
                     // methods use the latest Self{N} snapshot so field mutations
                     // accumulated before the ^ are preserved.
-                    // BT-1202: Class methods use the current ClassVars snapshot.
+                    // BT-1202: Class methods use the current ClassVars snapshot
+                    // — computed after the value above so it reflects any
+                    // rebind that value's evaluation just performed.
                     let state = if self.in_class_method() {
                         self.current_class_var()
                     } else if self.context == CodeGenContext::Actor {
@@ -2864,15 +2881,23 @@ impl CoreErlangGenerator {
                     } else {
                         self.current_self_var()
                     };
-                    Ok(docvec![
+                    let (preamble, value_doc) = match open_scope {
+                        Some(result_var) => (Some(val_preamble), leaf::var(result_var)),
+                        None => (None, val_preamble),
+                    };
+                    let throw_doc = docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
                         leaf::var(nlr_token),
                         ", ",
-                        val_doc,
+                        value_doc,
                         ", ",
                         leaf::var(state),
                         "})"
-                    ])
+                    ];
+                    Ok(match preamble {
+                        Some(p) => docvec![p, throw_doc],
+                        None => throw_doc,
+                    })
                 } else {
                     // Return in Core Erlang is just the value
                     self.generate_expression(value)

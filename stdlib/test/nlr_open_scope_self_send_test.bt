@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3051: `^self <selector>` — a self-send fed directly as `^`'s argument —
+// produced invalid Core Erlang when the self-send went through the open-scope
+// codegen pattern (`emit_class_var_result_unwrap`/`finalize_dispatch_with_preamble`):
+// `Expression::Return`'s NLR-throw codegen inserted the dangling open let-chain
+// straight into the `{'$bt_nlr', Token, Value, State}` tuple literal instead of
+// closing it, and never cleared `last_open_scope_result`, so a stale result
+// variable leaked out and was appended a second time by the enclosing block's
+// codegen. See `crates/beamtalk-core/src/codegen/core_erlang/mod.rs`'s
+// `Expression::Return` arm.
+//
+// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,
+// fixtures/bt3051_parent.bt, fixtures/bt3051_simple_child.bt.
+
+TestCase subclass: NlrOpenScopeSelfSendTest
+
+  // The bug's actual trigger: `^self foo` as a block's last statement, where
+  // the block executes in a foreign class's process (ADR 0109) — so `^`
+  // compiles via the NLR throw/catch path, not the plain-return path.
+  testReturnOfInheritedSelfSendInsideForeignBlockCompilesAndRuns =>
+    self assert: (BT3051Parent returnFooThrough: BT3047DriverPlain over: #(1)) equals: #FromAncestor
+
+  // No block involved — pins that the plain-return path (unaffected by this
+  // fix) continues to work for the same `^self <inheritedSelector>` shape.
+  testReturnOfInheritedSelfSendWithNoBlockStillWorks =>
+    self assert: BT3051SimpleChild returnFoo equals: #FromAncestor
