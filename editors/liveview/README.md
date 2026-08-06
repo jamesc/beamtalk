@@ -77,6 +77,7 @@ There are three ways to run the IDE, by audience:
 | **From source** (`just web` / `just web-remote`) | contributors hacking on the IDE | this section |
 | **Release archive** (`beamtalk-ide-<version>-<platform>.tar.gz`) | users who want a self-contained build, no Elixir/Mix | [deployment guide](../../docs/deployment/remote-liveview-ide.md#installing-the-ide) |
 | **Docker** (`ghcr.io/jamesc/beamtalk-ide`) | remote / operator deployments (OIDC) | [deployment guide](../../docs/deployment/remote-liveview-ide.md#run-with-docker) |
+| **Desktop app** (`desktop/`, ADR 0097) | local users who want a native window per workspace, no URL/terminal to keep track of | [desktop app deployment guide](../../docs/deployment/desktop-attach-client.md) |
 
 The archive and image are produced by the IDE's own release lane
 (`.github/workflows/liveview-release.yml` and `liveview-docker.yml`); both run the

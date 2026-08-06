@@ -69,6 +69,21 @@ This is `surface-specific` UX routing — it adds no op vocabulary and
 changes no op output (the underlying capability is still the same `eval` /
 `browse_*` ops these panes already use).
 
+### Desktop attach client (native shell over the LiveView IDE, ADR 0097)
+
+The desktop app (`desktop/`, BT-2982 epic) is **not a new surface for this
+table** — it opens a native window pointed at the *same* `bt_attach` LiveView
+IDE page the "LiveView IDE" section above already covers (ADR 0097 Decision:
+"a window loads `http://localhost:<port>`"; "It does not introduce a new
+wire protocol"). Every row's LiveView-IDE column applies unchanged to a
+workspace window opened this way. What the desktop app adds sits entirely
+outside the op vocabulary this table tracks: a **picker** UI (discovery,
+attach/detach, first-run empty state) that talks to the local filesystem and
+spawns/kills OS processes, never the REPL-op wire protocol — see
+[`docs/deployment/desktop-attach-client.md`](../deployment/desktop-attach-client.md)
+for that surface. `check-surface-drift` has nothing to enforce here because
+no op, CLI subcommand, meta-command, or MCP/LSP binding changed.
+
 ## Core Operations
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |

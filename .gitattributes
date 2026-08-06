@@ -17,6 +17,7 @@
 # TypeScript/JavaScript source files
 *.ts text eol=lf
 *.js text eol=lf
+*.mjs text eol=lf
 
 # Shell scripts
 *.sh text eol=lf
