@@ -912,7 +912,7 @@ class_name_to_module(Class) when is_atom(Class) ->
                     %% BT-760: Fall back to class registry for package-qualified modules
                     case beamtalk_class_registry:whereis_class(Class) of
                         undefined -> StaticModule;
-                        ClassPid -> beamtalk_object_class:module_name(ClassPid)
+                        ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
                     end
             end
     end.

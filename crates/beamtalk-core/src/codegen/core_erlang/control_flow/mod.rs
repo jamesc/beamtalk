@@ -32,7 +32,9 @@ mod list_ops;
 mod while_loops;
 
 use super::document::{Document, join, leaf};
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
+};
 use crate::ast::Expression;
 use crate::docvec;
 use crate::source_analysis::Span;
@@ -3156,7 +3158,18 @@ impl CoreErlangGenerator {
 
                 // BT-1397: If the RHS produced an open scope (class method self-send),
                 // emit the open scope first, then bind the variable to the result.
-                if let Some(open_scope_result) = open_scope {
+                // BT-3053: a `NoValue` scope (no single value — e.g. the RHS is a
+                // mutation-threaded `do:` nested in a direct-params loop) substitutes
+                // do:'s own `nil` contract rather than referencing a variable that
+                // doesn't exist.
+                let open_scope_value_doc = match open_scope {
+                    Some(OpenScopeResult::Value(open_scope_result)) => {
+                        Some(leaf::var(open_scope_result))
+                    }
+                    Some(OpenScopeResult::NoValue) => Some(Document::Str("'nil'")),
+                    None => None,
+                };
+                if let Some(open_scope_value_doc) = open_scope_value_doc {
                     // BT-2703: see note below — rebind so later same-iteration reads
                     // observe the freshly-written value.
                     self.bind_var(&id.name, &val_var);
@@ -3166,7 +3179,7 @@ impl CoreErlangGenerator {
                             "let ",
                             leaf::var(val_var.clone()),
                             " = ",
-                            leaf::var(open_scope_result),
+                            open_scope_value_doc,
                             " in let ",
                             leaf::var(new_state),
                             " = call 'maps':'put'(",

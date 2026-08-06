@@ -44,7 +44,7 @@
 use super::super::document::Document;
 use super::super::document::leaf;
 use super::super::gen_server::BodyExprKind;
-use super::super::{CoreErlangGenerator, Result};
+use super::super::{CoreErlangGenerator, OpenScopeResult, Result};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -116,10 +116,11 @@ impl CoreErlangGenerator {
         // the value doc (the result variable). The preamble is emitted BEFORE
         // the case binding so ClassVarsN stays in scope inside the case.
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
-            (cond_chain, leaf::var(result_var))
-        } else {
-            (Document::Nil, cond_chain)
+        let (cond_preamble, cond_val_doc) = match cond_open_scope {
+            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
+            None => (Document::Nil, cond_chain),
         };
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
@@ -162,10 +163,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1942: Split open let-chain from class method self-send sub-expressions.
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
-            (cond_chain, leaf::var(result_var))
-        } else {
-            (Document::Nil, cond_chain)
+        let (cond_preamble, cond_val_doc) = match cond_open_scope {
+            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
+            None => (Document::Nil, cond_chain),
         };
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
@@ -207,10 +209,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1942: Split open let-chain from class method self-send sub-expressions.
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
-            (cond_chain, leaf::var(result_var))
-        } else {
-            (Document::Nil, cond_chain)
+        let (cond_preamble, cond_val_doc) = match cond_open_scope {
+            Some(OpenScopeResult::Value(result_var)) => (cond_chain, leaf::var(result_var)),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => (cond_chain, Document::Str("'nil'")),
+            None => (Document::Nil, cond_chain),
         };
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
@@ -265,10 +268,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1942: Split open let-chain from class method self-send sub-expressions.
         let (recv_chain, recv_open_scope) = self.expression_doc_with_open_scope(receiver)?;
-        let (recv_preamble, recv_val_doc) = if let Some(result_var) = recv_open_scope {
-            (recv_chain, leaf::var(result_var))
-        } else {
-            (Document::Nil, recv_chain)
+        let (recv_preamble, recv_val_doc) = match recv_open_scope {
+            Some(OpenScopeResult::Value(result_var)) => (recv_chain, leaf::var(result_var)),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => (recv_chain, Document::Str("'nil'")),
+            None => (Document::Nil, recv_chain),
         };
         let obj_var = self.fresh_temp_var("Obj");
         let outer_state = self.current_state_var();

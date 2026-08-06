@@ -13,7 +13,9 @@ use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
 use super::super::value_type_codegen::has_opaque_native_representation;
-use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::super::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
+};
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition,
@@ -3410,10 +3412,13 @@ impl CoreErlangGenerator {
         if has_class_vars {
             let result_var = self.fresh_temp_var("Ret");
             let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
-            let (preamble, value_doc) = if let Some(open_scope_result) = open_scope {
-                (value_str, leaf::var(open_scope_result))
-            } else {
-                (Document::Nil, value_str)
+            let (preamble, value_doc) = match open_scope {
+                Some(OpenScopeResult::Value(open_scope_result)) => {
+                    (value_str, leaf::var(open_scope_result))
+                }
+                // BT-3053: no single value — substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => (value_str, Document::Str("'nil'")),
+                None => (Document::Nil, value_str),
             };
             if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
@@ -3443,10 +3448,13 @@ impl CoreErlangGenerator {
         } else {
             // BT-1942: Same treatment for the no-class-vars path.
             let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
-            if let Some(open_scope_result) = open_scope {
-                Ok(docvec![value_str, leaf::var(open_scope_result)])
-            } else {
-                Ok(value_str)
+            match open_scope {
+                Some(OpenScopeResult::Value(open_scope_result)) => {
+                    Ok(docvec![value_str, leaf::var(open_scope_result)])
+                }
+                // BT-3053: no single value — substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => Ok(docvec![value_str, "'nil'"]),
+                None => Ok(value_str),
             }
         }
     }
@@ -3517,29 +3525,40 @@ impl CoreErlangGenerator {
         if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
             let final_cv = self.current_class_var();
-            if let Some(result_var) = open_scope {
-                Ok(docvec![
+            match open_scope {
+                Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
                     expr_str,
                     "{'class_var_result', ",
                     leaf::var(result_var),
                     ", ",
                     leaf::var(final_cv),
                     "}",
-                ])
-            } else {
-                Ok(docvec![
+                ]),
+                // BT-3053: `NoValue` isn't reachable via this branch's own guard
+                // (class-var assignments/self-sends never produce it) — falls
+                // through to the same `'nil'` value the closed (`None`) case
+                // already used before this type existed.
+                Some(OpenScopeResult::NoValue) | None => Ok(docvec![
                     expr_str,
                     "{'class_var_result', 'nil', ",
                     leaf::var(final_cv),
                     "}",
-                ])
+                ]),
             }
         } else {
             let result_var = self.fresh_temp_var("Ret");
             // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
             // produced by THIS expression, not by a previous field assignment.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            if let Some(open_scope_result) = open_scope {
+            let open_scope_value_doc = match open_scope {
+                Some(OpenScopeResult::Value(open_scope_result)) => {
+                    Some(leaf::var(open_scope_result))
+                }
+                // BT-3053: no single value — substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => Some(Document::Str("'nil'")),
+                None => None,
+            };
+            if let Some(open_scope_value_doc) = open_scope_value_doc {
                 if self.class_var_mutated() {
                     let final_cv = self.current_class_var();
                     Ok(docvec![
@@ -3547,7 +3566,7 @@ impl CoreErlangGenerator {
                         "let ",
                         leaf::var(result_var.clone()),
                         " = ",
-                        leaf::var(open_scope_result),
+                        open_scope_value_doc,
                         " in {'class_var_result', ",
                         leaf::var(result_var),
                         ", ",
@@ -3555,7 +3574,7 @@ impl CoreErlangGenerator {
                         "}",
                     ])
                 } else {
-                    Ok(docvec![expr_str, leaf::var(open_scope_result)])
+                    Ok(docvec![expr_str, open_scope_value_doc])
                 }
             } else if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
@@ -3591,18 +3610,26 @@ impl CoreErlangGenerator {
         if self.is_class_method_self_send(expr) {
             // BT-891: Class method self-send as last expression with no class vars.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            if let Some(result_var) = open_scope {
-                Ok(docvec![expr_str, leaf::var(result_var)])
-            } else {
-                Ok(expr_str)
+            match open_scope {
+                Some(OpenScopeResult::Value(result_var)) => {
+                    Ok(docvec![expr_str, leaf::var(result_var)])
+                }
+                // BT-3053: not reachable via this branch's own guard (a class
+                // method self-send never produces NoValue), handled the same
+                // way as the general case for consistency.
+                Some(OpenScopeResult::NoValue) => Ok(docvec![expr_str, "'nil'"]),
+                None => Ok(expr_str),
             }
         } else {
             // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            if let Some(open_scope_result) = open_scope {
-                Ok(docvec![expr_str, leaf::var(open_scope_result)])
-            } else {
-                Ok(expr_str)
+            match open_scope {
+                Some(OpenScopeResult::Value(open_scope_result)) => {
+                    Ok(docvec![expr_str, leaf::var(open_scope_result)])
+                }
+                // BT-3053: no single value — substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => Ok(docvec![expr_str, "'nil'"]),
+                None => Ok(expr_str),
             }
         }
     }
@@ -3648,17 +3675,23 @@ impl CoreErlangGenerator {
             // after it while keeping ClassVarsN in scope.
             let tmp_var = self.fresh_temp_var("seq");
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-            if let Some(result_var) = open_scope {
-                Ok(docvec![
+            match open_scope {
+                Some(OpenScopeResult::Value(result_var)) => Ok(docvec![
                     expr_str,
                     "let ",
                     leaf::var(tmp_var),
                     " = ",
                     leaf::var(result_var),
                     " in "
-                ])
-            } else {
-                Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "])
+                ]),
+                // BT-3053: no single value — substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => Ok(docvec![
+                    expr_str,
+                    "let ",
+                    leaf::var(tmp_var),
+                    " = 'nil' in "
+                ]),
+                None => Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "]),
             }
         }
     }
@@ -3695,15 +3728,27 @@ impl CoreErlangGenerator {
                 // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
                 let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
                 self.bind_var(var_name, &core_var);
-                if let Some(open_scope_result) = open_scope {
-                    return Ok(docvec![
-                        val_doc,
-                        "let ",
-                        leaf::var(core_var),
-                        " = ",
-                        leaf::var(open_scope_result),
-                        " in "
-                    ]);
+                match open_scope {
+                    Some(OpenScopeResult::Value(open_scope_result)) => {
+                        return Ok(docvec![
+                            val_doc,
+                            "let ",
+                            leaf::var(core_var),
+                            " = ",
+                            leaf::var(open_scope_result),
+                            " in "
+                        ]);
+                    }
+                    // BT-3053: no single value — substitute do:'s own `nil` contract.
+                    Some(OpenScopeResult::NoValue) => {
+                        return Ok(docvec![
+                            val_doc,
+                            "let ",
+                            leaf::var(core_var),
+                            " = 'nil' in "
+                        ]);
+                    }
+                    None => {}
                 }
                 return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in "]);
             }

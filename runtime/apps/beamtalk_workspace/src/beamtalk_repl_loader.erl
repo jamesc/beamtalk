@@ -2924,7 +2924,7 @@ class_module(ClassNameBin) ->
         {ok, ClassName} ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 Pid when is_pid(Pid) ->
-                    {ok, beamtalk_object_class:module_name(Pid)};
+                    {ok, beamtalk_object_class:module_name_safe(Pid)};
                 _ ->
                     error
             end;
@@ -3134,7 +3134,7 @@ class_source_file(ClassNameBin) ->
         {ok, ClassName} ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 Pid when is_pid(Pid) ->
-                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    ModuleName = beamtalk_object_class:module_name_safe(Pid),
                     beamtalk_reflection:source_file_from_module(ModuleName);
                 _ ->
                     nil

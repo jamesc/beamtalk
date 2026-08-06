@@ -12,7 +12,7 @@
 use super::super::document::Document;
 use super::super::document::leaf;
 use super::super::intrinsics::validate_block_arity_exact;
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -97,7 +97,11 @@ impl CoreErlangGenerator {
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
             let result_doc = if self.in_direct_params_loop {
-                self.last_open_scope_result = Some("_".to_string());
+                // BT-1329/BT-3053: see the identical branch in
+                // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
+                // dictionary iteration: multiple rebound accumulator vars, no single
+                // "result" value, so signal open-with-no-value rather than naming one.
+                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -301,7 +305,11 @@ impl CoreErlangGenerator {
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
             let result_doc = if self.in_direct_params_loop {
-                self.last_open_scope_result = Some("_".to_string());
+                // BT-1329/BT-3053: see the identical branch in
+                // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
+                // dictionary iteration: multiple rebound accumulator vars, no single
+                // "result" value, so signal open-with-no-value rather than naming one.
+                self.last_open_scope_result = Some(OpenScopeResult::NoValue);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -485,6 +493,47 @@ mod tests {
         assert_eq!(
             put_count, 1,
             "dict do: tuple-acc path should have exactly 1 maps:put (repack after loop). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
+        // BT-3053: same shape as
+        // control_flow::list_ops::tests::test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return,
+        // but for the dictionary `do:` producer (dict_ops.rs:104) rather than
+        // list `do:` (basic_ops.rs:104) — both hit the identical
+        // `OpenScopeResult::NoValue` branch, but only the list-ops path had a
+        // regression test pinning the fix (flagged by the Claude review bot
+        // on the original PR). `^` (Expression::Return, via the NLR-throw
+        // path) fed the direct result of a mutation-threaded dictionary
+        // `do:` nested inside a direct-params loop must not reference the
+        // old bare `"_"` sentinel as if it were a bound variable.
+        let src = concat!(
+            "Actor subclass: Ctr3053Dict\n",
+            "  state: x = 0\n\n",
+            "  run: dict =>\n",
+            "    count := 0\n",
+            "    seen := 0\n",
+            "    1 to: 3 do: [:i |\n",
+            "      count := count + 1\n",
+            "      ^dict do: [:v | seen := seen + v]\n",
+            "    ]\n",
+            "    count\n",
+        );
+        let code = codegen(src);
+        let nlr_throw_idx = code
+            .find("call 'erlang':'throw'({'$bt_nlr'")
+            .expect("expected an NLR throw call in generated code");
+        let nlr_throw_window = &code[nlr_throw_idx..(nlr_throw_idx + 120).min(code.len())];
+        assert!(
+            !nlr_throw_window.contains(", _,"),
+            "NLR throw tuple must not reference a bare unbound `_` as the return \
+             value — the NoValue case must substitute 'nil'. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
+        );
+        assert!(
+            nlr_throw_window.contains("'nil'"),
+            "NLR throw tuple should substitute the literal 'nil' atom for a \
+             NoValue open scope. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
         );
     }
 

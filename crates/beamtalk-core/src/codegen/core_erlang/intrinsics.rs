@@ -23,7 +23,9 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::document::{Document, join, leaf};
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
+};
 use crate::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
@@ -1042,7 +1044,7 @@ impl CoreErlangGenerator {
                 case_doc,
                 " in ",
             ]);
-            self.last_open_scope_result = Some(result_var);
+            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
         } else {
             parts.push(case_doc);
         }
@@ -1503,7 +1505,7 @@ impl CoreErlangGenerator {
                 case_doc,
                 " in ",
             ]);
-            self.last_open_scope_result = Some(result_var);
+            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
         } else {
             parts.push(case_doc);
         }

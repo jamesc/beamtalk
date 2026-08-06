@@ -629,7 +629,7 @@ discover_methods_via_registry(ClassName) ->
             beamtalk_error:raise(Error2);
         ClassPid ->
             Methods = gen_server:call(ClassPid, methods),
-            Module = beamtalk_object_class:module_name(ClassPid),
+            Module = beamtalk_object_class:module_name_safe(ClassPid),
             FlatMethods = maps:from_keys(Methods, true),
             TestMethods = [
                 M
@@ -657,7 +657,7 @@ class_source_matches(ClassName, FilePath) ->
             false;
         ClassPid ->
             try
-                ModuleName = beamtalk_object_class:module_name(ClassPid),
+                ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
                 case beamtalk_reflection:source_file_from_module(ModuleName) of
                     nil -> false;
                     StoredPath -> path_suffix_match(StoredPath, FilePath)

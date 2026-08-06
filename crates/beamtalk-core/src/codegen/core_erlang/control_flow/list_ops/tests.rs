@@ -2036,8 +2036,9 @@ fn test_do_nested_in_direct_params_loop() {
     // The outer loop sets in_direct_params_loop=true, which causes
     // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
     // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
-    // let-chain is emitted, and last_open_scope_result is set to "_" so the outer
-    // loop can chain the next expression directly.
+    // let-chain is emitted, and last_open_scope_result is set to
+    // Some(OpenScopeResult::NoValue) (BT-3053) so the outer loop can chain the
+    // next expression directly.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2067,6 +2068,62 @@ fn test_do_nested_in_direct_params_loop() {
     assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_do_nested_in_direct_params_loop_fed_directly_to_nlr_return() {
+    // BT-3053: `^` (Expression::Return, compiled via the NLR-throw path since
+    // it's inside a block) fed the *direct result* of a mutation-threaded
+    // `do:` nested inside a direct-params loop — the exact shape that used to
+    // reference the bare `"_"` sentinel as if it were a bound variable
+    // (`last_open_scope_result` was `Option<String>` before this fix, and
+    // `"_"` did double duty as both a real name and a "still open, no value"
+    // flag). Before the fix this produced `call 'erlang':'throw'({'$bt_nlr',
+    // Token, _, State})` — a reference to an unbound `_`. After the fix, the
+    // NoValue case substitutes `do:`'s own `nil` return-value contract.
+    //
+    // Reuses the outer-loop/nested-do: setup from
+    // `test_do_nested_in_direct_params_loop` above, with `^` inside the
+    // outer to:do:'s own block wrapping the nested do:'s result directly —
+    // any `^` inside a block (not just the ADR 0109 cross-process case)
+    // goes through the NLR-throw codegen path (see BT-3051's fix in
+    // `Expression::Return`) rather than a plain return.
+    let src = concat!(
+        "Actor subclass: Ctr3053\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      ^items do: [:item | seen := seen + 1]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    // Isolate the NLR throw tuple itself — `", _, "` alone is too broad (it
+    // also matches unrelated wildcard patterns elsewhere in the generated
+    // module boilerplate).
+    let nlr_throw_idx = code
+        .find("call 'erlang':'throw'({'$bt_nlr'")
+        .expect("expected an NLR throw call in generated code");
+    // The throw call's argument list (`{'$bt_nlr', Token, Value, State})`) is
+    // short — a window comfortably covers it without picking up unrelated
+    // `", _, "` occurrences elsewhere in the module's boilerplate.
+    let nlr_throw_window = &code[nlr_throw_idx..(nlr_throw_idx + 120).min(code.len())];
+    // The critical assertion: no reference to a bare, unbound `_` variable as
+    // the NLR throw tuple's Value position (element 3) — the actual bug this
+    // issue fixes. A real bound variable name never renders as a lone `_`.
+    assert!(
+        !nlr_throw_window.contains(", _,"),
+        "NLR throw tuple must not reference a bare unbound `_` as the return \
+         value — the NoValue case must substitute 'nil'. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
+    );
+    assert!(
+        nlr_throw_window.contains("'nil'"),
+        "NLR throw tuple should substitute the literal 'nil' atom for a \
+         NoValue open scope. Got window:\n{nlr_throw_window}\n\nFull:\n{code}"
     );
 }
 

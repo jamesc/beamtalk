@@ -38,7 +38,7 @@
 
 use super::document::Document;
 use super::document::leaf;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
@@ -180,16 +180,26 @@ impl CoreErlangGenerator {
             }
             let saved_cv = self.class_var_version();
             let (doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
-            if let Some(result_var) = open_scope {
-                // Close the open scope inline: the let-chain + result_var forms
-                // a valid closed expression (e.g., `let X = ... in X`).
-                // Roll back class var version since the ClassVarsN binding is
-                // scoped inside the closed expression and not visible to
-                // subsequent code.
-                self.set_class_var_version(saved_cv);
-                parts.push(docvec![doc, leaf::var(result_var)]);
-            } else {
-                parts.push(doc);
+            match open_scope {
+                Some(OpenScopeResult::Value(result_var)) => {
+                    // Close the open scope inline: the let-chain + result_var forms
+                    // a valid closed expression (e.g., `let X = ... in X`).
+                    // Roll back class var version since the ClassVarsN binding is
+                    // scoped inside the closed expression and not visible to
+                    // subsequent code.
+                    self.set_class_var_version(saved_cv);
+                    parts.push(docvec![doc, leaf::var(result_var)]);
+                }
+                // BT-3053: e.g. a message argument that's itself `items do:
+                // [...]` nested in a direct-params loop — no single value,
+                // substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => {
+                    self.set_class_var_version(saved_cv);
+                    parts.push(docvec![doc, "'nil'"]);
+                }
+                None => {
+                    parts.push(doc);
+                }
             }
         }
         Ok(Document::Vec(parts))
@@ -307,24 +317,37 @@ impl CoreErlangGenerator {
         for arg in arguments {
             let (arg_doc, open_scope) = self.expression_doc_with_open_scope(arg)?;
             let arg_var = self.fresh_temp_var(prefix);
-            if let Some(result_var) = open_scope {
-                any_open_scope = true;
-                preamble_parts.push(arg_doc);
-                preamble_parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    leaf::var(result_var),
-                    " in ",
-                ]);
-            } else {
-                preamble_parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    arg_doc,
-                    " in ",
-                ]);
+            match open_scope {
+                Some(OpenScopeResult::Value(result_var)) => {
+                    any_open_scope = true;
+                    preamble_parts.push(arg_doc);
+                    preamble_parts.push(docvec![
+                        "let ",
+                        leaf::var(arg_var.clone()),
+                        " = ",
+                        leaf::var(result_var),
+                        " in ",
+                    ]);
+                }
+                // BT-3053: no single value — substitute do:'s own `nil` contract.
+                Some(OpenScopeResult::NoValue) => {
+                    any_open_scope = true;
+                    preamble_parts.push(arg_doc);
+                    preamble_parts.push(docvec![
+                        "let ",
+                        leaf::var(arg_var.clone()),
+                        " = 'nil' in ",
+                    ]);
+                }
+                None => {
+                    preamble_parts.push(docvec![
+                        "let ",
+                        leaf::var(arg_var.clone()),
+                        " = ",
+                        arg_doc,
+                        " in ",
+                    ]);
+                }
             }
             arg_refs.push(leaf::var(arg_var));
         }
@@ -364,10 +387,11 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
         let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
-        if let Some(result_var) = open_scope {
-            Ok((expr_doc, leaf::var(result_var)))
-        } else {
-            Ok((Document::Nil, expr_doc))
+        match open_scope {
+            Some(OpenScopeResult::Value(result_var)) => Ok((expr_doc, leaf::var(result_var))),
+            // BT-3053: no single value — substitute do:'s own `nil` contract.
+            Some(OpenScopeResult::NoValue) => Ok((expr_doc, Document::Str("'nil'"))),
+            None => Ok((Document::Nil, expr_doc)),
         }
     }
 
@@ -402,7 +426,7 @@ impl CoreErlangGenerator {
             call_doc,
             " in ",
         ];
-        self.last_open_scope_result = Some(result_var);
+        self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
         doc
     }
 
@@ -478,7 +502,7 @@ impl CoreErlangGenerator {
             leaf::var(plain_res),
             " end in ",
         ];
-        self.last_open_scope_result = Some(result);
+        self.last_open_scope_result = Some(OpenScopeResult::Value(result));
         doc
     }
 
@@ -2761,7 +2785,7 @@ impl CoreErlangGenerator {
                 case_doc,
                 " in ",
             ];
-            self.last_open_scope_result = Some(result_var);
+            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
             Ok(doc)
         } else {
             Ok(docvec![lookup_binding, arg_preamble, case_doc])
@@ -2841,7 +2865,7 @@ impl CoreErlangGenerator {
                 case_doc,
                 " in ",
             ];
-            self.last_open_scope_result = Some(result_var);
+            self.last_open_scope_result = Some(OpenScopeResult::Value(result_var));
             Ok(doc)
         } else {
             Ok(docvec![lookup_binding, arg_preamble, case_doc])
