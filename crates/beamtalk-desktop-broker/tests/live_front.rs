@@ -46,18 +46,40 @@ use std::time::{Duration, Instant};
 
 use beamtalk_desktop_broker::readiness::{self, ProbeTimeouts, ReadinessState};
 use beamtalk_desktop_broker::sname::predict_short_name;
-use beamtalk_desktop_broker::spawn::{self, DEFAULT_BIND_FAILURE_GRACE, SpawnConfig};
+use beamtalk_desktop_broker::spawn::{self, DEFAULT_BIND_FAILURE_GRACE, SpawnConfig, SpawnedFront};
 use beamtalk_desktop_broker::{SpawnAttemptConfig, spawn_front_with_port_retry};
+
+/// A wrapped front value that can be killed and reaped on drop —
+/// implemented for both a plain [`Child`] (the bad-cookie test below spawns
+/// one directly, bypassing `spawn::spawn_front`) and [`SpawnedFront`] (which
+/// additionally drops the Windows job handle via its `Deref`/`DerefMut` to
+/// `Child`).
+trait Killable {
+    fn kill_and_wait(&mut self);
+}
+
+impl Killable for Child {
+    fn kill_and_wait(&mut self) {
+        let _ = self.kill();
+        let _ = self.wait();
+    }
+}
+
+impl Killable for SpawnedFront {
+    fn kill_and_wait(&mut self) {
+        let _ = self.kill();
+        let _ = self.wait();
+    }
+}
 
 /// Kills the wrapped front on drop, including on a mid-test panic (an
 /// `assert!` failure otherwise skips any explicit `child.kill()` below it,
 /// leaking a live BEAM process — and its held port — past the failing test).
-struct KillOnDrop(Child);
+struct KillOnDrop<T: Killable>(T);
 
-impl Drop for KillOnDrop {
+impl<T: Killable> Drop for KillOnDrop<T> {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill_and_wait();
     }
 }
 

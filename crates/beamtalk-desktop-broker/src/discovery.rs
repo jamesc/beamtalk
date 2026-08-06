@@ -91,6 +91,27 @@ fn parse_metadata(dir_name: &str, content: &str) -> Result<WorkspaceSummary> {
     })
 }
 
+/// Read the Erlang distribution node name for `workspace_id` directly from
+/// `metadata.json`, without the epmd liveness check [`discover_workspaces`]
+/// does for the whole picker list.
+///
+/// The Windows spawn path (BT-2988) needs this standalone: there is no
+/// `bin/server` shell script on Windows to do the equivalent `sed`
+/// extraction (ADR 0097 Implementation §5b), so the broker resolves
+/// `BT_WORKSPACE_NODE` itself before invoking `bin\bt_attach.bat` directly.
+/// Falls back to [`default_node_name`], same as [`discover_workspaces`], when
+/// `metadata.json` doesn't yet carry a `node_name` field.
+///
+/// # Errors
+///
+/// Returns an error if `metadata.json` doesn't exist or can't be parsed.
+pub fn read_node_name(workspace_id: &str) -> Result<String> {
+    let meta_path = beamtalk_workspace::workspace_dir(workspace_id)?.join("metadata.json");
+    let content = std::fs::read_to_string(&meta_path)?;
+    let summary = parse_metadata(workspace_id, &content)?;
+    Ok(summary.node_name)
+}
+
 /// Enumerate `~/.beamtalk/workspaces/*/metadata.json`, parse each with a real
 /// JSON parser, and check liveness via a single epmd `NAMES` query shared
 /// across every workspace found (one round-trip instead of one per
@@ -201,6 +222,46 @@ mod tests {
     #[test]
     fn parse_metadata_rejects_invalid_json() {
         assert!(parse_metadata("abc123", "not json").is_err());
+    }
+
+    /// `read_node_name` is what the Windows spawn path (BT-2988) uses in
+    /// place of `bin/server`'s shell-level extraction — a real, on-disk
+    /// workspace directory (same pattern the rest of this crate's tests use;
+    /// there's no HOME-override hook in `beamtalk_workspace`).
+    #[test]
+    fn read_node_name_reads_explicit_node_name_from_metadata() {
+        let id = format!("read_node_name_explicit_{}", std::process::id());
+        let dir = beamtalk_workspace::workspace_dir(&id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("metadata.json"),
+            r#"{"workspace_id":"x","node_name":"bt_attach_x_123@localhost"}"#,
+        )
+        .unwrap();
+
+        let result = read_node_name(&id).unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(result, "bt_attach_x_123@localhost");
+    }
+
+    #[test]
+    fn read_node_name_falls_back_to_default_when_metadata_has_no_node_name() {
+        let id = format!("read_node_name_fallback_{}", std::process::id());
+        let dir = beamtalk_workspace::workspace_dir(&id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("metadata.json"), r#"{"created_at":1}"#).unwrap();
+
+        let result = read_node_name(&id).unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(result, default_node_name(&id));
+    }
+
+    #[test]
+    fn read_node_name_errors_when_metadata_missing() {
+        let id = format!("read_node_name_missing_{}", std::process::id());
+        assert!(read_node_name(&id).is_err());
     }
 
     #[test]

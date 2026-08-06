@@ -33,10 +33,19 @@
 //! first `/readiness` call) — e.g. `Child::id()` 26765 against a workspace
 //! suffix `bt3004test` produced the exact epmd registration
 //! `bt_attach_bt3004test_26765`. The launcher chain holds: no fork breaks it
-//! on this platform. The Windows launch path (BT-2988, `bin/bt_attach`
-//! invoked directly, no `bin/server` wrapper) has one fewer hop and was not
-//! itself exercised, but is at least as likely to hold given it removes a
-//! link from the same unbroken-`exec` chain this validated.
+//! on this platform.
+//!
+//! **The Windows launch path is actually worse here, not better — an earlier
+//! draft of this comment wrongly claimed the opposite** (BT-2988,
+//! adversarial-review correction): Windows cannot `CreateProcessW` a `.bat`
+//! directly, so `bin\bt_attach.bat` runs via `cmd.exe`, which is what
+//! `std::process::Child::id()` actually reports — not `erl.exe`'s pid, and
+//! not `bin/server`'s single extra hop either. `predict_node_name` is
+//! therefore expected to predict the *wrong* name on Windows, not just an
+//! unverified one; nothing in this crate currently corrects for that (it
+//! would need an epmd query instead of pid prediction there). See
+//! `crate::spawn`'s and `crate::winjob`'s module docs for how orphan-killing
+//! is handled despite this (a job object, not `Child::kill`/pid tracking).
 //!
 //! **DDD Context:** Desktop Shell
 

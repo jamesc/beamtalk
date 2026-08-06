@@ -3,7 +3,7 @@
 
 //! Spawn a per-workspace front (ADR 0097 Decision / Broker §2).
 //!
-//! Concretely: `PORT=<free-port> BT_ATTACH_BIND_IP=127.0.0.1
+//! Concretely, on Unix: `PORT=<free-port> BT_ATTACH_BIND_IP=127.0.0.1
 //! BT_ATTACH_NODE_SUFFIX=<id> RELEASE_DISTRIBUTION=none bin/server <id>`.
 //!
 //! `bin/server <id>` (`editors/liveview/rel/overlays/bin/server`) already
@@ -12,11 +12,12 @@
 //! and generates its own ephemeral `SECRET_KEY_BASE` when given a workspace
 //! id — the ADR's "Local-only posture" section calls that ephemeral-per-boot
 //! key *deliberate* (no durable session worth preserving on the
-//! unauthenticated localhost lane), so this broker does not set it itself.
-//! The broker's job is exactly the four env vars above, plus (this module's
-//! other duty) refusing to spawn at all when OIDC is configured.
+//! unauthenticated localhost lane), so this broker does not set it itself on
+//! Unix. The broker's job there is exactly the four env vars above, plus
+//! (this module's other duty) refusing to spawn at all when OIDC is
+//! configured.
 //!
-//! **Deliberately not setting a cookie env var here**, even though the
+//! **Deliberately not setting a cookie env var on Unix**, even though the
 //! workspace's cookie is what makes the attach secure: the spike found that
 //! `bin/server <id>` **unconditionally** re-resolves `BT_WORKSPACE_COOKIE`
 //! from the on-disk `cookie` file whenever given the workspace-id positional
@@ -27,15 +28,60 @@
 //! shape this module does not need, since the happy path always has a real
 //! on-disk cookie to resolve.)
 //!
-//! `RELEASE_DISTRIBUTION=none` is a hard requirement, not an optimization —
-//! the spike (`docs/research/desktop-shell-spike.md`, criterion (a)) found
-//! that `mix release`'s generated launcher boots the VM **already**
-//! distributed under `-sname bt_attach` (`RELEASE_NODE` defaults to
-//! `RELEASE_NAME`) before any Elixir code runs, which pre-empts
+//! **Windows has no `bin/server`** (BT-2988) — `bin/server` is a POSIX `sh`
+//! script with no counterpart in a `mix release` bundle. There, this module
+//! itself does what `bin/server` does on Unix before invoking the release's
+//! own Windows entry point (`bin\bt_attach.bat start`) directly:
+//! - resolves `BT_WORKSPACE_NODE` from `metadata.json`
+//!   ([`crate::discovery::read_node_name`], the same real-JSON-parser path
+//!   [`crate::discovery::discover_workspaces`] uses — not a shell `sed`)
+//! - resolves `BT_WORKSPACE_COOKIE` from the sibling `cookie` file
+//!   ([`beamtalk_workspace::read_cookie_file`])
+//! - generates an ephemeral per-boot `SECRET_KEY_BASE` itself (same
+//!   "deliberately ephemeral" rationale as `bin/server`'s — ADR 0097
+//!   "Local-only posture")
+//! - sets `PHX_SERVER=true` (what `bin/server` sets right before its own
+//!   `exec bin/bt_attach start`)
+//!
+//! `RELEASE_DISTRIBUTION=none` is a hard requirement on every platform, not
+//! an optimization — the spike (`docs/research/desktop-shell-spike.md`,
+//! criterion (a)) found that `mix release`'s generated launcher boots the VM
+//! **already** distributed under `-sname bt_attach` (`RELEASE_NODE` defaults
+//! to `RELEASE_NAME`) before any Elixir code runs, which pre-empts
 //! `ensure_distributed/0`'s `BT_ATTACH_NODE_SUFFIX` seeding entirely and
 //! makes every spawned instance collide on the identical epmd registration.
 //! Booting non-distributed hands control back to the front's own lazy,
 //! correctly-seeded `ensure_distributed/0` on the first `/readiness` call.
+//!
+//! **Windows gap, documented rather than silently worked around (BT-2988
+//! acceptance criteria):** the epmd/OS-process story is not fully verified on
+//! Windows. `detach` (below) uses `CREATE_NEW_PROCESS_GROUP` as the Windows
+//! analogue of Unix's `process_group(0)` — the standard way to stop a Ctrl-C
+//! sent to the broker's own console from also reaching the front.
+//!
+//! **The process-tree question this paragraph used to leave open is now
+//! closed by construction, not by observation** (adversarial-review
+//! follow-up): `bin\bt_attach.bat` cannot be a direct `CreateProcessW` child
+//! at all — Windows can only run a `.bat` via `cmd.exe`, so whatever
+//! `Child::id()`/`Child::kill()` refer to here is `cmd.exe` (or an
+//! equivalent wrapper), never `erl.exe` itself, no matter what a real build
+//! turns out to do. Relying on `Child::kill()` alone would therefore
+//! *always* orphan `erl.exe`, not just in some unverified branch — so
+//! [`spawn_front`] additionally assigns the spawned process to a
+//! [`crate::winjob::JobHandle`] (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`),
+//! which kills the *entire* process tree — `cmd.exe`, `erl.exe`, everything
+//! spawned after assignment — together, the moment the job handle closes
+//! (explicitly, or automatically when this broker process itself dies, no
+//! cooperation required). See [`crate::winjob`]'s module doc for the
+//! mechanism, its one residual (assign-after-spawn) race, and why that
+//! race can't be fully closed without bypassing `std::process::Command`.
+//! This has not been exercised against a real Windows boot — no Windows
+//! sandbox was available to develop or test it against — but unlike the
+//! rest of this paragraph's original framing, it is not a *guess* at what
+//! Windows does; the job-object mechanism works the same way regardless of
+//! how many hops sit between `cmd.exe` and `erl.exe`. [`crate::reap`]'s
+//! PID-file sweep remains the fallback net for any process this mechanism
+//! still misses (e.g. a crash in the narrow assign-after-spawn window).
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -50,15 +96,22 @@ use crate::sname::attach_node_suffix;
 /// Everything needed to spawn one front.
 #[derive(Debug, Clone)]
 pub struct SpawnConfig {
-    /// Path to the launcher executable — `bin/server <id>` on Unix (see ADR
-    /// 0097 Implementation §5b: on Windows there is no `sh` counterpart, so
-    /// the eventual Windows broker (BT-2988) must invoke `bin/bt_attach`
-    /// itself and set env directly; that platform split is packaging's call,
-    /// not this crate's — callers resolve the right launcher path for their
-    /// platform and bundle layout and pass it in here).
+    /// Path to the launcher executable — `bin/server` on Unix, invoked as
+    /// `bin/server <id>` (it re-resolves everything else itself). On Windows
+    /// (BT-2988, ADR 0097 Implementation §5b), this is instead the release's
+    /// own `bin\bt_attach.bat`, invoked as `bin\bt_attach.bat start` with no
+    /// positional workspace-id arg — [`spawn_front`] resolves and sets every
+    /// env var `bin/server` would have on Unix before invoking it. Either
+    /// way, callers resolve the right launcher path for their platform and
+    /// bundle layout and pass it in here; this module only cares that it's
+    /// the correct entry point for the current `cfg(unix)`/`cfg(windows)`.
     pub launcher: PathBuf,
-    /// Workspace id to attach to (positional arg to `bin/server`, and the
-    /// `BT_ATTACH_NODE_SUFFIX` seed).
+    /// Workspace id to attach to: a positional arg to `bin/server` on Unix
+    /// (which does its own env resolution from it), or on Windows the key
+    /// this module resolves `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE` by
+    /// (not passed as an argv there — `bin\bt_attach.bat` takes the release's
+    /// own `start` command instead). Either way it also seeds
+    /// `BT_ATTACH_NODE_SUFFIX`.
     pub workspace_id: String,
     /// Port the front should bind Phoenix to.
     pub port: u16,
@@ -85,9 +138,12 @@ impl SpawnConfig {
     }
 }
 
-/// The env vars this broker sets on the spawned front, in a stable order
+/// The env vars this broker sets on **every** platform, in a stable order
 /// (for deterministic logging/tests — `Command::envs` doesn't care about
-/// order).
+/// order). On Windows, [`build_launch_command`] sets four more
+/// (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`, `SECRET_KEY_BASE`,
+/// `PHX_SERVER`) that don't go through this function — it does not
+/// report the full env set there, only the cross-platform baseline.
 #[must_use]
 pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
     vec![
@@ -101,6 +157,34 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
     ]
 }
 
+/// A spawned front process. On Unix this is exactly [`Child`]; on Windows it
+/// additionally carries the [`crate::winjob::JobHandle`] tying the front's
+/// entire process tree (not just the immediate `cmd.exe`/wrapper child) to
+/// this value's lifetime — see [`crate::winjob`]'s module doc and this
+/// module's own doc comment for why that's necessary there. `Deref`/
+/// `DerefMut` to [`Child`] so callers use it exactly like a `Child`
+/// (`.id()`, `.kill()`, `.wait()`, `.try_wait()`) on every platform.
+#[derive(Debug)]
+pub struct SpawnedFront {
+    child: Child,
+    #[cfg(windows)]
+    #[allow(dead_code)] // held for its Drop side effect only, never read
+    job: crate::winjob::JobHandle,
+}
+
+impl std::ops::Deref for SpawnedFront {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for SpawnedFront {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
+
 /// Spawn the front described by `config`.
 ///
 /// Refuses with [`BrokerError::OidcConfigured`] if OIDC config is present
@@ -111,18 +195,29 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
 /// `~/.beamtalk/workspaces/<id>/metadata.json` doesn't exist.
 ///
 /// The child is spawned detached from this process's process group (Unix:
-/// `process_group(0)`; Windows: `CREATE_NEW_PROCESS_GROUP`) so a signal sent
-/// to the broker's own foreground group (e.g. Ctrl-C) does not also kill the
-/// front — orphan-reaping ([`crate::reap`]) is the intended mechanism for
-/// cleaning up fronts left behind by a dead broker, not accidental group
-/// signal propagation.
+/// `process_group(0)`; Windows: `CREATE_NEW_PROCESS_GROUP` + `CREATE_NO_WINDOW`)
+/// so a signal sent to the broker's own foreground group (e.g. Ctrl-C) does
+/// not also kill the front, and (Windows only) so the front's console-
+/// subsystem wrapper process doesn't pop a visible window of its own —
+/// orphan-reaping ([`crate::reap`]) is the intended mechanism for cleaning up
+/// fronts left behind by a dead broker, not accidental group signal
+/// propagation or a user closing a stray console window.
+///
+/// On Windows, additionally assigns the spawned process to a fresh
+/// [`crate::winjob::JobHandle`] before returning — see this module's doc
+/// comment for why plain `Child::kill()` cannot reach `erl.exe` there.
 ///
 /// # Errors
 ///
 /// Returns [`BrokerError::OidcConfigured`] or [`BrokerError::UnknownWorkspace`]
 /// per the refusal conditions above, or [`BrokerError::Io`] if the launcher
-/// process fails to spawn.
-pub fn spawn_front(config: &SpawnConfig) -> Result<Child> {
+/// process fails to spawn or (Windows only) if assigning it to the job
+/// object fails. On Windows, [`build_launch_command`]'s own workspace lookups
+/// can additionally propagate [`BrokerError::MissingCookie`] (no `cookie`
+/// file), [`BrokerError::Json`] (malformed `metadata.json`), or
+/// [`BrokerError::Workspace`] (a `beamtalk-workspace` failure) before any
+/// process is spawned.
+pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     if let Some(source) = oidc_configured(&config.ide_toml_path) {
         return Err(BrokerError::OidcConfigured(source.to_string()));
     }
@@ -134,13 +229,125 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<Child> {
         return Err(BrokerError::UnknownWorkspace(config.workspace_id.clone()));
     }
 
+    let mut cmd = build_launch_command(config)?;
+    detach(&mut cmd);
+
+    // Created before `cmd.spawn()` (not after) so there is no
+    // JobHandle-creation-fails-after-spawn case to unwind: if this errors,
+    // nothing has been spawned yet and the `?` below can propagate directly.
+    #[cfg(windows)]
+    let job = crate::winjob::JobHandle::new()?;
+
+    // `mut` is only needed on the `#[cfg(windows)]` path below, which kills
+    // `child` itself if job-object assignment fails; the non-Windows arm
+    // never mutates it.
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut child = cmd.spawn()?;
+
+    #[cfg(windows)]
+    {
+        // Best-effort-but-checked: assign right away (minimizes, per
+        // `crate::winjob`'s doc, the residual pre-assignment race) and
+        // surface a failure rather than silently returning a front this
+        // job object does not actually protect. `cmd.spawn()` above already
+        // succeeded, so a failure past this point must kill `child` itself
+        // before propagating — otherwise the job object we failed to attach
+        // never exists to reap it, and `crate::reap`'s PID-file sweep can't
+        // catch it either (a PID file is only written after `spawn_front`
+        // returns `Ok`), leaving a live, untracked `cmd.exe`/`erl.exe` tree
+        // behind.
+        if let Err(e) = job.assign(&child) {
+            kill_orphaned_child(&mut child);
+            return Err(e.into());
+        }
+        Ok(SpawnedFront { child, job })
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(SpawnedFront { child })
+    }
+}
+
+/// Kill and reap `child` after it was successfully spawned but
+/// [`crate::winjob::JobHandle::assign`] then failed to attach it to the
+/// job created before `spawn` — see the call site in [`spawn_front`].
+/// Best-effort: swallows its own errors rather than shadowing the setup
+/// failure that's already being propagated, since there's no better recovery
+/// available for a failure to kill a process we're already trying to kill.
+#[cfg(windows)]
+fn kill_orphaned_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Build the OS process invocation for `config`, platform-specific per this
+/// module's doc comment: `bin/server <id>` on Unix (self-resolving), or on
+/// Windows `bin\bt_attach.bat start` with every env var `bin/server` would
+/// otherwise have set resolved and set here instead.
+///
+/// Returns `Result` even though this Unix arm never fails: it must share a
+/// signature with its `#[cfg(windows)]` sibling below, which does (a missing
+/// cookie file, or a `read_node_name` failure) — `spawn_front` calls whichever
+/// one this build compiles through one shared call site.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)]
+fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
     let mut cmd = Command::new(&config.launcher);
     cmd.arg(&config.workspace_id);
     for (key, value) in build_env(config) {
         cmd.env(key, value);
     }
-    detach(&mut cmd);
-    Ok(cmd.spawn()?)
+    Ok(cmd)
+}
+
+/// Windows counterpart of the Unix `build_launch_command` above (BT-2988) —
+/// see this module's doc comment for the full rationale. `bin/server` does
+/// not exist on Windows, so this function does what it would have: resolve
+/// `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE` from the on-disk workspace
+/// directory, generate an ephemeral `SECRET_KEY_BASE`, and set `PHX_SERVER`
+/// — then invoke the release's own `bin\bt_attach.bat start` directly rather
+/// than passing `workspace_id` as an argv the Windows launcher has no shell
+/// script to interpret.
+///
+/// # Errors
+///
+/// Returns [`BrokerError::MissingCookie`] if the workspace directory has no
+/// (or an empty) `cookie` file, or propagates a [`crate::discovery::read_node_name`]
+/// failure (malformed `metadata.json` — `spawn_front` already checked it
+/// exists before calling this).
+#[cfg(windows)]
+fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
+    let node_name = crate::discovery::read_node_name(&config.workspace_id)?;
+    let cookie = beamtalk_workspace::read_cookie_file(&config.workspace_id)?
+        .ok_or_else(|| BrokerError::MissingCookie(config.workspace_id.clone()))?;
+
+    let mut cmd = Command::new(&config.launcher);
+    cmd.arg("start");
+    for (key, value) in build_env(config) {
+        cmd.env(key, value);
+    }
+    cmd.env("BT_WORKSPACE_NODE", node_name);
+    cmd.env("BT_WORKSPACE_COOKIE", cookie);
+    cmd.env("SECRET_KEY_BASE", generate_secret_key_base());
+    cmd.env("PHX_SERVER", "true");
+    Ok(cmd)
+}
+
+/// Generate an ephemeral `SECRET_KEY_BASE` for one Windows front boot —
+/// the Windows-side equivalent of `bin/server`'s `openssl rand -base64 48`
+/// fallback (see this module's doc comment for why ephemeral-per-boot is
+/// deliberate, not a shortcut). 48 random bytes, standard (padded) base64.
+/// Unlike `beamtalk-cli`'s workspace-cookie generator (which must avoid a
+/// leading `-`/`+`/`/` because that value is later parsed as an Erlang VM
+/// arg), this value is never parsed that way — Phoenix only ever reads it
+/// back as an opaque `SECRET_KEY_BASE` string — so no such rerolling is
+/// needed here.
+#[cfg(windows)]
+fn generate_secret_key_base() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 48];
+    rand::rng().fill_bytes(&mut bytes);
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
 }
 
 /// Config for [`spawn_front_with_port_retry`] — the fields [`SpawnConfig`]
@@ -249,8 +456,8 @@ pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
 /// after the closure below returned [`SpawnAttempt::Bound`], which always
 /// stores a child into `spawned` first — the `expect` documents that
 /// invariant rather than guarding against a real failure mode.
-pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Child, u16)> {
-    let spawned: RefCell<Option<Child>> = RefCell::new(None);
+pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(SpawnedFront, u16)> {
+    let spawned: RefCell<Option<SpawnedFront>> = RefCell::new(None);
     let port = port::allocate_port_with_retry(config.max_port_attempts, |candidate| {
         let spawn_config = SpawnConfig {
             launcher: config.launcher.clone(),
@@ -286,7 +493,16 @@ fn detach(cmd: &mut Command) {
 fn detach(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    // Adversarial-review follow-up (BT-2988): `bin\bt_attach.bat` can only
+    // run via a console-subsystem wrapper (`cmd.exe` — see this module's
+    // doc comment), which without this flag pops a visible console window
+    // per front, behind the desktop app's GUI, that a user could close and
+    // kill their workspace out from under them. `CREATE_NO_WINDOW`
+    // suppresses that; it does not affect `erl.exe`'s own I/O (the front
+    // doesn't attach a console either way — `PHX_SERVER=true` boot has
+    // nothing to print to one).
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -352,6 +568,158 @@ mod tests {
         config.ide_toml_path = tmp.path().join("ide.toml");
         let result = spawn_front(&config);
         assert!(matches!(result, Err(BrokerError::UnknownWorkspace(_))));
+    }
+
+    // ── Windows launch command (BT-2988) ────────────────────────────────
+    //
+    // `build_launch_command`/`generate_secret_key_base` only exist on
+    // `cfg(windows)` — these tests build a real, throwaway workspace
+    // directory under the actual home dir (same pattern as the rest of this
+    // file) and assert the resolved `Command`'s program/args/env, using
+    // `std::process::Command`'s stable `get_program`/`get_args`/`get_envs`
+    // introspection rather than actually spawning anything.
+
+    #[cfg(windows)]
+    struct WindowsTestWorkspaceDir {
+        id: String,
+    }
+
+    #[cfg(windows)]
+    impl WindowsTestWorkspaceDir {
+        fn new(prefix: &str, node_name: Option<&str>, cookie: Option<&str>) -> Self {
+            let id = format!("{prefix}_{}", std::process::id());
+            let dir = beamtalk_workspace::workspace_dir(&id).unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            let metadata = match node_name {
+                Some(name) => format!(r#"{{"workspace_id":"{id}","node_name":"{name}"}}"#),
+                None => format!(r#"{{"workspace_id":"{id}"}}"#),
+            };
+            std::fs::write(dir.join("metadata.json"), metadata).unwrap();
+            if let Some(cookie) = cookie {
+                std::fs::write(dir.join("cookie"), cookie).unwrap();
+            }
+            Self { id }
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for WindowsTestWorkspaceDir {
+        fn drop(&mut self) {
+            if let Ok(dir) = beamtalk_workspace::workspace_dir(&self.id) {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_launch_command_resolves_node_cookie_and_invokes_bt_attach_start() {
+        let ws = WindowsTestWorkspaceDir::new(
+            "win_launch_ok",
+            Some("bt_attach_win_launch_ok_1@localhost"),
+            Some("testcookie123"),
+        );
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+
+        let cmd = build_launch_command(&config).expect("should build a command");
+
+        assert_eq!(
+            cmd.get_program(),
+            std::ffi::OsStr::new(r"bin\bt_attach.bat")
+        );
+        // No positional workspace-id arg on Windows — bin\bt_attach.bat takes
+        // the release's own `start` command instead (see this module's doc
+        // comment for why).
+        assert_eq!(
+            cmd.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("start")]
+        );
+
+        let envs: std::collections::HashMap<String, String> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| {
+                v.map(|v| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.to_string_lossy().into_owned(),
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(envs.get("PORT").map(String::as_str), Some("4567"));
+        assert_eq!(
+            envs.get("BT_ATTACH_BIND_IP").map(String::as_str),
+            Some("127.0.0.1")
+        );
+        assert_eq!(
+            envs.get("RELEASE_DISTRIBUTION").map(String::as_str),
+            Some("none")
+        );
+        assert_eq!(
+            envs.get("BT_WORKSPACE_NODE").map(String::as_str),
+            Some("bt_attach_win_launch_ok_1@localhost")
+        );
+        assert_eq!(
+            envs.get("BT_WORKSPACE_COOKIE").map(String::as_str),
+            Some("testcookie123")
+        );
+        assert_eq!(envs.get("PHX_SERVER").map(String::as_str), Some("true"));
+        assert!(
+            envs.contains_key("SECRET_KEY_BASE"),
+            "must set an ephemeral SECRET_KEY_BASE itself — there is no bin/server to do it"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_launch_command_falls_back_to_default_node_name_when_metadata_lacks_one() {
+        let ws = WindowsTestWorkspaceDir::new("win_launch_default_node", None, Some("c"));
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+
+        let cmd = build_launch_command(&config).expect("should build a command");
+
+        let envs: std::collections::HashMap<String, String> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| {
+                v.map(|v| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.to_string_lossy().into_owned(),
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            envs.get("BT_WORKSPACE_NODE").map(String::as_str),
+            Some(crate::discovery::default_node_name(&ws.id)).as_deref()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_launch_command_errors_when_cookie_file_missing() {
+        let ws = WindowsTestWorkspaceDir::new("win_launch_no_cookie", None, None);
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+
+        let result = build_launch_command(&config);
+
+        assert!(matches!(result, Err(BrokerError::MissingCookie(_))));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn generate_secret_key_base_produces_distinct_values_each_call() {
+        let a = generate_secret_key_base();
+        let b = generate_secret_key_base();
+        assert_ne!(
+            a, b,
+            "must not reuse the same ephemeral secret across boots"
+        );
+        assert_eq!(
+            a.len(),
+            64,
+            "expected standard (padded) base64 of a 48-byte buffer, which is always 64 chars"
+        );
     }
 
     // ── spawn_front_with_port_retry ─────────────────────────────────────

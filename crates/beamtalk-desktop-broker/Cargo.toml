@@ -33,6 +33,11 @@ libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+# Ephemeral per-boot SECRET_KEY_BASE generation (BT-2988) — on Unix this is
+# `bin/server`'s job (openssl rand/urandom); Windows has no such launcher
+# script, so the broker generates it itself before invoking bin\bt_attach.bat.
+rand.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 tempfile = "3.14"

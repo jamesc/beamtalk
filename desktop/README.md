@@ -20,7 +20,9 @@ desktop/
       commands.rs       Tauri commands: list_workspaces, attach, detach,
                          create_workspace, quit
       state.rs          AppState: AttachManager + spawned Child handles
-      launcher.rs        Resolves the bundled bt_attach `bin/server` path
+      launcher.rs        Resolves the bundled bt_attach launcher path
+                           (`bin/server` on Unix, `bin\bt_attach.bat` on
+                           Windows — BT-2988)
       dto.rs             JSON view models for the frontend
     entitlements.plist  Hardened Runtime entitlements for the bundled BEAM
                          release (BT-2987 — see the packaging section below)
@@ -28,7 +30,10 @@ desktop/
                          editors/vscode/images/icon.png — the existing
                          Beamtalk brand asset) so the bundler has something
                          to embed; swap for real desktop-app art before a
-                         real release
+                         real release. icon.ico (BT-2988) is generated from
+                         the same source (128x128@2x.png) — Tauri's Windows
+                         MSI/NSIS bundlers need it; the placeholder-icon
+                         provenance/swap note above applies equally to it
     tauri.conf.json
     capabilities/default.json
     Cargo.lock            Committed (unlike the main workspace's) — this is a
@@ -38,17 +43,19 @@ desktop/
   ui/                  Frontend: plain HTML/CSS/JS, no build step
 ```
 
-## Packaging (BT-2987)
+## Packaging (BT-2987 Linux/macOS, BT-2988 Windows)
 
-`.github/workflows/desktop-release.yml` builds this app for Linux x86_64 and
-macOS arm64 + x86_64, bundling a freshly-built `dist-liveview` release
-(`just dist-liveview`) as a Tauri resource — `tauri.conf.json`'s
-`bundle.resources` maps repo-root `dist-liveview/` to `dist-liveview/` inside
-the app's resource dir, exactly where `launcher.rs`'s
+`.github/workflows/desktop-release.yml` builds this app for Linux x86_64,
+macOS arm64 + x86_64, and Windows x86_64, bundling a freshly-built
+`dist-liveview` release (`just dist-liveview`) as a Tauri resource —
+`tauri.conf.json`'s `bundle.resources` maps repo-root `dist-liveview/` to
+`dist-liveview/` inside the app's resource dir, exactly where `launcher.rs`'s
 `BUNDLED_LAUNCHER_RELATIVE_PATH` expects it once no
-`BEAMTALK_ATTACH_LAUNCHER` override is set. `bin/server` itself is never
-modified — the workflow runs the same `just dist-liveview` recipe a
-from-source dev uses.
+`BEAMTALK_ATTACH_LAUNCHER` override is set. `bin/server`/`bin\bt_attach.bat`
+are never modified — the workflow runs the same `just dist-liveview` recipe a
+from-source dev uses (via a `[windows]`-tagged PowerShell variant of that
+Justfile recipe on Windows, since `bin/server`'s bash-script role there has no
+POSIX-shell counterpart to build).
 
 On macOS, every nested Mach-O binary in that bundled release (`beam.smp`,
 `epmd`, any NIF `.so`/`.dylib`) is signed by
@@ -62,6 +69,10 @@ Runtime allowances BEAM needs (`allow-jit` +
 validation` for independently-signed NIFs) to both that pre-pass and the
 top-level app (`bundle.macOS.entitlements`). See the workflow file's header
 comment for the full signing/notarization flow and the required secrets.
+Windows has no equivalent code-signing pass in this lane — the `.msi`/`.exe`
+Tauri produces are unsigned; that's a real gap (unsigned installers trigger
+SmartScreen warnings), tracked as follow-up rather than silently worked
+around here.
 
 On Linux, `bundle.linux.deb.depends` in `tauri.conf.json` declares
 `libssl3t64` — Tauri's generated `.deb` metadata only covers the
@@ -83,11 +94,64 @@ guarantees are specific to `noble`'s package set and aren't guaranteed to
 hold on a future Ubuntu release.
 
 **This packaging lane is unverified for the same reason the app itself is**
-(see below) — no macOS/Tauri toolchain has been available to actually run
-`cargo tauri build` end-to-end here, so it is wired as `workflow_dispatch`/
-`workflow_call` only, not yet called from `release.yml`'s `on: release`
-path. Flip that once a real run confirms the build (and, separately, the
-signing/notarization steps against real Apple secrets) works.
+(see below) — no macOS/Linux/Windows Tauri toolchain has been available to
+actually run `cargo tauri build` end-to-end here, so it is wired as
+`workflow_dispatch`/`workflow_call` only, not yet called from `release.yml`'s
+`on: release` path. Flip that once a real run confirms the build (and,
+separately, the signing/notarization steps against real Apple secrets) works
+on every platform.
+
+### Windows-specific gaps (BT-2988, documented rather than silently worked around)
+
+- **Broker spawn path is unverified against a real Windows `mix release`
+  boot.** `beamtalk-desktop-broker`'s Windows `build_launch_command`
+  (`crates/beamtalk-desktop-broker/src/spawn.rs`) resolves
+  `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE` from disk, generates an ephemeral
+  `SECRET_KEY_BASE`, and invokes `bin\bt_attach.bat start` directly — the
+  logic cross-checks against `bin/server`'s actual Unix behavior and
+  `config/runtime.exs`'s env-var contract, and has unit test coverage, but
+  has not been exercised against a real built `dist-liveview` release on
+  Windows.
+- **Orphan/process-tree cleanup is closed by construction, not just hoped
+  for.** `bin\bt_attach.bat` can only run via `cmd.exe` (Windows cannot
+  `CreateProcessW` a `.bat` directly), so `std::process::Child::kill` alone
+  would always terminate `cmd.exe` and orphan `erl.exe` underneath it — not
+  an unverified maybe, a certainty given how Windows executes batch files.
+  `beamtalk_desktop_broker::winjob::JobHandle` (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`)
+  closes that: the spawned process tree is assigned to a job object that
+  kills every process in it — including everything spawned after
+  assignment — the moment the job handle closes, whether that's an explicit
+  detach or this broker process itself dying uncleanly. What remains
+  unverified is only the *mechanism's* real-world behavior (a small
+  assign-after-spawn race — see `spawn.rs`'s and `winjob.rs`'s module doc
+  comments) and whether `AssignProcessToJobObject`/`SetInformationJobObject`
+  behave as documented against a real `mix release` boot; `reap`'s PID-file
+  sweep remains the fallback net for whatever this mechanism still misses.
+- **No code signing.** See the Packaging section above — the `.msi`/NSIS
+  `.exe` this lane produces are unsigned.
+- **CI build lane is unverified.** `desktop-release.yml`'s Windows leg (WiX/
+  NSIS self-download, WebView2 Runtime presence, `package-desktop-release.sh`'s
+  `windows-x86_64` case) has not been exercised against a real
+  `windows-2022` run — see that workflow's header comment for the specific
+  list of unverified assumptions.
+- **Console-window suppression and the CI build-lane's `--config` quoting
+  were both real bugs, now fixed rather than open gaps.** Without
+  `windows_subsystem = "windows"` (`desktop/src-tauri/src/main.rs`) a
+  release build links console-subsystem, popping a visible window behind
+  the picker's GUI on every launch; `crate::spawn::detach` additionally
+  sets `CREATE_NO_WINDOW` so the console-subsystem `cmd.exe` wrapper (see
+  the process-tree point above) doesn't pop one *per front* either. The
+  `Justfile`'s `dist-desktop-platform` Windows recipe now writes its
+  `--config` JSON to a temp file instead of inlining it, because Windows
+  PowerShell 5.1 does not re-escape embedded quotes when building a native
+  command's argv — the inline form silently reached `cargo-tauri.exe` as
+  invalid JSON. None of this has been exercised on a real Windows build
+  either (same caveat as everything else here), but these are code fixes,
+  not open questions.
+- **epmd/dist behavior differences were not independently investigated**
+  beyond the process-tree point above — Windows epmd is the same `erl`-
+  distributed epmd binary as Unix (no protocol difference expected), but this
+  was not confirmed against a live Windows BEAM boot in this session.
 
 ## Why this crate is excluded from the root Cargo workspace
 
@@ -202,6 +266,19 @@ picker end-to-end against a real `beamtalk workspace create --background
 # since it skips a full `cargo tauri build`:
 just dist-liveview   # from editors/liveview/, produces bin/server
 export BEAMTALK_ATTACH_LAUNCHER=/path/to/dist-liveview/bin/server
+
+cd desktop
+cargo tauri dev
+```
+
+On Windows (BT-2988), the equivalent points at `bin\bt_attach.bat` instead —
+there is no `bin/server` there for the broker to shell out to, so it resolves
+`BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE`/`SECRET_KEY_BASE` itself (see the
+"Windows-specific gaps" section above):
+
+```powershell
+just dist-liveview   # from editors/liveview/, produces bin\bt_attach.bat
+$env:BEAMTALK_ATTACH_LAUNCHER = "C:\path\to\dist-liveview\bin\bt_attach.bat"
 
 cd desktop
 cargo tauri dev

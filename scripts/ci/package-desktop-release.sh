@@ -12,7 +12,12 @@
 # anything, it just gathers what's already there.
 #
 # Usage: scripts/ci/package-desktop-release.sh <version> <platform>
-#   platform: linux-x86_64 | macos-arm64 | macos-x86_64
+#   platform: linux-x86_64 | macos-arm64 | macos-x86_64 | windows-x86_64
+#
+# windows-x86_64 (BT-2988) runs on a GitHub-hosted `windows-latest` runner via
+# `shell: bash`, which is Git Bash — `find`/`sha256sum`/etc. below all work
+# there the same as on Linux/macOS; only the Tauri bundle-dir subpaths and
+# artifact extensions differ per platform.
 #
 # Outputs (to $GITHUB_OUTPUT if set, else stdout):
 #   archives=<newline-separated list of produced archive paths>
@@ -85,8 +90,33 @@ macos-arm64 | macos-x86_64)
     fi
     ;;
 
+windows-x86_64)
+    # .msi (WiX) and .nsis (NSIS installer .exe) — Tauri's two Windows
+    # bundle targets (`cargo tauri build --bundles msi,nsis`, ADR 0097 §5's
+    # "pick per Tauri's bundler support", extended to Windows by BT-2988).
+    # Not verified against a real `cargo tauri build` on Windows (no Windows
+    # sandbox was available to develop this against) — the bundle subpaths
+    # below follow Tauri v2's documented layout; confirm against a real CI
+    # run before relying on this case rather than silently trusting it.
+    msi_src=$(find "${BUNDLE_DIR}/msi" -maxdepth 1 -name '*.msi' | head -1 || true)
+    nsis_src=$(find "${BUNDLE_DIR}/nsis" -maxdepth 1 -name '*.exe' | head -1 || true)
+
+    if [ -n "${msi_src}" ]; then
+        dest="${NAME}.msi"
+        cp "${msi_src}" "${dest}"
+        checksum "${dest}"
+        archives+=("${dest}")
+    fi
+    if [ -n "${nsis_src}" ]; then
+        dest="${NAME}-setup.exe"
+        cp "${nsis_src}" "${dest}"
+        checksum "${dest}"
+        archives+=("${dest}")
+    fi
+    ;;
+
 *)
-    echo "❌ Unknown platform: ${PLATFORM} (expected linux-x86_64, macos-arm64, or macos-x86_64)" >&2
+    echo "❌ Unknown platform: ${PLATFORM} (expected linux-x86_64, macos-arm64, macos-x86_64, or windows-x86_64)" >&2
     exit 1
     ;;
 esac

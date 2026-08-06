@@ -71,6 +71,11 @@ pub mod reap;
 pub mod sname;
 /// Spawn a per-workspace front with the required env/posture.
 pub mod spawn;
+/// Windows Job Object wrapper tying a spawned front's process tree to this
+/// handle's lifetime (BT-2988) — see the module doc comment for why
+/// `Child::kill()` alone is not enough on Windows.
+#[cfg(windows)]
+pub mod winjob;
 
 #[cfg(test)]
 mod test_support;
