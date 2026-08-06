@@ -123,7 +123,7 @@ package_name(ClassName) when is_atom(ClassName) ->
             %% Class not registered — try scanning .app metadata
             package_name_from_app_metadata(ClassName);
         Pid ->
-            try beamtalk_object_class:module_name(Pid) of
+            try beamtalk_object_class:module_name_safe(Pid) of
                 ModuleName ->
                     extract_package_from_module(ModuleName)
             catch

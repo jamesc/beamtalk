@@ -421,7 +421,7 @@ source_file_of(ClassName) ->
         undefined ->
             null;
         ClassPid ->
-            ModuleName = beamtalk_object_class:module_name(ClassPid),
+            ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
             case beamtalk_reflection:source_file_from_module(ModuleName) of
                 nil -> null;
                 Path when is_binary(Path) -> Path
@@ -434,7 +434,7 @@ source_origin_of(ClassName) ->
         undefined ->
             <<"project">>;
         ClassPid ->
-            ModName = beamtalk_object_class:module_name(ClassPid),
+            ModName = beamtalk_object_class:module_name_safe(ClassPid),
             SourceFile =
                 case beamtalk_reflection:source_file_from_module(ModName) of
                     nil -> null;

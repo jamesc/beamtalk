@@ -857,7 +857,7 @@ startSupervisor(ClassArg) ->
     end,
     ClassPid = element(4, ClassArg),
     ClassName = beamtalk_object_class:class_name(ClassPid),
-    Module = beamtalk_object_class:module_name(ClassPid),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
     case beamtalk_supervisor:is_supervisor(ClassName) of
         false ->
             NameBin = atom_to_binary(ClassName, utf8),
