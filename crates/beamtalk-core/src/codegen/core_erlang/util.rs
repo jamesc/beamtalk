@@ -244,7 +244,10 @@ impl CoreErlangGenerator {
     pub(super) fn expression_doc_with_open_scope(
         &mut self,
         expr: &Expression,
-    ) -> Result<(super::document::Document<'static>, Option<String>)> {
+    ) -> Result<(
+        super::document::Document<'static>,
+        Option<super::OpenScopeResult>,
+    )> {
         self.last_open_scope_result = None;
         let doc = self.generate_expression(expr)?;
         Ok((doc, self.last_open_scope_result.take()))
@@ -261,13 +264,21 @@ impl CoreErlangGenerator {
     /// `detect:` / `count:` / …) — the dangling `in` produces invalid Core Erlang
     /// (`{core_parse_error, …, "syntax error before: in"}`). This helper closes
     /// the scope by appending the result variable so the doc stands alone.
+    ///
+    /// BT-3053: a `NoValue` chain (a mutation-threaded `do:`/dict-`do:` nested
+    /// in a direct-params loop — several rebound vars, no single result)
+    /// substitutes `do:`'s own `nil` return-value contract rather than
+    /// referencing a variable that doesn't exist.
     pub(super) fn closed_expression_doc(
         &mut self,
         expr: &Expression,
     ) -> Result<super::document::Document<'static>> {
         let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
         Ok(match open_scope {
-            Some(result_var) => docvec![doc, super::document::leaf::var(result_var)],
+            Some(super::OpenScopeResult::Value(result_var)) => {
+                docvec![doc, super::document::leaf::var(result_var)]
+            }
+            Some(super::OpenScopeResult::NoValue) => docvec![doc, "'nil'"],
             None => doc,
         })
     }
@@ -284,6 +295,11 @@ impl CoreErlangGenerator {
     /// keep the chain at the current level and append `let _ = <result_var> in `
     /// to discard the value and sequence on. With no open scope this is the
     /// original `let _ = <expr> in `.
+    ///
+    /// BT-3053: a `NoValue` chain has nothing to bind — its own rebindings are
+    /// already visible to subsequent statements, and (unlike the `Value` case)
+    /// there is no variable to reference in a discard `let`, so the doc is
+    /// pushed as-is with no closing `let _ = ... in` appended at all.
     pub(super) fn push_discarded_stmt(
         &mut self,
         docs: &mut Vec<super::document::Document<'static>>,
@@ -291,13 +307,16 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
         match open_scope {
-            Some(result_var) => {
+            Some(super::OpenScopeResult::Value(result_var)) => {
                 docs.push(doc);
                 docs.push(docvec![
                     "let _ = ",
                     super::document::leaf::var(result_var),
                     " in "
                 ]);
+            }
+            Some(super::OpenScopeResult::NoValue) => {
+                docs.push(doc);
             }
             None => {
                 docs.push(docvec!["let _ = ", doc, " in "]);
