@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3057: `self superclass` / `ClassName superclass` (same-class explicit
+// reference, BT-773) sent from inside a class method used to degrade to a
+// bare Symbol carrying the class's name instead of a real class object —
+// comparing equal by printString but not by identity/equals:. `self
+// includesSelector:` (a keyword selector) DNU'd outright, since the fast
+// path that avoids self-send-to-self deadlock only recognised two
+// hardcoded 0-arity selectors. Fixed by routing both through the real
+// beamtalk_behaviour_intrinsics primitives directly (see
+// `class_self_send_reflective_primitive` in dispatch_codegen.rs).
+//
+// Fixtures: fixtures/bt3057_reflective_primitives.bt.
+
+TestCase subclass: ClassMethodSelfSendReflectivePrimitivesTest
+
+  testSelfSuperclassReturnsRealClassObject =>
+    result := BT3057Middle selfSuperclassImplicitReturn
+    self assert: result equals: BT3057Ancestor
+    self assert: result name equals: #BT3057Ancestor
+
+  testExplicitClassNameSuperclassReturnsRealClassObject =>
+    result := BT3057Middle explicitClassNameSuperclass
+    self assert: result equals: BT3057Ancestor
+    self assert: result == BT3057Ancestor
+
+  testSelfIncludesSelectorTrue => self assert: BT3057Middle selfIncludesDescribe
+
+  testSelfIncludesSelectorFalse => self deny: BT3057Middle selfIncludesBogus

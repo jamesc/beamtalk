@@ -10,14 +10,12 @@
 // (BT-3052's own fix). `self` here is the class object itself
 // (closure-captured via `ClassSelf`, per BT-3047).
 //
-// The corresponding test compares the result to the Symbol `#BT3047Ancestor`
-// rather than the class object `BT3047Ancestor` — see BT-3057 (filed during
-// this test's development): a class-object (`#beamtalk_object{}`) returned
-// out of a class method, via any return path, currently degrades to a bare
-// Symbol carrying the class's name, independent of this PR's changes. That
-// Symbol is still a faithful witness that `classSuperclass/1` resolved the
-// *correct* class (not a deadlock hang, not the wrong class) via
-// module_name_safe/1, which is what this test targets.
+// BT-3057: the corresponding test originally compared the result to the
+// Symbol `#BT3047Ancestor` rather than the class object `BT3047Ancestor`,
+// because a class-object (`#beamtalk_object{}`) returned out of a class
+// method via `self superclass` degraded to a bare Symbol independent of
+// this fixture's own changes. BT-3057 fixed that self-send path, so the
+// test now compares against the real class object.
 
 BT3047Ancestor subclass: BT3054Parent
 

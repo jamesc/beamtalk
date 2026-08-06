@@ -13,13 +13,13 @@
 // to `beamtalk_object_class:module_name_safe/1`, which resolves the module
 // via the `beamtalk_class_metadata` ETS table instead (no message send).
 //
-// Compares against the Symbol `#BT3047Ancestor`, not the class object
-// `BT3047Ancestor` — see BT-3057, filed independently of this fix: a
-// class-object returned out of a class method currently degrades to a bare
-// Symbol regardless of this PR's changes. That Symbol still faithfully
-// proves `classSuperclass/1` resolved the *correct* class (not a deadlock,
-// not the wrong class) via the module_name_safe/1 migration this test
-// targets.
+// BT-3057: now compares against the real class object `BT3047Ancestor`
+// rather than the Symbol `#BT3047Ancestor` this test originally had to
+// settle for — the class-method self-send fast path used to bypass
+// `classSuperclass/1`'s `atom_to_class_object/1` wrapping entirely and
+// return the bare class-name atom instead of a `#beamtalk_object{}`. Fixed
+// by routing `self superclass` through the real intrinsic directly (see
+// `class_self_send_reflective_primitive` in dispatch_codegen.rs).
 //
 // Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,
 // fixtures/bt3054_parent.bt.
@@ -27,4 +27,4 @@
 TestCase subclass: SuperclassInForeignBlockTest
 
   testSuperclassInsideForeignBlockDoesNotDeadlock =>
-    self assert: (BT3054Parent makeSelfSuperclassThrough: BT3047DriverPlain over: #(1)) equals: #BT3047Ancestor
+    self assert: (BT3054Parent makeSelfSuperclassThrough: BT3047DriverPlain over: #(1)) equals: BT3047Ancestor
