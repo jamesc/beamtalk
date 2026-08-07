@@ -24,6 +24,48 @@
 //! "unknown, trust liveness" — every sweep matched, closing nothing); it now
 //! reads a real value there via `GetProcessTimes`.
 //!
+//! **A narrower race survived BT-3046's fix too, closed here (BT-3056):**
+//! `sweep` calls [`is_process_alive`] and [`read_start_time`] as two separate
+//! syscalls — if the process exits in that exact window, `read_start_time`
+//! returns `None` even though a `start_time` *was* recorded for it
+//! (`record.start_time: Some(_)`). Treating that as "unknown, trust
+//! liveness" (the pre-BT-3056 fallback) would classify it as
+//! [`Disposition::Reap`], and if a third, unrelated process grabs the
+//! recycled PID before `terminate_process` runs, it gets killed. The fix
+//! doesn't need a platform `cfg` to tell "genuinely can't read start time"
+//! apart from "raced a process exit": a record only ever has `start_time:
+//! Some(_)` if *this* platform's own [`read_start_time`] produced a real
+//! value when the record was saved, so a `Some(_)`-recorded, `None`-observed
+//! pairing can only mean the observation itself failed this one time — it
+//! is never a platform-incapability signal, which is `start_time: None`
+//! instead (see [`start_time_matches`]'s doc comment for the exact
+//! contract). `classify_record` now maps that specific pairing to
+//! [`Disposition::SkipPidReused`] rather than [`Disposition::Reap`].
+//!
+//! **Trade-off, deliberate and worth stating plainly** (BT-3056
+//! adversarial-review follow-up): [`sweep`] clears a record's on-disk file
+//! for *every* disposition, including `SkipPidReused` — so this fix's
+//! failure mode is "silently stop tracking a front this sweep couldn't
+//! prove was safe to kill," not just "skip killing it this one time." A
+//! `None` observation isn't always the exit-race above; it can also come
+//! from something more persistent — a permissions restriction, a sandboxed/
+//! namespaced process this broker can no longer introspect, or a record
+//! whose `Some(_)` start time was captured on a different machine sharing
+//! this `state_dir` over a network filesystem. In every one of those cases
+//! this still fails *safe* (no wrong-process kill), but a front that
+//! genuinely was the intended orphan escapes reaping for good, since
+//! [`sweep`] only runs once at broker startup with no later retry of a
+//! cleared record. That is judged the correct trade for this module's stated
+//! goal (never kill an unrelated process, even at the cost of occasionally
+//! leaving a real orphan for the user to notice and clean up by hand) — but
+//! it does depend on an invariant this file cannot enforce at compile time:
+//! every [`read_start_time`] platform arm must be "all-or-nothing" for a
+//! given PID — either it reliably produces a real value for a process this
+//! broker can see, or it never does (`None` unconditionally, like the
+//! `cfg(not(any(target_os = "linux", windows)))` arm below). A future arm
+//! that succeeds for *some* still-alive, still-visible processes but not
+//! others would quietly widen this gap without any test here catching it.
+//!
 //! **What "the recorded PID" means on Windows** (BT-2988): the caller
 //! persists `Child::id()` after `spawn_front`, which per [`crate::winjob`]'s
 //! doc comment is `cmd.exe`'s PID, not `erl.exe`'s (`.bat` launches can only
@@ -454,14 +496,21 @@ pub enum Disposition {
 /// [`is_process_alive`]/[`read_start_time`], injected here so the decision
 /// logic itself needs no process I/O to test).
 ///
-/// When either the recorded or the observed start time is unavailable (a
-/// platform without the cheap read, or an old record predating this field),
-/// this falls back to trusting liveness alone — the same "best effort"
-/// stance `beamtalk-cli`'s own `NodeInfo.start_time` handling takes for
-/// backward compatibility. This means PID-reuse detection is
-/// best-effort, not a hard guarantee, on platforms/records where start time
-/// isn't available — matching the spike's own framing of this as hardening
-/// a known gap, not eliminating it outright.
+/// When the *recorded* start time is unavailable (a platform without the
+/// cheap read, or an old record predating this field), this falls back to
+/// trusting liveness alone — the same "best effort" stance `beamtalk-cli`'s
+/// own `NodeInfo.start_time` handling takes for backward compatibility. This
+/// means PID-reuse detection is best-effort, not a hard guarantee, on
+/// platforms/records where start time was never available — matching the
+/// spike's own framing of this as hardening a known gap, not eliminating it
+/// outright.
+///
+/// A recorded start time with no matching *observed* value (`record.start_time:
+/// Some(_)`, `actual_start_time: None`) is treated differently (BT-3056),
+/// **not** as "unknown, trust liveness": see [`start_time_matches`]'s doc
+/// comment for why that pairing unambiguously means the observation raced a
+/// process exit, not a platform limitation, and lands in
+/// [`Disposition::SkipPidReused`] instead.
 #[must_use]
 pub fn classify_record(
     record: &FrontRecord,
@@ -479,14 +528,29 @@ pub fn classify_record(
 }
 
 /// Pure comparison shared by [`classify_record`] and `terminate_process`'s
-/// pre-`SIGKILL` re-check: is `actual` consistent with `expected`? `None` on
-/// either side means "unknown" and is treated as a match — the same
-/// best-effort stance `beamtalk-cli`'s own `NodeInfo.start_time` handling
-/// takes when start time isn't available (old record, unsupported platform).
+/// pre-`SIGKILL` re-check: is `actual` consistent with `expected`?
+///
+/// - `(None, _)` — no recorded start time (old record predating this field,
+///   or a platform [`read_start_time`] never returns a real value on) —
+///   treated as a match, the same best-effort stance `beamtalk-cli`'s own
+///   `NodeInfo.start_time` handling takes when start time isn't available.
+/// - `(Some(_), None)` — a start time *was* recorded, but this observation
+///   came back empty (BT-3056). Unlike the case above, this is **not**
+///   ambiguous: `expected` can only be `Some(_)` if this exact platform's
+///   [`read_start_time`] already produced a real value once, for this same
+///   PID, when the record was saved — so a platform that genuinely can't
+///   read start time would have recorded `None` to begin with, never
+///   `Some(_)`. The only way to reach `Some(_)` here paired with an observed
+///   `None` is `read_start_time` racing the process actually exiting between
+///   `sweep`'s `is_process_alive` check and its own call (see this module's
+///   doc comment) — treated as a **mismatch**, so the caller skips signaling
+///   rather than trusting a liveness snapshot that may already be stale.
+/// - `(Some(e), Some(a))` — compared directly.
 fn start_time_matches(expected: Option<u64>, actual: Option<u64>) -> bool {
     match (expected, actual) {
         (Some(e), Some(a)) => e == a,
-        _ => true,
+        (Some(_), None) => false,
+        (None, _) => true,
     }
 }
 
@@ -810,10 +874,21 @@ mod tests {
         assert_eq!(disposition, Disposition::Reap);
     }
 
+    /// BT-3056: this used to fall back to trusting liveness (`Reap`), the
+    /// same as `alive_with_no_recorded_start_time_falls_back_to_reap` above —
+    /// but the two cases aren't actually equivalent. Here a start time *was*
+    /// recorded (`Some(100)`), so this platform's `read_start_time`
+    /// definitely produced a real value once for this PID; an observed
+    /// `None` now can only mean the read raced the process exiting (see
+    /// `start_time_matches`'s doc comment), not a platform limitation. That
+    /// must not be trusted as "still the same process" — `SkipPidReused`
+    /// clears the record without signaling anything, closing the exact gap
+    /// the spike flagged: a third, unrelated process could otherwise grab
+    /// the just-vacated PID before `terminate_process` runs.
     #[test]
-    fn alive_with_no_observed_start_time_falls_back_to_reap() {
+    fn alive_with_no_observed_start_time_is_pid_reused_not_reaped() {
         let disposition = classify_record(&record(1234, Some(100)), true, None);
-        assert_eq!(disposition, Disposition::Reap);
+        assert_eq!(disposition, Disposition::SkipPidReused);
     }
 
     #[test]
@@ -1133,7 +1208,7 @@ mod tests {
     // real `read_start_time` would make this test SIGTERM/TerminateProcess
     // its own test process. Gating this way keeps that real behavior safe to
     // exercise here; `classify_record`'s fallback branch itself is covered
-    // platform-independently by `alive_with_no_observed_start_time_falls_back_to_reap`
+    // platform-independently by `alive_with_no_observed_start_time_is_pid_reused_not_reaped`
     // above.
     #[cfg(any(target_os = "linux", windows))]
     #[test]

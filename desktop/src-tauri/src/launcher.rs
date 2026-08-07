@@ -42,8 +42,11 @@ const BUNDLED_LAUNCHER_RELATIVE_PATH: &str = "dist-liveview/bin/bt_attach.bat";
 ///
 /// Never fails outright — an unresolvable resource dir falls back to the
 /// bare relative path as a last resort, so startup doesn't crash; the
-/// resulting path simply won't exist yet on an unpackaged dev build, and
-/// `attach` surfaces that as a normal spawn-I/O error rather than a panic.
+/// resulting path simply won't exist yet on an unpackaged dev build.
+/// `beamtalk_desktop_broker::spawn::spawn_front` now checks for that
+/// explicitly (BT-3056) and surfaces it as a named
+/// `BrokerError::LauncherNotFound`, not a panic and — unlike before that
+/// check existed — not an opaque spawn-I/O error either.
 #[must_use]
 pub fn resolve_launcher_path(app: &AppHandle) -> PathBuf {
     if let Ok(override_path) = std::env::var(LAUNCHER_PATH_OVERRIDE_ENV) {
