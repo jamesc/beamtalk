@@ -173,6 +173,22 @@ everyone, not just this crate. Wiring an actual CI build lane that installs
 the Linux/macOS toolchain is BT-2987's job (packaging); this issue (BT-2986)
 only writes the picker's source.
 
+### Unit test CI coverage (BT-3061)
+
+Being excluded from the root workspace does NOT mean this crate's own
+`#[cfg(test)]` unit tests go untested in CI — `.github/workflows/ci.yml`'s
+`test-desktop` job installs the same Linux Tauri toolchain (Linux only;
+Windows/macOS runners already ship what's needed) and runs `just
+test-desktop` on every push/PR, across Linux, macOS, and Windows, same as
+every other test job in that workflow. That's a separate concern from the
+packaging lane above: `test-desktop` only compiles and runs this crate's own
+unit tests (fast, no `dist-liveview` release build required — an empty
+placeholder directory satisfies `tauri.conf.json`'s `bundle.resources`
+existence check that this crate's `build.rs` enforces via `tauri_build::
+build()`), where `desktop-release.yml` builds and bundles the full shippable
+app. Run it locally with `just test-desktop` once you have the same
+prerequisites `cargo tauri dev` needs (below).
+
 ## Shell decision status (read before extending this app)
 
 The BT-2984 spike (`docs/research/desktop-shell-spike.md`) leans Tauri but

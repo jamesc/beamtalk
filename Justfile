@@ -453,6 +453,42 @@ dist-desktop:
 dist-desktop:
     just dist-desktop-platform msi,nsis
 
+# Run beamtalk-desktop's (desktop/src-tauri, the Tauri app crate) own
+# `#[cfg(test)]` unit tests (BT-3061). NOT part of `just test`/`just ci` —
+# this crate is deliberately excluded from the root Cargo workspace (see
+# root Cargo.toml's `exclude` and desktop/README.md) because it needs the
+# Tauri toolchain (webkit2gtk-4.1/glib/gtk3 dev packages on Linux; WebView2
+# on Windows and WKWebView on macOS need no extra packages) that the rest
+# of the workspace doesn't require. A dedicated CI job in ci.yml installs
+# that toolchain per-platform and calls this recipe directly; run it by
+# hand once you have the same Tauri prerequisites `cargo tauri dev` needs
+# (desktop/README.md).
+#
+# tauri-build's config validation (invoked from this crate's build.rs)
+# checks that tauri.conf.json's `bundle.resources` source path
+# (`../../dist-liveview`) exists on disk, but `cargo test` never invokes
+# the actual bundler — an empty placeholder directory satisfies the check
+# without a full `just dist-liveview` release build (Erlang/Elixir/Node),
+# which would make this recipe as slow as `just dist-desktop-platform` for
+# no test-coverage benefit. Verified locally: an empty dist-liveview/ is
+# sufficient for `cargo test` to build and run this crate's unit tests.
+[unix]
+test-desktop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist-liveview
+    cd desktop/src-tauri
+    cargo test --locked
+
+[windows]
+test-desktop:
+    #!powershell.exe
+    $ErrorActionPreference = "Stop"
+    New-Item -ItemType Directory -Force -Path dist-liveview | Out-Null
+    Set-Location desktop/src-tauri
+    cargo test --locked
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Ensure the loopback hex-bridge proxy is up before any rebar3/mix dep fetch.
 # Cloud containers only (gated on CLAUDE_CODE_REMOTE): a session can outlive the
 # SessionStart launch, and a dead bridge makes `rebar3 compile` fail to fetch
