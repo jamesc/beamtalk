@@ -222,10 +222,11 @@ fn attach_and_open_window(
             // nothing consumes yet. Matches the same
             // spawn-a-detached-`std::thread`-for-best-effort-background-work
             // shape `spawn_monitor` below already uses in this file.
-            // `update_windows_node_name_after_readiness` is a no-op stub off
-            // Windows (see its `#[cfg(not(windows))]` arm) — gate the spawn
-            // itself so this doesn't burn an OS thread just to immediately
-            // return on every attach.
+            // `update_windows_node_name_after_readiness` only exists (and is
+            // only needed) on Windows — see its doc comment — so this gates
+            // the spawn itself rather than calling into a no-op there,
+            // avoiding an OS thread that would immediately return on every
+            // attach off Windows.
             #[cfg(windows)]
             {
                 let workspace_id_for_correction = workspace_id.to_string();
@@ -524,8 +525,11 @@ fn persist_front_record(workspace_id: &str, port: u16, pid: u32) {
 /// remains bookkeeping/display only (`beamtalk_desktop_broker::reap`'s sweep
 /// keys entirely off `pid`), so there is nothing correctness-critical riding
 /// on this succeeding, and `attach_and_open_window` should not fail (or even
-/// log noisily) an otherwise-successful attach over it. A no-op on Unix,
-/// where [`initial_node_name`] already recorded the verified-correct value.
+/// log noisily) an otherwise-successful attach over it. Windows-only: the
+/// call site gates the background thread that invokes this behind
+/// `#[cfg(windows)]` too, since [`initial_node_name`] already recorded the
+/// verified-correct value on Unix — there is nothing for this to correct
+/// there.
 #[cfg(windows)]
 fn update_windows_node_name_after_readiness(workspace_id: &str, port: u16, pid: u32) {
     let suffix = beamtalk_desktop_broker::sname::attach_node_suffix(workspace_id);
@@ -537,9 +541,6 @@ fn update_windows_node_name_after_readiness(workspace_id: &str, port: u16, pid: 
         let _ = reap::update_record_node_name(&dir, workspace_id, port, pid, &node_name);
     }
 }
-
-#[cfg(not(windows))]
-fn update_windows_node_name_after_readiness(_workspace_id: &str, _port: u16, _pid: u32) {}
 
 /// Undo [`persist_front_record`] on an attach failure that already killed
 /// the child, so a clean in-session failure doesn't leave a record for a
