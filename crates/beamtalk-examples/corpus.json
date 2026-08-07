@@ -11778,6 +11778,33 @@
       "explanation": "Tests for Actor named-registration API (BT-1988 / ADR 0079 Phase 2).  Fixtures: stdlib/test/fixtures/named_counter.bt, named_greeter.bt"
     },
     {
+      "id": "stdlib-test-actor-new-error-parity-test",
+      "title": "ActorNewErrorParityTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ActorNewErrorParityTest",
+        "TestCase",
+        "actor_new_error_parity_test",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "object",
+        "process",
+        "subclassing",
+        "testNewViaPerformRaisesInstantiationError",
+        "testSelfNewInsideClassMethodRaisesInstantiationError"
+      ],
+      "source": "// BT-3071: Actor `new`/`new:` reject direct instantiation with an\n// identical structured `instantiation_error` regardless of dispatch path.\n// `ActorLifecycleTest testNewRaisesInstantiationError` already covers the\n// static-send path (`Counter new`); this file rounds out the dynamic-send\n// (`perform:`) and `self new` (BT-893's class-method self-send) paths, all\n// of which route to the same compiled `new/0` / `new/1` on the actor's own\n// module (see Actor.bt's `class sealed new` / `class sealed new:`).\n\nTestCase subclass: ActorNewErrorParityTest\n\n  testNewViaPerformRaisesInstantiationError =>\n    // Dynamic dispatch (perform:) must raise the same structured error as\n    // the static `Counter new` send.\n    self should: [Counter perform: #new] raise: #instantiation_error\n    self should: [\n      Counter perform: #new: withArguments: #(#{})\n    ] raise: #instantiation_error\n\n  testSelfNewInsideClassMethodRaisesInstantiationError =>\n    // `self new` inside a class method (BT-893's deadlock-avoiding\n    // class_self_new path, exercised via ActorSelfNewFixture) must raise\n    // the same structured error as the static and dynamic sends.\n    self should: [\n      ActorSelfNewFixture triggerSelfNew\n    ] raise: #instantiation_error\n    self should: [\n      ActorSelfNewFixture triggerSelfNewWith: #{}\n    ] raise: #instantiation_error",
+      "explanation": "BT-3071: Actor `new`/`new:` reject direct instantiation with an identical structured `instantiation_error` regardless of dispatch path. `ActorLifecycleTest testNewRaisesInstantiationError` already covers the static-send path (`Counter new`); this file rounds out the dynamic-send (`perform:`) and `self new` (BT-893's class-method self-send) paths, all of which route to the same compiled `new/0` / `new/1` on the actor's own module (see Actor.bt's `class sealed new` / `class sealed new:`)."
+    },
+    {
       "id": "stdlib-test-actor-non-local-return-test",
       "title": "ActorNonLocalReturnTest",
       "category": "stdlib-tests",
@@ -17508,6 +17535,38 @@
       ],
       "source": "// BT-1432: ActorNlrTier2 — early return (^) with tier2 value call in Actor method\n// A tier2 value call is a block that captures+mutates local variables,\n// requiring {Result, NewState} tuple unpacking.\n\nActor subclass: ActorNlrTier2\n  state: count = 0\n\n  // ^ [mutating-local block] value — should unpack the 2-tuple {Result, NewState}\n  compute: n =>\n    total := 0\n    n <= 0 ifTrue: [^\"skipped\"]\n    ^[\n      total := total + n\n      total\n    ] value\n\n  getCount => self.count",
       "explanation": "BT-1432: ActorNlrTier2 — early return (^) with tier2 value call in Actor method A tier2 value call is a block that captures+mutates local variables, requiring {Result, NewState} tuple unpacking."
+    },
+    {
+      "id": "stdlib-test-fixtures-actor-self-new-fixture",
+      "title": "ActorSelfNewFixture",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "ActorSelfNewFixture",
+        "actor",
+        "actor_self_new_fixture",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValue",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "process",
+        "property",
+        "subclassing",
+        "triggerSelfNew",
+        "triggerSelfNewWith:"
+      ],
+      "source": "// BT-3071: Test fixture — actor with class methods that call `self new` /\n// `self new:` from inside a class method. Actors must reject direct\n// instantiation via the `self`-send path exactly like the static\n// (`ActorSelfNewFixture new`) and dynamic (`perform: #new`) sends do, all\n// three raising the identical `instantiation_error` produced by the\n// class's own compiled `new/0` / `new/1` (BT-893's `class_self_new` routes\n// here rather than through `gen_server:call`, which would deadlock).\n\nActor subclass: ActorSelfNewFixture\n  state: value = 0\n\n  class triggerSelfNew -> Self => self new\n\n  class triggerSelfNewWith: initArgs :: Object -> Self => self new: initArgs\n\n  getValue => self.value",
+      "explanation": "BT-3071: Test fixture — actor with class methods that call `self new` / `self new:` from inside a class method. Actors must reject direct instantiation via the `self`-send path exactly like the static (`ActorSelfNewFixture new`) and dynamic (`perform: #new`) sends do, all three raising the identical `instantiation_error` produced by the class's own compiled `new/0` / `new/1` (BT-893's `class_self_new` routes here rather than through `gen_server:call`, which would deadlock)."
     },
     {
       "id": "stdlib-test-fixtures-actor-slot-fixture",

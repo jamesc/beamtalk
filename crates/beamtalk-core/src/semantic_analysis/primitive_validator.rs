@@ -25,6 +25,10 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "basicNewWith",
     "actorSpawn",
     "actorSpawnWith",
+    // BT-3071: Actor.bt's `class sealed new` / `class sealed new:` lift the
+    // actor instantiation-error stubs into declared class-method bodies.
+    "actorNewError",
+    "actorNewWithArgsError",
     // Reflection
     "classOf",
     "doesNotUnderstand",

@@ -347,6 +347,52 @@ impl CoreErlangGenerator {
         ))
     }
 
+    /// Builds the 4-step `instantiation_error` let-chain expression that always raises.
+    ///
+    /// Shared by all four actor/abstract instantiation guard *functions*
+    /// (via [`Self::instantiation_error_stub`]) and by Actor.bt's own
+    /// `class sealed new` / `class sealed new:` intrinsic bodies (BT-3071,
+    /// `actorNewError` / `actorNewWithArgsError` in
+    /// [`super::super::generate_primitive`]) — the latter compiles the
+    /// identical raise directly into Actor's `class_new`/`class_new:`
+    /// functions so the declared method and the per-actor-module compiled
+    /// stub (still required by `handle_new_compiled`'s
+    /// `erlang:apply(Module, new, Args)` fast path) never drift apart.
+    /// Generates just the expression, no `fun` wrapper:
+    /// ```text
+    /// let Error0 = call 'beamtalk_error':'new'('instantiation_error', '<class>') in
+    /// let Error1 = call 'beamtalk_error':'with_selector'(Error0, '<selector>') in
+    /// let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"hint">>) in
+    /// call 'beamtalk_error':'raise'(Error2)
+    /// ```
+    pub(in crate::codegen::core_erlang) fn instantiation_error_expr(
+        class_name: impl Into<String>,
+        selector: impl Into<String>,
+        hint: &str,
+    ) -> Document<'static> {
+        docvec![
+            docvec![
+                "let Error0 = call 'beamtalk_error':'new'('instantiation_error', ",
+                leaf::atom(class_name),
+                ") in",
+            ],
+            line(),
+            docvec![
+                "let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
+                leaf::atom(selector),
+                ") in",
+            ],
+            line(),
+            docvec![
+                "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+                leaf::binary_lit(hint),
+                ") in",
+            ],
+            line(),
+            "call 'beamtalk_error':'raise'(Error2)",
+        ]
+    }
+
     /// Builds the 4-step `instantiation_error` let-chain for a stub method that always raises.
     ///
     /// Shared by all four actor/abstract instantiation guard methods. Generates:
@@ -369,25 +415,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    docvec![
-                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', ",
-                        leaf::atom(class_name),
-                        ") in",
-                    ],
-                    line(),
-                    docvec![
-                        "let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
-                        leaf::atom(selector),
-                        ") in",
-                    ],
-                    line(),
-                    docvec![
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                        leaf::binary_lit(hint),
-                        ") in",
-                    ],
-                    line(),
-                    "call 'beamtalk_error':'raise'(Error2)",
+                    Self::instantiation_error_expr(class_name, selector, hint)
                 ]
             ),
             "\n",

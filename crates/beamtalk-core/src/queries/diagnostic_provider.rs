@@ -1744,11 +1744,18 @@ typed Object subclass: MyTyped
             ),
             // ── Lint validator: always-true condition ──
             ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
-            // ── Actor new error ──
-            (
-                "actor new",
-                "Actor subclass: A\n  state: v = 0\n  go => self.v\n\nA new",
-            ),
+            // Note: "actor new" (`Actor subclass: A ... A new`) used to live here as
+            // a Warning/Hint exemplar, but BT-3071 lifted Actor's `new`/`new:` into
+            // real, hierarchy-resolvable `class sealed new`/`new:` declarations on
+            // Actor.bt — so the TypeChecker no longer treats the send as unknown and
+            // stops contributing a Warning/Hint diagnostic for it (the DNU-style
+            // secondary signal this snippet exercised). The actual "use spawn, not
+            // new" protection is untouched: `check_actor_new_usage` (BT-563/BT-1524)
+            // still raises a hard compile Error independent of hierarchy resolution
+            // — see `semantic_analysis::tests::test_actor_new_error_in_standalone_method`
+            // and `error_actor_subclass_new` below — just not a Warning/Hint/Lint this
+            // category-completeness test cares about, so the snippet was removed
+            // rather than left permanently vacuous.
             // ── Type checker: missing type annotation in typed class ──
             (
                 "missing type annotation in typed class",
@@ -1797,10 +1804,11 @@ typed Object subclass: MyTyped
                 "Object subclass: Foo\n  bar => x := 42. 0",
             ),
             ("always-true condition", "true ifTrue: [1] ifFalse: [2]"),
-            (
-                "actor new",
-                "Actor subclass: A\n  state: v = 0\n  go => self.v\n\nA new",
-            ),
+            // "actor new" removed (BT-3071) — see the matching note in
+            // `all_warnings_and_hints_have_categories` above; it no longer produces
+            // a Warning/Hint/Lint diagnostic now that Actor's `new`/`new:` are real,
+            // resolvable class methods, only the unrelated hard compile Error this
+            // Warning/Hint-scoped test doesn't collect.
             (
                 "missing type annotation in typed class",
                 "typed Object subclass: Foo\n  state: x = 0\n  bar => self.x",

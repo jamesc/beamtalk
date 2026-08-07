@@ -535,16 +535,20 @@ separate `**` operator (unlike `Integer`) — use `raisedTo:`, which `**` desuga
 ### Actor (`stdlib/src/Actor.bt`)
 
 **Class:** `Actor` — superclass: `Object` — `@sealed`
-**Methods:** 24/24 implemented (100%)
-**Correction (BT-2976):** `new`/`new:` (previously documented as raising "Use spawn instead" errors) and
-`describe` no longer exist on `Actor` — the class-side registration (`spawnAs:`, `named:`, `allRegistered`, …)
-and lifecycle/monitoring protocol below were added since the last audit (BT-2966-era work) and were entirely
-undocumented here.
+**Methods:** 26/26 implemented (100%)
+**Correction (BT-2976):** `describe` no longer exists on `Actor` — the class-side registration (`spawnAs:`,
+`named:`, `allRegistered`, …) and lifecycle/monitoring protocol below were added since the last audit
+(BT-2966-era work) and were entirely undocumented here.
+**Update (BT-3071):** `new`/`new:` (previously codegen-injected error stubs invisible to this source-based
+audit) are now real `class sealed new` / `new:` declarations on `Actor.bt` — both always raise
+`instantiation_error` ("Use spawn instead" / "Use spawnWith: instead"); see `docs/ADR/0013-class-variables-class-methods-instantiation.md`.
 
 | Selector | Mechanism | Status | Notes |
 |----------|-----------|--------|-------|
 | `class spawn` | intrinsic | ✅ | `gen_server:start_link` with default state |
 | `class spawnWith:` | intrinsic | ✅ | With constructor args |
+| `class new` | intrinsic | ✅ | Always raises `instantiation_error` — actors use `spawn`, not `new` |
+| `class new:` | intrinsic | ✅ | Always raises `instantiation_error` — actors use `spawnWith:`, not `new:` |
 | `class spawnAs:` | pure BT | ✅ | Atomically spawn and register under `name` |
 | `class spawnWith:as:` | pure BT | ✅ | Atomically spawn with init args and register under `name` |
 | `class named:` | pure BT | ✅ | Look up a registered actor by name, checked against the receiver class |

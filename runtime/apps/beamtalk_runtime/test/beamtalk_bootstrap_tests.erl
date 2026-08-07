@@ -230,12 +230,21 @@ actor_methods_test_() ->
                 ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
 
                 %% spawn/spawnWith: are class-side methods (BT-1056)
-                %% BT-1524: new/new: overrides removed from Actor
+                %% BT-3071: new/new: are back on Actor's class methods —
+                %% lifted from the codegen-injected error stubs into real,
+                %% documented `class sealed new` / `new:` declarations in
+                %% Actor.bt. The compiled body still always raises
+                %% instantiation_error, and `check_actor_new_usage`
+                %% (BT-563/BT-1524's own hard compile-time error) still
+                %% rejects `ActorSubclass new` before this method is ever
+                %% reached — see
+                %% semantic_analysis::tests::test_actor_new_error_in_standalone_method
+                %% on the compiler side.
                 ClassMethods = beamtalk_object_class:local_class_methods(ActorClassPid),
                 ?assert(lists:member('spawn', ClassMethods)),
                 ?assert(lists:member('spawnWith:', ClassMethods)),
-                ?assertNot(lists:member('new', ClassMethods)),
-                ?assertNot(lists:member('new:', ClassMethods)),
+                ?assert(lists:member('new', ClassMethods)),
+                ?assert(lists:member('new:', ClassMethods)),
 
                 %% stop/kill/isAlive are instance-side methods
                 InstanceMethods = beamtalk_object_class:methods(ActorClassPid),

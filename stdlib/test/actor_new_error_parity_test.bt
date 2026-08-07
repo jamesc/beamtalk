@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3071: Actor `new`/`new:` reject direct instantiation with an
+// identical structured `instantiation_error` regardless of dispatch path.
+// `ActorLifecycleTest testNewRaisesInstantiationError` already covers the
+// static-send path (`Counter new`); this file rounds out the dynamic-send
+// (`perform:`) and `self new` (BT-893's class-method self-send) paths, all
+// of which route to the same compiled `new/0` / `new/1` on the actor's own
+// module (see Actor.bt's `class sealed new` / `class sealed new:`).
+
+TestCase subclass: ActorNewErrorParityTest
+
+  testNewViaPerformRaisesInstantiationError =>
+    // Dynamic dispatch (perform:) must raise the same structured error as
+    // the static `Counter new` send.
+    self should: [Counter perform: #new] raise: #instantiation_error
+    self should: [
+      Counter perform: #new: withArguments: #(#{})
+    ] raise: #instantiation_error
+
+  testSelfNewInsideClassMethodRaisesInstantiationError =>
+    // `self new` inside a class method (BT-893's deadlock-avoiding
+    // class_self_new path, exercised via ActorSelfNewFixture) must raise
+    // the same structured error as the static and dynamic sends.
+    self should: [
+      ActorSelfNewFixture triggerSelfNew
+    ] raise: #instantiation_error
+    self should: [
+      ActorSelfNewFixture triggerSelfNewWith: #{}
+    ] raise: #instantiation_error
