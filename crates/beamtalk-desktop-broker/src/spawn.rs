@@ -436,7 +436,7 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
 /// for the same workspace — e.g. a stale one mid-reap while a new one spawns
 /// on retry — never race on the same `sys.config`/boot files.
 #[cfg(windows)]
-fn release_tmp_dir(workspace_id: &str, port: u16) -> PathBuf {
+pub(crate) fn release_tmp_dir(workspace_id: &str, port: u16) -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("beamtalk-release-tmp")

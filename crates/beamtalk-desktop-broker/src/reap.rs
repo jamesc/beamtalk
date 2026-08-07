@@ -102,13 +102,37 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
 }
 
 /// Remove a front record — called on clean detach, so a graceful stop
-/// doesn't leave a stale record for the next sweep to trip over.
+/// doesn't leave a stale record for the next sweep to trip over. Also
+/// removes that front's per-front `RELEASE_TMP` directory on Windows
+/// (BT-3046 adversarial-review follow-up): that directory holds the boot's
+/// resolved `sys.config`, embedding `SECRET_KEY_BASE` and the workspace
+/// cookie, which are meant to be ephemeral per-boot secrets — left behind,
+/// they'd accumulate one live-secret directory per spawn/retry, forever.
+/// Every path that clears a front record (this sweep, and both detach call
+/// sites in `desktop/src-tauri/src/commands.rs`) goes through here, so this
+/// one hook covers all of them.
 ///
 /// # Errors
 ///
 /// Returns an error if the record file exists but can't be removed
 /// (anything other than "already gone").
 pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let release_tmp = crate::spawn::release_tmp_dir(workspace_id, port);
+        if let Err(e) = std::fs::remove_dir_all(&release_tmp) {
+            if e.kind() != ErrorKind::NotFound {
+                tracing::warn!(
+                    workspace = %workspace_id,
+                    port,
+                    path = %release_tmp.display(),
+                    error = %e,
+                    "remove_record: failed to remove per-front RELEASE_TMP directory"
+                );
+            }
+        }
+    }
+
     let path = record_path(dir, workspace_id, port);
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -560,6 +584,24 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         // Removing a record that was never saved must not error.
         remove_record(tmp.path(), "nonexistent", 1).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_record_also_removes_the_release_tmp_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let rec = record(4242, Some(555));
+        let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, rec.port);
+        std::fs::create_dir_all(&release_tmp).unwrap();
+        std::fs::write(release_tmp.join("sys.config"), b"secrets").unwrap();
+
+        save_record(tmp.path(), &rec).unwrap();
+        remove_record(tmp.path(), &rec.workspace_id, rec.port).unwrap();
+
+        assert!(
+            !release_tmp.exists(),
+            "RELEASE_TMP directory should be removed along with the front record"
+        );
     }
 
     #[test]
