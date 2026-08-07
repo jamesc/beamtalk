@@ -1953,6 +1953,113 @@ fn test_reject_wrong_arity_block_is_compile_error() {
 }
 
 #[test]
+fn test_any_satisfy_wrong_arity_block_is_compile_error() {
+    // anySatisfy: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at search_ops.rs:61.
+    let src =
+        "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "anySatisfy: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_all_satisfy_wrong_arity_block_is_compile_error() {
+    // allSatisfy: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at search_ops.rs:108.
+    let src =
+        "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "allSatisfy: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_detect_wrong_arity_block_is_compile_error() {
+    // detect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at search_ops.rs:349.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items detect: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "detect: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_detect_if_none_wrong_arity_predicate_is_compile_error() {
+    // detect:ifNone: requires a 1-arg predicate block. A 0-arg predicate (`[nil]`)
+    // must trigger the first validate_block_arity_exact call and produce a
+    // BlockArityError, covering the `?` branch at search_ops.rs:401.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items detect: [nil] ifNone: [42]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "detect:ifNone: with a 0-arg predicate block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_detect_if_none_wrong_arity_if_none_block_is_compile_error() {
+    // detect:ifNone: requires a 0-arg ifNone block. A 1-arg ifNone block (`[:x | x]`)
+    // must trigger the second validate_block_arity_exact call and produce a
+    // BlockArityError, covering the `?` branch at search_ops.rs:408.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0] ifNone: [:x | x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "detect:ifNone: with a 1-arg ifNone block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_select_nested_in_direct_params_loop() {
     // BT-1329: select: with a local mutation nested inside a direct-params to:do:
     // loop. The outer loop sets in_direct_params_loop=true, which causes
