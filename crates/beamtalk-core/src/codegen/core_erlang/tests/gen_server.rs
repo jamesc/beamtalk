@@ -1177,9 +1177,13 @@ fn test_class_registration_generation() {
         header_exports.contains("'has_method'/1"),
         "Generated class module must export has_method/1 in header. Got header:\n{header_exports}"
     );
-    // And the classifier's reachable set (superclass/0, class_name/0) must
-    // match what the module actually exports — these are the two auto-exports
-    // reachable via plain Beamtalk self-send.
+    // superclass/0 and class_name/0 must always be in the header: class_name/0
+    // is still reachable via `is_class_auto_export_selector`'s self-send
+    // classifier (BT-2007), and superclass/0 remains the intrinsic's own
+    // gen_server:call reply path plus the target for non-self-send dispatch —
+    // even though self-sent `superclass` itself now routes through
+    // `class_self_send_reflective_primitive` instead of this raw export
+    // (BT-3057).
     assert!(
         header_exports.contains("'superclass'/0"),
         "Generated class module must export superclass/0 in header. Got header:\n{header_exports}"
