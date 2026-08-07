@@ -288,6 +288,19 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
                 report.pid_reused_skipped.push(record.clone());
             }
         }
+        // Known residual (BT-3046 adversarial-review follow-up): on Windows,
+        // `TerminateProcess` above is documented as asynchronous, so a
+        // `Reap` disposition's `remove_record` call just below — which also
+        // removes that front's RELEASE_TMP directory — can race the process
+        // actually exiting and releasing its open file handles there, same
+        // shape as the bug fixed in `detach_internal`. Left unretried here:
+        // unlike Detach/Quit (the paths a user exercises constantly), a
+        // sweep only reaches a `Reap` disposition for an orphan from a
+        // *previous, already-dead* broker process — by then `JobHandle`'s
+        // kill-on-close (spawn.rs) has usually already torn the child's
+        // process tree down before this ever runs, so the race window here
+        // is narrow and this path is not the "accumulates forever" case the
+        // Blocker above was about.
         remove_record(dir, &record.workspace_id, record.port)?;
     }
     Ok(report)
