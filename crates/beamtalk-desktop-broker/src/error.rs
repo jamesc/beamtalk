@@ -67,6 +67,19 @@ pub enum BrokerError {
     /// (non-`Sync` in some configurations) internals.
     #[error("{0}")]
     Workspace(String),
+
+    /// `SpawnConfig::launcher` (or its `BEAMTALK_ATTACH_LAUNCHER` override,
+    /// see `desktop/src-tauri/src/launcher.rs`) points at an entry point
+    /// built for the wrong platform — e.g. a Unix `bin/server` shell script
+    /// on Windows, or `bin\bt_attach.bat` on Unix (BT-3046). Caught by a
+    /// cheap extension check in `spawn::build_launch_command` *before*
+    /// `Command::spawn`, so the failure is this named error rather than an
+    /// opaque OS error (`os error 193` — "not a valid Win32 application" —
+    /// when Windows tries to exec a shebang script) or a confusing
+    /// `PortsExhausted` from `spawn_front_with_port_retry`'s bind-failure
+    /// heuristic misreading every immediate exit as a port conflict.
+    #[error("launcher path '{0}' does not look like a valid entry point for this platform — {1}")]
+    LauncherPlatformMismatch(String, &'static str),
 }
 
 impl From<miette::Report> for BrokerError {

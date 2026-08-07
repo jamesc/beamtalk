@@ -260,9 +260,54 @@ mod tests {
         assert_eq!(result.unwrap(), PathBuf::from("/custom/path/to/beamtalk"));
     }
 
+    /// RAII guard that restores `PATH` to the value captured at construction
+    /// (or removes it if it wasn't set to begin with) when dropped (BT-3046).
+    ///
+    /// The two tests below used to just `remove_var("PATH")` on cleanup,
+    /// reasoning that was "restoring" it — but this test binary inherits a
+    /// real `PATH` from the process that launched it (cargo/the shell), so
+    /// unconditionally removing it instead of restoring that inherited value
+    /// leaves `PATH` unset for the rest of the binary's process lifetime,
+    /// not just for the guarded critical section. That silently broke any
+    /// *later* test in this binary relying on shell/PATH-based command
+    /// resolution (e.g. a Windows `.bat` launcher's `cmd.exe` looking up
+    /// `ping`) regardless of `ENV_LOCK` — the lock only serializes the
+    /// mutation window, it doesn't undo a mutation that outlives it.
+    ///
+    /// A `Drop` guard rather than a plain restore-on-success call
+    /// (adversarial-review follow-up): a test assertion panicking between the
+    /// `set_var` and an explicit restore call would skip that call entirely,
+    /// leaving `PATH` clobbered *and*, since the panic unwinds through the
+    /// `ENV_LOCK` guard too, poisoning the mutex — every later test's
+    /// `.lock().unwrap()` would then panic immediately, the same class of
+    /// binary-wide breakage this fix exists to close. `Drop` runs during
+    /// unwinding too, so the restore happens either way.
+    struct PathRestoreGuard(Option<std::ffi::OsString>);
+
+    impl PathRestoreGuard {
+        /// Capture the current `PATH` for later restoration.
+        fn capture() -> Self {
+            Self(std::env::var_os("PATH"))
+        }
+    }
+
+    impl Drop for PathRestoreGuard {
+        fn drop(&mut self) {
+            // SAFETY: guarded by ENV_LOCK — every call site below holds it
+            // for the guard's entire lifetime.
+            unsafe {
+                match self.0.take() {
+                    Some(v) => std::env::set_var("PATH", v),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+        }
+    }
+
     #[test]
     fn resolve_cli_path_finds_an_executable_on_path() {
         let _guard = ENV_LOCK.lock().unwrap();
+        let _path_guard = PathRestoreGuard::capture();
         let tmp = tempfile::TempDir::new().unwrap();
         let fake_cli = tmp.path().join(exe_name());
         std::fs::write(&fake_cli, b"#!/bin/sh\n").unwrap();
@@ -273,11 +318,6 @@ mod tests {
             std::env::set_var("PATH", tmp.path());
         }
         let result = resolve_cli_path();
-        // SAFETY: guarded by ENV_LOCK; restore PATH so later tests in this
-        // binary (e.g. spawning real processes) aren't left with a bogus PATH.
-        unsafe {
-            std::env::remove_var("PATH");
-        }
 
         assert_eq!(result.unwrap(), fake_cli);
     }
@@ -285,6 +325,7 @@ mod tests {
     #[test]
     fn resolve_cli_path_errors_when_nothing_found() {
         let _guard = ENV_LOCK.lock().unwrap();
+        let _path_guard = PathRestoreGuard::capture();
         let tmp = tempfile::TempDir::new().unwrap(); // empty directory
         // SAFETY: guarded by ENV_LOCK.
         unsafe {
@@ -292,10 +333,6 @@ mod tests {
             std::env::set_var("PATH", tmp.path());
         }
         let result = resolve_cli_path();
-        // SAFETY: guarded by ENV_LOCK.
-        unsafe {
-            std::env::remove_var("PATH");
-        }
 
         assert!(matches!(result, Err(BrokerError::CliNotFound)));
     }

@@ -350,15 +350,21 @@ pub fn detach_internal(
 ) -> Result<(), String> {
     let removed = locked(&state.attach).remove(workspace_id);
 
+    if let Some(mut child) = locked(&state.children).remove(workspace_id) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    // Removing the on-disk record — which also removes the front's
+    // RELEASE_TMP directory on Windows (BT-3046) — must happen *after* the
+    // child is confirmed dead above: while still running, the front holds
+    // files open under RELEASE_TMP, so an earlier removal would plausibly
+    // fail with a sharing violation and leave the secrets directory behind.
+    // Matches `kill_and_untrack`'s already-correct kill-then-untrack order.
     if let Some(front) = removed {
         if let Ok(dir) = reap::state_dir() {
             let _ = reap::remove_record(&dir, workspace_id, front.port);
         }
-    }
-
-    if let Some(mut child) = locked(&state.children).remove(workspace_id) {
-        let _ = child.kill();
-        let _ = child.wait();
     }
 
     let label = window_label(workspace_id);
