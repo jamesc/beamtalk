@@ -253,10 +253,16 @@ pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
         let handle = std::thread::spawn(move || {
             remove_release_tmp_dir_with_retry(&workspace_id, port);
         });
-        pending_release_tmp_cleanups()
+        let mut pending = pending_release_tmp_cleanups()
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(handle);
+            .unwrap_or_else(PoisonError::into_inner);
+        // Opportunistic prune (adversarial-review follow-up): this Vec is
+        // only otherwise drained by `wait_for_release_tmp_cleanup` on app
+        // exit, so over a long-running session with many attach/detach
+        // cycles it would otherwise grow monotonically, never freeing
+        // already-finished handles' small allocations.
+        pending.retain(|h| !h.is_finished());
+        pending.push(handle);
     }
 
     let path = record_path(dir, workspace_id, port);
@@ -1039,6 +1045,18 @@ mod tests {
     /// `wait_for_release_tmp_cleanup()` returns — proving it actually joins
     /// the backgrounded thread rather than merely sleeping a fixed amount
     /// and hoping.
+    ///
+    /// Shared-state caveat (adversarial-review follow-up, not fixed): both
+    /// this test and `remove_record_also_removes_the_release_tmp_directory`
+    /// register handles in the same process-wide `pending_release_tmp_cleanups`
+    /// Vec, so under default parallel `cargo test` execution this test's own
+    /// `wait_for_release_tmp_cleanup()` call could drain and join the
+    /// *other* test's handle instead of (or in addition to) this one's. The
+    /// assertion below still checks this test's own `release_tmp` directory,
+    /// not which handle got joined, so it doesn't produce a false failure —
+    /// but it means a passing run doesn't strictly guarantee *this* call
+    /// waited on *this* test's handle, only that the directory was gone by
+    /// the time it checked.
     #[cfg(windows)]
     #[test]
     fn wait_for_release_tmp_cleanup_blocks_until_pending_cleanup_finishes() {
