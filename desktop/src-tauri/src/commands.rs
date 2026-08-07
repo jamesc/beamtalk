@@ -463,6 +463,15 @@ pub fn detach_all(app: &AppHandle, state: &AppState) {
     for id in ids {
         let _ = detach_internal(app, state, &id);
     }
+    // BT-3059: `detach_internal`'s per-workspace `RELEASE_TMP` cleanup now
+    // runs on a background thread rather than blocking the loop above, but
+    // both of this function's callers (`quit` below, and `main.rs`'s
+    // `RunEvent::ExitRequested` handler) terminate the OS process shortly
+    // after this returns — which would otherwise abandon that cleanup
+    // mid-retry on every ordinary quit, silently defeating BT-3046's reason
+    // for retrying in the first place (see
+    // `reap::wait_for_release_tmp_cleanup`'s doc comment).
+    reap::wait_for_release_tmp_cleanup();
 }
 
 fn emit_progress(app: &AppHandle, workspace_id: &str, stage: &str) {
