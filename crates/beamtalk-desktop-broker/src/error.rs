@@ -134,6 +134,25 @@ pub enum BrokerError {
     /// heuristic misreading every immediate exit as a port conflict.
     #[error("launcher path '{0}' does not look like a valid entry point for this platform — {1}")]
     LauncherPlatformMismatch(String, &'static str),
+
+    /// `SpawnConfig::launcher` looks like a valid entry point for this
+    /// platform ([`BrokerError::LauncherPlatformMismatch`] already passed),
+    /// but no file exists there (BT-3056 adversarial-review follow-up) —
+    /// the far more common real-world spawn failure in practice: an
+    /// unpackaged dev build where `BEAMTALK_ATTACH_LAUNCHER` /
+    /// `desktop/src-tauri/src/launcher.rs`'s `resolve_launcher_path` fallback
+    /// path hasn't been built yet. Checked in `spawn::spawn_front`
+    /// immediately before `Command::spawn` (deliberately *not* inside
+    /// `build_launch_command`, which several of that function's own unit
+    /// tests exercise against synthetic non-existent launcher paths purely
+    /// for `Command` introspection) — this named variant replaces what used
+    /// to surface as an opaque [`BrokerError::Io`] from the failed
+    /// `Command::spawn` call itself.
+    #[error(
+        "launcher '{0}' does not exist — is the release built/bundled yet? \
+         (see BEAMTALK_ATTACH_LAUNCHER for pointing at a local dev build)"
+    )]
+    LauncherNotFound(String),
 }
 
 impl From<miette::Report> for BrokerError {

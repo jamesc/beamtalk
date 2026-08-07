@@ -79,18 +79,54 @@ pub fn candidate_paths(home: Option<&Path>) -> Vec<PathBuf> {
 /// silently falling through) → `PATH` → [`candidate_paths`]. Returns
 /// [`BrokerError::CliNotFound`] if nothing is found.
 ///
+/// A thin wrapper reading the real process environment and handing it to
+/// [`resolve_cli_path_with`] — see that function's doc comment (BT-3056) for
+/// why the actual resolution logic lives there instead, injectable rather
+/// than reading `std::env` directly.
+///
 /// # Errors
 ///
 /// Returns [`BrokerError::CliNotFound`] if the CLI can't be located by any
 /// of the resolution steps above.
 pub fn resolve_cli_path() -> Result<PathBuf> {
-    if let Ok(override_path) = std::env::var(CLI_PATH_OVERRIDE_ENV) {
+    resolve_cli_path_with(
+        std::env::var(CLI_PATH_OVERRIDE_ENV).ok(),
+        std::env::var("PATH").ok(),
+        dirs::home_dir().as_deref(),
+    )
+}
+
+/// Core resolution logic behind [`resolve_cli_path`], with every environment
+/// input ([`CLI_PATH_OVERRIDE_ENV`], `PATH`, the home directory) taken as a
+/// parameter instead of read from the real process environment (BT-3056
+/// adversarial-review follow-up).
+///
+/// This is what makes `resolve_cli_path`'s edge-case tests (an executable
+/// found via a synthetic `PATH`, and none found at all) possible without
+/// mutating process-global `std::env::set_var("PATH", ...)` — the two tests
+/// that used to do that were already RAII-guarded against leaking a clobbered
+/// `PATH` past themselves (BT-3046's `PathRestoreGuard`), but a shared
+/// `ENV_LOCK`-guarded mutation of real global state is still strictly more
+/// fragile than never touching it: any *future* test in this crate that
+/// spawns a process by bare executable name (matching it through shell/`PATH`
+/// resolution — e.g. a Windows `.bat` launcher's `cmd.exe` looking up `ping`)
+/// without also taking `ENV_LOCK` would silently race a real `PATH` mutation
+/// again. Injecting the search inputs here instead removes that risk
+/// entirely for this function's own tests, matching what
+/// [`search_path_var`]/[`candidate_paths`] (this function's own helpers)
+/// already did.
+fn resolve_cli_path_with(
+    override_path: Option<String>,
+    path_var: Option<String>,
+    home: Option<&Path>,
+) -> Result<PathBuf> {
+    if let Some(override_path) = override_path {
         if !override_path.is_empty() {
             return Ok(PathBuf::from(override_path));
         }
     }
 
-    if let Ok(path_var) = std::env::var("PATH") {
+    if let Some(path_var) = path_var {
         for candidate in search_path_var(&path_var, exe_name()) {
             if candidate.is_file() {
                 return Ok(candidate);
@@ -98,7 +134,7 @@ pub fn resolve_cli_path() -> Result<PathBuf> {
         }
     }
 
-    for candidate in candidate_paths(dirs::home_dir().as_deref()) {
+    for candidate in candidate_paths(home) {
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -181,7 +217,6 @@ pub fn stop_workspace(cli_path: &Path, workspace_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::ENV_LOCK;
 
     #[test]
     fn create_workspace_args_shape() {
@@ -250,89 +285,32 @@ mod tests {
 
     #[test]
     fn resolve_cli_path_prefers_the_override_env_var() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        // SAFETY: guarded by ENV_LOCK.
-        unsafe { std::env::set_var(CLI_PATH_OVERRIDE_ENV, "/custom/path/to/beamtalk") };
-        let result = resolve_cli_path();
-        // SAFETY: guarded by ENV_LOCK.
-        unsafe { std::env::remove_var(CLI_PATH_OVERRIDE_ENV) };
+        // BT-3056: no process-global env touched — the override is injected
+        // directly into resolve_cli_path_with.
+        let result =
+            resolve_cli_path_with(Some("/custom/path/to/beamtalk".to_string()), None, None);
 
         assert_eq!(result.unwrap(), PathBuf::from("/custom/path/to/beamtalk"));
     }
 
-    /// RAII guard that restores `PATH` to the value captured at construction
-    /// (or removes it if it wasn't set to begin with) when dropped (BT-3046).
-    ///
-    /// The two tests below used to just `remove_var("PATH")` on cleanup,
-    /// reasoning that was "restoring" it — but this test binary inherits a
-    /// real `PATH` from the process that launched it (cargo/the shell), so
-    /// unconditionally removing it instead of restoring that inherited value
-    /// leaves `PATH` unset for the rest of the binary's process lifetime,
-    /// not just for the guarded critical section. That silently broke any
-    /// *later* test in this binary relying on shell/PATH-based command
-    /// resolution (e.g. a Windows `.bat` launcher's `cmd.exe` looking up
-    /// `ping`) regardless of `ENV_LOCK` — the lock only serializes the
-    /// mutation window, it doesn't undo a mutation that outlives it.
-    ///
-    /// A `Drop` guard rather than a plain restore-on-success call
-    /// (adversarial-review follow-up): a test assertion panicking between the
-    /// `set_var` and an explicit restore call would skip that call entirely,
-    /// leaving `PATH` clobbered *and*, since the panic unwinds through the
-    /// `ENV_LOCK` guard too, poisoning the mutex — every later test's
-    /// `.lock().unwrap()` would then panic immediately, the same class of
-    /// binary-wide breakage this fix exists to close. `Drop` runs during
-    /// unwinding too, so the restore happens either way.
-    struct PathRestoreGuard(Option<std::ffi::OsString>);
-
-    impl PathRestoreGuard {
-        /// Capture the current `PATH` for later restoration.
-        fn capture() -> Self {
-            Self(std::env::var_os("PATH"))
-        }
-    }
-
-    impl Drop for PathRestoreGuard {
-        fn drop(&mut self) {
-            // SAFETY: guarded by ENV_LOCK — every call site below holds it
-            // for the guard's entire lifetime.
-            unsafe {
-                match self.0.take() {
-                    Some(v) => std::env::set_var("PATH", v),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
-        }
-    }
-
     #[test]
     fn resolve_cli_path_finds_an_executable_on_path() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let _path_guard = PathRestoreGuard::capture();
         let tmp = tempfile::TempDir::new().unwrap();
         let fake_cli = tmp.path().join(exe_name());
         std::fs::write(&fake_cli, b"#!/bin/sh\n").unwrap();
 
-        // SAFETY: guarded by ENV_LOCK.
-        unsafe {
-            std::env::remove_var(CLI_PATH_OVERRIDE_ENV);
-            std::env::set_var("PATH", tmp.path());
-        }
-        let result = resolve_cli_path();
+        // BT-3056: the synthetic PATH is injected, not written to the real
+        // process environment — no ENV_LOCK, no restore-on-drop guard, no
+        // risk of leaking a clobbered PATH to any other test in this binary.
+        let result = resolve_cli_path_with(None, Some(tmp.path().display().to_string()), None);
 
         assert_eq!(result.unwrap(), fake_cli);
     }
 
     #[test]
     fn resolve_cli_path_errors_when_nothing_found() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let _path_guard = PathRestoreGuard::capture();
         let tmp = tempfile::TempDir::new().unwrap(); // empty directory
-        // SAFETY: guarded by ENV_LOCK.
-        unsafe {
-            std::env::remove_var(CLI_PATH_OVERRIDE_ENV);
-            std::env::set_var("PATH", tmp.path());
-        }
-        let result = resolve_cli_path();
+        let result = resolve_cli_path_with(None, Some(tmp.path().display().to_string()), None);
 
         assert!(matches!(result, Err(BrokerError::CliNotFound)));
     }

@@ -245,7 +245,11 @@ impl std::ops::DerefMut for SpawnedFront {
 /// (no `cookie` file), [`BrokerError::Json`] (malformed `metadata.json`),
 /// [`BrokerError::Workspace`] (a `beamtalk-workspace` failure), or
 /// [`BrokerError::Io`] (failed to create the `RELEASE_TMP` directory) before
-/// any process is spawned.
+/// any process is spawned. Also returns [`BrokerError::LauncherNotFound`]
+/// (BT-3056) if `config.launcher` looks right for this platform but no file
+/// actually exists there — the common unpackaged-dev-build failure mode,
+/// checked explicitly rather than left to surface as a generic `Io` error
+/// out of `Command::spawn` below.
 pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     if let Some(source) = oidc_configured(&config.ide_toml_path) {
         return Err(BrokerError::OidcConfigured(source.to_string()));
@@ -259,6 +263,35 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     }
 
     let mut cmd = build_launch_command(config)?;
+
+    // BT-3056 adversarial-review follow-up: checked here, immediately after
+    // `build_launch_command` succeeds, rather than inside it — that function
+    // has its own unit tests exercising synthetic non-existent launcher
+    // paths (e.g. `bin\bt_attach.bat`, `bin/server`) purely for `Command`
+    // introspection (program/args/env), which a check inside
+    // `build_launch_command` itself would break. `config.launcher` and
+    // `cmd`'s resolved program are always the same path on both platforms
+    // (see `build_launch_command`'s two arms), so checking the former here
+    // is equivalent to checking the latter.
+    if !config.launcher.is_file() {
+        // Second adversarial-review follow-up (BT-3056): on Windows,
+        // `build_launch_command` above already created this attempt's
+        // per-front `RELEASE_TMP` directory (`std::fs::create_dir_all`) —
+        // returning here without removing it would leave that directory
+        // behind forever: no `FrontRecord` is ever written for a
+        // `spawn_front` call that fails this early, so `remove_record`'s own
+        // `RELEASE_TMP` cleanup hook (BT-3046/BT-3059) never runs for it.
+        // Same cleanup the job-object-assign failure path below already
+        // does for the identical reason, just inlined here too.
+        #[cfg(windows)]
+        {
+            let _ = std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, config.port));
+        }
+        return Err(BrokerError::LauncherNotFound(
+            config.launcher.display().to_string(),
+        ));
+    }
+
     detach(&mut cmd);
 
     // Created before `cmd.spawn()` (not after) so there is no
@@ -1121,6 +1154,50 @@ mod tests {
         );
     }
 
+    /// BT-3056: `build_launch_command` on its own never checks the launcher
+    /// actually exists (it only cares that the *path* looks right — see
+    /// `check_launcher_platform`) — that check lives in `spawn_front`
+    /// instead, deliberately, so it doesn't break the many
+    /// `build_launch_command_*` tests in this file that pass synthetic
+    /// non-existent launcher paths purely for `Command` introspection. This
+    /// exercises `spawn_front` end-to-end with a real (never-written)
+    /// absolute launcher path and a fully valid workspace, so the *only*
+    /// thing standing between it and a real `Command::spawn` call is the
+    /// missing file.
+    ///
+    /// Holds `ENV_LOCK` (adversarial-review follow-up): `spawn_front` reads
+    /// `BT_OIDC_*` process-globals via `oidc_configured`, which
+    /// `oidc_guard::tests` mutates concurrently in this same test binary —
+    /// without the lock this could spuriously observe `OidcConfigured`
+    /// instead of reaching the launcher-existence check this test exists to
+    /// exercise, matching every other `spawn_front`-calling test in this
+    /// file (e.g. `spawn_front_refuses_when_oidc_env_present`).
+    #[cfg(windows)]
+    #[test]
+    fn spawn_front_errors_with_launcher_not_found_when_file_is_missing() {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let ws = WindowsTestWorkspaceDir::new(
+            "win_launcher_missing",
+            Some("bt_attach_win_launcher_missing@localhost"),
+            Some("testcookie"),
+        );
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A well-formed, absolute .bat path — passes check_launcher_platform
+        // — that is simply never written to disk.
+        let launcher = tmp.path().join("bin").join("bt_attach.bat");
+        let mut config = SpawnConfig::new(launcher.clone(), ws.id.clone(), 4567);
+        config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::remove_var("BT_OIDC_ISSUER") };
+
+        let result = spawn_front(&config);
+
+        assert!(
+            matches!(result, Err(BrokerError::LauncherNotFound(ref p)) if *p == launcher.display().to_string()),
+            "expected LauncherNotFound({launcher:?}), got {result:?}"
+        );
+    }
+
     /// BT-3060: the Windows spawn path must hard-fail — not silently guess a
     /// node name via [`crate::discovery::default_node_name`] — when a
     /// workspace's `metadata.json` has no `node_name` yet (created but never
@@ -1271,6 +1348,32 @@ mod tests {
         assert!(
             matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
             "expected LauncherPlatformMismatch, got {result:?}"
+        );
+    }
+
+    /// BT-3056: see the Windows counterpart
+    /// (`spawn_front_errors_with_launcher_not_found_when_file_is_missing`)
+    /// for the full rationale, including why this holds `ENV_LOCK` — this
+    /// checks the same `spawn_front`-level existence guard on the Unix arm,
+    /// with a well-formed (no `.bat`/`.cmd`/`.exe` extension) but
+    /// never-written launcher path.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_front_errors_with_launcher_not_found_when_file_is_missing() {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        let ws = TestWorkspaceDir::new("launcher_missing");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let launcher = tmp.path().join("server"); // deliberately never written
+        let mut config = SpawnConfig::new(launcher.clone(), ws.id.clone(), 4567);
+        config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::remove_var("BT_OIDC_ISSUER") };
+
+        let result = spawn_front(&config);
+
+        assert!(
+            matches!(result, Err(BrokerError::LauncherNotFound(ref p)) if *p == launcher.display().to_string()),
+            "expected LauncherNotFound({launcher:?}), got {result:?}"
         );
     }
 
