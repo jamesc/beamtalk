@@ -44,7 +44,6 @@
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-#[cfg(unix)]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -118,26 +117,62 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
 /// (anything other than "already gone").
 pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
     #[cfg(windows)]
-    {
-        let release_tmp = crate::spawn::release_tmp_dir(workspace_id, port);
-        if let Err(e) = std::fs::remove_dir_all(&release_tmp) {
-            if e.kind() != ErrorKind::NotFound {
-                tracing::warn!(
-                    workspace = %workspace_id,
-                    port,
-                    path = %release_tmp.display(),
-                    error = %e,
-                    "remove_record: failed to remove per-front RELEASE_TMP directory"
-                );
-            }
-        }
-    }
+    remove_release_tmp_dir_with_retry(workspace_id, port);
 
     let path = record_path(dir, workspace_id, port);
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// How long to retry [`remove_dir_all`] on the per-front `RELEASE_TMP`
+/// directory before giving up and logging (10 attempts, 100ms apart — up to
+/// ~1s total).
+#[cfg(windows)]
+const RELEASE_TMP_REMOVE_ATTEMPTS: u32 = 10;
+#[cfg(windows)]
+const RELEASE_TMP_REMOVE_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+/// Best-effort removal of a front's `RELEASE_TMP` directory, retrying briefly
+/// on failure (BT-3046 adversarial-review follow-up, second pass).
+///
+/// The caller (`remove_record`) runs immediately after the front's
+/// `SpawnedFront` is dropped, which closes its `JobHandle`
+/// (`crate::winjob`) — `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` then kills
+/// `erl.exe` (the process actually holding files open under `RELEASE_TMP`;
+/// `Child::kill()`/`.wait()` upstream only ever touched `cmd.exe`, see
+/// `winjob.rs`'s doc comment), but that kill-on-close is fire-and-forget —
+/// there is no handle to `erl.exe` available here to wait on directly. A
+/// single immediate `remove_dir_all` attempt can therefore plausibly race
+/// `erl.exe` still exiting and lose with a sharing violation, on an entirely
+/// ordinary detach. Retrying briefly absorbs that race without needing to
+/// discover `erl.exe`'s pid and poll it separately.
+#[cfg(windows)]
+fn remove_release_tmp_dir_with_retry(workspace_id: &str, port: u16) {
+    let release_tmp = crate::spawn::release_tmp_dir(workspace_id, port);
+    let mut last_err = None;
+    for attempt in 0..RELEASE_TMP_REMOVE_ATTEMPTS {
+        match std::fs::remove_dir_all(&release_tmp) {
+            Ok(()) => return,
+            Err(e) if e.kind() == ErrorKind::NotFound => return,
+            Err(e) => {
+                last_err = Some(e);
+                if attempt + 1 < RELEASE_TMP_REMOVE_ATTEMPTS {
+                    std::thread::sleep(RELEASE_TMP_REMOVE_RETRY_DELAY);
+                }
+            }
+        }
+    }
+    if let Some(e) = last_err {
+        tracing::warn!(
+            workspace = %workspace_id,
+            port,
+            path = %release_tmp.display(),
+            error = %e,
+            "remove_record: failed to remove per-front RELEASE_TMP directory after retrying"
+        );
     }
 }
 
@@ -288,19 +323,12 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
                 report.pid_reused_skipped.push(record.clone());
             }
         }
-        // Known residual (BT-3046 adversarial-review follow-up): on Windows,
-        // `TerminateProcess` above is documented as asynchronous, so a
-        // `Reap` disposition's `remove_record` call just below — which also
-        // removes that front's RELEASE_TMP directory — can race the process
-        // actually exiting and releasing its open file handles there, same
-        // shape as the bug fixed in `detach_internal`. Left unretried here:
-        // unlike Detach/Quit (the paths a user exercises constantly), a
-        // sweep only reaches a `Reap` disposition for an orphan from a
-        // *previous, already-dead* broker process — by then `JobHandle`'s
-        // kill-on-close (spawn.rs) has usually already torn the child's
-        // process tree down before this ever runs, so the race window here
-        // is narrow and this path is not the "accumulates forever" case the
-        // Blocker above was about.
+        // `remove_record` below retries its Windows RELEASE_TMP removal
+        // briefly (BT-3046 adversarial-review follow-up), which also
+        // absorbs `TerminateProcess`'s documented asynchronicity here — a
+        // `Reap` disposition's target may not have fully exited (and
+        // released files it held open under RELEASE_TMP) by the time that
+        // call returns above.
         remove_record(dir, &record.workspace_id, record.port)?;
     }
     Ok(report)

@@ -262,6 +262,15 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         // behind.
         if let Err(e) = job.assign(&child) {
             kill_orphaned_child(&mut child);
+            // Best-effort (BT-3046 adversarial-review follow-up, low
+            // severity): `build_launch_command` above already created this
+            // attempt's RELEASE_TMP directory. At this point in the boot
+            // sequence the release has likely not written secrets into it
+            // yet, but there's no reason to leave even an empty stray
+            // directory behind — same cleanup `remove_record` does on the
+            // success path, just inlined here since this failure never
+            // reaches a saved `FrontRecord` for `remove_record` to key off.
+            let _ = std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, config.port));
             return Err(e.into());
         }
         Ok(SpawnedFront { child, job })
