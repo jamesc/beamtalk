@@ -1957,7 +1957,8 @@ fn test_any_satisfy_wrong_arity_block_is_compile_error() {
     // anySatisfy: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
     // validate_block_arity_exact and produce a BlockArityError, covering the `?`
     // error-propagation branch at search_ops.rs:61.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [nil]\n";
+    let src =
+        "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [nil]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
     let result = crate::codegen::core_erlang::generate_module(
@@ -1978,7 +1979,8 @@ fn test_all_satisfy_wrong_arity_block_is_compile_error() {
     // allSatisfy: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
     // validate_block_arity_exact and produce a BlockArityError, covering the `?`
     // error-propagation branch at search_ops.rs:108.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [nil]\n";
+    let src =
+        "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [nil]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
     let result = crate::codegen::core_erlang::generate_module(
