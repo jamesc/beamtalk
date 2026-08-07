@@ -530,6 +530,15 @@ fn persist_front_record(workspace_id: &str, port: u16, pid: u32) {
 /// `#[cfg(windows)]` too, since [`initial_node_name`] already recorded the
 /// verified-correct value on Unix — there is nothing for this to correct
 /// there.
+///
+/// `resolve_registered_node_name` below is deliberately *not* also passed
+/// `pid` to disambiguate a same-suffix race (BT-3062 investigated this and
+/// rejected it): `pid` here is `Child::id()` — `cmd.exe`'s pid on Windows,
+/// per `sname`'s module doc comment — not the `System.pid()` epmd's real
+/// registration actually embeds, so a pid-based check would never match on
+/// this, the only platform this function runs on. See `sname`'s module doc
+/// comment ("**Suffix-only matching**") for the full reasoning and the
+/// residual race this leaves accepted rather than closed.
 #[cfg(windows)]
 fn update_windows_node_name_after_readiness(workspace_id: &str, port: u16, pid: u32) {
     let suffix = beamtalk_desktop_broker::sname::attach_node_suffix(workspace_id);

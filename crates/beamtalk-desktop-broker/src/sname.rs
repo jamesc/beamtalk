@@ -68,6 +68,49 @@
 //! a stale or placeholder value there was never a kill/reap-correctness bug,
 //! only a misleading one for anyone reading the on-disk record.
 //!
+//! **Suffix-only matching, deliberately not disambiguated by `pid` (BT-3062)**:
+//! a Claude review Suggestion on the BT-3045 PR proposed closing the
+//! crash→respawn race below by validating the resolved epmd name's own
+//! embedded pid segment against the caller's `expected_pid`
+//! (`Child::id()`/`FrontRecord.pid`) before [`crate::reap::update_record_node_name`]
+//! writes it. That doesn't actually work *here*: this function is only ever
+//! called from the Windows-only correction path
+//! (`desktop/src-tauri/src/commands.rs`'s `update_windows_node_name_after_readiness`,
+//! `#[cfg(windows)]`), and the pid segment epmd's real registration embeds is
+//! `System.pid()` — `erl.exe`'s own pid — which the "**Windows launch path**"
+//! paragraph above establishes is a *different* process from the one
+//! `Child::id()`/`FrontRecord.pid` identifies (`cmd.exe`, the `.bat` wrapper).
+//! Gating the match on `expected_pid == embedded pid` would therefore never
+//! match on Windows — not just in the racy case this was meant to close, but
+//! on *every* call, silently disabling the correction entirely rather than
+//! narrowing its race window. (On Unix the two pids genuinely are the same
+//! process per BT-3004's verification above, so the check would work there —
+//! but Unix never calls this function; `predict_node_name` is trusted
+//! directly there instead, see [`crate::spawn`]'s caller.)
+//!
+//! The crash→respawn race is real and stays open: front A (`FrontRecord`
+//! still on disk, pid X) dies and deregisters from epmd before its detach
+//! path runs, front B spawns for the *same* workspace under a different port
+//! and registers with epmd, and the background thread still resolving A's
+//! correction sees exactly one epmd match — B's — and (via
+//! `update_record_node_name`'s CAS, which only ever validates the *on-disk
+//! record's* pid, not the resolved name's) stamps B's real node name onto
+//! A's own record. Accepted rather than closed, because `FrontRecord.node_name`
+//! remains bookkeeping/display only everywhere it's read (`crate::reap`'s
+//! sweep keys entirely off `pid`, never `node_name` — see that module's doc
+//! comment) — the worst case is a transient, cosmetically-wrong value in a
+//! record a future sweep or the dying front's own delayed detach will clear
+//! anyway, not a kill/reap-correctness bug. A real fix would need a
+//! genuinely shared identity between the broker and the front's own
+//! `System.pid()` (e.g. baking per-spawn entropy — the HTTP port,
+//! already OS-allocated per spawn per `crate::port`'s docs — into
+//! [`attach_node_suffix`] itself, so two fronts for one workspace can never
+//! share a suffix in the first place) — a real but materially larger,
+//! cross-cutting change to a contract several other things depend on
+//! (`attach_node_suffix`'s own tests, the Elixir side's
+//! `BtAttach.Workspace.attach_sname/2` consumer), out of scope for this
+//! narrow follow-up.
+//!
 //! **DDD Context:** Desktop Shell
 
 /// Value to set `BT_ATTACH_NODE_SUFFIX` to for a spawn attaching to `workspace_id`.
@@ -125,6 +168,11 @@ pub fn pending_node_name(suffix: &str) -> String {
 /// (BT-3045). Looks for exactly one currently-registered short name with the
 /// `bt_attach_<suffix>_` prefix `BtAttach.Workspace.attach_sname/2` always
 /// produces.
+///
+/// Deliberately **not** disambiguated further by the caller's own pid
+/// (BT-3062) — see this module's doc comment's "**Suffix-only matching**"
+/// paragraph for why a pid-based check would silently break this function on
+/// the only platform it's actually called from, rather than narrow a race.
 ///
 /// Returns `Ok(None)` — not a guess — when epmd reports zero matches (the
 /// front hasn't distributed yet; `ensure_distributed/0` only runs lazily on
@@ -281,6 +329,15 @@ mod tests {
         );
     }
 
+    /// BT-3062 investigated closing this by requiring the resolved name's
+    /// embedded pid to match the caller's own known pid, but concluded (see
+    /// this module's doc comment, "**Suffix-only matching**" paragraph) that
+    /// a pid-based check would silently break every call on the only
+    /// platform this function runs on (Windows: the caller's known pid is
+    /// `cmd.exe`'s, not the `erl.exe` pid epmd's registration actually
+    /// embeds) — so this stays deliberately unresolved here, ambiguous
+    /// suffix matches still refuse to guess rather than picking one
+    /// arbitrarily.
     #[test]
     fn find_unique_match_returns_none_when_two_fronts_on_the_same_workspace_are_ambiguous() {
         // ADR 0097-anticipated scenario (see attach_node_suffix's doc
