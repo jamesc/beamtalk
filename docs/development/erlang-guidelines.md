@@ -803,8 +803,7 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `get_method_return_type/2` | `beamtalk_class_registry:get_method_return_type/2` |
 | `get_class_method_return_type/2` | `beamtalk_class_registry:get_class_method_return_type/2` |
 | `class_name/1` | `beamtalk_object_class:class_name/1` |
-| `module_name/1` | `beamtalk_object_class:module_name/1` |
-| `module_name_safe/1` | `beamtalk_object_class:module_name_safe/1` (preferred — resolves via ETS, no `gen_server:call`; avoids deadlocks in foreign-process blocks) |
+| `module_name/1` | `beamtalk_object_class:module_name_safe/1` (preferred — resolves via ETS, no `gen_server:call`; avoids deadlocks in foreign-process blocks) |
 | `set_class_var/3` | `beamtalk_object_class:set_class_var/3` |
 | `class_methods/1` | `beamtalk_object_class:methods/1` |
 | `local_class_methods/1` | `beamtalk_object_class:local_class_methods/1` |
