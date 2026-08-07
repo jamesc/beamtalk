@@ -44,11 +44,50 @@
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+
+/// Serializes every read-modify-write or delete of a [`FrontRecord`] file
+/// ([`save_record`], [`update_record_node_name`], [`remove_record`]) so two
+/// of those operations racing the same `(workspace_id, port)` key can never
+/// interleave (BT-3062). Without this, `update_record_node_name`'s
+/// read-check-write had a window in which a concurrent `remove_record` (a
+/// racing `detach`/`quit`/failed-attach cleanup, per `kill_and_untrack`)
+/// could delete the file between the read and the write — the write would
+/// then silently *recreate* it, resurrecting a record for a front this
+/// broker already killed. See `update_record_node_name`'s doc comment for
+/// the full race description this closes.
+///
+/// One process-wide lock, not a per-key table: every operation it guards is
+/// a single fast file read/write, and record mutations across *different*
+/// keys are rare enough (one attach/detach at a time is the common case)
+/// that briefly serializing unrelated keys is a better trade than a per-key
+/// lock table's unbounded growth over a long-lived broker process's
+/// lifetime. Cross-process contention (e.g. this broker racing a *second*
+/// broker instance) is out of scope — ADR 0097 assumes one broker per user
+/// session — so a plain in-process [`Mutex`], not a cross-process file lock,
+/// is sufficient to close the specific same-process race this exists for.
+fn record_ops_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Lock [`record_ops_lock`], recovering from a poisoned mutex rather than
+/// propagating the panic to every future record operation for the rest of
+/// the process's life — matches `desktop/src-tauri/src/commands.rs`'s own
+/// `locked()` helper's reasoning for `state.attach`/`state.children`: a
+/// panic mid-mutation doesn't guarantee the record file itself was left
+/// inconsistent, and this is the one lock standing between a stuck broker
+/// and every future attach/detach silently failing to update its bookkeeping.
+fn locked_record_ops() -> MutexGuard<'static, ()> {
+    record_ops_lock()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Bookkeeping for one spawned front, persisted so a future broker process
 /// (after a crash) can find and reap it.
@@ -96,6 +135,7 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = record_path(dir, &record.workspace_id, record.port);
     let json = serde_json::to_string_pretty(record)?;
+    let _guard = locked_record_ops();
     std::fs::write(path, json)?;
     Ok(())
 }
@@ -126,6 +166,19 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
 /// newer front in between: this must never stamp a stale epmd-resolved name
 /// onto a record that isn't the one this call was resolving it for.
 ///
+/// **The resurrection window itself (BT-3062)** — the compare-and-swap above
+/// only ever protected against a *different* front's record being mutated;
+/// it did nothing about the file being deleted by a racing `remove_record`
+/// strictly between this function's read and its write, which would recreate
+/// the very file that call just deleted. [`locked_record_ops`] now wraps the
+/// whole read-check-write below in the same process-wide lock
+/// [`remove_record`] takes around its own delete, so the two can never
+/// interleave: either the delete completes first (this call then reads
+/// `NotFound` and no-ops, per the paragraph below) or this call's write
+/// completes first (and the delete, running after, removes the corrected
+/// file as intended) — never the read-delete-write ordering that used to
+/// resurrect it.
+///
 /// No-op (not an error) if the record no longer exists, or if it exists but
 /// its `pid` no longer matches `expected_pid` — either way there's nothing
 /// left for *this* call to correct, not a failure of this function's own job.
@@ -141,6 +194,7 @@ pub fn update_record_node_name(
     node_name: &str,
 ) -> Result<()> {
     let path = record_path(dir, workspace_id, port);
+    let _guard = locked_record_ops();
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
@@ -167,6 +221,14 @@ pub fn update_record_node_name(
 /// sites in `desktop/src-tauri/src/commands.rs`) goes through here, so this
 /// one hook covers all of them.
 ///
+/// The actual record-file delete below takes [`locked_record_ops`] (BT-3062)
+/// — the `RELEASE_TMP` removal above deliberately does not, since it can
+/// legitimately retry for up to ~1s (see
+/// [`remove_release_tmp_dir_with_retry`]) and doesn't touch the record file
+/// itself, so there's no reason to hold up an unrelated
+/// [`update_record_node_name`] call for that long over a resource it never
+/// touches.
+///
 /// # Errors
 ///
 /// Returns an error if the record file exists but can't be removed
@@ -176,6 +238,7 @@ pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
     remove_release_tmp_dir_with_retry(workspace_id, port);
 
     let path = record_path(dir, workspace_id, port);
+    let _guard = locked_record_ops();
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
@@ -757,6 +820,56 @@ mod tests {
             loaded,
             vec![rec],
             "record must be left completely untouched when expected_pid doesn't match"
+        );
+    }
+
+    /// Regression test (BT-3062): `update_record_node_name`'s read-check-write
+    /// and `remove_record`'s delete must never interleave, closing the
+    /// resurrection window described in `update_record_node_name`'s doc
+    /// comment (a racing `remove_record` landing strictly between the read
+    /// and the write would otherwise recreate the file it just deleted).
+    /// Rather than trying to force that exact interleaving from a test
+    /// (inherently racy to arrange), this proves the mechanism that prevents
+    /// it: both functions contend on the same [`record_ops_lock`], so a
+    /// `remove_record` that starts while that lock is held blocks until it's
+    /// released, rather than running concurrently.
+    #[test]
+    fn update_and_remove_are_mutually_exclusive_on_the_record_lock() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let rec = record(4242, Some(555));
+        save_record(tmp.path(), &rec).unwrap();
+
+        // Stand in for `update_record_node_name`'s own critical section
+        // being "mid-flight" between its read and its write.
+        let guard = locked_record_ops();
+
+        let dir = tmp.path().to_path_buf();
+        let workspace_id = rec.workspace_id.clone();
+        let port = rec.port;
+        let handle = std::thread::spawn(move || {
+            remove_record(&dir, &workspace_id, port).unwrap();
+        });
+
+        // Give the spawned remove_record ample time to have run if it were
+        // (wrongly) unsynchronized, then confirm it's still blocked and the
+        // record file is still present.
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !handle.is_finished(),
+            "remove_record should still be blocked on record_ops_lock"
+        );
+        assert_eq!(
+            load_all_records(tmp.path()).unwrap(),
+            vec![rec.clone()],
+            "record must still be on disk while the lock is held"
+        );
+
+        drop(guard);
+        handle.join().unwrap();
+
+        assert!(
+            load_all_records(tmp.path()).unwrap().is_empty(),
+            "remove_record should complete once the lock is released"
         );
     }
 
