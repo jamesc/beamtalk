@@ -10,9 +10,11 @@
 //! `cmd.exe /c` instead of failing. That means the process
 //! [`std::process::Child`] actually tracks is **`cmd.exe`**, not the BEAM VM
 //! `bin\bt_attach.bat` eventually execs into — so `Child::id()` is the wrong
-//! PID for [`crate::sname::predict_node_name`], and plain `Child::kill()`
-//! only terminates `cmd.exe`, orphaning `erl.exe` underneath it (with a live
-//! workspace cookie and a bound port) every time a front is detached.
+//! PID for [`crate::sname::predict_node_name`] (fixed on Windows, BT-3045, by
+//! not using that prediction there at all — see `sname`'s module doc for the
+//! epmd-query replacement), and plain `Child::kill()` only terminates
+//! `cmd.exe`, orphaning `erl.exe` underneath it (with a live workspace cookie
+//! and a bound port) every time a front is detached.
 //!
 //! A Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` fixes the
 //! orphan half of that (not the PID-prediction half — nothing here changes

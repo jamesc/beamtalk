@@ -42,10 +42,31 @@
 //! `std::process::Child::id()` actually reports — not `erl.exe`'s pid, and
 //! not `bin/server`'s single extra hop either. `predict_node_name` is
 //! therefore expected to predict the *wrong* name on Windows, not just an
-//! unverified one; nothing in this crate currently corrects for that (it
-//! would need an epmd query instead of pid prediction there). See
-//! `crate::spawn`'s and `crate::winjob`'s module docs for how orphan-killing
-//! is handled despite this (a job object, not `Child::kill`/pid tracking).
+//! unverified one. See `crate::spawn`'s and `crate::winjob`'s module docs for
+//! how orphan-*killing* is handled despite this (a job object, not
+//! `Child::kill`/pid tracking) — `predict_node_name`'s pid guess plays no
+//! part in that mechanism.
+//!
+//! **Fixed (BT-3045) by not trusting the pid guess on Windows at all**:
+//! [`resolve_registered_node_name`] queries epmd directly — the same
+//! `NAMES_REQ` protocol [`crate::discovery`]'s liveness check already uses —
+//! for a registration matching the known `bt_attach_<suffix>_` prefix,
+//! rather than predicting a pid it cannot correctly guess. This only returns
+//! an answer once the front has actually distributed (`ensure_distributed/0`
+//! runs lazily, on the first `/readiness` call — see
+//! `crate::spawn`/`desktop/src-tauri/src/commands.rs`'s `attach_and_open_window`,
+//! which calls it once readiness reaches `Ready`, not at spawn time), so it
+//! cannot replace `predict_node_name` for the *earlier* orphan-reaping
+//! bookkeeping write (`persist_front_record` in `commands.rs`, which must
+//! record something as soon as the process exists, before readiness is
+//! known) — Windows records an explicit "not yet known" placeholder there
+//! instead of a wrong-looking real name, and corrects it once
+//! `resolve_registered_node_name` has a real answer. `FrontRecord.node_name`
+//! itself remains bookkeeping/display only: `crate::reap`'s sweep keys
+//! entirely off `FrontRecord.pid` (and, on Windows, the
+//! [`crate::winjob::JobHandle`] tree-kill — neither touches `node_name`), so
+//! a stale or placeholder value there was never a kill/reap-correctness bug,
+//! only a misleading one for anyone reading the on-disk record.
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -79,6 +100,82 @@ pub fn predict_node_name(suffix: &str, os_pid: u32) -> String {
 #[must_use]
 pub fn predict_short_name(suffix: &str, os_pid: u32) -> String {
     format!("bt_attach_{suffix}_{os_pid}")
+}
+
+/// A placeholder `FrontRecord.node_name` value for a front just spawned on a
+/// platform where [`predict_node_name`] cannot be trusted (Windows —
+/// `desktop/src-tauri/src/commands.rs`'s `persist_front_record` calls this
+/// instead of guessing a pid-based name it knows is wrong; see this module's
+/// doc comment). Deliberately shaped so it can never collide
+/// with a real `bt_attach_<suffix>_<pid>@localhost` registration (no `@`, and
+/// the `pending:` tag makes it obviously not a dist node name to a human
+/// reading the on-disk record) — callers should replace it via
+/// [`resolve_registered_node_name`] once the front's readiness is confirmed,
+/// but a record that never gets that follow-up call (e.g. attach fails
+/// before reaching `Ready`) is at least honestly labeled rather than
+/// silently wrong.
+#[must_use]
+pub fn pending_node_name(suffix: &str) -> String {
+    format!("<pending:{suffix}>")
+}
+
+/// Resolve a front's *actual* epmd registration name by querying epmd
+/// directly, rather than guessing from an OS pid — the Windows-correct
+/// alternative to [`predict_node_name`] this module's doc comment describes
+/// (BT-3045). Looks for exactly one currently-registered short name with the
+/// `bt_attach_<suffix>_` prefix `BtAttach.Workspace.attach_sname/2` always
+/// produces.
+///
+/// Returns `Ok(None)` — not a guess — when epmd reports zero matches (the
+/// front hasn't distributed yet; `ensure_distributed/0` only runs lazily on
+/// the first `/readiness` call, so this only has a real answer to give once
+/// readiness has resolved at least once) or more than one (two fronts
+/// attached to the same workspace concurrently — a real, ADR-anticipated
+/// scenario, see [`attach_node_suffix`]'s doc comment — make the prefix alone
+/// ambiguous; a caller needing to disambiguate that case has a better signal
+/// available, e.g. the specific pid it just spawned combined with
+/// `metadata.json`'s freshly-written `node_name` once the front persists it).
+///
+/// # Errors
+///
+/// Returns an error only if the epmd query itself fails (a transport-level
+/// I/O error after a connection was established — "epmd not running" is not
+/// an error there and surfaces here as `Ok(None)`, zero names to match
+/// against). See [`beamtalk_workspace::epmd::query_epmd_names`].
+pub fn resolve_registered_node_name(suffix: &str) -> crate::error::Result<Option<String>> {
+    let names = beamtalk_workspace::epmd::query_epmd_names()?;
+    Ok(find_unique_match(names.iter().map(String::as_str), suffix))
+}
+
+/// Pure matching logic behind [`resolve_registered_node_name`] — given a set
+/// of currently-registered epmd short names, find the unique one (if any)
+/// whose `bt_attach_<suffix>_<pid>` shape has exactly `suffix` for its
+/// suffix segment. Split out so this decision is testable without a real
+/// epmd running, matching the pure-decision/impure-I/O split
+/// [`crate::reap::classify_record`] already uses for the same reason.
+///
+/// Deliberately **not** a plain `starts_with("bt_attach_{suffix}_")` check:
+/// workspace ids (and thus suffixes — [`attach_node_suffix`] passes them
+/// through unchanged) may themselves contain `_` (e.g. `"my_feature_1"`, see
+/// [`attach_node_suffix`]'s own tests), so a bare prefix match on suffix
+/// `"my"` would also match a *different* workspace's registration
+/// `bt_attach_my_feature_1_42` — the shared `bt_attach_my_` prefix is a
+/// false positive there, not a real match. Splitting off the pid at the
+/// *last* `_` instead (the pid — `System.pid()` — is always a plain decimal
+/// integer with no embedded `_` of its own) and comparing the remaining
+/// suffix segment for exact equality closes that gap.
+fn find_unique_match<'a>(names: impl IntoIterator<Item = &'a str>, suffix: &str) -> Option<String> {
+    let mut matches = names.into_iter().filter(|n| {
+        n.strip_prefix("bt_attach_")
+            .and_then(|rest| rest.rsplit_once('_'))
+            .is_some_and(|(name_suffix, pid)| {
+                name_suffix == suffix && !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit())
+            })
+    });
+    match (matches.next(), matches.next()) {
+        (Some(only), None) => Some(format!("{only}@localhost")),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +246,89 @@ mod tests {
         for id in ["abc123def456", "my-feature", "my_feature_1"] {
             assert_eq!(attach_node_suffix(id), id);
         }
+    }
+
+    // ── pending_node_name / find_unique_match (BT-3045) ─────────────────
+
+    #[test]
+    fn pending_node_name_is_not_shaped_like_a_real_dist_node_name() {
+        let placeholder = pending_node_name("abc123");
+        assert!(
+            !placeholder.contains('@'),
+            "must not look like a real node@host dist name that could be \
+             mistaken for a genuine (if stale) registration: {placeholder:?}"
+        );
+        assert!(placeholder.contains("abc123"));
+    }
+
+    #[test]
+    fn find_unique_match_returns_none_when_epmd_has_no_matching_name() {
+        let names = ["some_other_node", "bt_attach_other-workspace_123"];
+        assert_eq!(find_unique_match(names, "spike-a"), None);
+    }
+
+    #[test]
+    fn find_unique_match_returns_none_when_epmd_is_empty() {
+        assert_eq!(find_unique_match([], "spike-a"), None);
+    }
+
+    #[test]
+    fn find_unique_match_finds_the_single_matching_registration() {
+        let names = ["unrelated_node", "bt_attach_spike-a_4242"];
+        assert_eq!(
+            find_unique_match(names, "spike-a"),
+            Some("bt_attach_spike-a_4242@localhost".to_string())
+        );
+    }
+
+    #[test]
+    fn find_unique_match_returns_none_when_two_fronts_on_the_same_workspace_are_ambiguous() {
+        // ADR 0097-anticipated scenario (see attach_node_suffix's doc
+        // comment): a second window, or a crash→respawn racing the dying
+        // front's epmd deregistration. The prefix alone can't disambiguate
+        // which one a caller means — refuse to guess rather than picking one
+        // arbitrarily.
+        let names = ["bt_attach_spike-a_1001", "bt_attach_spike-a_1002"];
+        assert_eq!(find_unique_match(names, "spike-a"), None);
+    }
+
+    #[test]
+    fn find_unique_match_does_not_treat_a_longer_suffix_as_a_prefix_match() {
+        // suffix "a" must not match a registration for workspace "ab".
+        let names = ["bt_attach_ab_123"];
+        assert_eq!(find_unique_match(names, "a"), None);
+    }
+
+    /// Regression test for a real ambiguity a naive `starts_with` prefix
+    /// check would have: workspace ids (and thus suffixes) may themselves
+    /// contain `_` (see `attach_node_suffix_preserves_arbitrary_workspace_ids`
+    /// above, e.g. `"my_feature_1"`) — a *different*, unrelated workspace
+    /// named `"my_feature_1"` running at the same time as one named `"my"`
+    /// must never have its registration mistaken for `"my"`'s just because
+    /// `"bt_attach_my_"` happens to be a string prefix of
+    /// `"bt_attach_my_feature_1_42"`.
+    #[test]
+    fn find_unique_match_does_not_confuse_an_underscore_containing_suffix_with_a_shorter_one() {
+        let names = ["bt_attach_my_feature_1_42"];
+        assert_eq!(
+            find_unique_match(names, "my"),
+            None,
+            "workspace suffix 'my' must not match a registration belonging to \
+             workspace 'my_feature_1'"
+        );
+        assert_eq!(
+            find_unique_match(names, "my_feature_1"),
+            Some("bt_attach_my_feature_1_42@localhost".to_string()),
+            "the actual owning workspace's suffix should still match correctly"
+        );
+    }
+
+    #[test]
+    fn find_unique_match_rejects_a_non_numeric_trailing_segment() {
+        // A malformed/foreign registration that happens to share the
+        // bt_attach_ prefix and suffix but has a non-pid trailing segment
+        // must not be treated as a match.
+        let names = ["bt_attach_spike-a_notapid"];
+        assert_eq!(find_unique_match(names, "spike-a"), None);
     }
 }

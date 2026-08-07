@@ -42,14 +42,26 @@ pub fn find_free_port() -> Result<u16> {
 
 /// Outcome of a single spawn attempt at a candidate port, as reported by the
 /// caller-supplied `try_spawn` closure in [`allocate_port_with_retry`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpawnAttempt {
     /// The port was free and the front was spawned (or spawn was attempted
     /// with no evidence of a port conflict) — stop retrying.
     Bound,
     /// The port was already taken by the time the real spawn tried to bind
     /// it (the race the module docs describe) — try another candidate.
-    PortTaken,
+    ///
+    /// Carries a diagnostic string describing why the caller believes this
+    /// attempt failed (typically the launcher process's own
+    /// `std::process::ExitStatus` `Display` output), when available — a
+    /// caller that cannot cheaply produce one (or genuinely has none, e.g. a
+    /// synchronous bind failure with no process involved) may pass `None`.
+    /// [`allocate_port_with_retry`] carries the most recent one through to
+    /// [`BrokerError::PortsExhausted`] so a caller that exhausts every
+    /// attempt sees *something* about the real cause, not just a bare count
+    /// (BT-3045 adversarial-review follow-up — see that error variant's doc
+    /// comment for why a bare count alone can be actively misleading on the
+    /// Windows spawn path).
+    PortTaken(Option<String>),
 }
 
 /// Find a free port and hand it to `try_spawn`, retrying with a fresh
@@ -61,20 +73,26 @@ pub enum SpawnAttempt {
 ///
 /// # Errors
 ///
-/// Returns [`BrokerError::PortsExhausted`] after `max_attempts` conflicts,
-/// or propagates the first non-conflict error from `try_spawn` or
-/// [`find_free_port`].
+/// Returns [`BrokerError::PortsExhausted`] after `max_attempts` conflicts
+/// (carrying the last attempt's `PortTaken` diagnostic, if any — see that
+/// variant's doc comment), or propagates the first non-conflict error from
+/// `try_spawn` or [`find_free_port`].
 pub fn allocate_port_with_retry(
     max_attempts: u32,
     mut try_spawn: impl FnMut(u16) -> Result<SpawnAttempt>,
 ) -> Result<u16> {
+    let mut last_exit_status = None;
     for _ in 0..max_attempts.max(1) {
         let candidate = find_free_port()?;
-        if let SpawnAttempt::Bound = try_spawn(candidate)? {
-            return Ok(candidate);
+        match try_spawn(candidate)? {
+            SpawnAttempt::Bound => return Ok(candidate),
+            SpawnAttempt::PortTaken(reason) => last_exit_status = reason,
         }
     }
-    Err(BrokerError::PortsExhausted(max_attempts))
+    Err(BrokerError::PortsExhausted {
+        attempts: max_attempts,
+        last_exit_status,
+    })
 }
 
 #[cfg(test)]
@@ -128,7 +146,7 @@ mod tests {
             calls += 1;
             seen_candidates.insert(candidate);
             if calls < 3 {
-                Ok(SpawnAttempt::PortTaken)
+                Ok(SpawnAttempt::PortTaken(None))
             } else {
                 Ok(SpawnAttempt::Bound)
             }
@@ -148,10 +166,41 @@ mod tests {
         let mut calls = 0;
         let result = allocate_port_with_retry(4, |_candidate| {
             calls += 1;
-            Ok(SpawnAttempt::PortTaken)
+            Ok(SpawnAttempt::PortTaken(None))
         });
-        assert!(matches!(result, Err(BrokerError::PortsExhausted(4))));
+        assert!(matches!(
+            result,
+            Err(BrokerError::PortsExhausted {
+                attempts: 4,
+                last_exit_status: None
+            })
+        ));
         assert_eq!(calls, 4, "should stop after exactly max_attempts tries");
+    }
+
+    /// BT-3045: the diagnostic carried by the *last* `PortTaken` attempt
+    /// should surface in the terminal `PortsExhausted` error, not get
+    /// silently dropped — this is the whole point of threading it through
+    /// `allocate_port_with_retry` instead of just counting attempts.
+    #[test]
+    fn allocate_port_with_retry_surfaces_the_last_exit_status_when_exhausted() {
+        let mut calls = 0;
+        let result = allocate_port_with_retry(3, |_candidate| {
+            calls += 1;
+            Ok(SpawnAttempt::PortTaken(Some(format!(
+                "exit status: {calls}"
+            ))))
+        });
+        assert!(
+            matches!(
+                result,
+                Err(BrokerError::PortsExhausted {
+                    attempts: 3,
+                    last_exit_status: Some(ref s)
+                }) if s == "exit status: 3"
+            ),
+            "expected the third (last) attempt's diagnostic, got {result:?}"
+        );
     }
 
     #[test]
@@ -173,7 +222,7 @@ mod tests {
         let mut calls = 0;
         let result = allocate_port_with_retry(0, |_candidate| {
             calls += 1;
-            Ok(SpawnAttempt::PortTaken)
+            Ok(SpawnAttempt::PortTaken(None))
         });
         assert!(result.is_err());
         assert_eq!(calls, 1, "0 attempts should be clamped to at least 1");

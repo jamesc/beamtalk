@@ -203,7 +203,30 @@ fn attach_and_open_window(
     );
 
     match final_state {
-        ReadinessState::Ready(_version) => {}
+        ReadinessState::Ready(_version) => {
+            // BT-3045: the front has now actually distributed
+            // (`ensure_distributed/0` runs lazily on the first `/readiness`
+            // call, which just resolved above), so a real epmd-resolved
+            // node_name is available on Windows for the first time — correct
+            // persist_front_record's placeholder now that it's known. See
+            // `update_windows_node_name_after_readiness`'s doc comment.
+            //
+            // Fire-and-forget on a background thread (adversarial-review
+            // follow-up) rather than awaited inline here: `node_name` is
+            // bookkeeping/display only — nothing in this repo reads
+            // `FrontRecord.node_name` back today (`crate::reap`'s sweep keys
+            // entirely off `pid`) — so there is no correctness reason for
+            // window-opening below to wait on an epmd round-trip (typically
+            // fast, but not zero-cost, and occasionally as slow as epmd's own
+            // ~1.5s connect+read timeout budget) purely to correct a value
+            // nothing consumes yet. Matches the same
+            // spawn-a-detached-`std::thread`-for-best-effort-background-work
+            // shape `spawn_monitor` below already uses in this file.
+            let workspace_id_for_correction = workspace_id.to_string();
+            std::thread::spawn(move || {
+                update_windows_node_name_after_readiness(&workspace_id_for_correction, port, pid);
+            });
+        }
         ReadinessState::Failed(reason) => {
             kill_and_untrack(state, workspace_id, port);
             return Err(format!(
@@ -440,21 +463,72 @@ fn emit_progress(app: &AppHandle, workspace_id: &str, stage: &str) {
     );
 }
 
+/// Best-effort initial `node_name` guess for a just-spawned front, recorded
+/// before its readiness (and thus its real epmd registration) is known.
+///
+/// Unix: `predict_node_name`'s pid-based prediction is verified correct
+/// there (`beamtalk_desktop_broker::sname`'s module doc — `Child::id()` is
+/// the same pid `System.pid()` reports, an unbroken `exec` chain), so it's
+/// used directly.
+///
+/// Windows: the same prediction is *provably wrong* there (`Child::id()` is
+/// `cmd.exe`'s pid, `bin\bt_attach.bat` can only run via a console-subsystem
+/// wrapper — see `sname`'s module doc) — recording it anyway would look like
+/// real data while being silently incorrect. `sname::pending_node_name`
+/// records an explicit placeholder instead, corrected once
+/// `attach_and_open_window` confirms readiness and can resolve the real
+/// name via epmd (`update_windows_node_name_after_readiness` below).
+fn initial_node_name(workspace_id: &str, pid: u32) -> String {
+    let suffix = beamtalk_desktop_broker::sname::attach_node_suffix(workspace_id);
+    #[cfg(windows)]
+    {
+        let _ = pid; // only meaningful to the (wrong, on Windows) pid-based prediction
+        beamtalk_desktop_broker::sname::pending_node_name(&suffix)
+    }
+    #[cfg(not(windows))]
+    {
+        beamtalk_desktop_broker::sname::predict_node_name(&suffix, pid)
+    }
+}
+
 fn persist_front_record(workspace_id: &str, port: u16, pid: u32) {
     let Ok(dir) = reap::state_dir() else {
         return;
     };
-    let suffix = beamtalk_desktop_broker::sname::attach_node_suffix(workspace_id);
-    let node_name = beamtalk_desktop_broker::sname::predict_node_name(&suffix, pid);
     let record = reap::FrontRecord {
         workspace_id: workspace_id.to_string(),
         port,
         pid,
-        node_name,
+        node_name: initial_node_name(workspace_id, pid),
         start_time: reap::read_start_time(pid),
     };
     let _ = reap::save_record(&dir, &record);
 }
+
+/// Correct a Windows front record's placeholder `node_name` once readiness
+/// confirms the front is actually up (BT-3045) — see [`initial_node_name`]'s
+/// doc comment for why the initial write can't have a real answer yet.
+/// Best-effort and silent on failure everywhere (no epmd match yet, the
+/// record already gone via a racing detach/quit, an I/O error): `node_name`
+/// remains bookkeeping/display only (`beamtalk_desktop_broker::reap`'s sweep
+/// keys entirely off `pid`), so there is nothing correctness-critical riding
+/// on this succeeding, and `attach_and_open_window` should not fail (or even
+/// log noisily) an otherwise-successful attach over it. A no-op on Unix,
+/// where [`initial_node_name`] already recorded the verified-correct value.
+#[cfg(windows)]
+fn update_windows_node_name_after_readiness(workspace_id: &str, port: u16, pid: u32) {
+    let suffix = beamtalk_desktop_broker::sname::attach_node_suffix(workspace_id);
+    let Ok(Some(node_name)) = beamtalk_desktop_broker::sname::resolve_registered_node_name(&suffix)
+    else {
+        return;
+    };
+    if let Ok(dir) = reap::state_dir() {
+        let _ = reap::update_record_node_name(&dir, workspace_id, port, pid, &node_name);
+    }
+}
+
+#[cfg(not(windows))]
+fn update_windows_node_name_after_readiness(_workspace_id: &str, _port: u16, _pid: u32) {}
 
 /// Undo [`persist_front_record`] on an attach failure that already killed
 /// the child, so a clean in-session failure doesn't leave a record for a

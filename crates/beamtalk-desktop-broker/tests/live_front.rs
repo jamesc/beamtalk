@@ -159,6 +159,16 @@ fn drive_to_terminal(port: u16, timeouts: ProbeTimeouts) -> ReadinessState {
 /// workspace and confirm `sname::predict_node_name` (via
 /// `predict_short_name`, epmd's own vocabulary) matches what epmd actually
 /// reports once the front distributes.
+///
+/// Unix-only (BT-3045): `predict_node_name`'s pid prediction is *only*
+/// verified correct on Unix (see `sname`'s module doc comment — Windows'
+/// `Child::id()` reports `cmd.exe`'s pid, never `erl.exe`'s, since
+/// `bin\bt_attach.bat` can only run via that console-subsystem wrapper). This
+/// exact assertion is therefore *expected* to fail on Windows, by
+/// construction — not a gap this test should paper over. See
+/// `resolve_registered_node_name_matches_a_live_epmd_registration` below for
+/// the cross-platform (and Windows-correct) replacement.
+#[cfg(not(windows))]
 #[test]
 #[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
 fn predict_node_name_matches_a_live_epmd_registration() {
@@ -184,6 +194,43 @@ fn predict_node_name_matches_a_live_epmd_registration() {
     assert!(
         names.contains(&expected),
         "predicted short name {expected:?} not found in epmd's registered names {names:?}"
+    );
+}
+
+/// BT-3045: the Windows-correct replacement for the pid-based prediction
+/// above — spawn a real front, drive it to `Ready` (forcing
+/// `ensure_distributed/0` to actually run), then confirm
+/// `sname::resolve_registered_node_name` finds it via a real epmd query.
+/// Cross-platform (unlike the pid-based test above): this is exactly the
+/// mechanism `desktop/src-tauri/src/commands.rs`'s
+/// `update_windows_node_name_after_readiness` uses to correct a Windows
+/// front record's placeholder `node_name` once readiness confirms `Ready`.
+#[test]
+#[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
+fn resolve_registered_node_name_matches_a_live_epmd_registration() {
+    let ws = workspace_id();
+    let mut config = SpawnAttemptConfig::new(launcher(), ws.clone());
+    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+
+    let (child, port) =
+        spawn_front_with_port_retry(&config).expect("live front should spawn and bind");
+    let _guard = KillOnDrop(child);
+
+    // Force distribution to actually start (lazy, first-/readiness-call).
+    let state = drive_to_terminal(port, ProbeTimeouts::default_local());
+    assert!(
+        matches!(state, ReadinessState::Ready(_)),
+        "expected the live front to reach Ready against a real workspace, got {state:?}"
+    );
+
+    let suffix = beamtalk_desktop_broker::sname::attach_node_suffix(&ws);
+    let resolved = beamtalk_desktop_broker::sname::resolve_registered_node_name(&suffix)
+        .expect("epmd query should succeed with a real front now registered")
+        .expect("exactly one front should be registered under this workspace's suffix");
+    assert!(
+        resolved.starts_with(&format!("bt_attach_{suffix}_")) && resolved.ends_with("@localhost"),
+        "resolved node name {resolved:?} doesn't look like a real bt_attach registration \
+         for suffix {suffix:?}"
     );
 }
 
