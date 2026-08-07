@@ -1177,13 +1177,19 @@ fn test_class_registration_generation() {
         header_exports.contains("'has_method'/1"),
         "Generated class module must export has_method/1 in header. Got header:\n{header_exports}"
     );
-    // superclass/0 and class_name/0 must always be in the header: class_name/0
+    // superclass/0 and class_name/0 must always be in the header. class_name/0
     // is still reachable via `is_class_auto_export_selector`'s self-send
-    // classifier (BT-2007), and superclass/0 remains the intrinsic's own
-    // gen_server:call reply path plus the target for non-self-send dispatch —
-    // even though self-sent `superclass` itself now routes through
-    // `class_self_send_reflective_primitive` instead of this raw export
-    // (BT-3057).
+    // classifier (BT-2007). superclass/0 is part of the same uniform
+    // auto-export set every class module emits, but BT-3057's audit found no
+    // live caller for it anywhere in the runtime: the gen_server's own
+    // `superclass` reply reads `#class_state.superclass` directly rather than
+    // calling this export, non-self-send dispatch resolves `superclass`
+    // through the Class/Behaviour chain to
+    // `beamtalk_behaviour_intrinsics:classSuperclass/1` (ADR 0032 Phase 2),
+    // and self-sent `superclass` now routes through
+    // `class_self_send_reflective_primitive` to the same intrinsic. This
+    // assertion exists to keep the export set stable/uniform across class
+    // modules regardless — not because anything currently calls it.
     assert!(
         header_exports.contains("'superclass'/0"),
         "Generated class module must export superclass/0 in header. Got header:\n{header_exports}"
