@@ -588,6 +588,12 @@ impl ThreadingPlan {
     /// For value-type methods (BT-1053), starts from a fresh `maps:new()` instead
     /// of the actor State (which does not exist in value-type context).
     ///
+    /// For class methods (BT-3055), also starts from a fresh `maps:new()`: a class
+    /// method's signature is `(ClassSelf, ClassVars, Args...)` — there is no `State`
+    /// parameter to pack from, even when `self.context` is `Actor` (an actor class's
+    /// class methods still run with `context == Actor`, since the enclosing class is
+    /// an actor even though the *method* itself has no per-instance state).
+    ///
     /// In direct-params mode (BT-1275) this is a no-op — returns `(Nil, initial_state_var)` since
     /// variables are passed as separate fun arguments instead.
     pub fn generate_pack_prefix(
@@ -598,18 +604,20 @@ impl ThreadingPlan {
             return (Document::Nil, self.initial_state_var.clone());
         }
         let mut pack_docs: Vec<Document<'static>> = Vec::new();
-        // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
-        let mut current = if matches!(self.context, CodeGenContext::ValueType) {
-            let init_map_var = generator.fresh_temp_var("InitMap");
-            pack_docs.push(docvec![
-                "let ",
-                leaf::var(init_map_var.clone()),
-                " = call 'maps':'new'() in ",
-            ]);
-            init_map_var
-        } else {
-            self.initial_state_var.clone()
-        };
+        // BT-1053/BT-3055: Value-type methods and class methods have no actor State
+        // to pack from — start from a fresh empty map instead.
+        let mut current =
+            if matches!(self.context, CodeGenContext::ValueType) || generator.in_class_method() {
+                let init_map_var = generator.fresh_temp_var("InitMap");
+                pack_docs.push(docvec![
+                    "let ",
+                    leaf::var(init_map_var.clone()),
+                    " = call 'maps':'new'() in ",
+                ]);
+                init_map_var
+            } else {
+                self.initial_state_var.clone()
+            };
         for var_name in &self.threaded_locals {
             let packed_var = generator.fresh_temp_var("Packed");
             let core_var = generator
@@ -688,17 +696,24 @@ impl ThreadingPlan {
     /// `param_names` are the Core Erlang names of each threaded local IN THE CURRENT
     /// ITERATION (i.e. the fun parameter names at the point of the false arm).
     /// For the false-arm case these are the initial parameter names, not updated ones.
+    ///
+    /// BT-3055: mirrors `generate_pack_prefix`'s `ValueType`/`in_class_method` check —
+    /// this is the direct-params fast path's own `StateAcc` rebuild, and class methods
+    /// have no `State` to rebuild from here either.
     pub fn generate_exit_stateacc(
         &self,
         param_names: &[String],
         generator: &mut CoreErlangGenerator,
     ) -> Document<'static> {
-        if self.threaded_locals.is_empty() {
+        let starts_from_fresh_map =
+            matches!(self.context, CodeGenContext::ValueType) || generator.in_class_method();
+        if self.threaded_locals.is_empty() && !starts_from_fresh_map {
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
         let mut docs: Vec<Document<'static>> = Vec::new();
-        // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
-        let mut current = if matches!(self.context, CodeGenContext::ValueType) {
+        // BT-1053/BT-3055: Value-type methods and class methods have no actor State
+        // to rebuild from — start from a fresh empty map instead.
+        let mut current = if starts_from_fresh_map {
             let exit_var = generator.fresh_temp_var("ExitSA");
             docs.push(docvec![
                 "let ",
