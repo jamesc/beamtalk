@@ -250,9 +250,13 @@ pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
     #[cfg(windows)]
     {
         let workspace_id = workspace_id.to_string();
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             remove_release_tmp_dir_with_retry(&workspace_id, port);
         });
+        pending_release_tmp_cleanups()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(handle);
     }
 
     let path = record_path(dir, workspace_id, port);
@@ -261,6 +265,82 @@ pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// Registry of [`remove_record`]'s in-flight background `RELEASE_TMP`
+/// cleanup threads (BT-3059), so [`wait_for_release_tmp_cleanup`] can find
+/// and join them. Windows-only, since the cleanup itself only exists there —
+/// see [`remove_record`]'s doc comment.
+///
+/// One process-wide `Vec`, not per-call bookkeeping: the only reader
+/// ([`wait_for_release_tmp_cleanup`]) exists specifically for the app's exit
+/// paths, which want to wait for *every* cleanup still in flight regardless
+/// of which `remove_record` call started it.
+#[cfg(windows)]
+fn pending_release_tmp_cleanups() -> &'static Mutex<Vec<std::thread::JoinHandle<()>>> {
+    static PENDING: OnceLock<Mutex<Vec<std::thread::JoinHandle<()>>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Total wall-clock budget [`wait_for_release_tmp_cleanup`] gives pending
+/// cleanup threads — the same ~1s cap [`remove_release_tmp_dir_with_retry`]'s
+/// own retry loop is bounded by (`RELEASE_TMP_REMOVE_ATTEMPTS` ×
+/// `RELEASE_TMP_REMOVE_RETRY_DELAY`), plus headroom for thread-scheduling
+/// jitter under load.
+#[cfg(windows)]
+const RELEASE_TMP_CLEANUP_WAIT: Duration = Duration::from_millis(1500);
+
+/// Best-effort wait for [`remove_record`]'s backgrounded `RELEASE_TMP`
+/// cleanup threads (BT-3059) to finish, up to [`RELEASE_TMP_CLEANUP_WAIT`]
+/// **total** — not per-thread, since every registered thread already runs
+/// concurrently, so this bounds the slowest one, not their sum.
+///
+/// Backgrounding that cleanup off `remove_record` fixed the latency problem
+/// (up to `N`×1s blocking `sweep`/`detach_internal`/`detach_all`) but opened
+/// a correctness gap on the app's actual exit paths: `desktop/src-tauri`'s
+/// `quit` command calls `app.exit(0)` right after its `detach_all`, and
+/// `main.rs`'s `RunEvent::ExitRequested` handler lets Tauri's normal
+/// post-handler teardown terminate the process just as promptly — both end
+/// the OS process itself almost immediately, abandoning any cleanup thread
+/// still mid-retry rather than letting it run to completion. Since that
+/// retry exists to remove a `SECRET_KEY_BASE`/workspace-cookie-bearing
+/// directory (BT-3046), silently abandoning it on every ordinary quit that
+/// raced `erl.exe`'s asynchronous kill-on-close — precisely the case the
+/// retry was added for — would defeat the whole point of retrying. Calling
+/// this after `detach_all`'s loop and before the process actually exits
+/// restores that guarantee for the common case without reintroducing the
+/// `N`×1s sequential block: every registered thread already started
+/// concurrently, so this call's own wall-clock cost is bounded by
+/// [`RELEASE_TMP_CLEANUP_WAIT`] regardless of how many fronts were detached.
+///
+/// A no-op on non-Windows (nothing is ever registered there — the
+/// `RELEASE_TMP` cleanup this waits for is Windows-only).
+///
+/// Not required for correctness of the exit itself: a handle still running
+/// when the deadline elapses is simply abandoned (dropping a
+/// `std::thread::JoinHandle` detaches the thread rather than joining it) —
+/// matching the retry loop's own best-effort, log-and-move-on stance.
+pub fn wait_for_release_tmp_cleanup() {
+    #[cfg(windows)]
+    {
+        let handles: Vec<_> = std::mem::take(
+            &mut *pending_release_tmp_cleanups()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        let deadline = std::time::Instant::now() + RELEASE_TMP_CLEANUP_WAIT;
+        for handle in handles {
+            while !handle.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+            // else: still running past the deadline — abandon it (dropping
+            // `handle` here detaches the thread), matching remove_record's
+            // own best-effort stance.
+        }
     }
 }
 
@@ -908,7 +988,21 @@ mod tests {
     #[test]
     fn remove_record_also_removes_the_release_tmp_directory() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let rec = record(4242, Some(555));
+        // A workspace_id/port exclusive to this test (BT-3059), deliberately
+        // *not* `record()`'s shared "abc123"/4567 pair every other test in
+        // this module uses. That sharing is harmless for the FrontRecord
+        // JSON file (isolated per test via its own `tmp` TempDir), but
+        // `crate::spawn::release_tmp_dir` is a real, absolute path keyed
+        // only on `(workspace_id, port)` — not scoped to `tmp` at all. Now
+        // that `remove_record` backgrounds a *retrying* (up to ~1s)
+        // `remove_dir_all` against that path on every call, reusing the
+        // shared pair here would race this test's own create/write below
+        // against every other parallel test's cleanup thread contending for
+        // the same real directory — reproduced as a flake (`NotFound` on the
+        // `write` below) before this was made exclusive.
+        let mut rec = record(4242, Some(555));
+        "bt3059_release_tmp_test".clone_into(&mut rec.workspace_id);
+        rec.port = 32100;
         let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, rec.port);
         std::fs::create_dir_all(&release_tmp).unwrap();
         std::fs::write(release_tmp.join("sys.config"), b"secrets").unwrap();
@@ -930,6 +1024,44 @@ mod tests {
         assert!(
             !release_tmp.exists(),
             "RELEASE_TMP directory should be removed along with the front record"
+        );
+    }
+
+    /// Regression test for the exit-path gap [`wait_for_release_tmp_cleanup`]
+    /// fixes (BT-3059, adversarial-review follow-up): without it,
+    /// `remove_record`'s backgrounded `RELEASE_TMP` cleanup thread is purely
+    /// best-effort with no way for a caller to know it finished — exactly
+    /// the situation `desktop/src-tauri`'s `quit` command is in right before
+    /// `app.exit(0)` terminates the process and abandons any thread still
+    /// mid-retry. Unlike `remove_record_also_removes_the_release_tmp_directory`
+    /// above (which has to bounded-poll because it asserts with no such
+    /// wait), this asserts **immediately** and synchronously after
+    /// `wait_for_release_tmp_cleanup()` returns — proving it actually joins
+    /// the backgrounded thread rather than merely sleeping a fixed amount
+    /// and hoping.
+    #[cfg(windows)]
+    #[test]
+    fn wait_for_release_tmp_cleanup_blocks_until_pending_cleanup_finishes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Exclusive workspace_id/port — see the comment on
+        // `remove_record_also_removes_the_release_tmp_directory` above for
+        // why sharing `record()`'s default pair would race sibling tests.
+        let mut rec = record(4243, Some(556));
+        "bt3059_wait_test".clone_into(&mut rec.workspace_id);
+        rec.port = 32101;
+        let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, rec.port);
+        std::fs::create_dir_all(&release_tmp).unwrap();
+        std::fs::write(release_tmp.join("sys.config"), b"secrets").unwrap();
+
+        save_record(tmp.path(), &rec).unwrap();
+        remove_record(tmp.path(), &rec.workspace_id, rec.port).unwrap();
+        wait_for_release_tmp_cleanup();
+
+        assert!(
+            !release_tmp.exists(),
+            "wait_for_release_tmp_cleanup should block until remove_record's \
+             backgrounded RELEASE_TMP removal has actually finished, not just \
+             return immediately"
         );
     }
 
