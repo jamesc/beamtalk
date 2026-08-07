@@ -124,6 +124,76 @@ jobs:
         # docs/development/surface-parity.md. Fails fast on inventory drift.
         run: just check-surface-drift
 
+  # ─── Desktop app (Tauri) crate tests (BT-3061) ─────────────────────────
+  # desktop/src-tauri is excluded from the root Cargo workspace (root
+  # Cargo.toml's `exclude`, see desktop/README.md) because it needs the
+  # Tauri toolchain — webkit2gtk-4.1/glib/gtk3 dev packages on Linux;
+  # WebView2 (preinstalled) on Windows and WKWebView (part of the OS) on
+  # macOS need no extra packages — that the rest of the workspace doesn't
+  # require, so `just build`/`just test`'s `cargo build --workspace` never
+  # touches it. That left this crate's `#[cfg(test)]` unit tests (e.g.
+  # `commands::tests::locked_recovers_from_a_poisoned_mutex`) running only
+  # via a manual local `cargo test -p beamtalk-desktop` (easy to forget) or
+  # indirectly via desktop/e2e/'s whole-stack Playwright scripts — this job
+  # closes that gap on every platform desktop-release.yml ships for
+  # (BT-3061). Runs `just test-desktop`, which mirrors this same
+  # webkit2gtk-4.1 install list from desktop-release.yml's build job (minus
+  # `patchelf`, needed only for that lane's AppImage bundling, not for
+  # compiling/testing this crate).
+  test-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same OS set as the 'check' job above (including the win25 pin —
+        # see its comment), not desktop-release.yml's full release matrix:
+        # that workflow also builds macos-15-intel as a second *shipping*
+        # architecture, but this crate's Rust source has no architecture-
+        # specific logic, so one macOS unit-test run is sufficient
+        # coverage.
+        os: [ubuntu-latest, macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies (desktop/src-tauri)
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      # Tauri v2's documented Debian/Ubuntu prerequisites
+      # (https://v2.tauri.app/start/prerequisites/) — same list
+      # desktop-release.yml installs before its own `cargo tauri build`,
+      # minus `patchelf` (only needed for that lane's AppImage bundling
+      # step, not for compiling/testing this crate).
+      - name: Install Linux Tauri prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Test beamtalk-desktop (Tauri app crate)
+        run: just test-desktop
+
   # ─── Corpus drift check (BT-2737) ──────────────────────────────────────
   # crates/beamtalk-examples/corpus.json is generated from the .bt example/
   # test sources; this fails the PR if it wasn't regenerated after a source
