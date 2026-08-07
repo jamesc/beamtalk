@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3057: exercises the class-method self-send fast path
+// (`generate_class_method_self_send` / `class_self_send_reflective_primitive`
+// in dispatch_codegen.rs) for Behaviour-protocol reflective primitives —
+// `superclass` (unary, returns a class object) and `includesSelector:`
+// (keyword, returns a boolean) — sent directly to `self` or to an explicit
+// same-class reference (BT-773) from inside a class method body, with no
+// block or foreign process involved.
+
+BT3057Ancestor subclass: BT3057Middle
+
+  class selfSuperclassImplicitReturn => self superclass
+
+  class explicitClassNameSuperclass => ^BT3057Middle superclass
+
+  class selfIncludesDescribe => ^self includesSelector: #describe
+
+  class selfIncludesBogus => ^self includesSelector: #bogusNotAMethod
+
+  describe -> Symbol => #described

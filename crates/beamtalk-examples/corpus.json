@@ -14359,6 +14359,35 @@
       "explanation": "BT-893: Class method self-sends (self new:) should not deadlock Tests the factory pattern where class methods create instances via self new:"
     },
     {
+      "id": "stdlib-test-class-method-self-send-reflective-primitives-test",
+      "title": "ClassMethodSelfSendReflectivePrimitivesTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ClassMethodSelfSendReflectivePrimitivesTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "class_method_self_send_reflective_primitives_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string conversion",
+        "subclassing",
+        "testExplicitClassNameSuperclassReturnsRealClassObject",
+        "testSelfIncludesSelectorFalse",
+        "testSelfIncludesSelectorTrue",
+        "testSelfSuperclassReturnsRealClassObject",
+        "toString",
+        "to_string"
+      ],
+      "source": "// BT-3057: `self superclass` / `ClassName superclass` (same-class explicit\n// reference, BT-773) sent from inside a class method used to degrade to a\n// bare Symbol carrying the class's name instead of a real class object —\n// comparing equal by printString but not by identity/equals:. `self\n// includesSelector:` (a keyword selector) DNU'd outright, since the fast\n// path that avoids self-send-to-self deadlock only recognised two\n// hardcoded 0-arity selectors. Fixed by routing both through the real\n// beamtalk_behaviour_intrinsics primitives directly (see\n// `class_self_send_reflective_primitive` in dispatch_codegen.rs).\n//\n// Fixtures: fixtures/bt3057_ancestor.bt, fixtures/bt3057_middle.bt.\n\nTestCase subclass: ClassMethodSelfSendReflectivePrimitivesTest\n\n  testSelfSuperclassReturnsRealClassObject =>\n    result := BT3057Middle selfSuperclassImplicitReturn\n    self assert: result equals: BT3057Ancestor\n    self assert: result name equals: #BT3057Ancestor\n\n  testExplicitClassNameSuperclassReturnsRealClassObject =>\n    result := BT3057Middle explicitClassNameSuperclass\n    self assert: result equals: BT3057Ancestor\n    self assert: result == BT3057Ancestor\n\n  testSelfIncludesSelectorTrue => self assert: BT3057Middle selfIncludesDescribe\n\n  testSelfIncludesSelectorFalse => self deny: BT3057Middle selfIncludesBogus",
+      "explanation": "BT-3057: `self superclass` / `ClassName superclass` (same-class explicit reference, BT-773) sent from inside a class method used to degrade to a bare Symbol carrying the class's name instead of a real class object — comparing equal by printString but not by identity/equals:. `self includesSelector:` (a keyword selector) DNU'd outright, since the fast path that avoids self-send-to-self deadlock only recognised two hardcoded 0-arity selectors. Fixed by routing both through the real beamtalk_behaviour_intrinsics primitives directly (see `class_self_send_reflective_primitive` in dispatch_codegen.rs).  Fixtures: fixtures/bt3057_ancestor.bt, fixtures/bt3057_middle.bt."
+    },
+    {
       "id": "stdlib-test-class-methods-metaclass-test",
       "title": "ClassMethodsMetaclassTest",
       "category": "stdlib-tests",
@@ -17979,8 +18008,47 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-3054: exercises `self superclass` (backed by\n// beamtalk_behaviour_intrinsics:classSuperclass/1, which calls\n// beamtalk_object_class:module_name_safe/1) inside a block that executes in\n// a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's\n// `self new class`, but for the classSuperclass/1 call site migrated to\n// module_name_safe/1 in this PR rather than class_of_object_by_name/1\n// (BT-3052's own fix). `self` here is the class object itself\n// (closure-captured via `ClassSelf`, per BT-3047).\n//\n// The corresponding test compares the result to the Symbol `#BT3047Ancestor`\n// rather than the class object `BT3047Ancestor` — see BT-3057 (filed during\n// this test's development): a class-object (`#beamtalk_object{}`) returned\n// out of a class method, via any return path, currently degrades to a bare\n// Symbol carrying the class's name, independent of this PR's changes. That\n// Symbol is still a faithful witness that `classSuperclass/1` resolved the\n// *correct* class (not a deadlock hang, not the wrong class) via\n// module_name_safe/1, which is what this test targets.\n\nBT3047Ancestor subclass: BT3054Parent\n\n  class makeSelfSuperclassThrough: aDriverClass over: aList :: List =>\n    aDriverClass\n      run: [:x |\n        result := self superclass\n        ^result\n      ]\n      over: aList\n    #wrong",
-      "explanation": "BT-3054: exercises `self superclass` (backed by beamtalk_behaviour_intrinsics:classSuperclass/1, which calls beamtalk_object_class:module_name_safe/1) inside a block that executes in a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's `self new class`, but for the classSuperclass/1 call site migrated to module_name_safe/1 in this PR rather than class_of_object_by_name/1 (BT-3052's own fix). `self` here is the class object itself (closure-captured via `ClassSelf`, per BT-3047).  The corresponding test compares the result to the Symbol `#BT3047Ancestor` rather than the class object `BT3047Ancestor` — see BT-3057 (filed during this test's development): a class-object (`#beamtalk_object{}`) returned out of a class method, via any return path, currently degrades to a bare Symbol carrying the class's name, independent of this PR's changes. That Symbol is still a faithful witness that `classSuperclass/1` resolved the *correct* class (not a deadlock hang, not the wrong class) via module_name_safe/1, which is what this test targets."
+      "source": "// BT-3054: exercises `self superclass` (backed by\n// beamtalk_behaviour_intrinsics:classSuperclass/1, which calls\n// beamtalk_object_class:module_name_safe/1) inside a block that executes in\n// a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's\n// `self new class`, but for the classSuperclass/1 call site migrated to\n// module_name_safe/1 in this PR rather than class_of_object_by_name/1\n// (BT-3052's own fix). `self` here is the class object itself\n// (closure-captured via `ClassSelf`, per BT-3047).\n//\n// BT-3057: the corresponding test originally compared the result to the\n// Symbol `#BT3047Ancestor` rather than the class object `BT3047Ancestor`,\n// because a class-object (`#beamtalk_object{}`) returned out of a class\n// method via `self superclass` degraded to a bare Symbol independent of\n// this fixture's own changes. BT-3057 fixed that self-send path, so the\n// test now compares against the real class object.\n\nBT3047Ancestor subclass: BT3054Parent\n\n  class makeSelfSuperclassThrough: aDriverClass over: aList :: List =>\n    aDriverClass\n      run: [:x |\n        result := self superclass\n        ^result\n      ]\n      over: aList\n    #wrong",
+      "explanation": "BT-3054: exercises `self superclass` (backed by beamtalk_behaviour_intrinsics:classSuperclass/1, which calls beamtalk_object_class:module_name_safe/1) inside a block that executes in a foreign class's process (ADR 0109) — same shape as bt3052_parent.bt's `self new class`, but for the classSuperclass/1 call site migrated to module_name_safe/1 in this PR rather than class_of_object_by_name/1 (BT-3052's own fix). `self` here is the class object itself (closure-captured via `ClassSelf`, per BT-3047).  BT-3057: the corresponding test originally compared the result to the Symbol `#BT3047Ancestor` rather than the class object `BT3047Ancestor`, because a class-object (`#beamtalk_object{}`) returned out of a class method via `self superclass` degraded to a bare Symbol independent of this fixture's own changes. BT-3057 fixed that self-send path, so the test now compares against the real class object."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3057-ancestor",
+      "title": "BT3057Ancestor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3057Ancestor",
+        "Value",
+        "bt3057_ancestor",
+        "extends",
+        "inherit",
+        "inheritance",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3057: root of the small hierarchy used by\n// class_method_self_send_reflective_primitives_test.bt — see\n// fixtures/bt3057_middle.bt for the class methods under test.\n\nValue subclass: BT3057Ancestor",
+      "explanation": "BT-3057: root of the small hierarchy used by class_method_self_send_reflective_primitives_test.bt — see fixtures/bt3057_middle.bt for the class methods under test."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3057-middle",
+      "title": "BT3057Middle",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "BT3057Ancestor",
+        "BT3057Middle",
+        "bt3057_middle",
+        "describe",
+        "explicitClassNameSuperclass",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "selfIncludesBogus",
+        "selfIncludesDescribe",
+        "selfSuperclassImplicitReturn",
+        "subclassing"
+      ],
+      "source": "// BT-3057: exercises the class-method self-send fast path\n// (`generate_class_method_self_send` / `class_self_send_reflective_primitive`\n// in dispatch_codegen.rs) for Behaviour-protocol reflective primitives —\n// `superclass` (unary, returns a class object) and `includesSelector:`\n// (keyword, returns a boolean) — sent directly to `self` or to an explicit\n// same-class reference (BT-773) from inside a class method body, with no\n// block or foreign process involved.\n\nBT3057Ancestor subclass: BT3057Middle\n\n  class selfSuperclassImplicitReturn => self superclass\n\n  class explicitClassNameSuperclass => ^BT3057Middle superclass\n\n  class selfIncludesDescribe => ^self includesSelector: #describe\n\n  class selfIncludesBogus => ^self includesSelector: #bogusNotAMethod\n\n  describe -> Symbol => #described",
+      "explanation": "BT-3057: exercises the class-method self-send fast path (`generate_class_method_self_send` / `class_self_send_reflective_primitive` in dispatch_codegen.rs) for Behaviour-protocol reflective primitives — `superclass` (unary, returns a class object) and `includesSelector:` (keyword, returns a boolean) — sent directly to `self` or to an explicit same-class reference (BT-773) from inside a class method body, with no block or foreign process involved."
     },
     {
       "id": "stdlib-test-fixtures-bt3055-actor",
@@ -28652,8 +28720,8 @@
         "superclass_in_foreign_block_test",
         "testSuperclassInsideForeignBlockDoesNotDeadlock"
       ],
-      "source": "// BT-3054: `self superclass` inside a block that executes in a foreign\n// class's process (ADR 0109) exercises the same deadlock shape BT-3052 fixed\n// for `self new class`, but through `classSuperclass/1`\n// (`beamtalk_behaviour_intrinsics:classSuperclass/1`), which previously\n// resolved the module via a `gen_server:call` to the class's own pid\n// (`beamtalk_object_class:module_name/1`). Since the block executes inside\n// the *driver's* process, and the driver was itself synchronously invoked by\n// this class's own process (which is now blocked waiting on the driver),\n// that call cycles straight back to the blocked caller. Fixed by migrating\n// to `beamtalk_object_class:module_name_safe/1`, which resolves the module\n// via the `beamtalk_class_metadata` ETS table instead (no message send).\n//\n// Compares against the Symbol `#BT3047Ancestor`, not the class object\n// `BT3047Ancestor` — see BT-3057, filed independently of this fix: a\n// class-object returned out of a class method currently degrades to a bare\n// Symbol regardless of this PR's changes. That Symbol still faithfully\n// proves `classSuperclass/1` resolved the *correct* class (not a deadlock,\n// not the wrong class) via the module_name_safe/1 migration this test\n// targets.\n//\n// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,\n// fixtures/bt3054_parent.bt.\n\nTestCase subclass: SuperclassInForeignBlockTest\n\n  testSuperclassInsideForeignBlockDoesNotDeadlock =>\n    self assert: (BT3054Parent makeSelfSuperclassThrough: BT3047DriverPlain over: #(1)) equals: #BT3047Ancestor",
-      "explanation": "BT-3054: `self superclass` inside a block that executes in a foreign class's process (ADR 0109) exercises the same deadlock shape BT-3052 fixed for `self new class`, but through `classSuperclass/1` (`beamtalk_behaviour_intrinsics:classSuperclass/1`), which previously resolved the module via a `gen_server:call` to the class's own pid (`beamtalk_object_class:module_name/1`). Since the block executes inside the *driver's* process, and the driver was itself synchronously invoked by this class's own process (which is now blocked waiting on the driver), that call cycles straight back to the blocked caller. Fixed by migrating to `beamtalk_object_class:module_name_safe/1`, which resolves the module via the `beamtalk_class_metadata` ETS table instead (no message send).  Compares against the Symbol `#BT3047Ancestor`, not the class object `BT3047Ancestor` — see BT-3057, filed independently of this fix: a class-object returned out of a class method currently degrades to a bare Symbol regardless of this PR's changes. That Symbol still faithfully proves `classSuperclass/1` resolved the *correct* class (not a deadlock, not the wrong class) via the module_name_safe/1 migration this test targets.  Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt, fixtures/bt3054_parent.bt."
+      "source": "// BT-3054: `self superclass` inside a block that executes in a foreign\n// class's process (ADR 0109) exercises the same deadlock shape BT-3052 fixed\n// for `self new class`, but through `classSuperclass/1`\n// (`beamtalk_behaviour_intrinsics:classSuperclass/1`), which previously\n// resolved the module via a `gen_server:call` to the class's own pid\n// (`beamtalk_object_class:module_name/1`). Since the block executes inside\n// the *driver's* process, and the driver was itself synchronously invoked by\n// this class's own process (which is now blocked waiting on the driver),\n// that call cycles straight back to the blocked caller. Fixed by migrating\n// to `beamtalk_object_class:module_name_safe/1`, which resolves the module\n// via the `beamtalk_class_metadata` ETS table instead (no message send).\n//\n// BT-3057: now compares against the real class object `BT3047Ancestor`\n// rather than the Symbol `#BT3047Ancestor` this test originally had to\n// settle for — the class-method self-send fast path used to bypass\n// `classSuperclass/1`'s `atom_to_class_object/1` wrapping entirely and\n// return the bare class-name atom instead of a `#beamtalk_object{}`. Fixed\n// by routing `self superclass` through the real intrinsic directly (see\n// `class_self_send_reflective_primitive` in dispatch_codegen.rs).\n//\n// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt,\n// fixtures/bt3054_parent.bt.\n\nTestCase subclass: SuperclassInForeignBlockTest\n\n  testSuperclassInsideForeignBlockDoesNotDeadlock =>\n    self assert: (BT3054Parent makeSelfSuperclassThrough: BT3047DriverPlain over: #(1)) equals: BT3047Ancestor",
+      "explanation": "BT-3054: `self superclass` inside a block that executes in a foreign class's process (ADR 0109) exercises the same deadlock shape BT-3052 fixed for `self new class`, but through `classSuperclass/1` (`beamtalk_behaviour_intrinsics:classSuperclass/1`), which previously resolved the module via a `gen_server:call` to the class's own pid (`beamtalk_object_class:module_name/1`). Since the block executes inside the *driver's* process, and the driver was itself synchronously invoked by this class's own process (which is now blocked waiting on the driver), that call cycles straight back to the blocked caller. Fixed by migrating to `beamtalk_object_class:module_name_safe/1`, which resolves the module via the `beamtalk_class_metadata` ETS table instead (no message send).  BT-3057: now compares against the real class object `BT3047Ancestor` rather than the Symbol `#BT3047Ancestor` this test originally had to settle for — the class-method self-send fast path used to bypass `classSuperclass/1`'s `atom_to_class_object/1` wrapping entirely and return the bare class-name atom instead of a `#beamtalk_object{}`. Fixed by routing `self superclass` through the real intrinsic directly (see `class_self_send_reflective_primitive` in dispatch_codegen.rs).  Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_driver_plain.bt, fixtures/bt3054_parent.bt."
     },
     {
       "id": "stdlib-test-supervision-class-method-test",
