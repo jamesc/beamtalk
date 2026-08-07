@@ -585,25 +585,52 @@ fn clone_index(url: &str, target: &Utf8Path) -> Result<()> {
             .wrap_err_with(|| format!("Failed to remove stale registry clone '{target}'"))?;
     }
 
-    if let Some(parent) = target.parent() {
+    // `target` is passed to `git clone` unchanged below while `current_dir`
+    // is set to its parent (BT-3040) — that combination is only correct if
+    // `target` is absolute; a relative `target` would have its destination
+    // argument re-resolved against its own parent by git, landing one level
+    // too deep. Every caller derives `target` from `registry_cache_root`,
+    // which is always absolute (home-dir-based, or joined against
+    // `project_root`, itself always `std::env::current_dir()` — see
+    // `find_project_root`), so this should never trip; it exists to catch a
+    // future caller that breaks that chain rather than silently misplacing
+    // a clone.
+    debug_assert!(
+        target.is_absolute(),
+        "clone_index target must be absolute, got '{target}'"
+    );
+
+    let parent = target.parent();
+    if let Some(parent) = parent {
         std::fs::create_dir_all(parent)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create registry directory '{parent}'"))?;
     }
 
     info!(url, %target, "Cloning registry index");
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "protocol.ext.allow=never",
-            "clone",
-            "--quiet",
-            "--depth",
-            "1",
-            "--",
-            url,
-            target.as_str(),
-        ])
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-c",
+        "protocol.ext.allow=never",
+        "clone",
+        "--quiet",
+        "--depth",
+        "1",
+        "--",
+        url,
+        target.as_str(),
+    ]);
+    // Run from `parent` rather than inheriting the process's current
+    // directory (BT-3040): the process cwd is global, so a `git clone`
+    // spawned without an explicit `current_dir` can be handed a directory
+    // another thread is concurrently changing (or has since deleted) —
+    // Windows surfaces that as a spurious "Unable to read current working
+    // directory" clone failure. `parent` was just created above, so it is
+    // stable for the lifetime of this call.
+    if let Some(parent) = parent {
+        cmd.current_dir(parent);
+    }
+    let output = cmd
         .output()
         .into_diagnostic()
         .wrap_err("Failed to execute 'git clone' for the registry index")?;
@@ -1227,6 +1254,15 @@ git = "g"
     }
 
     #[test]
+    // BT-3040: `registry_cache_root` reads `REGISTRY_CACHE_DIR_ENV_VAR` at
+    // call time, and this test relies on it being unset (so the index lands
+    // under the real, shared `~/.beamtalk/registry/`). Without joining the
+    // `env_var` serial group, a concurrently running test that *does* set
+    // the override (e.g. `test_registry_cache_root_env_var_override`) can
+    // flip it mid-test — `ensure_index` and the `registry_cache_root` call
+    // used to compute the expected path would then disagree, since each
+    // reads the env var independently.
+    #[serial_test::serial(env_var)]
     fn test_ensure_index_clones_git_registry() {
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
@@ -1255,6 +1291,8 @@ git = "g"
     }
 
     #[test]
+    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    #[serial_test::serial(env_var)]
     fn test_resolve_release_through_git_registry() {
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
@@ -1271,6 +1309,11 @@ git = "g"
 
     /// A newly published version is picked up by the miss-then-refresh retry.
     #[test]
+    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // This test calls `ensure_index`/`resolve_release` twice (once to seed
+    // the cache, once to observe the refresh); an env var flip between the
+    // two calls would send them to different cache directories.
+    #[serial_test::serial(env_var)]
     fn test_resolve_release_refresh_picks_up_new_version() {
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
@@ -1298,6 +1341,8 @@ git = "g"
     /// A refresh that cannot reach the remote must leave the working index
     /// intact rather than deleting it and failing.
     #[test]
+    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    #[serial_test::serial(env_var)]
     fn test_failed_refresh_keeps_existing_index() {
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
@@ -1325,6 +1370,10 @@ git = "g"
     }
 
     #[test]
+    // BT-3040: `ensure_git_index` computes `registry_cache_root` before
+    // validating the URL, so this still touches the env-var-dependent path;
+    // see the serialization note on `test_ensure_index_clones_git_registry`.
+    #[serial_test::serial(env_var)]
     fn test_ensure_index_rejects_dangerous_registry_url() {
         let project = TempDir::new().unwrap();
         let err = ensure_index(
@@ -1575,6 +1624,11 @@ git = "g"
     /// or MCP lookup) resolving against the same git registry at once must
     /// both succeed, and must never see a half-swapped index (BT-2996).
     #[test]
+    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    // The concurrency this test cares about (multiple threads racing the
+    // same registry) is internal to the test itself; serializing against
+    // *other tests* just keeps the env var stable for the duration.
+    #[serial_test::serial(env_var)]
     fn test_concurrent_resolutions_against_same_registry_both_succeed() {
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let location = RegistryLocation::Git(url.clone());
@@ -1778,6 +1832,8 @@ git = "g"
     }
 
     #[test]
+    // BT-3040: see the serialization note on `test_ensure_index_clones_git_registry`.
+    #[serial_test::serial(env_var)]
     fn test_resolve_latest_release_through_git_registry() {
         let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
