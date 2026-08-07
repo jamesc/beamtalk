@@ -43,6 +43,31 @@
 //! - sets `PHX_SERVER=true` (what `bin/server` sets right before its own
 //!   `exec bin/bt_attach start`)
 //!
+//! **Why this is a Rust reimplementation and not a `bin\server.bat` mirroring
+//! `bin/server`'s shape (BT-3045 adversarial-review follow-up):** `bin/server`
+//! resolves `BT_WORKSPACE_NODE` with a `sed` regex against `metadata.json`,
+//! which works but is exactly the kind of fragile hand-rolled JSON access a
+//! `.bat` equivalent (batch has no JSON parser at all — a working port would
+//! mean an even more fragile `findstr`/`for /f` regex reimplementation) would
+//! have to imitate to get *worse* correctness, not parity. Windows already
+//! gets a strictly better implementation of the same resolution
+//! ([`crate::discovery::read_node_name`], the real `serde_json` parser
+//! [`crate::discovery::discover_workspaces`] itself uses) by staying in Rust
+//! — introducing a second, `.bat`-based entry point purely for symmetry with
+//! Unix would add a second-worse implementation of the one thing `bin/server`
+//! does that actually needs mirroring, not remove the drift risk. What *was*
+//! missing, and what BT-3045 actually closes, is a **test** tying the two
+//! together: `spawn::tests::windows_launch_env_matches_bin_server_contract`
+//! (Windows-only, since it exercises `build_launch_command`'s Windows arm)
+//! reads `bin/server`'s source and asserts each of today's known contract env
+//! vars still appears there as a real assignment, and is also set here — so
+//! *removing or renaming* one of them in `bin/server` fails this crate's test
+//! suite instead of silently drifting. It is a removal/rename guard, not
+//! full behavioral-equivalence proof — see that test's own doc comment for
+//! what it deliberately does not (and structurally cannot, without
+//! duplicating `bin/server`'s logic) catch, e.g. a *new* var `bin/server`
+//! starts setting that this test's hardcoded list hasn't been told about yet.
+//!
 //! `RELEASE_DISTRIBUTION=none` is a hard requirement on every platform, not
 //! an optimization — the spike (`docs/research/desktop-shell-spike.md`,
 //! criterion (a)) found that `mix release`'s generated launcher boots the VM
@@ -353,10 +378,10 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
 /// see this module's doc comment for the full rationale. `bin/server` does
 /// not exist on Windows, so this function does what it would have: resolve
 /// `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE` from the on-disk workspace
-/// directory, generate an ephemeral `SECRET_KEY_BASE`, and set `PHX_SERVER`
-/// — then invoke the release's own `bin\bt_attach.bat start` directly rather
-/// than passing `workspace_id` as an argv the Windows launcher has no shell
-/// script to interpret.
+/// directory, generate an ephemeral `SECRET_KEY_BASE`, set `PHX_SERVER`, and
+/// `cd` to the release root — then invoke the release's own
+/// `bin\bt_attach.bat start` directly rather than passing `workspace_id` as
+/// an argv the Windows launcher has no shell script to interpret.
 ///
 /// # Errors
 ///
@@ -383,6 +408,23 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
     cmd.env("SECRET_KEY_BASE", generate_secret_key_base());
     cmd.env("PHX_SERVER", "true");
 
+    // BT-3045 adversarial-review follow-up: `bin/server`'s Unix arm always
+    // `cd -P -- "$(dirname -- "$0")/.."`s to the release root before its
+    // final `exec bin/bt_attach start` (see the sibling `#[cfg(unix)]`
+    // `build_launch_command` above, which relies on that `exec` inheriting
+    // the launcher's own cwd rather than setting one itself) — this arm
+    // never had an equivalent, so the BEAM inherited whatever cwd the
+    // spawning Tauri app process happened to have (unrelated to the release)
+    // instead of the release root, affecting crash dumps and any
+    // relative-path writes the release makes assuming it's running from
+    // there. `release_root` mirrors that `dirname/..` computation; a
+    // best-effort skip (not an error) when it can't be determined keeps this
+    // function's error surface unchanged for callers/tests that pass a bare
+    // relative launcher path with no real parent directory.
+    if let Some(root) = release_root(&config.launcher) {
+        cmd.current_dir(root);
+    }
+
     // BT-3046 adversarial-review follow-up: a bundled MSI/NSIS install lands
     // under `C:\Program Files\Beamtalk\...`, which a standard (non-admin)
     // Windows user cannot write to. Mix releases resolve `RELEASE_TMP`
@@ -396,6 +438,45 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
     cmd.env("RELEASE_TMP", release_tmp);
 
     Ok(cmd)
+}
+
+/// The release root a Windows launcher path implies — `bin\bt_attach.bat`'s
+/// grandparent directory, mirroring `bin/server`'s own `dirname -- "$0")/..`
+/// (this module's doc comment, BT-3045).
+///
+/// **Requires an absolute `launcher`, deliberately** (adversarial-review
+/// follow-up) — `desktop/src-tauri/src/launcher.rs`'s `resolve_launcher_path`
+/// resolves an *absolute* path in the normal bundled-app case, but its
+/// documented fallbacks are not: `resource_dir()` failing, or a developer
+/// setting `BEAMTALK_ATTACH_LAUNCHER` to a bare relative path (its own doc
+/// comment's example, "against a `just dist-liveview` output"), both leave
+/// `launcher` relative (e.g. `dist-liveview\bin\bt_attach.bat`). Computing a
+/// *relative* release root from that and handing it to `Command::current_dir`
+/// would be actively harmful, not just unhelpful: the `.bat` still routes
+/// through `cmd.exe` (this module's doc comment, `BatBadBut`), and `cmd.exe`
+/// resolves the still-relative launcher path it was told to run *against the
+/// new current directory* — turning `dist-liveview\bin\bt_attach.bat` into
+/// an attempted `dist-liveview\dist-liveview\bin\bt_attach.bat`, which
+/// doesn't exist, so `cmd.exe` exits almost immediately. That early exit is
+/// exactly what [`spawn_front_with_port_retry`]'s heuristic treats as a
+/// suspected port conflict — silently turning a real (if unusual)
+/// dev-workflow launcher path into a confusing `PortsExhausted`, the precise
+/// failure mode this same issue's `PortsExhausted` diagnostic improvement
+/// exists to prevent. Requiring `is_absolute()` keeps this a no-op (today's
+/// behavior: no `current_dir` set, BEAM inherits the Tauri app's cwd) for
+/// that dev/fallback shape instead.
+#[cfg(windows)]
+fn release_root(launcher: &std::path::Path) -> Option<PathBuf> {
+    if !launcher.is_absolute() {
+        return None;
+    }
+    let bin_dir = launcher.parent()?;
+    let root = bin_dir.parent()?;
+    if root.as_os_str().is_empty() {
+        None
+    } else {
+        Some(root.to_path_buf())
+    }
 }
 
 /// Guard against [`SpawnConfig::launcher`] pointing at the wrong platform's
@@ -566,7 +647,12 @@ pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
 /// # Errors
 ///
 /// Returns [`BrokerError::PortsExhausted`] if every port attempt looks like
-/// a conflict, or propagates the first non-conflict error (OIDC refusal,
+/// a conflict — carrying the *last* attempt's real launcher exit status as a
+/// diagnostic (BT-3045; see that variant's doc comment for why: this
+/// function's retry signal is a heuristic, so a genuine non-conflict launcher
+/// failure that happens to exit early on every attempt would otherwise be
+/// reported as an opaque attempt count with no clue it wasn't really a port
+/// conflict) — or propagates the first non-conflict error (OIDC refusal,
 /// unknown workspace, spawn I/O failure, or a `try_wait` I/O error).
 ///
 /// # Panics
@@ -587,8 +673,15 @@ pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Spawn
         };
         let mut child = spawn_front(&spawn_config)?;
         std::thread::sleep(config.bind_failure_grace);
-        if let Some(_exit_status) = child.try_wait()? {
-            Ok(SpawnAttempt::PortTaken)
+        if let Some(exit_status) = child.try_wait()? {
+            // BT-3045: carry the launcher's actual exit status through, so a
+            // caller that exhausts every attempt sees more than a bare count
+            // (see BrokerError::PortsExhausted's doc comment) — this is a
+            // diagnostic only, not a reclassification: an early exit is still
+            // just *treated* as a suspected port conflict per this
+            // function's own heuristic doc comment above, whatever the real
+            // cause turns out to be.
+            Ok(SpawnAttempt::PortTaken(Some(exit_status.to_string())))
         } else {
             *spawned.borrow_mut() = Some(child);
             Ok(SpawnAttempt::Bound)
@@ -805,6 +898,182 @@ mod tests {
              — this also doubles as a real writability check: create_dir_all only succeeds if \
              the current user can actually write there"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_launch_command_sets_current_dir_to_the_release_root() {
+        // BT-3045: unlike the other Windows tests here, this one needs a
+        // launcher path with a real parent chain (bin\bt_attach.bat under a
+        // real release root) — `release_root` deliberately no-ops on the
+        // bare relative `r"bin\bt_attach.bat"` the other tests use (see its
+        // doc comment), so this uses an absolute tempdir path instead, the
+        // same shape `desktop/src-tauri/src/launcher.rs::resolve_launcher_path`
+        // always produces in production.
+        let ws = WindowsTestWorkspaceDir::new("win_launch_cwd", None, Some("c"));
+        let release_root = tempfile::TempDir::new().unwrap();
+        let launcher = release_root.path().join("bin").join("bt_attach.bat");
+        let config = SpawnConfig::new(launcher, ws.id.clone(), 4567);
+
+        let cmd = build_launch_command(&config).expect("should build a command");
+
+        assert_eq!(
+            cmd.get_current_dir(),
+            Some(release_root.path()),
+            "current_dir should be the launcher's grandparent directory \
+             (bin\\bt_attach.bat -> bin -> release root), matching bin/server's \
+             own `cd -P -- \"$(dirname \"$0\")/..\"` on Unix"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn release_root_is_none_for_a_launcher_with_no_real_parent_chain() {
+        // The bare relative paths the other Windows tests in this file use
+        // (e.g. r"bin\bt_attach.bat") have no real release root to cd into —
+        // release_root must no-op (return None) rather than resolve to an
+        // empty/current-directory PathBuf that `Command::current_dir` would
+        // then be handed nonsensically.
+        assert_eq!(
+            release_root(std::path::Path::new(r"bin\bt_attach.bat")),
+            None
+        );
+        assert_eq!(release_root(std::path::Path::new("bt_attach.bat")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn release_root_resolves_an_absolute_launcher_paths_grandparent() {
+        assert_eq!(
+            release_root(std::path::Path::new(
+                r"C:\Program Files\Beamtalk\dist-liveview\bin\bt_attach.bat"
+            )),
+            Some(PathBuf::from(r"C:\Program Files\Beamtalk\dist-liveview"))
+        );
+    }
+
+    /// Regression test (adversarial-review follow-up): a *relative* launcher
+    /// path with a real multi-level parent chain — exactly the shape
+    /// `desktop/src-tauri/src/launcher.rs::resolve_launcher_path` falls back
+    /// to when `resource_dir()` fails, or a developer sets
+    /// `BEAMTALK_ATTACH_LAUNCHER=dist-liveview/bin/bt_attach.bat` (that
+    /// module's own doc-comment example) — must still resolve to `None`, not
+    /// `Some("dist-liveview")`. Before this guard, `release_root` treated
+    /// this as a valid release root and handed it to `Command::current_dir`;
+    /// since the launcher path itself stays relative too, `cmd.exe` (which
+    /// `.bat` launches always route through) would then resolve it against
+    /// the *new* cwd, effectively looking for
+    /// `dist-liveview\dist-liveview\bin\bt_attach.bat` — silently breaking
+    /// this exact dev workflow with a confusing early `cmd.exe` exit
+    /// misclassified as a port conflict. See `release_root`'s doc comment
+    /// for the full failure chain.
+    #[cfg(windows)]
+    #[test]
+    fn release_root_is_none_for_a_relative_launcher_even_with_a_real_parent_chain() {
+        assert_eq!(
+            release_root(std::path::Path::new(r"dist-liveview\bin\bt_attach.bat")),
+            None,
+            "a relative launcher path must never produce a current_dir — see this \
+             function's doc comment for why that's actively harmful, not just unhelpful"
+        );
+    }
+
+    /// BT-3045 adversarial-review follow-up: `bin/server`'s Unix arm and
+    /// `build_launch_command`'s Windows arm are two independent
+    /// implementations of "resolve `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE`,
+    /// generate `SECRET_KEY_BASE` if needed, set `PHX_SERVER`" — nothing
+    /// previously compared them. This closes the specific gap that mattered
+    /// most in practice: it reads `bin/server`'s actual source (not a
+    /// duplicated copy of its logic) and asserts each of the four vars below
+    /// still appears there as a real shell **assignment** (`"{var}="`), not
+    /// merely mentioned in a comment — so deleting/renaming the functional
+    /// block while leaving the header comment's prose untouched (which
+    /// mentions these same names) still fails this test, unlike a bare
+    /// substring search would.
+    ///
+    /// **What this does *not* catch**, so a reviewer doesn't over-trust it:
+    /// `contract_vars` below is a hardcoded list of *today's* var names —
+    /// this test cannot discover a wholly new env var `bin/server` starts
+    /// setting in the future (a human still has to notice and add it here
+    /// too), and it only checks *presence*, not exact semantics (e.g.
+    /// `bin/server` only generates `SECRET_KEY_BASE` when unset, while the
+    /// Windows arm always regenerates one — both end up ephemeral-per-boot
+    /// for this broker's own call shape, since neither platform's broker
+    /// code pre-sets that var itself, but this test would not notice if that
+    /// stopped being true). It is a removal/rename guard, not a full
+    /// behavioral-equivalence proof.
+    ///
+    /// Windows-only (like the rest of this section): it exercises
+    /// `build_launch_command`'s `#[cfg(windows)]` arm, the half of the
+    /// contract this crate can actually drift on — `bin/server` itself needs
+    /// no equivalent check of its own code.
+    #[cfg(windows)]
+    #[test]
+    fn windows_launch_env_matches_bin_server_contract() {
+        // crates/beamtalk-desktop-broker -> crates -> repo root.
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let bin_server_path = repo_root
+            .join("editors")
+            .join("liveview")
+            .join("rel")
+            .join("overlays")
+            .join("bin")
+            .join("server");
+        let bin_server = std::fs::read_to_string(&bin_server_path).unwrap_or_else(|e| {
+            panic!(
+                "could not read {}: {e} — has bin/server moved? update this test's path \
+                 alongside it",
+                bin_server_path.display()
+            )
+        });
+
+        // Every env var bin/server's workspace-id branch sets/exports for
+        // `bin/bt_attach start` to inherit, beyond the four broker-set vars
+        // build_env's own test already covers cross-platform
+        // (PORT/BT_ATTACH_BIND_IP/BT_ATTACH_NODE_SUFFIX/RELEASE_DISTRIBUTION
+        // — bin/server never touches those itself, so they're out of scope
+        // here).
+        let contract_vars = [
+            "BT_WORKSPACE_NODE",
+            "BT_WORKSPACE_COOKIE",
+            "SECRET_KEY_BASE",
+            "PHX_SERVER",
+        ];
+        for var in contract_vars {
+            // A real shell assignment ("VAR=..."), not just the var name
+            // appearing somewhere (e.g. bin/server's own header-comment
+            // prose mentions BT_WORKSPACE_NODE/BT_WORKSPACE_COOKIE narratively
+            // without an "=" — a bare `.contains(var)` would still pass even
+            // if the actual assignment lines below the comment were deleted).
+            let assignment = format!("{var}=");
+            assert!(
+                bin_server.contains(&assignment),
+                "bin/server no longer assigns {var} (looked for {assignment:?}) — either it \
+                 was removed there (update this test's `contract_vars` list) or renamed \
+                 (update both this test AND build_launch_command's Windows arm to match)"
+            );
+        }
+
+        let ws = WindowsTestWorkspaceDir::new("win_launch_contract", None, Some("c"));
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+        let cmd = build_launch_command(&config).expect("should build a command");
+        let env_names: std::collections::HashSet<String> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| v.map(|_| k.to_string_lossy().into_owned()))
+            .collect();
+
+        for var in contract_vars {
+            assert!(
+                env_names.contains(var),
+                "build_launch_command's Windows arm doesn't set {var}, which bin/server sets \
+                 on Unix — the two have drifted out of sync"
+            );
+        }
     }
 
     #[cfg(windows)]
@@ -1035,8 +1304,16 @@ mod tests {
 
         let result = spawn_front_with_port_retry(&config);
         assert!(
-            matches!(result, Err(BrokerError::PortsExhausted(3))),
-            "expected PortsExhausted(3), got {result:?}"
+            matches!(
+                result,
+                Err(BrokerError::PortsExhausted {
+                    attempts: 3,
+                    last_exit_status: Some(_)
+                })
+            ),
+            "expected PortsExhausted with attempts=3 and a diagnostic exit status \
+             (BT-3045 — the launcher's real exit status should be surfaced, not just \
+             a bare count), got {result:?}"
         );
     }
 
@@ -1174,8 +1451,16 @@ mod tests {
 
         let result = spawn_front_with_port_retry(&config);
         assert!(
-            matches!(result, Err(BrokerError::PortsExhausted(3))),
-            "expected PortsExhausted(3), got {result:?}"
+            matches!(
+                result,
+                Err(BrokerError::PortsExhausted {
+                    attempts: 3,
+                    last_exit_status: Some(_)
+                })
+            ),
+            "expected PortsExhausted with attempts=3 and a diagnostic exit status \
+             (BT-3045 — the launcher's real exit status should be surfaced, not just \
+             a bare count), got {result:?}"
         );
     }
 

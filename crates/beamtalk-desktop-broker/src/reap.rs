@@ -100,6 +100,62 @@ pub fn save_record(dir: &Path, record: &FrontRecord) -> Result<()> {
     Ok(())
 }
 
+/// Correct a front record's `node_name` after the fact (BT-3045) — used on
+/// the Windows attach path, where [`save_record`]'s initial write (via
+/// `desktop/src-tauri/src/commands.rs`'s `persist_front_record`) cannot yet
+/// know the front's real epmd registration name (`sname::predict_node_name`'s
+/// pid guess is wrong there — see that module's doc comment — and
+/// `sname::resolve_registered_node_name`'s epmd query only has an answer once
+/// the front has actually distributed, which happens lazily on the first
+/// `/readiness` call, after the initial record write). Once readiness
+/// confirms `Ready` and a real epmd-resolved name is available, this
+/// overwrites the placeholder in place. The caller
+/// (`desktop/src-tauri/src/commands.rs`'s `attach_and_open_window`) runs this
+/// on a detached background thread rather than inline (`node_name` has no
+/// reader today, so nothing should block on it) — which widens, not just
+/// tolerates, the window for the race `expected_pid` exists to close below.
+///
+/// Compare-and-swap on `expected_pid`, not a blind overwrite: without it, a
+/// record removed by a concurrent `detach`/`quit`/failed-attach cleanup
+/// (`kill_and_untrack`) between this function's read and write would be
+/// silently *recreated* by the write — describing a process this broker
+/// already killed as if it were still the live front. Checking the pid also
+/// guards the (currently unlikely, since ports are freshly OS-allocated per
+/// spawn — see `crate::port`'s module docs — but not impossible) case where
+/// the same `(workspace_id, port)` key got reused by an entirely different,
+/// newer front in between: this must never stamp a stale epmd-resolved name
+/// onto a record that isn't the one this call was resolving it for.
+///
+/// No-op (not an error) if the record no longer exists, or if it exists but
+/// its `pid` no longer matches `expected_pid` — either way there's nothing
+/// left for *this* call to correct, not a failure of this function's own job.
+///
+/// # Errors
+///
+/// Returns an error if the record exists but can't be read/parsed/rewritten.
+pub fn update_record_node_name(
+    dir: &Path,
+    workspace_id: &str,
+    port: u16,
+    expected_pid: u32,
+    node_name: &str,
+) -> Result<()> {
+    let path = record_path(dir, workspace_id, port);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut record: FrontRecord = serde_json::from_str(&content)?;
+    if record.pid != expected_pid {
+        return Ok(());
+    }
+    node_name.clone_into(&mut record.node_name);
+    let json = serde_json::to_string_pretty(&record)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
 /// Remove a front record — called on clean detach, so a graceful stop
 /// doesn't leave a stale record for the next sweep to trip over. Also
 /// removes that front's per-front `RELEASE_TMP` directory on Windows
@@ -625,6 +681,83 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         // Removing a record that was never saved must not error.
         remove_record(tmp.path(), "nonexistent", 1).unwrap();
+    }
+
+    // ── update_record_node_name (BT-3045) ───────────────────────────────
+
+    #[test]
+    fn update_record_node_name_corrects_the_persisted_value() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let rec = record(4242, Some(555));
+        save_record(tmp.path(), &rec).unwrap();
+
+        update_record_node_name(
+            tmp.path(),
+            &rec.workspace_id,
+            rec.port,
+            rec.pid,
+            "bt_attach_abc123_9999@localhost",
+        )
+        .unwrap();
+
+        let loaded = load_all_records(tmp.path()).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].node_name, "bt_attach_abc123_9999@localhost");
+        // Every other field must survive untouched — this only corrects
+        // node_name, not a full re-save of caller-supplied data.
+        assert_eq!(loaded[0].pid, rec.pid);
+        assert_eq!(loaded[0].port, rec.port);
+        assert_eq!(loaded[0].workspace_id, rec.workspace_id);
+        assert_eq!(loaded[0].start_time, rec.start_time);
+    }
+
+    #[test]
+    fn update_record_node_name_is_a_noop_when_the_record_is_already_gone() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A concurrent detach/quit could have already cleared the record —
+        // must not error, there's simply nothing left to correct.
+        update_record_node_name(
+            tmp.path(),
+            "nonexistent",
+            1,
+            4242,
+            "bt_attach_x_1@localhost",
+        )
+        .unwrap();
+    }
+
+    /// Regression test (adversarial-review follow-up): without the
+    /// `expected_pid` compare-and-swap check, this call would have
+    /// unconditionally overwritten `node_name`, which — combined with the
+    /// caller now running this on a background thread (see
+    /// `update_record_node_name`'s doc comment) — could resurrect/mutate a
+    /// record for a process that's no longer the one this correction was
+    /// actually resolving a name for (e.g. a concurrent detach recreated the
+    /// same `(workspace_id, port)` key for a genuinely different, newer
+    /// front in between this call being scheduled and running).
+    #[test]
+    fn update_record_node_name_is_a_noop_when_the_recorded_pid_no_longer_matches() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let rec = record(4242, Some(555));
+        save_record(tmp.path(), &rec).unwrap();
+
+        // A stale correction for the *old* pid arrives after a new front
+        // record (same workspace_id/port, different pid) has replaced it.
+        update_record_node_name(
+            tmp.path(),
+            &rec.workspace_id,
+            rec.port,
+            9999, // not rec.pid
+            "bt_attach_abc123_9999@localhost",
+        )
+        .unwrap();
+
+        let loaded = load_all_records(tmp.path()).unwrap();
+        assert_eq!(
+            loaded,
+            vec![rec],
+            "record must be left completely untouched when expected_pid doesn't match"
+        );
     }
 
     #[cfg(windows)]

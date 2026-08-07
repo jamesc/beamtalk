@@ -5,6 +5,24 @@
 //!
 //! **DDD Context:** Desktop Shell
 
+use std::fmt;
+
+/// Display wrapper for [`BrokerError::PortsExhausted`]'s `last_exit_status`.
+///
+/// Renders `" — last launcher exit: <status>"` when a diagnostic is present,
+/// or an empty string when `None` (the pre-BT-3045 message shape, unchanged
+/// when there's nothing more to say).
+struct DisplayLastExitStatus<'a>(&'a Option<String>);
+
+impl fmt::Display for DisplayLastExitStatus<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(status) => write!(f, " — last launcher exit: {status}"),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Errors the broker core can produce.
 ///
 /// Kept as a concrete enum (rather than `miette::Report`, which the CLI/
@@ -37,8 +55,28 @@ pub enum BrokerError {
     MissingCookie(String),
 
     /// Ran out of port-allocation attempts (see [`crate::port::allocate_port_with_retry`]).
-    #[error("failed to allocate a free port after {0} attempt(s)")]
-    PortsExhausted(u32),
+    ///
+    /// `last_exit_status`, when available, is the most recent spawn attempt's
+    /// launcher process exit status (`std::process::ExitStatus`'s own
+    /// `Display` — e.g. `"exit status: 1"` on Unix or `"exit code:
+    /// 0xc0000135"` on Windows), threaded through from
+    /// [`crate::port::SpawnAttempt::PortTaken`]. Carrying it matters because
+    /// [`crate::spawn::spawn_front_with_port_retry`]'s retry signal is a
+    /// heuristic (any early process exit looks like a port conflict — see its
+    /// doc comment), not a proof: a genuine launcher failure unrelated to
+    /// port conflicts (a crash, a missing DLL, `bin\bt_attach.bat` rejecting
+    /// its `start` invocation for some Windows-specific reason) would
+    /// previously report only a bare attempt count here, reading as "every
+    /// candidate port really was taken" even when that was never true (BT-3045
+    /// adversarial-review follow-up).
+    #[error(
+        "failed to allocate a free port after {attempts} attempt(s){}",
+        DisplayLastExitStatus(.last_exit_status)
+    )]
+    PortsExhausted {
+        attempts: u32,
+        last_exit_status: Option<String>,
+    },
 
     /// The installed `beamtalk` CLI could not be located (checked `PATH` and
     /// the configured fallback locations). GUI apps launched from a dock/
