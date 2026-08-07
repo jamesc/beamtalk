@@ -65,10 +65,10 @@ hc getStep
 Actor subclass: LiveActor
   state: count = 0
   bump => self.count := self.count + 1
-// => _
+// => LiveActor
 
 LiveActor >> getCount => self.count
-// => _
+// => LiveActor>>getCount
 
 la := LiveActor spawn
 // => Actor(LiveActor, _)
@@ -84,7 +84,7 @@ la getCount
 
 // Redefine bump to add 100 instead of 1
 LiveActor >> bump => self.count := self.count + 100
-// => _
+// => LiveActor>>bump
 
 // Existing actor uses new method
 la bump
