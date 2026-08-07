@@ -19,10 +19,19 @@
 //! (Erlang) later adds `node_name` (plus settings, loaded modules, …) via
 //! debounced writes once it has booted at least once
 //! (`beamtalk_workspace_meta.erl`). A workspace that has never been started
-//! therefore has no `node_name` field yet — this module falls back to the
-//! deterministic `beamtalk_workspace_<id>@localhost` naming convention the
-//! CLI itself uses (`process.rs`/`lifecycle.rs`), and epmd liveness will
-//! correctly report it as dead regardless of which name was used to look it up.
+//! therefore has no `node_name` field yet. [`discover_workspaces`]'s
+//! best-effort picker listing falls back to the deterministic
+//! `beamtalk_workspace_<id>@localhost` naming convention the CLI itself uses
+//! (`process.rs`/`lifecycle.rs`) in that case, and epmd liveness will
+//! correctly report it as dead regardless of which name was used to look it
+//! up. [`read_node_name`] — the single-workspace lookup the Windows spawn
+//! path uses to actually dist-connect — does **not** fall back: it hard-fails
+//! with [`crate::error::BrokerError::MissingNodeName`] instead, matching
+//! `bin/server`'s Unix fail-fast behavior (ADR 0097 Broker §1b) rather than
+//! silently connecting to a guessed name that only *usually* matches the
+//! CLI's own naming convention (BT-3060 adversarial-review follow-up: a
+//! listing can afford to guess and let epmd sort out liveness, but an actual
+//! connection attempt should not).
 //!
 //! **DDD Context:** Desktop Shell
 
@@ -30,7 +39,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use crate::error::Result;
+use crate::error::{BrokerError, Result};
 
 /// One discovered workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,17 +108,36 @@ fn parse_metadata(dir_name: &str, content: &str) -> Result<WorkspaceSummary> {
 /// `bin/server` shell script on Windows to do the equivalent `sed`
 /// extraction (ADR 0097 Implementation §5b), so the broker resolves
 /// `BT_WORKSPACE_NODE` itself before invoking `bin\bt_attach.bat` directly.
-/// Falls back to [`default_node_name`], same as [`discover_workspaces`], when
-/// `metadata.json` doesn't yet carry a `node_name` field.
+///
+/// Unlike [`parse_metadata`] (used by [`discover_workspaces`]'s best-effort
+/// picker listing), this does **not** fall back to [`default_node_name`] when
+/// `metadata.json` has no `node_name` field — it hard-fails instead, matching
+/// `bin/server`'s Unix behavior (which `exit 1`s rather than guessing, see
+/// this module's doc comment). A workspace that has never been started has
+/// no real node to dist-connect to yet, and the two naming conventions (this
+/// crate's guess vs. the CLI's actual scheme) are independently maintained —
+/// a coincidental match today is not a guarantee (BT-3060).
+///
+/// A present-but-blank `node_name` (`""`, or whitespace-only) is treated the
+/// same as a missing field, matching both `bin/server`'s own `[ -z "${node}"
+/// ]` check (empty extraction fails the same way as no match) and this
+/// crate's own [`beamtalk_workspace::read_cookie_file`] convention for the
+/// sibling `cookie` file.
 ///
 /// # Errors
 ///
-/// Returns an error if `metadata.json` doesn't exist or can't be parsed.
+/// Returns [`BrokerError::Io`] if `metadata.json` doesn't exist,
+/// [`BrokerError::Json`] if it can't be parsed, or
+/// [`BrokerError::MissingNodeName`] if it parses but has no non-blank
+/// `node_name` field.
 pub fn read_node_name(workspace_id: &str) -> Result<String> {
     let meta_path = beamtalk_workspace::workspace_dir(workspace_id)?.join("metadata.json");
     let content = std::fs::read_to_string(&meta_path)?;
-    let summary = parse_metadata(workspace_id, &content)?;
-    Ok(summary.node_name)
+    let raw: RawMetadata = serde_json::from_str(&content)?;
+    match raw.node_name {
+        Some(name) if !name.trim().is_empty() => Ok(name),
+        _ => Err(BrokerError::MissingNodeName(workspace_id.to_string())),
+    }
 }
 
 /// Enumerate `~/.beamtalk/workspaces/*/metadata.json`, parse each with a real
@@ -245,17 +273,44 @@ mod tests {
         assert_eq!(result, "bt_attach_x_123@localhost");
     }
 
+    /// BT-3060: `read_node_name` (the Windows spawn path's lookup) must
+    /// hard-fail here, matching `bin/server`'s Unix behavior — unlike
+    /// `parse_metadata`'s picker-listing fallback (tested above), a real
+    /// spawn attempt must not silently guess at a node name.
     #[test]
-    fn read_node_name_falls_back_to_default_when_metadata_has_no_node_name() {
-        let id = format!("read_node_name_fallback_{}", std::process::id());
+    fn read_node_name_errors_when_metadata_has_no_node_name() {
+        let id = format!("read_node_name_missing_field_{}", std::process::id());
         let dir = beamtalk_workspace::workspace_dir(&id).unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("metadata.json"), r#"{"created_at":1}"#).unwrap();
 
-        let result = read_node_name(&id).unwrap();
+        let result = read_node_name(&id);
 
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(result, default_node_name(&id));
+        assert!(
+            matches!(result, Err(BrokerError::MissingNodeName(ref w)) if w == &id),
+            "expected MissingNodeName({id}), got {result:?}"
+        );
+    }
+
+    /// A present-but-blank `node_name` must fail exactly like an absent one
+    /// — matching `bin/server`'s `[ -z "${node}" ]` check and this crate's
+    /// own `read_cookie_file` empty-is-missing convention (BT-3060 review
+    /// follow-up).
+    #[test]
+    fn read_node_name_errors_when_metadata_has_a_blank_node_name() {
+        let id = format!("read_node_name_blank_field_{}", std::process::id());
+        let dir = beamtalk_workspace::workspace_dir(&id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("metadata.json"), r#"{"node_name":"   "}"#).unwrap();
+
+        let result = read_node_name(&id);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            matches!(result, Err(BrokerError::MissingNodeName(ref w)) if w == &id),
+            "expected MissingNodeName({id}), got {result:?}"
+        );
     }
 
     #[test]

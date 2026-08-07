@@ -388,8 +388,11 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
 /// Returns [`BrokerError::LauncherPlatformMismatch`] if `config.launcher`
 /// doesn't look like a Windows entry point, [`BrokerError::MissingCookie`] if
 /// the workspace directory has no (or an empty) `cookie` file, propagates a
-/// [`crate::discovery::read_node_name`] failure (malformed `metadata.json` —
-/// `spawn_front` already checked it exists before calling this), or
+/// [`crate::discovery::read_node_name`] failure — malformed `metadata.json`
+/// (`spawn_front` already checked it exists before calling this), or
+/// [`BrokerError::MissingNodeName`] when it exists but has no `node_name`
+/// field yet (a workspace created but never started — BT-3060, matching
+/// `bin/server`'s Unix fail-fast behavior instead of guessing) — or
 /// [`BrokerError::Io`] if the per-front [`release_tmp_dir`] can't be created.
 #[cfg(windows)]
 fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
@@ -910,7 +913,11 @@ mod tests {
         // doc comment), so this uses an absolute tempdir path instead, the
         // same shape `desktop/src-tauri/src/launcher.rs::resolve_launcher_path`
         // always produces in production.
-        let ws = WindowsTestWorkspaceDir::new("win_launch_cwd", None, Some("c"));
+        let ws = WindowsTestWorkspaceDir::new(
+            "win_launch_cwd",
+            Some("bt_attach_win_launch_cwd@localhost"),
+            Some("c"),
+        );
         let release_root = tempfile::TempDir::new().unwrap();
         let launcher = release_root.path().join("bin").join("bt_attach.bat");
         let config = SpawnConfig::new(launcher, ws.id.clone(), 4567);
@@ -1059,7 +1066,11 @@ mod tests {
             );
         }
 
-        let ws = WindowsTestWorkspaceDir::new("win_launch_contract", None, Some("c"));
+        let ws = WindowsTestWorkspaceDir::new(
+            "win_launch_contract",
+            Some("bt_attach_win_launch_contract@localhost"),
+            Some("c"),
+        );
         let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
         let cmd = build_launch_command(&config).expect("should build a command");
         let env_names: std::collections::HashSet<String> = cmd
@@ -1110,35 +1121,33 @@ mod tests {
         );
     }
 
+    /// BT-3060: the Windows spawn path must hard-fail — not silently guess a
+    /// node name via [`crate::discovery::default_node_name`] — when a
+    /// workspace's `metadata.json` has no `node_name` yet (created but never
+    /// started), matching `bin/server`'s Unix fail-fast behavior.
     #[cfg(windows)]
     #[test]
-    fn build_launch_command_falls_back_to_default_node_name_when_metadata_lacks_one() {
-        let ws = WindowsTestWorkspaceDir::new("win_launch_default_node", None, Some("c"));
+    fn build_launch_command_errors_when_metadata_lacks_node_name() {
+        let ws = WindowsTestWorkspaceDir::new("win_launch_no_node_name", None, Some("c"));
         let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
 
-        let cmd = build_launch_command(&config).expect("should build a command");
+        let result = build_launch_command(&config);
 
-        let envs: std::collections::HashMap<String, String> = cmd
-            .get_envs()
-            .filter_map(|(k, v)| {
-                v.map(|v| {
-                    (
-                        k.to_string_lossy().into_owned(),
-                        v.to_string_lossy().into_owned(),
-                    )
-                })
-            })
-            .collect();
-        assert_eq!(
-            envs.get("BT_WORKSPACE_NODE").map(String::as_str),
-            Some(crate::discovery::default_node_name(&ws.id)).as_deref()
+        assert!(
+            matches!(result, Err(BrokerError::MissingNodeName(ref w)) if w == &ws.id),
+            "expected MissingNodeName({}), got {result:?}",
+            ws.id
         );
     }
 
     #[cfg(windows)]
     #[test]
     fn build_launch_command_errors_when_cookie_file_missing() {
-        let ws = WindowsTestWorkspaceDir::new("win_launch_no_cookie", None, None);
+        let ws = WindowsTestWorkspaceDir::new(
+            "win_launch_no_cookie",
+            Some("bt_attach_win_launch_no_cookie@localhost"),
+            None,
+        );
         let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
 
         let result = build_launch_command(&config);

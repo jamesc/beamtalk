@@ -54,6 +54,22 @@ pub enum BrokerError {
     #[error("workspace '{0}' has no cookie file under ~/.beamtalk/workspaces/{0}/cookie")]
     MissingCookie(String),
 
+    /// A workspace directory exists but `metadata.json` has no `node_name`
+    /// field yet — the workspace was created but never started, so
+    /// `beamtalk_workspace_meta` (Erlang) never wrote a real node name back
+    /// to disk. The Windows spawn path (BT-2988) needs `node_name` itself
+    /// before invoking `bin\bt_attach.bat` directly (there is no `bin/server`
+    /// shell script there to resolve it), and hard-fails here rather than
+    /// guessing at a name via [`crate::discovery::default_node_name`] —
+    /// matching `bin/server`'s Unix fail-fast behavior instead of silently
+    /// dist-connecting to a name that only *usually* matches the CLI's own
+    /// naming convention (BT-3060 adversarial-review follow-up).
+    #[error(
+        "workspace '{0}' has no node_name in ~/.beamtalk/workspaces/{0}/metadata.json yet — \
+         start it first: beamtalk workspace create {0} --background --persistent"
+    )]
+    MissingNodeName(String),
+
     /// Ran out of port-allocation attempts (see [`crate::port::allocate_port_with_retry`]).
     ///
     /// `last_exit_status`, when available, is the most recent spawn attempt's
