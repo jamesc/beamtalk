@@ -573,6 +573,18 @@ fn fast_forward_index(index_dir: &Utf8Path) -> bool {
 }
 
 /// Clone the registry index into `target`, replacing anything already there.
+/// # Relative `file://` URLs
+///
+/// `git clone` below runs with `current_dir` set to `target`'s parent (the
+/// hash-keyed cache directory, BT-3040 — see the `debug_assert!` just below
+/// for why), not the process's actual working directory. A *relative*
+/// `file://` URL (`validate_git_url` only requires the scheme prefix, not
+/// that what follows is absolute) would therefore resolve against that
+/// cache-internal location instead of anywhere user-meaningful. Every
+/// caller/test in this module always builds absolute `file://` URLs, so
+/// this is not reachable in practice today — but a registry `file://` URL
+/// is expected to always be absolute; this isn't enforced beyond
+/// convention.
 fn clone_index(url: &str, target: &Utf8Path) -> Result<()> {
     // The registry URL can come from the environment or the manifest; screen it
     // with the same rules as a dependency URL so `ext::` and option-lookalikes
