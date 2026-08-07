@@ -833,6 +833,15 @@ mod tests {
     /// it: both functions contend on the same [`record_ops_lock`], so a
     /// `remove_record` that starts while that lock is held blocks until it's
     /// released, rather than running concurrently.
+    ///
+    /// Trade-off, noted rather than avoided (adversarial-review follow-up):
+    /// `record_ops_lock` is one process-wide `static`, not scoped per test,
+    /// so holding it for this test's 200ms window incidentally blocks any
+    /// other test in this binary that concurrently calls
+    /// `save_record`/`update_record_node_name`/`remove_record` on its own
+    /// unrelated tmp dir under default parallel `cargo test` execution. No
+    /// tight timeouts exist elsewhere in this suite, so this doesn't cause
+    /// failures — just up to 200ms of incidental cross-test latency.
     #[test]
     fn update_and_remove_are_mutually_exclusive_on_the_record_lock() {
         let tmp = tempfile::TempDir::new().unwrap();
