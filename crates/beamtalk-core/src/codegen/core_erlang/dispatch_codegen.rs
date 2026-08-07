@@ -3556,6 +3556,14 @@ pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -
 /// path, so adding `subclasses`/`allSubclasses` here today would trade a
 /// `does_not_understand` for a real self-call deadlock. Extending this list
 /// requires auditing the target intrinsic for that property first.
+///
+/// Note the metadata-first fast path itself still has a `not_available`
+/// fallback in `classSuperclass/1`/`classIncludesSelector/2` that calls
+/// `gen_server:call(ClassPid, ...)` — safe here only because every class
+/// module this codegen emits unconditionally exports `__beamtalk_meta/0`
+/// (see `native_facade.rs` / the gen_server codegen), so `meta_for_module/1`
+/// never actually falls through to it for a compiled class. If that
+/// invariant ever changes, this function's safety claim needs re-auditing.
 pub(super) fn class_self_send_reflective_primitive(
     selector_atom: &str,
     arity: usize,
