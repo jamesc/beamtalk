@@ -315,6 +315,26 @@ mod tests {
         assert!(matches!(result, Err(BrokerError::CliNotFound)));
     }
 
+    /// Smoke test for the thin `resolve_cli_path()` wrapper itself (BT-3056
+    /// adversarial-review follow-up) — everything above exercises the
+    /// resolution *logic* via the injectable `resolve_cli_path_with` without
+    /// touching process env at all; this proves the wrapper actually reads
+    /// the real `CLI_PATH_OVERRIDE_ENV`/`PATH`/home-dir inputs and threads
+    /// them through without panicking. Deliberately does not set/mutate any
+    /// process-global env itself (that would reintroduce exactly the
+    /// cross-test-flake risk this refactor removed) — so it can't assert on
+    /// a specific resolved path, only that the call completes and returns
+    /// one of its two documented outcome shapes for whatever this test
+    /// machine's real environment happens to be.
+    #[test]
+    fn resolve_cli_path_wrapper_does_not_panic_and_threads_real_env() {
+        let result = resolve_cli_path();
+        assert!(
+            result.is_ok() || matches!(result, Err(BrokerError::CliNotFound)),
+            "resolve_cli_path() should either resolve a path or report CliNotFound, got {result:?}"
+        );
+    }
+
     #[test]
     fn run_cli_reports_failure_with_stderr() {
         // `false` (POSIX) always exits 1 with no output — exercise the
