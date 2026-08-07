@@ -32,6 +32,7 @@ use std::process::Command;
 
 use crate::commands::deps::registry::{self, RegistryEntry, RegistryLocation};
 use crate::commands::manifest;
+use crate::commands::toml_utils::escape_toml_string;
 
 /// Run `beamtalk publish`.
 ///
@@ -545,43 +546,6 @@ fn render_version_block(version: &str, git_url: &str, tag: &str) -> String {
         escape_toml_string(git_url),
         escape_toml_string(tag)
     )
-}
-
-/// Escape a value for embedding in a TOML basic string.
-///
-/// `name`, `version`, `git_url`, `tag` all come from validated sources (the
-/// manifest parser, a computed `v{version}` tag), but `description` is
-/// free-form text from `beamtalk.toml`'s `description` field — reachable via
-/// a TOML multi-line basic string (`"""..."""`), which permits literal
-/// newlines and other control characters. TOML basic strings prohibit
-/// unescaped control characters (U+0000-U+001F, U+007F); an unescaped
-/// newline, tab, or other control character here would produce invalid TOML
-/// (caught by the round-trip check in `render_index_entry_content`, but as
-/// an unhelpful "this is a bug" error) or, if it happened to look like `key
-/// = "value"`, could inject a bogus extra line into the index entry.
-///
-/// Mirrors `deps::lockfile::escape_toml_string`'s coverage of the same TOML
-/// basic-string escape rules; the two aren't shared because they escape
-/// different kinds of value (a registry identity there, a package
-/// description/version/URL/tag here) with no natural common home.
-fn escape_toml_string(s: &str) -> String {
-    use std::fmt::Write as _;
-
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c == '\x7f' => {
-                let _ = write!(out, "\\u{:04X}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 fn write_index_entry(entry_path: &Utf8Path, content: &str) -> Result<()> {
@@ -1105,30 +1069,6 @@ mod tests {
         assert_eq!(parsed.versions.len(), 2);
         assert!(parsed.find_version("0.1.0").is_some());
         assert!(parsed.find_version("0.2.0").is_some());
-    }
-
-    #[test]
-    fn test_escape_toml_string_escapes_quotes_and_backslashes() {
-        assert_eq!(escape_toml_string(r#"say "hi""#), r#"say \"hi\""#);
-        assert_eq!(escape_toml_string(r"a\b"), r"a\\b");
-    }
-
-    /// A `description` reaching this function can carry a literal newline
-    /// (via a TOML multi-line basic string in `beamtalk.toml`) or any other
-    /// control character — not just quotes and backslashes. Covers the full
-    /// TOML-prohibited range (U+0000-U+001F, U+007F), mirroring
-    /// `deps::lockfile`'s `test_registry_field_with_full_control_character_range_roundtrips`.
-    #[test]
-    fn test_escape_toml_string_escapes_full_control_character_range() {
-        assert_eq!(escape_toml_string("a\nb"), r"a\nb");
-        assert_eq!(escape_toml_string("a\rb"), r"a\rb");
-        assert_eq!(escape_toml_string("a\tb"), r"a\tb");
-        // NUL, VT (U+000B, no short escape), a mid-range control (U+001F),
-        // and DEL (U+007F) — all fall back to the `\uXXXX` form.
-        assert_eq!(
-            escape_toml_string("a\u{0}\u{b}\u{1f}\u{7f}b"),
-            "a\\u0000\\u000B\\u001F\\u007Fb"
-        );
     }
 
     #[test]

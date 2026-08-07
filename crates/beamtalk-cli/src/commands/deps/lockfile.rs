@@ -54,6 +54,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use crate::commands::toml_utils::escape_toml_string;
+
 /// The lockfile filename.
 #[allow(dead_code)] // Used by tests; will be called by build system (ADR 0070 Phase 2+)
 pub const LOCKFILE_NAME: &str = "beamtalk.lock";
@@ -366,33 +368,6 @@ impl Default for Lockfile {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Escape a value for embedding in a TOML basic string.
-///
-/// Unlike `url`/`name`/`sha`, a registry identity can be a raw filesystem
-/// path (`[registry] url` pointing at a local directory) or an unvalidated
-/// `BEAMTALK_REGISTRY` env value, rather than validated git-URL syntax, so
-/// it can contain backslashes (Windows paths), quotes, or literal control
-/// characters. TOML basic strings prohibit unescaped control characters
-/// (U+0000-U+001F, U+007F); an unescaped backslash, quote, or newline here
-/// corrupts the lockfile, and every later `Lockfile::read` hard-fails.
-fn escape_toml_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c == '\x7f' => {
-                let _ = write!(out, "\\u{:04X}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 /// Format a `GitReference` for lockfile storage.

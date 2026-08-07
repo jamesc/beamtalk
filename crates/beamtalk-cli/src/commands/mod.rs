@@ -65,6 +65,7 @@ pub mod run;
 pub mod test;
 pub mod test_docs;
 pub mod test_stdlib;
+pub(crate) mod toml_utils;
 pub mod transcript;
 pub mod type_coverage;
 pub(crate) mod util;
