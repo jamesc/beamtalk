@@ -41,6 +41,13 @@ desktop/
                          root .gitignore's Cargo.lock exception and its
                          comment
   ui/                  Frontend: plain HTML/CSS/JS, no build step
+  e2e/                 BT-2989 E2E validation scripts (attach-cycle.sh +
+                         eval-roundtrip.mjs) — see e2e/README.md for what
+                         they cover and why, absent a working Tauri
+                         toolchain in any sandbox to date, they validate the
+                         broker's real spawn/readiness/detach contract and a
+                         real browser eval round-trip rather than the
+                         compiled picker binary itself
 ```
 
 ## Packaging (BT-2987 Linux/macOS, BT-2988 Windows)

@@ -39,6 +39,37 @@
 //! reintroduce the exact TOCTOU port race [`beamtalk_desktop_broker::port`]'s
 //! module doc describes and its retry logic is meant to absorb.
 //!
+//! ## BT-2989: full attach/detach lifecycle + dead-workspace negative path
+//!
+//! Two further tests below round out this file into the Rust half of BT-2989's
+//! E2E validation (ADR 0097 Phase 5) — the acceptance criteria's "attach →
+//! confirm reachable → detach → confirm the front process exits" and "attach
+//! with a dead workspace surfaces the failure taxonomy rather than hanging or
+//! crashing" clauses, exercised against the exact production call shape
+//! `desktop/src-tauri/src/commands.rs`'s `attach`/`detach` commands use
+//! (`spawn_front_with_port_retry` → `wait_ready` → kill+wait). The browser/UI
+//! half of BT-2989 (an eval actually round-tripping through the LiveView page
+//! a workspace window loads, and the picker showing that failure) lives in
+//! `desktop/e2e/` — see that directory's README for why it is a separate,
+//! Node/Playwright-based script rather than more Rust here: driving the
+//! *rendered* LiveView page needs a real browser, which this crate has no
+//! reason to depend on.
+//!
+//! `dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang` needs one
+//! extra fixture beyond the module setup above: a workspace that was created
+//! and then **stopped** (so `~/.beamtalk/workspaces/<id>/metadata.json` +
+//! `cookie` still resolve — `spawn_front` only checks `metadata.json` exists,
+//! per its doc comment — but no BEAM node is listening). Create one with:
+//!
+//! ```bash
+//! ./target/debug/beamtalk workspace create bt2989_dead_probe --background --persistent
+//! ./target/debug/beamtalk workspace stop bt2989_dead_probe
+//! ```
+//!
+//! then export `BT_DESKTOP_BROKER_LIVE_DEAD_WORKSPACE=bt2989_dead_probe` for
+//! the `cargo test` invocation above (it only affects that one test; the other
+//! three still need `BT_DESKTOP_BROKER_LIVE_WORKSPACE` **running**).
+//!
 //! **DDD Context:** Desktop Shell
 
 use std::process::{Child, Command};
@@ -102,6 +133,13 @@ fn launcher() -> std::path::PathBuf {
 
 fn workspace_id() -> String {
     require_env("BT_DESKTOP_BROKER_LIVE_WORKSPACE")
+}
+
+/// BT-2989: a workspace whose directory + cookie exist on disk but whose BEAM
+/// node has been stopped — see the module doc's "BT-2989" section for how to
+/// create one. Only read by the dead-workspace negative-path test below.
+fn dead_workspace_id() -> String {
+    require_env("BT_DESKTOP_BROKER_LIVE_DEAD_WORKSPACE")
 }
 
 /// Drive a spawned front's readiness to a terminal state, with a generous
@@ -257,5 +295,125 @@ fn a_real_port_conflict_exits_within_the_calibrated_grace_period() {
          spawn::DEFAULT_BIND_FAILURE_GRACE ({DEFAULT_BIND_FAILURE_GRACE:?}) — the grace \
          period would misclassify this conflict as SpawnAttempt::Bound and needs \
          recalibrating (see that constant's doc comment for the BT-3004 methodology)"
+    );
+}
+
+/// BT-2989 acceptance criterion 1 (the positive-path half): the full
+/// attach/detach lifecycle `desktop/src-tauri/src/commands.rs`'s `attach` and
+/// `detach` commands drive — spawn a real front against a real running
+/// workspace, confirm it reaches [`ReadinessState::Ready`], then kill it
+/// (`detach`'s `Child::kill()` + `.wait()`) and confirm the OS process has
+/// actually exited, not merely that the kill syscall returned.
+/// `Child::wait()` blocking-waits for the real exit (not `try_wait`'s
+/// point-in-time poll), so a `Some(status)` back from it already proves the
+/// process is gone; this also cross-checks against epmd, which independently
+/// confirms the dist registration a live process would hold is gone too —
+/// two different signals agreeing rather than trusting the OS reap alone.
+#[test]
+#[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
+fn detach_kills_the_front_and_it_exits_cleanly() {
+    let ws = workspace_id();
+    let mut config = SpawnAttemptConfig::new(launcher(), ws.clone());
+    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+
+    let (mut child, port) =
+        spawn_front_with_port_retry(&config).expect("live front should spawn and bind");
+    let pid = child.id();
+
+    let state = drive_to_terminal(port, ProbeTimeouts::default_local());
+    assert!(
+        matches!(state, ReadinessState::Ready(_)),
+        "expected the live front to reach Ready before detaching, got {state:?}"
+    );
+    let expected_sname = predict_short_name(&ws, pid);
+    let names_before = beamtalk_workspace::epmd::query_epmd_names()
+        .expect("epmd query should succeed while the front is up");
+    assert!(
+        names_before.contains(&expected_sname),
+        "front should be epmd-registered as {expected_sname:?} while Ready, saw {names_before:?}"
+    );
+
+    // "detach": kill + wait, exactly what commands.rs's detach_internal /
+    // kill_and_untrack do (see their doc comments) — no KillOnDrop guard
+    // needed from here on, since this IS the cleanup this test is asserting
+    // actually works, not a leak to guard against.
+    child.kill().expect("kill should succeed on a live child");
+    let status = child
+        .wait()
+        .expect("wait should succeed after a successful kill");
+    assert!(
+        !status.success(),
+        "a killed front should report a non-zero/signalled exit status, got {status}"
+    );
+
+    // epmd deregistration is not synchronous with process death (the BEAM's
+    // own net_kernel/epmd client needs a moment to notice the socket closed
+    // and epmd to drop the registration), so poll rather than asserting
+    // immediately after `wait()` returns — bounded, not a hang.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let names = beamtalk_workspace::epmd::query_epmd_names().unwrap_or_default();
+        if !names.contains(&expected_sname) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "epmd still lists {expected_sname:?} 10s after the front process exited — \
+             detach should leave no stale dist registration behind"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// BT-2989 acceptance criterion 2: attaching to a **dead** workspace (one
+/// whose `metadata.json`/`cookie` are still on disk — `spawn_front` only
+/// checks the former exists, per its doc comment — but whose BEAM node is no
+/// longer running) must surface the `/readiness` failure taxonomy
+/// (`FailureReason::DeadWorkspace`) within the normal probe budget, never
+/// hang indefinitely or crash the broker. This is the scenario
+/// `commands.rs::attach_and_open_window` turns into
+/// `Err(format!("workspace '{{id}}' is unreachable: {{reason:?}}"))`, which
+/// `desktop/ui/main.js`'s `attach()` catch handler then renders into the
+/// picker's status line — the UI-surfacing half of this criterion, not
+/// re-tested here since it needs the actual Tauri command + webview (see
+/// `desktop/e2e/README.md`).
+///
+/// Distinct from `bad_cookie_readiness_resolves_within_the_default_budget`
+/// above: that test spawns against a **fabricated** node name with a
+/// deliberately wrong cookie (no real workspace involved at all), which
+/// exercises the `BadCookie` branch. This one spawns against a real,
+/// previously-live workspace directory whose node has since been stopped —
+/// the on-disk cookie is genuinely correct, so the dist handshake itself
+/// would succeed if anything were listening; nothing is, which is exactly
+/// what should resolve to `DeadWorkspace` rather than `BadCookie`.
+#[test]
+#[ignore = "needs a live dist-liveview release + a STOPPED (but not deleted) workspace — see module doc comment"]
+fn dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang() {
+    let ws = dead_workspace_id();
+    let mut config = SpawnAttemptConfig::new(launcher(), ws);
+    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+
+    let (child, port) = spawn_front_with_port_retry(&config)
+        .expect("front should spawn and bind HTTP even though the workspace is dead");
+    let _guard = KillOnDrop(child);
+
+    let timeouts = ProbeTimeouts::default_local();
+    let start = Instant::now();
+    let state = drive_to_terminal(port, timeouts);
+    let elapsed = start.elapsed();
+
+    assert_eq!(
+        state,
+        ReadinessState::Failed(readiness::FailureReason::DeadWorkspace),
+        "expected a definitive DeadWorkspace failure, got {state:?} after {elapsed:?}"
+    );
+    // Same bound as the bad-cookie test above: a clear failure, not a hang.
+    assert!(
+        elapsed < timeouts.http_up + timeouts.readiness,
+        "dead-workspace readiness took {elapsed:?}, which exceeds the configured budget \
+         ({:?} + {:?}) — this should fail fast, not hang the broker before it can \
+         surface the error to the picker UI",
+        timeouts.http_up,
+        timeouts.readiness
     );
 }
