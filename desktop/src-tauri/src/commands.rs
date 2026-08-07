@@ -222,10 +222,21 @@ fn attach_and_open_window(
             // nothing consumes yet. Matches the same
             // spawn-a-detached-`std::thread`-for-best-effort-background-work
             // shape `spawn_monitor` below already uses in this file.
-            let workspace_id_for_correction = workspace_id.to_string();
-            std::thread::spawn(move || {
-                update_windows_node_name_after_readiness(&workspace_id_for_correction, port, pid);
-            });
+            // `update_windows_node_name_after_readiness` is a no-op stub off
+            // Windows (see its `#[cfg(not(windows))]` arm) — gate the spawn
+            // itself so this doesn't burn an OS thread just to immediately
+            // return on every attach.
+            #[cfg(windows)]
+            {
+                let workspace_id_for_correction = workspace_id.to_string();
+                std::thread::spawn(move || {
+                    update_windows_node_name_after_readiness(
+                        &workspace_id_for_correction,
+                        port,
+                        pid,
+                    );
+                });
+            }
         }
         ReadinessState::Failed(reason) => {
             kill_and_untrack(state, workspace_id, port);
