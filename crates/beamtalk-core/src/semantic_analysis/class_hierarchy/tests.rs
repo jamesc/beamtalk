@@ -249,14 +249,23 @@ fn actor_spawn_methods_are_class_side() {
         selectors.contains(&"spawnWith:"),
         "spawnWith: must be in class_methods"
     );
-    // BT-1524: new/new: overrides removed from Actor — no longer class-side
+    // BT-3071: new/new: are back on Actor's class_methods — lifted from the
+    // codegen-injected error stubs (`generate_actor_new_error_method` et al.,
+    // BT-1524's era) into real, documented `class sealed new` / `new:`
+    // declarations in Actor.bt. This does NOT reopen instantiation: the
+    // compiled body still always raises `instantiation_error`, and
+    // `check_actor_new_usage` (BT-563/BT-1524's own hard compile-time error,
+    // unaffected by hierarchy method resolution — see
+    // `test_actor_new_error_in_standalone_method` in
+    // `semantic_analysis::tests`) still rejects `ActorSubclass new` before
+    // this method is ever reached.
     assert!(
-        !selectors.contains(&"new"),
-        "new must NOT be in Actor class_methods after BT-1524"
+        selectors.contains(&"new"),
+        "new must be in Actor class_methods after BT-3071"
     );
     assert!(
-        !selectors.contains(&"new:"),
-        "new: must NOT be in Actor class_methods after BT-1524"
+        selectors.contains(&"new:"),
+        "new: must be in Actor class_methods after BT-3071"
     );
     // Instance methods must NOT appear on class side
     assert!(

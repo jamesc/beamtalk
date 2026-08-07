@@ -158,7 +158,16 @@ impl TypeChecker {
             //  * Abstract classes — instantiating them is a genuine error
             //    (`infer_constructor_type` keeps the result Dynamic for them).
             //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
-            //    not `new`'d; `A new` must still warn (drift-prevention pin).
+            //    not `new`'d. In the common case this exclusion is now moot for
+            //    `new`/`new:` specifically: Actor.bt declares real `class sealed
+            //    new` / `new:` (BT-3071), so `has_class_method` above is already
+            //    `true` and this whole block is skipped before reaching here. It
+            //    stays as defense-in-depth for a partially-unresolved hierarchy
+            //    (e.g. a cross-package actor whose ancestor chain
+            //    `find_class_method` can't see) — see
+            //    `new_on_actor_subclass_no_longer_dnu` for the still-current
+            //    behavior and `test_actor_new_error_in_standalone_method` /
+            //    `check_actor_new_usage` for the actual "use spawn" diagnostic.
             let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
                 && !hierarchy.is_abstract(class_name)
                 && !hierarchy.is_actor_subclass(class_name);

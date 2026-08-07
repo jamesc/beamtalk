@@ -516,9 +516,24 @@ Nav new
 }
 
 #[test]
-fn new_on_actor_subclass_still_warns() {
-    // Actors are spawned, not `new`'d — the implicit-`new` suppression must NOT
-    // leak to Actor subclasses (drift-prevention pin).
+fn new_on_actor_subclass_no_longer_dnu() {
+    // BT-3071: Actor.bt now declares real `class sealed new` / `new:`
+    // methods (lifted from the codegen-injected error stubs), so `new`
+    // resolves like any other inherited class method — no DNU from the
+    // TypeChecker here, and this is correct: the send is not "unknown", it
+    // is a real, resolvable method whose compiled body always raises
+    // `instantiation_error`. This replaces the former
+    // `new_on_actor_subclass_still_warns` pin, whose premise (the TypeChecker's
+    // implicit-`new` DNU-suppression heuristic must not leak to Actor
+    // subclasses) no longer applies once `new` is a genuinely inherited
+    // method rather than something that could be "suppressed".
+    //
+    // The user-facing "use spawn, not new" protection is unaffected — it
+    // lives in the separate, hierarchy-resolution-independent
+    // `check_actor_new_usage` validator (BT-563/BT-1524), still a hard
+    // compile error; see `test_actor_new_error_in_standalone_method` in
+    // `semantic_analysis::tests` and `error_actor_subclass_new` in
+    // `queries::diagnostic_provider::tests`.
     let source = "
 Actor subclass: Worker
   state: v = 0
@@ -528,8 +543,9 @@ Worker new
 ";
     let diags = dnu_diags(source);
     assert!(
-        !diags.is_empty(),
-        "`Worker new` on an Actor subclass must still warn (use spawn); got no diagnostics"
+        diags.is_empty(),
+        "`Worker new` resolves to Actor's real (inherited) `new` method post-BT-3071; \
+         expected no does-not-understand diagnostic, got {diags:?}"
     );
 }
 

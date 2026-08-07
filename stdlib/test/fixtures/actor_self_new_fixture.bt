@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3071: Test fixture — actor with class methods that call `self new` /
+// `self new:` from inside a class method. Actors must reject direct
+// instantiation via the `self`-send path exactly like the static
+// (`ActorSelfNewFixture new`) and dynamic (`perform: #new`) sends do, all
+// three raising the identical `instantiation_error` produced by the
+// class's own compiled `new/0` / `new/1` (BT-893's `class_self_new` routes
+// here rather than through `gen_server:call`, which would deadlock).
+
+Actor subclass: ActorSelfNewFixture
+  state: value = 0
+
+  class triggerSelfNew -> Self => self new
+
+  class triggerSelfNewWith: initArgs :: Object -> Self => self new: initArgs
+
+  getValue => self.value

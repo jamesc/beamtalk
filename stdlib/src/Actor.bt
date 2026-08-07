@@ -45,6 +45,33 @@ Object subclass: Actor
   /// ```
   class sealed spawnWith: initArgs -> Self => @intrinsic actorSpawnWith
 
+  /// Actors cannot be created with `new` — always raises (BT-217).
+  ///
+  /// Actors are processes with identity and lifecycle, not immutable
+  /// values; `spawn` starts the process, `new` does not make sense for
+  /// them. Every actor subclass carries a compiled `new/0` that raises this
+  /// same error directly (required by the runtime's `{new, Args}`
+  /// instantiation protocol, which calls a class's own compiled `new/0`
+  /// rather than dispatching through inherited class methods) — this
+  /// declaration is the documented, xref-visible source of that behaviour.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter new   // => raises instantiation_error: "Use spawn instead"
+  /// ```
+  class sealed new -> Never => @intrinsic actorNewError
+
+  /// Actors cannot be created with `new:` — always raises (BT-217).
+  ///
+  /// Use `spawnWith:` to create an actor instance with initialization
+  /// arguments. See `new` for why actors reject direct instantiation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter new: #{#count => 10}   // => raises instantiation_error: "Use spawnWith: instead"
+  /// ```
+  class sealed new: initArgs -> Never => @intrinsic actorNewWithArgsError
+
   // === Named registration (ADR 0079) ===
 
   /// Atomically spawn a new actor and register it under `name`.
