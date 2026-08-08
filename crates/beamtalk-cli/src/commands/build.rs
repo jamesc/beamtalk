@@ -2105,12 +2105,26 @@ pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file
                     &alias_def.annotation,
                 ),
                 doc: alias_def.doc_comment.clone(),
-                source_file: file.to_string(),
+                source_file: to_forward_slash(file),
                 internal: alias_def.is_internal,
             });
         }
     }
     result
+}
+
+/// Render a `Utf8Path` as forward-slash-separated text regardless of host OS.
+///
+/// `Utf8PathBuf`'s `Display`/`ToString` preserve native separators (backslash
+/// on Windows), which is wrong for values embedded in generated, checked-in
+/// artifacts like `beamtalk_stdlib.app.src` — those must be byte-identical
+/// regardless of the developer's OS (BT-3067). `Utf8Path` guarantees valid
+/// UTF-8, so a plain byte-level replace is safe here: backslash can't appear
+/// as a legitimate path separator component on any of our supported
+/// platforms. Same fix pattern as `make_git_index` in
+/// `deps/registry.rs`'s tests.
+fn to_forward_slash(path: &Utf8Path) -> String {
+    path.as_str().replace('\\', "/")
 }
 
 /// Collect `ClassInfo` from multiple sources into a single unified vector.
@@ -3187,6 +3201,54 @@ mod tests {
         let result = build_alias_metadata(&[alias_file]);
         let names: Vec<&str> = result.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, vec!["Zebra", "Alpha"]);
+    }
+
+    // BT-3067: `source_file` is written verbatim into the checked-in
+    // `beamtalk_stdlib.app.src`, so it must be identical regardless of the
+    // host OS that generated it. Uses a `Utf8PathBuf` built directly from a
+    // backslash-containing string (rather than `Utf8Path::join`, whose
+    // separator behavior itself varies by host OS) so the test exercises the
+    // Windows-native-path case deterministically on every platform, including
+    // Linux CI.
+    #[test]
+    fn test_to_forward_slash_normalizes_backslashes() {
+        let path = Utf8PathBuf::from("stdlib/src\\Ets.bt");
+        assert_eq!(to_forward_slash(&path), "stdlib/src/Ets.bt");
+    }
+
+    #[test]
+    fn test_to_forward_slash_normalizes_all_backslash_components() {
+        let path = Utf8PathBuf::from("stdlib\\src\\Ets.bt");
+        assert_eq!(to_forward_slash(&path), "stdlib/src/Ets.bt");
+    }
+
+    #[test]
+    fn test_to_forward_slash_leaves_forward_slash_paths_unchanged() {
+        let path = Utf8PathBuf::from("stdlib/src/Ets.bt");
+        assert_eq!(to_forward_slash(&path), "stdlib/src/Ets.bt");
+    }
+
+    #[test]
+    fn test_build_alias_metadata_source_file_uses_forward_slashes() {
+        // Exercises the real join-based path (not a hand-built string) so
+        // this also catches the bug as originally reported: on Windows,
+        // `src_path.join("aliases.bt")` yields a `Utf8PathBuf` whose
+        // `Display`/`to_string()` uses `\`, which used to leak straight into
+        // `source_file` before the `to_forward_slash` fix.
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+        let alias_file = src_path.join("aliases.bt");
+        write_test_file(&alias_file, "type Zebra = Integer\n");
+
+        let result = build_alias_metadata(&[alias_file]);
+        assert_eq!(result.len(), 1);
+        assert!(
+            !result[0].source_file.contains('\\'),
+            "source_file should never contain a backslash, got: {:?}",
+            result[0].source_file
+        );
     }
 
     #[test]
