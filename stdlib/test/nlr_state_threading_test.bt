@@ -5,60 +5,54 @@
 // Verifies that ^ inside blocks works correctly for Value subclass fixtures
 
 TestCase subclass: NlrStateThreadingTest
+  field: obj = nil
+
+  setUp => self.obj := NlrFieldMutation new
 
   testFindFirstReturnsCorrectValue =>
     // NLR returns the matched element via ^each
-    obj := NlrFieldMutation new
-    result := obj findFirst: 3 in: #(1, 2, 3, 4, 5)
+    result := self.obj findFirst: 3 in: #(1, 2, 3, 4, 5)
     self assert: result equals: 3
 
   testFindFirstNoMatchReturnsNil =>
     // Normal (non-NLR) path: method returns nil
-    obj := NlrFieldMutation new
-    result := obj findFirst: 100 in: #(1, 2, 3)
+    result := self.obj findFirst: 100 in: #(1, 2, 3)
     self assert: result equals: nil
 
   testFindAndReturnSelfUpdatesField =>
     // findAndReturnSelf: uses withLastQuery: then returns updated via ^
-    obj := NlrFieldMutation new
-    updated := obj findAndReturnSelf: 3 in: #(1, 2, 3, 4, 5)
+    updated := self.obj findAndReturnSelf: 3 in: #(1, 2, 3, 4, 5)
     self assert: updated lastQuery equals: 3
 
   testDetectReturnsMatchingElement =>
     // detect:in: uses a block predicate and returns the matched element via ^
-    obj := NlrFieldMutation new
-    result := obj detect: [:x | x > 2] in: #(1, 2, 3, 4, 5)
+    result := self.obj detect: [:x | x > 2] in: #(1, 2, 3, 4, 5)
     self assert: result equals: 3
 
   testDetectNoMatchReturnsNil =>
     // detect:in: returns nil when no element satisfies the predicate
-    obj := NlrFieldMutation new
-    result := obj detect: [:x | x > 100] in: #(1, 2, 3)
+    result := self.obj detect: [:x | x > 100] in: #(1, 2, 3)
     self assert: result equals: nil
 
   testFindNoneNlrNeverFires =>
     // Method has NLR infrastructure but ^ never fires
-    obj := NlrFieldMutation new
-    result := obj findNone: #(1, 2, 3)
+    result := self.obj findNone: #(1, 2, 3)
     self assert: result equals: nil
 
   testFindAndReturnSelfNoMatchReturnsSelf =>
     // Normal (non-NLR) path: findAndReturnSelf:in: returns updated at end of method
-    obj := NlrFieldMutation new
-    updated := obj findAndReturnSelf: 100 in: #(1, 2, 3)
+    updated := self.obj findAndReturnSelf: 100 in: #(1, 2, 3)
     self assert: updated lastQuery equals: 100
 
   // BT-857: anySatisfy: — early return via ^
   testAnySatisfyReturnsTrueOnMatch =>
     // anySatisfy:in: uses ^ to short-circuit and return true when match found
-    obj := NlrFieldMutation new
-    result := obj anySatisfy: [:x | x > 3] in: #(1, 2, 3, 4, 5)
+    result := self.obj anySatisfy: [:x | x > 3] in: #(1, 2, 3, 4, 5)
     self assert: result equals: true
 
   testAnySatisfyReturnsFalseOnNoMatch =>
     // Normal (non-NLR) path: all elements fail the predicate; returns false
-    obj := NlrFieldMutation new
-    result := obj anySatisfy: [:x | x > 100] in: #(1, 2, 3)
+    result := self.obj anySatisfy: [:x | x > 100] in: #(1, 2, 3)
     self assert: result equals: false
 
   // BT-857: ^ inside nested HOM — NLR propagates through multiple frames
