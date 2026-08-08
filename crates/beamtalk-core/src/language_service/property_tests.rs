@@ -107,13 +107,7 @@ fn file_id() -> Utf8PathBuf {
 // Property tests
 // ============================================================================
 
-fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    ProptestConfig {
-        cases: default.cases.max(512),
-        ..default
-    }
-}
+use crate::test_helpers::test_support::proptest_config_default as proptest_config;
 
 proptest! {
     #![proptest_config(proptest_config())]

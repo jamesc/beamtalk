@@ -251,16 +251,7 @@ const INTERNAL_NAMES: &[&str] = &[
 // Property tests
 // ============================================================================
 
-/// Default is 512 cases for standard CI; override via `PROPTEST_CASES` env var
-/// for nightly extended runs (e.g., `PROPTEST_CASES=10000`).
-fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    ProptestConfig {
-        // Use at least 512 cases, but allow PROPTEST_CASES to increase beyond that
-        cases: default.cases.max(512),
-        ..default
-    }
-}
+use crate::test_helpers::test_support::proptest_config_default as proptest_config;
 
 proptest! {
     #![proptest_config(proptest_config())]

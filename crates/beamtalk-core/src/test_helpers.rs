@@ -190,6 +190,22 @@ pub mod test_support {
         ExpressionStatement::bare(expr)
     }
 
+    /// Returns the standard proptest configuration used across beamtalk-core property tests.
+    ///
+    /// Sets `cases` to at least 512 (overridable via `PROPTEST_CASES` env var).
+    ///
+    /// Gated on `#[cfg(test)]` because `proptest` is a dev-dependency; it is not
+    /// available to dependent crates that enable the `"test"` feature.
+    #[cfg(test)]
+    #[must_use]
+    pub fn proptest_config_default() -> proptest::prelude::ProptestConfig {
+        let default = proptest::prelude::ProptestConfig::default();
+        proptest::prelude::ProptestConfig {
+            cases: default.cases.max(512),
+            ..default
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
