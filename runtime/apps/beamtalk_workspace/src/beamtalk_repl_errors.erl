@@ -15,33 +15,41 @@ Used by protocol handlers and op modules.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-%% BT-3084: raw-error-tuple tags recognized by ensure_structured_error/1
-%% (excluding the map/#beamtalk_error{}/eval_error wrapper shapes handled by
-%% earlier, more specific clauses). Shared by is_known_error_reason/1 so a
-%% `{eval_error, Class, Reason}` whose Reason is itself one of these keeps its
-%% specific structured kind instead of collapsing into the generic
-%% "Evaluation error: Class:Reason" wrapper.
+%% BT-3084: {Tag, Arity} pairs recognized by ensure_structured_error/1's
+%% specific clauses (excluding the map/#beamtalk_error{}/eval_error wrapper
+%% shapes handled by earlier, more specific clauses). Shared by
+%% is_known_error_reason/1 so a `{eval_error, Class, Reason}` whose Reason is
+%% itself one of these keeps its specific structured kind instead of
+%% collapsing into the generic "Evaluation error: Class:Reason" wrapper.
+%%
+%% Matched as {Tag, Arity} rather than bare Tag: every tag here happens to map
+%% to exactly one arity today, but a same-named tag at a different arity
+%% elsewhere in the codebase (e.g. a hypothetical unrelated 2-arity
+%% `{method_not_found, Reason}`) must NOT be misidentified as "known" just
+%% because the atom matches — that would silently route it through
+%% is_known_error_reason into a dead end (no clause for that arity) instead
+%% of the intended generic wrapper.
 -define(KNOWN_ERROR_TUPLE_TAGS, [
-    compile_error,
-    undefined_variable,
-    file_not_found,
-    read_error,
-    load_error,
-    registration_error,
-    parse_error,
-    invalid_request,
-    module_not_found,
-    invalid_module_name,
-    actors_exist,
-    class_not_found,
-    method_not_found,
-    unknown_op,
-    inspect_failed,
-    actor_not_alive,
-    no_source_file,
-    module_not_loaded,
-    missing_module_name,
-    session_creation_failed
+    {compile_error, 2},
+    {undefined_variable, 2},
+    {file_not_found, 2},
+    {read_error, 2},
+    {load_error, 2},
+    {registration_error, 2},
+    {parse_error, 2},
+    {invalid_request, 2},
+    {module_not_found, 2},
+    {invalid_module_name, 2},
+    {actors_exist, 3},
+    {class_not_found, 2},
+    {method_not_found, 3},
+    {unknown_op, 2},
+    {inspect_failed, 2},
+    {actor_not_alive, 2},
+    {no_source_file, 2},
+    {module_not_loaded, 2},
+    {missing_module_name, 2},
+    {session_creation_failed, 2}
 ]).
 
 -export([
@@ -390,7 +398,7 @@ is_known_error_reason(empty_expression) ->
 is_known_error_reason(timeout) ->
     true;
 is_known_error_reason(Reason) when is_tuple(Reason), tuple_size(Reason) > 0 ->
-    lists:member(element(1, Reason), ?KNOWN_ERROR_TUPLE_TAGS);
+    lists:member({element(1, Reason), tuple_size(Reason)}, ?KNOWN_ERROR_TUPLE_TAGS);
 is_known_error_reason(_) ->
     false.
 
