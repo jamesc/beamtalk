@@ -280,9 +280,16 @@ fn block_params_remain_dynamic_for_unparameterized_list() {
 }
 
 #[test]
-fn resolve_type_name_string_parametric() {
+fn resolve_type_string_parametric() {
     // List(String) should parse to Known("List") with type_args [Known("String")]
-    let result = TypeChecker::resolve_type_name_string(&"List(String)".into(), None);
+    let result = TypeChecker::resolve_type_string(
+        "List(String)",
+        &HashMap::new(),
+        &HashMap::new(),
+        None,
+        None,
+        TypeStringContext::Declared,
+    );
     match &result {
         InferredType::Known {
             class_name,
@@ -298,10 +305,16 @@ fn resolve_type_name_string_parametric() {
 }
 
 #[test]
-fn resolve_type_name_string_nested_parametric() {
+fn resolve_type_string_nested_parametric() {
     // Result(List(Integer), String) should parse correctly
-    let result =
-        TypeChecker::resolve_type_name_string(&"Result(List(Integer), String)".into(), None);
+    let result = TypeChecker::resolve_type_string(
+        "Result(List(Integer), String)",
+        &HashMap::new(),
+        &HashMap::new(),
+        None,
+        None,
+        TypeStringContext::Declared,
+    );
     match &result {
         InferredType::Known {
             class_name,

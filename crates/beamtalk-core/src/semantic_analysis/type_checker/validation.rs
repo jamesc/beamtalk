@@ -248,11 +248,13 @@ impl TypeChecker {
                                 ),
                             }
                         };
-                        return super::TypeChecker::substitute_return_type_with_self(
+                        return super::TypeChecker::resolve_type_string(
                             ret_ty,
                             &class_subst,
                             &HashMap::new(),
                             Some(&self_type),
+                            self.alias_registry.as_ref(),
+                            super::TypeStringContext::Substitution,
                         );
                     }
                 }
@@ -294,7 +296,7 @@ impl TypeChecker {
     /// Walks the method's declared parameter types and, for each parameter
     /// whose declared type is one of the class's type parameters (e.g. `T`
     /// in `Box(T)`), records the mapping `T -> arg_type`. The resulting map
-    /// is threaded into [`super::TypeChecker::substitute_return_type_with_self`]
+    /// is threaded into [`super::TypeChecker::resolve_type_string`]
     /// so the return type's references to those params resolve to the
     /// concrete inferred types.
     ///
@@ -1186,9 +1188,10 @@ impl TypeChecker {
             // side) — `arg_ty` itself can be a bare `InferredType::Known`
             // naming a registered alias on the *actual* side, e.g. a message
             // send whose callee's `MethodInfo::return_type` is the raw alias
-            // name `RestartStrategy` (`substitute_return_type_with_self` has
-            // no `AliasRegistry` access and never expands it, unlike
-            // declared-annotation resolution via `resolve_type_annotation`).
+            // name `RestartStrategy` (send-site resolution expands aliases
+            // only when a registry is threaded through — several
+            // `resolve_type_string` call sites, e.g. the class-object tower,
+            // pass `None`).
             // Structural compatibility below (`is_type_compatible` and the
             // `InferredType::Union` arm's `classify_union_members`) only
             // understands the *expansion*, not the alias name, so re-resolve
@@ -2887,7 +2890,7 @@ impl TypeChecker {
     /// alias deps, so non-alias assignability/compatibility behavior is
     /// untouched.
     ///
-    /// Deliberately not the more general `inference.rs::resolve_type_name_string`
+    /// Deliberately not the more general `inference.rs::resolve_type_string`
     /// (BT-2928, also alias-registry-aware): that helper additionally
     /// re-parses keywords (`nil`/`true`/`false`), generics, and pre-spelled
     /// unions, which would change what a *non-alias* declared type resolves

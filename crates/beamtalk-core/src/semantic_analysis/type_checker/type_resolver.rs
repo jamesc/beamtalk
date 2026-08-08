@@ -548,9 +548,14 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
             // generics (`List(Integer)`), unions (`Integer | Nil`), and `Nil`
             // keyword aliases canonicalise correctly instead of becoming an
             // opaque `Known("List(Integer)")`.
-            SuperclassTypeArg::Concrete { type_name } => {
-                super::TypeChecker::resolve_type_name_string(type_name, alias_registry)
-            }
+            SuperclassTypeArg::Concrete { type_name } => super::TypeChecker::resolve_type_string(
+                type_name,
+                &HashMap::new(),
+                &HashMap::new(),
+                None,
+                alias_registry,
+                super::TypeStringContext::Declared,
+            ),
         })
         .collect();
 
@@ -589,8 +594,8 @@ fn resolve_type_keyword(name: &EcoString) -> EcoString {
 /// `("Array(Integer)extra", None)` — the caller should treat the string as an
 /// opaque class name.
 ///
-/// Used by the string-form parsers (`resolve_type_name_string`,
-/// `substitute_return_type_with_self`, `parse_generic_type_string`, etc.) in
+/// Used by the string-form parsers (`resolve_type_string`,
+/// `parse_generic_type_string`, etc.) in
 /// place of manual `.find('(')` slicing. Centralising this keeps the
 /// parenthesis-parsing logic in one place and lets the
 /// `no .find('(')` grep check stay clean.

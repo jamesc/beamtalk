@@ -451,14 +451,16 @@ Widget new restart: 42
 fn argument_that_is_itself_an_alias_typed_return_value_is_not_flagged() {
     // BT-2939: complementary to BT-2953's `expected_structural` fix above,
     // which only resolves the *declared/expected* side. Here the *actual*
-    // side is the one carrying a bare, unresolved alias name:
-    // `Provider policy`'s return type comes from `MethodInfo::return_type`
-    // (a raw string, `"RestartStrategy"`) via
-    // `substitute_return_type_with_self`, which has no `AliasRegistry`
-    // access and never expands it — so the local `policy` is inferred as
-    // `InferredType::Known { class_name: "RestartStrategy", .. }`, not the
-    // structural union. Reproduces the exact stdlib shape that surfaced
-    // this (`Actor>>supervisionSpec`'s `policy := self supervisionPolicy.
+    // side comes from `Provider policy`'s return type — a raw
+    // `MethodInfo::return_type` string (`"RestartStrategy"`) resolved at
+    // the send site. Historically that path (the substitution resolver) had
+    // no `AliasRegistry` access, so `policy` was inferred as a bare
+    // `Known { class_name: "RestartStrategy", .. }` and the argument check
+    // had to accept an unexpanded alias name; since BT-3075 the unified
+    // `resolve_type_string` expands the alias at the send site, so `policy`
+    // carries the structural union directly. Either shape must stay green.
+    // Reproduces the exact stdlib shape that surfaced this
+    // (`Actor>>supervisionSpec`'s `policy := self supervisionPolicy.
     // spec withRestart: policy`, hit by `just build-stdlib` once
     // `RestartStrategy` became a real alias) at the unit level.
     let source = r"
