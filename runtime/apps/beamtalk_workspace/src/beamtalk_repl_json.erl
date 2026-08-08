@@ -445,117 +445,32 @@ is_local_process_alive(Pid) ->
 
 %%% Error Formatting
 
--doc "Format an error reason as a human-readable message.".
+-doc """
+Format an error reason as a human-readable message.
+
+BT-3084: this is a thin wrapper over `beamtalk_repl_errors:ensure_structured_error/1`
+— the single canonical raw-error-tuple dispatch table — plus `beamtalk_error:format/1`.
+Previously this function carried its own duplicate dispatch table that had drifted
+from `ensure_structured_error/1` (some tuples handled only here, some only there,
+each silently falling through to a raw `~p` dump on the other path). The only
+cases still handled directly below are the two exception-map shapes that need a
+"ClassName: " prefix prepended in front of the formatted message — a JSON-REPL
+display concern `ensure_structured_error/1` deliberately doesn't apply, since
+its callers want the bare `#beamtalk_error{}` for programmatic use.
+""".
 -spec format_error_message(term()) -> binary().
 format_error_message(#{'$beamtalk_class' := Class, error := Error}) ->
     Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(Class, utf8),
     iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Enriched)]);
-format_error_message(#beamtalk_error{} = Error) ->
-    Enriched = maybe_use_singleton_binding_name(Error),
-    iolist_to_binary(beamtalk_error:format(Enriched));
-format_error_message(empty_expression) ->
-    <<"Empty expression">>;
-format_error_message(timeout) ->
-    <<"Request timed out">>;
-format_error_message({compile_error, [#{message := Msg} | _]}) ->
-    %% BT-1235: structured diagnostic list — use the first diagnostic's message
-    Msg;
-format_error_message({compile_error, Msg}) when is_binary(Msg) ->
-    Msg;
-format_error_message({compile_error, Msg}) when is_list(Msg) ->
-    try
-        list_to_binary(Msg)
-    catch
-        error:badarg -> iolist_to_binary(io_lib:format("~p", [Msg]))
-    end;
-format_error_message({undefined_variable, Name}) ->
-    iolist_to_binary([<<"Undefined variable: ">>, beamtalk_repl_errors:format_name(Name)]);
-format_error_message({invalid_request, Reason}) ->
-    iolist_to_binary([<<"Invalid request: ">>, beamtalk_repl_errors:format_name(Reason)]);
-format_error_message({parse_error, Details}) ->
-    iolist_to_binary([<<"Parse error: ">>, beamtalk_repl_errors:format_name(Details)]);
 format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error := Error}}) ->
     Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(ExClass, utf8),
     iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Enriched)]);
-format_error_message({eval_error, _Class, #beamtalk_error{} = Error}) ->
-    Enriched = maybe_use_singleton_binding_name(Error),
-    iolist_to_binary(beamtalk_error:format(Enriched));
-format_error_message({eval_error, Class, Reason}) ->
-    iolist_to_binary([
-        <<"Evaluation error: ">>,
-        atom_to_binary(Class, utf8),
-        <<":">>,
-        beamtalk_repl_errors:format_name(Reason)
-    ]);
-format_error_message({load_error, Reason}) ->
-    iolist_to_binary([<<"Failed to load bytecode: ">>, beamtalk_repl_errors:format_name(Reason)]);
-format_error_message({file_not_found, Path}) ->
-    iolist_to_binary([<<"File not found: ">>, beamtalk_repl_errors:format_name(Path)]);
-format_error_message({read_error, Reason}) ->
-    iolist_to_binary([<<"Failed to read file: ">>, beamtalk_repl_errors:format_name(Reason)]);
-format_error_message({module_not_found, ModuleName}) ->
-    iolist_to_binary([<<"Module not loaded: ">>, ModuleName]);
-format_error_message({invalid_module_name, ModuleName}) ->
-    iolist_to_binary([<<"Invalid module name: ">>, ModuleName]);
-format_error_message({actors_exist, ModuleName, Count}) ->
-    CountStr = integer_to_list(Count),
-    ActorWord =
-        if
-            Count == 1 -> <<"actor">>;
-            true -> <<"actors">>
-        end,
-    iolist_to_binary([
-        <<"Cannot unload ">>,
-        atom_to_binary(ModuleName, utf8),
-        <<": ">>,
-        CountStr,
-        <<" ">>,
-        ActorWord,
-        <<" still running. Kill them first with :kill">>
-    ]);
-format_error_message({class_not_found, ClassName}) ->
-    NameBin = to_binary(ClassName),
-    iolist_to_binary([
-        <<"Unknown class: ">>,
-        NameBin,
-        <<". Use Workspace classes to see loaded classes.">>
-    ]);
-format_error_message({method_not_found, ClassName, Selector}) ->
-    NameBin = to_binary(ClassName),
-    iolist_to_binary([
-        NameBin,
-        <<" does not understand ">>,
-        Selector,
-        <<". Use :help ">>,
-        NameBin,
-        <<" to see available methods.">>
-    ]);
-format_error_message({unknown_op, Op}) ->
-    iolist_to_binary([<<"Unknown operation: ">>, Op]);
-format_error_message({inspect_failed, PidStr}) ->
-    iolist_to_binary([<<"Failed to inspect actor: ">>, list_to_binary(PidStr)]);
-format_error_message({actor_not_alive, PidStr}) ->
-    iolist_to_binary([<<"Actor is not alive: ">>, list_to_binary(PidStr)]);
-format_error_message({no_source_file, Module}) ->
-    iolist_to_binary([
-        <<"No source file recorded for module: ">>,
-        list_to_binary(Module),
-        <<". Try :load <path> to load it first.">>
-    ]);
-format_error_message({module_not_loaded, Module}) ->
-    iolist_to_binary([
-        <<"Module not loaded: ">>,
-        beamtalk_repl_errors:format_name(Module),
-        <<". Use :load <path> to load it first.">>
-    ]);
-format_error_message({missing_module_name, reload}) ->
-    <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
-format_error_message({session_creation_failed, Reason}) ->
-    iolist_to_binary([<<"Failed to create session: ">>, beamtalk_repl_errors:format_name(Reason)]);
 format_error_message(Reason) ->
-    iolist_to_binary(io_lib:format("~p", [Reason])).
+    Error = beamtalk_repl_errors:ensure_structured_error(Reason),
+    Enriched = maybe_use_singleton_binding_name(Error),
+    beamtalk_error:format(Enriched).
 
 %%% Internal Helpers
 
@@ -577,11 +492,6 @@ format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
-
--doc "Convert atom or binary to binary.".
--spec to_binary(atom() | binary()) -> binary().
-to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
-to_binary(V) when is_binary(V) -> V.
 
 -doc """
 Rewrite DNU error class names for singleton instances.
