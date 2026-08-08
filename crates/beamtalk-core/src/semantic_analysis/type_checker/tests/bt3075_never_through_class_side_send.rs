@@ -218,6 +218,44 @@ fn substitute_never_nested_in_generic_resolves_to_never_variant() {
     );
 }
 
+/// A substituted union return type must keep `Substituted` provenance —
+/// `check_impossible_class_comparison`'s gate treats substituted signatures
+/// as unverified promises and stays silent on them, so a defensive
+/// `isKindOf:` guard on e.g. a generic accessor's `T | Nil` result must not
+/// trip "comparison can never be true". Pre-merge, the substitution path
+/// stamped `Substituted` unconditionally; `union_of` alone would derive
+/// `Inferred` from the members and un-silence the gate (PR #3268 review).
+#[test]
+fn iskindof_on_substituted_union_return_stays_silent() {
+    // The receiver's type args must be *inferred* (constructor inference from
+    // the literal argument), not declared — a declared `:: MyBox(Integer)`
+    // annotation gives the substituted member `Declared` provenance, which
+    // wins `union_of`'s provenance vote and silences the gate on its own.
+    let source = "\
+typed Value subclass: MyBox(T)\n\
+  fetch -> T | Nil => nil\n\
+  class wrap: v :: T -> Self => self new\n\
+typed Object subclass: Repro\n\
+  check -> Object =>\n\
+    b := MyBox wrap: 5\n\
+    v := b fetch\n\
+    (v isKindOf: Boolean) ifFalse: [ 1 ]\n\
+    2\n";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let impossible: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("can never be true"))
+        .collect();
+    assert!(
+        impossible.is_empty(),
+        "v's type comes from substituting MyBox(Integer)'s declared `T | Nil` — \
+         an unverified promise, so the impossible-comparison hint must stay \
+         silent, got: {impossible:?}"
+    );
+}
+
 /// A bare `Nil` return through the substitution path normalises to
 /// `UndefinedObject` like every other resolver.
 #[test]
