@@ -19,6 +19,7 @@ pub(crate) mod ast_walker;
 pub mod codegen;
 pub mod compilation;
 pub mod erlang;
+pub(crate) mod ffi_receiver;
 pub mod ffi_type_specs;
 pub mod file_walker;
 pub mod language_service;

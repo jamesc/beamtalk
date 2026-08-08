@@ -115,97 +115,63 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
     hits
 }
 
-/// Classify a receiver expression as `self`, `super`, Erlang FFI, or other.
-fn receiver_kind(receiver: &Expression) -> ReceiverKind {
-    match receiver {
-        Expression::Super(..) => ReceiverKind::SuperReceiver,
-        Expression::Identifier(ident) if ident.name == "self" => ReceiverKind::SelfReceiver,
-        _ if is_erlang_ffi_receiver(receiver) => ReceiverKind::ErlangFfi,
-        _ => ReceiverKind::Other,
-    }
-}
-
-/// Whether `receiver` resolves through the `Erlang` FFI bridge.
+/// Classify a bare `self`/`super` receiver, if it is one.
 ///
-/// Recognises both `Erlang foo` (receiver is the `Erlang` class reference) and
-/// `(Erlang foo) bar:` (receiver is a send whose own receiver chain bottoms out
-/// at the `Erlang` class reference). A send onto such a receiver is an Erlang
-/// function call routed through `ErlangModule`'s `doesNotUnderstand:`, so it
-/// must not be treated as a Beamtalk message send.
-fn is_erlang_ffi_receiver(receiver: &Expression) -> bool {
+/// Shared by [`receiver_kind`] and [`cascade_receiver_kind`] so the two
+/// classifiers don't each hand-roll the same self/super check — the kind of
+/// duplication this PR otherwise exists to eliminate (BT-3079 review nit).
+fn self_or_super_kind(receiver: &Expression) -> Option<ReceiverKind> {
     match receiver {
-        Expression::ClassReference { name, package, .. } => {
-            package.is_none() && name.name == "Erlang"
-        }
-        Expression::MessageSend {
-            receiver: inner, ..
-        } => is_erlang_ffi_receiver(inner),
-        Expression::Parenthesized { expression, .. } => is_erlang_ffi_receiver(expression),
-        _ => false,
-    }
-}
-
-/// Resolve the native (Erlang) module name a send is routed to, given the send's
-/// receiver expression.
-///
-/// The module name is the unary selector applied directly to the `Erlang` class
-/// reference: in `(Erlang lists) reverse: x`, the `reverse:` send's receiver is
-/// the `Erlang lists` chain, whose own (innermost) send is `lists` onto the
-/// `Erlang` class reference — so the module is `lists`. For the bare module-name
-/// send `Erlang lists`, the receiver IS the `Erlang` class reference, so this is
-/// only called from `push_send` once the *enclosing* send is detected; the
-/// module-name send itself resolves its module via [`module_of_ffi_send`].
-///
-/// Returns `None` when the FFI chain does not bottom out at a static
-/// `Erlang <module>` (e.g. `(Erlang someExpr) …` where the module is computed),
-/// which is rare but must not crash the walk.
-fn erlang_ffi_module(receiver: &Expression) -> Option<String> {
-    match receiver {
-        // `(Erlang lists) …` parses the inner part as a MessageSend `lists`
-        // onto the `Erlang` class reference. The selector of the send whose
-        // own receiver is the bare `Erlang` class reference is the module name.
-        Expression::MessageSend {
-            receiver: inner,
-            selector,
-            ..
-        } => {
-            if is_erlang_class_reference(inner) {
-                Some(selector.name().trim_end_matches(':').to_string())
-            } else {
-                erlang_ffi_module(inner)
-            }
-        }
-        Expression::Parenthesized { expression, .. } => erlang_ffi_module(expression),
+        Expression::Super(..) => Some(ReceiverKind::SuperReceiver),
+        Expression::Identifier(ident) if ident.name == "self" => Some(ReceiverKind::SelfReceiver),
         _ => None,
     }
 }
 
-/// Whether `expr` is the bare `Erlang` class reference (no package qualifier).
-fn is_erlang_class_reference(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::ClassReference { name, package, .. }
-            if package.is_none() && name.name == "Erlang"
-    )
+/// Classify a receiver expression as `self`, `super`, Erlang FFI, or other,
+/// given the selector of the send `receiver` is the receiver of.
+///
+/// The selector is needed to apply the class-protocol filter to the bare
+/// `Erlang <selector>` shape (BT-3079): `Erlang class` / `Erlang new` dispatch
+/// to the class protocol, not the FFI bridge, so they must classify as
+/// `Other` even though their receiver is the `Erlang` class reference.
+fn receiver_kind(receiver: &Expression, selector: &crate::ast::MessageSelector) -> ReceiverKind {
+    if let Some(kind) = self_or_super_kind(receiver) {
+        return kind;
+    }
+    if ffi_target_module(receiver, selector).is_some() {
+        return ReceiverKind::ErlangFfi;
+    }
+    ReceiverKind::Other
 }
 
-/// Resolve the native module targeted by an FFI send, given the send's own
-/// `receiver` and `selector`.
+/// Resolve the native (Erlang) module a send is routed to, given the send's
+/// own `receiver` and `selector`. `None` when the send is not FFI at all, or
+/// when it would be but `selector` is a class-protocol selector (BT-3079):
+/// `Erlang class` / `Erlang new` dispatch to the class protocol
+/// (`beamtalk_object_class:class_send/3`) instead of the FFI bridge.
 ///
-/// Two shapes carry FFI module information:
-/// - The module-name send itself (`Erlang lists`): the receiver is the bare
-///   `Erlang` class reference and the selector (`lists`) is the module name.
-/// - A function send (`(Erlang lists) reverse:`): the module is recovered from
-///   the receiver chain via [`erlang_ffi_module`].
-fn module_of_ffi_send(
+/// Two shapes carry FFI module information, both centralized in
+/// [`crate::ffi_receiver`]:
+/// - The module-name send itself (`Erlang lists`): `receiver` is the bare
+///   `Erlang` class reference and `selector` (`lists`) is the module name.
+/// - A function send (`(Erlang lists) reverse:`): the module is recovered
+///   from the receiver chain via
+///   [`crate::ffi_receiver::erlang_module_of_receiver`] — `selector` (the
+///   *function* name, `reverse:`) plays no role in the module lookup here.
+fn ffi_target_module(
     receiver: &Expression,
     selector: &crate::ast::MessageSelector,
 ) -> Option<String> {
-    if is_erlang_class_reference(receiver) {
-        Some(selector.name().trim_end_matches(':').to_string())
-    } else {
-        erlang_ffi_module(receiver)
+    if crate::ffi_receiver::is_erlang_class_reference(receiver) {
+        if let crate::ast::MessageSelector::Unary(module_name) = selector {
+            if !crate::ffi_receiver::is_class_protocol_selector(module_name) {
+                return Some(module_name.to_string());
+            }
+        }
+        return None;
     }
+    crate::ffi_receiver::erlang_module_of_receiver(receiver).map(ToString::to_string)
 }
 
 /// Classify the shared receiver of a cascade.
@@ -215,12 +181,26 @@ fn module_of_ffi_send(
 /// shared receiver is that send's receiver. For any other shape (a cascade with
 /// a bare receiver), fall back to classifying the receiver directly.
 fn cascade_receiver_kind(receiver: &Expression) -> ReceiverKind {
-    match receiver {
-        Expression::MessageSend {
-            receiver: inner, ..
-        } => receiver_kind(inner),
-        other => receiver_kind(other),
+    if let Expression::MessageSend {
+        receiver: inner,
+        selector,
+        ..
+    } = receiver
+    {
+        return receiver_kind(inner, selector);
     }
+    if let Some(kind) = self_or_super_kind(receiver) {
+        return kind;
+    }
+    // Defensive fallback for a cascade with a genuinely bare receiver (see
+    // the doc comment above) — no wrapping send means no selector to apply
+    // the class-protocol filter with, but that filter only matters for the
+    // bare-`Erlang`-class-reference shape, which cannot itself appear here
+    // without a wrapping send.
+    if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
+        return ReceiverKind::ErlangFfi;
+    }
+    ReceiverKind::Other
 }
 
 /// Resolve the native module shared by an FFI cascade's messages.
@@ -234,8 +214,8 @@ fn cascade_shared_ffi_module(receiver: &Expression) -> Option<String> {
             receiver: inner,
             selector,
             ..
-        } => module_of_ffi_send(inner, selector),
-        other => erlang_ffi_module(other),
+        } => ffi_target_module(inner, selector),
+        other => crate::ffi_receiver::erlang_module_of_receiver(other).map(ToString::to_string),
     }
 }
 
@@ -328,9 +308,9 @@ fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
             ..
         } => {
             if !receiver_rooted_in_error(receiver) {
-                let kind = receiver_kind(receiver);
+                let kind = receiver_kind(receiver, selector);
                 let module = if kind == ReceiverKind::ErlangFfi {
-                    module_of_ffi_send(receiver, selector)
+                    ffi_target_module(receiver, selector)
                 } else {
                     None
                 };
@@ -654,6 +634,67 @@ mod tests {
         assert_eq!(hit.receiver, ReceiverKind::Other);
         // Non-FFI sends never carry a target module.
         assert_eq!(hit.target_module, None);
+    }
+
+    #[test]
+    fn erlang_class_protocol_selector_is_other_not_ffi() {
+        // BT-3079 regression: `Erlang class` must NOT be reported as an FFI
+        // call to a module named "class" — it dispatches to the class
+        // protocol (metaclass), like `Erlang new`, `Erlang printString`, etc.
+        let hits = find_all_sends_in_source("meta => Erlang class");
+        let hit = hits.iter().find(|h| h.selector == "class").unwrap();
+        assert_eq!(hit.receiver, ReceiverKind::Other);
+        assert_eq!(hit.target_module, None);
+    }
+
+    #[test]
+    fn erlang_new_class_protocol_selector_is_other_not_ffi() {
+        // Same as above for `new` — the other class-protocol selector most
+        // likely to collide with a real Erlang module name.
+        let hits = find_all_sends_in_source("make => Erlang new");
+        let hit = hits.iter().find(|h| h.selector == "new").unwrap();
+        assert_eq!(hit.receiver, ReceiverKind::Other);
+        assert_eq!(hit.target_module, None);
+    }
+
+    #[test]
+    fn package_qualified_erlang_is_other_not_ffi() {
+        // BT-3079 regression: `json@Erlang lists` names a package-scoped
+        // `Erlang` class, not the compiler's built-in FFI bridge, so it must
+        // not be tagged `ErlangFfi`.
+        let hits = find_all_sends_in_source("go => json@Erlang lists");
+        let hit = hits.iter().find(|h| h.selector == "lists").unwrap();
+        assert_eq!(hit.receiver, ReceiverKind::Other);
+        assert_eq!(hit.target_module, None);
+    }
+
+    #[test]
+    fn erlang_ffi_cascade_reuses_module_across_messages() {
+        // BT-3079 regression: `(Erlang lists) reverse: xs; flatten: xs` — the
+        // shared cascade receiver resolves to FFI module `lists` once and
+        // both cascade messages (including the second, which never sees the
+        // receiver syntactically) must carry it.
+        let hits = find_all_sends_in_source("rev: xs => (Erlang lists) reverse: xs; flatten: xs");
+        let reverse = hits.iter().find(|h| h.selector == "reverse:").unwrap();
+        let flatten = hits.iter().find(|h| h.selector == "flatten:").unwrap();
+        assert_eq!(reverse.receiver, ReceiverKind::ErlangFfi);
+        assert_eq!(reverse.target_module.as_deref(), Some("lists"));
+        assert_eq!(flatten.receiver, ReceiverKind::ErlangFfi);
+        assert_eq!(flatten.target_module.as_deref(), Some("lists"));
+    }
+
+    #[test]
+    fn erlang_class_protocol_cascade_is_other_not_ffi() {
+        // BT-3079 regression: `Erlang class; foo` — the shared cascade
+        // receiver's first message is the class-protocol selector `class`,
+        // so neither cascade message may be tagged FFI.
+        let hits = find_all_sends_in_source("meta => Erlang class; foo");
+        let class_msg = hits.iter().find(|h| h.selector == "class").unwrap();
+        let foo_msg = hits.iter().find(|h| h.selector == "foo").unwrap();
+        assert_eq!(class_msg.receiver, ReceiverKind::Other);
+        assert_eq!(class_msg.target_module, None);
+        assert_eq!(foo_msg.receiver, ReceiverKind::Other);
+        assert_eq!(foo_msg.target_module, None);
     }
 
     #[test]

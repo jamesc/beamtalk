@@ -1912,15 +1912,20 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods.
         // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.
-        if let Expression::ClassReference { name, .. } = unwrap_parens(receiver) {
+        if let Expression::ClassReference { name, package, .. } = unwrap_parens(receiver) {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
             // to enable FFI call type inference on the outer message send.
             // BT-1880: Class protocol selectors (class, new, superclass, etc.)
             // must NOT be intercepted as module lookups — they are handled by
-            // normal class-side dispatch (matching codegen CLASS_PROTOCOL_SELECTORS).
-            if class_name == "Erlang" {
+            // normal class-side dispatch. BT-3079: package-qualified references
+            // (`json@Erlang lists`) are excluded too — they name a package-scoped
+            // class, not the compiler's built-in FFI bridge. Both rules are
+            // centralized in `crate::ffi_receiver` (mirrored here via
+            // `is_class_protocol_selector` since this call site splits the
+            // receiver/selector apart rather than holding the combined send).
+            if class_name == "Erlang" && package.is_none() {
                 if let MessageSelector::Unary(module_name) = selector {
                     if !is_class_protocol_selector(module_name) {
                         // Static module name: `Erlang lists` → ErlangModule<lists>
@@ -5958,22 +5963,11 @@ impl TypeChecker {
 /// Class-protocol selectors that must NOT be intercepted as FFI module lookups.
 ///
 /// These are handled by `beamtalk_object_class:class_send/3` at runtime.
-/// This list mirrors `CLASS_PROTOCOL_SELECTORS` in `dispatch_codegen.rs`
-/// to keep codegen and type-checker behaviour consistent (BT-1880).
+/// BT-3079: delegates to the single shared recognizer in
+/// [`crate::ffi_receiver`], which codegen and the semantic-analysis validators
+/// also use, to keep this behaviour consistent everywhere (BT-1880).
 fn is_class_protocol_selector(selector: &str) -> bool {
-    matches!(
-        selector,
-        "new"
-            | "spawn"
-            | "class"
-            | "methods"
-            | "superclass"
-            | "subclasses"
-            | "allSubclasses"
-            | "class_name"
-            | "module_name"
-            | "printString"
-    )
+    crate::ffi_receiver::is_class_protocol_selector(selector)
 }
 
 /// Returns `true` for the equality / identity comparison binary operators —
