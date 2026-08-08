@@ -18,8 +18,10 @@
 //!
 //! There is no dedicated `ErlangCall` AST node. An FFI call such as
 //! `(Erlang lists) reverse: xs` parses as a nested [`Expression::MessageSend`]
-//! whose root receiver is the `Erlang` class reference. The detection mirrors
-//! the existing FFI machinery in
+//! whose root receiver is the `Erlang` class reference. The receiver
+//! recognition is shared with codegen and semantic analysis via
+//! [`crate::ffi_receiver`] (BT-3079); the function/arity derivation below
+//! matches the existing FFI machinery in
 //! [`crate::semantic_analysis::validators::structural_validators`] (BT-1726):
 //!
 //! - The **module** is recovered from the receiver: `Erlang <module>` (or
@@ -37,8 +39,8 @@
 //!
 //! Class-protocol selectors such as `Erlang class` / `Erlang new` are NOT FFI
 //! module lookups (they dispatch to the class protocol), so they are never
-//! reported — the [`CLASS_PROTOCOL_SELECTORS`] guard mirrors codegen and the
-//! validators.
+//! reported — recognition is delegated to the single shared implementation in
+//! [`crate::ffi_receiver`] (BT-3079), which codegen and the validators also use.
 //!
 //! # Parsing strategy
 //!
@@ -68,24 +70,6 @@ const PREFIX_LINES: u32 = 1;
 /// The single newline at the end is counted by [`PREFIX_LINES`]. The class
 /// name uses a leading underscore so it cannot collide with a real class.
 const SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticFfiScope\n";
-
-/// Class-protocol selectors that are NOT Erlang module names.
-///
-/// Mirrors `CLASS_PROTOCOL_SELECTORS` in codegen
-/// (`dispatch_codegen::try_handle_erlang_interop`) and the FFI validators, so
-/// `Erlang class`, `Erlang new`, etc. are not treated as FFI module lookups.
-const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
-    "new",
-    "spawn",
-    "class",
-    "methods",
-    "superclass",
-    "subclasses",
-    "allSubclasses",
-    "class_name",
-    "module_name",
-    "printString",
-];
 
 /// Find the 1-based line numbers within `method_source` where the Erlang FFI
 /// function `module`:`function` is invoked.
@@ -142,8 +126,8 @@ struct FfiTarget<'a> {
     arity: Option<usize>,
 }
 
-/// Strip `Parenthesized` wrappers so a `(Erlang lists)` receiver is matched the
-/// same as a bare `Erlang lists`.
+/// Strip `Parenthesized` wrappers so a `(Erlang lists)` cascade receiver is
+/// matched the same as a bare `Erlang lists` one.
 fn unwrap_parens(mut expr: &Expression) -> &Expression {
     while let Expression::Parenthesized { expression, .. } = expr {
         expr = expression;
@@ -158,24 +142,11 @@ fn unwrap_parens(mut expr: &Expression) -> &Expression {
 /// module name, or `None` if the receiver is not an FFI module proxy. Class-
 /// protocol selectors (`Erlang class`, …) are rejected so they are not treated
 /// as module lookups.
+///
+/// BT-3079: delegates to the single shared recognizer in
+/// [`crate::ffi_receiver`].
 fn extract_erlang_module(expr: &Expression) -> Option<&str> {
-    let expr = unwrap_parens(expr);
-    if let Expression::MessageSend {
-        receiver,
-        selector: MessageSelector::Unary(module_name),
-        ..
-    } = expr
-    {
-        if let Expression::ClassReference { name, package, .. } = receiver.as_ref() {
-            if package.is_none()
-                && name.name == "Erlang"
-                && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
-            {
-                return Some(module_name.as_str());
-            }
-        }
-    }
-    None
+    crate::ffi_receiver::erlang_module_of_receiver(expr)
 }
 
 /// Determine the line number to report for a matching FFI call site. Uses the
@@ -501,6 +472,15 @@ mod tests {
         // lookups, so a query for module `new`/`class` must not match.
         let src = "make => Erlang new";
         assert!(find_ffi_sites_in_source(src, "new", "anything", None).is_empty());
+    }
+
+    #[test]
+    fn package_qualified_erlang_is_not_an_ffi_call() {
+        // BT-3079 regression: `json@Erlang lists reverse: xs` names a
+        // package-scoped `Erlang` class, not the compiler's built-in FFI
+        // bridge, so it must not be reported as a `lists:reverse` call site.
+        let src = "rev: xs => json@Erlang lists reverse: xs";
+        assert!(find_ffi_sites_in_source(src, "lists", "reverse", None).is_empty());
     }
 
     #[test]

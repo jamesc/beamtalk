@@ -1584,6 +1584,111 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
 }
 
 #[test]
+fn test_erlang_interop_direct_call_parenthesized_receiver() {
+    // BT-3079: `(Erlang lists) reverse: xs` with a genuine `Parenthesized`
+    // AST node wrapping the inner `Erlang lists` send must hit the same
+    // direct-call fast path as the unparenthesized form — the shared
+    // `crate::ffi_receiver::erlang_module_of_receiver` recognizer peels
+    // parens so codegen and the LSP queries agree on this canonical form.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_send = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(1, 7)),
+            span: Span::new(1, 7),
+            package: None,
+        }),
+        selector: MessageSelector::Unary("lists".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(1, 13),
+    };
+    let parenthesized_receiver = Expression::Parenthesized {
+        expression: Box::new(inner_send),
+        span: Span::new(0, 14),
+    };
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(15, 23))]);
+    let arguments = vec![Expression::Identifier(Identifier::new(
+        "xs",
+        Span::new(24, 26),
+    ))];
+
+    let doc = generator
+        .generate_message_send(&parenthesized_receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'("),
+        "Parenthesized FFI receiver should emit proxy-routed call. Got: {output}"
+    );
+    assert!(
+        !output.contains("ErlangModule"),
+        "Should not create proxy map. Got: {output}"
+    );
+    assert!(
+        !output.contains("beamtalk_message_dispatch"),
+        "Should not use runtime dispatch. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_bare_class_protocol_selector_falls_through() {
+    // BT-3079 regression: `Erlang class` (receiver is directly the bare
+    // `Erlang` class reference, selector is the class-protocol `class`) must
+    // NOT construct an `ErlangModule` proxy for a module literally named
+    // `class` — it falls through to normal class-side dispatch.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Erlang", Span::new(0, 6)),
+        span: Span::new(0, 6),
+        package: None,
+    };
+    let selector = MessageSelector::Unary("class".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        !output.contains("ErlangModule"),
+        "`Erlang class` must not build a module proxy. Got: {output}"
+    );
+    assert!(
+        !output.contains("'module' => 'class'"),
+        "`Erlang class` must not be treated as a module named 'class'. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_package_qualified_not_treated_as_ffi() {
+    // BT-3079: `json@Erlang lists` — a package-qualified `Erlang` names a
+    // different, package-scoped class, not the compiler's built-in FFI
+    // bridge, so it must not be optimized as a direct Erlang call or
+    // construct an `ErlangModule` proxy.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Erlang", Span::new(5, 11)),
+        span: Span::new(0, 11),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+    };
+    let selector = MessageSelector::Unary("lists".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        !output.contains("ErlangModule"),
+        "Package-qualified `Erlang` must not build an FFI module proxy. Got: {output}"
+    );
+}
+
+#[test]
 fn test_cross_file_value_object_subclass_without_index() {
     // Without the superclass index, a class whose parent is not in the hierarchy
     // defaults to actor codegen (the old broken behavior).

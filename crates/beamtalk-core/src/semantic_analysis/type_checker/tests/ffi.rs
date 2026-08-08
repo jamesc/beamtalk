@@ -802,6 +802,26 @@ fn test_erlang_new_resolves_as_class_protocol_not_ffi() {
 }
 
 #[test]
+fn test_package_qualified_erlang_does_not_infer_ffi_module() {
+    // BT-3079 regression: `json@Erlang lists` names a package-scoped `Erlang`
+    // class, not the compiler's built-in FFI bridge — it must not be
+    // inferred as `ErlangModule<lists>`.
+    let module = parse_source("go => json@Erlang lists");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let has_erlang_module_type = checker.type_map().iter().any(|(_, ty)| {
+        matches!(ty, InferredType::Known { class_name, .. } if class_name.as_str() == "ErlangModule")
+    });
+    assert!(
+        !has_erlang_module_type,
+        "`json@Erlang lists` should not be inferred as ErlangModule"
+    );
+}
+
+#[test]
 fn test_erlang_module_proxy_class_uses_normal_dispatch() {
     // `proxy := Erlang lists; proxy class` — `class` on an ErlangModule instance
     // should use normal dispatch (class protocol), not FFI lookup.

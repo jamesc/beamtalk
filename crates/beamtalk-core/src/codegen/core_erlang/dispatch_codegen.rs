@@ -976,53 +976,33 @@ impl CoreErlangGenerator {
     /// Standard class-protocol selectors (e.g. `class`, `new`, `superclass`)
     /// fall through to normal class dispatch so that `Erlang class` returns the
     /// metaclass rather than a proxy for module `'class'`.
+    ///
+    /// BT-3079: FFI receiver recognition (the class-protocol filter, the
+    /// package-qualification check, and parenthesized-receiver peeling) is
+    /// centralized in [`crate::ffi_receiver`] — this is the only place those
+    /// rules are implemented.
     fn try_handle_erlang_interop(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        /// Class-protocol selectors that must NOT be intercepted as module
-        /// lookups. These are handled by `beamtalk_object_class:class_send/3`.
-        const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
-            "new",
-            "spawn",
-            "class",
-            "methods",
-            "superclass",
-            "subclasses",
-            "allSubclasses",
-            "class_name",
-            "module_name",
-            "printString",
-        ];
-
-        // BT-682: Direct call optimization — `Erlang lists reverse: xs` →
-        // `call 'lists':'reverse'(Xs)` with no proxy map allocation.
-        // Only when the module name is a compile-time literal (ClassReference path).
-        if let Expression::MessageSend {
-            receiver: inner_receiver,
-            selector: MessageSelector::Unary(module_name),
-            ..
-        } = receiver
-        {
-            if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-                if name.name == "Erlang"
-                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
-                {
-                    return self.generate_direct_erlang_call(module_name, selector, arguments);
-                }
-            }
+        // BT-682: Direct call optimization — `Erlang lists reverse: xs` (and the
+        // parenthesized `(Erlang lists) reverse: xs`) → `call 'lists':'reverse'(Xs)`
+        // with no proxy map allocation. Only when the module name is a
+        // compile-time literal (ClassReference path).
+        if let Some(module_name) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
+            return self.generate_direct_erlang_call(module_name, selector, arguments);
         }
 
         // BT-677: Proxy construction — `Erlang lists` → inline proxy map
-        if let Expression::ClassReference { name, .. } = receiver {
-            if name.name != "Erlang" {
+        if let Expression::ClassReference { name, package, .. } = receiver {
+            if package.is_some() || name.name != "Erlang" {
                 return Ok(None);
             }
             match selector {
                 MessageSelector::Unary(module_name)
-                    if !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str()) =>
+                    if !crate::ffi_receiver::is_class_protocol_selector(module_name) =>
                 {
                     let doc = docvec![
                         "~{'$beamtalk_class' => 'ErlangModule', 'module' => ",
