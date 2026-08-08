@@ -29,6 +29,8 @@
 //!   tier), generic `type_args` (`List(Port)` → `HandleScoped`), and user
 //!   `handleScope:` declarations.
 
+use std::collections::HashMap;
+
 use ecow::EcoString;
 
 use crate::ast::ClassKind;
@@ -323,8 +325,14 @@ fn tier_of_known(
                 // to its declared type before tiering, instead of treating
                 // the alias name as an unresolved nominal class.
                 Some(field_ty) => {
-                    let field_type =
-                        super::TypeChecker::resolve_type_name_string(&field_ty, alias_registry);
+                    let field_type = super::TypeChecker::resolve_type_string(
+                        &field_ty,
+                        &HashMap::new(),
+                        &HashMap::new(),
+                        None,
+                        alias_registry,
+                        super::TypeStringContext::Declared,
+                    );
                     tier_of_depth(&field_type, hierarchy, depth + 1, alias_registry)
                 }
                 // An untyped field carries no static tier — treat as Unknown.
@@ -574,7 +582,7 @@ mod tests {
     /// alias's *expansion* (here, `Port` → `HandleScoped(#process)`) when a
     /// registry is threaded through, instead of falling back to
     /// `Tier::Unknown` for the opaque alias name — the deferred half of
-    /// BT-2928's `resolve_type_name_string` fix for sendability tiering.
+    /// BT-2928's string-resolver alias fix for sendability tiering.
     #[test]
     fn value_composition_inherits_alias_typed_field_tier() {
         use crate::semantic_analysis::alias_registry::AliasRegistry;

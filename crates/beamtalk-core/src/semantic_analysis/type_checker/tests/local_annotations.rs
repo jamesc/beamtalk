@@ -479,8 +479,15 @@ fn method_call_union_return_no_false_binary_warning() {
 /// BT-2017: Verify that `resolve_type_name_string` correctly splits
 /// "Integer | Nil" into a proper Union type (not Known("Integer | Nil")).
 #[test]
-fn resolve_type_name_string_splits_union() {
-    let ty = TypeChecker::resolve_type_name_string(&"Integer | Nil".into(), None);
+fn resolve_type_string_splits_union() {
+    let ty = TypeChecker::resolve_type_string(
+        "Integer | Nil",
+        &HashMap::new(),
+        &HashMap::new(),
+        None,
+        None,
+        TypeStringContext::Declared,
+    );
     match &ty {
         InferredType::Union { members, .. } => {
             assert_eq!(
