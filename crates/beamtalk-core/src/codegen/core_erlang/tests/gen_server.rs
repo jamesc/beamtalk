@@ -4772,20 +4772,22 @@ fn test_method_xref_baked_into_register_class() {
         code.contains("'source_status' => 'indexed'"),
         "rows should be tagged indexed. Got:\n{code}"
     );
-    // BT-2614: the actor's compiler-injected class-side `new`/`new:`/`spawn`/`spawn:`
-    // are emitted as synthetic xref rows so the System Browser matches runtime
-    // `Counter class allMethods`. They are class-side, synthetic, and carry a
-    // synthetic_origin (the class-header line). Bound the methodXref payload to the
-    // next class-info field (`'classState'`) so the assertions below cannot be
-    // satisfied by unrelated parts of the generated module.
+    // BT-3073: `Counter` no longer carries synthetic class-side rows for
+    // `new`/`new:`/`spawn`/`spawnWith:` — BT-3071/BT-3072 lifted those bodies
+    // into real, source-backed class methods on `Actor` itself
+    // (`stdlib/src/Actor.bt`), so a subclass like `Counter` genuinely
+    // *inherits* them rather than *defining* them, and its own methodXref
+    // carries no row for them at all (the honest Smalltalk answer — see
+    // BT-2614, which introduced the now-removed rows). Bound the methodXref
+    // payload to the next class-info field (`'classState'`) so the assertions
+    // below cannot be satisfied by unrelated parts of the generated module.
     let mx_start = code.find("'methodXref' => [").expect("methodXref present");
     let mx_tail = &code[mx_start..];
     let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
 
     // The optional synthetic_origin key is omitted for the user-authored indexed
     // rows. Scope the check to the `increment` row (an indexed user method) so it
-    // is not tripped by the BT-2614 synthetic actor-constructor rows, which
-    // legitimately carry synthetic_origin. The increment row runs from its
+    // is not tripped by unrelated nested rows. The increment row runs from its
     // `'selector' => 'increment'` key up to the start of the next xref row — NOT
     // the first nested `}~`, which would truncate the slice mid-row inside the
     // `sends` list (BT-2622).
@@ -4805,20 +4807,19 @@ fn test_method_xref_baked_into_register_class() {
         !inc_row.contains("synthetic_origin"),
         "synthetic_origin must be omitted for the indexed increment row. Got:\n{inc_row}"
     );
-    for sel in ["new", "new:", "spawn", "spawn:"] {
+    // BT-3073: `new`/`new:`/`spawn`/`spawnWith:` are inherited from `Actor`,
+    // not defined by `Counter` — no top-level row for them, synthetic or
+    // otherwise. Match on the `class_side` + `selector` pair (not just
+    // `'selector' => '<sel>'` in isolation) so a legitimate nested `sends`
+    // entry — e.g. the `default` class method's own `Counter new` send,
+    // which also carries a `'selector' => 'new'` key — is not a false
+    // positive: only top-level methodXref rows carry `class_side`.
+    for sel in ["new", "new:", "spawn", "spawnWith:"] {
         assert!(
-            mx_seg.contains(&format!("'selector' => '{sel}'")),
-            "synthetic actor constructor `{sel}` row missing. Got:\n{mx_seg}"
+            !mx_seg.contains(&format!("'class_side' => 'true', 'selector' => '{sel}'")),
+            "`{sel}` is inherited from Actor and must not appear as a Counter class-side row. Got:\n{mx_seg}"
         );
     }
-    assert!(
-        mx_seg.contains("'source_status' => 'synthetic'"),
-        "actor constructors should be tagged synthetic. Got:\n{mx_seg}"
-    );
-    assert!(
-        mx_seg.contains("'synthetic_origin' =>"),
-        "synthetic actor-constructor rows should carry synthetic_origin. Got:\n{mx_seg}"
-    );
 }
 
 /// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for a
