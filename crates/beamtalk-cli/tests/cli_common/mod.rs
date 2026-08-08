@@ -11,6 +11,8 @@
 use assert_cmd::Command;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 
 /// Resolve the workspace root (repo root) from `CARGO_MANIFEST_DIR`.
@@ -48,11 +50,51 @@ pub fn beamtalk() -> Command {
     // honours `BEAMTALK_RUNTIME_DIR` first, which keeps `doctor`/`build`/`test`
     // pointing at the in-repo `runtime/` directory.
     cmd.env("BEAMTALK_RUNTIME_DIR", runtime_dir())
+        // BT-3066: Pin the shared, OTP-version-keyed FFI type-spec cache
+        // (`beamtalk_core::ffi_type_specs::shared_otp_cache_dir`) to a
+        // fresh directory per invocation instead of letting it default to
+        // the developer/CI machine's persistent cache dir
+        // (`dirs::cache_dir()`, e.g. `%LOCALAPPDATA%\beamtalk\otp-specs\`
+        // on Windows). That default is *shared across every checkout and
+        // test run on the machine* and outlives `_build/` wipes by design
+        // (BT-2470) — exactly the opposite of what a hermetic subprocess
+        // test needs. A single prior extraction failure (e.g. a build
+        // worker killed mid-batch) permanently poisons it with negative
+        // (`specs_line: ""`) cache entries for every module that failed to
+        // report a result, which are then replayed as fresh forever (same
+        // `.beam` mtime, same mapping stamp) — silently disabling FFI
+        // arg-type checking for any later test run on that machine,
+        // including in `beamtalk lint`/`build`'s "not stale" `@expect`
+        // matching. Long-lived developer machines accumulate this state;
+        // ephemeral CI runners mostly don't, which is why this surfaced as
+        // a "deterministic on this Windows box" failure rather than a CI
+        // one. Each invocation gets its own never-reused directory so no
+        // test run can read a poisoned cache written by an earlier one, or
+        // poison the cache for a later one.
+        .env("BEAMTALK_CACHE_DIR", isolated_cache_dir())
         // Disable colored output so assertions on text content are stable.
         .env("NO_COLOR", "1")
         // Quiet tracing — some tests assert on stderr content.
         .env_remove("RUST_LOG");
     cmd
+}
+
+/// Returns a fresh, never-reused directory path under the system temp dir
+/// for `BEAMTALK_CACHE_DIR` isolation (BT-3066). The directory is not
+/// created here — `beamtalk_core::ffi_type_specs`'s cache readers treat a
+/// missing directory as an empty cache, and writers create it lazily on
+/// first write — so a plain unique path is sufficient.
+fn isolated_cache_dir() -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "beamtalk-cli-test-cache-{}-{n}-{nanos}",
+        std::process::id()
+    ))
 }
 
 /// Locate the workspace `runtime/` directory.
