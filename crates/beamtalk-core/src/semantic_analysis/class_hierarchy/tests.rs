@@ -1383,7 +1383,7 @@ fn stdlib_integer_plus_has_return_type() {
     let method = h
         .find_method("Integer", "+")
         .expect("Integer >> + should exist");
-    assert_eq!(method.return_type.as_deref(), Some("Integer"));
+    assert_eq!(method.return_type, Some(DeclaredType::simple("Integer")));
 }
 #[test]
 fn stdlib_integer_plus_has_param_types() {
@@ -1391,7 +1391,10 @@ fn stdlib_integer_plus_has_param_types() {
     let method = h
         .find_method("Integer", "+")
         .expect("Integer >> + should exist");
-    assert_eq!(method.param_types, vec![Some("Number".into())]);
+    assert_eq!(
+        method.param_types,
+        vec![Some(DeclaredType::simple("Number"))]
+    );
 }
 #[test]
 fn stdlib_unary_method_has_empty_param_types() {
@@ -1452,7 +1455,7 @@ fn user_class_return_type_propagated() {
     let method = hierarchy
         .find_method("Counter", "getValue")
         .expect("Counter >> getValue should exist");
-    assert_eq!(method.return_type.as_deref(), Some("Integer"));
+    assert_eq!(method.return_type, Some(DeclaredType::simple("Integer")));
 }
 #[test]
 fn user_class_param_types_propagated() {
@@ -1511,8 +1514,11 @@ fn user_class_param_types_propagated() {
     let method = hierarchy
         .find_method("Counter", "add:")
         .expect("Counter >> add: should exist");
-    assert_eq!(method.return_type.as_deref(), Some("Counter"));
-    assert_eq!(method.param_types, vec![Some("Integer".into())]);
+    assert_eq!(method.return_type, Some(DeclaredType::simple("Counter")));
+    assert_eq!(
+        method.param_types,
+        vec![Some(DeclaredType::simple("Integer"))]
+    );
 }
 // --- State field type tests ---
 fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
@@ -1563,7 +1569,7 @@ fn state_field_type_returns_type_for_annotated_field() {
     assert!(diags.is_empty());
     assert_eq!(
         h.state_field_type("Counter", "count"),
-        Some(EcoString::from("Integer"))
+        Some(DeclaredType::simple("Integer"))
     );
 }
 #[test]
@@ -1646,12 +1652,12 @@ fn state_field_type_inherited_from_parent() {
     // Child's own typed field
     assert_eq!(
         h.state_field_type("Child", "extra"),
-        Some(EcoString::from("String"))
+        Some(DeclaredType::simple("String"))
     );
     // Inherited typed field from parent
     assert_eq!(
         h.state_field_type("Child", "count"),
-        Some(EcoString::from("Integer"))
+        Some(DeclaredType::simple("Integer"))
     );
     // Inherited untyped field from parent
     assert_eq!(h.state_field_type("Child", "label"), None);
@@ -1709,7 +1715,7 @@ fn state_field_type_shadowed_untyped_field() {
     // Parent's typed `count` is still accessible on the parent
     assert_eq!(
         h.state_field_type("TypedParent", "count"),
-        Some(EcoString::from("Integer"))
+        Some(DeclaredType::simple("Integer"))
     );
 }
 #[test]
@@ -2236,7 +2242,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(EcoString::from("Integer")),
+            return_type: Some(DeclaredType::simple("Integer")),
             param_types: vec![],
             doc: None,
         }],
@@ -2595,7 +2601,7 @@ fn register_extensions_adds_instance_method() {
     assert_eq!(methods.len(), original_count + 1);
     let ext = methods.iter().find(|m| m.selector == "shout").unwrap();
     assert_eq!(ext.arity, 0);
-    assert_eq!(ext.return_type.as_deref(), Some("String"));
+    assert_eq!(ext.return_type, Some(DeclaredType::simple("String")));
     assert_eq!(ext.defined_in.as_str(), "String");
 }
 #[test]
@@ -2629,7 +2635,7 @@ fn register_extensions_adds_class_method() {
     assert_eq!(methods.len(), original_count + 1);
     let ext = methods.iter().find(|m| m.selector == "fromJson:").unwrap();
     assert_eq!(ext.arity, 1);
-    assert_eq!(ext.param_types, vec![Some("String".into())]);
+    assert_eq!(ext.param_types, vec![Some(DeclaredType::simple("String"))]);
 }
 #[test]
 fn register_extensions_unannotated_uses_dynamic() {

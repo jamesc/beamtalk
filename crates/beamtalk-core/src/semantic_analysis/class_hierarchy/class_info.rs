@@ -6,11 +6,11 @@
 //! Contains `MethodInfo`, `SuperclassTypeArg`, and `ClassInfo` — the value objects
 //! that describe classes and methods in the static hierarchy.
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, Literal, MethodKind, TypeAnnotation};
+use crate::ast::{ClassDefinition, ClassKind, Expression, Literal, MethodKind};
 use ecow::EcoString;
 use std::collections::HashMap;
 
-use super::ClassHierarchy;
+use super::{ClassHierarchy, DeclaredType};
 
 /// Information about a method in the hierarchy.
 ///
@@ -40,10 +40,10 @@ pub struct MethodInfo {
     pub spawns_block: bool,
     /// Inferred return type (e.g., "Integer", "String", "Boolean").
     /// `None` means the return type is unknown (Dynamic).
-    pub return_type: Option<EcoString>,
+    pub return_type: Option<DeclaredType>,
     /// Parameter type annotations (e.g., `vec![Some("Number")]` for `+ other: Number`).
     /// Empty for unary methods. `None` elements mean the parameter type is unknown.
-    pub param_types: Vec<Option<EcoString>>,
+    pub param_types: Vec<Option<DeclaredType>>,
     /// Documentation string for this method.
     /// Populated for compiler-synthesized methods and stdlib methods with `///` doc comments;
     /// `None` for user-written methods without doc comments.
@@ -86,8 +86,8 @@ pub enum SuperclassTypeArg {
     ///
     /// Example: `Collection(Integer) subclass: IntArray` — `Integer` is fixed.
     Concrete {
-        /// The concrete type name (e.g., "Integer").
-        type_name: EcoString,
+        /// The concrete type (e.g., `Integer`).
+        declared: DeclaredType,
     },
 }
 
@@ -153,9 +153,9 @@ pub struct ClassInfo {
     pub surface_incomplete: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
-    /// Declared type annotations for state fields (field name → type name).
+    /// Declared type annotations for state fields (field name → type).
     /// Only populated for fields with explicit type annotations.
-    pub state_types: HashMap<EcoString, EcoString>,
+    pub state_types: HashMap<EcoString, DeclaredType>,
     /// Which state fields carry an explicit default value (field name → has default).
     /// Populated for every declared state field (both typed and untyped).
     ///
@@ -184,7 +184,7 @@ pub struct ClassInfo {
     /// Empty when the superclass is not generic or no type args are applied.
     ///
     /// Example: `Collection(E) subclass: Array(E)` → `[ParamRef { param_index: 0 }]`
-    /// Example: `Collection(Integer) subclass: IntArray` → `[Concrete { type_name: "Integer" }]`
+    /// Example: `Collection(Integer) subclass: IntArray` → `[Concrete { declared: DeclaredType::simple("Integer") }]`
     ///
     /// **References:** ADR 0068 Challenge 4
     pub superclass_type_args: Vec<SuperclassTypeArg>,
@@ -214,11 +214,11 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
-                return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters
                     .iter()
-                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                    .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
                     .collect(),
                 doc: m.doc_comment.clone().map(Into::into),
             })
@@ -235,11 +235,11 @@ impl ClassInfo {
                 is_sealed: m.is_sealed,
                 is_internal: m.is_internal,
                 spawns_block: false,
-                return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                return_type: m.return_type.as_ref().map(DeclaredType::from),
                 param_types: m
                     .parameters
                     .iter()
-                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                    .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
                     .collect(),
                 doc: m.doc_comment.clone().map(Into::into),
             })
@@ -274,7 +274,7 @@ impl ClassInfo {
                 .filter_map(|s| {
                     s.type_annotation
                         .as_ref()
-                        .map(|ty| (s.name.name.clone(), ty.type_name()))
+                        .map(|ty| (s.name.name.clone(), DeclaredType::from(ty)))
                 })
                 .collect(),
             state_has_default: class
@@ -309,12 +309,13 @@ impl ClassInfo {
                     .superclass_type_args
                     .iter()
                     .map(|ta| {
-                        let name = ta.type_name();
-                        if let Some(idx) = own_params.iter().position(|p| p == &name) {
-                            SuperclassTypeArg::ParamRef { param_index: idx }
-                        } else {
-                            SuperclassTypeArg::Concrete { type_name: name }
+                        let declared = DeclaredType::from(ta);
+                        if let DeclaredType::Simple(name) = &declared {
+                            if let Some(idx) = own_params.iter().position(|p| p == name) {
+                                return SuperclassTypeArg::ParamRef { param_index: idx };
+                            }
                         }
+                        SuperclassTypeArg::Concrete { declared }
                     })
                     .collect()
             },
