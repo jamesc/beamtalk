@@ -50,6 +50,7 @@ pub(in crate::semantic_analysis) use types::is_generic_type_param;
 pub use types::{DynamicReason, InferredType, TypeProvenance};
 
 pub(crate) use env_key::EnvKey;
+pub(crate) use inference::TypeStringContext;
 
 /// Map of expression spans to their inferred types.
 ///

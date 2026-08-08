@@ -107,8 +107,15 @@ fn resolve_type_annotation_dynamic_nested_in_generic_resolves_to_dynamic_variant
 /// `resolve_type_name_string` (the state-field-type string path) must also
 /// resolve a bare `Dynamic` to the real `InferredType::Dynamic` variant.
 #[test]
-fn resolve_type_name_string_dynamic_keyword_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_type_name_string(&eco_string("Dynamic"), None);
+fn resolve_type_string_dynamic_keyword_resolves_to_dynamic_variant() {
+    let result = TypeChecker::resolve_type_string(
+        &eco_string("Dynamic"),
+        &HashMap::new(),
+        &HashMap::new(),
+        None,
+        None,
+        TypeStringContext::Declared,
+    );
     assert!(
         matches!(result, InferredType::Dynamic(_)),
         "expected the real Dynamic variant, got: {result:?}"
@@ -118,9 +125,15 @@ fn resolve_type_name_string_dynamic_keyword_resolves_to_dynamic_variant() {
 /// `resolve_type_name_string` must resolve `Dynamic` correctly nested inside
 /// a generic's type args too.
 #[test]
-fn resolve_type_name_string_dynamic_nested_in_generic_resolves_to_dynamic_variant() {
-    let result =
-        TypeChecker::resolve_type_name_string(&eco_string("MyResult(Dynamic, Error)"), None);
+fn resolve_type_string_dynamic_nested_in_generic_resolves_to_dynamic_variant() {
+    let result = TypeChecker::resolve_type_string(
+        &eco_string("MyResult(Dynamic, Error)"),
+        &HashMap::new(),
+        &HashMap::new(),
+        None,
+        None,
+        TypeStringContext::Declared,
+    );
     let InferredType::Known {
         class_name,
         type_args,
