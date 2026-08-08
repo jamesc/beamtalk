@@ -23,12 +23,14 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     // Object lifecycle
     "basicNew",
     "basicNewWith",
-    "actorSpawn",
-    "actorSpawnWith",
     // BT-3071: Actor.bt's `class sealed new` / `class sealed new:` lift the
     // actor instantiation-error stubs into declared class-method bodies.
     "actorNewError",
     "actorNewWithArgsError",
+    // BT-3072: `actorSpawn` / `actorSpawnWith` retired — `class sealed spawn`
+    // / `spawnWith:` now have real FFI bodies (`(Erlang beamtalk_actor)
+    // doSpawn: self`) instead of `@intrinsic` markers, so these names are no
+    // longer used anywhere and are intentionally not in this registry.
     // Reflection
     "classOf",
     "doesNotUnderstand",

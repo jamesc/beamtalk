@@ -46,6 +46,19 @@ impl CoreErlangGenerator {
     /// 2. Wraps the pid in a `#beamtalk_object{}` record with class metadata
     /// 3. Returns the object record, or throws error on failure
     ///
+    /// BT-3072: `Actor.bt` separately declares a real `class sealed spawn`
+    /// body (`(Erlang beamtalk_actor) doSpawn: self`) as the documented,
+    /// xref-visible definition of dynamic-dispatch `spawn` — but this
+    /// per-actor-module compiled function remains the one every dispatch
+    /// path actually calls: the compiler's static `Counter spawn` fast path
+    /// (`try_handle_spawn_await`), the class `gen_server`'s `{spawn, Args}`
+    /// handler (`beamtalk_class_instantiation:handle_spawn/4`, via
+    /// `erlang:apply(Module, spawn, Args)`), and `self spawn` in a class
+    /// method (`class_self_spawn`) all call *this* function, never the
+    /// inherited class-method body. Same "keeps the compiled artifact as the
+    /// real definition" choice BT-3071 made for `new`/`new:` — see that
+    /// commit and `beamtalk_actor:doSpawn/1`'s doc for the rationale.
+    ///
     /// # Generated Code
     ///
     /// ```erlang

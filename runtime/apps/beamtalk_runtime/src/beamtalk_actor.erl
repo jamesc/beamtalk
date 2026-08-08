@@ -215,8 +215,15 @@ handle_getValue([], State) ->
 %% Selectors are re-derived by beamtalk_erlang_proxy from the first keyword;
 %% these names deliberately differ from the runtime `spawnAs/2,3` entry points
 %% so they do not collide at the FFI dispatch layer.
+%%
+%% BT-3072: doSpawn/1 and doSpawnWith/2 back the lifted `Actor>>spawn` /
+%% `Actor>>spawnWith:` bodies (sibling of doSpawnAs/2 / doSpawnWith/3 above,
+%% which already back the named-registration variants). They coexist with
+%% doSpawnWith/3 as separate-arity clauses of the same function name.
 -export([
+    doSpawn/1,
     doSpawnAs/2,
+    doSpawnWith/2,
     doSpawnWith/3,
     registerAs/2,
     unregister/1,
@@ -2537,14 +2544,63 @@ to `Result error: ...`.
         )}.
 
 %%% ============================================================================
-%%% Beamtalk stdlib FFI shims (ADR 0079, BT-1988)
+%%% Beamtalk stdlib FFI shims (ADR 0079 BT-1988; BT-3072 for doSpawn/doSpawnWith)
 %%%
-%%% These functions back `stdlib/src/Actor.bt`'s named-registration API via
-%%% `(Erlang beamtalk_actor)` FFI calls. They take the class object (or actor
-%%% instance) as the first argument and translate runtime `{ok, _} | {error, _}`
+%%% These functions back `stdlib/src/Actor.bt`'s `spawn`/`spawnWith:` and
+%%% named-registration API via `(Erlang beamtalk_actor)` FFI calls. They take
+%%% the class object (or actor instance) as the first argument.
+%%%
+%%% `doSpawn/1` / `doSpawnWith/2` raise on failure, matching `spawn`'s
+%%% declared `-> Self` return type (no `Result` wrapping). The named variants
+%%% (`doSpawnAs/2`, `doSpawnWith/3`) translate runtime `{ok, _} | {error, _}`
 %%% tuples into the shape ADR 0076 auto-converts to `Result` at the FFI
-%%% boundary.
+%%% boundary, matching their declared `Result(Self, Error)` return type.
 %%% ============================================================================
+
+-doc """
+FFI shim for `class sealed spawn -> Self` (BT-3072).
+
+`Self` is the class object `{beamtalk_object, 'ClassName class', Module, ClassPid}`.
+Reuses `beamtalk_class_instantiation:class_self_spawn/4` — the same helper
+the compiler's `self spawn` intrinsic (`try_instantiation_intrinsic` /
+ADR 0109 amendment) calls — so behaviour (safe_spawn's trap_exit +
+`initialize` sync, BT-572 hot-reload instance registration via the compiled
+`Module:spawn/0`, abstract-class rejection, `#beamtalk_object{}` wrapping) is
+byte-for-byte identical to the per-class `spawn/0` export. Unlike
+`doSpawnAs/2` / `doSpawnWith/3`, this raises on failure rather than
+returning `{error, _}` — `spawn`'s declared return type is `Self`, not
+`Result(Self, Error)`.
+""".
+-spec doSpawn(#beamtalk_object{}) -> #beamtalk_object{}.
+doSpawn(Self) ->
+    do_spawn_or_raise(Self, [], spawn).
+
+-doc """
+FFI shim for `class sealed spawnWith: initArgs -> Self` (BT-3072).
+
+Same contract as `doSpawn/1` plus the initialisation arguments passed to
+the actor's `init/1` callback.
+""".
+-spec doSpawnWith(#beamtalk_object{}, term()) -> #beamtalk_object{}.
+doSpawnWith(Self, InitArgs) ->
+    do_spawn_or_raise(Self, [InitArgs], 'spawnWith:').
+
+%% Shared implementation for doSpawn/1 and doSpawnWith/2. Resolves ClassName/
+%% Module from Self, resolves the abstract-class flag by name (BT-3047's
+%% metadata-lookup pattern — no process-dictionary dependency, safe to call
+%% from any process), then delegates to `class_self_spawn/4`, which raises a
+%% structured `instantiation_error` on failure.
+-spec do_spawn_or_raise(#beamtalk_object{}, list(), atom()) -> #beamtalk_object{}.
+do_spawn_or_raise(Self, Args, Selector) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, Module} ->
+            IsAbstract = beamtalk_class_instantiation:resolve_is_abstract_or_raise(
+                ClassName, Selector
+            ),
+            beamtalk_class_instantiation:class_self_spawn(ClassName, Module, IsAbstract, Args);
+        {error, #beamtalk_error{} = Err} ->
+            beamtalk_error:raise(beamtalk_error:with_selector(Err, Selector))
+    end.
 
 -doc """
 FFI shim for `class spawnAs: name :: Symbol -> Result(Self, Error)`.

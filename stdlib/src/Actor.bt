@@ -31,19 +31,28 @@ Object subclass: Actor
 
   /// Spawn a new actor process with default state.
   ///
+  /// The compiler's static `Counter spawn` and `self spawn` call sites lower
+  /// directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (BT-3072) —
+  /// this declaration is the documented, xref-visible source of behaviour for
+  /// the *dynamic* dispatch path (workspace bindings, `perform:`), not the
+  /// method actually invoked by those fast paths.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// c := Counter spawn
   /// ```
-  class sealed spawn -> Self => @intrinsic actorSpawn
+  class sealed spawn -> Self => (Erlang beamtalk_actor) doSpawn: self
 
   /// Spawn a new actor process with initialization arguments.
+  ///
+  /// See `spawn` for the static-vs-dynamic dispatch note (BT-3072).
   ///
   /// ## Examples
   /// ```beamtalk
   /// c := Counter spawnWith: #{#count => 10}
   /// ```
-  class sealed spawnWith: initArgs -> Self => @intrinsic actorSpawnWith
+  class sealed spawnWith: initArgs -> Self =>
+    (Erlang beamtalk_actor) doSpawnWith: self args: initArgs
 
   /// Actors cannot be created with `new` — always raises (BT-217).
   ///
