@@ -256,6 +256,33 @@ typed Object subclass: Repro\n\
     );
 }
 
+/// The provenance re-stamp must cover non-`Known`/`Union` collapses too: a
+/// substituted `T | Never` where `T` is bound to a metatype collapses (via
+/// `union_of`'s `Never` elimination) to a bare `Meta`, which must come out
+/// `Substituted` — `InferredType::meta` defaults to `Inferred`, which would
+/// un-silence `check_impossible_class_comparison`'s gate (PR #3268 review).
+#[test]
+fn substituted_union_collapsing_to_meta_gets_substituted_provenance() {
+    let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
+    subst.insert("T".into(), InferredType::meta("Counter"));
+    let result = TypeChecker::resolve_type_string(
+        "T | Never",
+        &subst,
+        &HashMap::new(),
+        None,
+        None,
+        TypeStringContext::Substitution,
+    );
+    let InferredType::Meta { provenance, .. } = &result else {
+        panic!("expected Meta after Never elimination, got: {result:?}");
+    };
+    assert!(
+        matches!(provenance, TypeProvenance::Substituted(_)),
+        "a collapsed Meta from a substituted union must be re-stamped \
+         Substituted, got: {provenance:?}"
+    );
+}
+
 /// A bare `Nil` return through the substitution path normalises to
 /// `UndefinedObject` like every other resolver.
 #[test]
