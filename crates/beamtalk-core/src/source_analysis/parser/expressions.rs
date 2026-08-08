@@ -2490,7 +2490,7 @@ impl Parser {
             .current_method_selector
             .clone()
             // Only `@primitive` infers its selector. `@intrinsic` names a
-            // structural intrinsic (`blockValue`, `actorSpawn`, …) that is never
+            // structural intrinsic (`blockValue`, `basicNew`, …) that is never
             // the method's own selector, so a bare `@intrinsic` must still error
             // rather than silently infer the wrong intrinsic (BT-2724).
             .filter(|_| !is_intrinsic)

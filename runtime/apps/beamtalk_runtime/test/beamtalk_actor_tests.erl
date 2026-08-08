@@ -2963,6 +2963,70 @@ dummy_class_self() ->
     }.
 
 %%% ============================================================================
+%%% BT-3072: doSpawn/1, doSpawnWith/2 — Actor.bt's lifted `spawn`/`spawnWith:`
+%%% bodies (`(Erlang beamtalk_actor) doSpawn: self` / `doSpawnWith: self
+%%% args: initArgs`). `class_send/3`'s explicit `spawn`/`spawnWith:` clauses
+%%% still route every normal dispatch path to the compiled per-class
+%%% `spawn/0` export directly (see beamtalk_class_dispatch.erl's BT-3072
+%%% comment), so these functions are unreachable via ordinary Beamtalk sends
+%%% today — exercised directly here rather than left as untested new code.
+%%% Beamtalk-side round-trip (dynamic dispatch, `perform:`, abstract-class
+%%% rejection, the BT-3047 foreign-block shape) is covered by
+%%% `stdlib/test/actor_spawn_dynamic_dispatch_test.bt`.
+%%% ============================================================================
+
+ffi_do_spawn_success_test() ->
+    ClassPid = ensure_counter_class_pid(),
+    Self = #beamtalk_object{class = 'Counter class', class_mod = counter, pid = ClassPid},
+    Obj = beamtalk_actor:doSpawn(Self),
+    ?assertMatch(#beamtalk_object{class = 'Counter'}, Obj),
+    ?assert(beamtalk_actor:is_beamtalk_actor(Obj#beamtalk_object.pid)),
+    ?assertEqual({ok, 0}, gen_server:call(Obj#beamtalk_object.pid, {getValue, []})),
+    gen_server:stop(Obj#beamtalk_object.pid).
+
+ffi_do_spawn_with_applies_init_args_test() ->
+    ClassPid = ensure_counter_class_pid(),
+    Self = #beamtalk_object{class = 'Counter class', class_mod = counter, pid = ClassPid},
+    Obj = beamtalk_actor:doSpawnWith(Self, #{value => 9}),
+    ?assertMatch(#beamtalk_object{class = 'Counter'}, Obj),
+    ?assertEqual({ok, 9}, gen_server:call(Obj#beamtalk_object.pid, {getValue, []})),
+    gen_server:stop(Obj#beamtalk_object.pid).
+
+ffi_do_spawn_non_object_receiver_raises_test() ->
+    %% Unlike doSpawnAs/2 / doSpawnWith/3 (which return {error, _} for
+    %% ADR 0076 to auto-convert to `Result error:`), doSpawn/1 and
+    %% doSpawnWith/2 raise — `spawn`'s declared return type is `Self`, not
+    %% `Result(Self, Error)`, matching the per-class `spawn/0` export.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_actor:doSpawn(not_an_actor)
+    ).
+
+ffi_do_spawn_with_non_object_receiver_raises_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_actor:doSpawnWith(not_an_actor, #{})
+    ).
+
+%% Ensure the Counter class is loaded and registered, returning its live
+%% class-object pid. Mirrors (but does not share — each test module keeps
+%% its own copy) beamtalk_dispatch_tests:ensure_counter_loaded/0 and
+%% beamtalk_class_instantiation_tests:ensure_counter_loaded/0.
+ensure_counter_class_pid() ->
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            {module, 'bt@counter'} = code:ensure_loaded('bt@counter'),
+            true = erlang:function_exported('bt@counter', register_class, 0),
+            'bt@counter':register_class(),
+            case erlang:whereis(beamtalk_class_Counter) of
+                undefined -> error(counter_registration_failed);
+                Pid -> Pid
+            end;
+        Pid ->
+            Pid
+    end.
+
+%%% ============================================================================
 %%% BT-1979: Additional actor system coverage
 %%% ============================================================================
 

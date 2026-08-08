@@ -95,7 +95,11 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% The remaining 4 instantiation selectors (new, new:, spawn, spawnWith:) retain
 %% explicit clauses because they must route to the gen_server's {new, _} / {spawn, _}
 %% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
-%% is future work (ADR 0032 Phase 4+).
+%% is future work (ADR 0032 Phase 4+). BT-3071/BT-3072 lifted real class-method
+%% bodies for all four onto Actor.bt (`class sealed new`/`new:`/`spawn`/
+%% `spawnWith:`), but deliberately left this routing untouched — those bodies
+%% are the documented, xref-visible definition of dynamic-dispatch behaviour,
+%% not the code path an external `Counter spawn` actually runs today.
 %% BT-3018: every other selector aimed at the class's own gen_server from
 %% inside that gen_server. `gen_server:call(self(), ...)` does not hang — it
 %% exits with `{calling_self, {gen_server, call, [...]}}`, a raw tuple that
@@ -1123,6 +1127,18 @@ BT-893: Replaces BT-755's error-raising approach. Instead of raising an error
 when a class method sends new/spawn to itself, we bypass gen_server and call
 beamtalk_class_instantiation directly. Class name and module are read from the
 process dictionary (set during beamtalk_object_class:init/1).
+
+BT-3072: `Actor.bt` now declares real `class sealed spawn`/`spawnWith:`
+bodies (`beamtalk_actor:doSpawn/1`, `doSpawnWith/2`), matching the treatment
+BT-3071 gave `new`/`new:`. This function — and `class_send/3`'s explicit
+`spawn`/`spawnWith:` clauses above, and `handle_metaclass_self_call/2` below
+— deliberately keep routing through `class_self_spawn`/`class_self_new`
+directly rather than falling through to generic inherited class-method
+dispatch: doing so would mean a self-send here reaches the lifted body via
+`gen_server:call(self(), ...)`, which deadlocks (the exact regression the
+issue's own context warns against). Same "keep the shim, the lifted body is
+the dynamic-dispatch definition, not the one every path actually calls"
+choice BT-3071 made — see `beamtalk_actor:doSpawn/1`'s doc.
 """.
 -spec handle_self_instantiation(new | spawn, atom(), list()) -> term().
 handle_self_instantiation(Type, Selector, Args) ->

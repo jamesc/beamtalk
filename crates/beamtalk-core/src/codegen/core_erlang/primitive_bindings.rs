@@ -42,7 +42,7 @@ pub enum PrimitiveBinding {
     /// Example: `timesRepeat: block => @primitive timesRepeat` generates
     /// an inline loop construct.
     StructuralIntrinsic {
-        /// The intrinsic name (e.g., `timesRepeat`, `blockValue`, `actorSpawn`).
+        /// The intrinsic name (e.g., `timesRepeat`, `blockValue`, `basicNew`).
         name: String,
     },
 }
