@@ -660,33 +660,25 @@ impl TypeChecker {
     /// `Inferred`), so a substituted `V | Nil` would otherwise read as
     /// `Inferred` — un-silencing `check_impossible_class_comparison`, whose
     /// provenance gate deliberately treats substituted signatures as
-    /// unverified promises. `Aliased` results keep their tag (re-stamping
-    /// would lose the alias display name); `Dynamic` and `Never` results
-    /// carry no provenance and pass through.
-    fn stamp_substituted_provenance(ty: InferredType) -> InferredType {
-        match ty {
-            InferredType::Union {
-                members,
-                provenance,
-            } if !matches!(provenance, super::TypeProvenance::Aliased { .. }) => {
-                InferredType::Union {
-                    members,
-                    provenance: super::TypeProvenance::Substituted(Span::default()),
-                }
+    /// unverified promises. Covers every provenance-carrying variant —
+    /// `union_of` can also collapse a single-member union to a `Meta` /
+    /// `Negation` / `Intersection` (PR #3268 review). `Aliased` results keep
+    /// their tag (re-stamping would lose the alias display name); `Dynamic`
+    /// and `Never` results carry no provenance and pass through.
+    fn stamp_substituted_provenance(mut ty: InferredType) -> InferredType {
+        match &mut ty {
+            InferredType::Known { provenance, .. }
+            | InferredType::Union { provenance, .. }
+            | InferredType::Meta { provenance, .. }
+            | InferredType::Negation { provenance, .. }
+            | InferredType::Intersection { provenance, .. }
+                if !matches!(provenance, super::TypeProvenance::Aliased { .. }) =>
+            {
+                *provenance = super::TypeProvenance::Substituted(Span::default());
             }
-            InferredType::Known {
-                class_name,
-                type_args,
-                provenance,
-            } if !matches!(provenance, super::TypeProvenance::Aliased { .. }) => {
-                InferredType::Known {
-                    class_name,
-                    type_args,
-                    provenance: super::TypeProvenance::Substituted(Span::default()),
-                }
-            }
-            other => other,
+            _ => {}
         }
+        ty
     }
 
     /// Infer the type of an expression, emitting diagnostics for invalid sends.
