@@ -340,6 +340,138 @@ git_log_rejects_non_integer_test() ->
     ?assertMatch({error, _}, beamtalk_git:git_log(<<"3">>)).
 
 %%% ============================================================================
+%%% classify_xy catch-all — non-2-byte binaries
+%%%
+%%% The `<<X, Y>>` binary pattern matches exactly 2 bytes. Empty, 1-byte, and
+%%% 3+-byte binaries all fall through to `classify_xy(_)` which returns
+%%% `{unmodified, unmodified}`.
+%%% ============================================================================
+
+classify_xy_empty_binary_is_unmodified_test() ->
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<>>)).
+
+classify_xy_one_byte_binary_is_unmodified_test() ->
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<"M">>)).
+
+classify_xy_three_byte_binary_is_unmodified_test() ->
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<"MMA">>)).
+
+%%% ============================================================================
+%%% Status parsing — malformed ordinary entries (silently dropped)
+%%%
+%%% Exercises `add_ordinary`'s error arm, `parse_ordinary`'s two error arms,
+%%% and `drop_fields`'s `_ -> error` arm. In all cases the entry is silently
+%%% dropped and does not crash the parser.
+%%% ============================================================================
+
+%% An entry whose body after XY has only one space-separated field — fewer than
+%% the 6 required by `1`-type entries — causes `drop_fields` to run out of
+%% spaces and return `error`, which propagates up to `add_ordinary` as a drop.
+status_ordinary_entry_too_few_fields_is_dropped_test() ->
+    %% Body after "1 " = ".M only-one-field". binary:split produces [".M",
+    %% "only-one-field"]; drop_fields("only-one-field", 6) fails immediately
+    %% because there are no spaces left.
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"1 .M only-one-field">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual([], maps:get(files, Status)).
+
+%% An entry whose body (after the "1 " prefix) contains no space at all fails
+%% the `[XY, RestFields]` pattern in `parse_ordinary` and takes the `_ -> error`
+%% clause; the entry is silently dropped rather than crashing.
+status_ordinary_entry_no_space_body_is_dropped_test() ->
+    %% binary:split("nospace", " ") = ["nospace"] — one element, not two — so
+    %% parse_ordinary returns error via the catch-all `_` arm.
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"1 nospace">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual([], maps:get(files, Status)).
+
+%% A rename entry (`2 R.`) that is the *last* NUL-delimited record in the output
+%% (no following orig-path record) exercises the `[] -> []` defensive clause in
+%% fold_status and still surfaces the renamed file entry correctly.
+status_rename_entry_at_end_of_list_test() ->
+    %% After split_nul, Rest = [] when fold_status processes the rename entry.
+    %% The `[] -> []` arm fires (Rest1 = []), then add_ordinary is called with
+    %% the full-enough entry and produces the renamed-file map.
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"2 R. N... 100644 100644 100644 aaa bbb R100 renamed.bt">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertMatch([#{path := <<"renamed.bt">>, index := renamed}], maps:get(files, Status)).
+
+%%% ============================================================================
+%%% finish/4 and with_stderr/2 paths via real git subprocess (run_git_in)
+%%%
+%%% These exercise the branches of `finish/4` and `with_stderr/2` that are
+%%% unreachable through the happy-path integration tests: specifically the
+%%% `is_not_a_repo=false` non-zero exit arm and both `with_stderr` branches.
+%%% ============================================================================
+
+%% `git log` on a repo with no commits exits non-zero with a "does not have any
+%% commits yet" message — not "not a git repository" — so `finish/4` takes the
+%% `is_not_a_repo=false` branch and returns `{ok, Msg, Code}` via `with_stderr`
+%% (the non-empty stderr arm). Msg is non-empty because it carries git's message.
+run_git_in_nonzero_non_repo_error_returns_ok_tuple_test() ->
+    Top = make_temp_repo(),
+    try
+        Result = beamtalk_git:run_git_in(
+            git_log,
+            [<<"log">>, <<"-n">>, <<"1">>],
+            list_to_binary(Top)
+        ),
+        ?assertMatch({ok, _, _}, Result),
+        {ok, Msg, Code} = Result,
+        ?assert(Code =/= 0),
+        ?assertNotEqual(<<>>, Msg)
+    after
+        rm_rf(Top)
+    end.
+
+%% `git diff --exit-code` exits with code 1 when files differ and writes the
+%% diff to stdout with no stderr. `finish/4` calls `with_stderr(Stdout, <<>>)`,
+%% hitting the `<<>> -> Base` branch (empty Extra returns Base unchanged). The
+%% returned Msg is the unmodified diff and names the changed file.
+run_git_in_diff_exit_code_empty_stderr_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        Result = beamtalk_git:run_git_in(
+            git_diff,
+            [<<"diff">>, <<"--exit-code">>, <<"--">>, RelFile],
+            Top
+        ),
+        ?assertMatch({ok, _, 1}, Result),
+        {ok, Msg, 1} = Result,
+        ?assertNotEqual(<<>>, Msg),
+        ?assertNotEqual(nomatch, binary:match(Msg, RelFile))
+    end).
+
+%%% ============================================================================
+%%% exit_error/3 reachable via full stack (workspace_meta + empty repo)
+%%%
+%%% `exit_error/3` is only reached when a git subprocess exits non-zero with a
+%%% non-"not a git repository" message. `git_log/1` on a no-commits repo is the
+%%% cleanest way to trigger this through the full run_git/2 → git_log/1 stack.
+%%% ============================================================================
+
+%% git_log/1 on a workspace whose project points at a repo with no commits:
+%% git exits non-zero, `finish/4` returns `{ok, Msg, Code}`, and git_log/1's
+%% `{ok, Stdout, Code}` arm calls `exit_error/3` to produce a structured error.
+git_log_on_empty_repo_returns_structured_error_test() ->
+    Top = make_temp_repo(),
+    try
+        with_workspace_meta(list_to_binary(Top), <<"git_log_empty_test">>, fun() ->
+            ?assertMatch({error, _}, beamtalk_git:git_log(1))
+        end)
+    after
+        rm_rf(Top)
+    end.
+
+%%% ============================================================================
 %%% Subdirectory-project cwd/pathspec consistency (BT-2608)
 %%%
 %%% These spawn a real `git` against a throwaway repo whose project root is a
