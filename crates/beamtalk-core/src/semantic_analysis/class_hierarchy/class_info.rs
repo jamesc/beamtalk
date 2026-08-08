@@ -371,10 +371,7 @@ mod tests {
     fn string_with_embedded_quote_matches_unparse() {
         let lit = Literal::String("say \"hi\"".into());
         let expr = Expression::Literal(lit.clone(), span());
-        assert_eq!(
-            format_default_value(&expr),
-            unparse_literal_display(&lit)
-        );
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
         assert_eq!(format_default_value(&expr), "\"say \"\"hi\"\"\"");
     }
 
@@ -382,10 +379,7 @@ mod tests {
     fn symbol_with_space_matches_unparse() {
         let lit = Literal::Symbol("with space".into());
         let expr = Expression::Literal(lit.clone(), span());
-        assert_eq!(
-            format_default_value(&expr),
-            unparse_literal_display(&lit)
-        );
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
         assert_eq!(format_default_value(&expr), "#'with space'");
     }
 
@@ -393,10 +387,7 @@ mod tests {
     fn newline_character_matches_unparse() {
         let lit = Literal::Character('\n');
         let expr = Expression::Literal(lit.clone(), span());
-        assert_eq!(
-            format_default_value(&expr),
-            unparse_literal_display(&lit)
-        );
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
         assert_eq!(format_default_value(&expr), "$\\n");
     }
 
@@ -404,10 +395,7 @@ mod tests {
     fn integral_float_matches_unparse() {
         let lit = Literal::Float(1.0);
         let expr = Expression::Literal(lit.clone(), span());
-        assert_eq!(
-            format_default_value(&expr),
-            unparse_literal_display(&lit)
-        );
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
         assert_eq!(format_default_value(&expr), "1.0");
     }
 }
