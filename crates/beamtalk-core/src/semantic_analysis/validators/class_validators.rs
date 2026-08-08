@@ -208,7 +208,7 @@ fn native_constructor_selectors(
         .filter(|m| {
             m.return_type
                 .as_ref()
-                .is_some_and(|t| type_names_class(t, class_name))
+                .is_some_and(|t| type_names_class(&t.to_string(), class_name))
         })
         .map(|m| m.selector.clone())
         .take(MAX_HINTED_CONSTRUCTORS)

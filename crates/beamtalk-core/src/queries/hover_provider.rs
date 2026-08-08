@@ -973,9 +973,19 @@ fn find_hover_in_expr(
                     _ => None,
                 };
                 let contents = if let Some(ty) = field_type {
-                    let display = alias_registry
-                        .and_then(|registry| registry.resolve_display_name(&ty))
-                        .unwrap_or(ty);
+                    // Alias lookup only applies to a bare `Simple` name — a
+                    // `Generic`/`Union`/etc. declared type was never a
+                    // registered alias name to begin with (ADR 0108 aliases
+                    // are single bare identifiers), so it falls straight
+                    // through to its own `Display`.
+                    let display: String = match &ty {
+                        crate::semantic_analysis::class_hierarchy::DeclaredType::Simple(name) => {
+                            alias_registry
+                                .and_then(|registry| registry.resolve_display_name(name))
+                                .map_or_else(|| ty.to_string(), |s| s.to_string())
+                        }
+                        _ => ty.to_string(),
+                    };
                     format!("`{} :: {display}`", field.name)
                 } else {
                     format!("`{}`", field.name)

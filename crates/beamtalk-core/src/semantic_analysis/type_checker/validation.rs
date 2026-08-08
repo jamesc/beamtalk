@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -194,7 +194,7 @@ impl TypeChecker {
                     if let Some(ref ret_ty) = method.return_type {
                         // `Self` resolves to the static receiver class —
                         // with constructor inference for generic classes (ADR 0068 Phase 1c)
-                        if ret_ty.as_str() == "Self" {
+                        if matches!(ret_ty, DeclaredType::SelfType) {
                             return Self::infer_constructor_type(
                                 class_name, hierarchy, selector, arg_types,
                             );
@@ -248,11 +248,18 @@ impl TypeChecker {
                                 ),
                             }
                         };
-                        return super::TypeChecker::resolve_type_string(
+                        // BT-3076: thread `self_type` under the reserved
+                        // `Self` subst key (see `resolve_declared_type`'s
+                        // `SelfType` arm) so nested `Self` in the return type
+                        // resolves the same way the old `self_type` parameter
+                        // did.
+                        let mut merged_subst: super::type_resolver::SubstitutionMap =
+                            class_subst.clone();
+                        merged_subst.insert("Self".into(), self_type);
+                        return super::type_resolver::resolve_declared_type(
                             ret_ty,
-                            &class_subst,
-                            &HashMap::new(),
-                            Some(&self_type),
+                            &merged_subst,
+                            self.protocol_registry.as_ref(),
                             self.alias_registry.as_ref(),
                             super::TypeStringContext::Substitution,
                         );
@@ -280,7 +287,7 @@ impl TypeChecker {
                 if !has_class_method {
                     if let Some(method) = hierarchy.find_method("Class", selector) {
                         if method.return_type.as_ref().is_some_and(|ty| {
-                            WellKnownClass::from_str(ty) == Some(WellKnownClass::Never)
+                            matches!(ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
                         }) {
                             return InferredType::Never;
                         }
@@ -296,7 +303,7 @@ impl TypeChecker {
     /// Walks the method's declared parameter types and, for each parameter
     /// whose declared type is one of the class's type parameters (e.g. `T`
     /// in `Box(T)`), records the mapping `T -> arg_type`. The resulting map
-    /// is threaded into [`super::TypeChecker::resolve_type_string`]
+    /// is threaded into [`super::type_resolver::resolve_declared_type`]
     /// so the return type's references to those params resolve to the
     /// concrete inferred types.
     ///
@@ -336,16 +343,22 @@ impl TypeChecker {
                 continue;
             };
             // Exact match: a bare class type param (e.g. `T` in `Box(T)`).
-            if class_info.type_params.contains(param_ty) {
-                subst.insert(param_ty.clone(), arg_ty.clone());
-                continue;
+            if let DeclaredType::Simple(name) = param_ty {
+                if class_info.type_params.contains(name) {
+                    subst.insert(name.clone(), arg_ty.clone());
+                    continue;
+                }
             }
             // ADR 0083 Slice 2: nested match — a param shaped like `List(E)`
             // where `E` is a class type param. Recover the binding from a
             // matching-base `Known` argument (e.g. `List(Integer)` ⇒
             // `E -> Integer`). Only fills params not already bound by an exact
             // match, so a direct `T` parameter still wins.
-            Self::unify_nested_class_params(param_ty, arg_ty, class_info, &mut subst);
+            //
+            // `unify_nested_class_params` is a string-level helper (BT-3076
+            // out of scope) — render once at this boundary.
+            let param_ty_str = param_ty.to_string();
+            Self::unify_nested_class_params(&param_ty_str, arg_ty, class_info, &mut subst);
         }
         subst
     }
@@ -1100,7 +1113,7 @@ impl TypeChecker {
             .collect();
 
         for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
-            let Some(expected_ty) = expected else {
+            let Some(expected_declared) = expected else {
                 continue;
             };
             // BT-2949: resolve a declared parameter type that names one of
@@ -1122,12 +1135,18 @@ impl TypeChecker {
             // regress the alias/protocol/union handling below by feeding
             // `resolve_type_param` an unrelated string it would otherwise
             // resolve to `Dynamic`.
+            // `type_string_references_class_param` and the compatibility
+            // checks below are string-level helpers (BT-3076 out of scope)
+            // — render the structured type once at this boundary (byte-
+            // identical to the old stored string); `resolve_type_param`
+            // itself takes the structured `DeclaredType` directly.
+            let expected_declared_str: EcoString = expected_declared.to_string().into();
             let substituted_expected;
             let expected_ty: &EcoString = if !class_subst.is_empty()
-                && Self::type_string_references_class_param(expected_ty, &class_subst)
+                && Self::type_string_references_class_param(&expected_declared_str, &class_subst)
             {
                 substituted_expected = super::TypeChecker::resolve_type_param(
-                    expected_ty,
+                    expected_declared,
                     &class_subst,
                     &HashMap::new(),
                     hierarchy,
@@ -1135,7 +1154,7 @@ impl TypeChecker {
                 .display_name();
                 &substituted_expected
             } else {
-                expected_ty
+                &expected_declared_str
             };
             // BT-2784: a protocol-typed parameter is registered as a synthetic
             // sealed-abstract class entry by `register_protocol_classes`
@@ -1190,7 +1209,7 @@ impl TypeChecker {
             // send whose callee's `MethodInfo::return_type` is the raw alias
             // name `RestartStrategy` (send-site resolution expands aliases
             // only when a registry is threaded through — several
-            // `resolve_type_string` call sites, e.g. the class-object tower,
+            // `resolve_declared_type` call sites, e.g. the class-object tower,
             // pass `None`).
             // Structural compatibility below (`is_type_compatible` and the
             // `InferredType::Union` arm's `classify_union_members`) only
@@ -1932,7 +1951,12 @@ impl TypeChecker {
             let (Some(child_t), Some(parent_t)) = (child_ty, parent_ty) else {
                 continue;
             };
-            if !Self::is_type_compatible(child_t, parent_t, hierarchy) {
+            // `is_type_compatible` is a string-level nominal-chain walker
+            // shared across many call sites (BT-3076 out of scope) — render
+            // the structured types once at this boundary.
+            let child_t_str: EcoString = child_t.to_string().into();
+            let parent_t_str: EcoString = parent_t.to_string().into();
+            if !Self::is_type_compatible(&child_t_str, &parent_t_str, hierarchy) {
                 let param_pos = i + 1;
                 self.diagnostics.push(
                     Diagnostic::warning(
@@ -2097,6 +2121,12 @@ impl TypeChecker {
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
             return; // No type annotation on this field
         };
+        // BT-3076: `resolve_alias_structural` / `resolve_display_name` below
+        // key an alias lookup by exact bare name — only a `DeclaredType::
+        // Simple` could ever be a registered alias reference to begin with,
+        // matching `state_field_type`'s pre-BT-3076 bare-`EcoString` return —
+        // so render the structured type once at this boundary.
+        let declared_type: EcoString = declared_type.to_string().into();
         // BT-2911: `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
         // `InferredType`, which BT-2897 already tags via
@@ -2302,6 +2332,9 @@ impl TypeChecker {
             if slots.iter().any(|s| s.as_str() == key_name.as_str()) {
                 // Known slot — value-check against the declared type when typed.
                 if let Some(declared_ty) = hierarchy.state_field_type(class_name, key_name) {
+                    // `check_spawn_with_value` is a string-level helper
+                    // (BT-3076 out of scope) — render once at this boundary.
+                    let declared_ty: EcoString = declared_ty.to_string().into();
                     self.check_spawn_with_value(
                         class_name,
                         key_name,
@@ -2890,13 +2923,14 @@ impl TypeChecker {
     /// alias deps, so non-alias assignability/compatibility behavior is
     /// untouched.
     ///
-    /// Deliberately not the more general `inference.rs::resolve_type_string`
-    /// (BT-2928, also alias-registry-aware): that helper additionally
-    /// re-parses keywords (`nil`/`true`/`false`), generics, and pre-spelled
-    /// unions, which would change what a *non-alias* declared type resolves
-    /// to here (e.g. `"Nil"` -> `"UndefinedObject"`) — a broader behavior
-    /// change than this ticket's scope, and it doesn't report alias deps for
-    /// hot-reload tracking. This function only ever touches a name that
+    /// Deliberately not the more general
+    /// [`super::type_resolver::resolve_declared_type`] (BT-2928, also
+    /// alias-registry-aware): that resolver additionally re-parses keywords
+    /// (`nil`/`true`/`false`), generics, and pre-spelled unions, which would
+    /// change what a *non-alias* declared type resolves to here (e.g.
+    /// `"Nil"` -> `"UndefinedObject"`) — a broader behavior change than this
+    /// ticket's scope, and it doesn't report alias deps for hot-reload
+    /// tracking. This function only ever touches a name that
     /// `AliasRegistry::get` recognises, then reuses the same
     /// `resolve_type_annotation_with_alias_deps`/`referenced_aliases`
     /// convention `check_return_type`/`check_state_defaults` already use in

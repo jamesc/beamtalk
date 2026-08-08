@@ -112,16 +112,25 @@ impl TypeChecker {
                                 continue;
                             };
                             let arg_type = arg_type.clone();
+                            // `split_intersection_type_string` / `is_protocol_type`
+                            // / `check_protocol_argument_conformance` key
+                            // protocol/hierarchy lookups by name string, not a
+                            // resolved `InferredType` — `Display` renders the
+                            // same text `type_name()` used to (byte-identical,
+                            // see `DeclaredType`'s doc), so this is a pure
+                            // representation swap, not a behaviour change.
+                            //
                             // ADR 0068 §Protocol Composition / ADR 0102
                             // §1/§3 (BT-2743): a parameter declared
                             // `:: P1 & P2` requires conformance to
-                            // *every* protocol part. `type_name()`
-                            // renders the annotation as `"P1 & P2"`;
-                            // split it and check each protocol part
-                            // independently instead of treating the
+                            // *every* protocol part. The rendered form is
+                            // `"P1 & P2"`; split it and check each protocol
+                            // part independently instead of treating the
                             // whole compound string as one (unregistered)
                             // name.
-                            if let Some(parts) = Self::split_intersection_type_string(expected_ty) {
+                            let expected_ty = expected_ty.to_string();
+                            if let Some(parts) = Self::split_intersection_type_string(&expected_ty)
+                            {
                                 for part in parts {
                                     if Self::is_protocol_type(part, hierarchy, protocol_registry) {
                                         self.check_protocol_argument_conformance(
@@ -134,13 +143,13 @@ impl TypeChecker {
                                     }
                                 }
                             } else if Self::is_protocol_type(
-                                expected_ty,
+                                &expected_ty,
                                 hierarchy,
                                 protocol_registry,
                             ) {
                                 self.check_protocol_argument_conformance(
                                     &arg_type,
-                                    expected_ty,
+                                    &expected_ty,
                                     *span,
                                     hierarchy,
                                     protocol_registry,
@@ -712,15 +721,26 @@ impl TypeChecker {
                                 })
                                 .collect();
                             for (i, arg) in arguments.iter().enumerate() {
-                                if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                                if let Some(Some(expected_declared)) = method.param_types.get(i) {
+                                    // `type_string_references_class_param` /
+                                    // `is_assignable_to_with_variance` below are
+                                    // string-level helpers (BT-3076 out of
+                                    // scope) — render the structured type once
+                                    // at this boundary (byte-identical to the
+                                    // old stored string) and keep them
+                                    // unchanged; `resolve_type_param` itself
+                                    // takes the structured `DeclaredType`
+                                    // directly.
+                                    let expected_declared_str: EcoString =
+                                        expected_declared.to_string().into();
                                     let substituted_expected;
                                     let expected_ty = if !class_subst.is_empty()
                                         && TypeChecker::type_string_references_class_param(
-                                            expected_ty,
+                                            &expected_declared_str,
                                             &class_subst,
                                         ) {
                                         substituted_expected = TypeChecker::resolve_type_param(
-                                            expected_ty,
+                                            expected_declared,
                                             &class_subst,
                                             &HashMap::new(),
                                             hierarchy,
@@ -728,7 +748,7 @@ impl TypeChecker {
                                         .display_name();
                                         &substituted_expected
                                     } else {
-                                        expected_ty
+                                        &expected_declared_str
                                     };
                                     // Only check when expected type is generic
                                     if expected_ty.contains('(') {

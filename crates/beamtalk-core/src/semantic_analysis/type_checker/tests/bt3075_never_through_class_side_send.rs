@@ -101,7 +101,7 @@ Object subclass: Liar\n\
 /// canonical `InferredType::Never`, not a `Known("Never")` pseudo-class.
 #[test]
 fn substitute_never_resolves_to_never_variant() {
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "Never",
         &HashMap::new(),
         &HashMap::new(),
@@ -119,7 +119,7 @@ fn substitute_never_resolves_to_never_variant() {
 /// real `Dynamic` variant (BT-2865's fix, previously missing here).
 #[test]
 fn substitute_dynamic_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "Dynamic",
         &HashMap::new(),
         &HashMap::new(),
@@ -138,7 +138,7 @@ fn substitute_dynamic_resolves_to_dynamic_variant() {
 /// `isNil`/`ifNil:` narrowing keeps working on class-method return values.
 #[test]
 fn substitute_union_with_nil_keyword_normalises_to_undefined_object() {
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "String | nil",
         &HashMap::new(),
         &HashMap::new(),
@@ -167,7 +167,7 @@ fn substitute_union_with_nil_keyword_normalises_to_undefined_object() {
 fn substitute_union_with_never_member_collapses() {
     let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
     subst.insert("T".into(), InferredType::known("Integer"));
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "T | Never",
         &subst,
         &HashMap::new(),
@@ -188,7 +188,7 @@ fn substitute_union_with_never_member_collapses() {
 fn substitute_never_nested_in_generic_resolves_to_never_variant() {
     let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
     subst.insert("T".into(), InferredType::known("Integer"));
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "GenResult(T, Never)",
         &subst,
         &HashMap::new(),
@@ -265,7 +265,7 @@ typed Object subclass: Repro\n\
 fn substituted_union_collapsing_to_meta_gets_substituted_provenance() {
     let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
     subst.insert("T".into(), InferredType::meta("Counter"));
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "T | Never",
         &subst,
         &HashMap::new(),
@@ -287,7 +287,7 @@ fn substituted_union_collapsing_to_meta_gets_substituted_provenance() {
 /// `UndefinedObject` like every other resolver.
 #[test]
 fn substitute_bare_nil_normalises_to_undefined_object() {
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "Nil",
         &HashMap::new(),
         &HashMap::new(),

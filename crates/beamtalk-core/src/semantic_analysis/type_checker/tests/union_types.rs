@@ -162,7 +162,7 @@ fn resolve_type_annotation_false_or() {
 
 #[test]
 fn resolve_type_string_simple() {
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "Integer",
         &HashMap::new(),
         &HashMap::new(),
@@ -175,7 +175,7 @@ fn resolve_type_string_simple() {
 
 #[test]
 fn resolve_type_string_union() {
-    let result = TypeChecker::resolve_type_string(
+    let result = TypeChecker::resolve_declared_type_string_for_test(
         "String | nil",
         &HashMap::new(),
         &HashMap::new(),

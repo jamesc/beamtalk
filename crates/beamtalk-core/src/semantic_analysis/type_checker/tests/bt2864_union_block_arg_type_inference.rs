@@ -140,8 +140,9 @@ typed Object subclass: App\n\
 /// `type_checker`, so private items are visible here).
 #[test]
 fn find_block_arm_none_for_ambiguous_union() {
+    let dt = DeclaredType::parse("Block(HTTPRequest, HTTPRequest) | Block(Integer, Integer)");
     assert_eq!(
-        TypeChecker::find_block_arm("Block(HTTPRequest, HTTPRequest) | Block(Integer, Integer)"),
+        TypeChecker::find_block_arm(&dt),
         None,
         "two Block(...) arms is ambiguous — must not pick either"
     );
@@ -151,27 +152,38 @@ fn find_block_arm_none_for_ambiguous_union() {
 /// the issue's exact repro shape.
 #[test]
 fn find_block_arm_finds_single_arm_in_union() {
+    let dt = DeclaredType::parse("Block(HTTPRequest, HTTPResponse) | HTTPHandler | HTTPRouter");
     assert_eq!(
-        TypeChecker::find_block_arm("Block(HTTPRequest, HTTPResponse) | HTTPHandler | HTTPRouter"),
-        Some("Block(HTTPRequest, HTTPResponse)")
+        TypeChecker::find_block_arm(&dt),
+        Some(
+            &[
+                DeclaredType::simple("HTTPRequest"),
+                DeclaredType::simple("HTTPResponse")
+            ][..]
+        )
     );
 }
 
 /// `find_block_arm` still matches a bare (non-Union) `Block(...)` type.
 #[test]
 fn find_block_arm_matches_bare_block() {
+    let dt = DeclaredType::parse("Block(Integer, Integer)");
     assert_eq!(
-        TypeChecker::find_block_arm("Block(Integer, Integer)"),
-        Some("Block(Integer, Integer)")
+        TypeChecker::find_block_arm(&dt),
+        Some(
+            &[
+                DeclaredType::simple("Integer"),
+                DeclaredType::simple("Integer")
+            ][..]
+        )
     );
 }
 
 /// `find_block_arm` returns `None` when no arm is a `Block(...)` type.
 #[test]
 fn find_block_arm_none_when_no_block_arm() {
-    assert_eq!(
-        TypeChecker::find_block_arm("HTTPHandler | HTTPRouter"),
-        None
-    );
-    assert_eq!(TypeChecker::find_block_arm("String"), None);
+    let no_block = DeclaredType::parse("HTTPHandler | HTTPRouter");
+    assert_eq!(TypeChecker::find_block_arm(&no_block), None);
+    let not_a_block = DeclaredType::parse("String");
+    assert_eq!(TypeChecker::find_block_arm(&not_a_block), None);
 }
