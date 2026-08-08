@@ -2863,15 +2863,18 @@ impl TypeChecker {
                             // yields `Symbol class` (`#foo class` is `Symbol` at
                             // runtime), not a phantom `Meta("#foo")` (BT-2624).
                             return_types.push(InferredType::meta(EcoString::from(resolve_name)));
-                        } else if let DeclaredType::ClassOf(meta_class) = ret_ty {
-                            if hierarchy.has_class(meta_class) {
-                                // ADR 0083: an explicit `X class` return on a union
-                                // member resolves to `Meta{X}` — mirrors the
-                                // non-union path (BT-2034). Without this branch the
-                                // ` class` suffix leaked through as
-                                // `Known("X class")`.
-                                return_types.push(InferredType::meta(meta_class.clone()));
-                            }
+                        } else if let DeclaredType::ClassOf(meta_class) = ret_ty
+                            && hierarchy.has_class(meta_class)
+                        {
+                            // ADR 0083: an explicit `X class` return on a union
+                            // member resolves to `Meta{X}` — mirrors the
+                            // non-union path (BT-2034). Without this branch the
+                            // ` class` suffix leaked through as
+                            // `Known("X class")`. An unregistered `X` falls
+                            // through to the arms below (like the non-union
+                            // path), so the member still contributes a type
+                            // instead of being silently dropped from the union.
+                            return_types.push(InferredType::meta(meta_class.clone()));
                         } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
                         {
                             // BT-1945: Bottom type for divergent methods
