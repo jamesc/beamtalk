@@ -362,15 +362,22 @@ impl CoreErlangGenerator {
 
     /// Builds the 4-step `instantiation_error` let-chain expression that always raises.
     ///
-    /// Shared by all four actor/abstract instantiation guard *functions*
-    /// (via [`Self::instantiation_error_stub`]) and by Actor.bt's own
-    /// `class sealed new` / `class sealed new:` intrinsic bodies (BT-3071,
-    /// `actorNewError` / `actorNewWithArgsError` in
-    /// [`super::super::generate_primitive`]) — the latter compiles the
-    /// identical raise directly into Actor's `class_new`/`class_new:`
-    /// functions so the declared method and the per-actor-module compiled
-    /// stub (still required by `handle_new_compiled`'s
-    /// `erlang:apply(Module, new, Args)` fast path) never drift apart.
+    /// Shared by all four actor/abstract instantiation guard *functions* (via
+    /// [`Self::instantiation_error_stub`]) — the per-actor-module compiled
+    /// `new/0`/`new/1` stubs still required by `handle_new_compiled`'s
+    /// `erlang:apply(Module, new, Args)` fast path, which bypasses
+    /// class-method dispatch entirely.
+    ///
+    /// BT-3071/BT-3074: Actor.bt's own `class sealed new` / `class sealed
+    /// new:` declarations used to compile through this same helper (via an
+    /// `@intrinsic` marker), guaranteeing the two could never drift. They now
+    /// send `Exception signalKind:class:selector:hint:` instead — a plain
+    /// Beamtalk expression, not an intrinsic — so they are a *separately
+    /// written* equivalent of this raise, not compiler-enforced to match. If
+    /// the hint text or kind here ever changes, update Actor.bt's `new`/
+    /// `new:` bodies to match by hand (low risk: `Actor.bt`'s declared bodies
+    /// are unreachable via any current dispatch path — see the doc comments
+    /// on those methods).
     /// Generates just the expression, no `fun` wrapper:
     /// ```text
     /// let Error0 = call 'beamtalk_error':'new'('instantiation_error', '<class>') in

@@ -54,6 +54,12 @@ Object subclass: Actor
   class sealed spawnWith: initArgs -> Self =>
     (Erlang beamtalk_actor) doSpawnWith: self args: initArgs
 
+  // `signalKind:class:selector:hint:` is declared `-> Never` on `Exception`
+  // (BT-3042), so this send genuinely always diverges — the type checker
+  // just can't currently propagate a `Never` result through a class-side
+  // keyword send to prove it, hence `@expect type` (BT-2829 precedent:
+  // `TimeoutProxy>>doesNotUnderstand:args:`).
+
   /// Actors cannot be created with `new` — always raises (BT-217).
   ///
   /// Actors are processes with identity and lifecycle, not immutable
@@ -68,7 +74,13 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new   // => raises instantiation_error: "Use spawn instead"
   /// ```
-  class sealed new -> Never => @intrinsic actorNewError
+  @expect type
+  class sealed new -> Never =>
+    Exception
+      signalKind: #instantiation_error
+      class: #Actor
+      selector: #new
+      hint: "Use spawn instead"
 
   /// Actors cannot be created with `new:` — always raises (BT-217).
   ///
@@ -79,7 +91,13 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new: #{#count => 10}   // => raises instantiation_error: "Use spawnWith: instead"
   /// ```
-  class sealed new: initArgs -> Never => @intrinsic actorNewWithArgsError
+  @expect type
+  class sealed new: _initArgs -> Never =>
+    Exception
+      signalKind: #instantiation_error
+      class: #Actor
+      selector: #new:
+      hint: "Use spawnWith: instead"
 
   // === Named registration (ADR 0079) ===
 
