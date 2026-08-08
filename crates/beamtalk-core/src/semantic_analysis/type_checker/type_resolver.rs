@@ -27,11 +27,13 @@ use ecow::{EcoString, eco_format};
 
 use crate::ast::TypeAnnotation;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::source_analysis::Span;
 
+use super::is_generic_type_param;
 use super::well_known::WellKnownClass;
-use super::{DynamicReason, InferredType, TypeProvenance};
+use super::{DynamicReason, InferredType, TypeProvenance, TypeStringContext};
 
 /// Substitution map from a generic type parameter name to its concrete
 /// [`InferredType`].
@@ -123,15 +125,13 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
     protocol_registry: Option<&ProtocolRegistry>,
     alias_registry: Option<&AliasRegistry>,
 ) -> InferredType {
-    let mut expanding = Vec::new();
-    let mut memo = HashMap::new();
-    resolve_type_annotation_inner(
-        ann,
+    let declared = DeclaredType::from(ann);
+    resolve_declared_type(
+        &declared,
         subst,
         protocol_registry,
         alias_registry,
-        &mut expanding,
-        &mut memo,
+        TypeStringContext::Declared,
     )
 }
 
@@ -164,19 +164,93 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation_with_alias_deps(
     protocol_registry: Option<&ProtocolRegistry>,
     alias_registry: Option<&AliasRegistry>,
 ) -> (InferredType, Vec<EcoString>) {
-    let mut expanding = Vec::new();
-    let mut memo = HashMap::new();
-    let resolved = resolve_type_annotation_inner(
-        ann,
+    let declared = DeclaredType::from(ann);
+    resolve_declared_type_with_alias_deps(
+        &declared,
         subst,
         protocol_registry,
         alias_registry,
+        TypeStringContext::Declared,
+    )
+}
+
+/// [`resolve_declared_type`] additionally returning the full transitive set
+/// of alias names touched while resolving `dt` — the [`DeclaredType`]
+/// counterpart of [`resolve_type_annotation_with_alias_deps`] (ADR 0108
+/// hot-reload re-check trigger, BT-2899). See that function's doc for the
+/// full rationale; identical here, just walking `DeclaredType` instead of
+/// `TypeAnnotation`.
+pub(in crate::semantic_analysis) fn resolve_declared_type_with_alias_deps(
+    dt: &DeclaredType,
+    subst: &SubstitutionMap,
+    protocol_registry: Option<&ProtocolRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+    ctx: TypeStringContext,
+) -> (InferredType, Vec<EcoString>) {
+    let mut expanding = Vec::new();
+    let mut memo = HashMap::new();
+    let resolved = resolve_declared_type_inner(
+        dt,
+        subst,
+        protocol_registry,
+        alias_registry,
+        ctx,
         &mut expanding,
         &mut memo,
     );
     let mut touched: Vec<EcoString> = memo.into_keys().collect();
     touched.sort();
     (resolved, touched)
+}
+
+/// Resolve a [`DeclaredType`] into a fully-parameterised [`InferredType`]
+/// (BT-3076) — the canonical, span-free recursion that
+/// [`resolve_type_annotation`] now delegates to (via `DeclaredType::from`)
+/// and that a future caller may drive directly from a stored
+/// `MethodInfo::return_type` / `param_types` string (via
+/// [`DeclaredType::parse`](crate::semantic_analysis::class_hierarchy::DeclaredType::parse))
+/// without re-parsing through the AST at all.
+///
+/// Behaviour is the [`TypeAnnotation`]-based resolver's, verbatim, per
+/// variant — see [`resolve_type_annotation`]'s doc for the full per-variant
+/// rundown (`Simple`, `Generic`, `Union`, `FalseOr`, `Difference`,
+/// `Intersection`, `SelfType`, `SelfClass`, `ClassOf`, `Singleton`) — plus
+/// the [`TypeStringContext`] provenance rules `TypeChecker::resolve_type_string`
+/// established (BT-3075): in [`TypeStringContext::Substitution`], an
+/// unresolved bare single-letter type-param name collapses to `Dynamic`
+/// (BT-1834, checked only for a bare `Simple` node — a `Generic` base is
+/// never a type param) and constructed types are stamped `Substituted`
+/// provenance instead of `Declared`.
+///
+/// **Span degradation.** `DeclaredType` carries no source location, so every
+/// provenance this resolver stamps uses [`Span::default()`] rather than a
+/// real span — unlike the annotation-based recursion this replaces, which
+/// stamped each node's own span. This mirrors `resolve_type_string`'s own
+/// convention (it has only ever had `Span::default()` to work with, being
+/// string-based) and is behaviourally inert: [`InferredType`]'s `PartialEq`
+/// ignores provenance entirely, and the one production reader of a
+/// `TypeProvenance`'s payload (`check_impossible_class_comparison`'s
+/// `Inferred`-only gate) matches on the *variant*, never the span value.
+///
+/// [`resolve_type_annotation`]: self::resolve_type_annotation
+pub(in crate::semantic_analysis) fn resolve_declared_type(
+    dt: &DeclaredType,
+    subst: &SubstitutionMap,
+    protocol_registry: Option<&ProtocolRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+    ctx: TypeStringContext,
+) -> InferredType {
+    let mut expanding = Vec::new();
+    let mut memo = HashMap::new();
+    resolve_declared_type_inner(
+        dt,
+        subst,
+        protocol_registry,
+        alias_registry,
+        ctx,
+        &mut expanding,
+        &mut memo,
+    )
 }
 
 /// The actual resolution recursion, guarded by `expanding` — the stack of
@@ -205,25 +279,34 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation_with_alias_deps(
 /// the work at each level (`O(2ⁿ)` total). `expanding` (a path stack) does
 /// not prevent this — it only rejects a name that is an *ancestor* of
 /// itself, and `L(n-1)`'s two references here are siblings, not nested.
-/// Since resolution is a pure function of `(annotation, subst,
-/// alias_registry)` and `subst` never changes across a single top-level
-/// [`resolve_type_annotation`] call (every recursive call above threads the
-/// same `subst` unchanged), caching by alias name alone is sound *within*
-/// one call: the first full resolution of a name is reused verbatim for
-/// every subsequent reference, turning the exponential re-walk into one
-/// resolution per distinct alias name.
-#[allow(clippy::too_many_lines)] // one match arm per TypeAnnotation variant — see resolve_type_annotation's doc
-fn resolve_type_annotation_inner(
-    ann: &TypeAnnotation,
+/// Since resolution is a pure function of `(declared_type, subst,
+/// alias_registry, ctx)` and neither changes across a single top-level
+/// [`resolve_declared_type`] call (every recursive call below threads them
+/// unchanged), caching by alias name alone is sound *within* one call: the
+/// first full resolution of a name is reused verbatim for every subsequent
+/// reference, turning the exponential re-walk into one resolution per
+/// distinct alias name.
+///
+/// Alias expansion threads `subst`, `protocol_registry`, `alias_registry`,
+/// and `ctx` through unchanged into the recursive call on the alias's own
+/// (converted) declared body — the same threading
+/// `resolve_type_annotation_inner` used. This is *not* what
+/// `TypeChecker::resolve_type_string`'s alias branch does (it resets to an
+/// empty `SubstitutionMap`, drops `protocol_registry`, and always resolves
+/// through the `Declared`-context AST path) — that divergence is pre-existing
+/// and out of scope here (BT-3076 stage 2 does not touch `resolve_type_string`).
+#[allow(clippy::too_many_lines)] // one match arm per DeclaredType variant — see resolve_declared_type's doc
+fn resolve_declared_type_inner(
+    dt: &DeclaredType,
     subst: &SubstitutionMap,
     protocol_registry: Option<&ProtocolRegistry>,
     alias_registry: Option<&AliasRegistry>,
+    ctx: TypeStringContext,
     expanding: &mut Vec<EcoString>,
     memo: &mut HashMap<EcoString, InferredType>,
 ) -> InferredType {
-    match ann {
-        TypeAnnotation::Simple(type_id) => {
-            let name = &type_id.name;
+    match dt {
+        DeclaredType::Simple(name) => {
             if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
                 return InferredType::Never;
             }
@@ -248,6 +331,15 @@ fn resolve_type_annotation_inner(
             if let Some(resolved) = subst.get(name) {
                 return resolved.clone();
             }
+            // BT-1834 / BT-3075: an unresolved bare type param (single
+            // uppercase letter) collapses to Dynamic in substitution contexts
+            // only, so downstream sends don't get false DNU warnings. The
+            // `Declared`-context callers (`resolve_type_annotation`'s
+            // wrapper) never hit this — an unmapped bare param there passes
+            // through as a nominal class name, matching pre-BT-3076 behaviour.
+            if ctx == TypeStringContext::Substitution && is_generic_type_param(name) {
+                return InferredType::Dynamic(DynamicReason::Unknown);
+            }
             // ADR 0108 / BT-2895: alias table comes next in the resolution
             // order (`subst` → alias table → nominal class). A reference to
             // an alias name expands eagerly to its declared annotation,
@@ -256,7 +348,7 @@ fn resolve_type_annotation_inner(
             // the way down to a plain structural `InferredType`.
             if let Some(registry) = alias_registry {
                 if let Some(alias_info) = registry.get(name) {
-                    // See `resolve_type_annotation_inner`'s doc: a name
+                    // See `resolve_declared_type_inner`'s doc: a name
                     // already fully resolved earlier in this call is reused
                     // verbatim, avoiding the exponential re-walk a chain of
                     // doubling aliases would otherwise trigger.
@@ -267,15 +359,17 @@ fn resolve_type_annotation_inner(
                         // A cycle slipped through declaration-time checking
                         // (e.g. a live redefinition that bypassed
                         // `AliasRegistry::redefine_alias`) — never hang. See
-                        // `resolve_type_annotation_inner`'s doc.
+                        // `resolve_declared_type_inner`'s doc.
                         return InferredType::Dynamic(DynamicReason::Unknown);
                     }
                     expanding.push(name.clone());
-                    let resolved = resolve_type_annotation_inner(
-                        &alias_info.annotation,
+                    let alias_declared = DeclaredType::from(&alias_info.annotation);
+                    let resolved = resolve_declared_type_inner(
+                        &alias_declared,
                         subst,
                         protocol_registry,
                         alias_registry,
+                        ctx,
                         expanding,
                         memo,
                     );
@@ -289,7 +383,9 @@ fn resolve_type_annotation_inner(
                     // the bare expansion. Tagged *before* memoizing so a
                     // later reference to the same alias reuses the tagged
                     // value verbatim (see the `memo.get` early-return above).
-                    let resolved = resolved.tag_alias_expansion(name.clone(), type_id.span);
+                    // Span degradation: `Span::default()` — see
+                    // `resolve_declared_type`'s doc.
+                    let resolved = resolved.tag_alias_expansion(name.clone(), Span::default());
                     memo.insert(name.clone(), resolved.clone());
                     return resolved;
                 }
@@ -298,128 +394,138 @@ fn resolve_type_annotation_inner(
             InferredType::Known {
                 class_name: resolved_name,
                 type_args: vec![],
-                provenance: TypeProvenance::Declared(ann.span()),
+                provenance: declared_type_provenance(ctx),
             }
         }
-        TypeAnnotation::Generic {
-            base, parameters, ..
-        } => {
+        DeclaredType::Generic { base, parameters } => {
             let type_args: Vec<InferredType> = parameters
                 .iter()
                 .map(|p| {
-                    resolve_type_annotation_inner(
+                    resolve_declared_type_inner(
                         p,
                         subst,
                         protocol_registry,
                         alias_registry,
+                        ctx,
                         expanding,
                         memo,
                     )
                 })
                 .collect();
             InferredType::Known {
-                class_name: base.name.clone(),
+                class_name: base.clone(),
                 type_args,
-                provenance: TypeProvenance::Declared(ann.span()),
+                provenance: declared_type_provenance(ctx),
             }
         }
-        TypeAnnotation::Union { types, .. } => {
+        DeclaredType::Union(types) => {
             let members: Vec<InferredType> = types
                 .iter()
                 .map(|t| {
-                    resolve_type_annotation_inner(
+                    resolve_declared_type_inner(
                         t,
                         subst,
                         protocol_registry,
                         alias_registry,
+                        ctx,
                         expanding,
                         memo,
                     )
                 })
                 .collect();
-            InferredType::union_of(&members)
+            let unioned = InferredType::union_of(&members);
+            if ctx == TypeStringContext::Substitution {
+                stamp_substituted_provenance(unioned)
+            } else {
+                unioned
+            }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            let inner_ty = resolve_type_annotation_inner(
+        DeclaredType::FalseOr(inner) => {
+            let inner_ty = resolve_declared_type_inner(
                 inner,
                 subst,
                 protocol_registry,
                 alias_registry,
+                ctx,
                 expanding,
                 memo,
             );
-            InferredType::union_of(&[inner_ty, InferredType::known("False")])
+            let unioned = InferredType::union_of(&[inner_ty, InferredType::known("False")]);
+            if ctx == TypeStringContext::Substitution {
+                stamp_substituted_provenance(unioned)
+            } else {
+                unioned
+            }
         }
-        TypeAnnotation::Difference { base, excluded, .. } => {
+        DeclaredType::Difference { base, excluded } => {
             // ADR 0102 §1: `base \ excluded` resolves through the shared
             // `difference` set operation (BT-2739). Reducible cases normalise —
             // e.g. an excluded member that drops a union member, or `T \ T`
             // collapsing to `Never`.
-            let base_ty = resolve_type_annotation_inner(
+            let base_ty = resolve_declared_type_inner(
                 base,
                 subst,
                 protocol_registry,
                 alias_registry,
+                ctx,
                 expanding,
                 memo,
             );
-            let excluded_ty = resolve_type_annotation_inner(
+            let excluded_ty = resolve_declared_type_inner(
                 excluded,
                 subst,
                 protocol_registry,
                 alias_registry,
+                ctx,
                 expanding,
                 memo,
             );
-            InferredType::difference(
-                &base_ty,
-                &excluded_ty,
-                TypeProvenance::Declared(ann.span()),
-                None,
-            )
+            InferredType::difference(&base_ty, &excluded_ty, declared_type_provenance(ctx), None)
         }
-        TypeAnnotation::Intersection { left, right, .. } => {
+        DeclaredType::Intersection { left, right } => {
             // ADR 0102 §1/§3, BT-2743: `left & right` resolves through the
             // shared `intersect` set operation. `hierarchy` is `None` (this
             // resolver never consults it); `protocol_registry` is passed
             // through so class ∩ protocol resolves to the stored
             // `Intersection` instead of falling through to `Never`.
-            let left_ty = resolve_type_annotation_inner(
+            let left_ty = resolve_declared_type_inner(
                 left,
                 subst,
                 protocol_registry,
                 alias_registry,
+                ctx,
                 expanding,
                 memo,
             );
-            let right_ty = resolve_type_annotation_inner(
+            let right_ty = resolve_declared_type_inner(
                 right,
                 subst,
                 protocol_registry,
                 alias_registry,
+                ctx,
                 expanding,
                 memo,
             );
             InferredType::intersect(
                 &left_ty,
                 &right_ty,
-                TypeProvenance::Declared(ann.span()),
+                declared_type_provenance(ctx),
                 None,
                 protocol_registry,
             )
         }
-        TypeAnnotation::ClassOf { class_name, .. } => {
+        DeclaredType::ClassOf(class_name) => {
             // ADR 0083: `<ClassName> class` is the metatype of the named class.
             // The name is carried directly in the annotation, so resolve it to a
             // dedicated `Meta` here (no enclosing-class context needed). A
             // metatype value still satisfies `:: Class` / `:: Behaviour`
             // parameters via the tower subtyping in `validation.rs`.
             InferredType::Meta {
-                class_name: class_name.name.clone(),
-                provenance: TypeProvenance::Declared(ann.span()),
+                class_name: class_name.clone(),
+                provenance: declared_type_provenance(ctx),
             }
         }
-        TypeAnnotation::SelfClass { .. } => {
+        DeclaredType::SelfClass => {
             // ADR 0083: `Self class` is the metatype of the *enclosing* class.
             // That class isn't known to the free-function resolver, so callers
             // that have the receiver class thread it through `subst` under the
@@ -428,20 +534,60 @@ fn resolve_type_annotation_inner(
             if let Some(InferredType::Known { class_name, .. }) = subst.get("Self") {
                 return InferredType::Meta {
                     class_name: class_name.clone(),
-                    provenance: TypeProvenance::Declared(ann.span()),
+                    provenance: declared_type_provenance(ctx),
                 };
             }
             InferredType::Dynamic(DynamicReason::Unknown)
         }
-        TypeAnnotation::SelfType { .. } => {
+        DeclaredType::SelfType => {
             // `Self` needs the static receiver class, which the annotation
             // resolver does not have. Call sites that do know it (e.g.
             // return-type validation, nested-Self substitution) handle it
             // directly.
             InferredType::Dynamic(DynamicReason::Unknown)
         }
-        TypeAnnotation::Singleton { name, .. } => InferredType::known(eco_format!("#{name}")),
+        DeclaredType::Singleton(name) => InferredType::known(eco_format!("#{name}")),
     }
+}
+
+/// `Declared` or `Substituted` provenance (both `Span::default()`, per
+/// `resolve_declared_type`'s doc), chosen by `ctx` — the `DeclaredType`
+/// recursion's single construction point for "this was a constructed nominal
+/// / generic / metatype / set-op result", mirroring
+/// `TypeChecker::resolve_type_string`'s equivalent inline `if` at its
+/// generic-parse arm (BT-3075).
+fn declared_type_provenance(ctx: TypeStringContext) -> TypeProvenance {
+    if ctx == TypeStringContext::Substitution {
+        TypeProvenance::Substituted(Span::default())
+    } else {
+        TypeProvenance::Declared(Span::default())
+    }
+}
+
+/// Re-stamp `Substituted` provenance on a substitution-context union/false-or
+/// result — the `DeclaredType`-recursion counterpart of
+/// `TypeChecker::stamp_substituted_provenance` (inference.rs), duplicated
+/// rather than shared since that helper is private to `inference.rs`'s
+/// `impl TypeChecker` block. See its doc for the full rationale: `union_of`
+/// derives provenance from the members, and a plain nominal member never
+/// wins, so a substituted `V | Nil` would otherwise read as `Inferred`;
+/// `Aliased` results keep their tag (re-stamping would lose the alias
+/// display name); `Dynamic` and `Never` results carry no provenance and pass
+/// through unchanged.
+fn stamp_substituted_provenance(mut ty: InferredType) -> InferredType {
+    match &mut ty {
+        InferredType::Known { provenance, .. }
+        | InferredType::Union { provenance, .. }
+        | InferredType::Meta { provenance, .. }
+        | InferredType::Negation { provenance, .. }
+        | InferredType::Intersection { provenance, .. }
+            if !matches!(provenance, TypeProvenance::Aliased { .. }) =>
+        {
+            *provenance = TypeProvenance::Substituted(Span::default());
+        }
+        _ => {}
+    }
+    ty
 }
 
 /// Build an [`InferredType`] for a method receiver from a class definition.
@@ -1812,5 +1958,248 @@ mod tests {
     fn base_name_of_string_discards_args() {
         assert_eq!(base_name_of_string("Dictionary(K, V)"), "Dictionary");
         assert_eq!(base_name_of_string("Integer"), "Integer");
+    }
+
+    // ---- resolve_declared_type (BT-3076 stage 2) ----
+    //
+    // `resolve_type_annotation` is now a thin `DeclaredType::from` + this
+    // function wrapper (always `TypeStringContext::Declared`), so every test
+    // above already exercises this recursion indirectly. These tests target
+    // `resolve_declared_type` directly, including the `Substitution` context
+    // no existing `TypeAnnotation`-based caller reaches yet.
+
+    #[test]
+    fn declared_type_simple_matches_annotation_resolution() {
+        let dt = DeclaredType::Simple("Integer".into());
+        let result =
+            resolve_declared_type(&dt, &empty_subst(), None, None, TypeStringContext::Declared);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn declared_type_never_and_dynamic_keywords() {
+        let never = resolve_declared_type(
+            &DeclaredType::Simple("Never".into()),
+            &empty_subst(),
+            None,
+            None,
+            TypeStringContext::Declared,
+        );
+        assert_eq!(never, InferredType::Never);
+
+        let dynamic = resolve_declared_type(
+            &DeclaredType::Simple("Dynamic".into()),
+            &empty_subst(),
+            None,
+            None,
+            TypeStringContext::Declared,
+        );
+        assert!(matches!(dynamic, InferredType::Dynamic(_)));
+    }
+
+    #[test]
+    fn declared_type_generic_preserves_type_args() {
+        let dt = DeclaredType::Generic {
+            base: "Result".into(),
+            parameters: vec![
+                DeclaredType::Simple("Integer".into()),
+                DeclaredType::Simple("String".into()),
+            ],
+        };
+        let result =
+            resolve_declared_type(&dt, &empty_subst(), None, None, TypeStringContext::Declared);
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = result
+        else {
+            panic!("expected Known");
+        };
+        assert_eq!(class_name.as_str(), "Result");
+        assert_eq!(type_args.len(), 2);
+    }
+
+    #[test]
+    fn declared_type_singleton_resolves_with_hash_prefix() {
+        let dt = DeclaredType::Singleton("ok".into());
+        let result =
+            resolve_declared_type(&dt, &empty_subst(), None, None, TypeStringContext::Declared);
+        assert_eq!(result, InferredType::known("#ok"));
+    }
+
+    #[test]
+    fn declared_type_substitution_context_collapses_bare_type_param_to_dynamic() {
+        // BT-1834: an unmapped bare single-letter param collapses to Dynamic
+        // only in `Substitution` context — `Declared` context (what
+        // `resolve_type_annotation` always uses) passes it through unchanged
+        // as a nominal class name.
+        let dt = DeclaredType::Simple("T".into());
+        let declared =
+            resolve_declared_type(&dt, &empty_subst(), None, None, TypeStringContext::Declared);
+        assert_eq!(declared, InferredType::known("T"));
+
+        let substituted = resolve_declared_type(
+            &dt,
+            &empty_subst(),
+            None,
+            None,
+            TypeStringContext::Substitution,
+        );
+        assert!(matches!(substituted, InferredType::Dynamic(_)));
+    }
+
+    #[test]
+    fn declared_type_substitution_context_still_honours_subst_map() {
+        // Substitution wins over the bare-param collapse when the map does
+        // have an entry for the name.
+        let dt = DeclaredType::Simple("T".into());
+        let mut subst = SubstitutionMap::new();
+        subst.insert("T".into(), InferredType::known("Integer"));
+        let result =
+            resolve_declared_type(&dt, &subst, None, None, TypeStringContext::Substitution);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn declared_type_alias_expansion_matches_annotation_based_resolution() {
+        let expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Singleton {
+                    name: "temporary".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "permanent".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "RestartStrategy".into(),
+            annotation: expansion,
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+
+        let dt = DeclaredType::Simple("RestartStrategy".into());
+        let via_declared_type = resolve_declared_type(
+            &dt,
+            &empty_subst(),
+            None,
+            Some(&registry),
+            TypeStringContext::Declared,
+        );
+
+        let ann = TypeAnnotation::Simple(ident("RestartStrategy"));
+        let via_annotation = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+
+        assert_eq!(via_declared_type, via_annotation);
+        let InferredType::Union { members, .. } = via_declared_type else {
+            panic!("expected Union");
+        };
+        assert_eq!(members.len(), 2);
+    }
+
+    #[test]
+    fn declared_type_with_alias_deps_records_transitive_names() {
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "A".into(),
+            annotation: TypeAnnotation::Simple(ident("Integer")),
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+        registry.register_test_alias(AliasInfo {
+            name: "B".into(),
+            annotation: TypeAnnotation::Simple(ident("A")),
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+
+        let dt = DeclaredType::Simple("B".into());
+        let (resolved, deps) = resolve_declared_type_with_alias_deps(
+            &dt,
+            &empty_subst(),
+            None,
+            Some(&registry),
+            TypeStringContext::Declared,
+        );
+        assert_eq!(resolved, InferredType::known("Integer"));
+        assert_eq!(deps, vec![EcoString::from("A"), EcoString::from("B")]);
+    }
+
+    #[test]
+    fn declared_type_union_in_substitution_context_stamps_substituted_provenance() {
+        // Mirrors `resolve_type_string`'s own `Substitution`-context
+        // re-stamping (BT-3075): a substituted `V | Nil` reads as
+        // `Substituted`, not `Inferred`, so `check_impossible_class_comparison`'s
+        // provenance gate stays silent for it.
+        let dt = DeclaredType::Union(vec![
+            DeclaredType::Simple("Integer".into()),
+            DeclaredType::Simple("String".into()),
+        ]);
+        let result = resolve_declared_type(
+            &dt,
+            &empty_subst(),
+            None,
+            None,
+            TypeStringContext::Substitution,
+        );
+        assert_eq!(
+            result.provenance(),
+            Some(TypeProvenance::Substituted(Span::default()))
+        );
+    }
+
+    #[test]
+    fn declared_type_difference_and_intersection_match_annotation_resolution() {
+        let dt_diff = DeclaredType::Difference {
+            base: Box::new(DeclaredType::Simple("Symbol".into())),
+            excluded: Box::new(DeclaredType::Singleton("foo".into())),
+        };
+        let ann_diff = TypeAnnotation::difference(
+            TypeAnnotation::Simple(ident("Symbol")),
+            TypeAnnotation::Singleton {
+                name: "foo".into(),
+                span: span(),
+            },
+            span(),
+        );
+        assert_eq!(
+            resolve_declared_type(
+                &dt_diff,
+                &empty_subst(),
+                None,
+                None,
+                TypeStringContext::Declared
+            ),
+            resolve_type_annotation(&ann_diff, &empty_subst(), None, None)
+        );
+
+        let dt_inter = DeclaredType::Intersection {
+            left: Box::new(DeclaredType::Simple("Integer".into())),
+            right: Box::new(DeclaredType::Simple("Integer".into())),
+        };
+        let ann_inter = TypeAnnotation::intersection(
+            TypeAnnotation::Simple(ident("Integer")),
+            TypeAnnotation::Simple(ident("Integer")),
+            span(),
+        );
+        assert_eq!(
+            resolve_declared_type(
+                &dt_inter,
+                &empty_subst(),
+                None,
+                None,
+                TypeStringContext::Declared
+            ),
+            resolve_type_annotation(&ann_inter, &empty_subst(), None, None)
+        );
     }
 }

@@ -20,11 +20,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 mod builtins;
 pub(crate) mod class_info;
+pub(crate) mod declared_type;
 mod hierarchy_queries;
 mod method_resolution;
 #[cfg(test)]
 mod tests;
 pub use class_info::{ClassInfo, MethodInfo, SuperclassTypeArg, format_default_value};
+pub use declared_type::DeclaredType;
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
 /// Static class hierarchy built during semantic analysis.
