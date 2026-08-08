@@ -1812,23 +1812,19 @@ impl CoreErlangGenerator {
     /// or `Integer`), as opposed to a generic (`List(Integer)`), union
     /// (`Integer | String`), singleton (`#north`), or metatype (`Foo class`).
     ///
-    /// [`ClassInfo::state_types`] flattens every annotation to its display string
-    /// via `TypeAnnotation::type_name`, losing the variant; this reconstructs the
-    /// `Simple`-only filter so extension-method field typing matches the in-class
-    /// path. Every non-`Simple` `type_name` rendering contains one of `(`, `|`,
-    /// `#`, or a space (`Generic`, `Union`, `FalseOr`, `Singleton`, `SelfClass`,
-    /// `ClassOf`) — none of which a simple identifier can contain — *except*
-    /// `SelfType`, which renders as the bare word `"Self"`; that one is excluded
-    /// explicitly so a (return-position-only, but defensively handled) `:: Self`
-    /// field never diverges from the in-class path's bare-BIF status quo.
+    /// So extension-method field typing matches the in-class path (which
+    /// records only `TypeAnnotation::Simple` fields, see
+    /// [`Self::set_class_field_types`]). `Self` needs no explicit exclusion
+    /// here: unlike the pre-BT-3076 string-rendered check, `Self` is
+    /// [`DeclaredType::SelfType`], never `Simple("Self")`, so it already
+    /// falls through to `false`.
     ///
     /// [`ClassInfo::state_types`]: crate::semantic_analysis::class_hierarchy::ClassInfo::state_types
-    fn is_simple_type_name(ty: &str) -> bool {
-        !ty.is_empty()
-            && ty != "Self"
-            && !ty
-                .chars()
-                .any(|c| c == '(' || c == ')' || c == '|' || c == '#' || c == ' ' || c == ',')
+    fn is_simple_type_name(ty: &crate::semantic_analysis::class_hierarchy::DeclaredType) -> bool {
+        matches!(
+            ty,
+            crate::semantic_analysis::class_hierarchy::DeclaredType::Simple(_)
+        )
     }
 
     /// BT-2710 follow-up: Whether `self.<name>` is known to hold a value with a

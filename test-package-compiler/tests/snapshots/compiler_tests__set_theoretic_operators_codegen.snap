@@ -131,7 +131,7 @@ Self, 'set_theoretic_operators', #{#<98>(8,1,'integer',['unsigned'|['big']]),#<1
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
-      'method_info' => ~{'tagWithoutFoo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe:' => ~{'arity' => 1, 'param_types' => ['Integer & Printable'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'classify:' => ~{'arity' => 1, 'param_types' => ['#north | #south | #east | #west'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'method_info' => ~{'tagWithoutFoo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe:' => ~{'arity' => 1, 'param_types' => ['Integer & Printable'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'classify:' => ~{'arity' => 1, 'param_types' => [{'union', [{'singleton', 'north'}, {'singleton', 'south'}, {'singleton', 'east'}, {'singleton', 'west'}]}], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -162,7 +162,7 @@ Self, 'set_theoretic_operators', #{#<98>(8,1,'integer',['unsigned'|['big']]),#<1
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
-      'method_info' => ~{'tagWithoutFoo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe:' => ~{'arity' => 1, 'param_types' => ['Integer & Printable'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'classify:' => ~{'arity' => 1, 'param_types' => ['#north | #south | #east | #west'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'method_info' => ~{'tagWithoutFoo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe:' => ~{'arity' => 1, 'param_types' => ['Integer & Printable'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'classify:' => ~{'arity' => 1, 'param_types' => [{'union', [{'singleton', 'north'}, {'singleton', 'south'}, {'singleton', 'east'}, {'singleton', 'west'}]}], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
 

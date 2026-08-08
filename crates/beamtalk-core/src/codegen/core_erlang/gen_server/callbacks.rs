@@ -811,13 +811,14 @@ impl CoreErlangGenerator {
                     if has_default {
                         continue;
                     }
-                    if Self::is_nilable_type_name(type_name) {
+                    let type_name = type_name.to_string();
+                    if Self::is_nilable_type_name(&type_name) {
                         continue;
                     }
                     out.push(InheritedTypedField {
                         owning_class: info.name.to_string(),
                         field_name: field_name.to_string(),
-                        type_name: type_name.to_string(),
+                        type_name,
                     });
                 }
             }
