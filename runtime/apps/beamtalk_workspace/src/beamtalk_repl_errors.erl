@@ -27,8 +27,9 @@ Used by protocol handlers and op modules.
 %% elsewhere in the codebase (e.g. a hypothetical unrelated 2-arity
 %% `{method_not_found, Reason}`) must NOT be misidentified as "known" just
 %% because the atom matches — that would silently route it through
-%% is_known_error_reason into a dead end (no clause for that arity) instead
-%% of the intended generic wrapper.
+%% is_known_error_reason into ensure_structured_error/1's generic catch-all
+%% clause (a degraded `~p` dump), dropping the eval_error `Class:` context,
+%% instead of the intended generic "Evaluation error: Class:Reason" wrapper.
 -define(KNOWN_ERROR_TUPLE_TAGS, [
     {compile_error, 2},
     {undefined_variable, 2},

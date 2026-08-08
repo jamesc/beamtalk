@@ -102,6 +102,24 @@ ensure_structured_error_eval_error_unknown_reason_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({eval_error, error, some_weird_reason}),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result).
 
+ensure_structured_error_eval_error_same_tag_different_arity_test() ->
+    %% BT-3084: is_known_error_reason/1 matches {Tag, Arity} pairs, not bare
+    %% Tag. beamtalk_behaviour_intrinsics.erl:706 constructs a 4-arity
+    %% {class_not_found, _, Path, Defined}, distinct from the REPL's own
+    %% 2-arity {class_not_found, ClassName} clause in ensure_structured_error/1.
+    %% A 4-arity reason must NOT be misidentified as "known" and delegated
+    %% (there is no ensure_structured_error/1 clause for that arity) — it
+    %% should fall through to the generic "Evaluation error: Class:Reason"
+    %% wrapper, preserving the eval_error Class context.
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {eval_error, error, {class_not_found, some_mod, "path", true}}
+    ),
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
+    ?assertMatch(
+        <<"Evaluation error: error:", _/binary>>,
+        Result#beamtalk_error.message
+    ).
+
 %%% ============================================================================
 %%% ensure_structured_error/1 — compile_error variants
 %%% ============================================================================
