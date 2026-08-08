@@ -83,18 +83,15 @@ fn near_valid_beamtalk() -> impl Strategy<Value = String> {
 // ============================================================================
 
 fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    let cases = default.cases.max(512);
-    ProptestConfig {
-        cases,
-        // The round-trip test filters out inputs with parse errors via
-        // `prop_assume!`, so the rejection rate can be high. Scale the
-        // global-reject cap with the case count to avoid "too many rejects"
-        // failures when running with large PROPTEST_CASES values, while
-        // still respecting any higher env/default `max_global_rejects`.
-        max_global_rejects: default.max_global_rejects.max(cases * 2),
-        ..default
-    }
+    let mut config = crate::test_helpers::test_support::proptest_config_default();
+    let cases = config.cases;
+    // The round-trip test filters out inputs with parse errors via
+    // `prop_assume!`, so the rejection rate can be high. Scale the
+    // global-reject cap with the case count to avoid "too many rejects"
+    // failures when running with large PROPTEST_CASES values, while
+    // still respecting any higher env/default `max_global_rejects`.
+    config.max_global_rejects = config.max_global_rejects.max(cases * 2);
+    config
 }
 
 proptest! {
