@@ -115,6 +115,19 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
     hits
 }
 
+/// Classify a bare `self`/`super` receiver, if it is one.
+///
+/// Shared by [`receiver_kind`] and [`cascade_receiver_kind`] so the two
+/// classifiers don't each hand-roll the same self/super check — the kind of
+/// duplication this PR otherwise exists to eliminate (BT-3079 review nit).
+fn self_or_super_kind(receiver: &Expression) -> Option<ReceiverKind> {
+    match receiver {
+        Expression::Super(..) => Some(ReceiverKind::SuperReceiver),
+        Expression::Identifier(ident) if ident.name == "self" => Some(ReceiverKind::SelfReceiver),
+        _ => None,
+    }
+}
+
 /// Classify a receiver expression as `self`, `super`, Erlang FFI, or other,
 /// given the selector of the send `receiver` is the receiver of.
 ///
@@ -123,12 +136,13 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
 /// to the class protocol, not the FFI bridge, so they must classify as
 /// `Other` even though their receiver is the `Erlang` class reference.
 fn receiver_kind(receiver: &Expression, selector: &crate::ast::MessageSelector) -> ReceiverKind {
-    match receiver {
-        Expression::Super(..) => ReceiverKind::SuperReceiver,
-        Expression::Identifier(ident) if ident.name == "self" => ReceiverKind::SelfReceiver,
-        _ if ffi_target_module(receiver, selector).is_some() => ReceiverKind::ErlangFfi,
-        _ => ReceiverKind::Other,
+    if let Some(kind) = self_or_super_kind(receiver) {
+        return kind;
     }
+    if ffi_target_module(receiver, selector).is_some() {
+        return ReceiverKind::ErlangFfi;
+    }
+    ReceiverKind::Other
 }
 
 /// Resolve the native (Erlang) module a send is routed to, given the send's
@@ -167,24 +181,26 @@ fn ffi_target_module(
 /// shared receiver is that send's receiver. For any other shape (a cascade with
 /// a bare receiver), fall back to classifying the receiver directly.
 fn cascade_receiver_kind(receiver: &Expression) -> ReceiverKind {
-    match receiver {
-        Expression::MessageSend {
-            receiver: inner,
-            selector,
-            ..
-        } => receiver_kind(inner, selector),
-        Expression::Super(..) => ReceiverKind::SuperReceiver,
-        Expression::Identifier(ident) if ident.name == "self" => ReceiverKind::SelfReceiver,
-        // Defensive fallback for a cascade with a genuinely bare receiver
-        // (see the doc comment above) — no wrapping send means no selector
-        // to apply the class-protocol filter with, but that filter only
-        // matters for the bare-`Erlang`-class-reference shape, which cannot
-        // itself appear here without a wrapping send.
-        other if crate::ffi_receiver::erlang_module_of_receiver(other).is_some() => {
-            ReceiverKind::ErlangFfi
-        }
-        _ => ReceiverKind::Other,
+    if let Expression::MessageSend {
+        receiver: inner,
+        selector,
+        ..
+    } = receiver
+    {
+        return receiver_kind(inner, selector);
     }
+    if let Some(kind) = self_or_super_kind(receiver) {
+        return kind;
+    }
+    // Defensive fallback for a cascade with a genuinely bare receiver (see
+    // the doc comment above) — no wrapping send means no selector to apply
+    // the class-protocol filter with, but that filter only matters for the
+    // bare-`Erlang`-class-reference shape, which cannot itself appear here
+    // without a wrapping send.
+    if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
+        return ReceiverKind::ErlangFfi;
+    }
+    ReceiverKind::Other
 }
 
 /// Resolve the native module shared by an FFI cascade's messages.
