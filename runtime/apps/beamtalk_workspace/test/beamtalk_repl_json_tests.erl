@@ -922,6 +922,66 @@ format_error_message_fallback_test() ->
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
+%%% ============================================================================
+%%% BT-3084 regression tests: format_error_message/1 derives from
+%%% beamtalk_repl_errors:ensure_structured_error/1 (one canonical table)
+%%% ============================================================================
+
+%% Previously {registration_error, ...} was handled by ensure_structured_error/1
+%% but absent from format_error_message/1's separate table, so it fell through
+%% to a raw `~p` dump instead of the structured message.
+format_error_message_registration_error_tuple_test() ->
+    Msg = beamtalk_repl_json:format_error_message(
+        {registration_error, {'Counter', already_registered}}
+    ),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Class registration failed for Counter">>)),
+    %% A raw `~p` fallthrough would render as a bare `{registration_error, {...}}`
+    %% tuple — assert the structured prose replaced it, not just co-exists with it.
+    ?assertEqual(nomatch, binary:match(Msg, <<"{registration_error">>)).
+
+format_error_message_registration_error_reason_only_test() ->
+    Msg = beamtalk_repl_json:format_error_message({registration_error, bad_module}),
+    ?assertEqual(<<"Class registration failed: bad_module">>, Msg).
+
+%% The structured (ensure_structured_error/1) path always extracted a `hint`
+%% from a compile_error diagnostic map; format_error_message/1 used to drop it
+%% via its own separate clause. Assert the hint now survives end-to-end.
+format_error_message_compile_error_hint_propagation_test() ->
+    Msg = beamtalk_repl_json:format_error_message(
+        {compile_error, [
+            #{
+                message => <<"Unused variable `x`">>,
+                line => 3,
+                hint => <<"Prefix with _ to ignore">>
+            }
+        ]}
+    ),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Unused variable `x`">>)),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Hint: Prefix with _ to ignore">>)).
+
+%% DNU rendered by beamtalk_error:generate_message/3 only — the selector is
+%% quoted, matching the canonical wording (previously this hand-rolled copy
+%% left it unquoted).
+format_error_message_method_not_found_quoted_selector_test() ->
+    Msg = beamtalk_repl_json:format_error_message(
+        {method_not_found, 'Counter', <<"increment">>}
+    ),
+    ?assertEqual(
+        <<"Counter does not understand 'increment'\nHint: Use :help Counter to see available methods.">>,
+        Msg
+    ).
+
+%% BT-3084: the two eval_error prose variants ("Evaluation error: Class:Reason")
+%% previously drifted between ensure_structured_error/1 (dropped Class) and
+%% format_error_message/1 (kept it). Assert both entry points now agree.
+format_error_message_eval_error_generic_matches_ensure_structured_error_test() ->
+    ViaJson = beamtalk_repl_json:format_error_message({eval_error, error, badarg}),
+    ViaErrors = beamtalk_error:format(
+        beamtalk_repl_errors:ensure_structured_error({eval_error, error, badarg})
+    ),
+    ?assertEqual(ViaErrors, ViaJson),
+    ?assertMatch(<<"Evaluation error: error:badarg">>, ViaJson).
+
 %% BT-237: eval_error with #beamtalk_error{} formatting
 
 format_error_message_eval_error_beamtalk_error_test() ->

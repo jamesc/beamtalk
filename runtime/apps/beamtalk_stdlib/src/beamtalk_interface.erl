@@ -55,8 +55,12 @@ dictionary or ETS state is required.
 ]).
 
 -ifdef(TEST).
-%% Expose internal helpers for EUnit testing (BT-2219, BT-2467).
--export([log_compiler_diagnostics/2, class_object_for_pid/2]).
+%% Expose internal helpers for EUnit testing (BT-2219, BT-2467, BT-3084).
+-export([
+    log_compiler_diagnostics/2,
+    class_object_for_pid/2,
+    make_method_not_found_error/2
+]).
 -endif.
 
 %%% ============================================================================
@@ -1277,14 +1281,12 @@ make_class_not_found_error(ClassName) ->
 -spec make_method_not_found_error(atom(), atom()) -> #beamtalk_error{}.
 make_method_not_found_error(ClassName, Selector) ->
     NameBin = atom_to_binary(ClassName, utf8),
-    SelBin = atom_to_binary(Selector, utf8),
+    %% BT-3084: don't hand-roll (and unquote) the DNU message — with_selector/2
+    %% already regenerates it via the canonical beamtalk_error:generate_message/3,
+    %% which quotes the selector (e.g. "Counter does not understand 'increment'").
     Err0 = beamtalk_error:new(does_not_understand, ClassName),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        iolist_to_binary([NameBin, <<" does not understand ">>, SelBin])
-    ),
     beamtalk_error:with_hint(
-        Err2,
+        Err1,
         iolist_to_binary([<<"Use Beamtalk help: ">>, NameBin, <<" to see available methods.">>])
     ).

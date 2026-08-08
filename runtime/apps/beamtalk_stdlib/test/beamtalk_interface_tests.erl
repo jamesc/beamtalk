@@ -554,3 +554,16 @@ live_registry_test_() ->
             end}
         ]
     end}.
+
+%%% ============================================================================
+%%% BT-3084: make_method_not_found_error/2 renders the canonical (quoted) DNU
+%%% message instead of hand-rolling its own unquoted copy.
+%%% ============================================================================
+
+make_method_not_found_error_quotes_selector_test() ->
+    Error = beamtalk_interface:make_method_not_found_error('Counter', increment),
+    ?assertEqual(<<"Counter does not understand 'increment'">>, Error#beamtalk_error.message),
+    ?assertEqual(increment, Error#beamtalk_error.selector),
+    ?assertEqual(
+        <<"Use Beamtalk help: Counter to see available methods.">>, Error#beamtalk_error.hint
+    ).

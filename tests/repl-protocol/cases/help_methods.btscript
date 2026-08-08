@@ -48,5 +48,7 @@ Beamtalk help: #NoSuchClass
 // ===========================================================================
 
 // help:selector: with unknown selector raises does_not_understand error
+// BT-3084: the DNU message is now rendered only by beamtalk_error:generate_message/3
+// (canonical, quoted selector) instead of a hand-rolled unquoted copy.
 Beamtalk help: Integer selector: #noSuchMethod
-// => ERROR: does not understand noSuchMethod
+// => ERROR: does not understand 'noSuchMethod'

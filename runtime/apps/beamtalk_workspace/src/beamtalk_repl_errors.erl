@@ -15,6 +15,35 @@ Used by protocol handlers and op modules.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% BT-3084: raw-error-tuple tags recognized by ensure_structured_error/1
+%% (excluding the map/#beamtalk_error{}/eval_error wrapper shapes handled by
+%% earlier, more specific clauses). Shared by is_known_error_reason/1 so a
+%% `{eval_error, Class, Reason}` whose Reason is itself one of these keeps its
+%% specific structured kind instead of collapsing into the generic
+%% "Evaluation error: Class:Reason" wrapper.
+-define(KNOWN_ERROR_TUPLE_TAGS, [
+    compile_error,
+    undefined_variable,
+    file_not_found,
+    read_error,
+    load_error,
+    registration_error,
+    parse_error,
+    invalid_request,
+    module_not_found,
+    invalid_module_name,
+    actors_exist,
+    class_not_found,
+    method_not_found,
+    unknown_op,
+    inspect_failed,
+    actor_not_alive,
+    no_source_file,
+    module_not_loaded,
+    missing_module_name,
+    session_creation_failed
+]).
+
 -export([
     make/3,
     make/4,
@@ -64,8 +93,13 @@ safe_to_existing_atom(_) ->
 -doc """
 Ensure an error reason is a structured #beamtalk_error{} record.
 If already structured (or a wrapped exception), passes through unchanged.
-Handles known bare tuple error patterns from the compile pipeline.
-Otherwise wraps the raw term in an internal_error.
+
+BT-3084: this is the single canonical dispatch table for the REPL's raw
+error-tuple vocabulary — compile/eval failures, undefined variables, file and
+module I/O, class/method lookups, actor ops, and session/request errors.
+`beamtalk_repl_json:format_error_message/1` derives from this table rather
+than maintaining a second one, so a tuple handled here is guaranteed to also
+render correctly there. Otherwise wraps the raw term in an internal_error.
 """.
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err) ->
@@ -78,9 +112,31 @@ ensure_structured_error(
     Err;
 ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) ->
     Err;
-ensure_structured_error({eval_error, _Class, Reason}) ->
-    %% Delegate to /1 for known tuple patterns; fall back to generic wrapper.
-    ensure_structured_error(Reason);
+ensure_structured_error({eval_error, Class, Reason}) ->
+    case is_known_error_reason(Reason) of
+        true ->
+            %% Reason is itself one of the recognized raw-error-tuple shapes
+            %% (or empty_expression/timeout) — delegate so it keeps its
+            %% specific structured kind/message instead of flattening into
+            %% the generic wrapper below.
+            ensure_structured_error(Reason);
+        false ->
+            %% BT-3084: opaque/unrecognized Reason — preserve the exception
+            %% class in the message. Previously this clause dropped `Class`
+            %% entirely, which diverged from beamtalk_repl_json's separate
+            %% "Evaluation error: Class:Reason" wording for the same shape;
+            %% unify on that wording here so both callers agree.
+            make(
+                internal_error,
+                'REPL',
+                iolist_to_binary([
+                    <<"Evaluation error: ">>,
+                    atom_to_binary(Class, utf8),
+                    <<":">>,
+                    format_name(Reason)
+                ])
+            )
+    end;
 ensure_structured_error({compile_error, [#{message := Msg} = Diag | _]}) ->
     %% BT-1235: structured diagnostic list — extract message and hint from first diagnostic
     % elp:fixme W0032 maps:find with complex branch logic
@@ -134,6 +190,123 @@ ensure_structured_error({parse_error, Details}) ->
     make(compile_error, 'Compiler', iolist_to_binary([<<"Parse error: ">>, format_name(Details)]));
 ensure_structured_error({invalid_request, Reason}) ->
     make(internal_error, 'REPL', iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]));
+%% BT-3084: the remaining clauses below were previously only handled by
+%% beamtalk_repl_json:format_error_message/1's separate dispatch table —
+%% absent here, they fell through to the generic `~p` wrapper just below
+%% (silently dropping the vocabulary, e.g. `{registration_error, ...}` was
+%% the reverse case: handled here but absent from the JSON table). Folding
+%% them into this one canonical table closes both gaps.
+ensure_structured_error({module_not_found, ModuleName}) ->
+    make(
+        module_not_found,
+        'Module',
+        iolist_to_binary([<<"Module not loaded: ">>, format_name(ModuleName)])
+    );
+ensure_structured_error({invalid_module_name, ModuleName}) ->
+    make(
+        invalid_module_name,
+        'Module',
+        iolist_to_binary([<<"Invalid module name: ">>, format_name(ModuleName)])
+    );
+ensure_structured_error({actors_exist, ModuleName, Count}) ->
+    ActorWord =
+        case Count of
+            1 -> <<"actor">>;
+            _ -> <<"actors">>
+        end,
+    make(
+        actors_exist,
+        'Module',
+        iolist_to_binary([
+            <<"Cannot unload ">>,
+            format_name(ModuleName),
+            <<": ">>,
+            integer_to_binary(Count),
+            <<" ">>,
+            ActorWord,
+            <<" still running. Kill them first with :kill">>
+        ])
+    );
+ensure_structured_error({class_not_found, ClassName}) ->
+    make(
+        class_not_found,
+        'REPL',
+        iolist_to_binary([
+            <<"Unknown class: ">>,
+            format_name(ClassName),
+            <<". Use Workspace classes to see loaded classes.">>
+        ])
+    );
+ensure_structured_error({method_not_found, ClassName, Selector}) ->
+    %% BT-3084: canonical DNU message — call beamtalk_error:generate_message/3
+    %% (via with_selector/2 when Selector is an atom) instead of hand-rolling
+    %% the "does not understand" text a third time.
+    Err0 = beamtalk_error:new(does_not_understand, ClassName),
+    Err1 =
+        case Selector of
+            S when is_atom(S) ->
+                beamtalk_error:with_selector(Err0, S);
+            _ ->
+                %% Selector arrived as a binary (e.g. no existing atom for it,
+                %% so the caller couldn't safely mint one) — still render via
+                %% generate_message/3 rather than reimplementing the quoting.
+                beamtalk_error:with_message(
+                    Err0,
+                    beamtalk_error:generate_message(does_not_understand, ClassName, Selector)
+                )
+        end,
+    beamtalk_error:with_hint(
+        Err1,
+        iolist_to_binary([
+            <<"Use :help ">>, format_name(ClassName), <<" to see available methods.">>
+        ])
+    );
+ensure_structured_error({unknown_op, Op}) ->
+    make(unknown_op, 'REPL', iolist_to_binary([<<"Unknown operation: ">>, format_name(Op)]));
+ensure_structured_error({inspect_failed, PidStr}) ->
+    make(
+        inspect_failed,
+        'Actor',
+        iolist_to_binary([<<"Failed to inspect actor: ">>, format_name(PidStr)])
+    );
+ensure_structured_error({actor_not_alive, PidStr}) ->
+    make(
+        actor_not_alive,
+        'Actor',
+        iolist_to_binary([<<"Actor is not alive: ">>, format_name(PidStr)])
+    );
+ensure_structured_error({no_source_file, Module}) ->
+    make(
+        no_source_file,
+        'Module',
+        iolist_to_binary([
+            <<"No source file recorded for module: ">>,
+            format_name(Module),
+            <<". Try :load <path> to load it first.">>
+        ])
+    );
+ensure_structured_error({module_not_loaded, Module}) ->
+    make(
+        module_not_loaded,
+        'Module',
+        iolist_to_binary([
+            <<"Module not loaded: ">>,
+            format_name(Module),
+            <<". Use :load <path> to load it first.">>
+        ])
+    );
+ensure_structured_error({missing_module_name, reload}) ->
+    make(
+        missing_module_name,
+        'REPL',
+        <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>
+    );
+ensure_structured_error({session_creation_failed, Reason}) ->
+    make(
+        session_creation_failed,
+        'REPL',
+        iolist_to_binary([<<"Failed to create session: ">>, format_name(Reason)])
+    );
 ensure_structured_error(empty_expression) ->
     make(empty_expression, 'REPL', <<"Empty expression">>);
 ensure_structured_error(timeout) ->
@@ -169,6 +342,30 @@ ensure_structured_error({invalid_request, _} = Reason, _Class) ->
     ensure_structured_error(Reason);
 ensure_structured_error({registration_error, _} = Reason, _Class) ->
     ensure_structured_error(Reason);
+ensure_structured_error({module_not_found, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({invalid_module_name, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({actors_exist, _, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({class_not_found, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({method_not_found, _, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({unknown_op, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({inspect_failed, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({actor_not_alive, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({no_source_file, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({module_not_loaded, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({missing_module_name, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({session_creation_failed, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
 ensure_structured_error(Reason, Class) ->
     make(
         internal_error,
@@ -179,6 +376,23 @@ ensure_structured_error(Reason, Class) ->
             io_lib:format("~p", [Reason])
         ])
     ).
+
+-doc """
+Is this term one of the raw-error-tuple shapes ensure_structured_error/1
+recognizes (or the bare `empty_expression`/`timeout` atoms)? Used to decide
+whether a `{eval_error, Class, Reason}`'s Reason should delegate to /1
+(keeping its specific kind) or fall back to the generic
+"Evaluation error: Class:Reason" wrapper.
+""".
+-spec is_known_error_reason(term()) -> boolean().
+is_known_error_reason(empty_expression) ->
+    true;
+is_known_error_reason(timeout) ->
+    true;
+is_known_error_reason(Reason) when is_tuple(Reason), tuple_size(Reason) > 0 ->
+    lists:member(element(1, Reason), ?KNOWN_ERROR_TUPLE_TAGS);
+is_known_error_reason(_) ->
+    false.
 
 -doc "Format a name for error messages.".
 -spec format_name(term()) -> binary().
