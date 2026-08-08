@@ -33,7 +33,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use beamtalk_parity_tests::drivers::{lsp::LspDriver, mcp::McpDriver};
+use beamtalk_parity_tests::drivers::{
+    lsp::{LspDriver, strip_verbatim_prefix},
+    mcp::McpDriver,
+};
 use beamtalk_parity_tests::pool::{SharedRepl, beamtalk_binary, shared_repl};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -229,10 +232,14 @@ async fn check_definition_parity(
     }
     // The resolved URI must point at the staged project tree. We canonicalise
     // both because tempfile may round-trip through `/private/var` on macOS.
+    // BT-3069: `canonicalize()` returns a `\\?\`-prefixed verbatim path on
+    // Windows; strip it before comparing against `target_uri` (a normal
+    // `file://` URI with no such prefix), or the `contains` check below
+    // always fails on Windows even when the definition resolved correctly.
     let staged_canonical = staged
         .canonicalize()
         .unwrap_or_else(|_| staged.to_path_buf());
-    let staged_str = staged_canonical.to_string_lossy().replace('\\', "/");
+    let staged_str = strip_verbatim_prefix(&staged_canonical.to_string_lossy()).replace('\\', "/");
     if !target_uri.contains(&*staged_str) {
         return Err(format!(
             "LSP definition uri `{target_uri}` does not point inside staged project `{staged_str}`"
