@@ -496,18 +496,20 @@ browse_method_source(ClassName, ClassSide, Selector) ->
     {binary() | null, binary() | null, binary() | null}.
 method_text_fields(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
     {null, null, null};
-%% BT-2614/BT-2714: synthetic methods (compiler-injected — value-type
-%% auto-accessors and actor `new`/`new:`/`spawn`/`spawn:` constructors) carry no
-%% editable user source. `source` stays null so the browser badges them read-only
-%% with no `[source]` jump — and, crucially, so a class-side `spawn` does NOT
-%% surface `Actor`'s real `spawn` body under the subclass's synthetic row (an
-%% inconsistent, misleading "source" for a generated method).
+%% BT-2304/BT-2714: synthetic methods (compiler-injected value-type
+%% auto-accessors) carry no editable user source. `source` stays null so the
+%% browser badges them read-only with no `[source]` jump. (BT-2614 originally
+%% also injected synthetic per-subclass rows for the actor `new`/`new:`/
+%% `spawn`/`spawn:` constructors; BT-3073 retired those once BT-3071/BT-3072
+%% lifted the bodies into real, source-backed class methods on `Actor` — a
+%% subclass now simply has no row of its own for them, so `Actor`'s indexed
+%% row is reached the ordinary way, no special-casing needed here.)
 %%
 %% BT-2714: but doc/signature DO resolve — via the same hierarchy walk `Beamtalk
 %% help:` uses (`method_doc_signature_resolved/3`) — so the read-only pane shows
-%% the method's real curated docs (the actor entry points inherit `Actor`'s
-%% docs; a value accessor shows its generated signature) instead of a blank
-%% pane. Reusing the `help:` resolver guarantees the browser and `:help` agree.
+%% the method's real curated docs (a value accessor shows its generated
+%% signature) instead of a blank pane. Reusing the `help:` resolver guarantees
+%% the browser and `:help` agree.
 method_text_fields(ClassPid, ClassSide, Selector, synthetic) ->
     {Doc, Signature} =
         beamtalk_repl_docs:method_doc_signature_resolved(ClassPid, ClassSide, Selector),
@@ -1897,14 +1899,19 @@ declared_protocol(_Info) ->
     atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status(), boolean()
 ) -> binary().
 protocol_from_source(_Selector, _Provenance, synthetic, ClassSide) ->
-    %% Synthetic methods are compiler-generated. Two kinds:
-    %%   * BT-2614: the actor class-side constructors `new`/`new:`/`spawn`/`spawn:`
-    %%     are "instance creation" — the canonical Pharo protocol for them.
-    %%   * value-type field accessors (ADR 0087) are "accessing" by construction.
-    %% Classify by `class_side`, not the selector name: a class-side synthetic
-    %% method is a constructor, an instance-side one is an accessor. This avoids
-    %% misclassifying an instance-side synthetic slot that happens to be named
-    %% `new`/`spawn` (e.g. `state: new :: Integer = 0`) as "instance creation".
+    %% Synthetic methods are compiler-generated. Today that means value-type
+    %% field accessors (ADR 0087), always instance-side, bucketed "accessing"
+    %% by construction. (BT-2614 originally also injected synthetic
+    %% class-side actor constructors `new`/`new:`/`spawn`/`spawn:`, bucketed
+    %% "instance creation" — the canonical Pharo protocol for them; BT-3073
+    %% retired those rows once BT-3071/BT-3072 lifted the bodies onto `Actor`
+    %% as real, source-backed — hence `indexed`, not `synthetic` — class
+    %% methods.) The `class_side => true` branch is kept for any future
+    %% class-side synthetic entry point (and is exercised directly by the
+    %% EUnit tests below with fabricated xref rows) — classify by
+    %% `class_side`, not the selector name, so an instance-side synthetic slot
+    %% that happens to be named `new`/`spawn` (e.g. `state: new :: Integer =
+    %% 0`) is not misclassified as "instance creation".
     case ClassSide of
         true -> <<"instance creation">>;
         false -> <<"accessing">>

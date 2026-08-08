@@ -895,22 +895,28 @@ browse_xref() ->
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
         method_row('printDetails', 106, indexed, class_body),
-        %% BT-2622: a synthetic *instance-side* slot whose name collides with an
-        %% actor constructor (`state: new :: Integer = 0` → synthetic accessor
-        %% `new`). It must bucket "accessing" by `class_side`, NOT "instance
-        %% creation" — the old selector-name convention would have misclassified
-        %% it. `new:`/`spawn`/`spawn:` are exercised the same way, so all four
-        %% colliding constructor names are covered on the instance side.
+        %% BT-2622: a synthetic *instance-side* slot whose name collides with a
+        %% class-side-constructor-shaped selector (`state: new :: Integer = 0`
+        %% → synthetic accessor `new`). It must bucket "accessing" by
+        %% `class_side`, NOT "instance creation" — the old selector-name
+        %% convention would have misclassified it. `new:`/`spawn`/`spawn:` are
+        %% exercised the same way, so all four names are covered on the
+        %% instance side.
         method_row('new', 108, synthetic, class_body),
         method_row('new:', 108, synthetic, class_body),
         method_row('spawn', 108, synthetic, class_body),
         method_row('spawn:', 108, synthetic, class_body),
-        %% BT-2614: compiler-injected synthetic class-side constructors. An actor's
-        %% codegen emits `new`/`new:`/`spawn`/`spawn:` as sourceless exported
-        %% functions; these rows are how the System Browser surfaces them (badged
-        %% synthetic, bucketed "instance creation") so its method set matches
-        %% runtime `aClass class allMethods` reflection. Listed as class-side
-        %% (`class_side => true`) so they appear under `side = class`, not instance.
+        %% Fabricated class-side synthetic rows exercising the generic
+        %% `class_side => true` → "instance creation" bucketing rule in
+        %% `protocol_from_source/4`. No real codegen path emits these today:
+        %% BT-2614 originally had actor codegen inject exactly this shape for
+        %% `new`/`new:`/`spawn`/`spawn:`, but BT-3073 retired those rows once
+        %% BT-3071/BT-3072 lifted the bodies onto `Actor` as real,
+        %% source-backed (`indexed`) class methods that subclasses inherit
+        %% rather than locally define. Kept here, with fabricated xref data,
+        %% purely to cover the classification rule for any future class-side
+        %% synthetic entry point. Listed as class-side (`class_side => true`)
+        %% so they appear under `side = class`, not instance.
         class_method_row('new', 1, synthetic, class_body),
         class_method_row('new:', 1, synthetic, class_body),
         class_method_row('spawn', 1, synthetic, class_body),
@@ -1197,51 +1203,61 @@ browse_tests(#{class_name := Class}) ->
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
             ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>)),
-            %% BT-2622: instance-side synthetic slots whose names collide with the
-            %% actor constructors must classify by `class_side` (accessing), NOT by
-            %% the selector-name convention (which would say "instance creation").
+            %% BT-2622: instance-side synthetic slots whose names collide with a
+            %% class-side-constructor-shaped selector must classify by
+            %% `class_side` (accessing), NOT by the selector-name convention
+            %% (which would say "instance creation").
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new">>)),
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new:">>)),
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn">>)),
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn:">>))
         end},
-        {"browse-protocols surfaces injected synthetic class-side constructors", fun() ->
-            %% BT-2614: the compiler-injected `new`/`new:`/`spawn`/`spawn:` an
-            %% actor's codegen emits as sourceless class-side functions appear in
-            %% the class-side protocol list, badged `synthetic` and bucketed under
-            %% "instance creation" — so the browser's method set matches runtime
-            %% `aClass class allMethods` reflection.
-            Value = decode_value(
-                beamtalk_repl_ops_browse:handle(
-                    <<"browse-protocols">>,
-                    #{<<"class">> => Class, <<"side">> => <<"class">>},
-                    make_msg(),
-                    self()
-                )
-            ),
-            ?assertEqual(<<"class">>, maps:get(<<"side">>, Value)),
-            Protocols = maps:get(<<"protocols">>, Value),
-            Selectors = all_selector_rows(Protocols),
-            Names = [maps:get(<<"selector">>, S) || S <- Selectors],
-            lists:foreach(
-                fun(Sel) ->
-                    ?assert(lists:member(Sel, Names)),
-                    Row = find_selector_row(Selectors, Sel),
-                    %% Badged synthetic (read-only marker) and bucketed
-                    %% "instance creation".
-                    ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, Row)),
-                    ?assertEqual(
-                        <<"instance creation">>, protocol_of(Protocols, Sel)
+        {"browse-protocols buckets a fabricated class-side synthetic row as instance creation",
+            fun() ->
+                %% Exercises the generic `class_side => true` → "instance
+                %% creation" classification rule in `protocol_from_source/4` with
+                %% fabricated xref data (see `browse_xref/0`). BT-2614 originally
+                %% had real actor codegen emit exactly this row shape for
+                %% `new`/`new:`/`spawn`/`spawn:`; BT-3073 retired that (those
+                %% selectors are now real, source-backed `indexed` class methods
+                %% inherited from `Actor`, never a per-subclass synthetic row) —
+                %% this test now covers the classification rule itself, decoupled
+                %% from any real compiler output.
+                Value = decode_value(
+                    beamtalk_repl_ops_browse:handle(
+                        <<"browse-protocols">>,
+                        #{<<"class">> => Class, <<"side">> => <<"class">>},
+                        make_msg(),
+                        self()
                     )
-                end,
-                [<<"new">>, <<"new:">>, <<"spawn">>, <<"spawn:">>]
-            )
-        end},
+                ),
+                ?assertEqual(<<"class">>, maps:get(<<"side">>, Value)),
+                Protocols = maps:get(<<"protocols">>, Value),
+                Selectors = all_selector_rows(Protocols),
+                Names = [maps:get(<<"selector">>, S) || S <- Selectors],
+                lists:foreach(
+                    fun(Sel) ->
+                        ?assert(lists:member(Sel, Names)),
+                        Row = find_selector_row(Selectors, Sel),
+                        %% Badged synthetic (read-only marker) and bucketed
+                        %% "instance creation".
+                        ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, Row)),
+                        ?assertEqual(
+                            <<"instance creation">>, protocol_of(Protocols, Sel)
+                        )
+                    end,
+                    [<<"new">>, <<"new:">>, <<"spawn">>, <<"spawn:">>]
+                )
+            end},
         {"browse-method-source returns null source for a synthetic class method", fun() ->
-            %% BT-2614: a synthetic class-side constructor has no editable user
-            %% source — `browse-method-source` returns `null` source (and null
-            %% doc/signature) so the browser badges it read-only with no
-            %% `[source]` jump, never surfacing an inherited body in its place.
+            %% A fabricated synthetic class-side row (see `browse_xref/0`) has
+            %% no editable user source — `browse-method-source` returns `null`
+            %% source (and null doc/signature) so the browser badges it
+            %% read-only with no `[source]` jump. (For a real actor's
+            %% `spawn`/`new`/`spawnWith:`/`new:`, BT-3073 means there is no
+            %% such row at all — the class simply has no methodXref entry for
+            %% them, and browsing resolves to `Actor`'s real, editable
+            %% `indexed` row instead.)
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-method-source">>,

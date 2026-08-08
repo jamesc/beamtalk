@@ -245,6 +245,50 @@ metaChain last
 metaChain size
 // => 3
 
+// BT-3073: actor `new`/`new:`/`spawn`/`spawnWith:` are real, source-backed
+// class methods declared once on `Actor` (`stdlib/src/Actor.bt`) — a
+// subclass like `Counter` (loaded above, defines neither) *inherits* them
+// rather than defining its own. `implementorsOf:` does not walk inheritance
+// (see the `#class` check above), so `Actor` is an implementor of all four
+// selectors but `Counter` never is. This retires the BT-2614 synthetic
+// per-class xref rows that used to make every actor subclass its own
+// "implementor" too.
+spawnImpls := SystemNavigation default implementorsOf: #spawn
+// => _
+
+spawnImpls includes: Actor class
+// => true
+
+spawnImpls includes: Counter class
+// => false
+
+spawnWithImpls := SystemNavigation default implementorsOf: #spawnWith:
+// => _
+
+spawnWithImpls includes: Actor class
+// => true
+
+spawnWithImpls includes: Counter class
+// => false
+
+newImpls := SystemNavigation default implementorsOf: #new
+// => _
+
+newImpls includes: Actor class
+// => true
+
+newImpls includes: Counter class
+// => false
+
+newColonImpls := SystemNavigation default implementorsOf: #new:
+// => _
+
+newColonImpls includes: Actor class
+// => true
+
+newColonImpls includes: Counter class
+// => false
+
 // ===========================================================================
 // SYSTEMNAVIGATION SENDERSOF: — find call sites of a selector
 // (BT-2214; originally added on Beamtalk in BT-2190, moved here in BT-2214)
