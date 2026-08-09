@@ -260,12 +260,13 @@ handle_describe_contains_versions_test() ->
     ?assert(maps:is_key(<<"protocol">>, Versions)),
     ?assert(maps:is_key(<<"beamtalk">>, Versions)).
 
-%% BT-2991: beamtalk_version:get/0 (the desktop-attach readiness RPC target)
-%% hardcodes its own "2.0" protocol_version literal, separate from the
-%% "protocol" value describe reports here. beamtalk_workspace already depends
-%% on beamtalk_runtime (dependencies flow down only, and workspace sits above
-%% runtime), so this cross-module check can live here to catch the two
-%% literals drifting when the wire protocol changes.
+%% BT-2991 / BT-3090: `beamtalk_version:get/0` (the desktop-attach readiness
+%% RPC target) and the "protocol" value describe reports here now both read
+%% the single `?PROTOCOL_VERSION` macro (`beamtalk.hrl`) instead of two
+%% independent "2.0" literals — a bump can no longer drift the two apart, but
+%% this integration-level check stays as a golden test of the real wiring
+%% (beamtalk_workspace already depends on beamtalk_runtime, so it can call
+%% both sides directly).
 handle_describe_protocol_version_matches_beamtalk_version_test() ->
     Msg = make_msg(<<"describe">>, <<"d-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
@@ -776,8 +777,10 @@ handle_describe_omits_removed_ops_test() ->
     ?assertEqual(false, maps:is_key(<<"reload">>, Ops)),
     ?assertEqual(false, maps:is_key(<<"modules">>, Ops)),
     %% Protocol version was bumped to 2.0 to mark the breaking change.
+    %% BT-3090: asserted through the shared ?PROTOCOL_VERSION macro so a
+    %% future bump only requires editing beamtalk.hrl.
     Versions = maps:get(<<"versions">>, Decoded),
-    ?assertEqual(<<"2.0">>, maps:get(<<"protocol">>, Versions)).
+    ?assertEqual(?PROTOCOL_VERSION, maps:get(<<"protocol">>, Versions)).
 
 handle_describe_contains_actors_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined),
