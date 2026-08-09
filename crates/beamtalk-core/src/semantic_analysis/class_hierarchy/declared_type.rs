@@ -814,3 +814,131 @@ mod tests {
         );
     }
 }
+
+/// Property-based tests for type-string fidelity (BT-3100): does a
+/// [`DeclaredType`] survive the round trip through its own textual form
+/// (`Display`) and back (`parse`)?
+///
+/// `DeclaredType::parse`'s grammar (see its doc comment) is strictly weaker
+/// than `Display`'s output range — it has no representation for `\`
+/// (difference), `&` (intersection), or `FalseOr`, so `parse` can't always
+/// invert `Display` on the first try. What it *can* do, and what these
+/// properties pin, is reach a stable fixed point: re-displaying what
+/// `parse` recovers, then re-parsing that, always lands on exactly the same
+/// structured value and text it started converging toward — the round trip
+/// never drifts, loses a branch, or panics, no matter how deeply
+/// union/intersection/difference/`FalseOr`/generic shapes are nested
+/// (BT-2760 grouping-paren shapes included).
+///
+/// One concrete non-idempotence this uncovered and pins deliberately: an
+/// intersection/difference whose right/excluded operand needs
+/// parenthesising (e.g. `A & (B | C)`) is misread by `parse` on the first
+/// pass as a single-argument `Generic` whose "base name" is the literal
+/// text `"A &"` — `split_generic_base` finds the first `(` in the whole
+/// string and doesn't know `&`/`\` aren't part of a class name. Displaying
+/// that `Generic` back out drops the space before the paren (`"A &(B | C)"`),
+/// but from there it's stable: reparsing that already-collapsed text
+/// reproduces the same `Generic` byte-for-byte forever after. Filed as a
+/// follow-up (not fixed here — out of scope per this issue's "Out of
+/// Scope" section, which restricts BT-3100 to adding the properties, not
+/// reworking `parse`'s grammar).
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Leaves: simple/singleton names plus every `Self`-family shape
+    /// `parse` recognises structurally.
+    fn leaf() -> impl Strategy<Value = DeclaredType> {
+        prop_oneof![
+            "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(DeclaredType::simple),
+            "[a-z][a-z0-9]{0,4}".prop_map(DeclaredType::singleton),
+            Just(DeclaredType::SelfType),
+            Just(DeclaredType::SelfClass),
+            "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(|n| DeclaredType::ClassOf(n.into())),
+        ]
+    }
+
+    /// Arbitrary `DeclaredType`s, recursively built from every grouping
+    /// shape named in the acceptance criteria: union, generic, `FalseOr`,
+    /// difference, and intersection.
+    fn arb_declared_type() -> impl Strategy<Value = DeclaredType> {
+        leaf().prop_recursive(4, 32, 4, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 2..4).prop_map(DeclaredType::Union),
+                (
+                    "[A-Za-z][A-Za-z0-9]{0,4}",
+                    prop::collection::vec(inner.clone(), 1..3),
+                )
+                    .prop_map(|(base, params)| DeclaredType::generic(base, params)),
+                inner
+                    .clone()
+                    .prop_map(|t| DeclaredType::FalseOr(Box::new(t))),
+                (inner.clone(), inner.clone()).prop_map(|(base, excluded)| {
+                    DeclaredType::Difference {
+                        base: Box::new(base),
+                        excluded: Box::new(excluded),
+                    }
+                }),
+                (inner.clone(), inner.clone()).prop_map(|(left, right)| {
+                    DeclaredType::Intersection {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }
+                }),
+            ]
+        })
+    }
+
+    fn proptest_config() -> ProptestConfig {
+        crate::test_helpers::test_support::proptest_config_default()
+    }
+
+    proptest! {
+        #![proptest_config(proptest_config())]
+
+        /// `parse ∘ Display` never panics on any generated shape, including
+        /// the ones (`\`, `&`, `FalseOr`) the parser can't fully represent.
+        #[test]
+        fn parse_display_never_panics(dt in arb_declared_type()) {
+            let text = dt.to_string();
+            let _ = DeclaredType::parse(&text);
+        }
+
+        /// `parse ∘ Display` reaches a canonical fixed point within one
+        /// extra round trip: parsing the text `dt` displays, then
+        /// re-displaying and re-parsing *that*, always lands on the same
+        /// structured value and text — it never keeps drifting.
+        #[test]
+        fn parse_display_reaches_fixed_point(dt in arb_declared_type()) {
+            let text1 = dt.to_string();
+            let recovered1 = DeclaredType::parse(&text1);
+            let text2 = recovered1.to_string();
+            let recovered2 = DeclaredType::parse(&text2);
+            let text3 = recovered2.to_string();
+
+            prop_assert_eq!(
+                &recovered1, &recovered2,
+                "parse(Display(x)) did not stabilise for {:?}: \
+                 first pass = {:?} ({:?}), second pass = {:?} ({:?})",
+                dt, recovered1, text2, recovered2, text3,
+            );
+            prop_assert_eq!(
+                &text2, &text3,
+                "Display text kept drifting for {:?}: {:?} -> {:?}",
+                dt, text2, text3,
+            );
+        }
+
+        /// Once at the fixed point, `parse ∘ Display` is a true identity —
+        /// applying it again changes nothing further.
+        #[test]
+        fn parse_display_idempotent_from_fixed_point(dt in arb_declared_type()) {
+            let stable = DeclaredType::parse(&DeclaredType::parse(&dt.to_string()).to_string());
+            let text = stable.to_string();
+            let reparsed = DeclaredType::parse(&text);
+            prop_assert_eq!(&reparsed, &stable);
+            prop_assert_eq!(reparsed.to_string(), text);
+        }
+    }
+}
