@@ -17,16 +17,31 @@ Test categories:
 - spawn/0 tests (Counter spawn) - returns #beamtalk_object{}
 - spawn/1 tests (Counter spawnWith: #{...})
 - State merging behavior (InitArgs override defaults)
-- Async message protocol (BT-79) - futures, awaits, errors, concurrency
+- Async future-cast protocol (BT-79) - futures, awaits, errors, concurrency
+  (runtime-only path — see the section header below for why it cannot
+  migrate onto compiled `.bt` output)
 - Block Evaluation Tests (value, value:, value:value:, closures)
 - Control Flow Tests (whileTrue:, whileFalse:, repeat)
-- Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
+- Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not) - migrated
+  (BT-3093) onto stdlib/bootstrap-test/booleans.btscript and
+  stdlib/test/boolean_short_circuit_test.bt; see the section header below
 - Cascade message sends (BT-133)
 - Multi-keyword messages (BT-133)
 - Actor interaction patterns (BT-133)
 - Error handling (BT-133)
 - Instance variable access patterns (BT-133)
 - Nested message sends and binary operators (BT-133)
+
+BT-3093: Migrated the hand-simulated Counter/Rectangle/Box/Spawner/
+instance-var fixtures that stood in for "as the compiler would generate"
+output onto real `.bt` fixtures compiled by
+runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
+(arithmetic_actor.bt, rectangle_actor.bt, box_actor.bt, spawner_actor.bt,
+shadow_actor.bt, coordinate_actor.bt), following the BT-239 precedent.
+The async future-cast protocol section is documented in place as staying
+simulated: it exercises a `beamtalk_actor:handle_cast/2` code path
+(`{Selector, Args, FuturePid}`) that generated per-class `handle_cast/2`
+callbacks do not implement, so no compiled source construct reaches it.
 
 See also: beamtalk_actor for the runtime implementation
 """.
@@ -41,20 +56,40 @@ See also: beamtalk_actor for the runtime implementation
 %% from tests/repl-protocol/fixtures/counter.bt (unified fixture - BT-239) which generates
 %% actual #beamtalk_object{} records.
 %%
-%% For other tests that need manual state manipulation (async, cascade, etc.),
-%% we use simulated state structures below.
-
--doc """
-Creates a Counter module structure as the compiler would generate.
-This mirrors the output of compiling:
-
-```beamtalk
-value := 0.
-increment := [self.value := self.value + 1. ^self.value].
-getValue := [^self.value].
-divide: n := [^self.value / n].
-```
-""".
+%% BT-3093: counter_module_state/1 and friends below previously claimed to
+%% mirror "the output of compiling" a Counter class — that claim was false.
+%% Real compiled classes get their own generated dispatch/4 case-statement
+%% module (crates/beamtalk-core/src/codegen/core_erlang/gen_server/*); they
+%% never store a `'__methods__'` map of funs in actor state. That funs-table
+%% shape is a *runtime* representation: it is what `beamtalk_actor:dispatch/4`
+%% and `beamtalk_actor:handle_cast/2`'s async future-cast branch
+%% (`{Selector, Args, FuturePid}`) operate on directly, and it is the same
+%% shape produced by Beamtalk's dynamic class-building API
+%% (`Object classBuilder ... classMethods: #{...}; register`).
+%%
+%% Everything that can be expressed as compiled `.bt` source and reached via
+%% the ordinary `{Selector, Args}` synchronous call protocol has been
+%% migrated (BT-3093) onto the fixtures in
+%% runtime/apps/beamtalk_runtime/test_fixtures/ (arithmetic_actor.bt,
+%% rectangle_actor.bt, box_actor.bt, spawner_actor.bt, shadow_actor.bt,
+%% coordinate_actor.bt), following the BT-239 precedent — see the section
+%% headers below for what moved where.
+%%
+%% What is kept here, and why: the async future-cast protocol
+%% (`{Selector, Args, FuturePid}` sent via `gen_server:cast/2`) is only
+%% implemented by `beamtalk_actor:handle_cast/2`'s generic fallback clause.
+%% Confirmed empirically (BT-3093): a real compiled actor's generated
+%% `handle_cast/2` (crates/.../gen_server/callbacks.rs `generate_handle_cast`)
+%% only matches the `{cast, Selector, Args}` fire-and-forget tag; a bare
+%% `{Selector, Args, FuturePid}` cast falls through to its `<_> -> {noreply,
+%% State}` catch-all and is silently dropped — verified by spawning
+%% 'bt@arithmetic_actor' and observing the future time out. There is no
+%% compiled `.bt` source construct that reaches this branch, so per the
+%% Consistency-Test Disposition Rule's documented exception ("a runtime-only
+%% failure path that has no corresponding source construct"), the async
+%% section below stays on this hand-built state+methods fixture, which is a
+%% legitimate direct input to `beamtalk_actor:dispatch/4` rather than a
+%% "simulated compiler output" fixture.
 -spec counter_module_state(InitArgs :: map()) -> map().
 counter_module_state(InitArgs) ->
     DefaultState = #{
@@ -169,14 +204,19 @@ spawn_with_preserves_unspecified_defaults_test() ->
 
     gen_server:stop(Pid).
 
+%% BT-3093: migrated off counter_module_state/raw start_link onto the real
+%% compiled 'bt@counter' module — spawn/1 already merges InitArgs the same
+%% way (proven identically by spawn_with_preserves_unspecified_defaults_test
+%% above), so this now exercises real codegen instead of a hand-simulated
+%% stand-in.
 spawn_with_multiple_overrides_test() ->
     %% spawnWith: #{value => 10, extra => bar}
     InitArgs = #{value => 10, extra => bar},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@counter':spawn(InitArgs),
+    Pid = element(4, Object),
 
     %% Value was overridden
-    ?assertEqual(10, gen_server:call(Pid, {getValue, []})),
+    ?assertEqual({ok, 10}, gen_server:call(Pid, {getValue, []})),
 
     %% Extra field present
     ActorState = sys:get_state(Pid),
@@ -185,8 +225,19 @@ spawn_with_multiple_overrides_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Async message protocol E2E tests (BT-79)
+%%% Async future-cast protocol tests (BT-79) — DOCUMENTED AS STAYING SIMULATED
 %%% ===========================================================================
+%%%
+%%% BT-3093: kept on counter_module_state/1 deliberately. This section
+%%% exercises `beamtalk_actor:handle_cast/2`'s `{Selector, Args, FuturePid}`
+%%% branch, which is only reachable through the generic actor callback
+%%% module — real compiled classes' generated `handle_cast/2` does not
+%%% implement this cast shape (verified empirically; see the
+%%% counter_module_state/1 doc comment above for how). There is no `.bt`
+%%% source construct that reaches this code path, so per the
+%%% Consistency-Test Disposition Rule's documented exception this stays a
+%%% direct unit test of beamtalk_actor.erl's own dispatch, not a simulated-
+%%% compiler-output fixture.
 
 %%% Basic async message send and future resolution
 
@@ -519,25 +570,38 @@ async_multiple_awaits_same_future_test() ->
     gen_server:stop(Actor).
 
 %%% ===========================================================================
-%%% Edge cases
+%%% Edge cases — MIGRATED / TRIMMED (BT-3093)
 %%% ===========================================================================
-
-spawn_with_empty_map_same_as_spawn_zero_test() ->
-    %% Both should produce identical state
-    State1 = counter_module_state(#{}),
-    State2 = counter_module_state(#{}),
-
-    %% Verify they're equal (functionally)
-    ?assertEqual(maps:get(value, State1), maps:get(value, State2)),
-    ?assertEqual(0, maps:get(value, State1)).
+%%%
+%%% spawn_with_empty_map_same_as_spawn_zero_test was removed: it only
+%%% asserted a property of counter_module_state/1's own `maps:merge/2` call
+%%% (that spawn() and spawn(#{}) merge identically) — plain Erlang map
+%%% semantics, not Beamtalk codegen behavior, and already implied by the
+%%% real-dispatch coverage in the spawn/0 and spawn/1 sections above
+%%% (spawn_zero_uses_default_state_test,
+%%% spawn_with_preserves_unspecified_defaults_test, etc., all against the
+%%% real compiled 'bt@counter' module). No scenario coverage was lost.
+%%%
+%%% spawn_preserves_class_and_methods_test is kept below (not removed) —
+%%% see its own doc comment for why.
+%%%
+%%% spawn_with_nil_values_override_test migrated onto real 'bt@counter'
+%%% spawn/1, since that scenario (spawnWith: #{value => nil}) was not
+%%% otherwise covered against real compiled output.
 
 spawn_with_nil_values_override_test() ->
     %% spawnWith: #{value => nil} should set value to nil
-    InitArgs = #{value => nil},
-    State = counter_module_state(InitArgs),
+    Object = 'bt@counter':spawn(#{value => nil}),
+    Pid = element(4, Object),
 
-    ?assertEqual(nil, maps:get(value, State)).
+    Result = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual({ok, nil}, Result),
 
+    gen_server:stop(Pid).
+
+%% BT-3093: kept as a direct unit test of the counter_module_state/1 helper
+%% itself, since the async future-cast section above still depends on that
+%% helper producing a `'__methods__'` funs table (see its doc comment).
 spawn_preserves_class_and_methods_test() ->
     %% Verify $beamtalk_class and __methods__ are preserved after merge
     InitArgs = #{value => 999},
@@ -554,6 +618,21 @@ spawn_preserves_class_and_methods_test() ->
 %%% ===========================================================================
 %%% Block Evaluation Tests (value, value:, value:value:, etc.)
 %%% ===========================================================================
+%%%
+%%% BT-3093 disposition note: the tests from here through the "Complex
+%%% Message Send Patterns" section below use plain Erlang `fun`s to probe
+%%% closure/control-flow mechanics on BEAM directly (capture, nesting,
+%%% arity, whileTrue:/whileFalse:/repeat, binary-operator precedence).
+%%% Unlike the Counter/Rectangle/Box/Boolean fixtures elsewhere in this
+%%% file, none of these carry an "as the compiler would generate" claim
+%%% about a specific compiled structure, so they are not the fixture the
+%%% Consistency-Test Disposition Rule (architecture-principles.md § 7)
+%%% targets — there is no compiled shape here that can drift out of sync.
+%%% Equivalent scenarios are additionally proven end-to-end against real
+%%% compiled Beamtalk in stdlib/bootstrap-test/blocks.btscript,
+%%% stdlib/test/block_evaluation_test.bt, stdlib/test/blocks_test.bt, and
+%%% stdlib/test/while_value_test.bt, so no coverage gap exists either way.
+%%% Left as-is.
 
 -doc """
 Test: [42] value => 42
@@ -775,209 +854,33 @@ inner_while_loop(Inner, Total) ->
     end.
 
 %%% ===========================================================================
-%%% Boolean control flow tests
+%%% Boolean control flow tests — MIGRATED (BT-3093)
 %%% ===========================================================================
 %%%
-%%% These tests verify Boolean control flow message implementations work
-%%% correctly on BEAM. The helper functions below implement the exact semantics
-%%% that compiled Beamtalk Boolean methods must produce.
+%%% This section used to hand-roll `beamtalk_if_true_if_false/3`,
+%%% `beamtalk_if_true/2`, `beamtalk_if_false/2`, `beamtalk_and/2`,
+%%% `beamtalk_or/2`, `beamtalk_not/1` as Erlang stand-ins for "the exact
+%%% semantics that compiled Beamtalk Boolean methods must produce" — a
+%%% textbook case of the hand-written "simulated compiler output" fixture
+%%% the Consistency-Test Disposition Rule
+%%% (docs/development/architecture-principles.md § 7) says to migrate onto
+%%% real compiled/generated output, per the BT-239 precedent.
 %%%
-%%% Boolean messages are core language semantics - True and False respond
-%%% to control flow messages like ifTrue:ifFalse:, and:, or:, not.
+%%% Real compiled coverage already existed and needed no new fixture:
+%%% - Value-correctness for ifTrue:ifFalse:, ifTrue:, ifFalse:, and:, or:,
+%%%   not (and xor:) is exercised end-to-end against the real compiled
+%%%   True/False/Boolean stdlib classes (stdlib/src/True.bt, False.bt,
+%%%   Boolean.bt) by stdlib/bootstrap-test/booleans.btscript.
+%%% - Short-circuit behavior (the unused block must never run, not just
+%%%   "the result happens to be right") is proven against the same real
+%%%   compiled classes by stdlib/test/boolean_short_circuit_test.bt, added
+%%%   as part of this migration using the AtomicCounter side-effect idiom
+%%%   already established in stdlib/test/blocks_test.bt.
 %%%
-%%% Tests pass block funs through the helper implementations to verify:
-%%% - Correct block is evaluated for conditional messages
-%%% - Short-circuit behavior prevents evaluation of unused blocks
-%%% - Return values match Beamtalk semantics
-%%%
-%%% See also: lib/True.bt for True control flow API
-%%% See also: lib/False.bt for False control flow API
-
-%%% ---------------------------------------------------------------------------
-%%% Boolean method implementations (simulating compiled Beamtalk methods)
-%%% ---------------------------------------------------------------------------
-
-%% True>>ifTrue:ifFalse: - evaluates trueBlock, ignores falseBlock
-beamtalk_if_true_if_false(true, TrueBlock, _FalseBlock) when is_function(TrueBlock, 0) ->
-    TrueBlock();
-%% False>>ifTrue:ifFalse: - evaluates falseBlock, ignores trueBlock
-beamtalk_if_true_if_false(false, _TrueBlock, FalseBlock) when is_function(FalseBlock, 0) ->
-    FalseBlock().
-
-%% True>>ifTrue: - evaluates the block
-beamtalk_if_true(true, Block) when is_function(Block, 0) ->
-    Block();
-%% False>>ifTrue: - returns self without evaluating
-beamtalk_if_true(false, _Block) ->
-    false.
-
-%% True>>ifFalse: - returns self without evaluating
-beamtalk_if_false(true, _Block) ->
-    true;
-%% False>>ifFalse: - evaluates the block
-beamtalk_if_false(false, Block) when is_function(Block, 0) ->
-    Block().
-
-%% True>>and: - evaluates the block (short-circuit: true needs to check)
-beamtalk_and(true, Block) when is_function(Block, 0) ->
-    Block();
-%% False>>and: - returns false without evaluating (short-circuit)
-beamtalk_and(false, _Block) ->
-    false.
-
-%% True>>or: - returns true without evaluating (short-circuit)
-beamtalk_or(true, _Block) ->
-    true;
-%% False>>or: - evaluates the block (short-circuit: false needs to check)
-beamtalk_or(false, Block) when is_function(Block, 0) ->
-    Block().
-
-%% True>>not - returns false
-beamtalk_not(true) ->
-    false;
-%% False>>not - returns true
-beamtalk_not(false) ->
-    true.
-
-%%% ---------------------------------------------------------------------------
-%%% ifTrue:ifFalse: tests
-%%% ---------------------------------------------------------------------------
-
-%% Test: true ifTrue: [42] ifFalse: [0] => 42
-true_if_true_if_false_evaluates_true_block_test() ->
-    TrueBlock = fun() -> 42 end,
-    FalseBlock = fun() -> error(should_not_evaluate) end,
-    Result = beamtalk_if_true_if_false(true, TrueBlock, FalseBlock),
-    ?assertEqual(42, Result).
-
-%% Test: false ifTrue: [42] ifFalse: [0] => 0
-false_if_true_if_false_evaluates_false_block_test() ->
-    TrueBlock = fun() -> error(should_not_evaluate) end,
-    FalseBlock = fun() -> 0 end,
-    Result = beamtalk_if_true_if_false(false, TrueBlock, FalseBlock),
-    ?assertEqual(0, Result).
-
-%%% ---------------------------------------------------------------------------
-%%% ifTrue: tests
-%%% ---------------------------------------------------------------------------
-
-%% Test: true ifTrue: [42] => 42
-true_if_true_evaluates_block_test() ->
-    Block = fun() -> 42 end,
-    Result = beamtalk_if_true(true, Block),
-    ?assertEqual(42, Result).
-
-%% Test: false ifTrue: [42] => false
-false_if_true_returns_self_test() ->
-    Block = fun() -> error(should_not_evaluate) end,
-    Result = beamtalk_if_true(false, Block),
-    ?assertEqual(false, Result).
-
-%%% ---------------------------------------------------------------------------
-%%% ifFalse: tests
-%%% ---------------------------------------------------------------------------
-
-%% Test: true ifFalse: [42] => true
-true_if_false_returns_self_test() ->
-    Block = fun() -> error(should_not_evaluate) end,
-    Result = beamtalk_if_false(true, Block),
-    ?assertEqual(true, Result).
-
-%% Test: false ifFalse: [42] => 42
-false_if_false_evaluates_block_test() ->
-    Block = fun() -> 42 end,
-    Result = beamtalk_if_false(false, Block),
-    ?assertEqual(42, Result).
-
-%%% ---------------------------------------------------------------------------
-%%% and: short-circuit tests
-%%% ---------------------------------------------------------------------------
-
-%% Test: true and: [true] => true
-true_and_evaluates_block_returns_true_test() ->
-    Block = fun() -> true end,
-    Result = beamtalk_and(true, Block),
-    ?assertEqual(true, Result).
-
-%% Test: true and: [false] => false
-true_and_evaluates_block_returns_false_test() ->
-    Block = fun() -> false end,
-    Result = beamtalk_and(true, Block),
-    ?assertEqual(false, Result).
-
-%% Test: false and: [error(should_not_evaluate)] => false
-false_and_short_circuits_test() ->
-    ShouldNotRun = fun() -> error(should_not_evaluate) end,
-    Result = beamtalk_and(false, ShouldNotRun),
-    ?assertEqual(false, Result).
-
-%%% ---------------------------------------------------------------------------
-%%% or: short-circuit tests
-%%% ---------------------------------------------------------------------------
-
-%% Test: true or: [error(should_not_evaluate)] => true
-true_or_short_circuits_test() ->
-    ShouldNotRun = fun() -> error(should_not_evaluate) end,
-    Result = beamtalk_or(true, ShouldNotRun),
-    ?assertEqual(true, Result).
-
-%% Test: false or: [true] => true
-false_or_evaluates_block_returns_true_test() ->
-    Block = fun() -> true end,
-    Result = beamtalk_or(false, Block),
-    ?assertEqual(true, Result).
-
-%% Test: false or: [false] => false
-false_or_evaluates_block_returns_false_test() ->
-    Block = fun() -> false end,
-    Result = beamtalk_or(false, Block),
-    ?assertEqual(false, Result).
-
-%%% ---------------------------------------------------------------------------
-%%% not tests
-%%% ---------------------------------------------------------------------------
-
-%% Test: true not => false
-true_not_returns_false_test() ->
-    Result = beamtalk_not(true),
-    ?assertEqual(false, Result).
-
-%% Test: false not => true
-false_not_returns_true_test() ->
-    Result = beamtalk_not(false),
-    ?assertEqual(true, Result).
-
-%%% ---------------------------------------------------------------------------
-%%% Complex control flow tests
-%%% ---------------------------------------------------------------------------
-
-%% Test nested conditionals: true ifTrue: [false ifTrue: [1] ifFalse: [2]] => 2
-nested_if_true_if_false_test() ->
-    OuterBlock = fun() ->
-        InnerTrueBlock = fun() -> error(should_not_evaluate) end,
-        InnerFalseBlock = fun() -> 2 end,
-        beamtalk_if_true_if_false(false, InnerTrueBlock, InnerFalseBlock)
-    end,
-    Result = beamtalk_if_true(true, OuterBlock),
-    ?assertEqual(2, Result).
-
-%% Test chained logical operations: true and: [true] and: [false] => false
-chained_and_operations_test() ->
-    FirstBlock = fun() -> true end,
-    SecondBlock = fun() -> false end,
-    FirstResult = beamtalk_and(true, FirstBlock),
-    ?assertEqual(true, FirstResult),
-    Result = beamtalk_and(FirstResult, SecondBlock),
-    ?assertEqual(false, Result).
-
-%% Test chained logical operations: false or: [false] or: [true] => true
-chained_or_operations_test() ->
-    FirstBlock = fun() -> false end,
-    SecondBlock = fun() -> true end,
-    FirstResult = beamtalk_or(false, FirstBlock),
-    ?assertEqual(false, FirstResult),
-    Result = beamtalk_or(FirstResult, SecondBlock),
-    ?assertEqual(true, Result).
+%%% Deleting the Erlang re-implementation here removes the drift risk the
+%%% disposition rule flags: the hand-rolled clauses could silently diverge
+%%% from True.bt/False.bt's actual dispatch without either test file
+%%% failing.
 
 %%% ===========================================================================
 %%% Block Closure Tests - Captures from outer scope
@@ -1109,245 +1012,206 @@ chained_block_evaluation_test() ->
     ?assertEqual(30, Result).
 
 %%% ===========================================================================
-%%% Cascade Message Send Tests (BT-133)
+%%% Cascade Message Send Tests (BT-133) — MIGRATED (BT-3093)
 %%% ===========================================================================
+%%%
+%%% Migrated off counter_module_state/raw start_link onto the real compiled
+%%% 'bt@counter' module (tests/repl-protocol/fixtures/counter.bt).
 
 %% Test: Cascade - multiple messages to same actor
 %% Simulates: counter increment; increment; getValue
 cascade_multiple_messages_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@counter':spawn(),
+    Pid = element(4, Object),
 
     %% Send cascade of messages to same actor
     gen_server:call(Pid, {increment, []}),
     gen_server:call(Pid, {increment, []}),
     Result = gen_server:call(Pid, {getValue, []}),
 
-    ?assertEqual(2, Result),
+    ?assertEqual({ok, 2}, Result),
     gen_server:stop(Pid).
 
 %% Test: Cascade with mixed message types
 %% Simulates: counter increment; getValue; increment
 cascade_mixed_operations_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@counter':spawn(),
+    Pid = element(4, Object),
 
     gen_server:call(Pid, {increment, []}),
     Value1 = gen_server:call(Pid, {getValue, []}),
     gen_server:call(Pid, {increment, []}),
     Value2 = gen_server:call(Pid, {getValue, []}),
 
-    ?assertEqual(1, Value1),
-    ?assertEqual(2, Value2),
+    ?assertEqual({ok, 1}, Value1),
+    ?assertEqual({ok, 2}, Value2),
     gen_server:stop(Pid).
 
 %% Test: Cascade returns last message result
 %% Simulates: counter increment; increment; increment
 cascade_returns_last_result_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@counter':spawn(),
+    Pid = element(4, Object),
 
     gen_server:call(Pid, {increment, []}),
     gen_server:call(Pid, {increment, []}),
     LastResult = gen_server:call(Pid, {increment, []}),
 
-    ?assertEqual(3, LastResult),
+    ?assertEqual({ok, 3}, LastResult),
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Multi-Keyword Message Tests (BT-133)
+%%% Multi-Keyword Message Tests (BT-133) — MIGRATED (BT-3093)
 %%% ===========================================================================
-
-%% Test fixture for multi-keyword messages
-%% Simulates: Rectangle width:height: method
--spec rectangle_module_state(InitArgs :: map()) -> map().
-rectangle_module_state(InitArgs) ->
-    DefaultState = #{
-        '$beamtalk_class' => 'Rectangle',
-        '__methods__' => #{
-            'width:height:' => fun rectangle_width_height/2,
-            area => fun rectangle_area/2
-        },
-        width => 0,
-        height => 0
-    },
-    maps:merge(DefaultState, InitArgs).
-
-rectangle_width_height([W, H], State) ->
-    NewState = maps:put(width, W, maps:put(height, H, State)),
-    {reply, self, NewState}.
-
-rectangle_area([], State) ->
-    W = maps:get(width, State),
-    H = maps:get(height, State),
-    {reply, W * H, State}.
+%%%
+%%% Migrated the hand-simulated rectangle_module_state/box_module_state
+%%% fixtures onto real compiled dispatch: rectangle_actor.bt exercises a
+%%% two-keyword message (width:height:), box_actor.bt a three-keyword
+%%% message (width:height:depth:) — both compiled by
+%%% runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript.
 
 %% Test: Multi-keyword message with two arguments
 %% Simulates: rect width: 5 height: 3
 multi_keyword_two_args_test() ->
-    InitArgs = #{},
-    State = rectangle_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@rectangle_actor':spawn(),
+    Pid = element(4, Object),
 
     gen_server:call(Pid, {'width:height:', [5, 3]}),
     Area = gen_server:call(Pid, {area, []}),
 
-    ?assertEqual(15, Area),
+    ?assertEqual({ok, 15}, Area),
     gen_server:stop(Pid).
-
-%% Test fixture for three-keyword messages
-%% Simulates: Box width:height:depth: method
--spec box_module_state(InitArgs :: map()) -> map().
-box_module_state(InitArgs) ->
-    DefaultState = #{
-        '$beamtalk_class' => 'Box',
-        '__methods__' => #{
-            'width:height:depth:' => fun box_width_height_depth/2,
-            volume => fun box_volume/2
-        },
-        width => 0,
-        height => 0,
-        depth => 0
-    },
-    maps:merge(DefaultState, InitArgs).
-
-box_width_height_depth([W, H, D], State) ->
-    NewState = maps:put(width, W, maps:put(height, H, maps:put(depth, D, State))),
-    {reply, self, NewState}.
-
-box_volume([], State) ->
-    W = maps:get(width, State),
-    H = maps:get(height, State),
-    D = maps:get(depth, State),
-    {reply, W * H * D, State}.
 
 %% Test: Multi-keyword message with three arguments
 %% Simulates: box width: 2 height: 3 depth: 4
 multi_keyword_three_args_test() ->
-    InitArgs = #{},
-    State = box_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@box_actor':spawn(),
+    Pid = element(4, Object),
 
     gen_server:call(Pid, {'width:height:depth:', [2, 3, 4]}),
     Volume = gen_server:call(Pid, {volume, []}),
 
-    ?assertEqual(24, Volume),
+    ?assertEqual({ok, 24}, Volume),
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Actor Interaction Patterns (BT-133)
+%%% Actor Interaction Patterns (BT-133) — MIGRATED (BT-3093)
 %%% ===========================================================================
-
-%% Test fixture: Spawner that creates another actor
--spec spawner_module_state(InitArgs :: map()) -> map().
-spawner_module_state(InitArgs) ->
-    DefaultState = #{
-        '$beamtalk_class' => 'Spawner',
-        '__methods__' => #{
-            spawnCounter => fun spawner_spawn_counter/2,
-            lastPid => fun spawner_last_pid/2
-        },
-        lastPid => nil
-    },
-    maps:merge(DefaultState, InitArgs).
-
-spawner_spawn_counter([], State) ->
-    %% Spawn a counter actor
-    CounterState = counter_module_state(#{}),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, CounterState, []),
-    NewState = maps:put(lastPid, Pid, State),
-    {reply, Pid, NewState}.
-
-spawner_last_pid([], State) ->
-    %% Return the last spawned PID, or nil if none
-    Pid = maps:get(lastPid, State, nil),
-    {reply, Pid, State}.
+%%%
+%%% Migrated the hand-simulated spawner_module_state fixture (and its raw
+%%% counter_module_state siblings) onto real compiled dispatch:
+%%% spawner_actor.bt's spawnChild method spawns an ArithmeticActor
+%%% (arithmetic_actor.bt) from within a compiled method body — proving
+%%% actor-to-actor `ClassName spawn` against real codegen.
 
 %% Test: Actor A spawns Actor B
 actor_spawns_another_actor_test() ->
-    InitArgs = #{},
-    SpawnerState = spawner_module_state(InitArgs),
-    {ok, Spawner} = gen_server:start_link(beamtalk_actor, SpawnerState, []),
+    Object = 'bt@spawner_actor':spawn(),
+    Spawner = element(4, Object),
 
     try
-        %% Spawner creates a Counter
-        CounterPid = gen_server:call(Spawner, {spawnCounter, []}),
-        ?assert(is_pid(CounterPid)),
+        %% Spawner creates an ArithmeticActor; spawnChild returns the
+        %% #beamtalk_object{} spawn() produces, same as any other spawn call.
+        {ok, ChildObject} = gen_server:call(Spawner, {spawnChild, []}),
+        ?assertMatch({beamtalk_object, 'ArithmeticActor', 'bt@arithmetic_actor', _}, ChildObject),
+        ChildPid = element(4, ChildObject),
+        ?assert(is_pid(ChildPid)),
 
-        %% Verify counter works
-        gen_server:call(CounterPid, {increment, []}),
-        Value = gen_server:call(CounterPid, {getValue, []}),
-        ?assertEqual(1, Value),
+        %% Verify the child actor works
+        gen_server:call(ChildPid, {increment, []}),
+        Value = gen_server:call(ChildPid, {getValue, []}),
+        ?assertEqual({ok, 1}, Value),
 
-        gen_server:stop(CounterPid)
+        gen_server:stop(ChildPid)
     after
         gen_server:stop(Spawner)
     end.
 
 %% Test: Actors communicating via messages
 actors_communicate_test() ->
-    %% Create two counters
-    State1 = counter_module_state(#{}),
-    State2 = counter_module_state(#{}),
-    {ok, Counter1} = gen_server:start_link(beamtalk_actor, State1, []),
-    {ok, Counter2} = gen_server:start_link(beamtalk_actor, State2, []),
+    %% Create two actors
+    Object1 = 'bt@arithmetic_actor':spawn(),
+    Object2 = 'bt@arithmetic_actor':spawn(),
+    Actor1 = element(4, Object1),
+    Actor2 = element(4, Object2),
 
     try
-        %% Increment counter1 twice
-        gen_server:call(Counter1, {increment, []}),
-        gen_server:call(Counter1, {increment, []}),
+        %% Increment actor1 twice
+        gen_server:call(Actor1, {increment, []}),
+        gen_server:call(Actor1, {increment, []}),
 
-        %% Get value from counter1 and set it in counter2 (simulated)
-        Value1 = gen_server:call(Counter1, {getValue, []}),
+        %% Get value from actor1 and set it in actor2 (simulated)
+        {ok, Value1} = gen_server:call(Actor1, {getValue, []}),
 
-        %% Increment counter2 that many times
-        [gen_server:call(Counter2, {increment, []}) || _ <- lists:seq(1, Value1)],
+        %% Increment actor2 that many times
+        [gen_server:call(Actor2, {increment, []}) || _ <- lists:seq(1, Value1)],
 
-        Value2 = gen_server:call(Counter2, {getValue, []}),
+        {ok, Value2} = gen_server:call(Actor2, {getValue, []}),
         ?assertEqual(Value1, Value2)
     after
-        gen_server:stop(Counter1),
-        gen_server:stop(Counter2)
+        gen_server:stop(Actor1),
+        gen_server:stop(Actor2)
     end.
 
 %% Test: Actor chain - A spawns B, B spawns C
 actor_spawn_chain_test() ->
-    SpawnerState = spawner_module_state(#{}),
-    {ok, Spawner1} = gen_server:start_link(beamtalk_actor, SpawnerState, []),
+    Object1 = 'bt@spawner_actor':spawn(),
+    Spawner1 = element(4, Object1),
 
-    %% Spawner1 creates Spawner2
-    Spawner2State = spawner_module_state(#{}),
-    {ok, Spawner2} = gen_server:start_link(beamtalk_actor, Spawner2State, []),
+    %% Spawner1's sibling Spawner2 creates the child actor
+    Object2 = 'bt@spawner_actor':spawn(),
+    Spawner2 = element(4, Object2),
 
     try
-        %% Spawner2 creates Counter
-        CounterPid = gen_server:call(Spawner2, {spawnCounter, []}),
+        %% Spawner2 creates a child ArithmeticActor
+        {ok, ChildObject} = gen_server:call(Spawner2, {spawnChild, []}),
+        ChildPid = element(4, ChildObject),
 
-        %% Use the counter
-        gen_server:call(CounterPid, {increment, []}),
-        gen_server:call(CounterPid, {increment, []}),
-        Value = gen_server:call(CounterPid, {getValue, []}),
+        %% Use the child actor
+        gen_server:call(ChildPid, {increment, []}),
+        gen_server:call(ChildPid, {increment, []}),
+        Value = gen_server:call(ChildPid, {getValue, []}),
 
-        ?assertEqual(2, Value),
+        ?assertEqual({ok, 2}, Value),
 
-        gen_server:stop(CounterPid)
+        gen_server:stop(ChildPid)
     after
         gen_server:stop(Spawner2),
         gen_server:stop(Spawner1)
     end.
 
 %%% ===========================================================================
-%%% Error Handling Tests (BT-133)
+%%% Error Handling Tests (BT-133) — MIGRATED (BT-3093)
 %%% ===========================================================================
+%%%
+%%% Migrated off counter_module_state onto real compiled dispatch
+%%% ('bt@counter' / 'bt@arithmetic_actor'). Doing so surfaced real drift in
+%%% the hand-simulated protocol this section used to assert: the fictional
+%%% `counter_divide/2` returned bare `{error, division_by_zero}` /
+%%% `#beamtalk_error{kind = type_error}` shapes that don't match what real
+%%% codegen produces. The corrected assertions below were captured by
+%%% spawning 'bt@arithmetic_actor' directly and observing
+%%% `beamtalk_actor:safe_dispatch/3`'s actual catch shape (matches the
+%%% already-migrated extension_error_propagation_test's
+%%% `{error, {error, Reason, Stacktrace}}` pattern) and the generated
+%%% dispatch/4 arity-mismatch clause (`{'reply', {'error', 'bad_arity'},
+%%% State}`, see crates/beamtalk-core/src/codegen/core_erlang/gen_server/
+%%% dispatch.rs and methods.rs).
 
 %% Test: Method not found error
+%%
+%% BT-3093: the DNU fallback for a real compiled actor walks the class
+%% hierarchy (beamtalk_dispatch:super/5) up to 'Actor', which is registered
+%% asynchronously by beamtalk_stdlib's background class loader at
+%% application startup. Earlier tests in this suite never happen to need
+%% that walk (they only call methods the compiled module handles directly),
+%% so this is the first point 'Actor' must actually be present —
+%% wait_for_class/2 makes that a deterministic precondition instead of an
+%% incidental side effect of how many slower tests ran first.
 method_not_found_error_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    wait_for_class('Actor', 5000),
+    Object = 'bt@counter':spawn(),
+    Pid = element(4, Object),
 
     %% Try to call non-existent method
     Result = gen_server:call(Pid, {nonExistentMethod, []}),
@@ -1365,133 +1229,111 @@ method_not_found_error_test() ->
     gen_server:stop(Pid).
 
 %% Test: Division by zero error
+%% BT-3093: real division by zero raises a raw `badarith` inside the
+%% compiled method body, caught by safe_dispatch/3's generic try/catch
+%% (crates/beamtalk-core/src/codegen/core_erlang/gen_server/dispatch.rs
+%% generate_safe_dispatch: `catch <Type, Error, Stacktrace> -> {'error',
+%% {Type, Error, Stacktrace}, State}`) — not the bare `division_by_zero`
+%% atom the old hand-simulated counter_divide/2 fabricated.
 division_by_zero_error_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@arithmetic_actor':spawn(),
+    Pid = element(4, Object),
 
     %% Try to divide by zero
     Result = gen_server:call(Pid, {'divide:', [0]}),
 
-    %% Should get division_by_zero error
-    ?assertMatch({error, division_by_zero}, Result),
+    ?assertMatch({error, {error, badarith, _Stacktrace}}, Result),
 
     gen_server:stop(Pid).
 
 %% Test: Wrong number of arguments error
+%% BT-3093: real generated dispatch matches a known selector against a
+%% fixed-arity Args pattern and falls through to an explicit bad_arity
+%% reply clause on a mismatch — it's a normal (successful) call reply
+%% carrying an error value, not a raised #beamtalk_error{} exception as the
+%% old hand-simulated version (which relied on Erlang function-clause
+%% matching, an implementation detail the real compiler doesn't share).
 wrong_arg_count_error_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@arithmetic_actor':spawn(),
+    Pid = element(4, Object),
 
     %% divide: expects 1 arg, give it 2
     Result = gen_server:call(Pid, {'divide:', [5, 10]}),
 
-    %% Should get a type_error (method threw exception due to wrong arity)
-    ?assertMatch(
-        {error, #beamtalk_error{
-            kind = type_error,
-            class = 'Counter',
-            selector = 'divide:'
-        }},
-        Result
-    ),
+    ?assertEqual({ok, {error, bad_arity}}, Result),
 
     gen_server:stop(Pid).
 
 %% Test: Actor crash and recovery simulation
 actor_crash_simulation_test() ->
-    %% Create a counter
-    State = counter_module_state(#{}),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    %% Create an actor
+    Object = 'bt@arithmetic_actor':spawn(),
+    Pid = element(4, Object),
 
     %% Use it normally
     gen_server:call(Pid, {increment, []}),
     Value1 = gen_server:call(Pid, {getValue, []}),
-    ?assertEqual(1, Value1),
+    ?assertEqual({ok, 1}, Value1),
 
     %% Simulate crash by stopping it
     gen_server:stop(Pid),
 
-    %% Create a new one (simulates restart)
-    {ok, NewPid} = gen_server:start_link(beamtalk_actor, State, []),
+    %% Create a new one (simulates restart) with fresh default state
+    NewObject = 'bt@arithmetic_actor':spawn(),
+    NewPid = element(4, NewObject),
     Value2 = gen_server:call(NewPid, {getValue, []}),
 
     %% New actor has fresh state
-    ?assertEqual(0, Value2),
+    ?assertEqual({ok, 0}, Value2),
 
     gen_server:stop(NewPid).
 
 %%% ===========================================================================
-%%% Instance Variable Access Patterns (BT-133)
+%%% Instance Variable Access Patterns (BT-133) — MIGRATED (BT-3093)
 %%% ===========================================================================
+%%%
+%%% Migrated the hand-simulated ModuleState maps onto real compiled
+%%% dispatch: shadow_actor.bt (parameter name shadows an instance variable)
+%%% and coordinate_actor.bt (multiple instance variables mutated by one
+%%% keyword message), both compiled by
+%%% runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript.
 
 %% Test: Instance variable shadowing
 %% When a method param has same name as instance var, param takes precedence
 instance_var_shadowing_test() ->
-    %% Module with 'value' instance var and method that takes 'value' param
-    ModuleState = #{
-        '$beamtalk_class' => 'ShadowTest',
-        '__methods__' => #{
-            getInstanceValue => fun([], State) ->
-                {reply, maps:get(value, State), State}
-            end,
-            echoParam => fun([Value], State) ->
-                %% Param 'Value' shadows instance var 'value'
-                {reply, Value, State}
-            end
-        },
-        value => 42
-    },
-
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, ModuleState, []),
+    Object = 'bt@shadow_actor':spawn(),
+    Pid = element(4, Object),
 
     %% Instance var value is 42
     InstanceValue = gen_server:call(Pid, {getInstanceValue, []}),
-    ?assertEqual(42, InstanceValue),
+    ?assertEqual({ok, 42}, InstanceValue),
 
     %% But param value is independent
-    ParamValue = gen_server:call(Pid, {echoParam, [99]}),
-    ?assertEqual(99, ParamValue),
+    ParamValue = gen_server:call(Pid, {'echoParam:', [99]}),
+    ?assertEqual({ok, 99}, ParamValue),
 
     %% Instance var unchanged
     StillInstanceValue = gen_server:call(Pid, {getInstanceValue, []}),
-    ?assertEqual(42, StillInstanceValue),
+    ?assertEqual({ok, 42}, StillInstanceValue),
 
     gen_server:stop(Pid).
 
 %% Test: Multiple instance variables
 multiple_instance_vars_test() ->
-    ModuleState = #{
-        '$beamtalk_class' => 'Point',
-        '__methods__' => #{
-            'setX:Y:' => fun([X, Y], State) ->
-                NewState = maps:put(x, X, maps:put(y, Y, State)),
-                {reply, ok, NewState}
-            end,
-            sumCoordinates => fun([], State) ->
-                X = maps:get(x, State),
-                Y = maps:get(y, State),
-                {reply, X + Y, State}
-            end
-        },
-        x => 0,
-        y => 0
-    },
+    Object = 'bt@coordinate_actor':spawn(),
+    Pid = element(4, Object),
 
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, ModuleState, []),
-
-    gen_server:call(Pid, {'setX:Y:', [10, 20]}),
+    gen_server:call(Pid, {'setX:y:', [10, 20]}),
     Sum = gen_server:call(Pid, {sumCoordinates, []}),
 
-    ?assertEqual(30, Sum),
+    ?assertEqual({ok, 30}, Sum),
 
     gen_server:stop(Pid).
 
 %% Test: Instance variable persistence across method calls
 instance_var_persistence_test() ->
-    State = counter_module_state(#{}),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@arithmetic_actor':spawn(),
+    Pid = element(4, Object),
 
     %% Increment modifies instance var
     gen_server:call(Pid, {increment, []}),
@@ -1499,14 +1341,14 @@ instance_var_persistence_test() ->
 
     %% Value persists
     Value = gen_server:call(Pid, {getValue, []}),
-    ?assertEqual(2, Value),
+    ?assertEqual({ok, 2}, Value),
 
     %% Increment again
     gen_server:call(Pid, {increment, []}),
 
     %% Still persists
     NewValue = gen_server:call(Pid, {getValue, []}),
-    ?assertEqual(3, NewValue),
+    ?assertEqual({ok, 3}, NewValue),
 
     gen_server:stop(Pid).
 
@@ -1516,17 +1358,19 @@ instance_var_persistence_test() ->
 
 %% Test: Nested unary messages
 %% Simulates: counter getValue getValue (if getValue returned an object)
+%% BT-3093: migrated off counter_module_state onto the real compiled
+%% 'bt@counter' module.
 nested_message_sends_simulation_test() ->
     %% This simulates the pattern, not actual nesting since getValue returns int
-    State = counter_module_state(#{}),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = 'bt@counter':spawn(),
+    Pid = element(4, Object),
 
     gen_server:call(Pid, {increment, []}),
     Value = gen_server:call(Pid, {getValue, []}),
 
     %% If we had an object wrapper, we'd send another message
     %% For now, just verify the value is what we expect
-    ?assertEqual(1, Value),
+    ?assertEqual({ok, 1}, Value),
 
     gen_server:stop(Pid).
 
@@ -1605,6 +1449,31 @@ setup_super_test_classes() ->
         _ -> ok
     end,
     ok.
+
+%% BT-3093: block until ClassName is registered in the class registry, or
+%% raise if TimeoutMs elapses first. beamtalk_stdlib registers stdlib
+%% classes (including 'Actor') asynchronously in the background at
+%% application startup, so tests whose real-codegen DNU path needs a
+%% hierarchy walk up to 'Actor' can otherwise run before it's ready.
+-spec wait_for_class(atom(), non_neg_integer()) -> ok.
+wait_for_class(ClassName, TimeoutMs) ->
+    application:ensure_all_started(beamtalk_runtime),
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    wait_for_class_loop(ClassName, Deadline).
+
+wait_for_class_loop(ClassName, Deadline) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true ->
+                    error({class_not_registered, ClassName});
+                false ->
+                    timer:sleep(10),
+                    wait_for_class_loop(ClassName, Deadline)
+            end;
+        _Pid ->
+            ok
+    end.
 
 %% ==========================================================================
 %% Super Keyword Tests (BT-108, BT-211)
@@ -1797,7 +1666,11 @@ extension_coexists_with_regular_methods_test() ->
     end.
 
 %% Test: Unregistered extension falls through to DNU error
+%% BT-3093: see method_not_found_error_test's comment — the DNU fallback
+%% walks the class hierarchy up to 'Actor', so wait for it deterministically
+%% rather than relying on enough earlier tests having run first.
 unregistered_extension_gives_dnu_test() ->
+    wait_for_class('Actor', 5000),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try

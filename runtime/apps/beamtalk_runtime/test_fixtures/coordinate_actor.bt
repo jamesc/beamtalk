@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// CoordinateActor - multiple instance variables mutated by a single
+// two-keyword message, verified against real compiled dispatch (BT-3093
+// migration of the hand-simulated ModuleState fixture in
+// beamtalk_codegen_simulation_tests.erl's multiple_instance_vars_test).
+
+Actor subclass: CoordinateActor
+  state: x = 0
+  state: y = 0
+
+  setX: newX y: newY =>
+    self.x := newX
+    self.y := newY
+
+  sumCoordinates => self.x + self.y

@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// RectangleActor - exercises a two-keyword message (width:height:) against
+// real compiled dispatch (BT-3093 migration of the hand-simulated
+// rectangle_module_state fixture in beamtalk_codegen_simulation_tests.erl).
+
+Actor subclass: RectangleActor
+  state: width = 0
+  state: height = 0
+
+  width: w height: h =>
+    self.width := w
+    self.height := h
+
+  area => self.width * self.height
