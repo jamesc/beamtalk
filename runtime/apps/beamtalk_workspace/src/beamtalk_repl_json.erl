@@ -261,7 +261,10 @@ term_to_json(Value) when is_integer(Value); is_boolean(Value) ->
 term_to_json(Value) when is_float(Value) ->
     %% BT-1336: Convert floats to explicit decimal strings so JSX cannot
     %% strip the ".0" from whole-number floats (e.g. 6.0 → "6").
-    format_float(Value);
+    %% BT-3082: beamtalk_primitive:print_string/1 is the single canonical
+    %% float renderer, shared with format_result/1 — this used to carry its
+    %% own separate `~p` + ".0"-append copy.
+    beamtalk_runtime_api:print_string(Value);
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json(Value) when is_binary(Value) ->
@@ -286,32 +289,15 @@ term_to_json({beamtalk_future, Pid}) when is_pid(Pid) ->
     %% BT-840: Tagged future — display based on the underlying process state.
     term_to_json_future_pid(Pid);
 term_to_json(Value) when is_pid(Value) ->
-    case is_process_alive(Value) of
-        true ->
-            case process_info(Value, current_function) of
-                {current_function, {beamtalk_future, pending, _}} ->
-                    iolist_to_binary(<<"#Future<pending>">>);
-                {current_function, {beamtalk_future, resolved, _}} ->
-                    iolist_to_binary(<<"#Future<resolved>">>);
-                {current_function, {beamtalk_future, rejected, _}} ->
-                    iolist_to_binary(<<"#Future<rejected>">>);
-                undefined ->
-                    PidStr = pid_to_list(Value),
-                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-                    iolist_to_binary([<<"#Dead<">>, Inner, <<">">>]);
-                _ ->
-                    PidStr = pid_to_list(Value),
-                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-                    iolist_to_binary([<<"#Actor<">>, Inner, <<">">>])
-            end;
-        false ->
-            PidStr = pid_to_list(Value),
-            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-            iolist_to_binary([<<"#Dead<">>, Inner, <<">">>])
-    end;
+    %% BT-3082: beamtalk_primitive:pid_label/1 is the single canonical
+    %% liveness-probed pid renderer, shared with format_result/1 — this used
+    %% to carry its own separate copy of the same Actor/Dead/Future logic.
+    beamtalk_runtime_api:pid_label(Value);
 term_to_json(Value) when is_function(Value) ->
-    {arity, Arity} = erlang:fun_info(Value, arity),
-    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
+    %% BT-3082: beamtalk_primitive:block_label/1 is the single canonical
+    %% `Block/N` renderer, shared with format_result/1 — this used to carry
+    %% its own separate copy of the same erlang:fun_info/2 + format logic.
+    beamtalk_runtime_api:block_label(Value);
 term_to_json(Value) when is_map(Value) ->
     %% For tagged value objects (user-defined classes), dispatch Beamtalk printString
     %% so that class overrides (e.g. TestResult) are used. Untagged maps fall back
@@ -473,18 +459,6 @@ format_error_message(Reason) ->
     beamtalk_error:format(Enriched).
 
 %%% Internal Helpers
-
--doc """
-Format a float as a binary string, ensuring a decimal point is always present.
-BT-1336: Uses ~p for clean representation, then appends ".0" if ~p omits the decimal.
-""".
--spec format_float(float()) -> binary().
-format_float(Value) ->
-    Bin = iolist_to_binary(io_lib:format("~p", [Value])),
-    case binary:match(Bin, <<".">>) of
-        nomatch -> <<Bin/binary, ".0">>;
-        _ -> Bin
-    end.
 
 -doc "Format a rejection reason for display in #Future<rejected: ...>.".
 -spec format_rejection_reason(term()) -> binary().
