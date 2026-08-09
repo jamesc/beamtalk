@@ -148,6 +148,57 @@ pub fn apply_return_type_writeback_from_map(
     }
 }
 
+/// Undoes a prior [`apply_return_type_writeback_from_map`] call for exactly
+/// the methods present in `written_by`, resetting their `return_type` back
+/// to `None`.
+///
+/// BT-3125: codegen's "untrusted hand-off" fallback (`generate_module_with_warnings`)
+/// re-infers return types against a fuller, cross-file-enriched hierarchy when a
+/// driver's own `lower_module_for_codegen` call (against a narrower hierarchy) may be
+/// stale. But by the time that fallback runs, the driver has *already* written the
+/// narrower inference's answers into `module` — and both `infer_method_return_types`
+/// (via `resolve_self_delegate_return_type`, which trusts an already-populated
+/// `return_type` as a declared annotation) and `apply_return_type_writeback_from_map`
+/// only ever touch a method whose `return_type` is still `None`, to protect genuine
+/// user annotations. Left alone, every method the narrower pass already answered would
+/// silently keep that stale answer instead of being refreshed.
+///
+/// `written_by` must be the exact map the driver's own writeback used (i.e.
+/// [`AnalysisResult::method_return_types`](crate::semantic_analysis::AnalysisResult::method_return_types)) —
+/// every key in it was, by construction, written by inference rather than a user, so
+/// clearing exactly those keys can never discard a real declared annotation.
+#[allow(clippy::implicit_hasher)] // concrete HashMap (matches AnalysisResult::method_return_types) is simpler for callers
+pub fn clear_return_type_writeback_for_keys(
+    module: &mut Module,
+    written_by: &HashMap<MethodReturnKey, InferredType>,
+) {
+    for class in &mut module.classes {
+        for method in &mut class.methods {
+            let key = (class.name.name.clone(), method.selector.name(), false);
+            if written_by.contains_key(&key) {
+                method.return_type = None;
+            }
+        }
+        for method in &mut class.class_methods {
+            let key = (class.name.name.clone(), method.selector.name(), true);
+            if written_by.contains_key(&key) {
+                method.return_type = None;
+            }
+        }
+    }
+
+    for standalone in &mut module.method_definitions {
+        let key = (
+            standalone.class_name.name.clone(),
+            standalone.method.selector.name(),
+            standalone.is_class_method,
+        );
+        if written_by.contains_key(&key) {
+            standalone.method.return_type = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

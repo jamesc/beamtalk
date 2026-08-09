@@ -653,20 +653,25 @@ pub fn generate_module_with_warnings(
     // eliminating a second full type-checking pass per compiled module. `None`
     // preserves the previous self-sufficient behaviour for callers that don't
     // run analysis separately (unit tests, ad-hoc codegen).
-    let (mut hierarchy, analysis_handed_off) = if let Some(analysis) = options.analysis {
-        generator.semantic_facts = analysis.semantic_facts;
-        (analysis.class_hierarchy, true)
-    } else {
-        // BT-1288: Compute semantic facts before codegen begins.
-        generator.semantic_facts = crate::semantic_analysis::compute_semantic_facts(module);
+    let (mut hierarchy, analysis_handed_off, driver_method_return_types) =
+        if let Some(analysis) = options.analysis {
+            generator.semantic_facts = analysis.semantic_facts;
+            (
+                analysis.class_hierarchy,
+                true,
+                Some(analysis.method_return_types),
+            )
+        } else {
+            // BT-1288: Compute semantic facts before codegen begins.
+            generator.semantic_facts = crate::semantic_analysis::compute_semantic_facts(module);
 
-        // Build hierarchy once for the entire generation (ADR 0006)
-        let (hierarchy_result, _) =
-            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
-        let hierarchy =
-            hierarchy_result.map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
-        (hierarchy, false)
-    };
+            // Build hierarchy once for the entire generation (ADR 0006)
+            let (hierarchy_result, _) =
+                crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
+            let hierarchy = hierarchy_result
+                .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
+            (hierarchy, false, None)
+        };
 
     // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
     // so that add_external_superclasses (which uses contains_key before inserting)
@@ -704,12 +709,31 @@ pub fn generate_module_with_warnings(
     let module: &Module = if analysis_handed_off && !added_beam_meta && !added_superclasses {
         module
     } else {
+        module_owned = module.clone();
+        // A driver that handed off `AnalysisResult` already wrote its
+        // (narrower-hierarchy) inference into `module_owned` before we got
+        // here — but `added_beam_meta`/`added_superclasses` just proved that
+        // hand-off stale. Undo exactly those driver-written entries before
+        // re-inferring: both `infer_method_return_types` (via
+        // `resolve_self_delegate_return_type`, which trusts an
+        // already-populated `return_type` as a declared annotation) and
+        // `apply_return_type_writeback_from_map` only fill in a `None`
+        // `return_type`, so without this the "fuller hierarchy" recompute
+        // below would silently be a no-op for every method the driver's
+        // pass already answered. `written_by` only ever contains
+        // inference-derived keys, so this can never clear a genuine user
+        // annotation (see `clear_return_type_writeback_for_keys`'s doc).
+        if let Some(written_by) = &driver_method_return_types {
+            crate::semantic_analysis::clear_return_type_writeback_for_keys(
+                &mut module_owned,
+                written_by,
+            );
+        }
         let method_return_types = crate::semantic_analysis::type_checker::infer_method_return_types(
-            module,
+            &module_owned,
             &hierarchy,
             options.native_type_registry.as_deref(),
         );
-        module_owned = module.clone();
         crate::semantic_analysis::lower_module_for_codegen(
             &mut module_owned,
             &hierarchy,

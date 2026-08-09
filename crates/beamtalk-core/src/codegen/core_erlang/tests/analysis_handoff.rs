@@ -22,7 +22,7 @@
 
 use crate::semantic_analysis::class_hierarchy::BUILD_CALL_COUNT;
 use crate::semantic_analysis::facts::COMPUTE_SEMANTIC_FACTS_CALL_COUNT;
-use crate::semantic_analysis::type_checker::CHECK_MODULE_CALL_COUNT;
+use crate::semantic_analysis::type_checker::{CHECK_MODULE_CALL_COUNT, InferredType};
 use crate::semantic_analysis::{AnalysisContext, analyse_full, lower_module_for_codegen};
 
 fn parse_fixture(src: &str) -> crate::ast::Module {
@@ -280,5 +280,76 @@ fn with_analysis_without_driver_prep_omits_writeback() {
         !code.contains("{'type', 0, 'integer', []}"),
         "expected no writeback-derived spec without a prior \
          `lower_module_for_codegen` call; got:\n{code}"
+    );
+}
+
+/// BT-3125 (post-review fix): when codegen's own cross-file enrichment
+/// (`add_from_beam_meta`/`add_external_superclasses`) invalidates a driver's
+/// hand-off, the "fuller hierarchy" recompute must actually *overwrite* a
+/// stale return type the driver's earlier (narrower) pass already wrote back
+/// — not silently keep it, because `infer_method_return_types`/
+/// `apply_return_type_writeback_from_map` both gate on `return_type.is_none()`
+/// (to protect real user annotations) and would otherwise treat the driver's
+/// own prior writeback output as already-settled.
+///
+/// Simulates staleness deterministically: after running real analysis (which
+/// correctly infers `bar => 42` as `Integer`), corrupt the driver's own
+/// `method_return_types` map to `String` before writing it back — exactly as
+/// if an earlier, less-informed pass had gotten it wrong — then hand the
+/// *same* (corrupted) map to codegen via `with_analysis`, together with a
+/// `with_class_hierarchy` stub codegen's own analysis never saw (forcing the
+/// fallback). The correct, freshly-reinferred `Integer` must win.
+#[test]
+fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
+    let mut module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
+    let mut analysis = analyse_full(&module, AnalysisContext::default());
+
+    let key: crate::semantic_analysis::type_checker::MethodReturnKey =
+        ("Foo".into(), "bar".into(), false);
+    assert_eq!(
+        analysis.method_return_types.get(&key),
+        Some(&InferredType::known("Integer")),
+        "test setup: real inference must actually infer Integer for `bar => 42`, \
+         or corrupting it to String below wouldn't prove anything"
+    );
+    analysis
+        .method_return_types
+        .insert(key, InferredType::known("String"));
+
+    // A real driver's own `lower_module_for_codegen` call, using the now-stale map.
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+    );
+    assert!(
+        matches!(
+            &module.classes[0].methods[0].return_type,
+            Some(crate::ast::TypeAnnotation::Simple(id)) if id.name == "String"
+        ),
+        "test setup: the module should carry the corrupted String writeback \
+         before codegen ever sees it; got:\n{:?}",
+        module.classes[0].methods[0].return_type
+    );
+
+    // A class stub codegen's own `add_from_beam_meta` hasn't seen before —
+    // this is what actually invalidates the driver's hand-off.
+    let unrelated_info = base_class_info("Unrelated", "Object");
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("foo")
+            .with_class_hierarchy(vec![unrelated_info])
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("{'type', 0, 'integer', []}"),
+        "expected the fallback recompute to refresh the stale writeback with \
+         the correct Integer answer; got:\n{code}"
+    );
+    assert!(
+        !code.contains("{'type', 0, 'binary', []}"),
+        "expected the stale String writeback to NOT survive into the \
+         generated spec; got:\n{code}"
     );
 }
