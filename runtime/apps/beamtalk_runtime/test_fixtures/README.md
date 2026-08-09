@@ -14,6 +14,12 @@ This directory contains Beamtalk source files compiled for use in runtime unit t
 runtime/apps/beamtalk_runtime/test_fixtures/
 ├── compile_fixtures.escript  # Compiles fixtures before tests (portable)
 ├── logging_counter.bt   # Super keyword test fixture
+├── arithmetic_actor.bt  # Counter-shaped actor + a real divide: method (BT-3093)
+├── rectangle_actor.bt   # Two-keyword message dispatch (BT-3093)
+├── box_actor.bt         # Three-keyword message dispatch (BT-3093)
+├── spawner_actor.bt     # Actor-spawns-actor from a compiled method (BT-3093)
+├── shadow_actor.bt      # Param name shadows an instance var (BT-3093)
+├── coordinate_actor.bt  # Multiple instance vars, one keyword message (BT-3093)
 └── README.md           # This file
 ```
 
@@ -33,8 +39,15 @@ escript ./runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
 
 The script:
 1. Compiles `tests/repl-protocol/fixtures/counter.bt` (unified fixture)
-2. Compiles `runtime/apps/beamtalk_runtime/test_fixtures/logging_counter.bt`
+2. Compiles each `.bt` file listed in `compile_fixtures.escript`'s
+   `LocalFixtures` list (currently `logging_counter`, `arithmetic_actor`,
+   `rectangle_actor`, `box_actor`, `spawner_actor`, `shadow_actor`,
+   `coordinate_actor`) to a module named `bt@<basename>`
 3. Copies resulting `.beam` files to `runtime/_build/*/test/`
+
+Add a new fixture by dropping a `<name>.bt` file in this directory and
+appending its basename to `LocalFixtures` in `compile_fixtures.escript` —
+no other wiring needed.
 
 ## Fixtures
 
@@ -77,6 +90,33 @@ Used by `beamtalk_codegen_simulation_tests.erl` super keyword tests to verify:
 - State is maintained correctly across super calls
 - Child can add new methods alongside overridden ones
 - Super works with unary, keyword, and property access
+
+### arithmetic_actor.bt, rectangle_actor.bt, box_actor.bt, spawner_actor.bt, shadow_actor.bt, coordinate_actor.bt (BT-3093)
+
+Added migrating `beamtalk_codegen_simulation_tests.erl` off hand-written
+"simulated compiler output" fixtures (state maps with a `'__methods__'` funs
+table claiming to mirror compiled Beamtalk) onto real compiled dispatch,
+per the Consistency-Test Disposition Rule
+(`docs/development/architecture-principles.md` § 7) and the BT-239
+precedent:
+
+- `arithmetic_actor.bt` — a Counter-shaped actor (`value`, `increment`,
+  `getValue`) plus a real `divide:` method, used for cascade/error-handling/
+  actor-interaction/instance-var-persistence tests that need a spawnable
+  actor beyond what the shared `counter.bt` exposes.
+- `rectangle_actor.bt` / `box_actor.bt` — two- and three-keyword message
+  dispatch (`width:height:`, `width:height:depth:`).
+- `spawner_actor.bt` — spawns an `ArithmeticActor` from inside a compiled
+  method body, proving actor-to-actor `ClassName spawn`.
+- `shadow_actor.bt` — a method parameter shares a name with an instance
+  variable, verifying the parameter shadows state.
+- `coordinate_actor.bt` — multiple instance variables mutated by one
+  two-keyword message.
+
+`beamtalk_codegen_simulation_tests.erl`'s module doc and the
+`counter_module_state/1` doc comment explain what stayed simulated and why
+(the async future-cast protocol tested there has no compiled `.bt` source
+construct that reaches it).
 
 ## References
 

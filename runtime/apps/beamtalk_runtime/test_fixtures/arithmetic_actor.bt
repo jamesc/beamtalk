@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ArithmeticActor - a Counter-shaped actor that also exposes a real
+// division method, for testing safe_dispatch error propagation on a
+// genuine runtime failure (BT-3093 migration of the hand-simulated
+// counter_module_state/counter_divide fixture in
+// beamtalk_codegen_simulation_tests.erl, which stood in for compiler
+// output rather than exercising it).
+
+Actor subclass: ArithmeticActor
+  state: value = 0
+
+  increment => self.value := self.value + 1
+
+  getValue => self.value
+
+  divide: n => self.value / n
