@@ -1,0 +1,436 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2502: Tests for the Inspector / InspectorField classes (ADR 0095 Phase 1).
+//
+// Covers value drill (#value structural traversal), actor snapshot (#actor lazy
+// guarded sys:get_state), the no_such_field error on `at:`, immutable
+// parent/root/path navigation, refresh re-snapshotting, and printString.
+//
+// Fixtures:
+//   fixtures/value_point.bt — Value subclass with x, y integer fields
+//   fixtures/counter.bt     — Actor subclass with a `value` integer field
+//   fixtures/inspect_pair.bt — Value subclass with left/right fields (nesting)
+
+TestCase subclass: InspectorTest
+  field: i = nil
+
+  setUp => self.i := Inspector on: (ValuePoint x: 3 y: 4)
+
+  // === InspectorField value record ===
+  testInspectorFieldAccessors =>
+    f := InspectorField
+      name: #x
+      label: "x"
+      value: 3
+      kind: #slot
+      drillable: true
+    self assert: f name equals: #x
+    self assert: f label equals: "x"
+    self assert: f value equals: 3
+    self assert: f kind equals: #slot
+    self assert: f drillable equals: true
+
+  testInspectorFieldIsLeafIsNegationOfDrillable =>
+    leaf := InspectorField
+      name: #n
+      label: "n"
+      value: 7
+      kind: #slot
+      drillable: false
+    self assert: leaf isLeaf equals: true
+    drillable := InspectorField
+      name: #n
+      label: "n"
+      value: 7
+      kind: #slot
+      drillable: true
+    self assert: drillable isLeaf equals: false
+
+  testInspectorFieldPrintStringShape =>
+    f := InspectorField
+      name: #x
+      label: "x"
+      value: 3
+      kind: #slot
+      drillable: false
+    self assert: (f printString startsWith: "#InspectorField<") equals: true
+    self assert: (f printString includesSubstring: "x: 3") equals: true
+
+  // === Construction: Inspector on: / inspect shorthand ===
+  testInspectorOnReturnsInspector =>
+    self assert: (self.i isKindOf: Inspector) equals: true
+
+  testValueKindClassifiedAsValue => self assert: self.i kind equals: #value
+
+  testActorKindClassifiedAsActor =>
+    c := Counter spawn
+    i := Inspector on: c
+    self assert: i kind equals: #actor
+
+  // === #value: structural field derivation (ADR 0094 sort order) ===
+  testValueFieldsAreSlots => self assert: self.i fields size equals: 2
+
+  testValueFieldsSortedByName =>
+    // ADR 0094 sort order: fields come back sorted by name (x before y).
+    names := self.i fields collect: [:f | f name]
+    self assert: names equals: #(#x, #y)
+
+  testValueFieldValuesMatch =>
+    xField := self.i fields detect: [:f | f name == #x]
+    self assert: xField value equals: 3
+
+  testScalarFieldIsNotDrillable =>
+    // An Integer slot value is a leaf — not drillable.
+    xField := self.i fields detect: [:f | f name == #x]
+    self assert: xField drillable equals: false
+
+  testNestedValueFieldIsDrillable =>
+    // A field holding another Value is drillable.
+    inner := ValuePoint x: 1 y: 2
+    pair := InspectPair new: #{#left => inner, #right => 42}
+    i := Inspector on: pair
+    leftField := i fields detect: [:f | f name == #left]
+    self assert: leftField drillable equals: true
+
+  // === Navigation: at: drills into a child cursor ===
+  testAtDrillsIntoChildValue =>
+    child := (self.i at: #x) unwrap
+    self assert: child subject equals: 3
+
+  testAtChildParentIsTheCursor =>
+    child := (self.i at: #x) unwrap
+    self assert: child parent kind equals: #value
+
+  testAtMissReturnsNoSuchField =>
+    result := self.i at: #nonesuch
+    self assert: result isError equals: true
+
+  testAtMissErrorKindIsNoSuchField =>
+    result := self.i at: #nonesuch
+    self assert: result error kind equals: #no_such_field
+
+  // === Immutable cursor: parent / root / path ===
+  testRootCursorParentIsNil => self assert: self.i parent equals: nil
+
+  testRootCursorPathIsEmpty => self assert: self.i path equals: #()
+
+  testChildPathExtendsByDrilledName =>
+    child := (self.i at: #x) unwrap
+    self assert: child path equals: #(#x)
+
+  testRootWalksBackToTop =>
+    child := (self.i at: #x) unwrap
+    self assert: child root kind equals: #value
+
+  testNavigationDoesNotMutateOriginalCursor =>
+    // Drilling returns a new cursor; the original is unchanged (immutable).
+    _ := (self.i at: #x) unwrap
+    self assert: self.i path equals: #()
+    self assert: self.i parent equals: nil
+
+  // === #actor: lazy guarded snapshot ===
+  testActorFieldsFromSnapshot =>
+    c := Counter spawn
+    c increment
+    c increment
+    i := Inspector on: c
+    valueField := i fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 2
+
+  testActorSnapshotIsFrozen =>
+    // The snapshot is captured at `on:`; later mutation is not seen until refresh.
+    c := Counter spawn
+    i := Inspector on: c
+    c increment
+    valueField := i fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 0
+
+  testRefreshReSnapshotsActor =>
+    c := Counter spawn
+    i := Inspector on: c
+    c increment
+    refreshed := i refresh
+    valueField := refreshed fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 1
+
+  testRefreshReturnsNewCursorOriginalUnchanged =>
+    c := Counter spawn
+    i := Inspector on: c
+    c increment
+    _ := i refresh
+    // Original cursor still shows the T0 snapshot.
+    valueField := i fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 0
+
+  // === Busy / dead actor degrades to #unavailable, never crashes ===
+  testDeadActorFieldsAreUnavailable =>
+    c := Counter spawn
+    c stop
+    // Inspecting a dead actor must not crash — it yields a single status field.
+    i := Inspector on: c
+    statusField := i fields detect: [:f | f name == #status]
+    self assert: statusField value equals: #unavailable
+
+  testDeadActorStatusFieldIsNotDrillable =>
+    c := Counter spawn
+    c stop
+    i := Inspector on: c
+    statusField := i fields detect: [:f | f name == #status]
+    self assert: statusField drillable equals: false
+
+  // === Rendering: printString depth-1 tree ===
+  testPrintStringHeaderNamesClass =>
+    self assert: (self.i printString includesSubstring: "Inspector(ValuePoint)") equals: true
+
+  testPrintStringIncludesImmediateFields =>
+    str := self.i printString
+    self assert: (str includesSubstring: "x: 3") equals: true
+    self assert: (str includesSubstring: "y: 4") equals: true
+
+  testPrintStringExpandedDepthAcceptsDepth =>
+    self assert: (self.i printStringExpanded: 1) equals: self.i printString
+
+  // === Cycle guard: pid-keyed seen-set with back-reference marker ===
+  testActorCycleEmitsBackReference =>
+    // A's state holds B, B's state holds A (a pid cycle). Expanding deeply must
+    // not recurse forever — the revisited actor pid yields a `↩ Actor(...)`
+    // back-reference marker instead (ADR 0095 Cycle handling).
+    a := CycleActorA spawn
+    b := CycleActorB spawn
+    a setPeer: b
+    b setPeer: a
+    str := (Inspector on: a) printStringExpanded: 5
+    self assert: (str includesSubstring: "↩ Actor") equals: true
+
+  testActorCycleRenderTerminates =>
+    // The expansion completes (does not hang) and names both actors once.
+    a := CycleActorA spawn
+    b := CycleActorB spawn
+    a setPeer: b
+    b setPeer: a
+    str := (Inspector on: a) printStringExpanded: 5
+    self assert: (str includesSubstring: "Inspector(CycleActorA)") equals: true
+
+  testSharedActorReferenceIsNotMistakenForCycle =>
+    // A diamond (shared, non-cyclic) reference: a value whose two fields both
+    // hold the SAME actor. Neither is an ancestor of the other, so BOTH must
+    // expand — the cycle guard tracks ancestry, not mere prior visitation, so
+    // there is no spurious back-reference (ADR 0095 Cycle handling).
+    c := Counter spawn
+    pair := InspectPair new: #{#left => c, #right => c}
+    str := (Inspector on: pair) printStringExpanded: 3
+    self deny: (str includesSubstring: "↩ Actor")
+
+  // === Depth bound: deeper expansion shows nested fields ===
+  testDepthOneRendersNestedValueInline =>
+    // At depth 1 a nested Value renders as its one-line structural string on the
+    // field line — not expanded into its own indented sub-tree.
+    inner := ValuePoint x: 1 y: 2
+    pair := InspectPair new: #{#left => inner, #right => 42}
+    str := (Inspector on: pair) printStringExpanded: 1
+    self assert: (str includesSubstring: "left: ValuePoint(x: 1, y: 2)") equals: true
+
+  testDepthTwoExpandsNestedValueSubTree =>
+    // At depth 2 the nested ValuePoint expands into its own header + fields, so a
+    // child header line `Inspector(ValuePoint)` appears that depth 1 omits.
+    inner := ValuePoint x: 1 y: 2
+    pair := InspectPair new: #{#left => inner, #right => 42}
+    shallow := (Inspector on: pair) printStringExpanded: 1
+    deep := (Inspector on: pair) printStringExpanded: 2
+    self deny: (shallow includesSubstring: "Inspector(ValuePoint)")
+    self assert: (deep includesSubstring: "Inspector(ValuePoint)") equals: true
+
+  // === Edge case: a Value with no fields ===
+  testEmptyValueHasNoFields =>
+    i := Inspector on: EmptyValue new
+    self assert: i fields size equals: 0
+
+  testEmptyValuePrintStringHasHeaderOnly =>
+    i := Inspector on: EmptyValue new
+    self assert: (i printString includesSubstring: "Inspector(EmptyValue)") equals: true
+
+  // === Edge case: drilling into a scalar yields a leaf cursor with no fields ===
+  testDrilledScalarHasNoFields =>
+    child := (self.i at: #x) unwrap
+    self assert: child fields size equals: 0
+    self assert: child kind equals: #value
+
+  // === `inspect` shorthand and `Inspector on:` (ADR 0095 §1, Phase 3 BT-2504) ===
+  testInspectorOnIsTheEntryPoint =>
+    // `Inspector on:` is the explicit entry point on any receiver.
+    self assert: self.i kind equals: #value
+
+  testInspectShorthandOpensCursor =>
+    // ADR 0095 Phase 3 (BT-2504): `anObject inspect` is the shorthand for
+    // `Inspector on: anObject` — it returns an Inspector cursor, not a String.
+    i := (ValuePoint x: 3 y: 4) inspect
+    self assert: (i isKindOf: Inspector) equals: true
+    self assert: i kind equals: #value
+    self assert: i fields size equals: 2
+
+  testInspectShorthandOnActor =>
+    c := Counter spawn
+    self assert: c inspect kind equals: #actor
+
+  testInspectShorthandOnActorCapturesState =>
+    // Regression guard (BT-2504): `c inspect` dispatches *inside* the actor's
+    // own process, so a `sys:get_state(self())` snapshot would deadlock and time
+    // out — the cursor must instead be seeded from the actor's in-hand state.
+    // Asserting on `fields` (not just `kind`) exercises that the snapshot was
+    // actually captured (a self-deadlock would yield only a #status field).
+    c := Counter spawn
+    c increment
+    c increment
+    valueField := c inspect fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 2
+
+  // === #collection: windowing, size, page:, direct-index at: (ADR 0095 §6) ===
+  testListClassifiedAsCollection =>
+    i := Inspector on: #(10, 20, 30)
+    self assert: i kind equals: #collection
+
+  testCollectionSizeIsFullCount =>
+    // size is the cheap full count, not the (capped) window length.
+    i := Inspector on: ((1 to: 1000) asList)
+    self assert: i size equals: 1000
+
+  testCollectionFieldsAreWindowed =>
+    // fields returns only the first window (page size 50), even for a large list.
+    i := Inspector on: ((1 to: 1000) asList)
+    self assert: i fields size equals: 50
+
+  testCollectionWindowElementsKeyedByIndex =>
+    // Ordered elements are #element fields keyed by 1-based absolute index.
+    i := Inspector on: #(10, 20, 30)
+    first := i fields first
+    self assert: first name equals: 1
+    self assert: first kind equals: #element
+    self assert: first value equals: 10
+
+  testCollectionPageReturnsNextWindow =>
+    // page: 2 (1-based) returns a new cursor on the next window.
+    i := Inspector on: ((1 to: 1000) asList)
+    p2 := (i page: 2) unwrap
+    self assert: p2 fields size equals: 50
+    self assert: p2 fields first value equals: 51
+
+  testCollectionPagePastEndIsEmpty =>
+    // A page past the end yields an empty window, not an error.
+    i := Inspector on: #(1, 2, 3)
+    p5 := (i page: 5) unwrap
+    self assert: p5 fields size equals: 0
+
+  testPageOnNonCollectionIsError =>
+    result := self.i page: 2
+    self assert: result isError equals: true
+    self assert: result error kind equals: #not_a_collection
+
+  testCollectionAtDirectIndexBeyondWindow =>
+    // at: indexes a list directly (1-based), reaching beyond the first window.
+    i := Inspector on: ((1 to: 1000) asList)
+    child := (i at: 73) unwrap
+    self assert: child subject equals: 73
+
+  testCollectionAtOutOfRangeIsNoSuchField =>
+    i := Inspector on: #(1, 2, 3)
+    result := i at: 99
+    self assert: result isError equals: true
+    self assert: result error kind equals: #no_such_field
+
+  testDictionaryRendersAssociations =>
+    // A Dictionary classifies as #collection; its entries are #association fields
+    // keyed by the entry key, and at: looks them up by key.
+    i := Inspector on: #{#a => 1, #b => 2}
+    self assert: i kind equals: #collection
+    self assert: i size equals: 2
+    bField := i fields detect: [:f | f name == #b]
+    self assert: bField kind equals: #association
+    child := (i at: #b) unwrap
+    self assert: child subject equals: 2
+
+  testSetClassifiedAsCollection =>
+    s := (Set new) fromList: #(1, 2, 3)
+    i := Inspector on: s
+    self assert: i kind equals: #collection
+    self assert: i size equals: 3
+
+  // === #foreign: a non-Beamtalk OTP process (ADR 0095 §3–§4) ===
+  testForeignProcessClassifiedAsForeign =>
+    // A stock OTP gen_server (the code server) is a foreign process, not a
+    // Beamtalk actor.
+    pid := (Erlang erlang) whereis: #code_server
+    i := Inspector on: pid
+    self assert: i kind equals: #foreign
+
+  testForeignProcessFieldsAreProcessInfo =>
+    pid := (Erlang erlang) whereis: #code_server
+    i := Inspector on: pid
+    // Best-effort process_info: every field is tagged #processInfo, and there is
+    // at least one (a live process always has a current_function / status).
+    self assert: i fields isNotEmpty equals: true
+    self assert: (i fields allSatisfy: [:f |
+      f kind == #processInfo
+    ]) equals: true
+
+  // === evaluate: — value Result contract, actor_eval_unsupported (ADR 0095 §1, §7) ===
+  //
+  // The value `evaluate:` *happy path* needs the compiler port, which the BUnit
+  // harness does not start (see beamtalk_senders_test.bt:94 for the same caveat),
+  // so it is covered by the REPL e2e btscript
+  // (tests/repl-protocol/cases/inspector_evaluate.btscript). Here we verify the
+  // safe contract: `evaluate:` always returns a `Result` and never crashes, even
+  // when the compiler is unavailable (it degrades to a `Result error:`).
+  testValueEvaluateReturnsResultNeverRaises =>
+    // No compiler port in BUnit → an error Result, but never a raise.
+    result := self.i evaluate: "self x + self y"
+    self assert: (result isKindOf: Result) equals: true
+
+  testActorEvaluateIsUnsupported =>
+    // Actor evaluate-in-context is deferred (ADR 0095 §7) — returns an error
+    // independent of the compiler (it short-circuits before any eval).
+    c := Counter spawn
+    i := Inspector on: c
+    result := i evaluate: "self increment"
+    self assert: result isError equals: true
+    self assert: result error kind equals: #actor_eval_unsupported
+
+  // === asDictionaries / asDictionary — wire form (ADR 0095 §7) ===
+  testAsDictionariesIsOneDictPerField =>
+    // One dictionary per drillable field, mirroring SupervisionTree asDictionaries.
+    dicts := self.i asDictionaries
+    self assert: dicts size equals: 2
+
+  testAsDictionariesFieldShape =>
+    // Each dict carries the typed field record: name (the at: key), label,
+    // value (a display string), kind, drillable.
+    xDict := self.i asDictionaries detect: [:d | (d at: #name) == #x]
+    self assert: (xDict at: #name) equals: #x
+    self assert: (xDict at: #label) equals: "x"
+    self assert: (xDict at: #value) equals: "3"
+    self assert: (xDict at: #kind) equals: #slot
+    self assert: (xDict at: #drillable) equals: false
+
+  testAsDictionaryEnvelopeCarriesCursorMetadata =>
+    // The singular envelope carries kind/path/childCount/page + the fields window.
+    env := self.i asDictionary
+    self assert: (env at: #kind) equals: #value
+    self assert: (env at: #path) equals: #()
+    self assert: (env at: #childCount) equals: 2
+    self assert: (env at: #page) equals: 1
+    self assert: (env at: #fields) size equals: 2
+
+  testAsDictionaryChildCountIsFullCollectionSize =>
+    // For a collection, childCount is the cheap full size (not the window length).
+    i := Inspector on: ((1 to: 1000) asList)
+    env := i asDictionary
+    self assert: (env at: #childCount) equals: 1000
+    self assert: (env at: #fields) size equals: 50
+    self assert: (env at: #page) equals: 1
+
+  testAsDictionaryPageReflectsWindow =>
+    // page: 2 → the envelope reports page 2 and its window of elements.
+    i := Inspector on: ((1 to: 1000) asList)
+    env := (i page: 2) unwrap asDictionary
+    self assert: (env at: #page) equals: 2
+    self assert: ((env at: #fields) first at: #value) equals: "51"

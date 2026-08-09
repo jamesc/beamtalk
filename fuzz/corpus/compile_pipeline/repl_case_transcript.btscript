@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Transcript class
+//
+// These tests require E2E because Transcript is a workspace-bound actor
+// dispatched via persistent_term. Workspace bindings only exist in the live
+// REPL process; BUnit tests run in compiled code without access to the REPL
+// workspace. Cross-turn variable persistence is also required.
+//
+// Transcript is a workspace-bound actor for writing to stdout.
+// show: prints a value, cr prints a newline.
+// BT-374: Workspace bindings dispatch via persistent_term + async send.
+// BT-540: Command methods return self (not nil) per Command-Query Separation.
+//
+// Related: workspace_bindings.bt — covers basic Transcript show: / cr dispatch.
+
+// ===========================================================================
+// SHOW: WITH DIFFERENT TYPES (type-variant behavior)
+// ===========================================================================
+
+// show: with an integer
+Transcript show: 42
+// => Actor(TranscriptStream, _)
+
+// show: with a boolean
+Transcript show: true
+// => Actor(TranscriptStream, _)
+
+// show: with nil
+Transcript show: nil
+// => Actor(TranscriptStream, _)
+
+// ===========================================================================
+// RETURN VALUE IS SELF (BT-540) — return-type checks
+// ===========================================================================
+
+// Command methods return self (the Transcript actor), not nil
+// This follows Smalltalk convention and Command-Query Separation
+t := Transcript show: "test"
+// => Actor(TranscriptStream, _)
+
+t class
+// => TranscriptStream
+
+t2 := Transcript cr
+// => Actor(TranscriptStream, _)
+
+t2 class
+// => TranscriptStream

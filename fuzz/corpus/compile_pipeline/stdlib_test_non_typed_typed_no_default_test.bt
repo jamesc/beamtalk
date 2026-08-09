@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Regression tests for BT-2881: a plain (non-`typed`) `Actor subclass:`
+// with a typed, no-default state field and an explicit `initialize` must
+// dispatch `initialize` in `handle_continue` and run the BT-1949/BT-1951
+// uninitialized-state safety check — neither is gated on the `typed`
+// keyword.
+//
+// Fixtures:
+//   stdlib/test/fixtures/non_typed_no_default_actor.bt          (properly initializes)
+//   stdlib/test/fixtures/non_typed_uninitialized_state_actor.bt (forgets to initialize)
+
+TestCase subclass: NonTypedTypedNoDefaultTest
+
+  // === Success: initialize dispatches and sets the no-default field ===
+  testInitializeDispatchesForNonTypedClass =>
+    a := NonTypedNoDefaultActor spawn
+    self assert: a getCount equals: 0
+
+  testMutateAfterInitializeWorks =>
+    a := NonTypedNoDefaultActor spawn
+    self assert: a bump equals: 1
+    self assert: a bump equals: 2
+
+  // === Failure: field left nil still raises, without the `typed` keyword ===
+  testUninitializedFieldRaisesErrorWithoutTypedKeyword =>
+    self should: [
+      NonTypedUninitializedStateActor spawn
+    ] raise: #instantiation_error
+
+  testUninitializedErrorContainsClassName =>
+    result := [
+      NonTypedUninitializedStateActor spawn
+    ] on: Exception do: [:e | e message]
+    self assert: (result includesSubstring: "NonTypedUninitializedStateActor")
+
+  testUninitializedErrorHintContainsFieldName =>
+    result := [
+      NonTypedUninitializedStateActor spawn
+    ] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "count")
+
+  testUninitializedErrorHintContainsTypeName =>
+    result := [
+      NonTypedUninitializedStateActor spawn
+    ] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "Integer")

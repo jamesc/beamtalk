@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// String#asAtom tests (BT-1585)
+// Verifies that asAtom reliably converts strings to atoms,
+// including strings with underscores, digits, and interpolation.
+
+TestCase subclass: StringAsAtomTest
+
+  testSimpleString => self assert: "hello" asAtom equals: #hello
+
+  testShortString => self assert: "abc" asAtom equals: #abc
+
+  testStringWithUnderscore =>
+    self assert: "hello_world" asAtom equals: #hello_world
+
+  testStringWithDigits => self assert: "foo_42" asAtom equals: #foo_42
+
+  testStringWithTrailingDigits => self assert: "item99" asAtom equals: #item99
+
+  testStringWithMultipleUnderscores =>
+    self assert: "a_b_c" asAtom equals: #a_b_c
+
+  testInterpolatedString =>
+    id := 42
+    name := "tq_{id}" asAtom
+    self assert: name equals: #tq_42
+
+  testAsAtomClassIsSymbol => self assert: "test" asAtom class equals: Symbol

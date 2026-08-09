@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1297: Tests constructor pattern matching inside Actor methods.
+// Verifies that self.slot := inside a match: arm works correctly.
+
+TestCase subclass: ResultMatchActorTest
+
+  testOkPatternMutatesState =>
+    a := ResultMatchActor spawn
+    result := a process: (Result ok: 42)
+    self assert: result equals: 42
+    self assert: a getLastValue equals: 42
+    self assert: a getErrorCount equals: 0
+
+  testErrorPatternIncrementsErrorCount =>
+    a := ResultMatchActor spawn
+    a process: (Result error: #oops)
+    self assert: a getLastValue equals: 0
+    self assert: a getErrorCount equals: 1
+
+  testAlternatingResults =>
+    a := ResultMatchActor spawn
+    a process: (Result ok: 10)
+    a process: (Result error: #fail)
+    a process: (Result ok: 99)
+    self assert: a getLastValue equals: 99
+    self assert: a getErrorCount equals: 1

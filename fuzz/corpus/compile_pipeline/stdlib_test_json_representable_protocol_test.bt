@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2818: JsonRepresentable protocol conformance tests.
+// Verifies that the protocol is registered and that classes implementing
+// asJson conform structurally (ADR 0068).
+//
+// Fixtures: stdlib/test/fixtures/json_user.bt (JsonUser — implements asJson)
+//           stdlib/test/fixtures/value_point.bt (ValuePoint — no asJson)
+
+TestCase subclass: JsonRepresentableProtocolTest
+
+  testJsonRepresentableIsRegistered =>
+    self assert: (Protocol isProtocol: #JsonRepresentable)
+
+  testRequiredMethods =>
+    methods := Protocol requiredMethods: #JsonRepresentable
+    self assert: methods size equals: 1
+    self assert: (methods includes: #asJson)
+
+  testAllProtocolsIncludesJsonRepresentable =>
+    self assert: (Protocol allProtocols includes: #JsonRepresentable)
+
+  // --- Conforming class (implements asJson) ---
+  testJsonUserConforms => self assert: (JsonUser conformsTo: #JsonRepresentable)
+
+  testJsonUserProtocolsIncludesJsonRepresentable =>
+    self assert: (JsonUser protocols includes: #JsonRepresentable)
+
+  // --- Non-conforming class (no asJson) ---
+  testValuePointDoesNotConform =>
+    self deny: (ValuePoint conformsTo: #JsonRepresentable)

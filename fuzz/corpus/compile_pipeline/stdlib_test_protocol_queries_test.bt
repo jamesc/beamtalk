@@ -1,0 +1,95 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0068 Phase 2c: Runtime protocol query tests.
+// Protocol definitions are in separate fixture files:
+// fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt.
+
+TestCase subclass: ProtocolQueriesTest
+
+  // --- Protocol.isProtocol: ---
+  testIsProtocolTrue => self assert: (Protocol isProtocol: #Displayable)
+
+  testIsProtocolFalse => self deny: (Protocol isProtocol: #NotARealProtocol)
+
+  // --- Protocol.requiredMethods: ---
+  testRequiredMethodsDisplayable =>
+    methods := Protocol requiredMethods: #Displayable
+    self assert: (methods includes: #asString)
+    self assert: (methods includes: #printString)
+    self assert: methods size equals: 2
+
+  testRequiredMethodsUnknown =>
+    methods := Protocol requiredMethods: #Unknown
+    self assert: methods size equals: 0
+
+  // --- Protocol.allProtocols ---
+  testAllProtocolsIncludesRegistered =>
+    protos := Protocol allProtocols
+    self assert: (protos includes: #Displayable)
+    self assert: (protos includes: #HasSize)
+
+  // --- conformsTo: (Behaviour method on class objects) ---
+  testStringConformsToDisplayable =>
+    self assert: (String conformsTo: #Displayable)
+
+  testIntegerConformsToDisplayable =>
+    self assert: (Integer conformsTo: #Displayable)
+
+  testStringConformsToHasSize => self assert: (String conformsTo: #HasSize)
+
+  testIntegerConformsToHasSize =>
+    // Integer does not have size
+    self deny: (Integer conformsTo: #HasSize)
+
+  // --- protocols (Behaviour method on class objects) ---
+  testStringProtocolsIncludesDisplayable =>
+    protos := String protocols
+    self assert: (protos includes: #Displayable)
+
+  testStringProtocolsIncludesHasSize =>
+    protos := String protocols
+    self assert: (protos includes: #HasSize)
+
+  // --- Protocol.conformingClasses: ---
+
+  // Note: conformingClasses with a known protocol is tested via EUnit
+  // (beamtalk_protocol_registry_tests.erl). The BUnit test environment
+  // makes iterating all live class processes unreliable due to gen_server
+  // timeouts during hierarchy walks.
+  testConformingClassesUnknownReturnsEmpty =>
+    // Unknown protocol returns empty list
+    classes := Protocol conformingClasses: #NonExistentProtocol
+    self assert: classes size equals: 0
+
+  // --- BT-1611: Class method protocol tests ---
+  testCreatableIsProtocol => self assert: (Protocol isProtocol: #Creatable)
+
+  testRequiredMethodsCreatable =>
+    // Creatable has one class method requirement: `class create`
+    // Required methods returns class methods with "class " prefix
+    methods := Protocol requiredMethods: #Creatable
+    self assert: methods size equals: 1
+    self assert: (methods includes: #'class create')
+
+  // --- ADR 0068: Protocol objects as first-class class objects ---
+  // Protocols are sealed abstract subclasses of Protocol with class methods.
+  testProtocolObjectRequiredMethods =>
+    // Direct message send on protocol object (not via Protocol class)
+    methods := Displayable requiredMethods
+    self assert: (methods includes: #asString)
+    self assert: (methods includes: #printString)
+
+  testProtocolObjectConformingClasses =>
+    // Direct message send returns conforming class names (atoms)
+    classes := HasSize conformingClasses
+    self assert: (classes includes: #String)
+
+  testProtocolObjectSuperclass =>
+    // Protocol objects are subclasses of Protocol
+    self assert: Displayable superclass equals: Protocol
+
+  testProtocolObjectInAllClasses =>
+    // Protocol objects appear in allClasses (returned as class objects)
+    all := (Erlang beamtalk_interface) allClasses
+    self assert: (all includes: Displayable)

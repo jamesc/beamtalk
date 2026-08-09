@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for runtime-embedded documentation (ADR 0033, BT-769)
+
+TestCase subclass: RuntimeDocTest
+
+  // Reset global doc state before each test to avoid ordering dependencies.
+  // Class-level and method-level docs are global mutations on the class object,
+  // so earlier tests (e.g. testSetMethodDoc) would pollute later tests.
+  setUp =>
+    DocTestHelper doc: nil
+    DocTestHelper setDocForMethod: #greet to: nil
+    DocTestHelper setDocForMethod: #answer to: nil
+
+  // --- Class doc ---
+  testClassDocDefaultsToNil => self assert: DocTestHelper doc equals: nil
+
+  testSetClassDoc =>
+    DocTestHelper doc: "A helper for testing"
+    self assert: DocTestHelper doc equals: "A helper for testing"
+
+  testSetClassDocOverwrites =>
+    DocTestHelper doc: "First doc"
+    DocTestHelper doc: "Second doc"
+    self assert: DocTestHelper doc equals: "Second doc"
+
+  // --- Method doc via >> and doc message ---
+  testMethodDocDefaultsToNil =>
+    m := DocTestHelper >> #greet
+    self assert: m doc equals: nil
+
+  testSetMethodDoc =>
+    DocTestHelper setDocForMethod: #greet to: "Say hello"
+    m := DocTestHelper >> #greet
+    self assert: m doc equals: "Say hello"
+
+  testSetMethodDocDifferentMethods =>
+    DocTestHelper setDocForMethod: #answer to: "Return 42"
+    m := DocTestHelper >> #answer
+    self assert: m doc equals: "Return 42"
+
+  // --- CompiledMethod doc accessor ---
+  testCompiledMethodDocField =>
+    DocTestHelper setDocForMethod: #greet to: "Greeting method"
+    m := DocTestHelper >> #greet
+    self assert: m doc equals: "Greeting method"
+    self assert: m selector equals: #greet
+
+  // --- doc: returns self (chainable) ---
+  testDocSetterReturnsSelf =>
+    result := DocTestHelper doc: "Chainable"
+    self assert: result equals: DocTestHelper
+
+  // --- docForMethod: ---
+  testDocForMethodReturnsDoc =>
+    DocTestHelper setDocForMethod: #greet to: "Say hello"
+    self assert: (DocTestHelper docForMethod: #greet) equals: "Say hello"
+
+  testDocForMethodNilWhenNoDoc =>
+    self assert: (DocTestHelper docForMethod: #add:to:) equals: nil
+
+  testDocForMethodNilForNonExistent =>
+    self assert: (DocTestHelper docForMethod: #nonExistent) equals: nil

@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Time class (BT-1244)
+
+TestCase subclass: TimeTest
+
+  testNowSReturnsInteger =>
+    s := Time nowS
+    self assert: s class equals: Integer
+
+  testNowMsReturnsInteger =>
+    ms := Time nowMs
+    self assert: ms class equals: Integer
+
+  testNowUsReturnsInteger =>
+    us := Time nowUs
+    self assert: us class equals: Integer
+
+  testNowSIsPositive => self assert: (Time nowS > 0)
+
+  testNowMsIsPositive => self assert: (Time nowMs > 0)
+
+  testNowUsIsPositive => self assert: (Time nowUs > 0)
+
+  testNowMsGreaterThanNowS =>
+    // Milliseconds > seconds for any time after epoch
+    s := Time nowS
+    ms := Time nowMs
+    self assert: (ms > s)
+
+  testNowUsGreaterThanNowMs =>
+    // Microseconds > milliseconds for any time after epoch
+    ms := Time nowMs
+    us := Time nowUs
+    self assert: (us > ms)
+
+  testNowSIsReasonableEpoch =>
+    // Should be well past 2020 (1577836800)
+    self assert: (Time nowS > 1577836800)
+
+  testNowMsAndNowUsArePositive =>
+    // Sanity check: both values are well above zero
+    self assert: (Time nowMs > 1000000000000)
+    self assert: (Time nowUs > 1000000000000000)

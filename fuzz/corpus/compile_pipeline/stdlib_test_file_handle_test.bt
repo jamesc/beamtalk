@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FileHandle Object-inheritance tests (BT-1762)
+//
+// After removing the module_for_value override for FileHandle, dispatch
+// goes through the compiled bt@stdlib@file_handle module. These tests
+// verify that Object-inherited methods work correctly on FileHandle values.
+
+TestCase subclass: FileHandleTest
+
+  // === BT-1762: Object-inherited methods work after removing module_for_value override ===
+  testDisplayString =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h displayString
+    ]) unwrap
+    self assert: (result isKindOf: String)
+
+  testRespondsToDisplayString =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h respondsTo: #displayString
+    ]) unwrap
+    self assert: result
+
+  testRespondsToHash =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h respondsTo: #hash
+    ]) unwrap
+    self assert: result
+
+  testRespondsToIsNil =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h respondsTo: #isNil
+    ]) unwrap
+    self assert: result
+
+  testIsNilReturnsFalse =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h isNil
+    ]) unwrap
+    self deny: result
+
+  testHash =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h hash
+    ]) unwrap
+    self assert: (result isKindOf: Integer)
+
+  testRespondsToNonExistentMethod =>
+    result := (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h respondsTo: #totallyBogusMethod
+    ]) unwrap
+    self deny: result

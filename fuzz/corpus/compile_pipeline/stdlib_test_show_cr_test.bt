@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-984: BUnit tests for Object>>show: and Object>>showCr:
+//
+// Verifies:
+// - Silent no-op when TranscriptStream current is nil
+// - Output is routed when a transcript instance is set as current
+
+TestCase subclass: ShowCrTest
+
+  setUp =>
+    // Ensure current is nil before each test (default in test environment)
+    TranscriptStream resetCurrent
+    self
+
+  tearDown =>
+    // Stop per-test transcript actor when one was set
+    TranscriptStream current ifNotNil: [:t | t stop]
+    // Restore nil state after each test
+    TranscriptStream resetCurrent
+    self
+
+  testShowCrNilSafeWhenNoTranscript =>
+    // When TranscriptStream current is nil, showCr: is a no-op and returns self
+    TranscriptStream resetCurrent
+    self assert: (42 showCr: "hello") equals: 42
+
+  testShowNilSafeWhenNoTranscript =>
+    // When TranscriptStream current is nil, show: is a no-op and returns self
+    TranscriptStream resetCurrent
+    self assert: (42 show: "hello") equals: 42
+
+  testShowCrRoutesOutputWhenTranscriptSet =>
+    // When a TranscriptStream is set as current, showCr: routes output to it
+    ts := TranscriptStream spawn
+    TranscriptStream current: ts
+    42 showCr: "hello"
+    self assert: (ts recent includes: "hello")
+
+  testShowRoutesOutputWhenTranscriptSet =>
+    // When a TranscriptStream is set as current, show: routes output to it
+    ts := TranscriptStream spawn
+    TranscriptStream current: ts
+    42 show: "world"
+    self assert: (ts recent includes: "world")

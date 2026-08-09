@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: ActorDelegateTest
+
+  testDelegateOnNonNativeActorRaisesError =>
+    counter := Counter spawn
+    self should: [counter delegate] raise: #signal
+
+  testDelegateRespondsTo =>
+    counter := Counter spawn
+    self assert: (counter respondsTo: #delegate)

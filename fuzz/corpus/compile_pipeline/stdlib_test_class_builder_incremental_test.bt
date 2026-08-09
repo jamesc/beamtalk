@@ -1,0 +1,151 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2269 / ADR 0084 Phase 3: the incremental class-piece ClassBuilder API.
+//
+// `addMethod:body:`, `addClassMethod:body:`, `addClassState:default:` and the
+// matching `removeMethod:` / `removeClassMethod:` write the SAME state maps the
+// bulk setters (`methods:`, `classMethods:`, `classVars:`) populate, so a class
+// can be assembled one piece at a time before `register` (the "browser" use
+// case). In a `classBuilder … register` cascade the compiler lowers each
+// `add*:body:` block exactly as it lowers the corresponding bulk-setter map
+// value — class methods become class-method funs that thread class-variable
+// state (`{class_var_result, …}`), so this does NOT reproduce the BT-873
+// closure-dispatch regression (state mutation is compiler-lowered, never a naive
+// runtime closure).
+//
+// register returns the canonical, dispatchable class object since BT-2258, so
+// the cascade result is used directly.
+
+TestCase subclass: ClassBuilderIncrementalTest
+  field: cls = nil
+  field: parentCls = nil
+
+  tearDown =>
+    self.cls isNil ifFalse: [self.cls removeFromSystem]
+    self.parentCls isNil ifFalse: [self.parentCls removeFromSystem]
+
+  // AC: build a class incrementally with every add* setter, then register;
+  // every piece is callable through the returned class object / its instances.
+  testIncrementalBuildAllPieces =>
+    self.cls := Object classBuilder name: #BT2269Full;
+      superclass: Object;
+      addField: #count default: 0;
+      addClassState: #total default: 0;
+      addMethod: #answer body: [:inst | 42];
+      addClassMethod: #bump body: [:self |
+        self.total := self.total + 1
+        self.total
+      ];
+      register
+    // Instance-side piece is callable.
+    instance := self.cls new
+    self assert: instance answer equals: 42
+    self assert: (instance fieldAt: #count) equals: 0
+    // Class-side piece is callable and threads class-variable state.
+    self assert: self.cls bump equals: 1
+    self assert: self.cls bump equals: 2
+
+  // AC: an incrementally-added instance method with a keyword selector is
+  // callable (block args bind positionally after the receiver).
+  testIncrementalKeywordInstanceMethod =>
+    self.cls := Object classBuilder name: #BT2269Kw;
+      superclass: Object;
+      addMethod: #double: body: [:inst :n | n * 2];
+      register
+    instance := self.cls new
+    self assert: (instance double: 21) equals: 42
+
+  // AC: an incrementally-added class method whose body threads a class variable
+  // seeded by addClassState:default: works across calls (the BT-873 "dropped
+  // state" regression must not recur).
+  testIncrementalClassVarThreads =>
+    self.cls := Object classBuilder name: #BT2269Tally;
+      superclass: Object;
+      addClassState: #total default: 10;
+      addClassMethod: #tally body: [:self |
+        self.total := self.total + 5
+        self.total
+      ];
+      register
+    self assert: self.cls tally equals: 15
+    self assert: self.cls tally equals: 20
+
+  // AC: a plain (no-arg) incrementally-added class method returns its value.
+  testIncrementalPlainClassMethod =>
+    self.cls := Object classBuilder name: #BT2269Answer;
+      superclass: Object;
+      addClassMethod: #answer body: [:self | 42];
+      register
+    self assert: self.cls answer equals: 42
+
+  // AC: removeMethod: drops an instance method before register — the class
+  // does not respond to the removed selector.
+  testRemoveMethodBeforeRegister =>
+    self.cls := Object classBuilder name: #BT2269RemInst;
+      superclass: Object;
+      addMethod: #kept body: [:inst | 1];
+      addMethod: #dropped body: [:inst | 2];
+      removeMethod: #dropped;
+      register
+    instance := self.cls new
+    self assert: instance kept equals: 1
+    self deny: (self.cls methods includes: #dropped)
+
+  // AC: removeClassMethod: drops a class method before register — the class
+  // does not respond to the removed selector.
+  testRemoveClassMethodBeforeRegister =>
+    self.cls := Object classBuilder name: #BT2269RemClass;
+      superclass: Object;
+      addClassMethod: #kept body: [:self | 1];
+      addClassMethod: #dropped body: [:self | 2];
+      removeClassMethod: #dropped;
+      register
+    self assert: self.cls kept equals: 1
+    self deny: (self.cls class allMethods includes: #dropped)
+
+  // Removing then re-adding the same instance selector keeps the last body.
+  testReAddMethodAfterRemove =>
+    self.cls := Object classBuilder name: #BT2269ReAdd;
+      superclass: Object;
+      addMethod: #value body: [:inst | 1];
+      removeMethod: #value;
+      addMethod: #value body: [:inst | 99];
+      register
+    instance := self.cls new
+    self assert: instance value equals: 99
+
+  // A self class-method send from an incrementally-added class method resolves
+  // a sibling class method.
+  testIncrementalSelfClassMethodSend =>
+    self.cls := Object classBuilder name: #BT2269SelfSend;
+      superclass: Object;
+      addClassMethod: #base body: [:self | 10];
+      addClassMethod: #doubled body: [:self | self base * 2];
+      register
+    self assert: self.cls doubled equals: 20
+
+  // super from an incrementally-added class method resolves the superclass's
+  // class method (shares the codegen path with classMethods:).
+  testIncrementalSuperResolvesToSuperclass =>
+    self.parentCls := Object classBuilder name: #BT2269SuperBase;
+      superclass: Object;
+      addClassMethod: #greeting body: [:self | "base"];
+      register
+    self.cls := Object classBuilder name: #BT2269SuperChild;
+      superclass: #BT2269SuperBase;
+      addClassMethod: #greeting body: [:self | super greeting];
+      register
+    self assert: self.cls greeting equals: "base"
+
+  // Mixing a bulk setter with incremental setters: both populate the same map,
+  // so all instance methods are present.
+  testBulkPlusIncrementalSameMap =>
+    self.cls := Object classBuilder name: #BT2269Mixed;
+      superclass: Object;
+      methods: #{#fromBulk => [:inst | 1]};
+      addMethod: #fromIncr body: [:inst | 2];
+      register
+    instance := self.cls new
+    self assert: instance fromBulk equals: 1
+    self assert: instance fromIncr equals: 2

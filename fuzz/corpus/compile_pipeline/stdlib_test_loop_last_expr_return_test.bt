@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2308: A local-threading loop as a value-type method's LAST expression must
+// return the loop's logical value (nil), not the internal {nil, StateAcc} tuple
+// it uses to thread mutations. Previously `whileTrue:`/`whileFalse:` (and, before
+// the counted-loop fix, to:do:/to:by:do:/timesRepeat:) leaked the raw tuple as the
+// method's return value.
+
+TestCase subclass: LoopLastExprReturnTest
+
+  // ── helpers: each ends in a threading loop as the LAST expression ──────────
+  // Bodies read+write the local so no "unused variable" warning is emitted.
+  whileLast =>
+    n := 0
+    [n < 3] whileTrue: [n := n + 1]
+
+  whileFalseLast =>
+    n := 0
+    [n >= 3] whileFalse: [n := n + 1]
+
+  toDoLast =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  toByDoLast =>
+    sum := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | sum := sum + i]
+
+  timesRepeatLast =>
+    x := 0
+    3 timesRepeat: [x := x + 1]
+
+  // ── the loop's logical value (nil) must be returned, not the tuple ─────────
+  testWhileTrueLastReturnsNil => self assert: self whileLast equals: nil
+
+  testWhileFalseLastReturnsNil => self assert: self whileFalseLast equals: nil
+
+  testToDoLastReturnsNil => self assert: self toDoLast equals: nil
+
+  testToByDoLastReturnsNil => self assert: self toByDoLast equals: nil
+
+  testTimesRepeatLastReturnsNil => self assert: self timesRepeatLast equals: nil
+
+  // ── non-last threading still works (loop result discarded, locals threaded) ─
+  testWhileTrueThreadsLocal =>
+    n := 0
+    [n < 3] whileTrue: [n := n + 1]
+    self assert: n equals: 3
+
+  testWhileFalseThreadsLocal =>
+    n := 0
+    [n >= 3] whileFalse: [n := n + 1]
+    self assert: n equals: 3
+
+  // ── NLR active + counted loop as last expression ───────────────────────────
+  // When a method contains a non-local return (^ inside a block) it returns a
+  // {Result, Self} tuple. A counted loop as the last expression must unwrap its
+  // {nil, StateAcc} into that shape: nil result when no early return fires, and
+  // the thrown value when it does.
+  nlrNoEarlyReturn =>
+    #[1, 2, 3] do: [:x | x > 5 ifTrue: [^x]]
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  nlrEarlyReturn =>
+    #[10] do: [:x | x > 5 ifTrue: [^x]]
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  testNlrNoEarlyReturnReturnsNil =>
+    self assert: self nlrNoEarlyReturn equals: nil
+
+  testNlrEarlyReturnReturnsValue => self assert: self nlrEarlyReturn equals: 10

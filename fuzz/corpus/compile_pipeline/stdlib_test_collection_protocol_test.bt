@@ -1,0 +1,172 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Collection abstract superclass (BT-505)
+
+TestCase subclass: CollectionProtocolTest
+
+  testSetSharedCollectionProtocolInheritedFromCollection =>
+    // Set isEmpty
+    self assert: Set new isEmpty
+    self deny: (Set new add: 1) isEmpty
+    // Set isNotEmpty
+    self assert: (Set new add: 1) isNotEmpty
+    self deny: Set new isNotEmpty
+    // Set includes:
+    self assert: ((Set new add: 1) includes: 1)
+    self deny: ((Set new add: 1) includes: 2)
+    // Set collect: (inherited from Collection)
+    self assert: (((Set new add: 1) add: 2) collect: [:x |
+      x * 10
+    ]) size equals: 2
+    // Set select: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) select: [:x |
+      x > 1
+    ]) size equals: 2
+    // Set reject: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) reject: [:x |
+      x > 2
+    ]) size equals: 2
+    // Set inject:into: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) inject: 0 into: [:sum :x |
+      sum + x
+    ]) equals: 6
+    // Set detect: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) detect: [:x |
+      x > 1
+    ]) notNil
+    // Set detect:ifNone: (inherited from Collection)
+    self assert: ((Set new add: 1) detect: [:x | x > 5] ifNone: [0]) equals: 0
+    // Set anySatisfy: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) anySatisfy: [:x | x > 2])
+    self deny: (((Set new add: 1) add: 2) anySatisfy: [:x | x > 5])
+    // Set allSatisfy: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) allSatisfy: [:x | x > 0])
+    self deny: ((((Set new add: 1) add: 2) add: 3) allSatisfy: [:x | x > 2])
+
+  testDictionaryCollectionProtocol =>
+    // Dictionary isEmpty (inherited from Collection via size)
+    self assert: #{} isEmpty
+    self deny: #{#a => 1} isEmpty
+    // Dictionary do: iterates over values
+    self assert: (#{#a => 10, #b => 20} do: [:v | v + 1]) equals: nil
+    // Dictionary includes: checks values
+    self assert: (#{#a => 1, #b => 2} includes: 1)
+    self deny: (#{#a => 1, #b => 2} includes: 99)
+    // Dictionary collect: (inherited from Collection via do:)
+    self assert: (#{#a => 1, #b => 2} collect: [:v | v * 10]) size equals: 2
+    // Dictionary select: (inherited from Collection via do:)
+    self assert: (#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } select: [:v | v > 1]) size equals: 2
+    // Dictionary inject:into: (inherited from Collection via do:)
+    self assert: (#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } inject: 0 into: [:sum :v | sum + v]) equals: 6
+    // Dictionary detect: (inherited from Collection via do:)
+    self assert: (#{#a => 1, #b => 5, #c => 3} detect: [:v | v > 4]) equals: 5
+    // Dictionary detect:ifNone:
+    self assert: (#{#a => 1} detect: [:v | v > 10] ifNone: [0]) equals: 0
+    // Dictionary anySatisfy: (inherited from Collection)
+    self assert: (#{#a => 1, #b => 5} anySatisfy: [:v | v > 3])
+    self deny: (#{#a => 1, #b => 2} anySatisfy: [:v | v > 5])
+    // Dictionary allSatisfy: (inherited from Collection)
+    self assert: (#{#a => 2, #b => 4} allSatisfy: [:v | v isEven])
+    self deny: (#{#a => 1, #b => 2} allSatisfy: [:v | v isEven])
+
+  testTupleCollectionProtocol =>
+    // Tuple empty creation
+    self assert: Tuple new class equals: Tuple
+
+  testClassHierarchyVerification =>
+    // Verify superclass chain
+    self assert: #(1, 2, 3) class equals: List
+    self assert: Set new class equals: Set
+    self assert: #{} class equals: Dictionary
+
+  testAggregationOnList =>
+    // sum / count: / noneSatisfy: / max / min / average
+    self assert: #(1, 2, 3, 4) sum equals: 10
+    self assert: (#(1, 2, 3, 4) count: [:x | x > 2]) equals: 2
+    self assert: (#(1, 2, 3) noneSatisfy: [:x | x > 5])
+    self deny: (#(1, 2, 3) noneSatisfy: [:x | x > 2])
+    self assert: #(3, 1, 4, 1, 5) max equals: 5
+    self assert: #(3, 1, 4, 1, 5) min equals: 1
+    self assert: #(1, 2, 3, 4) average equals: 2.5
+
+  testAggregationInheritedBySetAndInterval =>
+    // Set (inherited from Collection via do:)
+    self assert: (((Set new add: 1) add: 2) add: 3) sum equals: 6
+    self assert: (((Set new add: 3) add: 1) add: 2) max equals: 3
+    self assert: (((Set new add: 3) add: 1) add: 2) min equals: 1
+    self assert: ((((Set new add: 1) add: 2) add: 3) count: [:x |
+      x > 1
+    ]) equals: 2
+    // Interval (inherited from Collection via do:)
+    self assert: (1 to: 5) sum equals: 15
+    self assert: (1 to: 5) max equals: 5
+    self assert: (1 to: 5) min equals: 1
+    self assert: (1 to: 4) average equals: 2.5
+
+  testAggregationEmptyCollection =>
+    // sum of empty is 0; max/min/average raise on empty
+    self assert: #() sum equals: 0
+    self assert: (#() count: [:x | x > 0]) equals: 0
+    // noneSatisfy: on empty is vacuously true
+    self assert: (#() noneSatisfy: [:x | x > 0])
+    // BT-3021: these raise `empty_collection`, not the generic `user_error` —
+    // same kind as `#() first`, so one `on:do:` clause catches the family.
+    self should: [#() max] raise: #empty_collection
+    self should: [#() min] raise: #empty_collection
+    self should: [#() average] raise: #empty_collection
+
+  testEachWithIndexInheritedFromCollection =>
+    // List inherits eachWithIndex: from Collection: 1-based index paired
+    // with the matching element. Verified with assertions inside the block.
+    #("a", "b", "c") eachWithIndex: [:item :i |
+      self assert: (#("a", "b", "c") at: i) equals: item
+    ]
+
+  testDoSeparatedBySingleElementHasNoSeparator =>
+    // For a single element the separator block must never run — if it does,
+    // this assertion fails the test.
+    #(42) do: [:x | self assert: x equals: 42] separatedBy: [self assert: false]
+
+  testDoSeparatedByVisitsEachElement =>
+    // Element block runs for each element across the two-block path.
+    // Asserting the separator's exact firing count would require mutating
+    // a counter inside the separator block, which needs state-threading
+    // through do:separatedBy: (unsupported — BT-2703). The conditional-firing
+    // guarantee is covered by testDoSeparatedBySingleElementHasNoSeparator.
+    #(1, 2, 3) do: [:x | self assert: (x between: 1 and: 3)] separatedBy: [nil]
+
+  testConversionProtocol =>
+    // asArray preserves order for ordered sources (incl. non-trivial by: step)
+    self assert: #(1, 2, 3) asArray asList equals: #(1, 2, 3)
+    self assert: (1 to: 3) asArray asList equals: #(1, 2, 3)
+    self assert: (1 to: 10 by: 3) asArray asList equals: #(1, 4, 7, 10)
+    // asList on a List is identity-valued
+    self assert: #(1, 2, 3) asList equals: #(1, 2, 3)
+    // asSet discards duplicates (assert contents, not just size)
+    self assert: ((#(1, 2, 2, 3) asSet) asList sort) equals: #(1, 2, 3)
+    self assert: ((Set withAll: #(1, 2, 3)) asList sort) equals: #(1, 2, 3)
+    // asBag counts occurrences; Bag asList expands by count
+    self assert: ((#(1, 1, 2) asBag) occurrencesOf: 1) equals: 2
+    self assert: (((Bag withAll: #(1, 1, 2)) asList) sort) equals: #(1, 1, 2)
+    // Dictionary converts its values (consistent with do:)
+    self assert: ((#{#a => 10, #b => 20} asList) sort) equals: #(10, 20)
+    // Interval conversions
+    self assert: (1 to: 3) asList equals: #(1, 2, 3)
+    self assert: ((1 to: 3) asSet asList sort) equals: #(1, 2, 3)
+    // round trip List -> Set -> List (dedup)
+    self assert: ((#(3, 1, 2, 1) asSet) asList sort) equals: #(1, 2, 3)
+
+  testConversionEmpty =>
+    self assert: #() asList equals: #()
+    self assert: #() asArray asList equals: #()
+    self assert: #() asSet size equals: 0
+    self assert: #() asBag size equals: 0

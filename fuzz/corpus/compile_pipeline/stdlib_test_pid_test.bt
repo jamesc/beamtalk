@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1553: Tests for Pid kill and exit: methods
+
+TestCase subclass: PidTest
+  field: pid = nil
+
+  setUp =>
+    // Spawn a process that sleeps forever; unlink so kill/exit signals don't
+    // propagate to the test process.
+    pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(#infinity)
+    Erlang erlang unlink: pid
+    self withPid: pid
+
+  tearDown => self.pid isAlive ifTrue: [self.pid kill]
+
+  waitForPidDeath =>
+    50 timesRepeat: [self.pid isAlive ifTrue: [Timer sleep: 10]]
+
+  testKillTerminatesProcess =>
+    self assert: self.pid isAlive
+    self.pid kill
+    self waitForPidDeath
+    self deny: self.pid isAlive
+
+  testExitWithReasonTerminatesProcess =>
+    self assert: self.pid isAlive
+    self.pid exit: #shutdown
+    self waitForPidDeath
+    self deny: self.pid isAlive
+
+  testKillReturnValue =>
+    result := self.pid kill
+    self assert: result equals: true
+    self waitForPidDeath
+    self deny: self.pid isAlive
+
+  testExitReturnValue =>
+    result := self.pid exit: #shutdown
+    self assert: result equals: true
+    self waitForPidDeath
+    self deny: self.pid isAlive

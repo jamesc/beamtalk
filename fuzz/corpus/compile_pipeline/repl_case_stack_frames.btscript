@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for StackFrame introspection in the REPL context (BT-107)
+//
+// This file covers REPL-specific behavior only.
+// StackFrame semantics are tested exhaustively in
+// stdlib/bootstrap-test/stack_frames.bt.
+
+// ===========================================================================
+// TYPEOF WORKAROUND — COMPILE-TIME SYMBOL VALIDATOR
+// ===========================================================================
+
+// TypeError also has stackTrace.
+// Use a workspace variable to pass the wrong-typed arg so the compile-time
+// symbol validator does not reject it before runtime.
+badIndex := "hello"
+// => _
+
+[#(1, 2, 3) at: badIndex] on: TypeError do: [:e | e stackTrace class]
+// => List

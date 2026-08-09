@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1420: Tests that state mutations in self-called methods are visible
+// to the caller after the self-call returns.
+//
+// Fixtures: stdlib/test/fixtures/self_call_state_actor.bt
+
+TestCase subclass: ActorSelfCallStateTest
+  field: a = nil
+
+  setUp => self withA: SelfCallStateActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  // Core regression test: self-call mutates state, caller reads it
+  testSelfCallStateMutationVisible =>
+    self assert: self.a callSetupThenRead equals: 42
+
+  // Multiple sequential self-calls each mutate state
+  testMultipleSelfCallsMutateState =>
+    self assert: self.a callThreeIncrements equals: 3
+
+  // Self-call as last expression threads state back to gen_server
+  testSelfCallAsLastExpressionThreadsState =>
+    self.a callSetupAsLast
+    self assert: self.a getValue equals: 42
+
+  // Self-call mutation followed by field assignment
+  testSelfCallThenFieldAssignment =>
+    self assert: self.a callSetupThenAssignField equals: 52
+
+  // BT-1421: Assignment RHS self-send returns the value, not the dispatch tuple
+  testAssignmentRhsSelfSendReturnsValue =>
+    self assert: self.a callBumpAndCapture equals: 1
+
+  // BT-1421: Assignment RHS self-send threads state correctly
+  testAssignmentRhsSelfSendThreadsState =>
+    self assert: self.a callBumpAndReadState equals: 1
+
+  // BT-1421: Multiple assignment RHS self-sends accumulate state
+  testMultipleAssignmentRhsSelfSends =>
+    self assert: self.a callDoubleBumpAndCapture equals: 3

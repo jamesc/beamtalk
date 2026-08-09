@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1549: Tests suite-level setUpOnce lifecycle hook.
+// setUpOnce runs once before all tests, returning a fixture accessible
+// via self suiteFixture (message send).
+
+TestCase subclass: SetupOnceTest
+
+  setUpOnce =>
+    // Return a dictionary as the shared fixture
+    Dictionary new: #{#sharedKey => "sharedValue", #counter => 0}
+
+  testFixtureIsAccessible =>
+    // suiteFixture should contain the dictionary from setUpOnce
+    self deny: (self suiteFixture == nil)
+
+  testFixtureHasExpectedValue =>
+    self assert: (self suiteFixture at: #sharedKey) equals: "sharedValue"
+
+  testFixtureIsConsistentAcrossTests =>
+    // Each test sees the same fixture value
+    self assert: (self suiteFixture at: #counter) equals: 0

@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2880: match: arm with self-mutating multi-statement block returns
+// internal state tuple instead of value. Verifies bumpMatch returns the
+// mutated Integer (not an internal state-threading Tuple), and that the
+// mutation is actually visible in subsequent state reads. Also covers the
+// generalized shape — a match: arm whose body is itself a nested
+// ifTrue:/ifFalse: mutation with no `[...] value` wrapper — and a match:
+// with two adjacent arms that each mutate a different field.
+
+TestCase subclass: NilTypeMatchSelfMutationActorTest
+
+  testBumpMatchReturnsIntegerNotTuple =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    result := a bumpMatch
+    self assert: result equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpMatchThreadsStateAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpMatch
+    a bumpMatch
+    result := a bumpMatch
+    self assert: result equals: 3
+    self assert: a currentCount equals: 3
+
+  testBumpMatchIfTrueReturnsIntegerNotTuple =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    result := a bumpMatchIfTrue: true
+    self assert: result equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpMatchIfTrueThreadsStateAcrossCalls =>
+    // count: 0 -> 1 -> 2 -> 1 (the last call passes false, taking the
+    // ifFalse: branch, self.count := self.count - 1 = 1). The assignment's
+    // value is what's returned, so `result` is that decremented count, not
+    // the pre-decrement value.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpMatchIfTrue: true
+    a bumpMatchIfTrue: true
+    result := a bumpMatchIfTrue: false
+    self assert: result equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpEitherOfMutatesOnlyTheMatchingArmsField =>
+    // Each arm must start from the same pre-match state: bumping the `2`
+    // arm after two `1` bumps must not see (or leak into) the count the
+    // `1` arm mutated, and vice versa.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    r1 := a bumpEitherOf: 1
+    r2 := a bumpEitherOf: 1
+    r3 := a bumpEitherOf: 2
+    self assert: r1 equals: 1
+    self assert: r2 equals: 2
+    self assert: r3 equals: 1
+    self assert: a currentCount equals: 2
+    self assert: a currentOtherCount equals: 1

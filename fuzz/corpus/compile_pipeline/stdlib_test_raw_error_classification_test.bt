@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2704: raw Erlang runtime errors escaping a send are classified and wrapped
+// at the dispatch boundary (never leaked raw), the active selector/class is
+// threaded to compiled-method errors as a breadcrumb (BT-2705), AND the
+// error-only wrapping must not swallow throw-based control flow (^ / on:do:).
+
+// The RawErrorActor helper (a compiled method that triggers a raw Erlang
+// badarith) lives in fixtures/raw_error_actor.bt and is auto-loaded.
+
+TestCase subclass: RawErrorClassificationTest
+
+  // --- Bucket A: user-input errors are classified, not left generic ---
+  testNonNumericSumIsTypeError =>
+    // #(1, "x") sum raises a raw Erlang badarith inside the value-type
+    // dispatch path; it must surface as a catchable TypeError.
+    result := [#(1, "x") sum] on: TypeError do: [:e | e kind]
+    self assert: result equals: #type_error
+
+  testNonNumericSumCaughtByRuntimeErrorParent =>
+    // TypeError is under Error/Exception, but a non-numeric arith is a TypeError,
+    // so RuntimeError must NOT catch it (correct classification, not flattening).
+    result := [
+      [#(1, "x") sum] on: RuntimeError do: [:e | "wrong"]
+    ] on: TypeError do: [:e | "right"]
+    self assert: result equals: "right"
+
+  testActorMethodErrorCarriesSelectorBreadcrumb =>
+    // BT-2705: a raw error escaping a compiled method is located with the
+    // active selector threaded in at the actor dispatch boundary.
+    actor := RawErrorActor spawn
+    result := [actor triggerBadArith] on: TypeError do: [:e | e selector]
+    self assert: result equals: #triggerBadArith
+
+  testActorMethodErrorIsClassified =>
+    // The raw badarith inside the method still classifies as a TypeError.
+    actor := RawErrorActor spawn
+    result := [actor triggerBadArith] on: TypeError do: [:e | e kind]
+    self assert: result equals: #type_error
+
+  testNonNumericSumHasHint =>
+    // Bucket-A errors carry an actionable hint.
+    result := [#(1, "x") sum] on: TypeError do: [:e | e hint isNil]
+    self assert: result equals: false
+
+  testNonNumericSumMessageIsNotRawErlang =>
+    // The message must be a formatted string, never a raw `badarith` dump.
+    result := [
+      #(1, "x") sum
+    ] on: Exception do: [:e | e message includesSubstring: "badarith"]
+    self assert: result equals: false
+
+  // --- Control flow must be unaffected (only error: is wrapped, not throw:) ---
+  testNonLocalReturnThroughValueSendStillExits =>
+    // ^ inside a block passed to a value-type send (do:) must still exit the
+    // enclosing method. If the dispatch-boundary catch wrongly intercepted
+    // throw, this would return 0 instead of 2.
+    self assert: self firstEven equals: 2
+
+  firstEven =>
+    #(1, 2, 3, 4) do: [:x | x isEven ifTrue: [^x]]
+    ^0
+
+  testOnDoStillCatches =>
+    result := [#(1, "x") sum] on: Exception do: [:e | "caught"]
+    self assert: result equals: "caught"
+
+  testOnDoReRaisePropagates =>
+    // Re-raising a caught (wrapped) error from inside the handler must still
+    // propagate to the outer handler.
+    result := [
+      [#(1, "x") sum] on: TypeError do: [:e | e signal]
+    ] on: Exception do: [:e | "re-raised"]
+    self assert: result equals: "re-raised"
+
+  testSuccessfulValueSendUnaffected =>
+    // The wrapping wrapper must be transparent on the success path.
+    self assert: #(1, 2, 3) sum equals: 6

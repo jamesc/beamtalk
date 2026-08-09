@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2842: `generate_hierarchy_walk` unconditionally converted any
+// `{error, DispatchError}` returned by `beamtalk_dispatch:super/5` into a
+// fabricated does_not_understand, even when the selector *was* found and
+// invoked but raised a real error. Any inherited (non-overridden) method
+// reached via the runtime hierarchy walk therefore had its real error
+// silently replaced with a bogus DNU.
+//
+// Neither `triggerBadArithDirect` nor `triggerBadArithForwarded` is
+// overridden on InheritedSelfSendErrorChild, so both selectors resolve via
+// `beamtalk_dispatch:super/5`'s hierarchy walk (not Child's own local
+// dispatch/4 case statement) — exercising exactly the masked path.
+//
+// Contrast with actor_self_send_raw_error_test.bt, which covers the same
+// badarith trigger resolved via *local* dispatch (no hierarchy walk).
+//
+// Fixtures: stdlib/test/fixtures/inherited_self_send_error_base.bt,
+// stdlib/test/fixtures/inherited_self_send_error_child.bt
+
+TestCase subclass: ActorInheritedSelfSendErrorTest
+  field: c = nil
+
+  setUp => self withC: InheritedSelfSendErrorChild spawn
+
+  tearDown => self.c isNil ifFalse: [self.c stop]
+
+  testDirectInheritedCallRaisesRealError =>
+    // Single-hop, no self-send: triggerBadArithDirect is purely inherited
+    // (not overridden by Child), so it resolves via the hierarchy walk.
+    result := [self.c triggerBadArithDirect] on: TypeError do: [:e | e kind]
+    self assert: result equals: #type_error
+
+  testForwardedInheritedCallCarriesSelectorBreadcrumb =>
+    result := [
+      self.c triggerBadArithForwarded
+    ] on: TypeError do: [:e | e selector]
+    self assert: result equals: #triggerBadArithDirect
+
+  testForwardedInheritedCallMessageNamesSubclass =>
+    // The location prefix must name the runtime class (Child), not the
+    // superclass where the methods are defined (BT-2833's breadcrumb fix).
+    result := [
+      self.c triggerBadArithForwarded
+    ] on: TypeError do: [:e | e message]
+    self assert: (result includesSubstring: "InheritedSelfSendErrorChild>>triggerBadArithDirect") equals: true

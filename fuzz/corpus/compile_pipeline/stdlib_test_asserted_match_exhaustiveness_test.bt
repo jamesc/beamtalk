@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2763 / ADR 0106: opt-in asserted `matchExhaustive:` exhaustiveness.
+//
+// BUnit compiles with `--warnings-as-errors`, and `matchExhaustive:`'s
+// failure diagnostics are *already* `Error` severity — so a genuinely
+// non-exhaustive `matchExhaustive:` (or one over a non-closed scrutinee)
+// would fail to compile and take the whole suite down with it. Those
+// failure cases are therefore pinned at the Rust layer instead:
+//   crates/beamtalk-core/src/semantic_analysis/type_checker/tests/asserted_match_exhaustiveness.rs
+//
+// What THIS file pins is that `matchExhaustive:` compiles and dispatches
+// correctly end-to-end when the assertion genuinely holds — full coverage,
+// coverage via an unguarded wildcard, and the two-member case — exactly
+// mirroring the runtime coverage in `singleton_match_exhaustiveness_test.bt`
+// (the advisory `match:` sibling of this file), so the two keywords are
+// pinned as behaviourally identical at runtime.
+
+TestCase subclass: AssertedMatchExhaustivenessTest
+
+  testFullCoverageCompilesAndRuns =>
+    // All four members covered — matchExhaustive: is silently satisfied,
+    // and the match dispatches correctly at runtime.
+    compass :: #north | #south | #east | #west := #east
+    result := compass matchExhaustive: [
+      #north -> "up";
+      #south -> "down";
+      #east -> "right";
+      #west -> "left"
+    ]
+    self assert: result equals: "right"
+
+  testWildcardSatisfiesAssertionAndRuns =>
+    // An unguarded `_ ->` arm is full coverage — matchExhaustive: accepts
+    // it (a wildcard genuinely does handle every remaining case), and the
+    // match dispatches correctly at runtime.
+    compass :: #north | #south | #east | #west := #west
+    result := compass matchExhaustive: [
+      #north -> "up";
+      _ -> "other"
+    ]
+    self assert: result equals: "other"
+
+  testTwoMemberUnionFullCoverageRuns =>
+    // Smallest closed union, both members covered — silently satisfied and
+    // correct.
+    status :: #ok | #error := #error
+    result := status matchExhaustive: [
+      #ok -> "success";
+      #error -> "failure"
+    ]
+    self assert: result equals: "failure"
+
+  testAdvisoryMatchStillWorksAlongsideAssertedMatch =>
+    // Regression pin: plain `match:` (advisory, BT-2745) and
+    // `matchExhaustive:` (asserted, BT-2763) are independent keywords over
+    // the same scrutinee type — using one does not affect the other.
+    status :: #ok | #error := #ok
+    advisory := status match: [
+      #ok -> "advisory-ok";
+      #error -> "advisory-error"
+    ]
+    asserted := status matchExhaustive: [
+      #ok -> "asserted-ok";
+      #error -> "asserted-error"
+    ]
+    self assert: advisory equals: "advisory-ok"
+    self assert: asserted equals: "asserted-ok"

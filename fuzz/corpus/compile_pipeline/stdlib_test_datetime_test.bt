@@ -1,0 +1,502 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for DateTime class (BT-710)
+
+TestCase subclass: DateTimeTest
+
+  testConstructionYearMonthDay =>
+    dt := DateTime
+      year: 2026
+      month: 2
+      day: 18
+    self assert: dt class equals: DateTime
+
+  testConstructionYearMonthDayHourMinuteSecond =>
+    // Construct a full DateTime
+    dt2 := DateTime
+      year: 2026
+      month: 2
+      day: 18
+      hour: 10
+      minute: 30
+      second: 0
+    self assert: dt2 class equals: DateTime
+
+  testConstructionFromtimestamp =>
+    // Unix epoch is 1970-01-01
+    epoch := DateTime fromTimestamp: 0
+    self assert: epoch year equals: 1970
+    self assert: epoch month equals: 1
+    self assert: epoch day equals: 1
+    self assert: epoch hour equals: 0
+
+  testConstructionFromstring =>
+    // Parse ISO 8601 string
+    parsed := DateTime fromString: "2026-02-18T10:30:00Z"
+    self assert: parsed year equals: 2026
+    self assert: parsed month equals: 2
+    self assert: parsed day equals: 18
+    self assert: parsed hour equals: 10
+    self assert: parsed minute equals: 30
+    self assert: parsed second equals: 0
+
+  testConstructionNow =>
+    // DateTime now returns a DateTime
+    self assert: (DateTime now) class equals: DateTime
+    // now has a year >= 2026
+    self assert: ((DateTime now) year >= 2026)
+
+  testConstructionMonotonicnow =>
+    // monotonicNow returns an Integer
+    self assert: ((DateTime monotonicNow) class =:= Integer)
+
+  // BT-2998: `DateTime new` used to return `#{'$beamtalk_class' => 'DateTime'}`
+  // — tagged, so dispatch accepted it, but empty, so the first message
+  // (`asString`, `year`, …) died inside beamtalk_datetime on something that
+  // read like an arity bug. It now refuses at the point of the mistake.
+  testBareNewIsDisabled =>
+    // Rejected at compile time; @expect keeps that diagnostic from failing the
+    // build so the runtime guard (for dynamic sends) can be exercised too.
+    @expect type
+    self should: [DateTime new] raise: #instantiation_error
+    // The keyword form has refused all along; both now agree.
+    self should: [DateTime new: 5] raise: #user_error
+
+  testAccessors =>
+    a := DateTime
+      year: 2026
+      month: 3
+      day: 15
+      hour: 14
+      minute: 45
+      second: 30
+    self assert: a year equals: 2026
+    self assert: a month equals: 3
+    self assert: a day equals: 15
+    self assert: a hour equals: 14
+    self assert: a minute equals: 45
+    self assert: a second equals: 30
+
+  testConversionAstimestamp =>
+    // Unix epoch round-trip
+    self assert: (DateTime fromTimestamp: 0) asTimestamp equals: 0
+    // Known timestamp round-trip
+    ts := (DateTime
+      year: 2026
+      month: 1
+      day: 1) asTimestamp
+    self assert: (DateTime fromTimestamp: ts) year equals: 2026
+    self assert: (DateTime fromTimestamp: ts) month equals: 1
+    self assert: (DateTime fromTimestamp: ts) day equals: 1
+
+  testConversionAsstring =>
+    // Date-only formats with zero time
+    self
+      assert: (DateTime
+        year: 2026
+        month: 2
+        day: 18) asString
+      equals: "2026-02-18T00:00:00Z"
+    // Full datetime format
+    self
+      assert: (DateTime
+        year: 2026
+        month: 2
+        day: 18
+        hour: 10
+        minute: 30
+        second: 0) asString
+      equals: "2026-02-18T10:30:00Z"
+
+  testConversionPrintstring =>
+    self
+      assert: ((DateTime
+        year: 2026
+        month: 2
+        day: 18) printString) notNil
+
+  testArithmeticAddseconds =>
+    // Add one hour
+    self
+      assert: ((DateTime
+        year: 2026
+        month: 1
+        day: 1) addSeconds: 3600) hour
+      equals: 1
+    // Add negative seconds (subtract)
+    self
+      assert: ((DateTime
+        year: 2026
+        month: 1
+        day: 1
+        hour: 1
+        minute: 0
+        second: 0) addSeconds: -3600) hour
+      equals: 0
+
+  testArithmeticAdddays =>
+    // Add 7 days
+    self
+      assert: ((DateTime
+        year: 2026
+        month: 1
+        day: 1) addDays: 7) day
+      equals: 8
+    // Add days across month boundary
+    self
+      assert: ((DateTime
+        year: 2026
+        month: 1
+        day: 30) addDays: 3) month
+      equals: 2
+    self
+      assert: ((DateTime
+        year: 2026
+        month: 1
+        day: 30) addDays: 3) day
+      equals: 2
+
+  testArithmeticDiffseconds =>
+    // One day difference
+    b := DateTime
+      year: 2026
+      month: 1
+      day: 2
+    c := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    self assert: (b diffSeconds: c) equals: 86400
+    // Negative difference (reverse)
+    self assert: (c diffSeconds: b) equals: -86400
+    // Zero difference
+    self assert: (c diffSeconds: c) equals: 0
+
+  testComparison =>
+    d := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    e := DateTime
+      year: 2026
+      month: 1
+      day: 2
+    self assert: (d < e)
+    self deny: (e < d)
+    self deny: (d > e)
+    self assert: (e > d)
+    self assert: (d <= e)
+    self assert: (d <= d)
+    self deny: (d >= e)
+    self assert: (d >= d)
+    self assert: (d =:= d)
+    self deny: (d =:= e)
+    self assert: (d /= e)
+    self deny: (d /= d)
+
+  testErrorHandling =>
+    // Invalid date raises error
+    self
+      should: [
+        DateTime
+          year: 2026
+          month: 13
+          day: 1
+      ]
+      raise: #type_error
+    // Invalid time raises error
+    self
+      should: [
+        DateTime
+          year: 2026
+          month: 1
+          day: 1
+          hour: 25
+          minute: 0
+          second: 0
+      ]
+      raise: #type_error
+    // Invalid string format raises error
+    self should: [DateTime fromString: "not-a-date"] raise: #type_error
+    // Non-integer argument raises error
+    @expect type
+    self should: [DateTime fromTimestamp: "hello"] raise: #type_error
+    // diffSeconds: with non-DateTime raises error
+    @expect type
+    self
+      should: [
+        (DateTime
+          year: 2026
+          month: 1
+          day: 1) diffSeconds: "hello"
+      ]
+      raise: #type_error
+
+  testFormatBasic =>
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 25
+      hour: 14
+      minute: 30
+      second: 5
+    self assert: (dt format: "yyyy-MM-dd HH:mm:ss") equals: "2026-07-25 14:30:05"
+
+  testFormatUnpaddedTokens =>
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 5
+      hour: 9
+      minute: 3
+      second: 7
+    self assert: (dt format: "y/M/d H:m:s") equals: "2026/7/5 9:3:7"
+
+  testFormatTwoDigitYear =>
+    dt := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    self assert: (dt format: "yy-MM-dd") equals: "26-01-01"
+
+  testFormatLiteralPassthrough =>
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 25
+    self assert: (dt format: "Date: yyyy.MM.dd!") equals: "Date: 2026.07.25!"
+
+  testParseFormatRoundTrip =>
+    result := DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
+    self assert: result isOk
+    dt := result unwrap
+    self assert: dt year equals: 2026
+    self assert: dt month equals: 7
+    self assert: dt day equals: 25
+    self assert: dt hour equals: 14
+    self assert: dt minute equals: 30
+    self assert: dt second equals: 0
+    self assert: dt offsetMinutes equals: 0
+
+  testParseFormatMismatchReturnsError =>
+    result := DateTime parse: "not a date" format: "yyyy-MM-dd"
+    self deny: result isOk
+
+  testParseFormatInvalidDateReturnsError =>
+    // Syntactically matches yyyy-MM-dd but month 13 / day 40 are out of range
+    result := DateTime parse: "2026-13-40" format: "yyyy-MM-dd"
+    self deny: result isOk
+
+  testFormatParseSymmetry =>
+    // format: then parse:format: with the same pattern round-trips to an
+    // equal instant (both UTC, so also equal wall-clock fields)
+    dt := DateTime
+      year: 2026
+      month: 3
+      day: 9
+      hour: 8
+      minute: 5
+      second: 1
+    formatted := dt format: "yyyy-MM-dd HH:mm:ss"
+    parsed := (DateTime parse: formatted format: "yyyy-MM-dd HH:mm:ss") unwrap
+    self assert: (parsed =:= dt)
+
+  testOffsetMinutesDefaultsToZero =>
+    self
+      assert: (DateTime
+        year: 2026
+        month: 1
+        day: 1) offsetMinutes
+      equals: 0
+    self assert: (DateTime fromTimestamp: 0) offsetMinutes equals: 0
+    self assert: (DateTime now) offsetMinutes equals: 0
+
+  testOffsetConstruction =>
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 25
+      hour: 14
+      minute: 30
+      second: 0
+      offsetMinutes: 120
+    self assert: dt offsetMinutes equals: 120
+    // Wall-clock fields are stored as given, not normalized to UTC
+    self assert: dt hour equals: 14
+
+  testAsstringWithOffset =>
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 25
+      hour: 14
+      minute: 30
+      second: 0
+      offsetMinutes: 120
+    self assert: dt asString equals: "2026-07-25T14:30:00+02:00"
+    neg := DateTime
+      year: 2026
+      month: 7
+      day: 25
+      hour: 9
+      minute: 0
+      second: 0
+      offsetMinutes: -300
+    self assert: neg asString equals: "2026-07-25T09:00:00-05:00"
+
+  testFromstringWithOffsetRoundtrip =>
+    // Positive offset
+    parsed := DateTime fromString: "2026-07-25T14:30:00+02:00"
+    self assert: parsed offsetMinutes equals: 120
+    self assert: parsed hour equals: 14
+    self assert: parsed asString equals: "2026-07-25T14:30:00+02:00"
+    // Negative offset
+    neg := DateTime fromString: "2026-07-25T09:00:00-05:00"
+    self assert: neg offsetMinutes equals: -300
+    self assert: neg asString equals: "2026-07-25T09:00:00-05:00"
+    // Z suffix means UTC (offsetMinutes 0)
+    z := DateTime fromString: "2026-07-25T09:00:00Z"
+    self assert: z offsetMinutes equals: 0
+    // No suffix at all still parses, defaulting to UTC (pre-existing behavior)
+    noSuffix := DateTime fromString: "2026-07-25T09:00:00"
+    self assert: noSuffix offsetMinutes equals: 0
+
+  testToutc =>
+    dt := DateTime fromString: "2026-07-25T14:30:00+02:00"
+    utc := dt toUtc
+    self assert: utc offsetMinutes equals: 0
+    self assert: utc asString equals: "2026-07-25T12:30:00Z"
+    // Same instant as the original. Note: NOT `utc =:= dt` — `=:=` is not
+    // overridable (ADR 0002) and always compares the raw representation
+    // structurally, so a UTC DateTime and its +02:00 equivalent are never
+    // `=:=` even though they represent the same instant.
+    self assert: (utc sameInstant: dt)
+
+  testTooffset =>
+    utc := DateTime fromString: "2026-07-25T12:30:00Z"
+    plusTwo := utc toOffset: 120
+    self assert: plusTwo offsetMinutes equals: 120
+    self assert: plusTwo hour equals: 14
+    self assert: (plusTwo sameInstant: utc)
+    // Negative offset, crossing a day boundary
+    minusFive := utc toOffset: -300
+    self assert: minusFive offsetMinutes equals: -300
+    self assert: minusFive hour equals: 7
+    self assert: minusFive day equals: 25
+    self assert: (minusFive sameInstant: utc)
+
+  testTooffsetCrossesDayBoundary =>
+    // DST-adjacent style boundary case: an offset conversion that rolls
+    // the wall-clock date forward
+    utc := DateTime fromString: "2026-07-25T23:30:00Z"
+    plusTwo := utc toOffset: 120
+    self assert: plusTwo day equals: 26
+    self assert: plusTwo hour equals: 1
+    self assert: (plusTwo sameInstant: utc)
+
+  testComparisonRespectsInstantAcrossOffsets =>
+    utcNoon := DateTime fromString: "2026-07-25T12:00:00Z"
+    sameInstantPlusTwo := DateTime fromString: "2026-07-25T14:00:00+02:00"
+    // Different wall-clock hour (12 vs 14) but the same instant
+    self assert: utcNoon asTimestamp equals: sameInstantPlusTwo asTimestamp
+    self assert: (utcNoon sameInstant: sameInstantPlusTwo)
+    self deny: (utcNoon < sameInstantPlusTwo)
+    self deny: (utcNoon > sameInstantPlusTwo)
+    // An hour later in wall-clock at the same offset is genuinely later
+    later := DateTime fromString: "2026-07-25T15:00:00+02:00"
+    self assert: (sameInstantPlusTwo < later)
+    self assert: (later > utcNoon)
+
+  testSameinstantAndDifferentinstant =>
+    dt := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    self assert: (dt sameInstant: dt)
+    self deny: (dt differentInstant: dt)
+    other := DateTime
+      year: 2026
+      month: 1
+      day: 2
+    self deny: (dt sameInstant: other)
+    self assert: (dt differentInstant: other)
+    // Cross-offset: same instant, different offsetMinutes representation
+    utc := DateTime fromString: "2026-07-25T12:00:00Z"
+    offsetEquivalent := utc toOffset: 120
+    self assert: (utc sameInstant: offsetEquivalent)
+    self deny: (utc differentInstant: offsetEquivalent)
+
+  testAddsecondsPreservesOffset =>
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 25
+      hour: 23
+      minute: 30
+      second: 0
+      offsetMinutes: 120
+    added := dt addSeconds: 3600
+    self assert: added offsetMinutes equals: 120
+    self assert: added day equals: 26
+    self assert: added hour equals: 0
+
+  testSubtractionAcrossOffsetsReturnsInstantDuration =>
+    // The `-` operator (Duration subtraction) goes through the same
+    // instant-based asTimestamp math as comparisons — verify it isn't
+    // fooled by differing offsetMinutes representations.
+    utc := DateTime fromString: "2026-07-25T12:00:00Z"
+    plusTwoSameInstant := DateTime fromString: "2026-07-25T14:00:00+02:00"
+    self assert: (utc - plusTwoSameInstant) class equals: Duration
+    self assert: (utc - plusTwoSameInstant) asSeconds equals: 0
+    // An hour later in wall-clock at +02:00 is genuinely an hour later
+    plusTwoOneHourLater := DateTime fromString: "2026-07-25T15:00:00+02:00"
+    self assert: (plusTwoOneHourLater - utc) asHours equals: 1
+    self assert: (utc - plusTwoOneHourLater) asHours equals: -1
+
+  testErrorHandlingOffsetAndFormat =>
+    // offsetMinutes out of range (both a correct Integer type and an
+    // invalid value) raises a type_error
+    self
+      should: [
+        DateTime
+          year: 2026
+          month: 1
+          day: 1
+          hour: 0
+          minute: 0
+          second: 0
+          offsetMinutes: 5000
+      ]
+      raise: #type_error
+    // toOffset: with a non-Integer argument raises
+    @expect type
+    self
+      should: [
+        (DateTime
+          year: 2026
+          month: 1
+          day: 1) toOffset: "nope"
+      ]
+      raise: #type_error
+    // format: with a non-String pattern raises
+    @expect type
+    self
+      should: [
+        (DateTime
+          year: 2026
+          month: 1
+          day: 1) format: 42
+      ]
+      raise: #type_error
+    // fromString: with an out-of-range offset (hours > 23) raises
+    self should: [
+      DateTime fromString: "2026-07-25T14:30:00+99:99"
+    ] raise: #type_error
+    // fromString: with an ISO-valid but real-world-nonsensical offset
+    // (+15:00, between the +14:00 real max and the ISO +23:59 ceiling)
+    // also raises — validate_offset applies uniformly, not just to the
+    // keyword constructor
+    self should: [
+      DateTime fromString: "2026-07-25T14:30:00+15:00"
+    ] raise: #type_error

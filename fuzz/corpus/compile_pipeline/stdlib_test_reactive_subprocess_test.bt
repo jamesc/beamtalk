@@ -1,0 +1,236 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1187: BUnit tests for ReactiveSubprocess actor — push-mode stdout/stderr
+// delivery, exit notification, writeLine:, close, exitCode.
+//
+// Cross-platform: uses platform-appropriate commands on Unix and Windows.
+// Interactive stdin-echo tests use beamtalk-exec --cat on Windows for line-buffered output.
+//
+// StubDelegate actor is defined in fixtures/stub_delegate_fixture.bt.
+
+TestCase subclass: ReactiveSubprocessTest
+  field: isUnix = false
+
+  setUp => self withIsUnix: (System osFamily == "unix")
+
+  // --- Platform command helpers ---
+  shellExe => self.isUnix ifTrue: ["/bin/sh"] ifFalse: ["cmd"]
+
+  shellArgs: cmd => self.isUnix ifTrue: [#("-c", cmd)] ifFalse: [#("/c", cmd)]
+
+  sleepExe => self.isUnix ifTrue: ["/bin/sleep"] ifFalse: ["cmd"]
+
+  sleepArgs =>
+    self.isUnix ifTrue: [
+      #("10")
+    ] ifFalse: [#("/c", "ping -n 60 127.0.0.1 >nul")]
+
+  trueExe => self.isUnix ifTrue: ["/usr/bin/env"] ifFalse: ["cmd"]
+
+  trueArgs => self.isUnix ifTrue: [#("true")] ifFalse: [#("/c", "exit 0")]
+
+  multilineScript =>
+    self.isUnix ifTrue: [
+      "printf 'alpha\nbeta\ngamma\n'"
+    ] ifFalse: ["(echo alpha& echo beta& echo gamma)"]
+
+  stderrMultilineScript =>
+    self.isUnix ifTrue: [
+      "printf 'x\ny\nz\n' >&2"
+    ] ifFalse: ["(echo x& echo y& echo z)>&2"]
+
+  partialLineScript =>
+    self.isUnix ifTrue: ["printf hello"] ifFalse: ["<nul set /p =hello"]
+
+  partialStderrScript =>
+    self.isUnix ifTrue: ["printf hello >&2"] ifFalse: ["<nul set /p =hello>&2"]
+
+  stdoutStderrScript =>
+    self.isUnix ifTrue: [
+      "echo out; echo err >&2"
+    ] ifFalse: ["echo out& echo err>&2"]
+
+  envScript =>
+    self.isUnix ifTrue: [
+      "echo $BT_TEST_SEED; pwd"
+    ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
+
+  envDir =>
+    self.isUnix ifTrue: [File tempDirectory] ifFalse: [System getEnv: "TEMP"]
+
+  // cat executable: echoes stdin to stdout.
+  // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
+  // cat mode with explicit flushing, bypassing pipe buffering).
+  catExe => self.isUnix ifTrue: ["/bin/cat"] ifFalse: ["beamtalk-exec"]
+
+  catArgs => self.isUnix ifTrue: [#()] ifFalse: [#("--cat")]
+
+  // --- Tests ---
+  testStdoutLinesPushedToNotify =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self multilineScript)
+      notify: delegate) unwrap
+    // Wait for exit
+    self waitForExit: delegate from: proc
+    self assert: delegate stdoutLines equals: #("alpha", "beta", "gamma")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testStderrLinesPushedToNotify =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self stderrMultilineScript)
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: delegate stderrLines equals: #("x", "y", "z")
+    self assert: delegate stdoutLines equals: #()
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testExitCodePushedToNotify =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self trueExe
+      args: self trueArgs
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: delegate exitCode equals: 0
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testPartialLineFlushedOnExit =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self partialLineScript)
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: delegate stdoutLines equals: #("hello")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testStdoutAndStderrIndependent =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self stdoutStderrScript)
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: delegate stdoutLines equals: #("out")
+    self assert: delegate stderrLines equals: #("err")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testWriteLineDeliversThroughCat =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self catExe
+      args: self catArgs
+      notify: delegate) unwrap
+    proc writeLine: "hello"
+    // Poll up to 500 ms (50 × 10 ms) for cat to echo back
+    50 timesRepeat: [
+      (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 10]
+    ]
+    self assert: (delegate stdoutLines includes: "hello")
+    proc close
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testExitCodeNilWhileRunning =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self sleepExe
+      args: self sleepArgs
+      notify: delegate) unwrap
+    self assert: proc exitCode equals: nil
+    proc close
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testCloseIsIdempotent =>
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self sleepExe
+      args: self sleepArgs
+      notify: delegate) unwrap
+    self assert: proc close equals: nil
+    self assert: proc close equals: nil
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testOpenWithEnvAndDir =>
+    delegate := StubDelegate spawn
+    // Print the env var and the working directory to verify both are passed through
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self envScript)
+      env: #{"BT_TEST_SEED" => "hello1187"}
+      dir: self envDir
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: (delegate stdoutLines includes: "hello1187")
+    // On Windows, cd prints path with drive letter; on Unix, pwd prints the dir.
+    // macOS TMPDIR ends with a trailing slash (e.g. "/var/folders/.../T/") and is
+    // reached through the /private symlink, but the subprocess reports its
+    // canonical working directory without the trailing slash
+    // (e.g. "/private/var/folders/.../T"). Strip a trailing "/" so the substring
+    // check matches the canonical path the shell prints.
+    dir := self envDir replaceRegex: "/$" with: ""
+    self assert: (delegate stdoutLines anySatisfy: [:line |
+      line includesSubstring: dir
+    ])
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testPartialStderrLineFlushedOnExit =>
+    // Subprocess exits with a partial stderr fragment (no trailing newline).
+    // push_pending(stderr, ...) flushes the fragment as a line on exit (lines 418-419).
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self partialStderrScript)
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: delegate stderrLines equals: #("hello")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testOpenWithNonStringCommandRaisesTypeError =>
+    // Non-binary command argument fails the is_binary/1 guard in dispatch/3 (lines 114-115).
+    delegate := StubDelegate spawn
+    @expect type
+    self
+      should: [
+        ReactiveSubprocess
+          open: 42
+          args: #()
+          notify: delegate
+      ]
+      raise: #type_error
+    self assert: delegate stop equals: #ok
+
+  testStopWithoutCloseTerminatesPort =>
+    // Stop a running process without calling close first.
+    // terminate/2 runs the port_closed=false branch (lines 309-321) and cleans up the port.
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self sleepExe
+      args: self sleepArgs
+      notify: delegate) unwrap
+    self assert: proc exitCode equals: nil
+    self assert: proc stop equals: #ok
+    self assert: delegate stop equals: #ok
+
+  // Helper: poll up to 50 times (10ms each) for delegate exitReceived.
+  // Uses timesRepeat: to work around mutable locals not threading across block
+  // boundaries (BT-2308).
+  waitForExit: delegate from: _proc =>
+    50 timesRepeat: [delegate exitReceived ifFalse: [Timer sleep: 10]]
+    delegate exitReceived ifFalse: [
+      self fail: "Timed out waiting for subprocess exit notification"
+    ]

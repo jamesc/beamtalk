@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-97, BT-359, BT-765: Tests the basic reflection API on actor objects —
+// class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:, perform:; and that
+// fieldAt:put: raises immutable_value on primitive types (integers, strings)
+// BT-924: fieldAt: on user-defined Value subclass: objects reads slots — see
+// value_subclass_test.bt. fieldAt: on primitive literals (42, "hello") still
+// raises immutable_value since primitives have no map slots
+// BT-1168: Variable (symbol) arguments to respondsTo:, fieldAt:, fieldAt:put:
+
+TestCase subclass: ReflectionBasicTest
+  field: c = nil
+  field: a = nil
+
+  setUp =>
+    self.c := Counter spawn
+    self.a := ReflectionSelfMutateActor spawn
+
+  tearDown =>
+    self.c isNil ifFalse: [self.c stop]
+    self.a isNil ifFalse: [self.a stop]
+
+  testDynamicRespondsTo =>
+    // BT-1168: variable holding a symbol should work with respondsTo:
+    sel := #increment
+    self assert: (self.c respondsTo: sel)
+    unknownSel := #nonExistent
+    self deny: (self.c respondsTo: unknownSel)
+
+  testDynamicFieldAt =>
+    // BT-1168: variable holding a field name should work with fieldAt:
+    fieldName := #value
+    self assert: (self.c fieldAt: fieldName) equals: 0
+    self.c increment
+    self assert: (self.c fieldAt: fieldName) equals: 1
+
+  testDynamicFieldAtPut =>
+    // BT-1168: variable holding a field name should work with fieldAt:put:
+    fieldName := #value
+    self.c fieldAt: fieldName put: 99
+    self assert: self.c getValue equals: 99
+
+  testActorReflectionApi =>
+    // Test class reflection
+    self assert: self.c class equals: Counter
+    // Test respondsTo: with symbol literal
+    self assert: (self.c respondsTo: #increment)
+    // Test respondsTo: with non-existent method
+    self deny: (self.c respondsTo: #nonExistent)
+    // Test fieldNames
+    self assert: self.c fieldNames equals: #(#value)
+    // Test fieldAt: - read field value
+    self assert: (self.c fieldAt: #value) equals: 0
+    // Increment to change state
+    self assert: self.c increment equals: 1
+    // Test fieldAt: after state change
+    self assert: (self.c fieldAt: #value) equals: 1
+    // Test fieldAt:put: - set field value
+    self assert: (self.c fieldAt: #value put: 42) equals: 42
+    // Verify field was set
+    self assert: self.c getValue equals: 42
+    // Test perform: - dynamic dispatch (zero-arity method)
+    self assert: (self.c perform: #getValue) equals: 42
+    // Test perform: with another method
+    self assert: (self.c perform: #increment) equals: 43
+    // Verify increment worked via getValue
+    self assert: self.c getValue equals: 43
+    // BT-359: fieldAt: on primitive value types (integers) raises immutable_value
+    // Note: user-defined Value subclass: objects support fieldAt: for reading (BT-924)
+    self should: [42 fieldAt: #x] raise: #immutable_value
+    // BT-765: fieldAt:put: on immutable literals raises immutable_value error
+    @expect type
+    self should: [42 fieldAt: #x put: 99] raise: #immutable_value
+    @expect type
+    self should: ["hello" fieldAt: #x put: "world"] raise: #immutable_value
+
+  // BT-1324: self fieldAt:put: must thread state so subsequent reads see the update
+  testSelfFieldAtPutThreadsState =>
+    self assert: self.a mutateAndReadReflective equals: 42
+
+  testSelfFieldAtPutThreadsStateDirect =>
+    self assert: self.a mutateAndReadDirect equals: 99
+
+  testSelfFieldAtPutTwoFields => self assert: self.a mutateTwoFields equals: 30
+
+  testAssignThenReflectiveRead =>
+    self assert: self.a assignAndReadReflective equals: 77

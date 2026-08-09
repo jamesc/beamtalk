@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit test example: Counter actor tests (each test spawns its own counter)
+
+TestCase subclass: CounterTest
+
+  testInitialValue => self assert: Counter spawn getValue equals: 0
+
+  testIncrement => self assert: Counter spawn increment equals: 1

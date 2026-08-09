@@ -240,6 +240,120 @@ pub mod test_support {
         })
     }
 
+    /// Patterns that should never appear in valid Core Erlang output — Rust
+    /// Debug/Display leaks (BT-875).
+    ///
+    /// Shared by `core_erlang_validity_tests.rs`'s proptest suite and the
+    /// `compile_pipeline` fuzz target (BT-3124) so the two never drift.
+    pub const CORE_ERLANG_FORMAT_ARTIFACT_PATTERNS: &[&str] = &[
+        "{:?}",
+        "Document::",
+        "BinaryOp(",
+        "Expression::",
+        "Literal::",
+        "MessageSelector::",
+        "Pattern::",
+        "TokenKind::",
+    ];
+
+    /// Checks that parentheses, brackets, and braces are balanced in Core
+    /// Erlang output, skipping the contents of single- and double-quoted
+    /// atom/string literals (which may themselves contain unbalanced
+    /// delimiter characters).
+    ///
+    /// Shared by `core_erlang_validity_tests.rs`'s proptest suite and the
+    /// `compile_pipeline` fuzz target (BT-3124) so the two never drift.
+    #[must_use]
+    pub fn core_erlang_has_balanced_delimiters(s: &str) -> bool {
+        let mut stack = Vec::new();
+        let mut chars = s.chars().peekable();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+                '"' if !in_single_quote => in_double_quote = !in_double_quote,
+                '\\' if in_single_quote || in_double_quote => {
+                    // Skip escaped character
+                    chars.next();
+                }
+                _ if in_single_quote || in_double_quote => {}
+                '(' => stack.push(')'),
+                '[' => stack.push(']'),
+                '{' => stack.push('}'),
+                ')' | ']' | '}' => {
+                    if stack.pop() != Some(ch) {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        stack.is_empty() && !in_single_quote && !in_double_quote
+    }
+
+    /// Checks the structural-validity properties `generate_module`'s output
+    /// must satisfy whenever it returns `Ok`: starts with `module`, ends
+    /// with `end`, has balanced delimiters, and contains no Rust format
+    /// artifacts. Returns a list of human-readable violation descriptions —
+    /// empty means the output is structurally valid.
+    ///
+    /// Shared by `core_erlang_validity_tests.rs`'s proptest suite and the
+    /// `compile_pipeline` fuzz target (BT-3124) so the two never drift.
+    #[must_use]
+    pub fn core_erlang_structural_issues(output: &str) -> Vec<String> {
+        let mut issues = Vec::new();
+        let trimmed = output.trim();
+
+        if !trimmed.starts_with("module") {
+            issues.push(format!(
+                "does not start with 'module':\n{}",
+                char_prefix(trimmed, 200)
+            ));
+        }
+        if !trimmed.ends_with("end") {
+            issues.push(format!(
+                "does not end with 'end':\n...{}",
+                char_suffix(trimmed, 200)
+            ));
+        }
+        if !core_erlang_has_balanced_delimiters(output) {
+            issues.push("has unbalanced delimiters".to_string());
+        }
+        for pattern in CORE_ERLANG_FORMAT_ARTIFACT_PATTERNS {
+            if output.contains(pattern) {
+                issues.push(format!("contains format artifact {pattern:?}"));
+            }
+        }
+
+        issues
+    }
+
+    /// Returns the first `max_chars` characters of `s` (fewer if shorter),
+    /// respecting UTF-8 boundaries. A hand-rolled, MSRV-1.85-compatible
+    /// stand-in for the standard library's `floor_char_boundary` (stable
+    /// since 1.91, past this crate's pinned MSRV).
+    fn char_prefix(s: &str, max_chars: usize) -> &str {
+        match s.char_indices().nth(max_chars) {
+            Some((byte_idx, _)) => &s[..byte_idx],
+            None => s,
+        }
+    }
+
+    /// Returns the last `max_chars` characters of `s` (fewer if shorter),
+    /// respecting UTF-8 boundaries. A hand-rolled, MSRV-1.85-compatible
+    /// stand-in for the standard library's `ceil_char_boundary` (stable
+    /// since 1.91, past this crate's pinned MSRV).
+    fn char_suffix(s: &str, max_chars: usize) -> &str {
+        let char_count = s.chars().count();
+        let skip = char_count.saturating_sub(max_chars);
+        match s.char_indices().nth(skip) {
+            Some((byte_idx, _)) => &s[byte_idx..],
+            None => "",
+        }
+    }
+
     /// Returns the standard proptest configuration used across beamtalk-core property tests.
     ///
     /// Sets `cases` to at least 512 (overridable via `PROPTEST_CASES` env var).

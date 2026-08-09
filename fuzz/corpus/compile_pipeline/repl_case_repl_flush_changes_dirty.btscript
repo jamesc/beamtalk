@@ -1,0 +1,86 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the `:flush`, `:flush <selector>`, `:changes`, and `:dirty`
+// REPL meta-commands (ADR 0082 Phase 3, BT-2287).
+//
+// These CLI-side aliases desugar to the Beamtalk expressions:
+//   :flush          → Workspace flush
+//   :flush <sel>    → Workspace flush: <sel>
+//   :changes        → Workspace changes
+//   :dirty          → Workspace changes notEmpty
+//
+// The tests verify the aliases dispatch through to the underlying message
+// sends. Runtime semantics of those calls are covered separately:
+// workspace_changes.btscript (BT-2284) for `Workspace changes`; the
+// `beamtalk_workspace_flush_tests` EUnit suite (BT-2286) for `Workspace flush`.
+//
+// IMPORTANT: meta-commands are dispatched by the REPL/test harness *only when
+// the entire line is* `:flush`, `:changes`, `:dirty`, or `:flush <selector>`.
+// They are NOT composable inside larger expressions — assertions about return
+// shape route through the underlying message-send form on a separate line.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session. Live
+// patches from earlier cases (e.g. `Counter >> increment => ...` from
+// compile_source_patch.btscript) accumulate as non-flushable ChangeLog entries
+// (no active project tree → all sourceFile paths classify as "dependency"),
+// so the active changeset is generally non-empty here. The assertions below
+// compare alias-vs-direct return shapes, not exact dirty-state values.
+
+// ===========================================================================
+// :dirty — alias for `Workspace changes notEmpty`.
+// ===========================================================================
+
+// The underlying expression returns a Boolean.
+(Workspace changes notEmpty) isKindOf: Boolean
+// => true
+
+// The alias dispatches successfully (wildcard: meta-commands aren't
+// composable, so we can only verify the call doesn't raise an error).
+:dirty
+// => _
+
+// ===========================================================================
+// :changes — alias for `Workspace changes`
+// ===========================================================================
+
+// :changes returns a value (wildcard — the harness can't introspect it
+// directly because meta-commands aren't composable inside expressions).
+:changes
+// => _
+
+// The underlying call returns a ChangeLog. Both calls go through the same
+// FFI singleton, so the dispatch path is exercised by both.
+Workspace changes isKindOf: ChangeLog
+// => true
+
+// ===========================================================================
+// :flush — alias for `Workspace flush`
+// ===========================================================================
+
+// :flush returns a FlushResult value (wildcard — exact contents depend on
+// what was pending from earlier cases).
+:flush
+// => _
+
+// ===========================================================================
+// :flush <selector> — alias for `Workspace flush: <selector>`
+// ===========================================================================
+
+// :flush with a Class selector dispatches as `Workspace flush: Object`.
+// `Object` typically has no pending entries, so the call is a no-op.
+:flush Object
+// => _
+
+// :flush with a Symbol kind selector dispatches as `Workspace flush: #'new-class'`.
+:flush #'new-class'
+// => _
+
+// :flush with a Dictionary `#{ #file => path }` selector dispatches as
+// `Workspace flush: #{ #file => "..." }`.
+:flush #{ #file => "src/never_dirty.bt" }
+// => _
+
+// After all the targeted flushes, the ChangeLog is still queryable.
+:changes
+// => _

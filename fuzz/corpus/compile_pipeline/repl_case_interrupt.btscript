@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for :interrupt meta-command (BT-2090).
+//
+// The :interrupt command sends an out-of-band interrupt op to cancel a
+// running evaluation. These tests verify the command is recognised,
+// the interrupt op round-trips successfully, and the session remains
+// functional afterwards.
+//
+// Note: testing a true long-running eval + interrupt race requires
+// concurrent sends which the sequential btscript harness cannot do.
+// The important thing is that the op is wired up and does not break
+// the session.
+
+// ===========================================================================
+// :interrupt — idle session (no eval running)
+// ===========================================================================
+
+// Sending :interrupt when nothing is running should succeed gracefully
+:interrupt
+// => Interrupt sent.
+
+// Session should still be functional after interrupt
+1 + 1
+// => 2
+
+// ===========================================================================
+// :int — short alias
+// ===========================================================================
+
+// The :int alias should also work
+:int
+// => Interrupt sent.
+
+// Session still functional after alias
+x := 42
+// => 42
+
+x
+// => 42

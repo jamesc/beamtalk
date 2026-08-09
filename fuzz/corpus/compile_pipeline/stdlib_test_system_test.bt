@@ -1,0 +1,100 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests the System class — getEnv:, getEnv:default:, osPlatform, osFamily,
+// architecture, hostname, erlangVersion, pid, and type-error validation
+
+TestCase subclass: SystemTest
+
+  testSetEnvAndUnsetEnv =>
+    // setEnv:value: sets an environment variable and returns true
+    self assert: (System setEnv: "BT_TEST_SET_ENV_BT" value: "hello") equals: true
+    // getEnv: can read the value back
+    self assert: (System getEnv: "BT_TEST_SET_ENV_BT") equals: "hello"
+    // setEnv:value: overwrites existing values
+    self assert: (System setEnv: "BT_TEST_SET_ENV_BT" value: "updated") equals: true
+    self assert: (System getEnv: "BT_TEST_SET_ENV_BT") equals: "updated"
+    // unsetEnv: removes the variable and returns true
+    self assert: (System unsetEnv: "BT_TEST_SET_ENV_BT") equals: true
+    self assert: (System getEnv: "BT_TEST_SET_ENV_BT") equals: nil
+    // unsetEnv: on non-existent var still returns true
+    self assert: (System unsetEnv: "BT_TEST_NEVER_SET_XYZ") equals: true
+    // setEnv:value: raises #type_error for non-String name
+    @expect type
+    self should: [System setEnv: 42 value: "x"] raise: #type_error
+    // setEnv:value: raises #type_error for non-String value
+    @expect type
+    self should: [System setEnv: "x" value: 42] raise: #type_error
+    // unsetEnv: raises #type_error for non-String argument
+    @expect type
+    self should: [System unsetEnv: 42] raise: #type_error
+
+  testSystemEnvironmentAndPlatform =>
+    self assert: ((System getEnv: "PATH") class =:= String)
+    // Reading a non-existent env var returns nil
+    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ") equals: nil
+    // Non-existent var returns the default
+    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ" default: "fallback") equals: "fallback"
+    // Existing var returns the actual value (not the default)
+    self deny: ((System getEnv: "PATH" default: "nope") =:= "nope")
+    // osPlatform returns a string
+    self assert: (System osPlatform class =:= String)
+    // Platform is one of the known values
+    self assert: (#("linux", "darwin", "win32") includes: System osPlatform)
+    // osFamily returns a string
+    self assert: (System osFamily class =:= String)
+    // Family is one of the known values
+    self assert: (#("unix", "win32") includes: System osFamily)
+    // architecture returns a non-empty string
+    self assert: (System architecture class =:= String)
+    // --- architecture ---
+    self assert: (System architecture length > 0)
+    // hostname returns a non-empty string
+    self assert: (System hostname class =:= String)
+    // --- hostname ---
+    self assert: (System hostname length > 0)
+    // erlangVersion returns a non-empty string
+    self assert: (System erlangVersion class =:= String)
+    // --- erlangVersion ---
+    self assert: (System erlangVersion length > 0)
+    // pid returns a positive integer
+    self assert: (System pid class =:= Integer)
+    // --- pid ---
+    self assert: (System pid > 0)
+    // getEnv: requires String argument
+    @expect type
+    self should: [System getEnv: 42] raise: #type_error
+    // getEnv:default: validates both arguments
+    @expect type
+    self should: [System getEnv: 42 default: "fallback"] raise: #type_error
+    // --- error cases ---
+    @expect type
+    self should: [System getEnv: "PATH" default: 42] raise: #type_error
+
+  testUniqueId =>
+    // uniqueId returns a positive integer
+    self assert: (System uniqueId class =:= Integer)
+    // uniqueId is positive
+    self assert: (System uniqueId > 0)
+    // uniqueId is monotonically increasing
+    id1 := System uniqueId
+    id2 := System uniqueId
+    self assert: (id2 > id1)
+
+  // --- ADR 0099 §3: System halt: (two-tier exit, VM tier) ---
+  // The test workspace is NOT node-owning, so every halt: call is refused before
+  // it can reach erlang:halt — these tests never halt the runner.
+  testHaltNonIntegerRaisesTypeError =>
+    @expect type
+    self should: [System halt: "one"] raise: #type_error
+
+  testHaltOutOfRangeRaisesError =>
+    // A value outside POSIX 0..255 is a wrong *value*, not a wrong *type*.
+    self should: [System halt: 999] raise: #invalid_argument
+
+  testHaltInSharedWorkspaceRefuses =>
+    // Not node-owning → refused (directs the caller to Program exit:), never halts.
+    self should: [System halt: 0] raise: #unsupported
+
+  testHaltUnaryInSharedWorkspaceRefuses =>
+    self should: [System halt] raise: #unsupported

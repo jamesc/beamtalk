@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for undefined variable detection (semantic errors)
+//
+// These tests require REPL/E2E because undefined variables trigger
+// compile-time errors that the stdlib test framework can't catch.
+//
+// Block scoping, closures, and variable persistence tests are in
+// stdlib/test/semantic_scope_test.bt.
+
+// --- Undefined variables produce semantic errors ---
+
+// Bare undefined identifier triggers compile-time error
+undefinedFoo
+// => ERROR: Undefined variable
+
+// Undefined variable in expression triggers error
+undefinedBar + 5
+// => ERROR: Undefined variable

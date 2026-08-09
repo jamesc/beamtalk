@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-1947: typed state/field declarations without default values.
+//
+// Fixtures:
+//   stdlib/test/fixtures/typed_no_default_actor.bt
+//   stdlib/test/fixtures/typed_no_default_value.bt
+
+TestCase subclass: TypedNoDefaultTest
+
+  // === Actor with typed state, no default ===
+  testActorInitializeSetsTypedState =>
+    a := TypedNoDefaultActor spawn
+    self assert: a getLabel equals: "initialized"
+
+  testActorTypedStateWithDefault =>
+    a := TypedNoDefaultActor spawn
+    self assert: a getCount equals: 0
+
+  testActorMutateTypedNoDefaultState =>
+    a := TypedNoDefaultActor spawn
+    self assert: (a setLabel: "changed") equals: "changed"
+    self assert: a getLabel equals: "changed"
+
+  testActorIncrementTypedDefaultState =>
+    a := TypedNoDefaultActor spawn
+    self assert: a increment equals: 1
+    self assert: a getCount equals: 1
+
+  // === Value with typed field, no default ===
+  testValueFactoryConstructor =>
+    v := TypedNoDefaultValue new: #{#name => "Alice", #age => 30}
+    self assert: v getName equals: "Alice"
+    self assert: v getAge equals: 30

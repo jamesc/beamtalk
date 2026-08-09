@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Program class (ADR 0099 §2, BT-2686).
+//
+// `Program commandName` reads the beamtalk_runtime `program_name` app env,
+// defaulting to "beamtalk" when unset (the run-mode / connected-workspace value).
+// The escript path overrides it with the script name in Phase 4.
+
+TestCase subclass: ProgramTest
+
+  testCommandNameReturnsString =>
+    self assert: Program commandName class equals: String
+
+  testCommandNameDefaultsToBeamtalk =>
+    // Under the test workspace the program_name env is unset, so commandName
+    // defaults to the run-mode literal "beamtalk".
+    self assert: Program commandName equals: "beamtalk"
+
+  testNameIsReflectiveClassName =>
+    // `name` stays the sealed reflective class-identity accessor — defining the
+    // invocation accessor as `commandName` (not `name`) keeps this intact, so
+    // SystemNavigation's class-universe walk does not break (BT-2686 regression).
+    self assert: Program name equals: #Program
+
+  testExitNonIntegerRaisesTypeError =>
+    @expect type
+    self should: [Program exit: "two"] raise: #type_error
+
+  testExitOutOfRangeRaisesError =>
+    // Out of POSIX 0..255 is a wrong value (validated before the node-owning
+    // gate), consistent with System halt:.
+    self should: [Program exit: 999] raise: #invalid_argument
+
+// NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an
+// error — it raises a tagged `script_exit` signal that the session evaluator
+// catches to end the session and report exit code N to the connecting client
+// (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,
+// so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block
+// here has no session evaluator to catch the signal).

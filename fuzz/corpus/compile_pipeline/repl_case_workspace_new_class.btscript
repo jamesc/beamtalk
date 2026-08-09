@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for `Workspace newClass: source at: path` (ADR 0082 Phase 1, BT-2285).
+//
+// `newClass:at:` compiles and installs a brand-new class in memory and logs a
+// durable `kind: "new-class"` ChangeEntry. Phase 1 does NOT write the file to
+// disk (that is Phase 2 flush). It must raise a loud, specific error — no silent
+// fallback — for each of the four validation cases (ADR 0082, *`Workspace
+// newClass:` validation*).
+//
+// These cases require E2E because the live FFI path runs only in a running
+// workspace. The shared E2E session has no project (`project_path` undefined),
+// so every candidate path classifies as "outside the project source tree". That
+// makes two validation rules deterministic here and lets us assert them against
+// the live workspace:
+//   (a) target already exists on disk  — checked first, fires for any file;
+//   (b) target outside the project tree — fires for any non-existing path,
+//       because with no project context there is no tree to create the file in.
+// The name-mismatch (c) and already-loaded (d) rules are shadowed by (b) in this
+// project-less session; their pure validation logic is covered deterministically
+// by the loader's EUnit tests (declared_class_name/1, validate_new_class/3), and
+// the new-class ChangeEntry shape by the changelog gen_server's EUnit tests.
+
+// Workspace responds to #newClass:at: (FFI dispatch wired)
+Workspace respondsTo: #newClass:at:
+// => true
+
+// ===========================================================================
+// (a) TARGET ALREADY EXISTS ON DISK
+// ===========================================================================
+
+// An existing fixture file is a loud error — checked before any project context,
+// so it fires regardless of whether a project is loaded.
+Workspace newClass: "Object subclass: Counter" at: "tests/repl-protocol/fixtures/counter.bt"
+// => ERROR: already exists
+
+// ===========================================================================
+// (b) TARGET OUTSIDE THE PROJECT SOURCE TREE
+// ===========================================================================
+
+// A path that does not exist and is not inside the current project tree is a
+// loud error. In this project-less session every non-existing path qualifies.
+Workspace newClass: "Object subclass: Greeter" at: "/nonexistent/elsewhere/greeter.bt"
+// => ERROR: outside the project source tree
+
+// ===========================================================================
+// TYPE ERRORS — both arguments must be Strings
+// ===========================================================================
+
+// Non-String source is a loud type error, not a silent fallback.
+Workspace newClass: 42 at: "src/greeter.bt"
+// => ERROR: expects a String source
+
+// Non-String path is a loud type error.
+Workspace newClass: "Object subclass: Greeter" at: 42
+// => ERROR: expects a String path

@@ -89,49 +89,14 @@ fn parse_source(source: &str) -> crate::ast::Module {
     module
 }
 
-/// Check that parentheses, brackets, and braces are balanced in Core Erlang output.
-fn has_balanced_delimiters(s: &str) -> bool {
-    let mut stack = Vec::new();
-    // Skip string literals (single-quoted atoms and double-quoted strings)
-    let mut chars = s.chars().peekable();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            '\\' if in_single_quote || in_double_quote => {
-                // Skip escaped character
-                chars.next();
-            }
-            _ if in_single_quote || in_double_quote => {}
-            '(' => stack.push(')'),
-            '[' => stack.push(']'),
-            '{' => stack.push('}'),
-            ')' | ']' | '}' => {
-                if stack.pop() != Some(ch) {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    stack.is_empty() && !in_single_quote && !in_double_quote
-}
-
-/// Patterns that should never appear in valid Core Erlang output.
-/// These indicate Rust Debug/Display format leaks (BT-875).
-const FORMAT_ARTIFACT_PATTERNS: &[&str] = &[
-    "{:?}",
-    "Document::",
-    "BinaryOp(",
-    "Expression::",
-    "Literal::",
-    "MessageSelector::",
-    "Pattern::",
-    "TokenKind::",
-];
+// `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` moved to
+// `crate::test_helpers::test_support` (BT-3124) so the `compile_pipeline`
+// fuzz target can share the same structural-validity checks instead of
+// duplicating them.
+use crate::test_helpers::test_support::{
+    CORE_ERLANG_FORMAT_ARTIFACT_PATTERNS as FORMAT_ARTIFACT_PATTERNS,
+    core_erlang_has_balanced_delimiters as has_balanced_delimiters,
+};
 
 // ============================================================================
 // Property tests

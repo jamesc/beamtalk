@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests block evaluation — basic value/value:/value:value: dispatch, nested
+// blocks, blocks used as conditionals, and variable persistence across
+// expressions in a test method
+
+TestCase subclass: BlockEvaluationTest
+
+  testBlockEvaluationBasic =>
+    self assert: [5 + 3] value equals: 8
+    // Block with argument that returns computed value
+    self assert: ([:x | x * 2] value: 7) equals: 14
+    // Block with two arguments
+    self assert: ([:a :b | a + b] value: 10 value: 20) equals: 30
+
+  testBlockEvaluationNested =>
+    // Nested block evaluation
+    self assert: [[:x | x * 3] value: 4] value equals: 12
+    // Block returning a block, then evaluating it
+    self assert: [[100]] value value equals: 100
+
+  testBlockWithConditionals =>
+    // Block with comparison (returns boolean for conditional use)
+    self assert: ([:x | x > 5] value: 10)
+    self deny: ([:x | x > 5] value: 3)
+    // Block with arithmetic comparison
+    self assert: ([:x :y | x + y > 10] value: 5 value: 10)
+
+  testVariablePersistenceAcrossExpressions =>
+    // Set up a value
+    baseValue := 100
+    self assert: baseValue equals: 100
+    // Use it in a block
+    self assert: ([:x | x + baseValue] value: 50) equals: 150
+    // Value still accessible
+    self assert: baseValue equals: 100
+
+  // BT-1213: Block literal with captured mutation (same var on LHS and RHS)
+  // Previously crashed with error:{badarity,...} because the Tier 2 stateful block
+  // expected a StateAcc parameter but value called it with zero args.
+  testBlockValueWithCapturedMutation =>
+    count := 0
+    [count := count + 1] value
+    self assert: count equals: 1
+
+  testBlockValueWithCapturedMutationMultipleStatements =>
+    x := 10
+    [
+      x := x + 5
+      x := x * 2
+    ] value
+    self assert: x equals: 30
+
+  testBlockValueKeywordWithCapturedMutation =>
+    total := 0
+    [:n | total := total + n] value: 7
+    self assert: total equals: 7
+
+  testValueKeywordOnBlockVariable =>
+    // BT-1260: value:/value:value:/value:value:value: on a variable holding a block
+    // emits a runtime is_function guard (apply if function, send if not).
+    // Before BT-1260, this fell through to the same apply path as block literals;
+    // now the guard is explicit so non-function receivers dispatch correctly too.
+    oneArg := [:x | x * 3]
+    self assert: (oneArg value: 7) equals: 21
+    twoArg := [:a :b | a + b]
+    self assert: (twoArg value: 4 value: 5) equals: 9
+    threeArg := [:a :b :c | a * b + c]
+    self
+      assert: (threeArg
+        value: 2
+        value: 3
+        value: 1)
+      equals: 7

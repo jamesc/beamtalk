@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2)
+//
+// Verifies:
+// - sourceFile returns nil for stdlib classes (never loaded from a user file)
+// - reload raises no_source_file for stdlib classes
+// - sourceFile is a sealed method on all classes (isBehaviour check)
+//
+// The positive case (sourceFile returns a path after :load) requires the REPL
+// context and is tested in tests/repl-protocol/cases/source_file_reload.bt
+
+TestCase subclass: SourceFileReloadTest
+
+  testStdlibClassSourceFileIsNil =>
+    // Stdlib classes have no user-supplied source file
+    self assert: Integer sourceFile equals: nil
+    self assert: String sourceFile equals: nil
+    self assert: Object sourceFile equals: nil
+    self assert: Boolean sourceFile equals: nil
+    self assert: Actor sourceFile equals: nil
+
+  testBootstrapBehaviourSourceFileIsNil =>
+    // Behaviour itself is a stdlib class — no source file
+    self assert: Behaviour sourceFile equals: nil
+
+  testStdlibReloadRaisesNoSourceFile =>
+    // Reloading a stdlib class raises no_source_file
+    self should: [Integer reload] raise: #no_source_file
+    self should: [String reload] raise: #no_source_file
+    self should: [Object reload] raise: #no_source_file
+
+  testSourceFileMethodExists =>
+    // sourceFile is a sealed method defined in Behaviour (class protocol)
+    self assert: (Behaviour includesSelector: #sourceFile)
+    // Sending sourceFile to any class object returns nil or a path (no DNU)
+    self assert: Integer sourceFile equals: nil
+
+  testReloadMethodExists =>
+    // reload is a sealed method defined in Behaviour (class protocol)
+    self assert: (Behaviour includesSelector: #reload)
+    // Reloading a stdlib class (Behaviour itself) raises no_source_file
+    self should: [Behaviour reload] raise: #no_source_file

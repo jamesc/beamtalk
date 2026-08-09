@@ -1,0 +1,81 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2243: BUnit-level coverage for `SystemNavigation messagesSentBy:` — the
+// outgoing-call set of a single method, the dual of `sendersOf:`. Backs the
+// `callHierarchy/outgoingCalls` LSP query.
+//
+// `messagesSentBy:` is an instance method on `SystemNavigation`, reached via
+// the `default` constructor. It takes a `CompiledMethod` (the value of
+// `aClass >> #selector`) and returns one `#{#selector, #line}` Dictionary per
+// `MessageSend` / `Cascade` send found in the method body.
+//
+// Behavioural assertions (does the per-send walk produce the expected hits?)
+// live in the E2E REPL-protocol suite — the BUnit harness does not start the
+// compiler-port process, so `allSendsIn:` returns `[]` here regardless of the
+// source contents. The BUnit checks below cover the parts that do not require
+// the compiler port: that the selector is defined, that the composition
+// primitives (`CompiledMethod source`, `Behaviour >>`) are present, and that
+// the argument-type guard rejects non-CompiledMethod values.
+
+TestCase subclass: SystemNavigationMessagesSentByTest
+
+  // --- selector existence ---
+  testIncludesSelectorMessagesSentBy =>
+    self assert: (SystemNavigation includesSelector: #messagesSentBy:)
+
+  // --- composition primitives must be in place ---
+  //
+  // The implementation reads `aMethod source` and asks the compiler for every
+  // send via `(Erlang beamtalk_interface) allSendsIn:`. Both primitives have
+  // to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // --- argument type guard ---
+
+  // Passing a Symbol must raise a typed error pointing at the right argument
+  // shape. Mirrors the `sendersOf:` / `referencesTo:` guards. The static
+  // type checker also flags the argument-type mismatch on the call site,
+  // so we suppress the type warning with `@expect type` — the BUnit run is
+  // about the *runtime* guard, not the compile-time check.
+  testRequiresCompiledMethodArgument =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav messagesSentBy: #notAMethod] raise: #user_error
+
+  // Passing a class object also fails the type check.
+  testRejectsClassObject =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav messagesSentBy: Integer] raise: #user_error
+
+  // --- happy-path shape (compiler port absent) ---
+  //
+  // Even with the compiler port absent, a valid `CompiledMethod` argument is
+  // accepted (no argument-error raised) and returns a List (possibly empty
+  // because `allSendsIn:` falls back to `[]` when the port is down). The
+  // important contract here is the shape: type-checked input → List output.
+  testValidArgumentReturnsList =>
+    method := SystemNavigation >> #allClasses
+    self deny: method isNil
+    nav := SystemNavigation default
+    result := nav messagesSentBy: method
+    self assert: (result isKindOf: List)
+
+  // --- nil-source defensive path ---
+  //
+  // A CompiledMethod whose `source` is nil (a primitive registered without
+  // source text) must return `[]` without calling into the compiler — exactly
+  // the same shape as the no-senders path on `sendersOf:`. The synthetic
+  // assertion below cannot construct such a method directly in BUnit, but
+  // verifying the selector path on a real source-bearing method
+  // (`SystemNavigation >> #allClasses`) confirms the no-crash invariant.
+  testMetaclassMethodAccepted =>
+    method := SystemNavigation class >> #default
+    self deny: method isNil
+    self deny: method source isEmpty
+    nav := SystemNavigation default
+    result := nav messagesSentBy: method
+    self assert: (result isKindOf: List)

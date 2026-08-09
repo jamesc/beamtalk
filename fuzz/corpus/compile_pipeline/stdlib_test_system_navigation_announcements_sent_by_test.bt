@@ -1,0 +1,108 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2475: BUnit-level coverage for `SystemNavigation announcementsSentBy:` and
+// its site-level form `announcementSitesSentBy:` — the static dual of
+// `AnnouncementNavigation` (ADR 0093 §7). These mine `announce:` /
+// `announceAndWait:` / `announceAndWait:timeout:` call sites out of a class's
+// method bodies and resolve each event argument to its `Announcement` subclass.
+//
+// Behavioural assertions (does the per-method walk find the emissions and
+// resolve the argument classes?) live in the E2E REPL-protocol suite
+// (`workspace_native_api.btscript`) — the BUnit harness does not start the
+// compiler-port process, so `announceSitesIn:` returns `[]` here regardless of
+// the source contents (same constraint as `messagesSentBy:` / `sendersOf:`'s
+// source-scan path). The checks below cover the parts that do not need the
+// port: selector existence, composition primitives, the argument-type guard,
+// and the List-shape contract.
+
+TestCase subclass: SystemNavigationAnnouncementsSentByTest
+
+  // --- selector existence ---
+  testIncludesSelectorAnnouncementsSentBy =>
+    self assert: (SystemNavigation includesSelector: #announcementsSentBy:)
+
+  testIncludesSelectorAnnouncementSitesSentBy =>
+    self assert: (SystemNavigation includesSelector: #announcementSitesSentBy:)
+
+  // --- composition primitives must be in place ---
+  //
+  // The implementation walks `aClass methods`, fetches each method via `>>`,
+  // reads its source, and asks the compiler for the announce sites. All of
+  // those primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // The per-scope and per-method helpers are present.
+  testHelperCollectAnnounceSitesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectAnnounceSitesIn:into:)
+
+  testHelperAppendAnnounceSitesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #appendAnnounceSitesIn:class:methodSelector:into:)
+
+  // The extension-scan helper is present (the body delegates to it after the
+  // class-side walk). Behavioural coverage of the extension-source path lives
+  // in the E2E REPL-protocol suite.
+  testHelperCollectExtensionAnnounceSitesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionAnnounceSitesFor:into:)
+
+  // The Announcement-subclass gate is present.
+  testHelperIsAnnouncementClassIsDefined =>
+    self assert: (SystemNavigation includesSelector: #isAnnouncementClass:)
+
+  // --- isAnnouncementClass: gate (works without the compiler port) ---
+  //
+  // `isAnnouncementClass:` is a pure class-registry query, so it can be checked
+  // behaviourally in BUnit. `Announcement` is self-inclusive (it is in its own
+  // `superclassChain`); a non-announcement class and `nil` are rejected.
+  testIsAnnouncementClassAcceptsAnnouncement =>
+    nav := SystemNavigation default
+    self assert: (nav isAnnouncementClass: Announcement)
+
+  testIsAnnouncementClassRejectsNonAnnouncement =>
+    nav := SystemNavigation default
+    self deny: (nav isAnnouncementClass: Integer)
+
+  testIsAnnouncementClassRejectsNil =>
+    nav := SystemNavigation default
+    self deny: (nav isAnnouncementClass: nil)
+
+  // --- argument type guard (parity with sendersOf: / referencesTo:) ---
+  //
+  // Passing a Symbol must raise a typed error pointing at the right argument
+  // shape. The static type checker also flags the argument-type mismatch on the
+  // call site, so we suppress the type warning with `@expect type` — the BUnit
+  // run is about the *runtime* guard.
+  testRequiresClassArgumentNotSymbol =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav announcementsSentBy: #NotAClass] raise: #user_error
+
+  testRequiresClassArgumentNotString =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav announcementsSentBy: "NotAClass"] raise: #user_error
+
+  // The site-level form applies the same guard.
+  testSitesRequiresClassArgument =>
+    nav := SystemNavigation default
+    @expect type
+    self should: [nav announcementSitesSentBy: #NotAClass] raise: #user_error
+
+  // --- happy-path shape (compiler port absent) ---
+  //
+  // Even with the compiler port absent, a valid class argument is accepted (no
+  // argument-error raised) and returns a List (empty here because
+  // `announceSitesIn:` falls back to `[]` when the port is down). The contract
+  // under test is the shape: class input -> List output.
+  testValidArgumentReturnsListOfClasses =>
+    nav := SystemNavigation default
+    result := nav announcementsSentBy: SystemNavigation
+    self assert: (result isKindOf: List)
+
+  testValidArgumentSitesReturnsList =>
+    nav := SystemNavigation default
+    result := nav announcementSitesSentBy: SystemNavigation
+    self assert: (result isKindOf: List)

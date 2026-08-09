@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1218: Tests for supervisionSpec synthesis and supervisionPolicy override
+// on Actor subclasses (ADR 0059 Phase 1).
+//
+// Fixtures: stdlib/test/fixtures/spec_test_actor_default.bt
+//           stdlib/test/fixtures/spec_test_actor_permanent.bt
+//           stdlib/test/fixtures/spec_test_actor_transient.bt
+
+TestCase subclass: SupervisionSpecTest
+
+  testDefaultSupervisionPolicy =>
+    // Actor subclasses with no explicit override return #temporary
+    self assert: SpecTestActorDefault supervisionPolicy equals: #temporary
+
+  testExplicitPermanentPolicy =>
+    // Explicit override is returned correctly
+    self assert: SpecTestActorPermanent supervisionPolicy equals: #permanent
+
+  testExplicitTransientPolicy =>
+    // Explicit override for #transient
+    self assert: SpecTestActorTransient supervisionPolicy equals: #transient
+
+  testSupervisionSpecHasCorrectActorClass =>
+    // supervisionSpec returns a SupervisionSpec with actorClass set
+    spec := SpecTestActorPermanent supervisionSpec
+    self assert: spec actorClass equals: SpecTestActorPermanent
+
+  testSupervisionSpecRestartMatchesPolicy =>
+    // supervisionSpec restart reflects the class supervisionPolicy
+    spec := SpecTestActorPermanent supervisionSpec
+    self assert: spec restart equals: #permanent
+
+  testDefaultSupervisionSpecRestart =>
+    // Default policy propagates through supervisionSpec
+    spec := SpecTestActorDefault supervisionSpec
+    self assert: spec restart equals: #temporary
+
+  testTransientSupervisionSpecRestart =>
+    spec := SpecTestActorTransient supervisionSpec
+    self assert: spec restart equals: #transient

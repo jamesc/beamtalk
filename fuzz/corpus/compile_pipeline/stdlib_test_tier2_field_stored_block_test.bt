@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2797: Verifies field mutations inside a block, stored in an instance
+// field in one method and invoked via value: from a *different* method, work
+// correctly at *runtime* (not just compile-time).
+//
+// Note: the same-method case (a Tier 2 block stored in a *local variable*
+// and invoked later in the same method) is covered at the Rust codegen unit
+// test level (crates/beamtalk-core/src/codegen/core_erlang/tests/control_flow.rs),
+// not here — the compiler can prove that case's safety per-method
+// (prescan_tier2_local_vars), but the semantic-analysis pass that runs ahead
+// of codegen doesn't yet have an equivalent whole-body lookahead, so it still
+// conservatively flags it at the source level.
+
+TestCase subclass: Tier2FieldStoredBlockTest
+
+  // BT-2797: the main real-world motivator — a block assigned to an instance
+  // field in one method (setup), invoked via value: from a different method
+  // (tick:), twice. total starts at 0, tick: 5 adds 5 (total=5), tick: 3
+  // adds 3 (total=8).
+  testFieldStoredBlockInvokedFromDifferentMethod =>
+    actor := Tier2FieldStoredBlockTestActor spawn
+    self assert: actor testFieldStoredBlockAcrossMethods equals: 8
+
+  // BT-2803: same scenario, invoked via valueWithArguments: instead of
+  // value: — the runtime-list-length generalization of BT-2797's runtime
+  // Tier 1/Tier 2 discrimination.
+  testFieldStoredBlockInvokedFromDifferentMethodViaValueWithArguments =>
+    actor := Tier2FieldStoredBlockTestActor spawn
+    self assert: actor testFieldStoredBlockAcrossMethodsViaValueWithArguments equals: 8
+
+  // BT-2808: `self.onTick value: x; value: x` — a cascade of two safe value:
+  // sends to the same field-stored Tier 2 block, both must thread state.
+  testFieldStoredBlockCascadeInvocation =>
+    actor := Tier2FieldStoredBlockTestActor spawn
+    self assert: actor testFieldStoredBlockCascadeInvocation equals: 10

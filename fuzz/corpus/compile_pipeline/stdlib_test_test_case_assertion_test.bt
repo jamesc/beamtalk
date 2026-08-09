@@ -1,0 +1,125 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0014 Phase 2: Tests the TestCase framework itself — setUp/tearDown
+// lifecycle, assert:/deny:/assert:equals: pass cases, and that multiple
+// instances can be independently created and used
+
+TestCase subclass: TestCaseAssertionTest
+
+  testLifecycleAndBasicAssertions =>
+    testCase := TestCase new
+    // setUp returns self (the instance), not nil — functional setUp pattern (BT-1533)
+    self assert: (testCase setUp class) equals: TestCase
+    self assert: testCase tearDown equals: nil
+    // Test assert: with true condition
+    self assert: (TestCase new assert: true) equals: nil
+    // Test assert:equals: with matching values
+    self assert: (TestCase new assert: 3 equals: 3) equals: nil
+    self assert: (TestCase new assert: "hello" equals: "hello") equals: nil
+    self assert: (TestCase new assert: true equals: true) equals: nil
+    self assert: (TestCase new assert: false equals: false) equals: nil
+    // Test assert:equals: with integers
+    self assert: (TestCase new assert: 42 equals: 42) equals: nil
+    self assert: (TestCase new assert: 0 equals: 0) equals: nil
+    // Test assert:equals: with negative numbers
+    self assert: (TestCase new assert: -5 equals: -5) equals: nil
+    // Test deny: with false condition
+    self assert: (TestCase new deny: false) equals: nil
+    // Test that TestCase is a Value subclass (BT-1533: migrated from Object)
+    self assert: TestCase superclass equals: Value
+    testInstance := TestCase new
+    self assert: testInstance class equals: TestCase
+    // Test that multiple instances can be created
+    tc2 := TestCase new
+    self assert: tc2 class equals: TestCase
+    // Test lifecycle methods can be called on different instances
+    tc3 := TestCase new
+    self assert: (tc3 setUp class) equals: TestCase
+    self assert: tc3 tearDown equals: nil
+
+  testAssertionFailureTests =>
+    // Test assert: with false condition — should raise assertion_failed
+    self should: [TestCase new assert: false] raise: #assertion_failed
+    // Test assert:equals: with unequal values
+    self should: [TestCase new assert: 3 equals: 4] raise: #assertion_failed
+    // Test assert:equals: with different types
+    self should: [
+      TestCase new assert: "hello" equals: 42
+    ] raise: #assertion_failed
+    // Test deny: with true condition — should raise assertion_failed
+    self should: [TestCase new deny: true] raise: #assertion_failed
+    // Test fail: unconditional failure
+    self should: [
+      TestCase new fail: "this test should fail"
+    ] raise: #assertion_failed
+
+  testShouldRaiseTests =>
+    // Test should:raise: with matching error kind
+    self assert: (TestCase new should: [1 / 0] raise: #badarith) equals: nil
+    // Test should:raise: with does_not_understand error
+    @expect dnu
+    self assert: (TestCase new should: [
+      42 nonExistentMethod
+    ] raise: #does_not_understand) equals: nil
+    // Test should:raise: block completes normally (no error raised)
+    self should: [
+      TestCase new should: [42] raise: #does_not_understand
+    ] raise: #assertion_failed
+    // Test should:raise: with wrong error kind (mismatch)
+    self should: [
+      TestCase new should: [1 / 0] raise: #does_not_understand
+    ] raise: #assertion_failed
+
+  testSkipMechanism =>
+    // Running a class with skip tests via TestRunner yields skipped count > 0
+    // SampleSkipTestCase is loaded from fixtures/ automatically
+    result := TestRunner run: SampleSkipTestCase
+    self assert: result total equals: 3
+    self assert: result passed equals: 1
+    self assert: result skipped equals: 2
+    self assert: result failed equals: 0
+    // hasPassed is true because there are no failures (only skips)
+    self assert: result hasPassed
+
+  testAssertOkPassReturnsValue =>
+    // assertOk: on a successful Result returns the unwrapped value
+    value := self assertOk: (Result ok: 42)
+    self assert: value equals: 42
+
+  testAssertOkTypedReturnUsedInArithmetic =>
+    // assertOk: returns T (not Object), so arithmetic works without warnings
+    value := self assertOk: (Result ok: 42)
+    self assert: value + 1 equals: 43
+
+  testAssertOkPassWithStringValue =>
+    // assertOk: works with any value type
+    value := self assertOk: (Result ok: "hello")
+    self assert: value equals: "hello"
+
+  testAssertOkPassWithNilValue =>
+    // assertOk: works when the ok value is nil
+    value := self assertOk: (Result ok: nil)
+    self assert: value equals: nil
+
+  testAssertOkFailOnError =>
+    // assertOk: raises assertion_failed when given an error Result
+    self should: [
+      TestCase new assertOk: (Result error: #nope)
+    ] raise: #assertion_failed
+
+  testAssertErrorEqualsPass =>
+    // assertError:equals: passes when error reason matches
+    self assert: (TestCase new assertError: (Result error: #not_found) equals: #not_found) equals: nil
+
+  testAssertErrorEqualsFailOnOkResult =>
+    // assertError:equals: raises when given an ok Result
+    self should: [
+      TestCase new assertError: (Result ok: 42) equals: #not_found
+    ] raise: #assertion_failed
+
+  testAssertErrorEqualsFailOnWrongReason =>
+    // assertError:equals: raises when error reason does not match expected
+    self should: [
+      TestCase new assertError: (Result error: #wrong_error) equals: #not_found
+    ] raise: #assertion_failed

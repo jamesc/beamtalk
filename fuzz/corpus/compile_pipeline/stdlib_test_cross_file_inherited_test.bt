@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-1976: cross-file inherited typed-no-default field validation.
+// BT-1951 (Phase 1) only validated inherited fields whose declaring class's
+// AST was present in the current compilation. BT-1976 reads the ancestor's
+// field metadata from `__beamtalk_meta/0` (via `ClassInfo.state_has_default`)
+// so the post-initialize check runs across compilation units.
+//
+// Fixtures:
+//   fixtures/cross_file_parent_typed.bt        (parent with typed-no-default field)
+//   fixtures/cross_file_child_sets_parent.bt   (child sets the field — succeeds)
+//   fixtures/cross_file_parent_forgets.bt      (parent forgets its own field)
+//   fixtures/cross_file_child_of_forgetful.bt  (child inherits the gap — raises)
+
+TestCase subclass: CrossFileInheritedTest
+
+  // Positive: child in a separate file sets its cross-file parent's
+  // typed-no-default field before validation runs.
+  testCrossFileChildSetsParentField =>
+    a := CrossFileChildSetsParent spawn
+    self assert: a getToken equals: "set-by-child"
+
+  // Negative: cross-file parent's `initialize` forgets its own typed-no-default
+  // field; child has no `initialize`. Post-initialize must raise even though
+  // the parent's AST is absent from the child's compilation unit.
+  testCrossFileParentForgetsFieldRaises =>
+    self should: [CrossFileChildOfForgetful spawn] raise: #instantiation_error
+
+  testCrossFileErrorNamesOwningParentClass =>
+    hint := [CrossFileChildOfForgetful spawn] on: Exception do: [:e | e hint]
+    self assert: (hint includesSubstring: "CrossFileParentForgets")
+
+  testCrossFileErrorMentionsFieldName =>
+    hint := [CrossFileChildOfForgetful spawn] on: Exception do: [:e | e hint]
+    self assert: (hint includesSubstring: "required")

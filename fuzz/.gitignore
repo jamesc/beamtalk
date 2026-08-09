@@ -7,3 +7,7 @@ corpus/*
 !corpus/parse_arbitrary/
 corpus/parse_arbitrary/*
 !corpus/parse_arbitrary/*.bt
+!corpus/compile_pipeline/
+corpus/compile_pipeline/*
+!corpus/compile_pipeline/*.bt
+!corpus/compile_pipeline/*.btscript

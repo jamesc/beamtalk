@@ -1,0 +1,245 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-44, BT-75: Tests List methods — creation, literals, mutation (add:, remove:),
+// iteration (do:, collect:, select:, reject:, inject:into:), sort, advanced
+// methods (zip:, groupBy:, partition:), and new methods (++, from:to:, indexOf:,
+// eachWithIndex:, intersperse:)
+
+TestCase subclass: CollectionsTest
+
+  testCreation =>
+    self assert: List new equals: #()
+    self assert: (List new) size equals: 0
+    self assert: (List new) class equals: List
+    // List new: accepts a List (convenience alias for withAll:)
+    self assert: (List new: #(1, 2, 3)) equals: #(1, 2, 3)
+
+  testTier1EssentialMethods =>
+    // --- last ---
+    self assert: #(1, 2, 3) last equals: 3
+    self assert: #(42) last equals: 42
+    // --- at: ---
+    self assert: (#(10, 20, 30) at: 1) equals: 10
+    self assert: (#(10, 20, 30) at: 3) equals: 30
+    // --- includes: ---
+    self assert: (#(1, 2, 3) includes: 2)
+    self deny: (#(1, 2, 3) includes: 5)
+    self deny: (#() includes: 1)
+    // --- sort ---
+    self assert: #(3, 1, 2) sort equals: #(1, 2, 3)
+    self assert: #() sort equals: #()
+    // --- reversed ---
+    self assert: #(1, 2, 3) reversed equals: #(3, 2, 1)
+    self assert: #() reversed equals: #()
+    // --- detect: ---
+    self assert: (#(1, 2, 3, 4) detect: [:x | x > 2]) equals: 3
+    // --- detect:ifNone: ---
+    self assert: (#(1, 2, 3) detect: [:x | x > 10] ifNone: [0]) equals: 0
+    self assert: (#(1, 2, 3) detect: [:x | x > 1] ifNone: [0]) equals: 2
+
+  testTier2FunctionalMethods =>
+    // --- take: ---
+    self assert: (#(1, 2, 3, 4, 5) take: 3) equals: #(1, 2, 3)
+    self assert: (#(1, 2) take: 5) equals: #(1, 2)
+    // --- drop: ---
+    self assert: (#(1, 2, 3, 4, 5) drop: 2) equals: #(3, 4, 5)
+    self assert: (#(1, 2) drop: 5) equals: #()
+    // --- flatten ---
+    self assert: #(#(1, 2), #(3, 4)) flatten equals: #(1, 2, 3, 4)
+    // --- flatMap: ---
+    self assert: (#(1, 2, 3) flatMap: [:x |
+      #(x, (x * 10))
+    ]) equals: #(1, 10, 2, 20, 3, 30)
+    // --- count: ---
+    self assert: (#(1, 2, 3, 4, 5) count: [:x | x > 2]) equals: 3
+    // --- anySatisfy: ---
+    self assert: (#(1, 2, 3) anySatisfy: [:x | x > 2])
+    self deny: (#(1, 2, 3) anySatisfy: [:x | x > 5])
+    // --- allSatisfy: ---
+    self assert: (#(1, 2, 3) allSatisfy: [:x | x > 0])
+    self deny: (#(1, 2, 3) allSatisfy: [:x | x > 1])
+
+  testAddFirst =>
+    // --- addFirst: (O(1) cons prepend) ---
+    self assert: (#(2, 3) addFirst: 1) equals: #(1, 2, 3)
+    self assert: (#() addFirst: "x") equals: #("x")
+
+  testTier3AdvancedMethods =>
+    // --- unique ---
+    self assert: #(3, 1, 2, 1, 3) unique equals: #(1, 2, 3)
+    // --- takeWhile: ---
+    self assert: (#(1, 2, 3, 4, 5) takeWhile: [:x | x < 4]) equals: #(1, 2, 3)
+    // --- dropWhile: ---
+    self assert: (#(1, 2, 3, 4, 5) dropWhile: [:x | x < 3]) equals: #(3, 4, 5)
+    // --- intersperse: ---
+    self assert: (#(1, 2, 3) intersperse: 0) equals: #(1, 0, 2, 0, 3)
+    self assert: (#() intersperse: 0) equals: #()
+    // --- add: ---
+    self assert: (#(1, 2, 3) add: 4) equals: #(1, 2, 3, 4)
+    self assert: (#() add: 1) equals: #(1)
+
+  testAdvancedMethods =>
+    // --- zip: ---
+    zipped := #(1, 2, 3) zip: #(4, 5, 6)
+    self assert: zipped size equals: 3
+    pair := zipped first
+    self assert: pair first equals: 1
+    self assert: pair last equals: 4
+    // --- groupBy: ---
+    grouped := #(1, 2, 3, 4, 5, 6) groupBy: [:x | x isEven]
+    self assert: grouped size equals: 2
+    // --- partition: ---
+    partitioned := #(1, 2, 3, 4) partition: [:x | x > 2]
+    self assert: partitioned size equals: 2
+    // --- sort: (with comparator) ---
+    self assert: (#(3, 1, 2) sort: [:a :b | a >= b]) equals: #(3, 2, 1)
+
+  testFromToAndIndexOf =>
+    // --- ++ (concatenation) ---
+    self assert: (#(1, 2) ++ #(3, 4)) equals: #(1, 2, 3, 4)
+    self assert: (#() ++ #(1, 2)) equals: #(1, 2)
+    self assert: (#(1, 2) ++ #()) equals: #(1, 2)
+    self assert: (#() ++ #()) equals: #()
+    // --- from:to: (subsequence, 1-based inclusive) ---
+    self assert: (#(1, 2, 3, 4, 5) from: 2 to: 4) equals: #(2, 3, 4)
+    // Wildcard for single-element result (Erlang printable_list ambiguity with small integers)
+    self assert: (#(1, 2, 3, 4, 5) from: 1 to: 1) equals: #(1)
+    // Two-element subsequence verifies inclusive bounds
+    self assert: (#(1, 2, 3, 4, 5) from: 1 to: 2) equals: #(1, 2)
+    self assert: (#(1, 2, 3, 4, 5) from: 1 to: 5) equals: #(1, 2, 3, 4, 5)
+    self assert: (#(1, 2, 3) from: 3 to: 2) equals: #()
+    // from:to: beyond list end returns available elements
+    self assert: (#(1, 2, 3) from: 2 to: 10) equals: #(2, 3)
+    // --- indexOf: (1-based, nil if not found) ---
+    self assert: (#(10, 20, 30) indexOf: 20) equals: 2
+    self assert: (#(10, 20, 30) indexOf: 10) equals: 1
+    self assert: (#(10, 20, 30) indexOf: 30) equals: 3
+    self assert: (#(10, 20, 30) indexOf: 99) equals: nil
+    // indexOf: returns first match when duplicates exist
+    self assert: (#(1, 2, 3, 2) indexOf: 2) equals: 2
+    self assert: (#() indexOf: 1) equals: nil
+    // eachWithIndex: returns nil after iterating
+    self assert: (#(10, 20, 30) eachWithIndex: [:elem :idx |
+      elem + idx
+    ]) equals: nil
+    // Verify eachWithIndex: iterates (empty list is a no-op)
+    self assert: (#() eachWithIndex: [:elem :idx | elem]) equals: nil
+    // The block receives (elem, idx) — verify it doesn't error with 2-arg block:
+    self assert: (#(100, 200, 300) eachWithIndex: [:elem :idx |
+      elem + idx
+    ]) equals: nil
+    // --- ++ with variables ---
+    a := #(1, 2, 3)
+    self assert: a equals: #(1, 2, 3)
+    // Direct index assertion not possible in E2E since blocks can't accumulate results
+    self assert: (a ++ #(4, 5)) equals: #(1, 2, 3, 4, 5)
+
+  testJoin =>
+    // BT-895: join and join: caused infinite dispatch loop
+    // --- join (no separator) ---
+    self assert: #("hello", "world") join equals: "helloworld"
+    self assert: #("a", "b", "c") join equals: "abc"
+    self assert: #() join equals: ""
+    // --- join: (with separator) ---
+    self assert: (#("a", "b", "c") join: ", ") equals: "a, b, c"
+    self assert: (#("hello", "world") join: " ") equals: "hello world"
+    self assert: (#("x") join: ", ") equals: "x"
+    self assert: (#() join: ", ") equals: ""
+
+  testPerformOnPureIterationBlocksAlreadyWorked =>
+    // BT-2888: do:/collect:/select:/reject:/inject:into: compile to real
+    // BIF-lowered bodies (unlike Block's value* structural intrinsics fixed
+    // by BT-2812) — a Tier 1 (pure) block reached via perform: already
+    // worked correctly before this issue; pinned here as a baseline.
+    self assert: (#(1, 2, 3) perform: #collect: withArguments: #([:x |
+      x * 2
+    ])) equals: #(2, 4, 6)
+    self assert: (#(1, 2, 3, 4) perform: #select: withArguments: #([:x |
+      x > 2
+    ])) equals: #(3, 4)
+    self assert: (#(1, 2, 3, 4) perform: #reject: withArguments: #([:x |
+      x > 2
+    ])) equals: #(1, 2)
+    self assert: (#(1, 2, 3) perform: #inject:into: withArguments: #(0, [:acc :x |
+      acc + x
+    ])) equals: 6
+    self assert: (#(1, 2, 3) perform: #do: withArguments: #([:x |
+      x + 1
+    ])) equals: nil
+
+  testPerformOnStatefulIterationBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2888: a stored (Tier 2) block mutates captured state via a threaded
+    // StateAcc that only a call-site-aware caller (the literal-do:/collect:/
+    // etc. inline codegen) can supply. Reached generically via perform:, the
+    // real BIF-lowered body (e.g. `lists:map/2`) used to apply the block with
+    // the wrong arity and crash with a confusing raw error (`function_clause`,
+    // `type_error`, ...) instead of the clear stateful_block_dispatch error
+    // BT-2812 established for the same situation on Block's value*.
+    count := 0
+    statefulBlock := [:x |
+      count := count + 1
+      x * 2
+    ]
+    self should: [
+      #(1, 2, 3) perform: #collect: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
+    count := 0
+    statefulDoBlock := [:x | count := count + x]
+    self should: [
+      #(1, 2, 3) perform: #do: withArguments: #(statefulDoBlock)
+    ] raise: #stateful_block_dispatch
+
+    count := 0
+    statefulSelectBlock := [:x |
+      count := count + 1
+      x > 1
+    ]
+    self should: [
+      #(1, 2, 3) perform: #select: withArguments: #(statefulSelectBlock)
+    ] raise: #stateful_block_dispatch
+
+    count := 0
+    statefulRejectBlock := [:x |
+      count := count + 1
+      x > 1
+    ]
+    self should: [
+      #(1, 2, 3) perform: #reject: withArguments: #(statefulRejectBlock)
+    ] raise: #stateful_block_dispatch
+
+    count := 0
+    statefulInjectBlock := [:acc :x |
+      count := count + 1
+      acc + x
+    ]
+    self should: [
+      #(1, 2, 3) perform: #inject:into: withArguments: #(0, statefulInjectBlock)
+    ] raise: #stateful_block_dispatch
+
+  testPerformOnEachWithIndexWithStatefulBlockRaisesClearError =>
+    // BT-2914: eachWithIndex: is self-hosted (pure BT on inject:into:), not a
+    // BIF-lowered @primitive, so BT-2888's selector-keyed guard doesn't cover
+    // it. Its Collection body invokes the block via `value:value:` on a
+    // statically-unknown receiver; a Tier 2 (stateful) block arriving through
+    // perform: used to crash with a raw badarity instead of the clear
+    // stateful_block_dispatch error. The guard now lives in the generic
+    // value-send fallback, so any self-hosted iteration method gets it.
+    count := 0
+    statefulBlock := [:x :i | count := count + x]
+    self should: [
+      #(1, 2, 3) perform: #eachWithIndex: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
+    // Pure (Tier 1) blocks via perform: keep working (baseline, mirrors
+    // testPerformOnPureIterationBlocksAlreadyWorked).
+    self assert: (#(10, 20) perform: #eachWithIndex: withArguments: #([:x :i |
+      x + i
+    ])) equals: nil
+
+  // BT-2997: `unique` deduplicates by `=:=`, not `lists:usort/1`'s term order,
+  // so `1` and `1.0` survive as distinct elements. Output stays sorted.
+  testUniqueIsStrict =>
+    self assert: #(1, 1.0, 1, 1.0) unique equals: #(1, 1.0)
+    self assert: #(3, 1, 2, 1, 3) unique equals: #(1, 2, 3)

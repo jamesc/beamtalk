@@ -1,0 +1,173 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for `type Name = ...` declarations typed directly at the REPL,
+// `:help <Alias>`, and cross-turn alias persistence within a session
+// (ADR 0108 Phase 8, BT-2902), plus (final section below) the alias
+// hot-reload re-check trigger verified end-to-end from a live REPL session
+// (ADR 0108 Phase 10, BT-2905 — the epic's required final E2E validation
+// phase; per CLAUDE.md, "EUnit and BUnit alone are insufficient for
+// user-facing features"). The very first section below (BT-2938) instead
+// proves a *stdlib-declared* alias resolves in a session that never
+// declared it at all — the gap this file's other sections don't cover,
+// since every other section's aliases are typed at the REPL first.
+//
+// REPL display-value decision (flagged for maintainer sign-off — see the
+// PR description and CLAUDE.md's REPL-output rule): a `type` declaration
+// echoes its declared name, mirroring the existing class-declaration
+// convention (`Actor subclass: Counter` displays `Counter`).
+//
+// The `:help` doc-comment-block rendering is covered by
+// beamtalk_repl_eval_tests.erl (format_alias_help/2 with/without a doc
+// comment) and a beamtalk-compiler-port test asserting the compiler
+// correctly extracts a `///` doc comment on a `type` declaration — this
+// harness parses `.btscript` "expressions" line-by-line and cannot express
+// a `///` comment followed by its declaration as a single multi-line REPL
+// input the way real multi-line class bodies are typed (a `///`-prefixed
+// line is indistinguishable here from a plain in-file comment line).
+//
+// Hover on an alias name/reference (BT-2905's other REPL-protocol-untestable
+// leaf — there is no `textDocument/hover`-equivalent op in this harness) is
+// covered end-to-end against the same query layer the LSP server's
+// `textDocument/hover` handler calls: `hover_on_alias_declaration_name_shows_expansion`
+// and `hover_resolves_alias_through_project_wide_registry` in
+// crates/beamtalk-core/src/queries/hover_provider.rs and
+// crates/beamtalk-core/src/language_service/mod.rs respectively (BT-2901).
+
+// ===========================================================================
+// BT-2938: a *stdlib-declared* alias (`type SupervisionStrategy = ...`,
+// `stdlib/src/Supervisor.bt`) resolves in this fresh session — which has
+// not typed a single `type` declaration yet — for both `:help` and a
+// `::`-typed local, exactly the way a compiled-in stdlib *class* already
+// resolves out of the box. Before this issue, `:help SupervisionStrategy`
+// failed with `Class 'SupervisionStrategy' not found` (the session's
+// alias table only ever tracked session-declared aliases). The `__`
+// wildcards skip the blank-line-delimited doc-comment block (present here,
+// unlike `Direction` below) without pinning its exact line-wrapping; the
+// `Declared in: stdlib` provenance line (distinct from `Declared in: REPL`
+// below) is this issue's own REPL-output convention, flagged in the PR
+// description for maintainer sign-off per CLAUDE.md's REPL-output rule.
+// ===========================================================================
+
+:help SupervisionStrategy
+// => type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne__OTP supervisor restart strategy__Declared in: stdlib
+
+sup :: SupervisionStrategy := #oneForOne
+// => oneForOne
+
+// ===========================================================================
+// Declaring a type alias directly at the REPL echoes its name.
+// ===========================================================================
+
+type Direction = #north | #south | #east | #west
+// => Direction
+
+// ===========================================================================
+// The alias declared in the turn above resolves in a *later*, separate
+// turn's `::` annotation — the session-persistence behaviour this issue
+// adds (aliases erase at runtime, so there is no live BEAM artifact to
+// recover them from the way a REPL-declared class is recovered; the
+// session keeps its own alias table — see beamtalk_repl_state:alias_table).
+// A plain compile error here (rather than `#north`) would mean `Direction`
+// failed to resolve.
+// ===========================================================================
+
+d :: Direction := #north
+// => north
+
+// ===========================================================================
+// `matchExhaustive:` over an alias-typed scrutinee behaves identically to
+// the spelled-out union (ADR 0108 Exhaustiveness — inherited, not new). The
+// declaration and the `matchExhaustive:` are submitted together in one
+// turn (period-separated) because a typed local's *type* — unlike the
+// `Direction` alias itself — is not persisted as workspace state across
+// turns (the same pre-existing constraint `nil-and-type-patterns.btscript`
+// documents for `String | Nil`); what this proves is that the
+// *cross-turn-resolved* `Direction` alias expands to the exact closed
+// singleton union the checker already knows how to reason about.
+// ===========================================================================
+
+missing :: Direction := #north. missing matchExhaustive: [#north -> 0; #south -> 180; #east -> 90]
+// => ERROR: non-exhaustive matchExhaustive: `#west` is not handled
+
+covered :: Direction := #west. covered matchExhaustive: [#north -> 0; #south -> 180; #east -> 90; #west -> 270]
+// => 270
+
+// ===========================================================================
+// `:help <Alias>` on a session-declared alias with no doc comment: just the
+// declaration + expansion line and `Declared in:`, no comment block —
+// matching how `:help` already renders an undocumented class/method.
+// ===========================================================================
+
+:help Direction
+// => type Direction = #north | #south | #east | #west__Declared in: REPL
+
+// ===========================================================================
+// A live redefinition in a later turn is legal (ADR 0108 Semantics) — the
+// newest binding wins for subsequent resolution. Re-checking sites that
+// referenced the old binding is BT-2899's separate hot-reload concern.
+// ===========================================================================
+
+type Direction = #north | #south | #east | #west | #up | #down
+// => Direction
+
+e :: Direction := #up. e matchExhaustive: [#north -> 0; #south -> 1; #east -> 2; #west -> 3; #up -> 4; #down -> 5]
+// => 4
+
+:help Direction
+// => type Direction = #north | #south | #east | #west | #up | #down__Declared in: REPL
+
+// ===========================================================================
+// Alias hot-reload re-check trigger (BT-2899), verified end-to-end (BT-2905):
+// live-redefining an alias must invalidate a `matchExhaustive:` proof a
+// *compiled class method* holds against the alias's OLD member set — the
+// ADR 0108 headline scenario, and the gap flagged immediately above
+// ("Re-checking sites... is BT-2899's separate hot-reload concern").
+//
+// Unlike the ad-hoc `missing :: Direction := ...` top-level expressions
+// above (freshly re-resolved every REPL turn, never indexed into
+// `beamtalk_alias_xref`), the re-check trigger is keyed off alias-name ->
+// annotation-site edges that only a real class COMPILE populates — and,
+// per `beamtalk_repl_compiler.erl`, only the FILE-compile path
+// (`compile_file_core/4`, reached via `:load`) and the `>>` method-patch
+// path register those edges; a class typed directly at the REPL
+// (`compile_class_definition_result/2`) does not. So the dependent class
+// below is loaded from a fixture file, not typed inline.
+//
+// The re-check itself runs asynchronously on
+// `beamtalk_workspace_shape_recheck_worker` and publishes into
+// `beamtalk_workspace_findings_store` — NOT `Workspace recheckImage`,
+// whose whole-image sweep deliberately drops error-severity diagnostics
+// (`beamtalk_recheck.erl`'s `relevant_image_diagnostic/1`), so a genuinely
+// non-exhaustive `matchExhaustive:` would never surface there. We poll the
+// findings store directly via the Erlang FFI escape, mirroring the
+// whileTrue:/Timer sleep: poll idiom `announcements.btscript` uses to
+// await another asynchronous completion.
+// ===========================================================================
+
+type HotReloadColor = #red | #green | #blue
+// => HotReloadColor
+
+:load tests/repl-protocol/fixtures/hot_reload_alias_switch.bt
+// => Loaded: HotReloadColorSwitch
+
+// Sanity: no stale-alias finding yet — the compiled method's
+// matchExhaustive: proof is still sound against the alias's current
+// (exhaustive) three-member set.
+((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty
+// => true
+
+// Redefine the alias to add a member: `labelFor:`'s matchExhaustive:
+// (still only covering red/green/blue) is now stale — newly non-exhaustive.
+type HotReloadColor = #red | #green | #blue | #alpha
+// => HotReloadColor
+
+// Poll the findings store until the async re-check worker has posted a
+// finding for the dependent class (capped retries, ~2s).
+_hrPollCount := 0. [((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty and: [_hrPollCount < 100]] whileTrue: [Timer sleep: 20. _hrPollCount := _hrPollCount + 1]. ((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty
+// => false
+
+// The finding is classified as an alias-change re-check and names the
+// exhaustiveness gap — proof the proof re-fired as newly non-exhaustive.
+((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") anySatisfy: [:f | ((Erlang maps) get: #message with: f) includesSubstring: "exhaustive"]
+// => true

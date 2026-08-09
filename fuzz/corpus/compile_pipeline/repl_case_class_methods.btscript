@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for class-side methods (BT-411 / ADR 0013 Phase 2)
+//
+// These tests require E2E because they use the Beamtalk workspace binding
+// (an actor) via `Beamtalk classNamed:` with workspace variable persistence
+// across REPL turns. BUnit tests cannot drive workspace binding dispatch
+// with cross-turn variable persistence.
+//
+// Tests defining and calling class methods using the `class` prefix.
+// Class methods run on the class process, not instances.
+
+// @load tests/repl-protocol/fixtures/class_methods_fixture.bt
+// @load tests/repl-protocol/fixtures/class_methods_delegator_fixture.bt
+
+// ===========================================================================
+// BASIC CLASS METHOD DISPATCH
+// ===========================================================================
+
+cls := Beamtalk classNamed: #Calculator
+// => Calculator
+
+cls defaultValue
+// => 42
+
+cls add: 10 to: 20
+// => 30
+
+// ===========================================================================
+// CLASS METHOD TO CLASS METHOD DELEGATION (BT-891)
+// ===========================================================================
+
+del := Beamtalk classNamed: #Delegator
+// => Delegator
+
+del helper: 5
+// => 10
+
+del delegateHelper: 5
+// => 10
+
+del chained: 5
+// => 10

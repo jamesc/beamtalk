@@ -1,0 +1,239 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests the Tracing class — trace context (setContext:/context/clearContext),
+// lifecycle (enable/disable/isEnabled/clear), configuration (maxEvents/maxEvents:),
+// error behavior (empty results), live health queries, and systemHealth VM overview.
+//
+// Telemetry is available in the BUnit harness (declared as a dependency of
+// beamtalk_runtime, so OTP starts it before the trace store gen_server's init/1
+// runs). Lifecycle events from compiled actors are therefore captured here.
+// Method-dispatch traces remain empty in these tests because no method
+// dispatches are performed against an actor while tracing is enabled — the
+// API-surface tests focus on Tracing's query and configuration behaviour, not
+// on dispatch-trace content.
+
+TestCase subclass: TracingTest
+
+  class serial -> Boolean => true
+
+  setUp =>
+    // Ensure a clean state before each test
+    Tracing clear
+    Tracing disable
+    Tracing clearContext
+
+  // === Lifecycle ===
+  testEnableReturnsNil => self assert: Tracing enable equals: nil
+
+  testDisableReturnsNil => self assert: Tracing disable equals: nil
+
+  testIsEnabledReturnsFalseByDefault => self deny: Tracing isEnabled
+
+  testEnableDisableCycle =>
+    Tracing enable
+    self assert: Tracing isEnabled
+    Tracing disable
+    self deny: Tracing isEnabled
+
+  testClearReturnsNil => self assert: Tracing clear equals: nil
+
+  testClearResetsEnabled =>
+    // clear does not change enabled state — test that enable persists
+    Tracing enable
+    Tracing clear
+    // isEnabled should still be true (clear resets data, not enabled flag)
+    self assert: Tracing isEnabled
+
+  // === Trace context (BT-1639) ===
+  testContextReturnsEmptyDictionaryByDefault =>
+    self assert: Tracing context equals: #{}
+
+  testSetContextReturnsNil =>
+    self assert: (Tracing setContext: #{#workflowId => "wf-123"}) equals: nil
+
+  testSetContextAndRetrieve =>
+    Tracing setContext: #{#workflowId => "wf-456"}
+    ctx := Tracing context
+    self assert: (ctx at: #workflowId) equals: "wf-456"
+
+  testSetContextMerges =>
+    Tracing setContext: #{#workflowId => "wf-789"}
+    Tracing setContext: #{#activityId => "a-1"}
+    ctx := Tracing context
+    self assert: (ctx at: #workflowId) equals: "wf-789"
+    self assert: (ctx at: #activityId) equals: "a-1"
+
+  testClearContextReturnsNil => self assert: Tracing clearContext equals: nil
+
+  testClearContextRemovesAll =>
+    Tracing setContext: #{#workflowId => "wf-clear"}
+    Tracing clearContext
+    self assert: Tracing context equals: #{}
+
+  // BT-1639: Verify context operates in the caller's process.
+  // With the direct-call optimization, Tracing class methods execute in the
+  // caller's process (not the Tracing class object's gen_server process).
+  // This test verifies that setContext/context form a consistent pair
+  // within the same process, and that separate set/clear cycles don't
+  // leak state across calls.
+  testContextIsolationAcrossClearCycles =>
+    // First cycle: set and read
+    Tracing setContext: #{#requestId => "req-1"}
+    self assert: (Tracing context at: #requestId) equals: "req-1"
+    Tracing clearContext
+    // After clear, context should be empty — proves context is per-process
+    // (not stored in a shared ETS or global registry)
+    self assert: Tracing context equals: #{}
+    // Second cycle: completely independent
+    Tracing setContext: #{#sessionId => "sess-2"}
+    ctx := Tracing context
+    self deny: (ctx includesKey: #requestId)
+    self assert: (ctx at: #sessionId) equals: "sess-2"
+    Tracing clearContext
+
+  // === Configuration ===
+  testMaxEventsDefault =>
+    // Default is 100000
+    self assert: Tracing maxEvents equals: 100000
+
+  testMaxEventsSetAndGet =>
+    Tracing maxEvents: 50000
+    self assert: Tracing maxEvents equals: 50000
+    // Reset to default
+    Tracing maxEvents: 100000
+
+  testMaxEventsReturnsNil =>
+    self assert: (Tracing maxEvents: 25000) equals: nil
+    // Reset to default
+    Tracing maxEvents: 100000
+
+  // === Traces (empty when not enabled / no dispatches) ===
+  testTracesReturnsEmptyList =>
+    // traces returns [] when not enabled
+    self assert: Tracing traces equals: #()
+
+  testTracesReturnsEmptyListWhenEnabled =>
+    // traces returns [] when enabled but no dispatches/lifecycle events
+    // have been recorded since the last clear
+    Tracing enable
+    self assert: Tracing traces equals: #()
+
+  // === Stats (empty when no dispatches recorded) ===
+  testStatsReturnsEmptyDictionary => self assert: Tracing stats equals: #{}
+
+  testStatsForActorIncludesLifecycleStart =>
+    // BT-1638: Compiled actors emit lifecycle start telemetry in init,
+    // so statsFor: a freshly spawned actor includes a "start" entry.
+    c := Counter spawn
+    stats := Tracing statsFor: c
+    self deny: stats isEmpty
+    c stop
+
+  // === BT-1638: Lifecycle telemetry from compiled actors ===
+  testLifecycleStartEventRecordedOnSpawn =>
+    // Compiled actors emit [beamtalk, actor, lifecycle, start] in init/1
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    // Small delay to ensure telemetry handler has processed
+    Timer sleep: 50
+    traces := Tracing traces
+    startEvents := traces select: [:t | (t at: "selector") == "start"]
+    self deny: startEvents isEmpty
+    c stop
+
+  testLifecycleStopEventRecordedOnStop =>
+    // Compiled actors emit [beamtalk, actor, lifecycle, stop] in terminate/2
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    c stop
+    // Small delay to ensure termination and telemetry processing
+    Timer sleep: 100
+    traces := Tracing traces
+    stopEvents := traces select: [:t | (t at: "selector") == "stop"]
+    self deny: stopEvents isEmpty
+
+  testLifecycleEventsHaveCorrectMode =>
+    // Lifecycle events are recorded with mode => lifecycle
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    Timer sleep: 50
+    traces := Tracing traces
+    lifecycleEvents := traces select: [:t | (t at: "mode") == "lifecycle"]
+    self deny: lifecycleEvents isEmpty
+    c stop
+
+  // === Analysis (empty results) ===
+  testSlowMethodsReturnsEmptyList =>
+    self assert: (Tracing slowMethods: 10) equals: #()
+
+  testHotMethodsReturnsEmptyList =>
+    self assert: (Tracing hotMethods: 10) equals: #()
+
+  testErrorMethodsReturnsEmptyList =>
+    self assert: (Tracing errorMethods: 5) equals: #()
+
+  testBottlenecksReturnsEmptyList =>
+    // No actors with recorded dispatches, so bottlenecks is empty
+    self assert: (Tracing bottlenecks: 5) equals: #()
+
+  // === Live health ===
+  testHealthForLiveActor =>
+    c := Counter spawn
+    health := Tracing healthFor: c
+    // Should have status key (waiting or running, not dead)
+    self deny: ((health at: "status") == #dead)
+    // Should have queue_depth key
+    self assert: ((health at: "queue_depth") >= 0)
+    // Should have memory_kb key
+    self assert: ((health at: "memory_kb") >= 0)
+    // Should have reductions key
+    self assert: ((health at: "reductions") >= 0)
+    c stop
+
+  testHealthForDeadActor =>
+    c := Counter spawn
+    c stop
+    // Small delay to ensure process is dead
+    Timer sleep: 50
+    health := Tracing healthFor: c
+    // Dead actor should have status=dead
+    self assert: (health at: "status") equals: #dead
+    // Dead actor should have error message
+    self assert: (health at: "error") equals: "process not alive"
+
+  testSystemHealth =>
+    health := Tracing systemHealth
+    // Should have scheduler_count (positive integer)
+    self assert: ((health at: "scheduler_count") > 0)
+    // Should have process_count
+    self assert: ((health at: "process_count") > 0)
+    // Should have process_limit
+    self assert: ((health at: "process_limit") > 0)
+    // Should have memory map
+    mem := health at: "memory"
+    self assert: ((mem at: "total_mb") >= 0)
+    // Should have run_queue
+    self assert: ((health at: "run_queue") >= 0)
+
+  // === Type error validation ===
+  // ADR 0101: these shims raise a #beamtalk_error{kind = type_error}; the unified
+  // FFI proxy now preserves that classification (idempotent pass-through) instead
+  // of the former clobbering to runtime_error.
+  testSlowMethodsRequiresPositiveInteger =>
+    self should: [Tracing slowMethods: 0] raise: #type_error
+
+  testHotMethodsRequiresPositiveInteger =>
+    self should: [Tracing hotMethods: -1] raise: #type_error
+
+  testErrorMethodsRequiresPositiveInteger =>
+    self should: [Tracing errorMethods: 0] raise: #type_error
+
+  testBottlenecksRequiresPositiveInteger =>
+    self should: [Tracing bottlenecks: 0] raise: #type_error
+
+  testMaxEventsRequiresPositiveInteger =>
+    self should: [Tracing maxEvents: 0] raise: #type_error

@@ -1,0 +1,366 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for destructuring assignment: tuple {a, b} := expr, array #[a, b] := expr, and list #(a, b) := expr
+
+TestCase subclass: DestructuringTest
+
+  // === Tuple destructuring ===
+  testTupleDestructuringBasic =>
+    {a, b} := Erlang erlang list_to_tuple: #(10, 20)
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testTupleDestructuringThreeElements =>
+    {a, b, c} := Erlang erlang list_to_tuple: #(1, 2, 3)
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testTupleDestructuringWithTaggedSymbol =>
+    {status, val} := Tuple withAll: #(#ok, 42)
+    self assert: status equals: #ok
+    self assert: val equals: 42
+
+  testTupleDestructuringWithTaggedSymbolLiteral =>
+    // Literal pattern in first slot: {#ok, value} matches only when first element is #ok.
+    {#ok, value} := Tuple withAll: #(#ok, 42)
+    self assert: value equals: 42
+
+  testTupleDestructuringLiteralMismatchRaisesError =>
+    // When the literal slot does not match, a RuntimeError with badmatch details is raised.
+    result := [
+      {#ok, _val} := Tuple withAll: #(#error, 42)
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    self assert: result equals: true
+
+  testTupleDestructuringWithWildcard =>
+    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)
+    self assert: b equals: 99
+
+  // === Array destructuring ===
+  testArrayDestructuringBasic =>
+    #[a, b] := #[10, 20]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testArrayDestructuringThreeElements =>
+    #[a, b, c] := #[1, 2, 3]
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testArrayDestructuringWithWildcard =>
+    #[_, b] := #[99, 42]
+    self assert: b equals: 42
+
+  testArrayDestructuringExtraElements =>
+    // Array has more elements than pattern — that's fine, extras ignored
+    #[a, b] := #[10, 20, 30, 40]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testArrayDestructuringStrings =>
+    #[first, second] := #["hello", "world"]
+    self assert: first equals: "hello"
+    self assert: second equals: "world"
+
+  testArrayDestructuringWithTaggedSymbolLiteral =>
+    // Literal pattern in first slot: #[#ok, value] matches only when first element is #ok.
+    #[#ok, value] := #[#ok, 42]
+    self assert: value equals: 42
+
+  testArrayDestructuringLiteralMismatchRaisesError =>
+    // When the literal slot does not match, a RuntimeError with badmatch details is raised.
+    result := [
+      #[#ok, _val] := #[#error, 42]
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    self assert: result equals: true
+
+  testArrayDestructuringIntegerLiteral =>
+    // Integer literal in a pattern position.
+    #[1, value] := #[1, 99]
+    self assert: value equals: 99
+
+  testArrayDestructuringMultipleLiterals =>
+    // Multiple literal positions with a variable in between.
+    #[#begin, middle, #done] := #[#begin, "data", #done]
+    self assert: middle equals: "data"
+
+  // === Last-expression destructuring (RHS must be evaluated) ===
+  testTupleDestructuringOnlyStatement =>
+    // Destructuring as the only (and therefore last) statement in a method.
+    // Verifies the method compiles and runs without error.
+    {_, _} := Tuple withAll: #(#ok, 42)
+
+  testArrayDestructuringOnlyStatement =>
+    // Same for array destructuring as the only statement.
+    #[_, _] := #[1, 2]
+
+  testTupleDestructuringVariablesUsedAfter =>
+    // Variables bound by destructuring are accessible in subsequent expressions.
+    {a, b} := Erlang erlang list_to_tuple: #(5, 10)
+    self assert: a equals: 5
+    self assert: b equals: 10
+
+  testArrayDestructuringVariablesUsedAfter =>
+    // Same for array destructuring.
+    #[x, y] := #[3, 7]
+    self assert: x equals: 3
+    self assert: y equals: 7
+
+  // === Sequential destructurings ===
+  testSequentialTupleDestructurings =>
+    // Multiple tuple destructurings in sequence all bind correctly.
+    {a, b} := Erlang erlang list_to_tuple: #(1, 2)
+    {c, d} := Erlang erlang list_to_tuple: #(3, 4)
+    self assert: a + b + c + d equals: 10
+
+  testSequentialArrayDestructurings =>
+    // Multiple array destructurings in sequence all bind correctly.
+    #[a, b] := #[1, 2]
+    #[c, d] := #[3, 4]
+    self assert: a + b + c + d equals: 10
+
+  testMixedDestructurings =>
+    // Mix of tuple and array destructuring in the same method.
+    {x, y} := Erlang erlang list_to_tuple: #(10, 20)
+    #[p, q] := #[100, 200]
+    self assert: x + y + p + q equals: 330
+
+  // === Destructuring inside block bodies ===
+  testArrayDestructuringNonLastInCollect =>
+    // Destructuring as non-last expression in a collect: block;
+    // the block binds pattern variables then returns a computed value.
+    result := #[#[1, 10], #[2, 20]]
+      collect: [:pair |
+        #[a, b] := pair
+        a + b
+      ]
+    self assert: result equals: #[11, 22]
+
+  testTupleDestructuringNonLastInCollect =>
+    // Tuple destructuring as non-last expression in a collect: block.
+    pair1 := Erlang erlang list_to_tuple: #(1, 10)
+    pair2 := Erlang erlang list_to_tuple: #(2, 20)
+    result := #[pair1, pair2]
+      collect: [:pair |
+        {a, b} := pair
+        a + b
+      ]
+    self assert: result equals: #[11, 22]
+
+  testArrayDestructuringNonLastInSelect =>
+    // Destructuring as non-last expression in a select: block;
+    // the last expression is the predicate that determines inclusion.
+    result := #[#[1, 10], #[15, 5], #[2, 20]]
+      select: [:pair |
+        #[a, b] := pair
+        a < b
+      ]
+    self assert: result equals: #[#[1, 10], #[2, 20]]
+
+  testTupleDestructuringNonLastInSelect =>
+    // Tuple destructuring as non-last expression in select: block.
+    pair1 := Erlang erlang list_to_tuple: #(1, 10)
+    pair2 := Erlang erlang list_to_tuple: #(15, 5)
+    pair3 := Erlang erlang list_to_tuple: #(2, 20)
+    result := #[pair1, pair2, pair3]
+      select: [:pair |
+        {a, b} := pair
+        a < b
+      ]
+    self assert: result equals: #[pair1, pair3]
+
+  testArrayDestructuringNonLastInInject =>
+    // Destructuring as non-last expression in inject:into: block;
+    // the last expression is the new accumulator value.
+    result := #[#[1, 10], #[2, 20]]
+      inject: 0
+      into: [:acc :pair |
+        #[a, b] := pair
+        acc + a + b
+      ]
+    self assert: result equals: 33
+
+  testTupleDestructuringNonLastInInject =>
+    // Tuple destructuring as non-last expression in inject:into: block.
+    pair1 := Erlang erlang list_to_tuple: #(1, 10)
+    pair2 := Erlang erlang list_to_tuple: #(2, 20)
+    result := #[pair1, pair2]
+      inject: 0
+      into: [:acc :pair |
+        {a, b} := pair
+        acc + a + b
+      ]
+    self assert: result equals: 33
+
+  testDestructuringVariablesAccessibleInSubsequentBlocks =>
+    // Variables bound by destructuring are visible to blocks that follow.
+    #[x, y] := #[5, 10]
+    doubled := #[x, y] collect: [:v | v * 2]
+    self assert: doubled equals: #[10, 20]
+
+  testNestedArrayDestructuringInCollect =>
+    // Destructuring that unpacks a pair and uses both parts in the result.
+    pairs := #[#[3, 4], #[5, 12], #[8, 15]]
+    sums := pairs
+      collect: [:pair |
+        #[a, b] := pair
+        a + b
+      ]
+    self assert: sums equals: #[7, 17, 23]
+
+  // === List destructuring (#(...) syntax, BT-1279) ===
+  testListDestructuringBasic =>
+    #(a, b) := #(10, 20)
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testListDestructuringThreeElements =>
+    #(a, b, c) := #(1, 2, 3)
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testListDestructuringWithWildcard =>
+    #(_, b) := #(99, 42)
+    self assert: b equals: 42
+
+  testListDestructuringOnArray =>
+    // Duck-typed: #(...) destructuring calls at: on any collection — works on Array too
+    #(a, b) := #[10, 20]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testListDestructuringInBlock =>
+    result := #(#(1, 10), #(2, 20))
+      collect: [:pair |
+        #(a, b) := pair
+        a + b
+      ]
+    self assert: result equals: #(11, 22)
+
+  // === Map destructuring ===
+  testMapDestructuringSingleKey =>
+    dict := #{#name => "Alice"}
+    #{#name => name} := dict
+    self assert: name equals: "Alice"
+
+  testMapDestructuringMultipleKeys =>
+    dict := #{#x => 10, #y => 20}
+    #{#x => x, #y => y} := dict
+    self assert: x equals: 10
+    self assert: y equals: 20
+
+  testMapDestructuringWithWildcard =>
+    dict := #{#sid => "abc123", #runner => "runner1"}
+    #{#sid => sid, #runner => _} := dict
+    self assert: sid equals: "abc123"
+
+  testMapDestructuringSubset =>
+    // Destructuring only some keys is allowed; extra keys are ignored.
+    dict := #{#a => 1, #b => 2, #c => 3}
+    #{#a => a, #c => c} := dict
+    self assert: a equals: 1
+    self assert: c equals: 3
+
+  testMapDestructuringMissingKeyRaisesError =>
+    // Accessing a missing key raises a RuntimeError (any kind) — here we only
+    // assert that it raises at all. The error kind is checked by
+    // testMapDestructuringMissingKeyIsKeyError (#key_error, classified by BT-2707).
+    result := [
+      #{#missing => _val} := #{#present => 42}
+      #did_not_raise
+    ] on: RuntimeError do: [:e | #raised]
+    self assert: result equals: #raised
+
+  testMapDestructuringMissingKeyIsKeyError =>
+    // The classified missing-key error carries the key_error kind.
+    result := [
+      #{#missing => _val} := #{#present => 42}
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e kind]
+    self assert: result equals: #key_error
+
+  testMapDestructuringOnlyStatement =>
+    // Map destructuring as the only statement in a method.
+    #{#x => _} := #{#x => 99}
+
+  testMapDestructuringVariablesUsedAfter =>
+    dict := #{#name => "Bob", #age => 30}
+    #{#name => name, #age => age} := dict
+    self assert: name equals: "Bob"
+    self assert: age equals: 30
+
+  testMapDestructuringSequential =>
+    d1 := #{#a => 1}
+    d2 := #{#b => 2}
+    #{#a => a} := d1
+    #{#b => b} := d2
+    self assert: a + b equals: 3
+
+  testMapDestructuringInCollectBlock =>
+    // Map destructuring inside a collect: block.
+    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]
+    sums := dicts
+      collect: [:d |
+        #{#x => x, #y => y} := d
+        x + y
+      ]
+    self assert: sums equals: #[11, 22]
+
+  // === Array rest pattern (#[a, ...rest] := expr) ===
+  testArrayRestPatternBasic =>
+    #[first, ...rest] := #[1, 2, 3, 4, 5]
+    self assert: first equals: 1
+    self assert: rest equals: #[2, 3, 4, 5]
+
+  testArrayRestPatternTwoPositional =>
+    #[a, b, ...remaining] := #[10, 20, 30, 40]
+    self assert: a equals: 10
+    self assert: b equals: 20
+    self assert: remaining equals: #[30, 40]
+
+  testArrayRestPatternNoRemainder =>
+    // When array has exact number of positional elements, rest is empty
+    #[x, y, ...tail] := #[1, 2]
+    self assert: x equals: 1
+    self assert: y equals: 2
+    self assert: tail equals: #[]
+
+  testArrayRestPatternOnlyRest =>
+    // No positional elements, just rest — captures the whole array
+    #[...all] := #[10, 20, 30]
+    self assert: all equals: #[10, 20, 30]
+
+  testArrayRestPatternWithWildcardPositional =>
+    // Wildcard in a positional slot, rest captures remainder
+    #[_, ...rest] := #[99, 42, 7]
+    self assert: rest equals: #[42, 7]
+
+  testArrayRestPatternWithLiteralPositional =>
+    // Literal in a positional slot with rest
+    #[#ok, ...values] := #[#ok, 1, 2, 3]
+    self assert: values equals: #[1, 2, 3]
+
+  testArrayRestPatternWithWildcardRest =>
+    // ..._ discards the rest (no binding)
+    #[head, ..._] := #[1, 2, 3, 4, 5]
+    self assert: head equals: 1
+
+  testArrayRestPatternInBlock =>
+    // Rest pattern inside a collect: block
+    result := #[#[1, 2, 3], #[10, 20, 30]]
+      collect: [:arr |
+        #[_, ...rest] := arr
+        rest
+      ]
+    self assert: result equals: #[#[2, 3], #[20, 30]]
+
+  testArrayRestPatternSingleElement =>
+    // Array with one element, no positional, rest gets it all
+    #[...items] := #[42]
+    self assert: items equals: #[42]

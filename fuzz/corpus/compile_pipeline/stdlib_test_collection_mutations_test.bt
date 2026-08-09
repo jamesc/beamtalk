@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-524: Tests that the is_list guard in mutation-threading codegen works
+// correctly when actor methods iterate over List, Set, and Dictionary arguments
+
+TestCase subclass: CollectionMutationsTest
+  field: counter = nil
+
+  setUp => self.counter := CollectionMutationCounter spawn
+
+  tearDown => self.counter isNil ifFalse: [self.counter stop]
+
+  testActorMutatingCollections =>
+    self assert: self.counter getTotal equals: 0
+    self assert: (self.counter sumSet: #(1, 2, 3)) equals: 6
+    self assert: self.counter getTotal equals: 6
+    counter2 := CollectionMutationCounter spawn
+    s := (Set new) fromList: #(1, 2, 3)
+    self assert: (counter2 sumSet: s) equals: 6
+    self assert: counter2 getTotal equals: 6
+    counter3 := CollectionMutationCounter spawn
+    self assert: (counter3 sumDictValues: (Dictionary new: #{
+      #a => 10,
+      #b => 20,
+      #c => 30
+    })) equals: 60
+    self assert: counter3 getTotal equals: 60
+
+  // BT-2703: eachWithIndex: threads actor state through the block.
+  testActorEachWithIndexMutation =>
+    // 10*1 + 20*2 + 30*3 = 10 + 40 + 90 = 140
+    self assert: (self.counter sumWithIndex: #(10, 20, 30)) equals: 140
+    self assert: self.counter getTotal equals: 140
+
+  // BT-2703: do:separatedBy: threads actor state through both blocks.
+  testActorDoSeparatedByMutation =>
+    // elements 1+2+3 = 6; two separators between them = 200; total = 206
+    self assert: (self.counter joinSum: #(1, 2, 3)) equals: 206
+    self assert: self.counter getTotal equals: 206
+
+  // BT-2703: do:separatedBy: with a single element runs no separator.
+  testActorDoSeparatedBySingleElement =>
+    self assert: (self.counter joinSum: #(5)) equals: 5
+    self assert: self.counter getTotal equals: 5
+
+  // BT-2703: empty collection — the fold body never runs, so `finalize_enumeration_fold`'s
+  // `element(2, EnumFold)` only works because the threaded inject seeds `foldl` with a
+  // `{Seed, State}` tuple (returned unchanged for `[]`), not a bare seed.
+  testActorEachWithIndexEmptyCollection =>
+    self assert: (self.counter sumWithIndex: #()) equals: 0
+    self assert: self.counter getTotal equals: 0
+
+  testActorDoSeparatedByEmptyCollection =>
+    self assert: (self.counter joinSum: #()) equals: 0
+    self assert: self.counter getTotal equals: 0
+
+  // BT-2703: eachWithIndex: threading an outer local alongside a field write.
+  testActorEachWithIndexLocalAndField =>
+    // returns the outer local `seen` (one per element); field gets 10*1+20*2+30*3
+    self assert: (self.counter countWithIndex: #(10, 20, 30)) equals: 3
+    self assert: self.counter getTotal equals: 140
+
+  // BT-2703: do:separatedBy: threading an outer local mutated only in the separator.
+  testActorDoSeparatedByLocalSeparator =>
+    // 3 elements -> 2 gaps; field accumulates 1+2+3 = 6
+    self assert: (self.counter gapCount: #(1, 2, 3)) equals: 2
+    self assert: self.counter getTotal equals: 6
+
+  // BT-2703: regression guard — in a value type these selectors with a mutating
+  // block must not crash with `badarity`. The captured-local write is lost here
+  // (pre-existing, out-of-scope value-type behaviour), so the result is the initial 0.
+  testValueTypeEnumerationDoesNotCrash =>
+    vt := EnumerationValueType new
+    self assert: (vt eachWithIndexSum: #(10, 20, 30)) equals: 0
+    self assert: (vt doSeparatedBySum: #(1, 2, 3)) equals: 0

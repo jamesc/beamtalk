@@ -37,16 +37,17 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked --version 0.13.1
 
-      - name: Run parser fuzzing (10 minutes)
+      - name: Run parser fuzzing (5 minutes)
         id: fuzz
         continue-on-error: true
         run: |
-          # Run fuzzing for 600 seconds (10 minutes)
+          # BT-3124: split from 600s to 300s so the job's existing ~20-minute
+          # budget also covers the compile_pipeline fuzz job below.
           # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
-          # -max_total_time=600: Run for exactly 10 minutes
+          # -max_total_time=300: Run for exactly 5 minutes
           cargo +nightly fuzz run parse_arbitrary -- \
             -rss_limit_mb=4096 \
-            -max_total_time=600 \
+            -max_total_time=300 \
             -print_final_stats=1
 
       - name: Upload artifacts on failure
@@ -175,7 +176,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ steps.fuzz.outcome }}" = "success" ]; then
-            echo "✅ **Success:** No crashes detected in 10-minute fuzz run" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Success:** No crashes detected in 5-minute fuzz run" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️ **Issues Detected:** See artifacts for details" >> $GITHUB_STEP_SUMMARY
             
@@ -193,7 +194,240 @@ jobs:
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Corpus size:** $(ls -1 fuzz/corpus/parse_arbitrary/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
-          echo "**Duration:** 10 minutes" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** 5 minutes" >> $GITHUB_STEP_SUMMARY
+
+  # BT-3124: full-pipeline fuzz target (lex -> parse -> analyse -> codegen).
+  # Mirrors the `fuzz` job above (same failure-detection/artifact/issue
+  # shape) for the `compile_pipeline` target instead of `parse_arbitrary` --
+  # kept as a separate job rather than a second step in `fuzz` so each
+  # target's crash/timeout/OOM detection stays simple to read, matching this
+  # file's existing job-per-concern style (see `extended-proptest` below).
+  fuzz-compile-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly
+        with:
+          toolchain: nightly
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version 0.13.1
+
+      - name: Run compile pipeline fuzzing (5 minutes)
+        id: fuzz
+        continue-on-error: true
+        run: |
+          # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
+          # -max_total_time=300: Run for exactly 5 minutes
+          cargo +nightly fuzz run compile_pipeline -- \
+            -rss_limit_mb=4096 \
+            -max_total_time=300 \
+            -print_final_stats=1
+
+      - name: Upload artifacts on failure
+        if: steps.fuzz.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fuzz-compile-pipeline-artifacts-${{ github.run_id }}
+          path: fuzz/artifacts/compile_pipeline/
+          retention-days: 30
+
+      - name: Check for fuzz failures
+        if: steps.fuzz.outcome == 'failure'
+        run: |
+          FAILED=0
+
+          # Check if there are any crash artifacts (includes structural-validity
+          # assertion failures — core_erlang_structural_issues finding a
+          # non-empty issue list, since the fuzz target asserts! on those)
+          if ls fuzz/artifacts/compile_pipeline/crash-* 1> /dev/null 2>&1; then
+            echo "❌ CRITICAL: compile pipeline crashed or produced invalid Core Erlang during fuzzing!"
+            echo "Crash artifacts uploaded. Please investigate immediately."
+            FAILED=1
+          fi
+
+          # Check for timeouts
+          if ls fuzz/artifacts/compile_pipeline/timeout-* 1> /dev/null 2>&1; then
+            echo "⚠️ WARNING: compile pipeline timeout detected"
+            echo "This indicates an infinite loop or extremely slow analysis/codegen."
+            FAILED=1
+          fi
+
+          # Check for OOM
+          if ls fuzz/artifacts/compile_pipeline/oom-* 1> /dev/null 2>&1; then
+            echo "❌ compile pipeline out-of-memory detected on malformed input"
+            echo "The pipeline consumed >4GB on crafted input, preventing effective fuzzing."
+            FAILED=1
+          fi
+
+          # Fail if fuzz step failed but produced no artifacts (infra error, cargo-fuzz crash, etc.)
+          if [ $FAILED -eq 0 ]; then
+            echo "❌ Fuzz step failed but no artifacts were produced; failing to avoid false green."
+            FAILED=1
+          fi
+
+          exit $FAILED
+
+      - name: Create issue on failure
+        if: steps.fuzz.outcome == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+
+            const artifactsDir = 'fuzz/artifacts/compile_pipeline/';
+            let files = [];
+
+            try {
+              files = fs.readdirSync(artifactsDir);
+            } catch (e) {
+              console.log('No artifacts directory found');
+              return;
+            }
+
+            const crashes = files.filter(f => f.startsWith('crash-'));
+            const ooms = files.filter(f => f.startsWith('oom-'));
+            const timeouts = files.filter(f => f.startsWith('timeout-'));
+
+            if (crashes.length === 0 && ooms.length === 0 && timeouts.length === 0) {
+              console.log('No failure artifacts found, not creating issue');
+              return;
+            }
+
+            const types = [];
+            if (crashes.length > 0) types.push('crash');
+            if (ooms.length > 0) types.push('OOM');
+            if (timeouts.length > 0) types.push('timeout');
+
+            const title = `🔀 Compile pipeline fuzzing failure: ${types.join(', ')} (run ${context.runId})`;
+
+            let details = '';
+            if (crashes.length > 0) {
+              details += `\n### Crashes / invalid Core Erlang (${crashes.length})\n${crashes.map(c => `- \`${c}\``).join('\n')}\nEither a panic in lex/parse/analyse/codegen, or generate_module returned Ok with structurally invalid Core Erlang (unbalanced delimiters, missing module/end, or a Rust format-artifact leak).\n`;
+            }
+            if (ooms.length > 0) {
+              details += `\n### Out-of-Memory (${ooms.length})\n${ooms.map(c => `- \`${c}\``).join('\n')}\nThe pipeline used >4GB on crafted input.\n`;
+            }
+            if (timeouts.length > 0) {
+              details += `\n### Timeouts (${timeouts.length})\n${timeouts.map(c => `- \`${c}\``).join('\n')}\nThe pipeline took too long, indicating an infinite loop or pathological input.\n`;
+            }
+
+            const body = [
+              `## Compile Pipeline Fuzzing Failure`,
+              ``,
+              `The nightly fuzzer found issues in the lex -> parse -> analyse -> codegen pipeline.`,
+              ``,
+              `**Run:** ${context.runId}`,
+              `**Workflow:** ${context.workflow}`,
+              `**Date:** ${new Date().toISOString()}`,
+              details,
+              `### Action Required`,
+              ``,
+              `1. Download the \`fuzz-compile-pipeline-artifacts-${context.runId}\` artifact from the workflow run`,
+              `2. Reproduce: \`cargo +nightly fuzz run compile_pipeline <artifact-file>\``,
+              `3. Fix the issue in analysis/codegen`,
+              `4. Re-run fuzzer to verify fix`,
+              ``,
+              `### References`,
+              ``,
+              `- ADR 0011: Robustness Testing — Layered Fuzzing`,
+              `- Epic: BT-3112`,
+              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['Bug', 'codegen', 'fuzzing', 'High']
+            });
+
+      - name: Add to job summary
+        if: always()
+        run: |
+          echo "## 🔀 Compile Pipeline Fuzzing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.fuzz.outcome }}" = "success" ]; then
+            echo "✅ **Success:** No crashes or invalid Core Erlang detected in 5-minute fuzz run" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Issues Detected:** See artifacts for details" >> $GITHUB_STEP_SUMMARY
+
+            if ls fuzz/artifacts/compile_pipeline/crash-* 1> /dev/null 2>&1; then
+              echo "- ❌ **Crashes:** Panic or structurally invalid Core Erlang on some input" >> $GITHUB_STEP_SUMMARY
+            fi
+            if ls fuzz/artifacts/compile_pipeline/timeout-* 1> /dev/null 2>&1; then
+              echo "- ⏱️ **Timeouts:** Pipeline took too long on some input" >> $GITHUB_STEP_SUMMARY
+            fi
+            if ls fuzz/artifacts/compile_pipeline/oom-* 1> /dev/null 2>&1; then
+              echo "- 💾 **OOM:** Pipeline used excessive memory on malformed input" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Corpus size:** $(ls -1 fuzz/corpus/compile_pipeline/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** 5 minutes" >> $GITHUB_STEP_SUMMARY
+
+  # BT-3124: corpus-through-BEAM lint. Generates .core text for the seed
+  # corpus via the same pipeline the compile_pipeline fuzz target exercises,
+  # then batch-compiles with erlc + core_lint -- the check that catches
+  # "beamtalk's own codegen thinks this is valid, but erlc/core_lint rejects
+  # it", surfaced without putting BEAM in the libFuzzer hot loop.
+  corpus-through-erlc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Generate .core corpus
+        run: |
+          cargo run --release --example compile_pipeline_corpus -p beamtalk-core -- \
+            target/compile-pipeline-corpus fuzz/corpus/compile_pipeline
+
+      - name: Batch-compile with erlc + core_lint
+        id: corpus_lint
+        run: escript scripts/compile-pipeline-corpus-lint.escript target/compile-pipeline-corpus
+
+      - name: Add to job summary
+        if: always()
+        run: |
+          echo "## 🔬 Corpus-Through-BEAM Lint Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.corpus_lint.outcome }}" = "success" ]; then
+            echo "✅ **Success:** every generated .core file compiled cleanly through erlc + core_lint" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Failure:** erlc/core_lint rejected .core output beamtalk's own codegen accepted — see job logs for the per-file report (source .bt, generated .core, erlc/core_lint message)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Corpus size:** $(ls -1 fuzz/corpus/compile_pipeline/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
 
   extended-proptest:
     runs-on: ubuntu-latest

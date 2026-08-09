@@ -1,0 +1,132 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2206: BUnit-level coverage for `SystemNavigation unimplementedSelectors` —
+// the classic Smalltalk typo-finder. Reports selectors that are SENT somewhere
+// but DEFINED nowhere, with the send-sites so a user can jump to the typo.
+//
+// `unimplementedSelectors` is an instance method on `SystemNavigation`, reached
+// via the `default` (or future scoped) constructor. See the note in
+// `beamtalk_implementors_test.bt` for why the class side is constructors only
+// and the queries live on the instance.
+//
+// Behavioural tests (a real typo surfaces with a site; doesNotUnderstand: /
+// perform: / Erlang FFI do not pollute results; result-record shape) live in
+// the E2E REPL-protocol suite at
+// tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
+// workspace_mode with the live class registry populated AND the compiler-port
+// process running (the source-text scan needs both). The BUnit harness does
+// not start the compiler port, so `allSendsIn:` returns `[]` here regardless of
+// source — hence these checks stay structural.
+//
+// BT-2303 migrated the sent / defined sets to read the runtime-maintained xref
+// index (`beamtalk_xref:all_sends_bt/0` for sends, `defined_selectors_bt/0` for
+// defines) with the BT-2299 miss-policy fallback: a loaded-but-unindexed class
+// falls back to the source-scan helpers below for that class only. The legacy
+// `collectAllSendsIn:…` helpers are retained as that fallback path, so the
+// structural assertions on them still hold. End-to-end correctness of the
+// index-backed result (the typo surfaces with sites; DNU / perform: / FFI do
+// not pollute) is covered by the E2E suite, which loads the fixtures into the
+// live index.
+//
+// BT-2304 / ADR 0087 Phase 6 (synthetic auto-accessors): compiler-generated
+// `field/1` getters and `withField:/2` setters for `Value subclass:` classes
+// now carry `source_status => synthetic` rows in the index. They satisfy sends
+// to their own selectors — a `point value`/`point withValue:` send resolves to
+// a defined synthetic accessor, so it is NOT a false typo — because the defined
+// set (`defined_selectors_bt/0`) includes the synthetic rows. Their `sends`
+// lists are empty (they delegate to runtime map primitives), so they introduce
+// no new sent selectors and therefore no new unimplemented false positives. The
+// index-level behavioural assertions live in the runtime EUnit suite
+// `beamtalk_xref_tests:synthetic_accessor_visibility_test_`.
+
+TestCase subclass: SystemNavigationUnimplementedTest
+
+  // --- selector existence ---
+  testIncludesSelectorUnimplementedSelectors =>
+    self assert: (SystemNavigation includesSelector: #unimplementedSelectors)
+
+  // --- composition primitives must be in place ---
+
+  // The implementation builds a defined-set Set, walks aClass methods, fetches
+  // each via `>>`, reads its source, and groups sends into a Dictionary. All of
+  // those primitives have to be present.
+  testCompositionPrimitivesPresent =>
+    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (Behaviour includesSelector: #includesSelector:)
+    self assert: (CompiledMethod includesSelector: #source)
+
+  // Set is the defined-set accumulator: `add:` builds it, `includes:` filters
+  // sent selectors against it.
+  testSetPrimitivesPresent =>
+    self assert: (Set includesSelector: #add:)
+    self assert: (Set includesSelector: #includes:)
+
+  // Dictionary is the grouping accumulator (selector -> [sites]):
+  // `at:ifAbsent:` fetches the running site list, `at:put:` extends it, `keys`
+  // converts back to the result list.
+  testDictionaryPrimitivesPresent =>
+    self assert: (Dictionary includesSelector: #at:ifAbsent:)
+    self assert: (Dictionary includesSelector: #at:put:)
+    self assert: (Dictionary includesSelector: #keys)
+
+  // The internal helpers factor out per-scope iteration / per-method splitting /
+  // per-send recording so each `inject:into:` body stays a single expression
+  // and so they can be unit-checked separately.
+  testHelperCollectAllSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectAllSendsIn:excluding:into:)
+
+  testHelperAppendAllSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #appendAllSendsIn:owner:methodSelector:handlesDnu:excluding:into:)
+
+  testHelperRecordSendIsDefined =>
+    self assert: (SystemNavigation includesSelector: #recordSend:line:recv:owner:methodSelector:handlesDnu:excluding:into:)
+
+  // The extension-scan helper is present (the `unimplementedSelectors` body
+  // delegates to it after the class-side walk). Behavioural coverage lives in
+  // the E2E suite (the compiler port is not running under BUnit).
+  testHelperCollectExtensionAllSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #collectExtensionAllSendsExcluding:into:)
+
+  // The class-tag resolver helper (shared with sendersOf:) is present.
+  testHelperResolveExtensionClassIsDefined =>
+    self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+
+  // --- the index-backed helpers (BT-2303) must be defined ---
+
+  // The defined set is built from indexed `defined_selectors_bt` rows via this
+  // typed mapper; the DNU-handler scope set + indexed-send grouping back the
+  // index-read path.
+  testHelperDefinedSetFromIndexIsDefined =>
+    self assert: (SystemNavigation includesSelector: #definedSetFromIndex:into:)
+
+  testHelperDnuHandlerScopesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #dnuHandlerScopesFrom:fallback:into:)
+
+  testHelperGroupIndexedSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #groupIndexedSends:excluding:dnuScopes:into:)
+
+  testHelperUnionFallbackClassesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #unionFallbackClasses:with:)
+
+  // The DNU-scope keying agrees across the indexed (owner-tag + side) and
+  // fallback (Behaviour scope) paths: an instance scope keys to the bare name,
+  // a class-side scope to the `" class"`-suffixed name. `Object class name` is
+  // already `"Object class"`, so the two helpers must produce the same key.
+  // `Object` is used because it is always loaded in the BUnit harness.
+  testDnuScopeKeyAgreesAcrossPaths =>
+    nav := SystemNavigation default
+    self assert: (nav dnuScopeKeyForOwner: #Object classSide: false) == "Object"
+    self assert: (nav dnuScopeKeyForOwner: #Object classSide: true) == "Object class"
+    self assert: (nav dnuScopeKeyFor: Object) == "Object"
+    self assert: (nav dnuScopeKeyFor: Object class) == "Object class"
+
+  // The documented runtime-provided exclusion list is present and (currently)
+  // empty — the stdlib comes back clean under the structural exclusions.
+  testRuntimeProvidedSelectorsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #runtimeProvidedSelectors)
+
+  testRuntimeProvidedSelectorsIsEmpty =>
+    self assert: (SystemNavigation default runtimeProvidedSelectors) isEmpty

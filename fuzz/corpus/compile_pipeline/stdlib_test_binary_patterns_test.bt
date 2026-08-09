@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-663: Tests for binary pattern matching in match: expressions.
+// Covers integer segments, binary segments, and guards.
+
+TestCase subclass: BinaryPatternsTest
+
+  testMatchFirstByteOfString =>
+    // Strings are UTF-8 binaries; "A" is byte 65
+    result := "ABC" match: [
+      <<first:8, _/binary>> -> first;
+      _ -> 0
+    ]
+    self assert: result equals: 65
+
+  testMatchRestBinary =>
+    // Extract the tail of a binary after the first byte
+    result := "ABC" match: [
+      <<_:8, rest/binary>> -> rest size;
+      _ -> 0
+    ]
+    self assert: result equals: 2
+
+  testMatchWildcardBinary =>
+    // Wildcard binary segment matches any binary
+    result := "hello" match: [
+      <<_/binary>> -> true;
+      _ -> false
+    ]
+    self assert: result
+
+  testMatchIntegerSegmentFallthrough =>
+    // When no arm matches, fall through to wildcard
+    result := "X" match: [
+      <<first:8, _/binary>> when: [first > 200] -> "high";
+      _ -> "low"
+    ]
+    self assert: result equals: "low"

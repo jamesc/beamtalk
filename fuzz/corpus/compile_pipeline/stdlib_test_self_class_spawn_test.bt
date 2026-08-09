@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2005: Regression tests for `self class spawnWith:as:` /
+// `self class spawnAs:` inside a class factory method. Before the fix, the
+// metaclass dispatch path routed through `gen_server:call` on the class
+// process, which is the *same* process executing the class method — the call
+// deadlocked with `{calling_self, gen_server:call([...])}`.
+//
+// Fixture: stdlib/test/fixtures/self_class_named_factory_actor.bt
+
+TestCase subclass: SelfClassSpawnTest
+
+  testSelfClassSpawnAsRegistersName =>
+    name := #bt2005_self_class_spawnas_success
+    result := SelfClassNamedFactoryActor startViaClassAs: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor registeredName equals: name
+    self assert: actor isRegistered
+    actor stop
+
+  testSelfClassSpawnWithAsRegistersName =>
+    name := #bt2005_self_class_spawnwithas_success
+    result := SelfClassNamedFactoryActor startViaClassWith: #{
+      #value => 42
+    } as: name
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor getValue equals: 42
+    self assert: actor registeredName equals: name
+    actor stop
+
+  testSelfClassSpawnWithAsDuplicateReturnsError =>
+    name := #bt2005_self_class_spawnwithas_dup
+    first := (SelfClassNamedFactoryActor startViaClassWith: #{
+      #value => 1
+    } as: name) unwrap
+    second := SelfClassNamedFactoryActor startViaClassWith: #{
+      #value => 2
+    } as: name
+    self assert: second isError
+    self assert: second error kind equals: #name_registered
+    first stop
+
+  testSelfClassSpawnAsReservedNameReturnsError =>
+    result := SelfClassNamedFactoryActor startViaClassAs: #logger
+    self assert: result isError
+    self assert: result error kind equals: #reserved_name
+
+  testSelfClassSpawnPlain =>
+    actor := SelfClassNamedFactoryActor startViaClassPlain
+    self assert: actor getValue equals: 0
+    actor stop
+
+  testSelfClassSpawnWithMap =>
+    actor := SelfClassNamedFactoryActor startViaClassWithMap: #{#value => 7}
+    self assert: actor getValue equals: 7
+    actor stop

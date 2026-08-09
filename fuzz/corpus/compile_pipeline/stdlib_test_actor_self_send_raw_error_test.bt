@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2822 (BT-2816 follow-up): a raw Erlang error (e.g. badarith) that
+// escapes a self-send forwarding hop must carry the same selector/class
+// breadcrumb — and the resulting located message prefix — as the
+// cross-actor equivalent (BT-2705, covered by raw_error_classification_test).
+//
+// Before this fix, generate_self_dispatch_error_clause routed caught
+// exceptions through the context-free reraise/3, so a raw error escaping a
+// self-send got classified but lost its `ClassName>>selector: ...` location
+// prefix and its `selector` breadcrumb (both stayed unset).
+//
+// Fixtures: stdlib/test/fixtures/self_send_raw_error_actor.bt
+
+TestCase subclass: ActorSelfSendRawErrorTest
+  field: a = nil
+
+  setUp => self withA: SelfSendRawErrorActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  testForwardedSelfSendCarriesSelectorBreadcrumb =>
+    // The breadcrumb must name the self-dispatch call site where the raw
+    // error actually occurred (triggerBadArithDirect), not the outer
+    // cross-actor selector the test invoked (triggerBadArithForwarded).
+    result := [
+      self.a triggerBadArithForwarded
+    ] on: TypeError do: [:e | e selector]
+    self assert: result equals: #triggerBadArithDirect
+
+  testForwardedSelfSendMessageIsLocated =>
+    result := [
+      self.a triggerBadArithForwarded
+    ] on: TypeError do: [:e | e message]
+    self assert: (result includesSubstring: "SelfSendRawErrorActor>>triggerBadArithDirect") equals: true
+
+  testForwardedSelfSendIsStillClassified =>
+    // The raw badarith inside the forwarded method still classifies as a
+    // TypeError, matching the direct (non-forwarded) cross-actor case.
+    result := [self.a triggerBadArithForwarded] on: TypeError do: [:e | e kind]
+    self assert: result equals: #type_error

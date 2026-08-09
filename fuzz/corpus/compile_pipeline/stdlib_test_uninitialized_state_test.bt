@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-1949: UninitializedStateError after Actor initialize.
+//
+// Fixtures:
+//   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)
+//   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)
+
+TestCase subclass: UninitializedStateTest
+
+  // === Success: typed-no-default field properly initialized ===
+  testTypedNoDefaultFieldInitialized =>
+    a := TypedNoDefaultActor spawn
+    self assert: a getLabel equals: "initialized"
+
+  testTypedNoDefaultFieldWithDefaultWorks =>
+    a := TypedNoDefaultActor spawn
+    self assert: a getCount equals: 0
+
+  // === Failure: typed-no-default field left nil ===
+  testUninitializedTypedFieldRaisesError =>
+    self should: [UninitializedStateActor spawn] raise: #instantiation_error
+
+  testUninitializedErrorContainsClassName =>
+    result := [UninitializedStateActor spawn] on: Exception do: [:e | e message]
+    self assert: (result includesSubstring: "UninitializedStateActor")
+
+  testUninitializedErrorHintContainsFieldName =>
+    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "connection")
+
+  testUninitializedErrorHintContainsTypeName =>
+    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "String")
+
+  // === Nilable typed-no-default field: nil is valid, no error ===
+  testNilAllowedFieldLeftNilSpawnsSuccessfully =>
+    a := NilAllowedStateActor spawn
+    self assert: a getLabel equals: nil
+
+  testNilAllowedFieldOtherStateWorks =>
+    a := NilAllowedStateActor spawn
+    self assert: a getCount equals: 1

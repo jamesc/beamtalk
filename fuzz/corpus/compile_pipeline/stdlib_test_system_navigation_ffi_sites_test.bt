@@ -1,0 +1,110 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2211: BUnit-level coverage for `SystemNavigation ffiSitesFor:` — find the
+// methods that invoke a named Erlang function through the `Erlang` FFI bridge.
+// Backs System Browser-style navigation ("who calls this Erlang function?").
+//
+// `ffiSitesFor:` is an instance method on `SystemNavigation`, reached via the
+// `default` (or future scoped) constructor. As with `beamtalk_senders_test.bt`
+// and `system_navigation_fields_test.bt`, the behavioural happy-path checks
+// (does the scan actually find FFI call sites, with the right #class /
+// #selector / #line shape, and does arity narrowing work?) live in the E2E
+// REPL-protocol suite (tests/repl-protocol/cases/workspace_native_api.btscript)
+// because the compiler-port process that parses each method's source is NOT
+// running under BUnit — the per-method FFI returns `[]` here regardless of
+// source contents.
+//
+// What IS testable under BUnit (no port needed):
+//   - selector + helper existence and composition primitives
+//   - spec validation: a well-formed spec returns `[]` (no error) while a
+//     malformed spec raises (`#user_error`) — both decided by `parseFfiSpec:`,
+//     not the port
+//   - the no-match `[]`-shape on a well-formed spec
+
+TestCase subclass: SystemNavigationFfiSitesTest
+
+  // --- selector existence ---
+  testIncludesSelectorFfiSitesFor =>
+    self assert: (SystemNavigation includesSelector: #ffiSitesFor:)
+
+  // --- composition primitives must be in place ---
+  //
+  // The implementation walks `allClasses`, fetches each method via `>>`, reads
+  // its source, and asks the compiler to find matching FFI call line numbers.
+  // It also parses the spec via String `split:` / `isDigit` / `asInteger`.
+  testCompositionPrimitivesPresent =>
+    self assert: (Behaviour includesSelector: #methods)
+    self assert: (Behaviour includesSelector: #'>>')
+    self assert: (CompiledMethod includesSelector: #source)
+    self assert: (String includesSelector: #split:)
+    self assert: (String includesSelector: #isDigit)
+    self assert: (String includesSelector: #asInteger)
+
+  // The spec parser + per-class / per-method helpers are defined so they can be
+  // unit-checked separately.
+  testHelpersDefined =>
+    self assert: (SystemNavigation includesSelector: #parseFfiSpec:)
+    self assert: (SystemNavigation includesSelector: #collectFfiSitesFor:function:arity:in:into:)
+    self assert: (SystemNavigation includesSelector: #appendFfiSitesIn:module:function:arity:owner:methodSelector:into:)
+    self assert: (SystemNavigation includesSelector: #collectExtensionFfiSitesFor:function:arity:into:)
+
+  // --- spec validation (decided by parseFfiSpec:, not the compiler port) ---
+  //
+  // A well-formed spec (`module:function`) does NOT raise, even when the port is
+  // off — the scan simply returns `[]`. This confirms the spec-validation gate
+  // accepts a real spec on the path that does not need the compiler port.
+  // `aSpec` is a String, so a literal String passes the typed `:: String`
+  // parameter; the runtime shape-check is what we exercise.
+  testWellFormedSpecDoesNotRaise =>
+    nav := SystemNavigation default
+    result := nav ffiSitesFor: "lists:noSuchFunctionXyzzyBunit"
+    self assert: result isEmpty
+
+  // An arity-qualified well-formed spec is also accepted (returns []).
+  testArityQualifiedSpecDoesNotRaise =>
+    nav := SystemNavigation default
+    result := nav ffiSitesFor: "lists:noSuchFunctionXyzzyBunit/1"
+    self assert: result isEmpty
+
+  // --- malformed specs raise #user_error ---
+  //
+  // A spec with no `:` separator is malformed.
+  testNoColonRaises =>
+    nav := SystemNavigation default
+    self should: [nav ffiSitesFor: "nocolon"] raise: #user_error
+
+  // A spec with more than one `:` (extra colon) does not match module:function.
+  testExtraColonRaises =>
+    nav := SystemNavigation default
+    self should: [nav ffiSitesFor: "a:b:c"] raise: #user_error
+
+  // An empty module name is malformed.
+  testEmptyModuleRaises =>
+    nav := SystemNavigation default
+    self should: [nav ffiSitesFor: ":reverse"] raise: #user_error
+
+  // An empty function name is malformed.
+  testEmptyFunctionRaises =>
+    nav := SystemNavigation default
+    self should: [nav ffiSitesFor: "lists:"] raise: #user_error
+
+  // A non-numeric arity suffix is malformed.
+  testNonNumericArityRaises =>
+    nav := SystemNavigation default
+    self should: [nav ffiSitesFor: "lists:reverse/x"] raise: #user_error
+
+  // More than one `/` (two arity slashes) is malformed.
+  testExtraSlashRaises =>
+    nav := SystemNavigation default
+    self should: [nav ffiSitesFor: "lists:reverse/1/2"] raise: #user_error
+
+  // --- String argument required ---
+  //
+  // Passing a non-String raises. Dispatch dynamically via perform: so the typed
+  // `:: String` parameter does not reject the bad argument at compile time.
+  testNonStringSpecRaises =>
+    nav := SystemNavigation default
+    self should: [
+      nav perform: #ffiSitesFor: withArguments: #(42)
+    ] raise: #user_error

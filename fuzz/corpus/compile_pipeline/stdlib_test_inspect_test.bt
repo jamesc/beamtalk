@@ -1,0 +1,101 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1167 / BT-2504: Tests for the structural Debug string and the repurposed
+// `inspect` verb.
+//
+// ADR 0095 Phase 3 (BT-2504) repurposed `inspect` from `-> String` to
+// `-> Inspector`: `anObject inspect` now opens a navigable Inspector cursor.
+// The structural Debug string (`ClassName(field: value, ...)`) — formerly the
+// `inspect` result — is now produced solely by `printString` (ADR 0094). These
+// tests keep the format coverage on `printString` and verify the new `inspect`
+// contract.
+//
+// Fixtures:
+//   fixtures/empty_value.bt  — Value subclass with no state
+//   fixtures/named_item.bt   — Value subclass with a String state field
+//   fixtures/inspect_pair.bt — Value subclass with left/right fields
+//   fixtures/value_point.bt  — Value subclass with x, y integer fields
+//   fixtures/counter.bt      — Actor subclass with value integer field
+
+TestCase subclass: InspectTest
+
+  // --- Structural string (printString): Value subclass with fields ---
+  testValueSubclassWithFieldsProducesNameAndFields =>
+    p := ValuePoint x: 3 y: 4
+    self assert: p printString equals: "ValuePoint(x: 3, y: 4)"
+
+  testValueSubclassDefaultValuesProducesZeros =>
+    p := ValuePoint new
+    self assert: p printString equals: "ValuePoint(x: 0, y: 0)"
+
+  testValueSubclassPartialInitShowsDefaults =>
+    p := ValuePoint new: #{#x => 7}
+    self assert: p printString equals: "ValuePoint(x: 7, y: 0)"
+
+  // --- Value subclass: with no fields ---
+  testValueSubclassWithNoFieldsProducesEmptyParens =>
+    ev := EmptyValue new
+    self assert: ev printString equals: "EmptyValue()"
+
+  // --- String field values are quoted ---
+  testStringFieldValueIsQuoted =>
+    item := NamedItem new: #{#name => "today"}
+    self assert: item printString equals: "NamedItem(name: ""today"")"
+
+  // --- Primitive printString still works ---
+  testIntegerPrintStringIsStructural => self assert: 42 printString equals: "42"
+
+  testStringPrintStringIsStructural =>
+    self assert: "hello" printString equals: """hello"""
+
+  testNilPrintStringIsStructural => self assert: nil printString equals: "nil"
+
+  testBooleanPrintStringIsStructural =>
+    self assert: true printString equals: "true"
+    self assert: false printString equals: "false"
+
+  // --- Actor subclass: inspect renders name + fields ---
+  // A live actor's `printString` is the identity label `Actor(Counter, <pid>)`
+  // (ADR 0094), NOT a structural dump. The structural field view of an actor's
+  // state is reached via `inspect` (ADR 0095): `c inspect` opens a seeded
+  // `#actor` cursor whose `printString` shows the class header and field values.
+  testActorSubclassWithFieldsProducesNameAndFields =>
+    c := Counter spawn
+    str := c inspect printString
+    self assert: (str includesSubstring: "Counter") equals: true
+    self assert: (str includesSubstring: "value: 0") equals: true
+
+  testActorSubclassAfterMutationShowsUpdatedValue =>
+    c := Counter spawn
+    c increment
+    c increment
+    str := c inspect printString
+    self assert: (str includesSubstring: "value: 2") equals: true
+
+  // --- Nested value objects use recursive printString ---
+  testNestedValueObjectUsesRecursivePrintString =>
+    inner := ValuePoint x: 1 y: 2
+    p := InspectPair new: #{#left => inner, #right => 42}
+    self assert: p printString equals: "InspectPair(left: ValuePoint(x: 1, y: 2), right: 42)"
+
+  // --- ADR 0095 Phase 3: `inspect` now returns an Inspector, not a String ---
+  testInspectReturnsAnInspector =>
+    p := ValuePoint x: 3 y: 4
+    self assert: (p inspect isKindOf: Inspector) equals: true
+
+  testInspectIsShorthandForInspectorOn =>
+    // `anObject inspect` is the shorthand for `Inspector on: anObject`.
+    p := ValuePoint x: 3 y: 4
+    self assert: p inspect kind equals: #value
+    self assert: p inspect fields size equals: 2
+
+  testInspectOnActorClassifiesAsActor =>
+    c := Counter spawn
+    self assert: c inspect kind equals: #actor
+
+  testInspectOnPrimitiveClassifiesAsValue =>
+    self assert: 42 inspect kind equals: #value
+
+  testInspectOnCollectionClassifiesAsCollection =>
+    self assert: #(1, 2, 3) inspect kind equals: #collection

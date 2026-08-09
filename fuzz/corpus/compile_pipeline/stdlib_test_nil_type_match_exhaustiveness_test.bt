@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2856 / ADR 0107 Phase A: `nil`/`Type`-pattern exhaustiveness reaches
+// `matchExhaustive:` (BT-2763) and advisory `match:` (BT-2745).
+//
+// BUnit compiles with `--warnings-as-errors`, and both a genuinely
+// non-exhaustive `matchExhaustive:` (`Error`) and a non-exhaustive plain
+// `match:` (`Warning`, which `--warnings-as-errors` also turns fatal) would
+// fail to compile and take the whole suite down. Those failure cases are
+// therefore pinned at the Rust layer instead:
+//   crates/beamtalk-core/src/semantic_analysis/type_checker/tests/nil_type_match_exhaustiveness.rs
+//
+// What THIS file pins is that full `nil`/`Type` coverage compiles and
+// dispatches correctly end-to-end — mirroring
+// `asserted_match_exhaustiveness_test.bt` and `type_pattern_match_test.bt`,
+// the two sibling files this one composes.
+
+TestCase subclass: NilTypeMatchExhaustivenessTest
+
+  testFullNilAndTypeCoverageSatisfiesAssertedMatch =>
+    // `String | Nil`, both members covered by a `nil` arm and a `String`
+    // Type arm — matchExhaustive: is silently satisfied, and the match
+    // dispatches correctly at runtime.
+    raw :: String | Nil := "hello"
+    result := raw matchExhaustive: [
+      nil -> "was nil";
+      s :: String -> s size
+    ]
+    self assert: result equals: 5
+
+  testFullNilAndTypeCoverageDispatchesNilArm =>
+    raw :: String | Nil := nil
+    result := raw matchExhaustive: [
+      nil -> "was nil";
+      s :: String -> s size
+    ]
+    self assert: result equals: "was nil"
+
+  testWildcardSatisfiesAssertionAlongsideTypeArm =>
+    // An unguarded `_ ->` arm covers `nil` too — matchExhaustive: accepts
+    // it, and the match still dispatches correctly at runtime.
+    raw :: String | Nil := "hi"
+    result := raw matchExhaustive: [
+      s :: String -> s size;
+      _ -> -1
+    ]
+    self assert: result equals: 2
+
+  testAdvisoryMatchStillWorksAlongsideAssertedMatch =>
+    // Regression pin: plain `match:` (advisory) and `matchExhaustive:`
+    // (asserted) are independent keywords over the same `Known | Nil`
+    // scrutinee type — using one does not affect the other, and both
+    // require full coverage to compile clean under
+    // `--warnings-as-errors`.
+    raw :: String | Nil := "hi"
+    advisory := raw match: [
+      nil -> "advisory-nil";
+      s :: String -> "advisory-" ++ s
+    ]
+    asserted := raw matchExhaustive: [
+      nil -> "asserted-nil";
+      s :: String -> "asserted-" ++ s
+    ]
+    self assert: advisory equals: "advisory-hi"
+    self assert: asserted equals: "asserted-hi"

@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)
+
+TestCase subclass: CompiledMethodTest
+
+  testMethodLookup =>
+    self assert: (Counter >> #getValue) class equals: CompiledMethod
+    self assert: (Counter >> #nonExistent) equals: nil
+
+  testMethodLookupOnVariableReceivers =>
+    cls := Counter
+    self assert: cls equals: Counter
+    // Bare class literals infer as Meta{Counter} (BT-2260), so `cls >> #sel`
+    // resolves class-side via Behaviour instead of producing a DNU hint. At
+    // runtime, cls holds the class object and dispatches through the
+    // Class→Behaviour chain.
+    self assert: (cls >> #getValue) class equals: CompiledMethod
+    self assert: (cls >> #getValue) selector equals: #getValue
+    self assert: (cls >> #nonExistent) equals: nil
+
+  testClass => self assert: (Counter >> #getValue) class equals: CompiledMethod
+
+  testSelector =>
+    self assert: (Counter >> #getValue) selector equals: #getValue
+    self assert: (Counter >> #increment) selector equals: #increment
+
+  testArgumentCount =>
+    self assert: (Counter >> #getValue) argumentCount equals: 0
+    self assert: (Counter >> #increment) argumentCount equals: 0
+
+  testSource =>
+    self assert: (Counter >> #getValue) source equals: "getValue => self.value"
+
+  testPrintString =>
+    self assert: (Counter >> #getValue) printString equals: "CompiledMethod(getValue)"
+
+  testLookupOnNonClass =>
+    // >> on non-class value produces type_error
+    @expect dnu
+    self should: [42 >> #foo] raise: #type_error
+
+  testAsString =>
+    self assert: (Counter >> #getValue) asString equals: "CompiledMethod(getValue)"
+
+  // BT-2195: `>>` on a metaclass receiver looks up class-side methods.
+  // `SystemNavigation class >> #default` is a defined class-side selector,
+  // so the lookup must return a non-nil CompiledMethod with selector
+  // `#default`. Confirms the resolver routes `class = 'Metaclass'`
+  // receivers through the `{class_method, _}` handler.
+  testMetaclassLookupHit =>
+    cm := SystemNavigation class >> #default
+    self assert: cm class equals: CompiledMethod
+    self assert: cm selector equals: #default
+
+  // BT-2195: Class-side source is preserved end-to-end and reachable via
+  // `>>` + `source`. The method body of `SystemNavigation class >>
+  // #default` contains the literal `self new`, so `source` must include
+  // it (used by SystemNavigation's source-text scanners).
+  testMetaclassLookupSourceText =>
+    src := (SystemNavigation class >> #default) source
+    self assert: (src includesSubstring: "self new")
+
+  // BT-2195: Metaclass-side `>>` returns nil for an undefined selector,
+  // mirroring the instance-side `Integer >> #nonExistent` contract.
+  testMetaclassLookupMiss =>
+    self assert: (SystemNavigation class >> #neverDefinedMetaclassSelectorXyzzy) equals: nil

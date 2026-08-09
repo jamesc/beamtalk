@@ -1,0 +1,152 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1397: Tests that class methods can contain blocks that call other
+// class methods via `self` without producing Core Erlang parse errors.
+
+TestCase subclass: ClassMethodBlockTest
+
+  // sort: block calling class method via self
+  testSortWithClassMethodBlock =>
+    result := ClassMethodBlock sortItems: #(3, 1, 2)
+    self assert: result equals: #(1, 2, 3)
+
+  // collect: block calling class method via self
+  testCollectWithClassMethodBlock =>
+    result := ClassMethodBlock doubleAll: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+
+  // do: block calling class method via self (discarded result)
+  testDoWithClassMethodBlock =>
+    result := ClassMethodBlock processAll: #(1, 2, 3)
+    self assert: result equals: #(1, 2, 3)
+
+  // inject:into: block calling class method via self
+  testInjectIntoWithClassMethodBlock =>
+    result := ClassMethodBlock sumAll: #(1, 2, 3)
+    self assert: result equals: 6
+
+  // Block with local assignments whose RHS is a class method self-send
+  testLocalAssignmentWithClassMethodSelfSend =>
+    result := ClassMethodBlock doubleAndSort: #(3, 1, 2)
+    self assert: result equals: #(1, 2, 3)
+
+  // Multiple class method self-sends in a block
+  testMultipleClassMethodSelfSends =>
+    result := ClassMethodBlock processWithMultipleSends: #(1, 2, 3)
+    self assert: result equals: #(4, 8, 12)
+
+  // BT-1414: do: with captured local variable mutation in class method
+  testDoWithCapturedMutation =>
+    result := ClassMethodBlock countItems: #(1, 2, 3)
+    self assert: result equals: 3
+
+  // BT-1414: do: with two captured mutations simultaneously
+  testDoWithTwoCapturedMutations =>
+    result := ClassMethodBlock sumAndCount: #(10, 20, 30)
+    self assert: result equals: #(60, 3)
+
+  // BT-1414: do: with captured mutation on Actor class method (context=Actor)
+  testActorClassMethodDoWithMutation =>
+    result := ActorClassMethodBlock countItems: #(1, 2, 3, 4, 5)
+    self assert: result equals: 5
+
+  // BT-2349: last-position inject:into: in a class method returns the accumulator,
+  // not the raw {value, StateAcc} threading tuple.
+  testClassMethodInjectLastReturnsValue =>
+    result := ClassMethodBlock sumCounting: #(1, 2, 3)
+    self assert: result equals: 6
+
+  // BT-2349: local-assignment of collect: in a class method binds the collected Array
+  // and threads the mutated counter out to later statements.
+  testClassMethodCollectAssignmentThreads =>
+    result := ClassMethodBlock doubleCounting: #(1, 2, 3)
+    self assert: result equals: #(#(2, 4, 6), 3)
+
+  // BT-2349: last-position select: in a class method returns the filtered Array.
+  testClassMethodSelectLastReturnsValue =>
+    result := ClassMethodBlock evensCounting: #(1, 2, 3, 4)
+    self assert: result equals: #(2, 4)
+
+  // BT-2349: last-position counted loop in a class method unwraps to the loop value (nil).
+  testClassMethodCountedLoopLastReturnsNil =>
+    result := ClassMethodBlock countToLast: 3
+    self assert: result equals: nil
+
+  // BT-2349: counted loop in local-assignment position threads the mutated total out.
+  testClassMethodLoopAssignmentThreads =>
+    result := ClassMethodBlock sumViaLoop: 3
+    self assert: result equals: 6
+
+  // BT-2349: last-position read+write conditional returns the branch value (true).
+  testClassMethodConditionalLastTrue =>
+    result := ClassMethodBlock condLast: true
+    self assert: result equals: 7
+
+  // BT-2349: last-position read+write conditional returns nil when the branch is skipped.
+  testClassMethodConditionalLastFalse =>
+    result := ClassMethodBlock condLast: false
+    self assert: result equals: nil
+
+  // BT-2349: last-position ifTrue:ifFalse: read+write conditional returns the true branch.
+  testClassMethodConditionalBothTrue =>
+    result := ClassMethodBlock condBothLast: true
+    self assert: result equals: 11
+
+  // BT-2349: last-position ifTrue:ifFalse: read+write conditional returns the false branch.
+  testClassMethodConditionalBothFalse =>
+    result := ClassMethodBlock condBothLast: false
+    self assert: result equals: 101
+
+  // BT-2350: collect: block combining a self-send AND a captured-local mutation.
+  // Previously emitted invalid Core Erlang (dangling `in`); now the collected
+  // self-send results and the threaded counter both come back.
+  testClassMethodCollectSelfSendAndMutation =>
+    result := ClassMethodBlock doubleAllCounting: #(1, 2, 3)
+    self assert: result equals: #(#(2, 4, 6), 3)
+
+  // BT-2350: select: variant — self-send predicate + captured-local mutation.
+  testClassMethodSelectSelfSendAndMutation =>
+    result := ClassMethodBlock bigCounting: #(1, 2, 3, 4)
+    self assert: result equals: #(#(3, 4), 4)
+
+  // BT-2350: inject:into: variant — self-send + captured-local mutation.
+  testClassMethodInjectSelfSendAndMutation =>
+    result := ClassMethodBlock addCounting: #(1, 2, 3)
+    self assert: result equals: #(6, 3)
+
+  // BT-2350 (Copilot follow-up): non-last discarded self-send in a collect: block.
+  testClassMethodCollectNonLastSelfSend =>
+    result := ClassMethodBlock doubleAllCountingNonLast: #(1, 2, 3)
+    self assert: result equals: #(#(2, 4, 6), 3)
+
+  // BT-2350 (Copilot follow-up): non-last discarded self-send in a do: block.
+  testClassMethodDoNonLastSelfSend =>
+    result := ClassMethodBlock doCountingNonLast: #(1, 2, 3)
+    self assert: result equals: 3
+
+  // BT-2350 (Copilot follow-up): non-last discarded self-send in an inject:into: block.
+  testClassMethodInjectNonLastSelfSend =>
+    result := ClassMethodBlock addCountingNonLast: #(1, 2, 3)
+    self assert: result equals: #(6, 3)
+
+  // BT-2358: explicit `^` return of a parenthesized collect: returns the Array,
+  // not the raw {Array, StateAcc} tuple.
+  testClassMethodReturnCollect =>
+    result := ClassMethodBlock doubleCountingRet: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+
+  // BT-2358: explicit `^` return of inject:into: (no parens) returns the accumulator.
+  testClassMethodReturnInject =>
+    result := ClassMethodBlock sumCountingRet: #(1, 2, 3)
+    self assert: result equals: 6
+
+  // BT-2358: explicit `^` return of a read+write conditional returns the branch value.
+  testClassMethodReturnConditionalTrue =>
+    result := ClassMethodBlock condRet: true
+    self assert: result equals: 7
+
+  // BT-2358: explicit `^` return of a read+write conditional returns nil when skipped.
+  testClassMethodReturnConditionalFalse =>
+    result := ClassMethodBlock condRet: false
+    self assert: result equals: nil

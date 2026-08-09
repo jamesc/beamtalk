@@ -1,0 +1,164 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1514: Tests that extension methods on sealed classes (Integer, String, Array)
+// work through the ETS dispatch path (file-loaded extensions, not REPL recompilation).
+//
+// Extensions are registered directly via beamtalk_extensions:register/4 in each test
+// to ensure we test the ETS dispatch mechanism, not REPL class recompilation.
+// All extension calls use perform: / perform:withArguments: to bypass the sealed
+// class static check (the compiler rejects calls to unknown methods on sealed types).
+// Each test registers its extension, runs the assertion, then cleans up the ETS entry.
+
+TestCase subclass: ExtensionSealedTest
+
+  // =========================================================================
+  // Integer extensions via ETS
+  // =========================================================================
+  testIntegerExtensionUnary =>
+    // Register: Integer >> triple => self * 3
+    extFun := [:a :s | s * 3]
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #triple
+      fun: extFun
+      owner: #test
+    result := 14 perform: #triple
+    Erlang ets delete: #beamtalk_extensions key: #(#Integer, #triple)
+    self assert: result equals: 42
+
+  testIntegerExtensionKeyword =>
+    // Register: Integer >> times: n => self * n
+    extFun := [:a :s | s * (a at: 1)]
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #times:
+      fun: extFun
+      owner: #test
+    result := 7 perform: #times: withArguments: #(6)
+    Erlang ets delete: #beamtalk_extensions key: #(#Integer, #times:)
+    self assert: result equals: 42
+
+  // =========================================================================
+  // String extensions via ETS
+  // =========================================================================
+  testStringExtensionUnary =>
+    // Register: String >> exclaim => self ++ "!"
+    extFun := [:a :s | s ++ "!"]
+    Erlang beamtalk_extensions
+      register: #String
+      selector: #exclaim
+      fun: extFun
+      owner: #test
+    result := "hello" perform: #exclaim
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #exclaim)
+    self assert: result equals: "hello!"
+
+  testStringExtensionKeyword =>
+    // Register: String >> wrappedWith: str => str ++ self ++ str
+    extFun := [:a :s | (a at: 1) ++ s ++ (a at: 1)]
+    Erlang beamtalk_extensions
+      register: #String
+      selector: #wrappedWith:
+      fun: extFun
+      owner: #test
+    result := "hello" perform: #wrappedWith: withArguments: #("**")
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #wrappedWith:)
+    self assert: result equals: "**hello**"
+
+  // =========================================================================
+  // Array extensions via ETS
+  // =========================================================================
+  testArrayExtensionUnary =>
+    // Register: Array >> isTaggedMap => verifies the receiver is an Array
+    // Arrays are tagged maps at the BEAM level: #{'$beamtalk_class' => 'Array', ...}
+    extFun := [:a :s | Erlang erlang is_map: s]
+    Erlang beamtalk_extensions
+      register: #Array
+      selector: #isTaggedMap
+      fun: extFun
+      owner: #test
+    arr := #[10, 20, 30]
+    result := arr perform: #isTaggedMap
+    Erlang ets delete: #beamtalk_extensions key: #(#Array, #isTaggedMap)
+    self assert: result
+
+  testArrayExtensionKeyword =>
+    // Register: Array >> tagWith: label => returns the label (tests arg passing)
+    extFun := [:a :s | a at: 1]
+    Erlang beamtalk_extensions
+      register: #Array
+      selector: #tagWith:
+      fun: extFun
+      owner: #test
+    arr := #[10, 20, 30]
+    result := arr perform: #tagWith: withArguments: #("tagged")
+    Erlang ets delete: #beamtalk_extensions key: #(#Array, #tagWith:)
+    self assert: result equals: "tagged"
+
+  // =========================================================================
+  // Class-side extensions via ETS
+  // =========================================================================
+  testIntegerClassSideExtension =>
+    // Register class-side: Integer class >> meaningOfLife => 42
+    // Class-side extensions go through the metaclass dispatch chain.
+    // The class name in ETS for metaclass dispatch is 'Integer class'.
+    extFun := [:a :s | 42]
+    Erlang beamtalk_extensions
+      register: #'Integer class'
+      selector: #meaningOfLife
+      fun: extFun
+      owner: #test
+    // Class-side ETS extensions may not be dispatched yet; catch DNU specifically
+    result := [Integer perform: #meaningOfLife]
+      on: Exception
+      do: [:e |
+        self assert: e selector equals: #meaningOfLife
+        #not_dispatched
+      ]
+    Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #meaningOfLife)
+    // Class-side dispatch does not currently check extensions in ETS —
+    // verify the DNU is caught gracefully. When wired up, change to assert: 42.
+    self assert: result equals: #not_dispatched
+
+  // =========================================================================
+  // Verify ETS dispatch properties
+  // =========================================================================
+  testExtensionIsInEts =>
+    // Register an extension and verify it's found via ETS lookup
+    extFun := [:a :s | s * 3]
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #tripled
+      fun: extFun
+      owner: #test
+    hasIt := Erlang beamtalk_extensions has: #Integer selector: #tripled
+    result := 10 perform: #tripled
+    Erlang ets delete: #beamtalk_extensions key: #(#Integer, #tripled)
+    self assert: hasIt
+    self assert: result equals: 30
+
+  testExtensionDoesNotOverrideLocalMethod =>
+    // Register an extension with the same name as a local method
+    extFun := [:a :s | 999]
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #'+'
+      fun: extFun
+      owner: #test
+    // Local method should still win — extensions cannot override class-body methods
+    result := 2 + 3
+    Erlang ets delete: #beamtalk_extensions key: #(#Integer, #'+')
+    self assert: result equals: 5
+
+  testRespondsToExtension =>
+    // Register an extension and check respondsTo:
+    extFun := [:a :s | s * 4]
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #quadrupled
+      fun: extFun
+      owner: #test
+    result := 42 respondsTo: #quadrupled
+    Erlang ets delete: #beamtalk_extensions key: #(#Integer, #quadrupled)
+    self assert: result

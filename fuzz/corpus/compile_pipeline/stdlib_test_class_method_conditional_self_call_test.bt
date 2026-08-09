@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1550: Tests class method with conditional self-call + ^ return.
+// Regression: compiler emitted unbound_var ClassVars{N} for this pattern.
+
+TestCase subclass: ClassMethodConditionalSelfCallTest
+
+  setUp =>
+    ClassMethodConditionalSelfCall resetCounter
+    self
+
+  testTriggerPositive =>
+    // Conditional self-call fires (x > 0), then returns x.
+    self assert: (ClassMethodConditionalSelfCall trigger: 5) equals: 5
+
+  testTriggerNegative =>
+    // Conditional self-call does not fire, returns x.
+    self assert: (ClassMethodConditionalSelfCall trigger: -1) equals: -1
+
+  testTriggerWithReturnUsesDefault =>
+    // ^ early return fires when default is non-nil.
+    self assert: (ClassMethodConditionalSelfCall triggerWithReturn: 5 default: "cached") equals: "cached"
+
+  testTriggerWithReturnFallsThrough =>
+    // No ^ when default is nil — returns x.
+    self assert: (ClassMethodConditionalSelfCall triggerWithReturn: 5 default: nil) equals: 5
+
+  testTriggerWithMutationReturnsX =>
+    // Conditional self-call + mutation compiles and returns x.
+    // Note: class var mutations inside conditional closures don't propagate
+    // to the outer method's ClassVars — the mutation is local to the closure.
+    // Proper conditional class var threading would require inline case
+    // expressions (like actor state threading). This is a known limitation.
+    self assert: (ClassMethodConditionalSelfCall triggerWithMutation: 5) equals: 5
+
+  testTriggerWithMutationSkipped =>
+    // Condition is false, self-call does not fire — returns x.
+    self assert: (ClassMethodConditionalSelfCall triggerWithMutation: -1) equals: -1
+
+  testTriggerFullWithCachedValue =>
+    // Full pattern: ifAbsent: + conditional self + ^ early return.
+    dict := #{#bar => "old", #baz => "cached"}
+    self assert: (ClassMethodConditionalSelfCall triggerFull: "new" dict: dict) equals: "cached"
+
+  testTriggerFullNoCachedValue =>
+    // Full pattern: no cached value, returns x.
+    dict := #{#bar => "same"}
+    self assert: (ClassMethodConditionalSelfCall triggerFull: "same" dict: dict) equals: "same"

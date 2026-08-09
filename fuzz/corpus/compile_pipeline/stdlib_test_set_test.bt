@@ -1,0 +1,151 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Set (unique element collections using ordsets) (BT-73)
+
+TestCase subclass: SetTest
+
+  testCreationClass => self assert: (Set new) class equals: Set
+
+  testIsemptySize =>
+    self assert: (Set new) isEmpty
+    self assert: (Set new) size equals: 0
+
+  testAddIncludes =>
+    s := (Set new) add: 1
+    self assert: (s includes: 1)
+    self deny: (s includes: 2)
+    self assert: s size equals: 1
+
+  testAddDeduplication =>
+    s := (Set new) add: 1
+    s2 := (s add: 2) add: 1
+    self assert: s2 size equals: 2
+    self assert: (s2 includes: 1)
+    self assert: (s2 includes: 2)
+
+  testRemove =>
+    s2 := ((Set new) add: 1) add: 2
+    s3 := s2 remove: 1
+    self deny: (s3 includes: 1)
+    self assert: (s3 includes: 2)
+    self assert: s3 size equals: 1
+
+  testFromList =>
+    colors := Set new fromList: #(#red, #green, #blue)
+    self assert: colors size equals: 3
+    self assert: (colors includes: #red)
+    self deny: (colors includes: #yellow)
+
+  testUnion =>
+    a := Set new fromList: #(1, 2, 3)
+    b := Set new fromList: #(3, 4, 5)
+    u := a union: b
+    self assert: u size equals: 5
+    self assert: (u includes: 1)
+    self assert: (u includes: 5)
+
+  testIntersection =>
+    a := Set new fromList: #(1, 2, 3)
+    b := Set new fromList: #(3, 4, 5)
+    i := a intersection: b
+    self assert: i size equals: 1
+    self assert: (i includes: 3)
+    self deny: (i includes: 1)
+
+  testDifference =>
+    a := Set new fromList: #(1, 2, 3)
+    b := Set new fromList: #(3, 4, 5)
+    d := a difference: b
+    self assert: d size equals: 2
+    self assert: (d includes: 1)
+    self deny: (d includes: 3)
+
+  // BT-3027 — Set has no first/last; anyOne is the deliberately
+  // non-deterministic single-element accessor.
+  testAnyOne =>
+    s := Set new fromList: #(1, 2, 3)
+    self assert: (s includes: s anyOne)
+
+  testAnyOneOnSingletonSet => self assert: ((Set new add: 42) anyOne) equals: 42
+
+  testAnyOneOnEmptySetRaisesEmptyCollection =>
+    self should: [Set new anyOne] raise: #empty_collection
+
+  testIssubsetof =>
+    small := Set new fromList: #(1, 2)
+    big := Set new fromList: #(1, 2, 3)
+    self assert: (small isSubsetOf: big)
+    self deny: (big isSubsetOf: small)
+
+  testAslist =>
+    self assert: ((Set new) fromList: #(3, 1, 2)) asList equals: #(1, 2, 3)
+
+  testIteration =>
+    self assert: (((Set new) fromList: #(1, 2, 3)) do: [:x | nil]) equals: nil
+    // Block receives each element — inject:into: verifies correct values are passed
+    self assert: (((Set new) fromList: #(1, 2, 3)) inject: 0 into: [:sum :x |
+      sum + x
+    ]) equals: 6
+
+  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2888: the do: stateful_block_dispatch guard also applies
+    // to Set, since the guard is keyed on selector name, not receiver class.
+    count := 0
+    statefulBlock := [:x | count := count + x]
+    self should: [
+      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
+  testRespondstoMethodReflection =>
+    s4 := (Set new) add: 1
+    self assert: (s4 respondsTo: #size)
+    self assert: (s4 respondsTo: #includes:)
+    self deny: (s4 respondsTo: #nonExistent)
+
+  testPrintstring =>
+    self assert: (((Set new) fromList: #(1, 2, 3)) printString) equals: "Set(1, 2, 3)"
+    self assert: ((Set new) printString) equals: "Set()"
+
+  // ===== Element identity is `=:=`, not term order (BT-2997) =====
+  //
+  // Set was backed by `ordsets`, which decides membership by Erlang term
+  // *order* — `==` semantics — so `1` and `1.0` collapsed into one element.
+  // That made Set the odd one out: `Dictionary` keys (Erlang maps) and
+  // `List>>includes:` both use `=:=`, which ADR 0002 and BT-1562 make the
+  // language's element identity.
+  testIntAndFloatAreDistinctElements =>
+    s := (Set new add: 1) add: 1.0
+    self assert: s size equals: 2
+    self assert: s asList equals: #(1, 1.0)
+
+  testStrictMembership =>
+    s := (Set new) add: 1
+    self assert: (s includes: 1)
+    self deny: (s includes: 1.0)
+
+  testStrictRemovalKeepsTheOtherNumber =>
+    s := (Set new add: 1) add: 1.0
+    self assert: (s remove: 1.0) asList equals: #(1)
+    self assert: (s remove: 1) asList equals: #(1.0)
+
+  testSetNowAgreesWithDictionaryOnKeyIdentity =>
+    // The divergence this fixes: both hold two entries now.
+    s := (Set new add: 1) add: 1.0
+    d := (Dictionary new at: 1 put: #a) at: 1.0 put: #b
+    self assert: s size equals: d size
+
+  testStrictSetOperations =>
+    ints := (Set new) fromList: #(1, 2)
+    floats := (Set new) fromList: #(1.0, 2.0)
+    // Disjoint under `=:=`, though every element compares `==` to one in the other.
+    self assert: (ints intersection: floats) size equals: 0
+    self assert: (ints union: floats) size equals: 4
+    self assert: (ints difference: floats) asList equals: #(1, 2)
+    self deny: (ints isSubsetOf: floats)
+    self assert: (ints isSubsetOf: (ints union: floats))
+
+  testSortedOrderPreserved =>
+    // The representation is still a term-order-sorted list, so `asList`
+    // remains sorted regardless of insertion order.
+    self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)

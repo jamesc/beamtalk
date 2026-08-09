@@ -1,0 +1,447 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FileHandle incremental I/O tests (BT-2975)
+//
+// Covers read:/readAll/write:/writeLine:/position/seek:/flush/sync/close/isOpen
+// on handles from File open:mode: and File open:mode:do:.
+//
+// All paths are relative to the stdlib test working directory — never /tmp.
+//
+// Fixtures: stdlib/test/fixtures/file_handle_owner_actor.bt (BT-3020)
+
+TestCase subclass: FileHandleIoTest
+
+  // === open:mode:do: — block-scoped handles ===
+  testOpenModeDoReturnsBlockValue =>
+    File writeAll: "target/bt-test-tmp/handle_block.txt" contents: "abcdef"
+    result := File
+      open: "target/bt-test-tmp/handle_block.txt"
+      mode: #read
+      do: [:h | (h read: 3) unwrap]
+    self assert: result isOk
+    self assert: result unwrap equals: "abc"
+
+  testOpenModeDoClosesHandle =>
+    File writeAll: "target/bt-test-tmp/handle_autoclose.txt" contents: "data"
+    escaped := (File
+      open: "target/bt-test-tmp/handle_autoclose.txt"
+      mode: #read
+      do: [:h | h]) unwrap
+    self deny: escaped isOpen
+
+  testOpenModeDoFileNotFound =>
+    result := File
+      open: "target/bt-test-tmp/no_such_handle_file.txt"
+      mode: #read
+      do: [:h | h readAll]
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "file not found")
+
+  testOpenModeDoUnknownMode =>
+    result := File
+      open: "target/bt-test-tmp/handle_badmode.txt"
+      mode: #sideways
+      do: [:h | h readAll]
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "Mode must be #read")
+
+  // === append + reopen round-trip ===
+  testAppendThenReopenRoundTrip =>
+    nl := $\n asString
+    File delete: "target/bt-test-tmp/handle_append.log"
+    File
+      open: "target/bt-test-tmp/handle_append.log"
+      mode: #append
+      do: [:h |
+        h writeLine: "first"
+        h writeLine: "second"
+      ]
+    File
+      open: "target/bt-test-tmp/handle_append.log"
+      mode: #append
+      do: [:h | h writeLine: "third"]
+    reread := File
+      open: "target/bt-test-tmp/handle_append.log"
+      mode: #read
+      do: [:h | h readAll unwrap]
+    self assert: reread unwrap equals: "first" ++ nl ++ "second" ++ nl ++ "third" ++ nl
+
+  testAppendCreatesParentDirectories =>
+    File deleteAll: "target/bt-test-tmp/handle-nested"
+    result := File
+      open: "target/bt-test-tmp/handle-nested/deep/log.txt"
+      mode: #append
+      do: [:h | h write: "nested"]
+    self assert: result isOk
+    self assert: (File readAll: "target/bt-test-tmp/handle-nested/deep/log.txt") unwrap equals: "nested"
+
+  // === seek / position / read ===
+  testSeekThenRead =>
+    File writeAll: "target/bt-test-tmp/handle_seek.txt" contents: "0123456789"
+    result := File
+      open: "target/bt-test-tmp/handle_seek.txt"
+      mode: #read
+      do: [:h |
+        (h seek: 4) unwrap
+        (h read: 3) unwrap
+      ]
+    self assert: result unwrap equals: "456"
+
+  testSeekReturnsNewPosition =>
+    File writeAll: "target/bt-test-tmp/handle_seek_pos.txt" contents: "0123456789"
+    result := File
+      open: "target/bt-test-tmp/handle_seek_pos.txt"
+      mode: #read
+      do: [:h | (h seek: 7) unwrap]
+    self assert: result unwrap equals: 7
+
+  testPositionAdvancesWithReads =>
+    File writeAll: "target/bt-test-tmp/handle_position.txt" contents: "0123456789"
+    result := File
+      open: "target/bt-test-tmp/handle_position.txt"
+      mode: #read
+      do: [:h |
+        h read: 6
+        h position unwrap
+      ]
+    self assert: result unwrap equals: 6
+
+  testReadAtEndOfFileReturnsEmpty =>
+    File writeAll: "target/bt-test-tmp/handle_eof.txt" contents: "ab"
+    result := File
+      open: "target/bt-test-tmp/handle_eof.txt"
+      mode: #read
+      do: [:h |
+        h read: 10
+        (h read: 10) unwrap
+      ]
+    self assert: result unwrap isEmpty
+
+  testReadAllFromCurrentPosition =>
+    File writeAll: "target/bt-test-tmp/handle_readall.txt" contents: "header|body"
+    result := File
+      open: "target/bt-test-tmp/handle_readall.txt"
+      mode: #read
+      do: [:h |
+        (h seek: 7) unwrap
+        h readAll unwrap
+      ]
+    self assert: result unwrap equals: "body"
+
+  testReadNegativeCountRaisesTypeError =>
+    File writeAll: "target/bt-test-tmp/handle_negread.txt" contents: "abc"
+    self
+      should: [
+        File
+          open: "target/bt-test-tmp/handle_negread.txt"
+          mode: #read
+          do: [:h | h read: -1]
+      ]
+      raise: #type_error
+
+  // === readWrite ===
+  testReadWriteKeepsExistingContents =>
+    File writeAll: "target/bt-test-tmp/handle_rw.txt" contents: "0123456789"
+    File
+      open: "target/bt-test-tmp/handle_rw.txt"
+      mode: #readWrite
+      do: [:h |
+        (h seek: 5) unwrap
+        h write: "XXXXX"
+      ]
+    self assert: (File readAll: "target/bt-test-tmp/handle_rw.txt") unwrap equals: "01234XXXXX"
+
+  testWriteTruncatesExistingFile =>
+    File writeAll: "target/bt-test-tmp/handle_trunc.txt" contents: "0123456789"
+    File
+      open: "target/bt-test-tmp/handle_trunc.txt"
+      mode: #write
+      do: [:h | h write: "ab"]
+    self assert: (File readAll: "target/bt-test-tmp/handle_trunc.txt") unwrap equals: "ab"
+
+  // === flush / sync ===
+  testSyncAfterWriteSucceeds =>
+    nl := $\n asString
+    File delete: "target/bt-test-tmp/handle_sync.log"
+    result := File
+      open: "target/bt-test-tmp/handle_sync.log"
+      mode: #append
+      do: [:h |
+        h writeLine: "durable"
+        h sync
+      ]
+    self assert: result unwrap isOk
+    self assert: (File readAll: "target/bt-test-tmp/handle_sync.log") unwrap equals: "durable" ++ nl
+
+  testFlushOnOpenHandleSucceeds =>
+    File delete: "target/bt-test-tmp/handle_flush.log"
+    result := File
+      open: "target/bt-test-tmp/handle_flush.log"
+      mode: #append
+      do: [:h |
+        h write: "x"
+        h flush
+      ]
+    self assert: result unwrap isOk
+
+  // === close / isOpen ===
+  testIsOpenTrueInsideBlock =>
+    File writeAll: "target/bt-test-tmp/handle_isopen.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_isopen.txt"
+      mode: #read
+      do: [:h | h isOpen]
+    self assert: result unwrap
+
+  testCloseIsIdempotent =>
+    File writeAll: "target/bt-test-tmp/handle_double_close.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_double_close.txt"
+      mode: #read
+      do: [:h |
+        h close
+        h close
+      ]
+    self assert: result unwrap isOk
+
+  // Also the regression guard for non-raw descriptors: `File open:mode:` runs
+  // in the File class process, so a raw (opener-locked) descriptor would fail
+  // here with not_on_controlling_process the moment this process touches it.
+  testCallerOwnedHandleRoundTrip =>
+    nl := $\n asString
+    File delete: "target/bt-test-tmp/handle_owned.log"
+    handle := (File open: "target/bt-test-tmp/handle_owned.log" mode: #append) unwrap
+    handle writeLine: "owned"
+    handle sync
+    handle close
+    self deny: handle isOpen
+    self assert: (File readAll: "target/bt-test-tmp/handle_owned.log") unwrap equals: "owned" ++ nl
+
+  // === BT-3020: open:mode: registers its handle against a resolved owner ===
+
+  // A test method runs in a plain spawned process (beamtalk_test_case's
+  // spawn_test_execution/6) — no REPL session, and not itself a Beamtalk
+  // actor — so open:mode: called directly from here resolves to tier 3:
+  // unowned, listed for diagnostics but reclaimed by nothing but `close`.
+  testOpenModeFromCompiledCodeIsUnowned =>
+    path := "target/bt-test-tmp/handle_unowned.txt"
+    File delete: path
+    handle := (File open: path mode: #write) unwrap
+    entry := File openHandles detect: [:e | (e at: 1) =:= path]
+    self assert: (entry at: 2) equals: #write
+    self assert: (entry at: 3) isNil
+    handle close
+    self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
+
+  // Tier 2: an actor that opens a handle from one of its own methods and
+  // never closes it — the exact leak this issue fixes — is reclaimed when
+  // the actor dies, and until then is listed under the actor's own pid.
+  testActorOwnedHandleReclaimedOnDeath =>
+    path := "target/bt-test-tmp/handle_actor_owned.txt"
+    File delete: path
+    actor := FileHandleOwnerActor spawn
+    actor openUnclosed: path
+    entry := File openHandles detect: [:e | (e at: 1) =:= path]
+    self assert: (entry at: 3) equals: actor pid
+    Erlang erlang unlink: actor pid
+    actor kill
+    50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
+
+  // === closed-handle errors ===
+  testReadOnClosedHandleErrors =>
+    File writeAll: "target/bt-test-tmp/handle_closed_read.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_read.txt"
+      mode: #read
+      do: [:h |
+        h close
+        h read: 1
+      ]
+    inner := result unwrap
+    self assert: inner isError
+    self assert: (inner error printString includesSubstring: "FileHandle is closed")
+
+  testWriteOnClosedHandleErrors =>
+    File delete: "target/bt-test-tmp/handle_closed_write.log"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_write.log"
+      mode: #append
+      do: [:h |
+        h close
+        h write: "nope"
+      ]
+    inner := result unwrap
+    self assert: inner isError
+
+  testPositionOnClosedHandleErrors =>
+    File writeAll: "target/bt-test-tmp/handle_closed_pos.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_pos.txt"
+      mode: #read
+      do: [:h |
+        h close
+        h position
+      ]
+    inner := result unwrap
+    self assert: inner isError
+
+  testSyncOnClosedHandleErrors =>
+    File delete: "target/bt-test-tmp/handle_closed_sync.log"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_sync.log"
+      mode: #append
+      do: [:h |
+        h close
+        h sync
+      ]
+    inner := result unwrap
+    self assert: inner isError
+
+  // === mode enforcement ===
+  testWriteOnReadOnlyHandleErrors =>
+    File writeAll: "target/bt-test-tmp/handle_readonly.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_readonly.txt"
+      mode: #read
+      do: [:h | h write: "nope"]
+    inner := result unwrap
+    self assert: inner isError
+    self assert: (inner error printString includesSubstring: "not opened for writing")
+
+  testReadOnWriteOnlyHandleErrors =>
+    result := File
+      open: "target/bt-test-tmp/handle_writeonly.txt"
+      mode: #write
+      do: [:h | h read: 1]
+    inner := result unwrap
+    self assert: inner isError
+    self assert: (inner error printString includesSubstring: "not opened for reading")
+
+  // === lines still works on a mode-opened handle ===
+  testLinesOnReadHandle =>
+    nl := $\n asString
+    File writeAll: "target/bt-test-tmp/handle_lines.txt" contents: "a" ++ nl ++ "b" ++ nl ++ "c" ++ nl
+    result := File
+      open: "target/bt-test-tmp/handle_lines.txt"
+      mode: #read
+      do: [:h | h lines asList]
+    self assert: result unwrap size equals: 3
+
+  // === respondsTo: sees the incremental I/O surface ===
+  testRespondsToIoSelectors =>
+    File writeAll: "target/bt-test-tmp/handle_responds.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_responds.txt"
+      mode: #read
+      do: [:h |
+        (h respondsTo: #sync)
+          and: [
+            (h respondsTo: #close) and: [
+              (h respondsTo: #isOpen) and: [h respondsTo: #seek:]
+            ]
+          ]
+      ]
+    self assert: result unwrap
+
+  testDoesNotRespondToUnknownSelector =>
+    File writeAll: "target/bt-test-tmp/handle_responds2.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_responds2.txt"
+      mode: #read
+      do: [:h | h respondsTo: #totallyBogusHandleMethod]
+    self deny: result unwrap
+
+  testWriteAcceptsBinaryData =>
+    File delete: "target/bt-test-tmp/handle_binwrite.dat"
+    File writeAll: "target/bt-test-tmp/handle_binwrite_src.txt" contents: "x"
+    payload := (File readBinary: "target/bt-test-tmp/handle_binwrite_src.txt") unwrap
+    File
+      open: "target/bt-test-tmp/handle_binwrite.dat"
+      mode: #append
+      do: [:h | h write: payload]
+    self assert: (File readBinary: "target/bt-test-tmp/handle_binwrite.dat") unwrap equals: "x"
+
+  // === BT-3018 / ADR 0109: the block runs in the caller's process ===
+  // Before the call-site lowering these were the deadlock: the block ran inside
+  // the File class gen_server, so any further File send from it hit
+  // gen_server:call(self(), ...).
+  testBlockRunsInTheCallersProcess =>
+    File writeAll: "target/bt-test-tmp/handle_caller.txt" contents: "x"
+    outer := (Erlang erlang) self
+    inner := (File
+      open: "target/bt-test-tmp/handle_caller.txt"
+      mode: #read
+      do: [:h | (Erlang erlang) self]) unwrap
+    self assert: inner equals: outer
+
+  testNestedFileSendInsideBlockWorks =>
+    File writeAll: "target/bt-test-tmp/handle_nested.txt" contents: "x"
+    result := File open: "target/bt-test-tmp/handle_nested.txt" do: [:h |
+      File exists: "target/bt-test-tmp/handle_nested.txt"
+    ]
+    self assert: result unwrap
+
+  testNestedFileSendInsideModeBlockWorks =>
+    File writeAll: "target/bt-test-tmp/handle_nested2.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_nested2.txt"
+      mode: #read
+      do: [:h | (File readAll: "target/bt-test-tmp/handle_nested2.txt") unwrap]
+    self assert: result unwrap equals: "abc"
+
+  testPlainBlockStillReturnsItsValue =>
+    File writeAll: "target/bt-test-tmp/handle_plain.txt" contents: "x"
+    result := File open: "target/bt-test-tmp/handle_plain.txt" do: [:h | 42]
+    self assert: result unwrap equals: 42
+
+  // === The handle is closed however the block leaves ===
+  // ADR 0109 asked for this because it expected two lowering paths. There is
+  // only one `try … after close end` per selector — in `beamtalk_file`'s
+  // `'open:do:'/2` and `'open:mode:do:'/3` — and the intercepted call site
+  // reaches it through the `open/2,3` shims that dynamic dispatch also uses.
+  // These cover the intercepted path end to end; beamtalk_file_tests covers
+  // the dynamic entry points directly.
+  testHandleIsClosedWhenTheBlockReturns =>
+    File writeAll: "target/bt-test-tmp/handle_close_ok.txt" contents: "x"
+    escaped := (File open: "target/bt-test-tmp/handle_close_ok.txt" do: [:h |
+      h
+    ]) unwrap
+    self deny: escaped isOpen
+
+  testHandleIsClosedWhenTheBlockRaises =>
+    File writeAll: "target/bt-test-tmp/handle_close_raise.txt" contents: "abc"
+    // A raising block cannot return the handle, so stash it in the process
+    // dictionary on the way past. That is an FFI call rather than a captured
+    // variable, so the block stays capture-free — and it lands in *this*
+    // process precisely because ADR 0109 runs the block here.
+    self
+      should: [
+        File
+          open: "target/bt-test-tmp/handle_close_raise.txt"
+          mode: #read
+          do: [:h |
+            (Erlang erlang) put: #btHandleCloseProbe value: h
+            h read: -1
+          ]
+      ]
+      raise: #type_error
+    escaped := (Erlang erlang) get: #btHandleCloseProbe
+    self deny: escaped isOpen
+
+  // The dynamic path is deliberately *not* intercepted (ADR 0109, "Not in
+  // scope"): `perform:` reaches `open:do:` through the class gen_server, so the
+  // block still runs there and a nested `File` send still fails. Part 1's
+  // `class_send` self-call guard is what turns that into a structured
+  // dispatch_error rather than an opaque `calling_self` exit. Pinned here so
+  // the gap between the two paths stays a decision rather than a surprise.
+  testPerformOpenDoStillRunsInTheClassProcess =>
+    File writeAll: "target/bt-test-tmp/handle_perform.txt" contents: "x"
+    nested := [:h | File exists: "target/bt-test-tmp/handle_perform.txt"]
+    self
+      should: [
+        File perform: #open:do: withArguments: #("target/bt-test-tmp/handle_perform.txt", nested)
+      ]
+      raise: #dispatch_error

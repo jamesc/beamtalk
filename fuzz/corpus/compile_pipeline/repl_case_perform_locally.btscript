@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for performLocally:withArguments: (BT-1664)
+//
+// Tests that performLocally:withArguments: dispatches class methods
+// in the caller's process, bypassing the class object's gen_server.
+
+// @load tests/repl-protocol/fixtures/perform_locally_fixture.bt
+
+// ===========================================================================
+// BASIC LOCAL DISPATCH
+// ===========================================================================
+
+// Zero-argument class method via performLocally:
+LocalDispatchHelper performLocally: #greeting withArguments: #()
+// => hello from local dispatch
+
+// One-argument keyword class method via performLocally:
+LocalDispatchHelper performLocally: #echo: withArguments: #(42)
+// => 42
+
+// Multi-keyword class method via performLocally:
+LocalDispatchHelper performLocally: #add:to: withArguments: #(3, 7)
+// => 10
+
+// ===========================================================================
+// PROCESS IDENTITY VERIFICATION
+// ===========================================================================
+
+// Normal dispatch returns the class gen_server's PID
+classServerPid := LocalDispatchHelper callerPid
+// => _
+
+// performLocally: returns the caller's (REPL workspace) PID
+localPid := LocalDispatchHelper performLocally: #callerPid withArguments: #()
+// => _
+
+// The PIDs should be different — normal dispatch runs in gen_server,
+// performLocally: runs in the caller's process
+classServerPid == localPid
+// => false

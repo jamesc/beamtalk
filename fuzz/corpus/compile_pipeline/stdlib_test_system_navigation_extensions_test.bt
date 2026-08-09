@@ -1,0 +1,86 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2212: BUnit coverage for SystemNavigation extendersOf: / extensionsBy:
+// — the reverse extension-method index (ADR 0066 / BT-2202).
+//
+// Extensions are registered directly via beamtalk_extensions:register/4
+// (mirroring extension_sealed_test.bt), owned by the loaded "stdlib" package so
+// the owner round-trips through extendersOf:'s loaded-package filter to a real
+// Package object. Each test registers, captures the query result, cleans up the
+// ETS entry, then asserts (so a failing assertion never leaks registry state).
+// Assertions match on the unique test selectors / the "stdlib" package name, so
+// they tolerate any real extensions stdlib may already have and any parallel
+// test sharing the global ETS table.
+
+TestCase subclass: SystemNavigationExtensionsTest
+
+  // Register `String >> sel` owned by package `pkg`.
+  registerExt: sel owner: pkg =>
+    extFun := [:a :s | s]
+    Erlang beamtalk_extensions
+      register: #String
+      selector: sel
+      fun: extFun
+      owner: pkg
+
+  // extendersOf: returns the owning packages as Package objects, deduplicated:
+  // a package contributing two methods to String appears exactly once.
+  testExtendersOfReturnsDedupedPackages =>
+    self registerExt: #sysnavExtAlpha owner: #stdlib
+    self registerExt: #sysnavExtBeta owner: #stdlib
+    extenders := SystemNavigation default extendersOf: String
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtBeta)
+    self assert: (extenders anySatisfy: [:p | p name == "stdlib"])
+    self assert: (extenders count: [:p | p name == "stdlib"]) equals: 1
+
+  // extensionsBy: returns {class, selector} records whose #class is the extended
+  // class OBJECT (so callers can navigate from it).
+  testExtensionsByRecords =>
+    self registerExt: #sysnavExtAlpha owner: #stdlib
+    records := SystemNavigation default extensionsBy: (Package named: "stdlib")
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
+    self
+      assert: (records anySatisfy: [:r |
+        (r at: #class) == String and: [(r at: #selector) == #sysnavExtAlpha]
+      ])
+
+  // Symmetric round-trip: extendersOf: T yields package P iff extensionsBy: P
+  // hits T.
+  testRoundTrip =>
+    self registerExt: #sysnavExtAlpha owner: #stdlib
+    extenders := SystemNavigation default extendersOf: String
+    records := SystemNavigation default extensionsBy: (Package named: "stdlib")
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
+    self assert: (extenders anySatisfy: [:p | p name == "stdlib"])
+    self assert: (records anySatisfy: [:r | (r at: #class) == String])
+
+  // Non-package owners are skipped — Package named: would raise on them, so an
+  // extension owned by a name that is not a loaded package must not surface.
+  testNonPackageOwnerFiltered =>
+    self registerExt: #sysnavExtGamma owner: #sysnav_not_a_pkg_xyz
+    extenders := SystemNavigation default extendersOf: String
+    Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtGamma)
+    self deny: (extenders anySatisfy: [:p | p name == "sysnav_not_a_pkg_xyz"])
+
+  // No extensions returns an empty list (not an error): nobody extends the test
+  // case class.
+  testNoExtensionsEmpty =>
+    self assert: (SystemNavigation default extendersOf: self class) isEmpty
+
+  // extendersOf: rejects a non-class argument. The call goes through perform:
+  // because the `:: Behaviour` parameter makes a direct `extendersOf: #String`
+  // a compile-time type error — the runtime guard is reachable only via dynamic
+  // dispatch (REPL/eval/perform:).
+  testExtendersOfRejectsNonClass =>
+    self should: [
+      SystemNavigation default perform: #extendersOf: withArguments: #(#String)
+    ] raise: #user_error
+
+  // extensionsBy: rejects a non-Package argument (a bare Symbol here, a common
+  // mistake of passing the package name instead of the Package object).
+  testExtensionsByRejectsNonPackage =>
+    self should: [
+      SystemNavigation default perform: #extensionsBy: withArguments: #(#stdlib)
+    ] raise: #user_error

@@ -1,0 +1,218 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2342: value-type local threading for foldl list-ops, last-position
+// conditionals, and local-assignment of threading constructs.
+//
+// These run in value-type (TestCase) context, which previously leaked the
+// internal {value, StateAcc} threading tuple in several positions:
+//   A. collect:/select:/reject:/inject:into: were classified Pure, so the
+//      threaded locals were never extracted and the tuple leaked (every
+//      position). The collect/select/reject result was also a raw list
+//      instead of the reconstructed Array.
+//   B. A read+write conditional as a method's last expression crashed at
+//      runtime (stateful block dispatched with 0 args).
+//   C. `x := <threading construct>` bound x to the raw {value, StateAcc}
+//      tuple and did not rebind the threaded locals.
+
+TestCase subclass: VtThreadingConstructsTest
+
+  // ── A. foldl list-ops thread outer-local mutations ─────────────────────────
+
+  // inject:into: as a non-last side effect — accumulator discarded, t threaded.
+  testInjectSideEffectThreadsLocal =>
+    t := 0
+    #[1, 2, 3]
+      inject: 0
+      into: [:a :b |
+        t := t + b
+        a + b
+      ]
+    self assert: t equals: 6
+
+  // inject:into: as the RHS of a local assignment — r gets the accumulator,
+  // t is threaded back (covers both A and C).
+  testInjectAssignmentThreadsLocal =>
+    t := 0
+    r := #[1, 2, 3]
+      inject: 0
+      into: [:a :b |
+        t := t + b
+        a + b
+      ]
+    self assert: r equals: 6
+    self assert: t equals: 6
+
+  // collect: as a non-last side effect threads the counter.
+  testCollectSideEffectThreadsLocal =>
+    n := 0
+    #[1, 2, 3]
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    self assert: n equals: 3
+
+  // collect: as a local-assignment RHS: result is the Array, n threaded.
+  testCollectAssignmentReturnsArrayAndThreads =>
+    n := 0
+    r := #[1, 2, 3]
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    self assert: r equals: #[2, 4, 6]
+    self assert: n equals: 3
+
+  // collect: as the last expression returns the reconstructed Array.
+  collectLast =>
+    n := 0
+    #[1, 2, 3]
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+
+  testCollectLastReturnsArray =>
+    self assert: self collectLast equals: #[2, 4, 6]
+
+  // inject:into: as the last expression returns the accumulator (not the
+  // {value, StateAcc} tuple); the threaded counter does not escape.
+  injectLast =>
+    n := 0
+    #[1, 2, 3]
+      inject: 0
+      into: [:a :b |
+        n := n + 1
+        a + b
+      ]
+
+  testInjectLastReturnsAccumulator => self assert: self injectLast equals: 6
+
+  // select: as a local-assignment RHS reconstructs the Array and threads count.
+  testSelectAssignmentReturnsArrayAndThreads =>
+    count := 0
+    r := #[1, 2, 3, 4]
+      select: [:x |
+        count := count + 1
+        x > 2
+      ]
+    self assert: r equals: #[3, 4]
+    self assert: count equals: 4
+
+  // reject: as a local-assignment RHS reconstructs the Array and threads count.
+  testRejectAssignmentReturnsArrayAndThreads =>
+    count := 0
+    r := #[1, 2, 3, 4]
+      reject: [:x |
+        count := count + 1
+        x > 2
+      ]
+    self assert: r equals: #[1, 2]
+    self assert: count equals: 4
+
+  // Mutation must be visible to later statements (non-last, no assignment).
+  testCollectMutationVisibleLater =>
+    n := 0
+    #[1, 2, 3]
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    doubled := n * 2
+    self assert: doubled equals: 6
+
+  // ── B. read+write conditional as a method's last expression ────────────────
+
+  // Read+write conditional as the last expression. `flag` is a parameter so the
+  // branch is not constant-folded. Previously crashed with an arity error when
+  // the branch was taken (stateful block dispatched with 0 args).
+  condReadWriteLast: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+
+  testConditionalReadWriteLastTrueReturnsBranchValue =>
+    self assert: (self condReadWriteLast: true) equals: 7
+
+  testConditionalReadWriteLastFalseReturnsNil =>
+    self assert: (self condReadWriteLast: false) equals: nil
+
+  // ── C. local-assignment of a loop threads back the mutated local ───────────
+  testLocalAssignFromWhileLoop =>
+    n := 0
+    result := [n < 2] whileTrue: [n := n + 1]
+    self assert: result equals: nil
+    self assert: n equals: 2
+
+  testLocalAssignFromCountedLoop =>
+    sum := 0
+    result := 1 to: 5 do: [:i | sum := sum + i]
+    self assert: result equals: nil
+    self assert: sum equals: 15
+
+  // ── D. threading constructs nested inside a last-position conditional ───────
+  //
+  // A read+write conditional as the method's last expression inlines each branch
+  // as a let-chain (build_vt_conditional_branch_value). A threading construct
+  // (loop / foldl list-op) used *inside* that branch still yields a
+  // {value, StateAcc} tuple; previously the branch sequencer did not unwrap it,
+  // so a later statement saw a stale local (non-last), an assignment target bound
+  // to the raw tuple (RHS), or the branch value leaked the tuple (value position).
+  // Each branch directly mutates a method-level local (`total`/`acc`/`hits`) so
+  // the conditional is classified as read+write threading and routed here.
+
+  // Non-last collect inside the branch: its threaded `n` must be visible to the
+  // later `total := total + n` in the same branch.
+  branchNestedCollect: flag =>
+    total := 0
+    flag
+      ifTrue: [
+        n := 0
+        #[1, 2, 3]
+          collect: [:i |
+            n := n + 1
+            i * 2
+          ]
+        total := total + n
+      ]
+
+  testBranchNonLastThreadingVisibleLater =>
+    self assert: (self branchNestedCollect: true) equals: 3
+
+  testBranchNonLastThreadingFalseReturnsNil =>
+    self assert: (self branchNestedCollect: false) equals: nil
+
+  // collect: as an assignment RHS inside the branch: `r` must be the reconstructed
+  // Array (so `r size` works) and `n` must thread back, not bind to a raw tuple.
+  branchNestedAssign: flag =>
+    _acc := 0
+    flag
+      ifTrue: [
+        n := 0
+        r := #[1, 2, 3]
+          collect: [:i |
+            n := n + 1
+            i * 2
+          ]
+        _acc := r size + n
+      ]
+
+  testBranchAssignRhsThreading =>
+    self assert: (self branchNestedAssign: true) equals: 6
+
+  // collect: as the branch's own value: the branch yields the reconstructed Array
+  // (element 1), not the raw {value, StateAcc} tuple.
+  branchValueCollect: flag =>
+    hits := 0
+    flag
+      ifTrue: [
+        hits := hits + 1
+        #[1, 2, 3]
+          collect: [:i |
+            hits := hits + 1
+            i * 2
+          ]
+      ]
+
+  testBranchValuePositionThreading =>
+    self assert: (self branchValueCollect: true) equals: #[2, 4, 6]

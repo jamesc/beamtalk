@@ -967,27 +967,31 @@ ls -la ~/.beamtalk/daemon.sock
 
 ---
 
-## Fuzzing (Parser Crash Safety)
+## Fuzzing (Parser & Compile Pipeline Crash Safety)
 
-Fuzzing tests the parser's robustness by feeding it random or mutated input to detect crashes, infinite loops, and excessive memory use.
+Fuzzing tests the compiler's robustness by feeding it random or mutated input to detect crashes, infinite loops, and excessive memory use. Two targets, at different pipeline depths (BT-3124):
+
+| Target | Pipeline depth | Corpus |
+|---|---|---|
+| `parse_arbitrary` | lex → parse | `fuzz/corpus/parse_arbitrary/` (35 seed files from `examples/` and `tests/repl-protocol/cases/`) |
+| `compile_pipeline` | lex → parse → analyse → codegen | `fuzz/corpus/compile_pipeline/` (383 seed files from `stdlib/test/*.bt` and `tests/repl-protocol/cases/*.btscript`) |
 
 **Technology:** cargo-fuzz (libFuzzer)
 
-**Location:** `fuzz/fuzz_targets/parse_arbitrary.rs`
-
-**Corpus:** `fuzz/corpus/parse_arbitrary/` (32 seed files from examples/ and tests/repl-protocol/cases/)
+`compile_pipeline` additionally asserts, whenever `generate_module` returns `Ok`, that the output is structurally valid Core Erlang — the same checks `core_erlang_validity_tests.rs`'s proptest suite runs, shared via `beamtalk_core::test_helpers::test_support::core_erlang_structural_issues` so the two never drift.
 
 ### Running Locally
 
 ```bash
-# Fuzz for 60 seconds (default)
+# Fuzz both targets for 60 seconds each (default)
 just fuzz
 
-# Fuzz for a specific duration
-just fuzz 300  # 5 minutes
+# Fuzz both targets for a specific duration each
+just fuzz 300  # 5 minutes per target
 
-# Or use cargo directly
+# Or use cargo directly, one target at a time
 cargo +nightly fuzz run parse_arbitrary -- -max_total_time=60
+cargo +nightly fuzz run compile_pipeline -- -max_total_time=60
 ```
 
 **Requirements:**
@@ -1006,13 +1010,28 @@ cargo +nightly fuzz run parse_arbitrary -- -max_total_time=60
 
 ### CI Integration
 
-Fuzzing runs nightly (not per-PR) via `.github/workflows/fuzz.yml`:
-- Duration: 10 minutes per run
+Fuzzing runs nightly (not per-PR) via `.github/workflows/fuzz.yml`, one job per target:
+- Duration: 5 minutes per target per run (split from a single 10-minute `parse_arbitrary`-only run when `compile_pipeline` was added, BT-3124)
 - Memory limit: 4GB RSS
 - Artifacts uploaded on failure
 - Auto-creates GitHub issues for crashes
 
 **Why nightly?** Fuzzing is too slow for per-PR CI (minutes to hours). Nightly runs catch regressions without blocking development.
+
+### Corpus-Through-BEAM Lint (`compile_pipeline` only)
+
+`compile_pipeline`'s structural-validity check catches Core Erlang that's broken in ways beamtalk's own codegen can detect (unbalanced delimiters, missing `module`/`end`, Rust format-artifact leaks) — but not "codegen thinks this is fine, and it parses, but `erlc`/`core_lint` still rejects it" (e.g. an unbound variable — the BT-3115 bug class). Putting a real `erlc` compile in the libFuzzer hot loop would be far too slow, so this check runs as a separate nightly job instead:
+
+1. `cargo run --release --example compile_pipeline_corpus -p beamtalk-core -- <out_dir> <corpus_dir>...` — runs every corpus file through the same lex/parse/analyse/codegen pipeline and writes each successful `Ok` output as a `.core` file.
+2. `escript scripts/compile-pipeline-corpus-lint.escript <out_dir>` — batch-compiles every `.core` file with `compile:file/2` (`from_core`, `return_errors`, `return_warnings`, `clint`), the same options `beamtalk_build_worker.erl`/`beamtalk_compiler_server.erl` use in production. Prints an actionable per-file report (generated `.core` path, `erlc`/`core_lint` message) and exits non-zero on any failure.
+
+Run both locally in one step:
+
+```bash
+just fuzz-corpus-lint
+# Or against additional corpus dirs (e.g. fuzzer-grown corpus from a CI artifact):
+just fuzz-corpus-lint "fuzz/corpus/compile_pipeline fuzz/artifacts/compile_pipeline"
+```
 
 ### Interpreting Results
 

@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1549: Tests that setUpOnce coexists with per-test setUp.
+
+TestCase subclass: SetupOnceWithSetupTest
+  field: perTestValue = 0
+
+  setUpOnce => #{#suite => "fixture"}
+
+  setUp => self withPerTestValue: 42
+
+  testBothFixturesAvailable =>
+    // Per-test setUp state
+    self assert: self.perTestValue equals: 42
+    // Suite-level fixture
+    self assert: (self suiteFixture at: #suite) equals: "fixture"
+
+  testIsolationPreserved =>
+    // Each test gets a fresh setUp instance
+    self assert: self.perTestValue equals: 42
+    // But shares the suite fixture
+    self assert: (self suiteFixture at: #suite) equals: "fixture"

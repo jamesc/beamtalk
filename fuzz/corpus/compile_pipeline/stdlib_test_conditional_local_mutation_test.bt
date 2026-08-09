@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1392: Tests that local variable mutations inside ifTrue:/ifFalse:/
+// ifTrue:ifFalse: blocks propagate to the enclosing scope in value types.
+
+TestCase subclass: ConditionalLocalMutationTest
+
+  // ifTrue: with true condition propagates mutation
+  testIfTrueWithTrue =>
+    result := ConditionalLocalMutation new testIfTrueSimple: true
+    self assert: result equals: 2
+
+  // ifTrue: with false condition does NOT propagate mutation
+  testIfTrueWithFalse =>
+    result := ConditionalLocalMutation new testIfTrueSimple: false
+    self assert: result equals: 1
+
+  // ifFalse: with false condition propagates mutation
+  testIfFalseWithFalse =>
+    result := ConditionalLocalMutation new testIfFalseSimple: false
+    self assert: result equals: 2
+
+  // ifFalse: with true condition does NOT propagate mutation
+  testIfFalseWithTrue =>
+    result := ConditionalLocalMutation new testIfFalseSimple: true
+    self assert: result equals: 1
+
+  // ifTrue:ifFalse: with true condition takes true branch
+  testIfTrueIfFalseWithTrue =>
+    result := ConditionalLocalMutation new testIfTrueIfFalse: true
+    self assert: result equals: 2
+
+  // ifTrue:ifFalse: with false condition takes false branch
+  testIfTrueIfFalseWithFalse =>
+    result := ConditionalLocalMutation new testIfTrueIfFalse: false
+    self assert: result equals: 3
+
+  // Multiple captured mutations in one block
+  testMultipleMutationsTrue =>
+    result := ConditionalLocalMutation new testMultipleMutations: true
+    self assert: result equals: 22
+
+  // Multiple captured mutations — false branch preserves originals
+  testMultipleMutationsFalse =>
+    result := ConditionalLocalMutation new testMultipleMutations: false
+    self assert: result equals: 11
+
+  // Mutation with expression referencing the original value
+  testMutationWithExpressionTrue =>
+    result := ConditionalLocalMutation new testMutationWithExpression: true
+    self assert: result equals: 15
+
+  // Sequential conditionals both true
+  testSequentialBothTrue =>
+    result := ConditionalLocalMutation new testSequentialConditionals: true and: true
+    self assert: result equals: 11
+
+  // Sequential conditionals first true only
+  testSequentialFirstTrueOnly =>
+    result := ConditionalLocalMutation new testSequentialConditionals: true and: false
+    self assert: result equals: 1
+
+  // Sequential conditionals second true only
+  testSequentialSecondTrueOnly =>
+    result := ConditionalLocalMutation new testSequentialConditionals: false and: true
+    self assert: result equals: 10

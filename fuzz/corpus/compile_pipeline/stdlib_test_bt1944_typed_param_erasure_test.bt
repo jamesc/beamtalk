@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1944: Type annotations on method params should be erasable.
+// Adding `:: Integer | Nil` should NOT change runtime behavior.
+
+TestCase subclass: TypedParamErasureTest
+  field: actor = nil
+
+  setUp => self withActor: BT1944TypedParamActor spawn
+
+  tearDown => self.actor isNil ifFalse: [self.actor stop]
+
+  testUntypedParamNil =>
+    self.actor doUntyped: nil
+    self assert: self.actor count equals: 1
+
+  testTypedParamNil =>
+    self.actor doTyped: nil
+    self assert: self.actor count equals: 1
+
+  testTypedObjectParamNil =>
+    self.actor doTypedObject: nil
+    self assert: self.actor count equals: 1
+
+  testTypedParamInteger =>
+    self.actor doTyped: 42
+    self assert: self.actor count equals: 1
