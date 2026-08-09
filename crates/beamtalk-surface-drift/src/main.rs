@@ -35,6 +35,15 @@ const PARITY_DOC: &str = "docs/development/surface-parity.md";
 const REPL_OPS_DIR: &str = "runtime/apps/beamtalk_workspace/src";
 const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server.rs";
 const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/mod.rs";
+/// BT-3083: the single source of the REPL meta-command vocabulary — every
+/// `":cmd"` name/alias tab-completion offers lives in this table
+/// (`commands::REPL_COMMAND_TABLE`), and `REPL_DISPATCH`'s `classify_command`
+/// resolves against it by referencing each table constant (`commands::EXIT`,
+/// `commands::HELP`, …). Scanning this file (rather than `REPL_DISPATCH`'s
+/// match arms, which no longer contain the alias string literals) is what
+/// makes `code.repl_meta` reflect "the completion list" side of the parity
+/// doc check and the dispatch-coverage check (`check_drift` rule 4b) below.
+const REPL_COMMANDS_TABLE: &str = "crates/beamtalk-cli/src/commands/repl/commands.rs";
 const LSP_SERVER: &str = "crates/beamtalk-lsp/src/server.rs";
 
 fn main() -> ExitCode {
@@ -418,8 +427,16 @@ struct CodeInventory {
     repl_ops: BTreeSet<String>,
     /// MCP tool function names from `#[tool(...)]` attributes.
     mcp_tools: BTreeSet<String>,
-    /// REPL meta-commands dispatched by `handle_repl_command`.
+    /// REPL meta-command name/alias literals from `commands::REPL_COMMAND_TABLE`
+    /// — the tab-completion vocabulary (BT-3083).
     repl_meta: BTreeSet<String>,
+    /// `ReplCommandSpec` constant identifiers declared in `REPL_COMMANDS_TABLE`
+    /// (e.g. `EXIT`, `HELP`) — used with `repl_command_dispatch_refs` to check
+    /// the completion table against the dispatcher (BT-3083).
+    repl_command_consts: BTreeSet<String>,
+    /// `commands::IDENT` identifiers referenced anywhere in `REPL_DISPATCH`
+    /// (`classify_command`'s recognition step).
+    repl_command_dispatch_refs: BTreeSet<String>,
     /// LSP capabilities (e.g. `textDocument/hover`) wired into
     /// `ServerCapabilities`.
     lsp_caps: BTreeSet<String>,
@@ -430,7 +447,8 @@ impl CodeInventory {
         let mut inv = CodeInventory::default();
         inv.scan_repl_ops(&repo_root.join(REPL_OPS_DIR))?;
         inv.scan_mcp_tools(&repo_root.join(MCP_SERVER))?;
-        inv.scan_repl_meta(&repo_root.join(REPL_DISPATCH))?;
+        inv.scan_repl_meta(&repo_root.join(REPL_COMMANDS_TABLE))?;
+        inv.scan_repl_command_dispatch(&repo_root.join(REPL_DISPATCH))?;
         inv.scan_lsp_caps(&repo_root.join(LSP_SERVER))?;
         // Sanity-check: if any scanner found zero items, the heuristic may
         // have broken. Fail loudly rather than producing false-positive drift
@@ -449,8 +467,16 @@ impl CodeInventory {
         }
         if inv.repl_meta.is_empty() {
             return Err(
-                "scanner found 0 REPL meta-commands — the handle_repl_command() \
+                "scanner found 0 REPL meta-commands — the commands::REPL_COMMAND_TABLE \
                  pattern may have changed. Update the REPL scanner in beamtalk-surface-drift."
+                    .into(),
+            );
+        }
+        if inv.repl_command_consts.is_empty() || inv.repl_command_dispatch_refs.is_empty() {
+            return Err(
+                "scanner found 0 REPL command consts or dispatch references — the \
+                 `pub(crate) const IDENT: ReplCommandSpec` / `commands::IDENT` patterns \
+                 may have changed. Update the REPL scanner in beamtalk-surface-drift."
                     .into(),
             );
         }
@@ -497,6 +523,19 @@ impl CodeInventory {
         let text = fs::read_to_string(path)
             .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
         extract_repl_meta(&text, &mut self.repl_meta);
+        extract_repl_command_consts(&text, &mut self.repl_command_consts);
+        Ok(())
+    }
+
+    /// Scans `REPL_DISPATCH` for `commands::IDENT` references — the set of
+    /// `ReplCommandSpec` constants `classify_command` actually consults.
+    /// Paired with `repl_command_consts` (from `REPL_COMMANDS_TABLE`) in
+    /// `check_drift` to catch a completion-table entry with no dispatch
+    /// reference (BT-3083's `:actors`/`:kill`/`:inspect`/`:sessions` bug).
+    fn scan_repl_command_dispatch(&mut self, path: &Path) -> Result<(), String> {
+        let text = fs::read_to_string(path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        extract_repl_command_dispatch_refs(&text, &mut self.repl_command_dispatch_refs);
         Ok(())
     }
 
@@ -632,37 +671,24 @@ fn extract_async_fn_name(line: &str) -> Option<String> {
     }
 }
 
-/// CLI scanner — match `":<word>"` literals appearing inside the
-/// `handle_repl_command` function body. We delimit by the function header
-/// and the first closing brace at column 0 after it.
+/// Truncates `REPL_COMMANDS_TABLE`'s (`commands.rs`) source at its first
+/// `#[cfg(test)]` module, so the scanners below only see the declarative
+/// `ReplCommandSpec` table — not the deliberately-absent-command strings
+/// (`":actors"`, …) or arbitrary probe strings (`":testXYZ"`, …) its own
+/// unit tests construct as literals.
+fn production_portion(text: &str) -> &str {
+    text.find("#[cfg(test)]").map_or(text, |idx| &text[..idx])
+}
+
+/// CLI scanner — match `":<word>"` literals in `REPL_COMMANDS_TABLE`'s
+/// production portion (`commands.rs`, BT-3083). Unlike the old scan of
+/// `handle_repl_command`'s brace-balanced body, this is a whole-file scan up
+/// to the test module: the file is a small, declarative `ReplCommandSpec`
+/// table with no unrelated `"<colon-word>"` string literals there (its
+/// `help:` doc strings never *start* with `:`, so they don't false-match
+/// `extract_meta_literals`'s "quote immediately followed by colon" rule).
 fn extract_repl_meta(text: &str, out: &mut BTreeSet<String>) {
-    let Some(start) = text.find("fn handle_repl_command(") else {
-        return;
-    };
-    let body = &text[start..];
-    // Find first opening `{` after the signature.
-    let Some(open_idx) = body.find('{') else {
-        return;
-    };
-    let body = &body[open_idx..];
-    // Walk forward, balancing braces.
-    let mut depth: i32 = 0;
-    let mut end: usize = body.len();
-    for (idx, c) in body.char_indices() {
-        match c {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = idx + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let fn_body = &body[..end];
-    for line in fn_body.lines() {
+    for line in production_portion(text).lines() {
         let trimmed = line.trim_start();
         if trimmed.starts_with("//") {
             continue;
@@ -670,6 +696,51 @@ fn extract_repl_meta(text: &str, out: &mut BTreeSet<String>) {
         for cmd in extract_meta_literals(line) {
             out.insert(cmd);
         }
+    }
+}
+
+/// Collect `pub(crate) const IDENT: ReplCommandSpec = ...` identifiers from
+/// `REPL_COMMANDS_TABLE` (`commands.rs`) — excludes `REPL_COMMAND_TABLE`
+/// itself, which is a `&[&ReplCommandSpec]`, not a `ReplCommandSpec`.
+fn extract_repl_command_consts(text: &str, out: &mut BTreeSet<String>) {
+    for line in production_portion(text).lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("pub(crate) const ") else {
+            continue;
+        };
+        let Some(colon_idx) = rest.find(':') else {
+            continue;
+        };
+        let ident = rest[..colon_idx].trim();
+        if rest[colon_idx + 1..]
+            .trim_start()
+            .starts_with("ReplCommandSpec")
+        {
+            out.insert(ident.to_string());
+        }
+    }
+}
+
+/// Collect every `commands::IDENT` reference in `REPL_DISPATCH`
+/// (`crates/beamtalk-cli/src/commands/repl/mod.rs`) — the set of
+/// `ReplCommandSpec` table constants `classify_command` actually consults
+/// when recognising a line.
+fn extract_repl_command_dispatch_refs(text: &str, out: &mut BTreeSet<String>) {
+    let needle = "commands::";
+    let mut rest = text;
+    while let Some(idx) = rest.find(needle) {
+        let after = &rest[idx + needle.len()..];
+        let ident_len = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(after.len());
+        let ident = &after[..ident_len];
+        // Only uppercase-leading identifiers are table constants (module
+        // functions like `commands::all_forms` are lowercase and irrelevant
+        // here).
+        if ident.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            out.insert(ident.to_string());
+        }
+        rest = &after[ident_len..];
     }
 }
 
@@ -952,8 +1023,23 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
     for cmd in &code.repl_meta {
         if !doc.repl_meta.contains(cmd) {
             errors.push(format!(
-                "REPL meta-command `{cmd}` is dispatched in {REPL_DISPATCH} but missing from {PARITY_DOC}. \
+                "REPL meta-command `{cmd}` is declared in {REPL_COMMANDS_TABLE} but missing from {PARITY_DOC}. \
                  Add it to the matching op row or to the `REPL Meta-Command Reference` table."
+            ));
+        }
+    }
+
+    // 4b) BT-3083: every ReplCommandSpec table constant (the completion
+    // vocabulary) must be referenced by classify_command in REPL_DISPATCH —
+    // catches a tab-completable command with no dispatch path, the exact bug
+    // that let `:actors`/`:kill`/`:inspect`/`:sessions` complete with no
+    // dispatch arm behind them.
+    for ident in &code.repl_command_consts {
+        if !code.repl_command_dispatch_refs.contains(ident) {
+            errors.push(format!(
+                "REPL command `commands::{ident}` is declared in {REPL_COMMANDS_TABLE} \
+                 (tab-completable) but classify_command in {REPL_DISPATCH} never references \
+                 `commands::{ident}` — it would tab-complete with no dispatch path."
             ));
         }
     }
@@ -972,6 +1058,85 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // BT-3083: REPL command table <-> dispatch cross-check scanners.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn production_portion_stops_at_test_module() {
+        let src = "const A: u8 = 1;\n#[cfg(test)]\nmod tests {\n    const B: u8 = 2;\n}\n";
+        assert_eq!(production_portion(src), "const A: u8 = 1;\n");
+    }
+
+    #[test]
+    fn extract_repl_command_consts_finds_spec_constants_only() {
+        let src = r#"
+pub(crate) const HELP: ReplCommandSpec = ReplCommandSpec {
+    name: ":help",
+    aliases: &[":h", ":?"],
+    help: "docs",
+    takes_class_expr_arg: true,
+};
+
+pub(crate) const REPL_COMMAND_TABLE: &[&ReplCommandSpec] = &[&HELP];
+"#;
+        let mut out = BTreeSet::new();
+        extract_repl_command_consts(src, &mut out);
+        assert!(out.contains("HELP"));
+        // The table slice itself is not a ReplCommandSpec — must be excluded.
+        assert!(!out.contains("REPL_COMMAND_TABLE"));
+    }
+
+    #[test]
+    fn extract_repl_command_consts_ignores_test_module_constants() {
+        let src = "pub(crate) const HELP: ReplCommandSpec = ReplCommandSpec { name: \":help\", aliases: &[], help: \"\", takes_class_expr_arg: false };\n\
+                   #[cfg(test)]\nmod tests {\n    const NOT_A_COMMAND: ReplCommandSpec = HELP;\n}\n";
+        let mut out = BTreeSet::new();
+        extract_repl_command_consts(src, &mut out);
+        assert!(out.contains("HELP"));
+        assert!(!out.contains("NOT_A_COMMAND"));
+    }
+
+    #[test]
+    fn extract_repl_command_dispatch_refs_finds_uppercase_idents() {
+        let src = "if commands::EXIT.is_form(word) { }\nif commands::HELP.is_form(word) { }\nfor f in commands::all_forms() {}\n";
+        let mut out = BTreeSet::new();
+        extract_repl_command_dispatch_refs(src, &mut out);
+        assert!(out.contains("EXIT"));
+        assert!(out.contains("HELP"));
+        // Lowercase module functions (not table constants) must be excluded.
+        assert!(!out.contains("all_forms"));
+    }
+
+    #[test]
+    fn drift_flags_repl_command_with_no_dispatch_reference() {
+        let doc = ParityDoc::default();
+        let mut code = CodeInventory::default();
+        code.repl_command_consts.insert("GHOST".into());
+        // No matching entry in repl_command_dispatch_refs.
+        let mut errors = Vec::new();
+        check_drift(&doc, &code, &mut errors);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("commands::GHOST") && e.contains("never references"))
+        );
+    }
+
+    #[test]
+    fn drift_clean_when_repl_command_const_is_dispatched() {
+        let doc = ParityDoc::default();
+        let mut code = CodeInventory::default();
+        code.repl_command_consts.insert("EXIT".into());
+        code.repl_command_dispatch_refs.insert("EXIT".into());
+        let mut errors = Vec::new();
+        check_drift(&doc, &code, &mut errors);
+        assert!(
+            !errors.iter().any(|e| e.contains("EXIT")),
+            "unexpected errors: {errors:?}"
+        );
+    }
 
     #[test]
     fn parse_cell_treats_via_and_missing_as_surface_specific() {

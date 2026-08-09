@@ -1964,3 +1964,59 @@ handle_list_classes_non_binary_filter_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ErrMsg = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown filter">>)).
+
+%%====================================================================
+%% is_identifier_char/1 — shared word-boundary conformance corpus (BT-3083)
+%%====================================================================
+
+%% BT-3083 conformance: every case in the shared corpus must classify
+%% identically here and in the Rust side's `is_completion_word_char`
+%% (`crates/beamtalk-core/src/source_analysis/mod.rs`). The corpus is the
+%% single source of truth both implementations are pinned to; the Rust side
+%% asserts the identical cases in
+%% `source_analysis::completion_word_boundary_tests::completion_word_char_matches_shared_corpus`.
+is_identifier_char_matches_shared_corpus_test() ->
+    Cases = load_word_boundary_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            [Char | _] = unicode:characters_to_list(maps:get(<<"char">>, Case)),
+            Expected = maps:get(<<"is_word_char">>, Case),
+            Why = maps:get(<<"why">>, Case, <<>>),
+            ?assertEqual(
+                Expected,
+                beamtalk_repl_ops_dev:is_identifier_char(Char),
+                {corpus_mismatch, Char, Why}
+            )
+        end,
+        Cases
+    ).
+
+%% Load the shared word-boundary conformance corpus from the repo tree. Walks
+%% up from the test CWD to the project root (the dir holding `Cargo.toml`),
+%% then reads the fixture both surfaces share.
+load_word_boundary_corpus() ->
+    Root = find_word_boundary_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "completion_word_boundary_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).
+
+find_word_boundary_corpus_root("/") ->
+    error(project_root_not_found);
+find_word_boundary_corpus_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_word_boundary_corpus_root(filename:dirname(Dir))
+    end.

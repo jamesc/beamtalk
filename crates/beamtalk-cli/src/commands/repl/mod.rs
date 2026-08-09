@@ -74,6 +74,7 @@ const RETRY_DELAY_MS: u64 = 500;
 
 pub(crate) mod client;
 pub(crate) mod color;
+pub(crate) mod commands;
 pub(crate) mod display;
 pub(crate) mod helper;
 pub(crate) mod process;
@@ -606,141 +607,197 @@ enum CommandResult {
     NotACommand,
 }
 
+/// Which branch of REPL-command handling a line resolves to, without
+/// executing any client I/O (BT-3083).
+///
+/// [`classify_command`] is the single recognition step both the real
+/// dispatcher (`handle_repl_command`) and a table-completeness test
+/// (`every_completable_form_dispatches_when_submitted_bare`, below) consult,
+/// built from `commands::REPL_COMMAND_TABLE` rather than scattering alias spellings
+/// across match-arm literals — the drift that let `:actors`/`:kill`/
+/// `:inspect`/`:sessions` complete with no dispatch, and `:interrupt`/
+/// `:recheck` dispatch with no completion.
+#[derive(Debug, PartialEq, Eq)]
+enum CommandAction<'a> {
+    Exit,
+    Help,
+    HelpTopic(&'a str),
+    Clear,
+    Bindings,
+    Sync,
+    SyncArgsError,
+    UnloadUsage,
+    Unload(&'a str),
+    Test(&'a str),
+    ShowCodegenUsage,
+    ShowCodegen(&'a str),
+    Interrupt,
+    Flush,
+    FlushArg(&'a str),
+    Changes,
+    Dirty,
+    RecheckImage,
+    RecheckUsage,
+}
+
+/// Classify a line as a known REPL meta-command (or `None` if it isn't one),
+/// using `commands::REPL_COMMAND_TABLE` to resolve the command word (and its
+/// aliases) — see [`CommandAction`].
+fn classify_command(line: &str) -> Option<CommandAction<'_>> {
+    let word = line.split(' ').next().unwrap_or(line);
+    let bare = word == line;
+
+    if commands::EXIT.is_form(word) {
+        return bare.then_some(CommandAction::Exit);
+    }
+    if commands::HELP.is_form(word) {
+        return Some(if bare {
+            CommandAction::Help
+        } else {
+            CommandAction::HelpTopic(commands::HELP.arg(line)?)
+        });
+    }
+    if commands::CLEAR.is_form(word) {
+        return bare.then_some(CommandAction::Clear);
+    }
+    if commands::BINDINGS.is_form(word) {
+        return bare.then_some(CommandAction::Bindings);
+    }
+    if commands::SYNC.is_form(word) {
+        return Some(if bare {
+            CommandAction::Sync
+        } else {
+            CommandAction::SyncArgsError
+        });
+    }
+    if commands::UNLOAD.is_form(word) {
+        return Some(if bare {
+            CommandAction::UnloadUsage
+        } else {
+            CommandAction::Unload(commands::UNLOAD.arg(line)?)
+        });
+    }
+    if commands::TEST.is_form(word) {
+        return Some(if bare {
+            CommandAction::Test("")
+        } else {
+            CommandAction::Test(commands::TEST.arg(line)?)
+        });
+    }
+    if commands::SHOW_CODEGEN.is_form(word) {
+        return Some(if bare {
+            CommandAction::ShowCodegenUsage
+        } else {
+            CommandAction::ShowCodegen(commands::SHOW_CODEGEN.arg(line)?)
+        });
+    }
+    if commands::INTERRUPT.is_form(word) {
+        return bare.then_some(CommandAction::Interrupt);
+    }
+    if commands::FLUSH.is_form(word) {
+        return Some(if bare {
+            CommandAction::Flush
+        } else {
+            CommandAction::FlushArg(commands::FLUSH.arg(line)?)
+        });
+    }
+    if commands::CHANGES.is_form(word) {
+        return bare.then_some(CommandAction::Changes);
+    }
+    if commands::DIRTY.is_form(word) {
+        return bare.then_some(CommandAction::Dirty);
+    }
+    if commands::RECHECK.is_form(word) {
+        return match (bare, line) {
+            (true, _) => Some(CommandAction::RecheckUsage),
+            (false, ":recheck image") => Some(CommandAction::RecheckImage),
+            (false, _) => None,
+        };
+    }
+    None
+}
+
 /// Dispatch a single REPL command (lines starting with `:`).
 ///
 /// Extracted from the main loop to reduce nesting depth. Returns
 /// [`CommandResult::NotACommand`] when the line is not a recognised command
 /// so the caller can fall through to expression accumulation/evaluation.
 fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
-    match line {
-        ":exit" | ":quit" | ":q" => return CommandResult::Exit,
-        ":help" | ":h" | ":?" => {
-            print_help();
-            return CommandResult::Handled;
-        }
-        _ if line.starts_with(":help ") || line.starts_with(":h ") => {
-            handle_help_topic(line, client);
-            return CommandResult::Handled;
-        }
-        ":clear" => {
-            handle_clear(client);
-            return CommandResult::Handled;
-        }
-        ":bindings" | ":b" => {
-            handle_bindings(client);
-            return CommandResult::Handled;
-        }
-        ":sync" | ":s" => {
-            handle_sync(client);
-            return CommandResult::Handled;
-        }
-        _ if line.starts_with(":sync ") || line.starts_with(":s ") => {
+    let Some(action) = classify_command(line) else {
+        return CommandResult::NotACommand;
+    };
+
+    match action {
+        CommandAction::Exit => return CommandResult::Exit,
+        CommandAction::Help => print_help(),
+        CommandAction::HelpTopic(args) => handle_help_topic(args, client),
+        CommandAction::Clear => handle_clear(client),
+        CommandAction::Bindings => handle_bindings(client),
+        CommandAction::Sync => handle_sync(client),
+        CommandAction::SyncArgsError => {
             eprintln!(":sync takes no arguments — it syncs the project from beamtalk.toml");
-            return CommandResult::Handled;
         }
-        _ if line.starts_with(":unload ") => {
-            let class_name = extract_command_arg(line, ":unload ", None)
-                .trim()
-                .to_string();
+        CommandAction::UnloadUsage => eprintln!("Usage: :unload <ClassName>"),
+        CommandAction::Unload(class_name) => {
             if class_name.is_empty() {
                 eprintln!("Usage: :unload <ClassName>");
             } else {
-                match client.unload(&class_name) {
+                match client.unload(class_name) {
                     Ok(response) => display_eval_response(&response),
                     Err(e) => eprintln!("Error: {e}"),
                 }
             }
-            return CommandResult::Handled;
         }
-        ":unload" => {
-            eprintln!("Usage: :unload <ClassName>");
-            return CommandResult::Handled;
-        }
-        _ if line.starts_with(":test ") || line.starts_with(":t ") => {
-            let raw = extract_command_arg(line, ":test ", Some(":t "));
-            let class_name = raw.trim();
+        CommandAction::Test(class_name) => {
             let expr = if class_name.is_empty() {
                 "Workspace test".to_string()
             } else {
                 format!("Workspace test: {class_name}")
             };
             sync_tests_then_run(client, &expr);
-            return CommandResult::Handled;
         }
-        ":test" | ":t" => {
-            sync_tests_then_run(client, "Workspace test");
-            return CommandResult::Handled;
-        }
-        ":show-codegen" | ":sc" => {
-            eprintln!("Usage: :show-codegen <expression>");
-            return CommandResult::Handled;
-        }
-        _ if line.starts_with(":show-codegen ") || line.starts_with(":sc ") => {
-            handle_show_codegen(line, client);
-            return CommandResult::Handled;
-        }
-        ":interrupt" | ":int" => {
-            handle_interrupt(client);
-            return CommandResult::Handled;
-        }
-        ":flush" => {
-            // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace flush`.
-            eval_and_display(client, "Workspace flush");
-            return CommandResult::Handled;
-        }
-        _ if line.starts_with(":flush ") => {
+        CommandAction::ShowCodegenUsage => eprintln!("Usage: :show-codegen <expression>"),
+        CommandAction::ShowCodegen(code) => handle_show_codegen(code, client),
+        CommandAction::Interrupt => handle_interrupt(client),
+        // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace flush`.
+        CommandAction::Flush => eval_and_display(client, "Workspace flush"),
+        CommandAction::FlushArg(selector) => {
             // BT-2287 / ADR 0082 Phase 3: `:flush <selector>` desugars to
             // `Workspace flush: <selector>`. The selector is passed through
             // verbatim so users can pass a Class (`Counter`), a Symbol
             // (`#'new-class'`), or a Dictionary (`#{ #file => "path" }`).
-            let selector = extract_command_arg(line, ":flush ", None);
             if selector.is_empty() {
                 eprintln!("Usage: :flush [<Class>|#kind|#{{ #file => \"path\" }}]");
             } else {
                 eval_and_display(client, &format!("Workspace flush: {selector}"));
             }
-            return CommandResult::Handled;
         }
-        ":changes" => {
-            // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes`.
-            eval_and_display(client, "Workspace changes");
-            return CommandResult::Handled;
-        }
-        ":dirty" => {
-            // BT-2287 / ADR 0082 Phase 3: REPL alias for
-            // `Workspace changes dirtyMethods` — the per-class set of dirty
-            // selectors. Pairs with `:changes` (full summary) and answers
-            // "what specifically has changed?".
-            eval_and_display(client, "Workspace changes dirtyMethods");
-            return CommandResult::Handled;
-        }
-        _ if line == ":recheck image" || line == ":recheck" => {
-            handle_recheck(line, client);
-            return CommandResult::Handled;
-        }
-        _ => {}
+        // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes`.
+        CommandAction::Changes => eval_and_display(client, "Workspace changes"),
+        // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes
+        // dirtyMethods` — the per-class set of dirty selectors. Pairs with
+        // `:changes` (full summary) and answers "what specifically changed?".
+        CommandAction::Dirty => eval_and_display(client, "Workspace changes dirtyMethods"),
+        // `:recheck image` (REPL alias for `Workspace recheckImage`, ADR 0105
+        // Phase 3, BT-2782); bare `:recheck` shows the usage hint.
+        CommandAction::RecheckImage => eval_and_display(client, "Workspace recheckImage"),
+        CommandAction::RecheckUsage => eprintln!("Usage: :recheck image"),
     }
 
-    CommandResult::NotACommand
-}
-
-/// Handle `:recheck image` (REPL alias for `Workspace recheckImage`, ADR 0105
-/// Phase 3, BT-2782) and the bare `:recheck` usage hint.
-fn handle_recheck(line: &str, client: &mut ReplClient) {
-    if line == ":recheck image" {
-        eval_and_display(client, "Workspace recheckImage");
-    } else {
-        eprintln!("Usage: :recheck image");
-    }
+    CommandResult::Handled
 }
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
 ///
+/// `args` is the already-extracted, trimmed argument (BT-3083: extraction
+/// now happens once in `classify_command`, driven by `commands::HELP`'s
+/// registered aliases — `:help`, `:h`, and `:? ` all reach this, closing a
+/// pre-existing gap where `:? <Class>` didn't dispatch help despite
+/// tab-completing as if it did).
+///
 /// BT-2091: Routes through `Beamtalk help: ClassName` evaluation rather
 /// than the deprecated `docs` protocol op (which has been removed).
-fn handle_help_topic(line: &str, client: &mut ReplClient) {
-    let args = extract_command_arg(line, ":help ", Some(":h "));
-
+fn handle_help_topic(args: &str, client: &mut ReplClient) {
     if args.is_empty() {
         print_help();
         return;
@@ -965,8 +1022,10 @@ fn sync_tests_then_run(client: &mut ReplClient, test_expr: &str) {
 }
 
 /// Handle `:show-codegen <expr>` -- display generated Core Erlang.
-fn handle_show_codegen(line: &str, client: &mut ReplClient) {
-    let code = extract_command_arg(line, ":show-codegen ", Some(":sc "));
+///
+/// `code` is the already-extracted, trimmed argument (BT-3083: see
+/// `handle_help_topic`'s doc comment for why extraction moved out of here).
+fn handle_show_codegen(code: &str, client: &mut ReplClient) {
     if code.is_empty() {
         eprintln!("Usage: :show-codegen <expression>");
         return;
@@ -1256,21 +1315,6 @@ pub(crate) fn repl_loop(
     let _ = rl.save_history(&history_file);
 
     Ok(())
-}
-
-/// Extracts the argument from a REPL command with long and optional short forms.
-///
-/// Returns the trimmed argument string, or an empty string if the command
-/// doesn't match either prefix.
-pub(crate) fn extract_command_arg<'a>(
-    line: &'a str,
-    long_prefix: &str,
-    short_prefix: Option<&str>,
-) -> &'a str {
-    line.strip_prefix(long_prefix)
-        .or_else(|| short_prefix.and_then(|s| line.strip_prefix(s)))
-        .unwrap_or("")
-        .trim()
 }
 
 #[cfg(test)]
@@ -1690,52 +1734,74 @@ mod tests {
         assert_eq!(result, Some("clinode@localhost".to_string()));
     }
 
+    // BT-3083: argument extraction moved from a standalone `extract_command_arg`
+    // helper into `commands::ReplCommandSpec::arg` (table-driven, covers name +
+    // every alias in one place). `commands.rs` has its own unit tests for that
+    // method directly; the tests below exercise it through `classify_command`,
+    // the actual dispatch entry point.
+
     #[test]
-    fn extract_command_arg_long_prefix() {
+    fn classify_command_extracts_arg_for_long_prefix() {
         assert_eq!(
-            extract_command_arg(":load foo.bt", ":load ", Some(":l ")),
-            "foo.bt"
+            classify_command(":unload foo.bt"),
+            Some(CommandAction::Unload("foo.bt"))
         );
     }
 
     #[test]
-    fn extract_command_arg_short_prefix() {
+    fn classify_command_extracts_arg_for_short_alias() {
         assert_eq!(
-            extract_command_arg(":l foo.bt", ":load ", Some(":l ")),
-            "foo.bt"
+            classify_command(":t Counter"),
+            Some(CommandAction::Test("Counter"))
         );
     }
 
     #[test]
-    fn extract_command_arg_trims_whitespace() {
+    fn classify_command_trims_whitespace_in_arg() {
         assert_eq!(
-            extract_command_arg(":load   foo.bt  ", ":load ", Some(":l ")),
-            "foo.bt"
+            classify_command(":unload   Counter  "),
+            Some(CommandAction::Unload("Counter"))
         );
     }
 
     #[test]
-    fn extract_command_arg_no_short_prefix() {
+    fn classify_command_unrecognized_word_is_not_a_command() {
+        assert_eq!(classify_command(":other cmd"), None);
+    }
+
+    #[test]
+    fn classify_command_bare_unload_is_usage() {
         assert_eq!(
-            extract_command_arg(":unload counter", ":unload ", None),
-            "counter"
+            classify_command(":unload"),
+            Some(CommandAction::UnloadUsage)
         );
     }
 
     #[test]
-    fn extract_command_arg_no_match_returns_empty() {
-        assert_eq!(extract_command_arg(":other cmd", ":load ", Some(":l ")), "");
+    fn classify_command_trailing_space_only_is_empty_arg() {
+        // `:unload ` (trailing space, nothing after) is a distinct case from
+        // bare `:unload` — both end up showing usage, but via different
+        // `CommandAction` variants (`Unload("")` vs `UnloadUsage`).
+        assert_eq!(
+            classify_command(":unload "),
+            Some(CommandAction::Unload(""))
+        );
     }
 
+    /// BT-3083 regression guard: every form (name or alias) offered by
+    /// tab-completion (`commands::all_forms`, consumed by `helper.rs`) must
+    /// dispatch to *something* when submitted bare — the exact bug that let
+    /// `:actors`/`:kill`/`:inspect`/`:sessions` complete with no dispatch arm
+    /// (parse-erroring as Beamtalk source) while `:interrupt`/`:recheck`
+    /// dispatched but didn't complete.
     #[test]
-    fn extract_command_arg_empty_argument() {
-        // Command with trailing space but no argument
-        assert_eq!(extract_command_arg(":load ", ":load ", Some(":l ")), "");
-    }
-
-    #[test]
-    fn extract_command_arg_whitespace_only_argument() {
-        assert_eq!(extract_command_arg(":inspect   ", ":inspect ", None), "");
+    fn every_completable_form_dispatches_when_submitted_bare() {
+        for form in commands::all_forms() {
+            assert!(
+                classify_command(form).is_some(),
+                "{form:?} tab-completes but classify_command finds no dispatch"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1749,7 +1815,7 @@ mod tests {
     /// to. Mirrors the format used in `handle_repl_command` so the tests catch
     /// translation drift.
     fn flush_expr_for(line: &str) -> Option<String> {
-        let selector = extract_command_arg(line, ":flush ", None);
+        let selector = commands::FLUSH.arg(line).unwrap_or("");
         if selector.is_empty() {
             None
         } else {
@@ -1790,16 +1856,18 @@ mod tests {
         );
     }
 
-    /// Helper mirroring `handle_repl_command`'s bare-alias dispatch table.
-    /// Keep this in sync with the `":flush" | ":changes" | ":dirty" |
-    /// ":recheck image"` arms in `handle_repl_command` — the tests below pin
-    /// the translation contract so drift in the dispatch table fails CI.
+    /// Maps a line to the Beamtalk expression `handle_repl_command` evaluates
+    /// for it, by going through the real `classify_command` (BT-3083) rather
+    /// than a hand-maintained mirror — so this test can only drift from
+    /// production behaviour if `handle_repl_command`'s own match arm changes
+    /// without a matching `CommandAction` (which the compiler's exhaustive
+    /// match already forbids).
     fn bare_alias_expr(line: &str) -> Option<&'static str> {
-        match line {
-            ":flush" => Some("Workspace flush"),
-            ":changes" => Some("Workspace changes"),
-            ":dirty" => Some("Workspace changes dirtyMethods"),
-            ":recheck image" => Some("Workspace recheckImage"),
+        match classify_command(line)? {
+            CommandAction::Flush => Some("Workspace flush"),
+            CommandAction::Changes => Some("Workspace changes"),
+            CommandAction::Dirty => Some("Workspace changes dirtyMethods"),
+            CommandAction::RecheckImage => Some("Workspace recheckImage"),
             _ => None,
         }
     }

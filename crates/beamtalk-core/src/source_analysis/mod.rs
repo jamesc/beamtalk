@@ -112,6 +112,43 @@ pub fn is_valid_selector(sel: &str) -> bool {
     }
 }
 
+/// Returns `true` if `c` should be treated as part of a completion "word" —
+/// the token tab-completion / hover word-boundary scanners use to find the
+/// prefix currently being typed.
+///
+/// Deliberately broader than a strict lexical identifier: `:` is included so
+/// keyword selectors like `ifTrue:` and `ifTrue:ifFalse:` complete as a
+/// single unit, and `@` so package-qualified names like `json@Parser` do too
+/// (BT-1659). This is the canonical Rust definition — the CLI REPL's
+/// tab-completer (`crates/beamtalk-cli/src/commands/repl/helper.rs`) and the
+/// LSP's static completion provider (`queries::completion_provider`) both
+/// delegate here rather than keeping their own copies (BT-3083).
+///
+/// The live REPL/MCP completion engine (`beamtalk_repl_ops_dev:is_identifier_char/1`
+/// in `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`) cannot
+/// depend on this Rust crate, so it re-implements the identical rule in
+/// Erlang; a shared corpus fixture
+/// (`runtime/apps/beamtalk_workspace/test/fixtures/completion_word_boundary_corpus.json`)
+/// pins both implementations to the same cases so the two can't silently
+/// drift apart — see `completion_word_char_matches_shared_corpus` below and
+/// `beamtalk_repl_ops_dev_tests:is_identifier_char_matches_shared_corpus_test/0`.
+pub fn is_completion_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == ':' || c == '@'
+}
+
+/// Finds the byte offset where the completion "word" ending at `text` began,
+/// scanning backward from the end of `text` for the first character that
+/// isn't [`is_completion_word_char`].
+///
+/// Returns `0` if `text` is a single word (or empty) — the whole string is
+/// the word.
+pub fn completion_word_start(text: &str) -> usize {
+    text.char_indices()
+        .rev()
+        .find(|&(_, c)| !is_completion_word_char(c))
+        .map_or(0, |(i, c)| i + c.len_utf8())
+}
+
 #[cfg(test)]
 mod naming_tests {
     use super::*;
@@ -182,5 +219,64 @@ mod naming_tests {
         assert!(!is_valid_selector("foo+"));
         assert!(!is_valid_selector("has space"));
         assert!(!is_valid_selector("bad!char"));
+    }
+}
+
+#[cfg(test)]
+mod completion_word_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn selector_completes_as_one_word() {
+        assert_eq!(completion_word_start("ifTrue:"), 0);
+        assert_eq!(completion_word_start("Integer ifT:"), 8);
+    }
+
+    #[test]
+    fn qualified_name_completes_as_one_word() {
+        assert_eq!(completion_word_start("json@Parser"), 0);
+        assert_eq!(completion_word_start("json@Parser pa"), 12);
+    }
+
+    #[test]
+    fn plain_identifier_boundary() {
+        assert_eq!(completion_word_start("obj message"), 4);
+        assert_eq!(completion_word_start(""), 0);
+    }
+
+    /// BT-3083 conformance: every case in the shared corpus must classify
+    /// identically here and in the Erlang REPL/MCP completion engine's
+    /// `is_identifier_char/1`. The corpus is the single source of truth both
+    /// implementations are pinned to; the Erlang side asserts the identical
+    /// cases in
+    /// `beamtalk_repl_ops_dev_tests:is_identifier_char_matches_shared_corpus_test/0`.
+    #[test]
+    fn completion_word_char_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join(
+                "runtime/apps/beamtalk_workspace/test/fixtures/completion_word_boundary_corpus.json",
+            );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let ch_str = case["char"].as_str().expect("case.char is a string");
+            let ch = ch_str.chars().next().expect("case.char is non-empty");
+            let expected = case["is_word_char"]
+                .as_bool()
+                .expect("case.is_word_char is a bool");
+            let why = case["why"].as_str().unwrap_or("");
+            assert_eq!(
+                is_completion_word_char(ch),
+                expected,
+                "corpus mismatch for char {ch:?} ({why})"
+            );
+        }
     }
 }

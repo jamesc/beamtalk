@@ -302,9 +302,16 @@ fn compute_erlang_completions(
     }
     None
 }
-/// Returns `true` if `b` is a valid Beamtalk identifier character (letter, digit, or underscore).
+/// Returns `true` if `b` is a completion word-boundary character.
+///
+/// Delegates to [`crate::source_analysis::is_completion_word_char`], the
+/// canonical (char-based) definition shared with the CLI REPL's
+/// tab-completer — this module works with raw source bytes, so it re-wraps
+/// each byte as a `char` (safe here: every caller only ever tests ASCII
+/// bytes, and non-ASCII UTF-8 continuation bytes correctly fall through as
+/// "not a word char" either way). See BT-3083.
 fn is_identifier_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+    crate::source_analysis::is_completion_word_char(b as char)
 }
 /// Detects if the text before cursor ends with `Erlang <module_name>`.
 ///
@@ -412,6 +419,12 @@ fn add_keyword_completions(
     context: &ClassContext<'_>,
     hierarchy: &ClassHierarchy,
 ) {
+    // BT-3083: this static list and the live REPL/MCP completion engine's
+    // `builtin_keywords/0` (`beamtalk_repl_ops_dev.erl`) are two engines that
+    // cannot literally share code (Rust vs. Erlang) but should offer the same
+    // control-flow vocabulary — a keyword missing from one and not the other
+    // is a completion gap on whichever surface is missing it. Keep the two
+    // lists in sync when adding a keyword here.
     let keywords = [
         ("self", "Reference to the current object"),
         ("super", "Reference to the superclass"),
@@ -424,6 +437,14 @@ fn add_keyword_completions(
             "Pattern matching expression, asserted exhaustive (BT-2763 / ADR 0106)",
         ),
         ("if:then:else:", "Conditional expression"),
+        ("ifTrue:", "Conditional expression (Boolean)"),
+        ("ifFalse:", "Conditional expression (Boolean)"),
+        ("ifTrue:ifFalse:", "Conditional expression (Boolean)"),
+        (
+            "whileTrue:",
+            "Loop while the receiver block's condition is true",
+        ),
+        ("timesRepeat:", "Repeat a block a fixed number of times"),
     ];
     for (keyword, doc) in &keywords {
         completions
