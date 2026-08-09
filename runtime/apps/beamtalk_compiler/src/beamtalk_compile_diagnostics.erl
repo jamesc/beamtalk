@@ -45,11 +45,21 @@ protocol markers and silently drops every other line, so the message was
 being lost outright rather than merely unformatted.
 
 BT-3126 extended this module with `format_warnings/1' for the same
-reason on the *warning* path: `beamtalk_build_worker''s Port backend
-passed `report_warnings' to `compile:forms/2', which hits the same
-stdout-not-stderr sink and the same silent-drop, so `compile:forms'
-warnings (e.g. unused-variable warnings in generated Core Erlang) were
-never surfaced at all.
+reason on the *warning* path, fixed in both compile-from-Core-Erlang
+callers:
+
+  * `beamtalk_build_worker' (the `beamtalk build' batch CLI worker)
+    passed `report_warnings' to `compile:forms/2', which hits the same
+    stdout-not-stderr sink and the same silent-drop as the pre-BT-3115
+    error path above.
+  * `beamtalk_compiler_server' (the in-memory Port backend, ADR 0022
+    Phase 3, backing the REPL/LSP/live-compile path) passed neither
+    `report_warnings' nor `return_warnings' at all, so `compile:forms'
+    computed warnings and then discarded them unconditionally — not
+    printed anywhere, not even to stdout.
+
+Either way, `compile:forms' warnings (e.g. unused-variable warnings in
+generated Core Erlang) were never surfaced to the developer.
 """.
 
 -export([format_errors/1, format_warnings/1]).

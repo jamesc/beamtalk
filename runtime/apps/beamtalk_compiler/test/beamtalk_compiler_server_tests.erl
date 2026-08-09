@@ -30,6 +30,23 @@ compile_core_erlang_with_warnings_test() ->
     Result = beamtalk_compiler_server:compile_core_erlang(CoreErlang),
     ?assertMatch({ok, _, _}, Result).
 
+%% BT-3126: this is the actual Port-owning gen_server (ADR 0022 Phase 1,
+%% see moduledoc) backing the REPL/LSP/in-memory compile path. Before the
+%% fix, compile_core_forms/2 passed neither report_warnings nor
+%% return_warnings at all, so compile:forms computed warnings and then
+%% discarded them unconditionally -- not printed anywhere, not even to
+%% stdout. Core Erlang that discards the result of erlang:+/2 via a `do'
+%% sequence triggers sys_core_fold's "ignored result of a call" warning
+%% while still compiling successfully; demonstrates the warning now
+%% reaches stderr.
+compile_core_erlang_warning_reaches_stderr_test() ->
+    CoreErlang = warning_core_erlang(),
+    Captured = beamtalk_stderr_capture:capture(fun() ->
+        Result = beamtalk_compiler_server:compile_core_erlang(CoreErlang),
+        ?assertMatch({ok, bt_server_warn_test, _}, Result)
+    end),
+    ?assertNotEqual(nomatch, binary:match(Captured, <<"Warning:">>)).
+
 compile_core_erlang_scan_error_test() ->
     %% Use a character that core_scan cannot tokenize
     Result = beamtalk_compiler_server:compile_core_erlang(<<"\x00\x01\x02">>),
@@ -616,5 +633,20 @@ unbound_var_core_erlang() ->
         "  'foo'/1 = fun (X) ->\n"
         "    let Y = call 'erlang':'+' (X, State)\n"
         "    in Y\n"
+        "end\n"
+    >>.
+
+%% BT-3126: 'foo'/1 discards the result of `erlang:+/2' via a `do'
+%% sequence -- a genuine `sys_core_fold' "ignored result of a call"
+%% warning, while still compiling successfully.
+warning_core_erlang() ->
+    <<
+        "module 'bt_server_warn_test' ['foo'/1]\n"
+        "  attributes []\n"
+        "  'foo'/1 =\n"
+        "    fun (X) ->\n"
+        "        do\n"
+        "            call 'erlang':'+' (1, 2)\n"
+        "        X\n"
         "end\n"
     >>.

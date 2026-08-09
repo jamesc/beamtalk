@@ -658,7 +658,9 @@ compile_core_erlang({cerl, Etf}) when is_binary(Etf) ->
     %% failure mode.
     try binary_to_term(Etf, [safe]) of
         CoreModule ->
-            compile_core_forms(CoreModule, [from_core, binary, return_errors, clint])
+            compile_core_forms(CoreModule, [
+                from_core, binary, return_errors, return_warnings, clint
+            ])
     catch
         error:badarg ->
             {error, {cerl_decode_error, unsafe_atoms_or_malformed_etf}}
@@ -670,7 +672,7 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
                     compile_core_forms(
-                        CoreModule, [from_core, binary, return_errors, clint]
+                        CoreModule, [from_core, binary, return_errors, return_warnings, clint]
                     );
                 {error, ParseError} ->
                     {error, {core_parse_error, ParseError}}
@@ -687,19 +689,38 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 %% unconditionally on this `from_core' pipeline regardless of `clint'.
 %% `strong_validation'/`basic_validation' were evaluated and are NOT
 %% applicable: both skip code generation, which this path requires.
+%%
+%% BT-3126: both callers above now pass `return_warnings' (previously
+%% neither `report_warnings' nor `return_warnings' was passed at all, so
+%% `compile:forms' silently discarded every warning without printing it
+%% anywhere — worse than `beamtalk_build_worker''s pre-fix
+%% stdout-not-stderr bug, which at least printed *somewhere*). This is the
+%% actual Port-owning gen_server (ADR 0022 Phase 1, see moduledoc) backing
+%% the REPL/LSP/in-memory compile path, so its warnings reach the
+%% developer the same way `beamtalk_build_worker''s do: printed to
+%% `standard_error' via `beamtalk_compile_diagnostics:format_warnings/1'.
+%% `compile_core_erlang/1''s `{ok, atom(), binary()} | {error, term()}'
+%% return contract is unchanged.
 compile_core_forms(CoreModule, Options) ->
     case compile:forms(CoreModule, Options) of
         {ok, ModuleName, Binary} ->
             {ok, ModuleName, Binary};
-        {ok, ModuleName, Binary, _Warnings} ->
+        {ok, ModuleName, Binary, Warnings} ->
+            print_warnings(Warnings),
             {ok, ModuleName, Binary};
-        {error, Errors, _Warnings} ->
+        {error, Errors, Warnings} ->
+            print_warnings(Warnings),
             {error,
                 {core_compile_error, #{
                     message => beamtalk_compile_diagnostics:format_errors(Errors),
                     raw => Errors
                 }}}
     end.
+
+print_warnings([]) ->
+    ok;
+print_warnings(Warnings) ->
+    io:put_chars(standard_error, beamtalk_compile_diagnostics:format_warnings(Warnings)).
 
 %%% gen_server callbacks
 
