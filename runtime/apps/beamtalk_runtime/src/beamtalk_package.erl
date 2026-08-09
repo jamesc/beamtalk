@@ -113,6 +113,15 @@ Returns the package name (binary) for a given class name.
 Extracts the package segment from the BEAM module name (`bt@{pkg}@{class}`)
 via `__beamtalk_meta/0` or from the `.app` class list metadata.
 Returns `nil` if the class is not found or has no package.
+
+Caveat: this calls `beamtalk_object_class:module_name_safe/1` rather than
+`module_name/1` because this function is reachable from inside an ADR 0109
+foreign-process block (directly, or via the unrestricted `Erlang <module>`
+FFI gateway), and an unsafe `gen_server:call` here would risk the deadlock
+shape BT-3052/BT-3054 fixed. That means the `noproc`/`timeout` catch clauses
+below cannot detect a class process killed via an untrappable `kill` signal
+before `terminate/2` ran — see `module_name_safe/1`'s doc for the full
+explanation.
 """.
 -spec package_name(atom()) -> binary() | nil.
 package_name(ClassName) when is_atom(ClassName) ->

@@ -649,6 +649,14 @@ Check whether a class's source file matches the given path.
 Looks up the class in the registry, reads its module's beamtalk_source
 attribute, and checks if the stored path ends with FilePath.
 Returns false if the class is not registered or has no source attribute.
+
+Caveat: this is reachable from inside an ADR 0109 foreign-process block
+(directly, or via the unrestricted `Erlang <module>` FFI gateway), so it
+resolves the module via `beamtalk_object_class:module_name_safe/1` rather
+than an unsafe `gen_server:call`-based precheck. That means the
+`noproc`/`timeout` catches below cannot detect a class process killed via an
+untrappable `kill` signal before `terminate/2` ran — see
+`module_name_safe/1`'s doc for the full explanation.
 """.
 -spec class_source_matches(atom(), binary()) -> boolean().
 class_source_matches(ClassName, FilePath) ->

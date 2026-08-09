@@ -728,6 +728,14 @@ callers such as `SystemNavigation classesInPackage:` — which resolves *every*
 class in a package via `findClass:` — from crashing the whole query on a
 single transiently-unavailable class (nil results are filtered out by the
 caller, consistent with the "stale entries dropped silently" miss policy).
+
+Caveat: this is reachable from inside an ADR 0109 foreign-process block
+(directly, or via the unrestricted `Erlang <module>` FFI gateway), so it
+calls `module_name_safe/1` rather than an unsafe `gen_server:call`-based
+precheck. That means the `noproc`/`timeout` catches above cannot detect a
+class process killed via an untrappable `kill` signal before `terminate/2`
+ran — see `beamtalk_object_class:module_name_safe/1`'s doc for the full
+explanation.
 """.
 -spec class_object_for_pid(atom(), pid()) -> beamtalk_object() | 'nil'.
 class_object_for_pid(ClassName, Pid) ->
