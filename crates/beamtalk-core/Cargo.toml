@@ -41,6 +41,12 @@ serde_json.workspace = true
 # (non-fatal by design), matching the tracing usage already established in
 # `beamtalk-cli`/`beamtalk-lsp`.
 tracing.workspace = true
+# why: BT-3100 — `test_support::arb_declared_type` (the shared proptest
+# generator for type-string fidelity tests) needs proptest in the normal
+# dependency graph, not just dev-dependencies, so it compiles for dependent
+# crates that opt in via the `test` feature below. Optional: stays out of
+# the default (production) build.
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta.workspace = true
@@ -68,7 +74,7 @@ default = []
 ## Expose `test_helpers::test_support` for use in dependent crates' dev-dependencies.
 ## Add `beamtalk-core = { features = ["test"] }` to the dependent crate's
 ## `[dev-dependencies]` section to enable this.
-test = []
+test = ["dep:proptest"]
 ## Enable serde Serialize/Deserialize derives on ClassInfo and related types.
 ## Used by beamtalk-cli to persist Pass 1 metadata cache for incremental builds.
 serde = ["ecow/serde"]

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BoxActor - exercises a three-keyword message (width:height:depth:) against
+// real compiled dispatch (BT-3093 migration of the hand-simulated
+// box_module_state fixture in beamtalk_codegen_simulation_tests.erl).
+
+Actor subclass: BoxActor
+  state: width = 0
+  state: height = 0
+  state: depth = 0
+
+  width: w height: h depth: d =>
+    self.width := w
+    self.height := h
+    self.depth := d
+
+  volume => self.width * self.height * self.depth

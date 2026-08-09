@@ -51,8 +51,6 @@ main([]) ->
     FixtureBuildDir = filename:join([FixturesDir, "build"]),
     delete_if_exists(filename:join(CounterBuildDir, "bt@counter.beam")),
     delete_if_exists(filename:join(CounterBuildDir, "bt@counter.core")),
-    delete_if_exists(filename:join(FixtureBuildDir, "bt@logging_counter.beam")),
-    delete_if_exists(filename:join(FixtureBuildDir, "bt@logging_counter.core")),
 
     %% Build counter fixture (using REPL-protocol fixture - BT-239)
     CounterSrc = filename:join([RepoRoot, "tests", "repl-protocol", "fixtures", "counter.bt"]),
@@ -72,24 +70,48 @@ main([]) ->
     %% Copy to rebar3 build directories
     copy_to_build_dirs(RepoRoot, CounterBeam, "bt@counter.beam"),
 
-    %% Build logging_counter fixture (BT-108 - super keyword tests)
-    LoggingCounterSrc = filename:join([FixturesDir, "logging_counter.bt"]),
-    LoggingCounterBeam = filename:join(FixtureBuildDir, "bt@logging_counter.beam"),
-    run_beamtalk(Beamtalk, LoggingCounterSrc),
-    case filelib:is_regular(LoggingCounterBeam) of
-        true -> ok;
-        false ->
-            io:format(standard_error, "Failed to compile logging_counter.bt (no .beam output)~n"
-                      "  Expected: ~s~n"
-                      "  Beamtalk: ~s~n"
-                      "  Source:   ~s~n", [LoggingCounterBeam, Beamtalk, LoggingCounterSrc]),
-            halt(1)
-    end,
-
-    %% Copy to rebar3 build directories
-    copy_to_build_dirs(RepoRoot, LoggingCounterBeam, "bt@logging_counter.beam"),
+    %% Build the remaining local fixtures that live alongside this script.
+    %% Each entry is a .bt source file compiled to a module named after its
+    %% snake_case basename (bt@<basename>). Add new fixtures here rather
+    %% than hand-rolling another copy of this block (BT-3093).
+    LocalFixtures = [
+        %% BT-108 - super keyword tests
+        "logging_counter",
+        %% BT-3093 - migrated hand-simulated Counter/Rectangle/Box/Spawner/
+        %% instance-var fixtures onto real compiled dispatch
+        "arithmetic_actor",
+        "rectangle_actor",
+        "box_actor",
+        "spawner_actor",
+        "shadow_actor",
+        "coordinate_actor"
+    ],
+    lists:foreach(
+        fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,
+        LocalFixtures
+    ),
 
     ok.
+
+%% @private Compile a `<Basename>.bt` fixture from FixturesDir and copy the
+%% resulting `bt@<Basename>.beam` into every rebar3 test build directory.
+build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) ->
+    ModuleFile = "bt@" ++ Basename ++ ".beam",
+    Src = filename:join([FixturesDir, Basename ++ ".bt"]),
+    Beam = filename:join(FixtureBuildDir, ModuleFile),
+    delete_if_exists(Beam),
+    delete_if_exists(filename:join(FixtureBuildDir, "bt@" ++ Basename ++ ".core")),
+    run_beamtalk(Beamtalk, Src),
+    case filelib:is_regular(Beam) of
+        true -> ok;
+        false ->
+            io:format(standard_error, "Failed to compile ~s.bt (no .beam output)~n"
+                      "  Expected: ~s~n"
+                      "  Beamtalk: ~s~n"
+                      "  Source:   ~s~n", [Basename, Beam, Beamtalk, Src]),
+            halt(1)
+    end,
+    copy_to_build_dirs(RepoRoot, Beam, ModuleFile).
 
 %% @private Run beamtalk build on a source file.
 %% Uses open_port/spawn_executable to avoid cmd.exe quoting issues on Windows.

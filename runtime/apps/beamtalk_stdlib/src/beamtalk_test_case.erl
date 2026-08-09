@@ -705,10 +705,14 @@ discover_test_methods_from_module(Module) ->
 Resolve the BEAM module atom for a class name (no gen_server call).
 Uses the beamtalk compiler naming convention: bt@snake_case_name.
 Falls back to bt@stdlib@snake_case_name for stdlib classes.
+
+BT-3081: the CamelCase→snake_case conversion delegates to
+`beamtalk_module_name:camel_to_snake/1`, the single Erlang-side authority
+for the `ClassName ⇄ bt@[pkg@]snake_case` convention (ADR 0016).
 """.
 -spec resolve_module(atom()) -> atom().
 resolve_module(ClassName) ->
-    SnakeName = class_name_to_snake(atom_to_list(ClassName)),
+    SnakeName = beamtalk_module_name:camel_to_snake(atom_to_list(ClassName)),
     % elp:fixme W0023 intentional atom creation
     UserModule = list_to_atom("bt@" ++ SnakeName),
     case code:is_loaded(UserModule) of
@@ -734,26 +738,6 @@ resolve_module(ClassName) ->
                     end
             end
     end.
-
--doc """
-Convert CamelCase class name to snake_case module name component.
-Matches the Rust to_module_name() convention.
-""".
--spec class_name_to_snake(string()) -> string().
-class_name_to_snake(Name) ->
-    class_name_to_snake(Name, false, []).
-
-class_name_to_snake([], _PrevLower, Acc) ->
-    lists:reverse(Acc);
-class_name_to_snake([H | T], PrevLower, Acc) when H >= $A, H =< $Z ->
-    % ASCII uppercase to lowercase
-    Lower = H + 32,
-    case PrevLower of
-        true -> class_name_to_snake(T, false, [Lower, $_ | Acc]);
-        false -> class_name_to_snake(T, false, [Lower | Acc])
-    end;
-class_name_to_snake([H | T], _PrevLower, Acc) ->
-    class_name_to_snake(T, H >= $a andalso H =< $z, [H | Acc]).
 
 -doc """
 Run a single test method with setUp/tearDown lifecycle (BT-440).

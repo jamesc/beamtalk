@@ -2455,6 +2455,13 @@ stop_class_actors_with_registry_test_() ->
 %% A self-referential class (its own superclass) makes walk_hierarchy/3 loop;
 %% the ?MAX_HIERARCHY_DEPTH guard halts it and returns the accumulator. We drive
 %% it via classAllSuperclasses/1, which folds class objects up the chain.
+%%
+%% BT-3096: walk_ancestors/3's max_depth_exceeded now carries the last node
+%% visited (with its accumulator riding along inside it — see
+%% beamtalk_behaviour_intrinsics:walk_hierarchy/3's moduledoc), so
+%% walk_hierarchy/3 returns the PARTIAL fold built up before the guard
+%% tripped instead of discarding it in favour of the original (empty) `[]`
+%% accumulator. Assert the list is non-empty and bounded, not merely a list.
 walk_hierarchy_cycle_guard_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -2473,9 +2480,23 @@ walk_hierarchy_cycle_guard_test_() ->
                     class = 'BTCycleSelf class', class_mod = test_class, pid = Pid
                 },
                 try
-                    %% Must terminate (depth guard) and return a bounded list.
+                    %% Must terminate (depth guard) and return a bounded,
+                    %% non-empty list: the partial fold collected from the
+                    %% (repeated, self-referencing) ancestor visited before
+                    %% the depth guard tripped, not the empty `[]` the walk
+                    %% started with.
                     Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
-                    ?assert(is_list(Supers))
+                    ?assert(is_list(Supers)),
+                    ?assert(length(Supers) > 0),
+                    ?assert(length(Supers) =< ?MAX_HIERARCHY_DEPTH + 1),
+                    %% Every entry is the same self-referencing class, since
+                    %% the cycle never reaches a different ancestor.
+                    ?assert(
+                        lists:all(
+                            fun(#beamtalk_object{pid = SuperPid}) -> SuperPid =:= Pid end,
+                            Supers
+                        )
+                    )
                 after
                     try
                         gen_server:stop(Pid, normal, 5000)

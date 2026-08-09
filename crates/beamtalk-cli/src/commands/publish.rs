@@ -26,13 +26,14 @@
 //! see `deps::registry::resolve_registry_location`), so publishing and
 //! consuming a package always agree on which index is authoritative.
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use miette::{IntoDiagnostic, Result, WrapErr};
 use std::process::Command;
 
 use crate::commands::deps::registry::{self, RegistryEntry, RegistryLocation};
 use crate::commands::manifest;
 use crate::commands::toml_utils::escape_toml_string;
+use crate::commands::util::find_project_root;
 
 /// Run `beamtalk publish`.
 ///
@@ -624,35 +625,10 @@ fn commit_and_push_index(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Find the project root by requiring a `beamtalk.toml` in the current
-/// directory.
-fn find_project_root() -> Result<Utf8PathBuf> {
-    let cwd = std::env::current_dir()
-        .into_diagnostic()
-        .wrap_err("Failed to determine current directory")?;
-
-    let project_root = Utf8PathBuf::from_path_buf(cwd).map_err(|p| {
-        miette::miette!("Current directory path is not valid UTF-8: {}", p.display())
-    })?;
-
-    let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        miette::bail!(
-            "No beamtalk.toml found in current directory.\n  \
-             Run this command from a Beamtalk project root, or create one with `beamtalk new`."
-        );
-    }
-
-    Ok(project_root)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino::Utf8PathBuf;
     use serial_test::serial;
     use tempfile::TempDir;
 

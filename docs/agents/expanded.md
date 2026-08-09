@@ -109,6 +109,47 @@ grep -rn "\^" stdlib/src/ stdlib/test/ --include="*.bt" | grep -v "// =>" | head
 
 ---
 
+## Duplication & Drift Prevention
+
+The 2026-08 duplication audit (BT-3078) found ~20 cases of the same rule implemented N times across the codebase. All three root causes are process-shaped — catch them at write time, not at audit time.
+
+### Before implementing a helper, list, or table
+
+**Grep for an existing implementation of the same rule before writing a new one.** If one exists:
+- **Same layer / same language:** import it directly.
+- **Different layer, "but the lower layer can't depend on the higher one":** that is not a license to duplicate. Extract a shared leaf module that sits *below* both consumers and have both import it. See `crates/beamtalk-core/src/semantic_analysis/type_checker/type_resolver.rs`'s `split_generic_base` vs. `class_hierarchy/declared_type.rs`'s duplicate of the same function (kept apart today only by a "mirrors" comment) — the correct fix is a shared leaf module under both `type_checker` and `class_hierarchy`, not two copies.
+
+### "Keep in sync" comments are not enforcement
+
+A comment reading "mirrors X" or "must stay in sync with Y" is a promise with no one holding it. Grep the repo for the phrase before adding one — chances are several already exist and have already drifted:
+```bash
+grep -ri "keep.*in sync\|mirrors " crates/ runtime/
+```
+**Never add a "keep in sync"/"mirrors" comment without a test that fails when the pair disagrees.** If the two copies can be deleted in favor of one, do that instead of adding a comment — see the consistency-test disposition rule below.
+
+### Rust/Erlang boundary conventions
+
+Naming rules (camelCase↔snake_case, `with*:` selectors), vocabularies (builtin class lists, error tuple shapes, spec type strings), and constants (protocol version) that get hand-retyped on the other side of the Rust/Erlang boundary will drift silently — a boundary comment is not enough because the two sides are compiled and reviewed independently. These need either:
+- a **shared conformance fixture** — a test that reads the same golden data (or generates it) on both sides and asserts they agree, or
+- **code generation** — one side is generated from the other at build time (e.g. `build_stdlib.rs` generating `beamtalk_stdlib.app.src`).
+
+Existing examples of sanctioned conformance fixtures: `beamtalk-surface-drift` (CLI/REPL/MCP/LSP surface parity), `beamtalk-parity-tests` (cross-process behavior parity), and the fixtures added for BT-3080/BT-3081/BT-3085/BT-3090 (type resolution, class/module naming, builtin class list, and mechanical Erlang-side dedups respectively).
+
+### Consistency-test disposition rule
+
+This governs what happens to a "check these two implementations agree" test as consolidation work proceeds:
+
+> **A consistency test across a boundary you cannot delete is enforcement — keep it and extend it. A consistency test between two copies you can delete is a smell — delete the copy; the test becomes an ordinary unit/golden test of the single implementation.**
+
+When you find a pair-test during a consolidation PR:
+- **Keep:** the two things it compares are genuinely on opposite sides of a permanent boundary (different processes, different languages, different surfaces). Extend it as the boundary grows.
+- **Convert:** the two things it compares are two implementations of the same rule that you are about to delete one of. Once only one implementation remains, the "do these two agree" assertions collapse into ordinary input→output assertions on that one implementation — rewrite the test as a golden test, not a dual-simulation.
+- **Migrate:** one side is a hand-maintained simulation of what the other side (a compiler/codegen) produces. Replace the simulated fixture with a compiled one so drift fails at compile/build time rather than needing a human to update the simulation.
+
+See `docs/development/architecture-principles.md` § Duplication & the Shared-Leaf-Module Pattern and § Consistency-Test Disposition Rule for the worked example and full text.
+
+---
+
 ## Domain-Driven Design (DDD)
 
 The beamtalk architecture follows **Domain-Driven Design**. Use domain terms consistently (e.g., `CompletionProvider` not `completions`). The codebase has four bounded contexts: **Language Service** (IDE features), **Compilation** (lexer→codegen), **Runtime** (actors, OTP), and **REPL** (interactive dev).

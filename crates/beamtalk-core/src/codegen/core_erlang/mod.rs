@@ -1812,23 +1812,19 @@ impl CoreErlangGenerator {
     /// or `Integer`), as opposed to a generic (`List(Integer)`), union
     /// (`Integer | String`), singleton (`#north`), or metatype (`Foo class`).
     ///
-    /// [`ClassInfo::state_types`] flattens every annotation to its display string
-    /// via `TypeAnnotation::type_name`, losing the variant; this reconstructs the
-    /// `Simple`-only filter so extension-method field typing matches the in-class
-    /// path. Every non-`Simple` `type_name` rendering contains one of `(`, `|`,
-    /// `#`, or a space (`Generic`, `Union`, `FalseOr`, `Singleton`, `SelfClass`,
-    /// `ClassOf`) — none of which a simple identifier can contain — *except*
-    /// `SelfType`, which renders as the bare word `"Self"`; that one is excluded
-    /// explicitly so a (return-position-only, but defensively handled) `:: Self`
-    /// field never diverges from the in-class path's bare-BIF status quo.
+    /// So extension-method field typing matches the in-class path (which
+    /// records only `TypeAnnotation::Simple` fields, see
+    /// [`Self::set_class_field_types`]). `Self` needs no explicit exclusion
+    /// here: unlike the pre-BT-3076 string-rendered check, `Self` is
+    /// [`DeclaredType::SelfType`], never `Simple("Self")`, so it already
+    /// falls through to `false`.
     ///
     /// [`ClassInfo::state_types`]: crate::semantic_analysis::class_hierarchy::ClassInfo::state_types
-    fn is_simple_type_name(ty: &str) -> bool {
-        !ty.is_empty()
-            && ty != "Self"
-            && !ty
-                .chars()
-                .any(|c| c == '(' || c == ')' || c == '|' || c == '#' || c == ' ' || c == ',')
+    fn is_simple_type_name(ty: &crate::semantic_analysis::class_hierarchy::DeclaredType) -> bool {
+        matches!(
+            ty,
+            crate::semantic_analysis::class_hierarchy::DeclaredType::Simple(_)
+        )
     }
 
     /// BT-2710 follow-up: Whether `self.<name>` is known to hold a value with a
@@ -2265,7 +2261,7 @@ impl CoreErlangGenerator {
         facts: &crate::semantic_analysis::SemanticFacts,
         out: &mut std::collections::HashSet<String>,
     ) {
-        match Self::peel_parens(expr) {
+        match expr.unwrap_parens() {
             Expression::Assignment { value, .. } => {
                 Self::collect_list_op_cross_scope_mutations_recursive(value, facts, out);
             }
@@ -2298,8 +2294,8 @@ impl CoreErlangGenerator {
         // Peel parens then an assignment RHS (which may itself be parenthesized) so
         // forms like `_r := (1 to: 5 do: [...])` are still inspected — mirrors
         // `expr_has_nested_counted_loop_threading`.
-        let inner = match Self::peel_parens(expr) {
-            Expression::Assignment { value, .. } => Self::peel_parens(value),
+        let inner = match expr.unwrap_parens() {
+            Expression::Assignment { value, .. } => value.unwrap_parens(),
             other => other,
         };
         let Expression::MessageSend {
@@ -3140,7 +3136,7 @@ impl CoreErlangGenerator {
         // BT-2355: `_r := (loop)` wraps the construct in parentheses; peel them so
         // the threaded locals are still discovered when the construct is an
         // assignment RHS or sub-expression.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         let Expression::MessageSend {
             receiver,
             selector,
@@ -3247,17 +3243,6 @@ impl CoreErlangGenerator {
     /// the Actor method-body sequencer consumes, where empty and absent are equivalent.
     fn non_empty(v: Vec<String>) -> Option<Vec<String>> {
         if v.is_empty() { None } else { Some(v) }
-    }
-
-    /// BT-2355: Peels any `Expression::Parenthesized` wrappers, returning the inner
-    /// expression. Used so control-flow classification/threading sees through the
-    /// parentheses in forms like `_r := (1 to: 5 do: [...])`.
-    pub(super) fn peel_parens(expr: &Expression) -> &Expression {
-        let mut current = expr;
-        while let Expression::Parenthesized { expression, .. } = current {
-            current = expression;
-        }
-        current
     }
 
     /// BT-2355: Collects the `Block` arguments of a message send (e.g. the branch

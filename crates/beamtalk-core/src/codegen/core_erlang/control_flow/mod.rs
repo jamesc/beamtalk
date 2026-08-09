@@ -1160,7 +1160,7 @@ impl CoreErlangGenerator {
         }
         // Extract selector name from the message send
         if let Expression::MessageSend { selector, .. } = expr {
-            let sel_name = selector.to_erlang_atom();
+            let sel_name = selector.name().to_string();
             let line_info = self
                 .span_to_line(span)
                 .map_or(String::new(), |l| format!(" at line {l}"));
@@ -3390,8 +3390,8 @@ impl CoreErlangGenerator {
     ) -> bool {
         use crate::ast::MessageSelector;
 
-        let inner = match Self::peel_parens(expr) {
-            Expression::Assignment { value, .. } => Self::peel_parens(value),
+        let inner = match expr.unwrap_parens() {
+            Expression::Assignment { value, .. } => value.unwrap_parens(),
             other => other,
         };
         let Expression::MessageSend {

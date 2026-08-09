@@ -162,10 +162,9 @@ fn resolve_type_annotation_false_or() {
 
 #[test]
 fn resolve_type_string_simple() {
-    let result = TypeChecker::resolve_type_string(
-        "Integer",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("Integer"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,
@@ -175,10 +174,9 @@ fn resolve_type_string_simple() {
 
 #[test]
 fn resolve_type_string_union() {
-    let result = TypeChecker::resolve_type_string(
-        "String | nil",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("String | nil"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,
@@ -650,6 +648,97 @@ fn false_or_param_resolves_to_union() {
     assert!(
         dnu_hints.is_empty(),
         "FalseOr resolved as union; no DNU for universal messages: {dnu_hints:?}"
+    );
+}
+
+/// BT-3076 (review follow-up): a union member whose method returns `X class`
+/// for an `X` not registered in the hierarchy still contributes a type to the
+/// inferred union — it falls through to the structured resolver (yielding
+/// `Meta("X")`, same as the non-union path) instead of being silently
+/// dropped, which under-widened the union.
+#[test]
+fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
+    let make_class = |name: &str, ret: TypeAnnotation| ClassDefinition {
+        name: ident(name),
+        superclass: Some(ident("Object")),
+        superclass_package: None,
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![MethodDefinition {
+            selector: MessageSelector::Unary("tag".into()),
+            parameters: vec![],
+            body: vec![],
+            return_type: Some(ret),
+            is_sealed: false,
+            is_internal: false,
+            is_class_method: false,
+            kind: MethodKind::Primary,
+            expect: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: span(),
+    };
+
+    let module = Module {
+        classes: vec![
+            make_class("UnionA", TypeAnnotation::Simple(ident("Integer"))),
+            make_class(
+                "UnionB",
+                TypeAnnotation::ClassOf {
+                    class_name: ident("Missing"),
+                    span: span(),
+                },
+            ),
+        ],
+        method_definitions: vec![],
+        protocols: vec![],
+        type_aliases: Vec::new(),
+        expressions: vec![],
+        span: span(),
+        file_leading_comments: vec![],
+        file_trailing_comments: vec![],
+    };
+
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["UnionA", "UnionB"]));
+    let module_expr = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("tag".into()),
+            vec![],
+        ))],
+        span(),
+    );
+    let ty = checker.infer_expr(
+        &module_expr.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(
+        ty,
+        InferredType::union_of(&[
+            InferredType::known("Integer"),
+            InferredType::meta("Missing")
+        ]),
+        "UnionB's `Missing class` return must contribute Meta(\"Missing\"), got: {ty:?}"
     );
 }
 

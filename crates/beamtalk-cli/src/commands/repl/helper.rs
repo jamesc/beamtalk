@@ -21,7 +21,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper};
 
-use beamtalk_core::source_analysis::{TokenKind, Trivia, lex_with_eof};
+use beamtalk_core::source_analysis::{TokenKind, Trivia, completion_word_start, lex_with_eof};
 
 use beamtalk_repl_protocol::RequestBuilder;
 
@@ -29,38 +29,10 @@ use crate::commands::protocol::ProtocolClient;
 
 use super::ReplResponse;
 use super::color;
+use super::commands;
 
 /// Timeout for completion requests to avoid blocking the REPL.
 const COMPLETION_TIMEOUT: Duration = Duration::from_millis(500);
-
-/// REPL commands available for client-side completion.
-const REPL_COMMANDS: &[&str] = &[
-    ":help",
-    ":h",
-    ":?",
-    ":exit",
-    ":quit",
-    ":q",
-    ":clear",
-    ":bindings",
-    ":b",
-    ":sync",
-    ":s",
-    ":unload",
-    ":actors",
-    ":a",
-    ":kill",
-    ":inspect",
-    ":sessions",
-    ":test",
-    ":t",
-    ":show-codegen",
-    ":sc",
-    // BT-2287 / ADR 0082 Phase 3: ChangeLog meta-commands.
-    ":flush",
-    ":changes",
-    ":dirty",
-];
 
 /// REPL helper providing tab completion and syntax highlighting.
 ///
@@ -177,26 +149,14 @@ impl ReplHelper {
 /// When the user types one of these followed by a partial argument, we strip the
 /// command prefix and pass only the argument to the backend completer so it can
 /// perform the same receiver-aware completion it does for bare expressions.
-const CLASS_EXPR_COMMANDS: &[&str] = &[
-    ":help ",
-    ":h ",
-    ":? ",
-    ":test ",
-    ":t ",
-    ":show-codegen ",
-    ":sc ",
-    ":unload ",
-    // BT-2287 / ADR 0082 Phase 3: `:flush <Class>` argument is a Beamtalk
-    // expression (typically a class name or selector literal).
-    ":flush ",
-];
-
-/// If `line` starts with a REPL class/expression command, return the byte offset
-/// where the argument begins so the caller can strip the prefix.
+///
+/// BT-3083: derived from `commands::REPL_COMMAND_TABLE` (each entry with
+/// `takes_class_expr_arg: true`) rather than a separately hand-maintained
+/// list, so this can't drift from what `classify_command` in `mod.rs`
+/// actually routes to the class/expr argument path.
 fn parse_class_expr_command_prefix(line: &str) -> Option<usize> {
-    CLASS_EXPR_COMMANDS
-        .iter()
-        .find_map(|prefix| line.strip_prefix(prefix).map(|_| prefix.len()))
+    commands::class_expr_arg_prefixes()
+        .find_map(|prefix| line.strip_prefix(prefix.as_str()).map(|_| prefix.len()))
 }
 
 impl Completer for ReplHelper {
@@ -212,8 +172,7 @@ impl Completer for ReplHelper {
 
         // REPL command completion (starts with `:`, no arguments yet)
         if line_to_pos.starts_with(':') && !line_to_pos.contains(' ') {
-            let candidates: Vec<Pair> = REPL_COMMANDS
-                .iter()
+            let candidates: Vec<Pair> = commands::all_forms()
                 .filter(|cmd| cmd.starts_with(line_to_pos))
                 .map(|cmd| Pair {
                     display: cmd.to_string(),
@@ -272,11 +231,7 @@ impl Completer for ReplHelper {
 
             let completions = self.backend_complete(arg, arg.len());
             // Find the word boundary within the argument portion.
-            let arg_word_start = arg
-                .char_indices()
-                .rev()
-                .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':' && c != '@')
-                .map_or(0, |(i, c)| i + c.len_utf8());
+            let arg_word_start = completion_word_start(arg);
             let candidates: Vec<Pair> = completions
                 .into_iter()
                 .map(|c| Pair {
@@ -287,15 +242,14 @@ impl Completer for ReplHelper {
             return Ok((arg_start + arg_word_start, candidates));
         }
 
-        // Find the start of the current word (identifier boundary).
-        // Colons are treated as identifier chars so keyword selectors like
-        // `ifTrue:` and `ifTrue:ifFalse:` complete as a unit (BT-783).
-        // This must stay in sync with is_identifier_char/1 in beamtalk_repl_ops_dev.erl.
-        let word_start = line_to_pos
-            .char_indices()
-            .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':' && c != '@')
-            .map_or(0, |(i, c)| i + c.len_utf8());
+        // Find the start of the current word (identifier boundary). Colons
+        // and `@` are treated as word chars so keyword selectors like
+        // `ifTrue:`/`ifTrue:ifFalse:` and qualified names like `json@Parser`
+        // complete as a unit (BT-783 / BT-1659). `completion_word_start` is
+        // the canonical Rust definition (BT-3083), conformance-tested
+        // against `is_identifier_char/1` in `beamtalk_repl_ops_dev.erl` via
+        // the shared corpus fixture — see `beamtalk_core::source_analysis`.
+        let word_start = completion_word_start(line_to_pos);
 
         // Query backend with full line context so it can perform receiver-aware
         // method completion (BT-783). The backend parses the receiver from the line.
@@ -485,18 +439,9 @@ fn highlight_line(line: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Helper: extract word start position from a line (same logic as Completer).
-    fn find_word_start(line: &str) -> usize {
-        line.char_indices()
-            .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':' && c != '@')
-            .map_or(0, |(i, c)| i + c.len_utf8())
-    }
-
     /// Helper: get REPL command completions for a prefix.
     fn command_completions(prefix: &str) -> Vec<String> {
-        REPL_COMMANDS
-            .iter()
+        commands::all_forms()
             .filter(|cmd| cmd.starts_with(prefix))
             .map(ToString::to_string)
             .collect()
@@ -514,9 +459,33 @@ mod tests {
         let candidates = command_completions(":s");
         assert!(candidates.contains(&":sync".to_string()));
         assert!(candidates.contains(&":s".to_string()));
-        assert!(candidates.contains(&":sessions".to_string()));
         assert!(candidates.contains(&":show-codegen".to_string()));
         assert!(candidates.contains(&":sc".to_string()));
+    }
+
+    /// BT-3083: `:actors`/`:kill`/`:inspect`/`:sessions` used to tab-complete
+    /// with no dispatch arm behind them (guaranteed parse error on Enter).
+    /// See `commands.rs`'s module doc for why they were removed rather than
+    /// wired up — the capability lives on `Workspace`/actor message-sends.
+    #[test]
+    fn test_repl_command_completion_no_longer_offers_dead_actor_commands() {
+        let candidates = command_completions(":");
+        for dead in [":actors", ":a", ":kill", ":inspect", ":sessions"] {
+            assert!(
+                !candidates.contains(&dead.to_string()),
+                "{dead} should not be offered by tab-completion"
+            );
+        }
+    }
+
+    /// BT-3083: `:interrupt`/`:int`/`:recheck` dispatched but were missing
+    /// from tab-completion.
+    #[test]
+    fn test_repl_command_completion_offers_interrupt_and_recheck() {
+        let candidates = command_completions(":");
+        assert!(candidates.contains(&":interrupt".to_string()));
+        assert!(candidates.contains(&":int".to_string()));
+        assert!(candidates.contains(&":recheck".to_string()));
     }
 
     #[test]
@@ -547,77 +516,84 @@ mod tests {
     #[test]
     fn test_repl_command_completion_colon_only() {
         let candidates = command_completions(":");
-        assert_eq!(candidates.len(), REPL_COMMANDS.len());
+        assert_eq!(candidates.len(), commands::all_forms().count());
     }
+
+    // Word-boundary behaviour is exercised directly against the canonical
+    // `completion_word_start` (BT-3083: previously a test-only copy of the
+    // Completer's inline closure — now the same production function backs
+    // both the Completer and these tests, and is shared with the LSP's
+    // completion provider and conformance-tested against the Erlang REPL
+    // engine; see `beamtalk_core::source_analysis`).
 
     #[test]
     fn test_word_boundary_detects_last_identifier() {
-        let start = find_word_start("obj message");
+        let start = completion_word_start("obj message");
         assert_eq!(&"obj message"[start..], "message");
     }
 
     #[test]
     fn test_word_boundary_single_word() {
-        let start = find_word_start("Counter");
+        let start = completion_word_start("Counter");
         assert_eq!(&"Counter"[start..], "Counter");
     }
 
     #[test]
     fn test_word_boundary_after_space() {
-        let start = find_word_start("obj ");
+        let start = completion_word_start("obj ");
         assert_eq!(&"obj "[start..], "");
     }
 
     #[test]
     fn test_word_boundary_after_dot() {
-        let start = find_word_start("self.val");
+        let start = completion_word_start("self.val");
         assert_eq!(&"self.val"[start..], "val");
     }
 
     #[test]
     fn test_word_boundary_after_colon() {
         // Colons are identifier chars so keyword selectors complete as a unit.
-        let start = find_word_start("ifTrue:");
+        let start = completion_word_start("ifTrue:");
         assert_eq!(&"ifTrue:"[start..], "ifTrue:");
     }
 
     #[test]
     fn test_word_boundary_keyword_selector_with_receiver() {
         // "Integer ifT:" — word start is "ifT:"
-        let start = find_word_start("Integer ifT:");
+        let start = completion_word_start("Integer ifT:");
         assert_eq!(&"Integer ifT:"[start..], "ifT:");
     }
 
     #[test]
     fn test_word_boundary_unicode_non_ascii_is_boundary() {
         // Unicode alpha chars are treated as boundaries (lexer only allows ASCII)
-        let start = find_word_start("über foo");
+        let start = completion_word_start("über foo");
         assert_eq!(&"über foo"[start..], "foo");
     }
 
     #[test]
     fn test_word_boundary_empty_input() {
-        let start = find_word_start("");
+        let start = completion_word_start("");
         assert_eq!(start, 0);
     }
 
     #[test]
     fn test_word_boundary_underscore_in_identifier() {
-        let start = find_word_start("my_var");
+        let start = completion_word_start("my_var");
         assert_eq!(&"my_var"[start..], "my_var");
     }
 
     #[test]
     fn test_word_boundary_qualified_name() {
         // BT-1659: @ is an identifier char so json@Parser stays as one token
-        let start = find_word_start("json@Parser");
+        let start = completion_word_start("json@Parser");
         assert_eq!(&"json@Parser"[start..], "json@Parser");
     }
 
     #[test]
     fn test_word_boundary_qualified_name_with_prefix() {
         // After "json@Parser ", word start is at the space
-        let start = find_word_start("json@Parser pa");
+        let start = completion_word_start("json@Parser pa");
         assert_eq!(&"json@Parser pa"[start..], "pa");
     }
 
@@ -747,24 +723,24 @@ mod tests {
         assert_eq!(parse_class_expr_command_prefix("Counter spawn"), None);
     }
 
-    // --- REPL_COMMANDS: verify :modules and :m were removed ---
+    // --- REPL command vocabulary: verify :modules and :m were removed ---
 
     #[test]
     fn test_repl_commands_does_not_contain_modules() {
-        let commands: Vec<&str> = REPL_COMMANDS.to_vec();
+        let forms: Vec<&str> = commands::all_forms().collect();
         assert!(
-            !commands.contains(&":modules"),
-            ":modules should not be in REPL_COMMANDS (removed in this PR)"
+            !forms.contains(&":modules"),
+            ":modules should not be a REPL command form (removed in this PR)"
         );
     }
 
     #[test]
     fn test_repl_commands_does_not_contain_m_alias() {
-        let commands: Vec<&str> = REPL_COMMANDS.to_vec();
+        let forms: Vec<&str> = commands::all_forms().collect();
         // :m was the short alias for :modules — also removed
         assert!(
-            !commands.contains(&":m"),
-            ":m should not be in REPL_COMMANDS (removed along with :modules)"
+            !forms.contains(&":m"),
+            ":m should not be a REPL command form (removed along with :modules)"
         );
     }
 

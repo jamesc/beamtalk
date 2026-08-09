@@ -1,0 +1,42 @@
+[
+  { "char": "a", "is_word_char": true, "why": "ascii lowercase letter" },
+  { "char": "z", "is_word_char": true, "why": "ascii lowercase letter" },
+  { "char": "A", "is_word_char": true, "why": "ascii uppercase letter" },
+  { "char": "Z", "is_word_char": true, "why": "ascii uppercase letter" },
+  { "char": "0", "is_word_char": true, "why": "ascii digit" },
+  { "char": "9", "is_word_char": true, "why": "ascii digit" },
+  { "char": "_", "is_word_char": true, "why": "underscore, valid in identifiers" },
+  {
+    "char": ":",
+    "is_word_char": true,
+    "why": "colon is a word char so keyword selectors like ifTrue: and ifTrue:ifFalse: complete as a unit"
+  },
+  {
+    "char": "@",
+    "is_word_char": true,
+    "why": "BT-1659: @ is a word char so package-qualified names like json@Parser complete as a unit"
+  },
+  { "char": " ", "is_word_char": false, "why": "space is always a word boundary" },
+  { "char": "\t", "is_word_char": false, "why": "tab is always a word boundary" },
+  { "char": "\n", "is_word_char": false, "why": "newline is always a word boundary" },
+  { "char": ".", "is_word_char": false, "why": "dot separates message sends / cascades" },
+  { "char": ",", "is_word_char": false, "why": "comma is a boundary (argument/cascade separator)" },
+  { "char": "(", "is_word_char": false, "why": "open paren is a boundary" },
+  { "char": ")", "is_word_char": false, "why": "close paren is a boundary" },
+  { "char": "[", "is_word_char": false, "why": "open bracket is a boundary" },
+  { "char": "]", "is_word_char": false, "why": "close bracket is a boundary" },
+  { "char": "{", "is_word_char": false, "why": "open brace is a boundary" },
+  { "char": "}", "is_word_char": false, "why": "close brace is a boundary" },
+  { "char": "#", "is_word_char": false, "why": "hash (symbol/array literal prefix) is a boundary" },
+  { "char": "'", "is_word_char": false, "why": "quote is a boundary" },
+  { "char": "\"", "is_word_char": false, "why": "double quote is a boundary" },
+  { "char": "-", "is_word_char": false, "why": "hyphen/minus is a boundary" },
+  { "char": "+", "is_word_char": false, "why": "plus is a boundary" },
+  { "char": "^", "is_word_char": false, "why": "caret (return) is a boundary" },
+  { "char": "!", "is_word_char": false, "why": "bang is a boundary" },
+  {
+    "char": "ü",
+    "is_word_char": false,
+    "why": "non-ASCII letters are boundaries; the lexer only allows ASCII identifiers"
+  }
+]

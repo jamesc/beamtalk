@@ -106,6 +106,16 @@
 %% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
 -define(MAX_HIERARCHY_DEPTH, 20).
 
+%% @doc REPL/RPC wire protocol version (BT-3090).
+%%
+%% Single source of truth for the protocol version string reported by both
+%% `beamtalk_version:get/0` (the desktop-attach readiness handshake, ADR
+%% 0097) and `beamtalk_repl_ops_dev:handle_term(<<"describe">>, ...)` (the
+%% REPL `describe` op). Before this macro the two were independent `"2.0"`
+%% string literals synced only by a "keep in sync" comment (BT-2091) — bump
+%% this macro and both call sites move together.
+-define(PROTOCOL_VERSION, <<"2.0">>).
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

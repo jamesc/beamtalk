@@ -1245,23 +1245,16 @@ class_object(_) ->
 
 %% The Beamtalk class name for an actor pid, read from the `'$beamtalk_actor'`
 %% process-dictionary marker planted by every actor's `init/1`.
+%% BT-3090: delegates to the canonical `beamtalk_actor:pid_class_name/1` —
+%% previously a hand-duplicated copy here.
 -spec actor_class_name(pid()) -> atom() | nil.
 actor_class_name(Pid) ->
-    case erlang:process_info(Pid, dictionary) of
-        {dictionary, Dict} when is_list(Dict) ->
-            case lists:keyfind('$beamtalk_actor', 1, Dict) of
-                {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
-                _ -> nil
-            end;
-        _ ->
-            nil
-    end.
+    beamtalk_actor:pid_class_name(Pid).
 
 %% The registered name of a pid, or the Beamtalk `nil` atom when unregistered
 %% or dead.
+%% BT-3090: delegates to the canonical `beamtalk_actor:registered_name_for_pid/1`
+%% — previously a hand-duplicated copy here.
 -spec registered_name(pid()) -> atom() | nil.
 registered_name(Pid) when is_pid(Pid) ->
-    case erlang:process_info(Pid, registered_name) of
-        {registered_name, Name} when is_atom(Name) -> Name;
-        _ -> nil
-    end.
+    beamtalk_actor:registered_name_for_pid(Pid).

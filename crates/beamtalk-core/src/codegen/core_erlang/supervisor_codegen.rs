@@ -81,10 +81,7 @@ impl CoreErlangGenerator {
             class_method_exports = docvec![
                 class_method_exports,
                 ", ",
-                fname(
-                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
-                    arity
-                ),
+                fname(safe_class_method_fn_name(m.selector.name().as_ref()), arity),
             ];
         }
 
@@ -185,10 +182,7 @@ impl CoreErlangGenerator {
             class_method_exports = docvec![
                 class_method_exports,
                 ", ",
-                fname(
-                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
-                    arity
-                ),
+                fname(safe_class_method_fn_name(m.selector.name().as_ref()), arity),
             ];
         }
 

@@ -79,6 +79,7 @@ pub mod test_support {
         ClassDefinition, ClassModifiers, Expression, ExpressionStatement, Identifier,
         MessageSelector, MethodDefinition, Module,
     };
+    use crate::semantic_analysis::class_hierarchy::DeclaredType;
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
 
     /// Parses a Beamtalk source string and returns the [`Module`] AST.
@@ -188,6 +189,55 @@ pub mod test_support {
     #[must_use]
     pub fn bare(expr: Expression) -> ExpressionStatement {
         ExpressionStatement::bare(expr)
+    }
+
+    /// Arbitrary [`DeclaredType`] values, recursively covering every
+    /// grouping shape BT-3100's type-string fidelity properties exercise:
+    /// union, generic, `FalseOr`/optional, difference, intersection, and
+    /// the `Self`-family leaves (`Self`, `Self class`, `<Name> class`).
+    ///
+    /// Shared by `declared_type.rs`'s own `parse`/`Display` fixed-point
+    /// property tests and `beamtalk-compiler-port`'s wire-fidelity property
+    /// test (ETF encode/decode round trip) — both boundaries need the exact
+    /// same generated shape space, so it lives here once rather than being
+    /// copied into both crates (this repo's "No duplicate implementations"
+    /// rule).
+    pub fn arb_declared_type() -> impl proptest::strategy::Strategy<Value = DeclaredType> {
+        use proptest::prelude::*;
+
+        let leaf = prop_oneof![
+            "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(DeclaredType::simple),
+            "[a-z][a-z0-9]{0,4}".prop_map(DeclaredType::singleton),
+            Just(DeclaredType::SelfType),
+            Just(DeclaredType::SelfClass),
+            "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(|n| DeclaredType::ClassOf(n.into())),
+        ];
+
+        leaf.prop_recursive(4, 32, 4, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 2..4).prop_map(DeclaredType::Union),
+                (
+                    "[A-Za-z][A-Za-z0-9]{0,4}",
+                    prop::collection::vec(inner.clone(), 1..3),
+                )
+                    .prop_map(|(base, params)| DeclaredType::generic(base, params)),
+                inner
+                    .clone()
+                    .prop_map(|t| DeclaredType::FalseOr(Box::new(t))),
+                (inner.clone(), inner.clone()).prop_map(|(base, excluded)| {
+                    DeclaredType::Difference {
+                        base: Box::new(base),
+                        excluded: Box::new(excluded),
+                    }
+                }),
+                (inner.clone(), inner.clone()).prop_map(|(left, right)| {
+                    DeclaredType::Intersection {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }
+                }),
+            ]
+        })
     }
 
     /// Returns the standard proptest configuration used across beamtalk-core property tests.

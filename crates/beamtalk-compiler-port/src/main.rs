@@ -69,10 +69,131 @@ fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
     }
 }
 
-/// Extract an atom→atom map from a Term (for `field_types`).
-fn term_to_atom_atom_map(
+/// BT-3076: Deserialize a single `method_info`/`class_method_info`
+/// `return_type`/`param_types` entry — the `MetaTypeRepr` wire shape codegen
+/// emits (`crate::codegen::core_erlang::gen_server::methods::MetaTypeRepr`'s
+/// `meta_type_repr_doc`, beamtalk-core) — into a structured
+/// [`DeclaredType`](beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType).
+///
+/// This is THE single place strings become types crossing the ETF boundary:
+/// before BT-3076, `term_to_atom` only matched a bare `Term::Atom`, so every
+/// tagged tuple (`{type_param, ...}`, `{generic, ...}`, and now `{union,
+/// ...}` / `{singleton, ...}`) silently degraded to `None` — a generic
+/// return type crossing the compiler port lost its structure entirely (the
+/// bug this stage fixes; see `test_generic_return_type_survives_etf_meta`).
+///
+/// Wire shapes:
+/// - `'none'` → `None` (the `Option` wrapper, not `DeclaredType::None` — no
+///   such variant exists).
+/// - A bare atom (e.g. `'Integer'`) → [`DeclaredType::parse`] — handles
+///   legacy artifacts (pre-BT-3076 compiled modules only ever emitted flat
+///   atoms) and the old return-type writeback union strings the same way
+///   `resolve_type_string` used to. `parse` also recognises the flat
+///   self-type renderings codegen still emits for method signatures
+///   (`'Self'`, `'Self class'`, `'<Name> class'` — the `MetaTypeRepr::Atom`
+///   fallback), so those round-trip structurally as
+///   `SelfType`/`SelfClass`/`ClassOf` instead of decaying to `Simple` (see
+///   `self_type_return_survives_etf_meta`).
+/// - `{'type_param', Name, _Index}` → `DeclaredType::Simple(Name)` — the
+///   codegen-internal `Index` (class-param position, or `-1` for
+///   method-local) has no `DeclaredType` counterpart; a bare type-param name
+///   round-trips as an ordinary `Simple`, exactly like a `TypeAnnotation::
+///   Simple` naming a generic param does everywhere else in the checker.
+/// - `{'generic', Base, [Params]}` → `DeclaredType::Generic { base, parameters }`,
+///   recursively.
+/// - `{'union', [Members]}` → `DeclaredType::Union(members)`, recursively
+///   (BT-3076 wire extension).
+/// - `{'singleton', Name}` → `DeclaredType::Singleton(Name)` (BT-3076 wire
+///   extension).
+/// - Anything else (malformed/unknown tag) → `None`, matching this parser's
+///   existing graceful-degradation convention.
+fn term_to_declared_type(
     term: &Term,
-) -> std::collections::HashMap<ecow::EcoString, ecow::EcoString> {
+) -> Option<beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType> {
+    use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+
+    match term {
+        Term::Atom(_) => {
+            let name = term_to_atom(term)?;
+            if name == "none" {
+                None
+            } else {
+                Some(DeclaredType::parse(&name))
+            }
+        }
+        Term::Tuple(t) => {
+            let tag = t.elements.first().and_then(term_to_atom)?;
+            match tag.as_str() {
+                "type_param" => {
+                    let name = t.elements.get(1).and_then(term_to_atom)?;
+                    Some(DeclaredType::simple(name))
+                }
+                "generic" => {
+                    let base = t.elements.get(1).and_then(term_to_atom)?;
+                    let parameters = t
+                        .elements
+                        .get(2)
+                        .map(term_to_declared_type_list)
+                        .unwrap_or_default();
+                    Some(DeclaredType::generic(base, parameters))
+                }
+                "union" => {
+                    let members = t
+                        .elements
+                        .get(1)
+                        .map(term_to_declared_type_list)
+                        .unwrap_or_default();
+                    Some(DeclaredType::union(members))
+                }
+                "singleton" => {
+                    let name = t.elements.get(1).and_then(term_to_atom)?;
+                    Some(DeclaredType::singleton(name))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Deserializes a `[MetaTypeRepr, ...]` ETF list — each element via
+/// [`term_to_declared_type`] — for `Generic`/`Union`'s nested parameters.
+/// Malformed elements are silently dropped (matches this file's existing
+/// graceful-degradation convention throughout).
+fn term_to_declared_type_list(
+    term: &Term,
+) -> Vec<beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType> {
+    match term {
+        Term::List(list) => list
+            .elements
+            .iter()
+            .filter_map(term_to_declared_type)
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// BT-3076: Deserialize an atom→`DeclaredType` map (for `field_types` /
+/// `ClassInfo::state_types`).
+///
+/// `field_types` is still emitted by codegen as flat atoms (`'Integer'`, or
+/// `'none'` for an untyped field — `meta_field_types_map`, beamtalk-core) —
+/// unlike `method_info`/`class_method_info`, it never carries the tagged
+/// `MetaTypeRepr` tuples, so every value here goes through
+/// [`DeclaredType::parse`] rather than the full [`term_to_declared_type`].
+/// The `'none'` sentinel is intentionally *not* filtered out here — it
+/// round-trips as `DeclaredType::Simple("none")`, preserving this map's
+/// pre-BT-3076 behaviour verbatim (the old atom→atom reader never
+/// special-cased it either) rather than fixing that latent quirk as a
+/// drive-by change.
+fn term_to_declared_type_atom_map(
+    term: &Term,
+) -> std::collections::HashMap<
+    ecow::EcoString,
+    beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType,
+> {
+    use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+
     match term {
         Term::Map(m) => m
             .map
@@ -82,7 +203,7 @@ fn term_to_atom_atom_map(
                 let val = term_to_atom(v)?;
                 Some((
                     ecow::EcoString::from(key.as_str()),
-                    ecow::EcoString::from(val.as_str()),
+                    DeclaredType::parse(&val),
                 ))
             })
             .collect(),
@@ -130,29 +251,9 @@ fn parse_method_infos_from_map(
                 return None;
             };
             let arity = map_get(info_map, "arity").and_then(term_to_usize)?;
-            let return_type = map_get(info_map, "return_type")
-                .and_then(term_to_atom)
-                .and_then(|s| {
-                    if s == "none" {
-                        None
-                    } else {
-                        Some(ecow::EcoString::from(s.as_str()))
-                    }
-                });
-            let param_types: Vec<Option<ecow::EcoString>> = match map_get(info_map, "param_types") {
-                Some(Term::List(list)) => list
-                    .elements
-                    .iter()
-                    .map(|t| {
-                        term_to_atom(t).and_then(|s| {
-                            if s == "none" {
-                                None
-                            } else {
-                                Some(ecow::EcoString::from(s.as_str()))
-                            }
-                        })
-                    })
-                    .collect(),
+            let return_type = map_get(info_map, "return_type").and_then(term_to_declared_type);
+            let param_types = match map_get(info_map, "param_types") {
+                Some(Term::List(list)) => list.elements.iter().map(term_to_declared_type).collect(),
                 _ => vec![],
             };
             Some(MethodInfo {
@@ -217,7 +318,7 @@ fn parse_class_info_from_meta_term(
         .map(term_to_atom_list)
         .unwrap_or_default();
     let state_types = map_get(m, "field_types")
-        .map(term_to_atom_atom_map)
+        .map(term_to_declared_type_atom_map)
         .unwrap_or_default();
     // BT-1976: Read field_has_default map emitted by codegen. Missing key
     // (older BEAM artifacts) → empty map; AST-less cross-file validation
@@ -2571,6 +2672,25 @@ fn handle_request(request_term: &Term) -> Term {
         _ => return error_response(&["Missing or invalid 'command' field".to_string()]),
     };
 
+    // BT-3095: this match arm's string literals are the Rust half of the
+    // compiler-port wire vocabulary; `beamtalk_compiler.erl` (fanning out
+    // through `beamtalk_compiler_server`/`beamtalk_compiler_port`) is the
+    // Erlang half, sending each `command => <atom>` from separate call
+    // sites. The two lists cannot literally share code (different
+    // languages/processes either side of the OTP port), so a command
+    // added to one side and not the other is a silent drift whose only
+    // symptom is a runtime "Unknown command" error wherever it's invoked
+    // (BT-3078 drift audit; BT-3091 flagged this pair for evaluation).
+    // A shared corpus fixture
+    // (`runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json`)
+    // pins both sides to the same 16-command list end-to-end: the Rust test
+    // below dispatches each corpus command through `handle_request` and
+    // checks it isn't the catch-all arm, while
+    // `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`
+    // drives the real compiled binary through `beamtalk_compiler`'s public
+    // API (one command per corpus entry) and asserts each one dispatches
+    // successfully — so a command missing on either side fails a build-time
+    // test instead of surfacing only at runtime.
     match command {
         "compile_expression" => handle_compile_expression(map),
         "compile_expression_trace" => handle_compile_expression_trace(map),
@@ -2700,6 +2820,59 @@ fn directive_for_verbosity(v: u8) -> &'static str {
 mod tests {
     use super::*;
 
+    /// BT-3095 conformance: every command in the shared wire-vocabulary
+    /// corpus must be recognized by `handle_request`'s dispatch — i.e. it
+    /// must not fall through to the catch-all `"Unknown command: ..."` arm.
+    /// The corpus is the single source of truth both implementations are
+    /// pinned to; the Erlang side asserts the identical list drives real
+    /// dispatch on the compiled binary in
+    /// `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`.
+    /// See `handle_request`'s doc comment for the full rationale.
+    #[test]
+    fn handle_request_recognizes_shared_command_vocabulary_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join(
+                "runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json",
+            );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let corpus: Vec<String> = serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!corpus.is_empty(), "corpus must have cases");
+
+        for command in &corpus {
+            // Deliberately send no fields beyond `command` — a recognized
+            // command may still fail (e.g. "Missing or invalid 'source'
+            // field"), but that failure is distinct from the dispatcher's
+            // catch-all message, which is the unique fingerprint of an
+            // unrecognized command atom.
+            let request = Term::from(Map::from([(atom("command"), atom(command.as_str()))]));
+            let response = handle_request(&request);
+            let Term::Map(ref m) = response else {
+                panic!("command {command:?}: expected a map response, got {response:?}");
+            };
+            let unknown_message = format!("Unknown command: {command}");
+            if let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") {
+                for diag in &diagnostics.elements {
+                    let Term::Map(diag_map) = diag else {
+                        continue;
+                    };
+                    if let Some(msg) = map_get(diag_map, "message").and_then(term_to_string) {
+                        assert_ne!(
+                            msg, unknown_message,
+                            "corpus command {command:?} is not recognized by handle_request's \
+                             dispatch — add a match arm (or remove it from the corpus if it was \
+                             deliberately retired)"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// BT-907: Inline class definition with cross-file superclass index must compile
     /// as a value type, not an Actor, when the parent's chain resolves to Object.
     #[test]
@@ -2823,16 +2996,178 @@ mod tests {
         assert_eq!(info.state.len(), 1);
         assert_eq!(info.state[0].as_str(), "count");
         assert_eq!(
-            info.state_types.get("count").map(ecow::EcoString::as_str),
-            Some("Integer")
+            info.state_types.get("count"),
+            Some(
+                &beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::simple("Integer")
+            )
         );
         assert_eq!(info.methods.len(), 1);
         assert_eq!(info.methods[0].selector.as_str(), "value");
         assert_eq!(info.methods[0].arity, 0);
-        assert_eq!(info.methods[0].return_type.as_deref(), Some("Integer"));
+        assert_eq!(
+            info.methods[0].return_type,
+            Some(
+                beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::simple("Integer")
+            )
+        );
         assert_eq!(info.class_methods.len(), 1);
         assert_eq!(info.class_methods[0].selector.as_str(), "new");
         assert_eq!(info.class_methods[0].arity, 0);
+    }
+
+    /// BT-3076: a generic return type — the `{'generic', Base, [Params]}`
+    /// `MetaTypeRepr` tagged tuple codegen emits for e.g. `-> Result(T, E)`
+    /// (`crate::codegen::core_erlang::gen_server::methods::MetaTypeRepr`,
+    /// beamtalk-core) — must survive the ETF `__beamtalk_meta/0` boundary
+    /// into `MethodInfo::return_type` *structurally*.
+    ///
+    /// Before this stage, `term_to_atom` only matched a bare `Term::Atom`,
+    /// so this exact tagged tuple silently degraded to `None` — a real
+    /// latent bug (a generic return type crossing the compiler port lost
+    /// its structure entirely). `term_to_declared_type` is the fix: this
+    /// test pins the shape `{'generic', 'Result', [{'type_param', 'T', 0},
+    /// 'Error']}` (a class-level type param nested inside a generic,
+    /// mirroring what codegen actually emits for `class Box(T) ... unwrap
+    /// -> Result(T, Error)`) round-tripping to
+    /// `DeclaredType::Generic { base: "Result", parameters: [Simple("T"),
+    /// Simple("Error")] }` — the codegen-internal `type_param` index has no
+    /// `DeclaredType` counterpart and is intentionally dropped (see
+    /// `term_to_declared_type`'s doc).
+    #[test]
+    fn generic_return_type_survives_etf_meta() {
+        use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+        use eetf::{FixInteger, List, Tuple};
+
+        let generic_return = Term::from(Tuple {
+            elements: vec![
+                atom("generic"),
+                atom("Result"),
+                Term::from(List::from(vec![
+                    Term::from(Tuple {
+                        elements: vec![
+                            atom("type_param"),
+                            atom("T"),
+                            Term::from(FixInteger::from(0)),
+                        ],
+                    }),
+                    atom("Error"),
+                ])),
+            ],
+        });
+
+        let unwrap_method_map = Map::from([
+            (atom("arity"), Term::from(FixInteger::from(0))),
+            (atom("param_types"), Term::from(List::from(vec![]))),
+            (atom("return_type"), generic_return),
+        ]);
+        let method_info_map = Map::from([(atom("unwrap"), Term::from(unwrap_method_map))]);
+
+        let meta_map = Map::from([
+            (atom("class"), atom("box")),
+            (atom("superclass"), atom("Object")),
+            (atom("meta_version"), Term::from(FixInteger::from(2))),
+            (atom("is_sealed"), atom("false")),
+            (atom("is_abstract"), atom("false")),
+            (atom("is_value"), atom("true")),
+            (atom("is_typed"), atom("false")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("field_types"), Term::from(Map::from([]))),
+            (atom("method_info"), Term::from(method_info_map)),
+            (atom("class_method_info"), Term::from(Map::from([]))),
+            (atom("class_variables"), Term::from(List::from(vec![]))),
+        ]);
+
+        let class_hierarchy_term = Term::from(Map::from([(atom("box"), Term::from(meta_map))]));
+        let classes = parse_class_hierarchy_from_term(&class_hierarchy_term);
+        assert_eq!(classes.len(), 1, "Should parse one class");
+
+        let info = &classes[0];
+        let method = info
+            .methods
+            .iter()
+            .find(|m| m.selector == "unwrap")
+            .expect("unwrap method should be present");
+        assert_eq!(
+            method.return_type,
+            Some(DeclaredType::generic(
+                "Result",
+                vec![DeclaredType::simple("T"), DeclaredType::simple("Error")],
+            )),
+            "generic return type must survive the ETF meta boundary structurally, \
+             not degrade to None (the pre-BT-3076 bug this test guards against)"
+        );
+    }
+
+    /// BT-3076: `-> Self` / `-> Self class` / `-> <Name> class` return types
+    /// cross the ETF `__beamtalk_meta/0` boundary as *flat atoms* (codegen's
+    /// `MetaTypeRepr::Atom` fallback renders them via `Display`), so a method
+    /// inherited from a class compiled in a previous REPL/workspace step must
+    /// re-enter `MethodInfo::return_type` as the structured
+    /// `SelfType`/`SelfClass`/`ClassOf` variants — the checker's fluent-setter
+    /// and metatype special cases match on those variants, and a degraded
+    /// `Simple("Self")` would silently fall back to `Dynamic`. Companion to
+    /// `generic_return_type_survives_etf_meta` for the self-type shapes.
+    #[test]
+    fn self_type_return_survives_etf_meta() {
+        use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+        use eetf::{FixInteger, List};
+
+        let method = |return_type: Term| {
+            Term::from(Map::from([
+                (atom("arity"), Term::from(FixInteger::from(0))),
+                (atom("param_types"), Term::from(List::from(vec![]))),
+                (atom("return_type"), return_type),
+            ]))
+        };
+        let method_info_map = Map::from([
+            (atom("withX"), method(atom("Self"))),
+            (atom("species"), method(atom("Self class"))),
+            (atom("actorClass"), method(atom("Actor class"))),
+        ]);
+
+        let meta_map = Map::from([
+            (atom("class"), atom("box")),
+            (atom("superclass"), atom("Object")),
+            (atom("meta_version"), Term::from(FixInteger::from(2))),
+            (atom("is_sealed"), atom("false")),
+            (atom("is_abstract"), atom("false")),
+            (atom("is_value"), atom("true")),
+            (atom("is_typed"), atom("false")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("field_types"), Term::from(Map::from([]))),
+            (atom("method_info"), Term::from(method_info_map)),
+            (atom("class_method_info"), Term::from(Map::from([]))),
+            (atom("class_variables"), Term::from(List::from(vec![]))),
+        ]);
+
+        let class_hierarchy_term = Term::from(Map::from([(atom("box"), Term::from(meta_map))]));
+        let classes = parse_class_hierarchy_from_term(&class_hierarchy_term);
+        assert_eq!(classes.len(), 1, "Should parse one class");
+
+        let info = &classes[0];
+        let return_type_of = |selector: &str| {
+            info.methods
+                .iter()
+                .find(|m| m.selector == selector)
+                .unwrap_or_else(|| panic!("{selector} method should be present"))
+                .return_type
+                .clone()
+        };
+        assert_eq!(
+            return_type_of("withX"),
+            Some(DeclaredType::SelfType),
+            "'Self' atom must round-trip as SelfType, not Simple(\"Self\")"
+        );
+        assert_eq!(
+            return_type_of("species"),
+            Some(DeclaredType::SelfClass),
+            "'Self class' atom must round-trip as SelfClass"
+        );
+        assert_eq!(
+            return_type_of("actorClass"),
+            Some(DeclaredType::ClassOf("Actor".into())),
+            "'Actor class' atom must round-trip as ClassOf(\"Actor\")"
+        );
     }
 
     /// ADR 0050 Phase 4: `class_hierarchy` in `compile_expression` request is accepted
@@ -5046,5 +5381,89 @@ mod property_tests {
              (not silently vanish) when referenced in a later turn's `::` annotation: \
              {response:?}"
         );
+    }
+
+    // -------------------------------------------------------------------
+    // BT-3100: type-annotation string fidelity across the compiler-port
+    // wire protocol
+    // -------------------------------------------------------------------
+
+    /// Property-based tests pinning that a type-annotation *string* —
+    /// `method_signature_terms`'s `TypeAnnotation::type_name()` rendering,
+    /// carried in `return_type`/`param_types` response fields (see
+    /// `method_definition_ok_response`, ADR 0105 Phase 1 / BT-2777) —
+    /// crosses the compiler port's `{packet, 4}`-framed ETF wire unchanged.
+    ///
+    /// `Term::encode`/`Term::decode` (`eetf`) implement the same External
+    /// Term Format the BEAM's `term_to_binary`/`binary_to_term` speak, so
+    /// round-tripping a real response `Term` through them here exercises
+    /// the identical byte-level encoding the live Rust ⇄ Erlang port pipe
+    /// uses — there is no separate "real" wire representation this test
+    /// would be missing by not spawning a BEAM. What it *doesn't* cover is
+    /// the Erlang-side decode; that's `beamtalk_compiler_port.erl`'s job,
+    /// exercised by the runtime `EUnit` suite, not this crate.
+    ///
+    /// Generated strings reuse `DeclaredType`'s `Display` rendering
+    /// (byte-identical to `TypeAnnotation::type_name()`, enforced by
+    /// `declared_type.rs`'s own `assert_display_parity` tests) so the
+    /// shapes this test carries across the wire — union, generic,
+    /// singleton, `FalseOr`, difference, intersection, self-types — are
+    /// the exact same canonical text a real compiled method signature
+    /// would send, not an ad hoc string format.
+    ///
+    /// The generator itself (`arb_declared_type`) lives in beamtalk-core's
+    /// `test_helpers::test_support` (behind the `test` Cargo feature this
+    /// crate's dev-dependency enables) rather than being copied here, so
+    /// this test and `declared_type.rs`'s own fixed-point property tests
+    /// exercise the exact same shape space by construction — see this
+    /// repo's "No duplicate implementations" rule.
+    #[cfg(test)]
+    mod type_string_wire_fidelity {
+        use super::*;
+        use beamtalk_core::test_helpers::test_support::arb_declared_type;
+
+        fn arb_type_annotation_string() -> impl Strategy<Value = String> {
+            arb_declared_type().prop_map(|dt| dt.to_string())
+        }
+
+        proptest! {
+            #![proptest_config(proptest_config())]
+
+            /// A `return_type`/`param_types` string embedded in a real
+            /// production response (`method_definition_ok_response`)
+            /// survives ETF encode → decode byte-for-byte: no truncation,
+            /// no re-encoding drift, regardless of how the type-annotation
+            /// text is shaped.
+            #[test]
+            fn type_annotation_string_survives_wire_roundtrip(type_str in arb_type_annotation_string()) {
+                let response = method_definition_ok_response(
+                    "Foo",
+                    "bar",
+                    false,
+                    "bar => self",
+                    &type_str,
+                    std::slice::from_ref(&type_str),
+                    &[],
+                );
+
+                let mut buf = Vec::new();
+                response.encode(&mut buf).expect("encoding a response Term must not fail");
+                let decoded = Term::decode(io::Cursor::new(buf))
+                    .expect("decoding a just-encoded response Term must not fail");
+
+                prop_assert_eq!(
+                    response_field_str(&decoded, "return_type"),
+                    Some(type_str.clone()),
+                    "return_type did not survive the ETF wire round trip for {:?}",
+                    type_str,
+                );
+                prop_assert_eq!(
+                    response_field_str_list(&decoded, "param_types"),
+                    Some(vec![type_str.clone()]),
+                    "param_types did not survive the ETF wire round trip for {:?}",
+                    type_str,
+                );
+            }
+        }
     }
 }

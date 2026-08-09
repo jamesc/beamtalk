@@ -21,6 +21,30 @@ use sha2::{Digest, Sha256};
 /// deregistration polling, registration lookup.
 pub mod epmd;
 
+/// SHA256-hash a path string down to a 12-hex-char workspace ID.
+///
+/// The pure half of [`generate_workspace_id`] — no filesystem access, no
+/// `canonicalize()`. Split out so a golden test can pin a fixed
+/// input/output pair without depending on a platform-specific canonicalized
+/// path (e.g. `std::env::temp_dir()` resolves differently per OS) and
+/// without re-implementing the hash in the test itself — see
+/// `docs/development/architecture-principles.md` §7.
+#[must_use]
+pub fn hash_workspace_path_string(path_str: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(path_str.as_bytes());
+    let result = hasher.finalize();
+
+    // Use first 12 hex chars (6 bytes) for readability — take first 6 bytes
+    result
+        .iter()
+        .take(6)
+        .fold(String::with_capacity(12), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 /// Generate a workspace ID from a project path.
 ///
 /// Uses SHA256 hash of the canonicalized absolute path (first 12 hex chars).
@@ -35,20 +59,7 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     let path_str = absolute
         .to_str()
         .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", absolute))?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(path_str.as_bytes());
-    let result = hasher.finalize();
-
-    // Use first 12 hex chars (6 bytes) for readability — take first 6 bytes
-    let hex = result
-        .iter()
-        .take(6)
-        .fold(String::with_capacity(12), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        });
-    Ok(hex)
+    Ok(hash_workspace_path_string(path_str))
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).

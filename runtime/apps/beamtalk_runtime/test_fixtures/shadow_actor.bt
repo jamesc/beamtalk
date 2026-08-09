@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ShadowActor - a method parameter shares a name with an instance variable,
+// verifying the parameter shadows the state (which is only reachable via
+// self.value) against real compiled dispatch (BT-3093 migration of the
+// hand-simulated ModuleState fixture in
+// beamtalk_codegen_simulation_tests.erl's instance_var_shadowing_test).
+
+Actor subclass: ShadowActor
+  state: value = 42
+
+  getInstanceValue => self.value
+
+  echoParam: value => value

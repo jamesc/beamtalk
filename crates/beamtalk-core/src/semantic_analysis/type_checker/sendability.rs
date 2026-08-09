@@ -29,8 +29,6 @@
 //!   tier), generic `type_args` (`List(Port)` → `HandleScoped`), and user
 //!   `handleScope:` declarations.
 
-use std::collections::HashMap;
-
 use ecow::EcoString;
 
 use crate::ast::ClassKind;
@@ -38,6 +36,7 @@ use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 
 use super::InferredType;
+use super::type_resolver;
 
 /// The scope over which a `HandleScoped` value's backing handle stays valid.
 ///
@@ -313,22 +312,22 @@ fn tier_of_known(
     if kind == ClassKind::Value {
         for field in hierarchy.all_state(name) {
             let field_tier = match hierarchy.state_field_type(name, &field) {
-                // Parse the stored type-name string through the shared resolver
-                // so generic annotations keep their `type_args`: `"List(Port)"`
-                // becomes `Known("List", [Known("Port")])`, not an opaque
-                // `Known("List(Port)")`. Without this the whole annotation would
-                // be treated as the class name, `resolve_class_kind` would find
-                // no such class, and a generic field would silently drop to
-                // `Unknown` instead of composing its element tier (BT-2770).
+                // Resolve the stored `DeclaredType` through the shared
+                // resolver so generic annotations keep their `type_args`:
+                // `List(Port)` becomes `Known("List", [Known("Port")])`, not
+                // an opaque `Known("List(Port)")`. Without this the whole
+                // annotation would be treated as the class name,
+                // `resolve_class_kind` would find no such class, and a
+                // generic field would silently drop to `Unknown` instead of
+                // composing its element tier (BT-2770).
                 // BT-2936: `alias_registry` (threaded from the top-level
                 // `tier_of` call) additionally expands an alias-typed field
                 // to its declared type before tiering, instead of treating
                 // the alias name as an unresolved nominal class.
                 Some(field_ty) => {
-                    let field_type = super::TypeChecker::resolve_type_string(
+                    let field_type = type_resolver::resolve_declared_type(
                         &field_ty,
-                        &HashMap::new(),
-                        &HashMap::new(),
+                        &type_resolver::SubstitutionMap::new(),
                         None,
                         alias_registry,
                         super::TypeStringContext::Declared,

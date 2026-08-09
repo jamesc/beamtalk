@@ -282,10 +282,9 @@ fn block_params_remain_dynamic_for_unparameterized_list() {
 #[test]
 fn resolve_type_string_parametric() {
     // List(String) should parse to Known("List") with type_args [Known("String")]
-    let result = TypeChecker::resolve_type_string(
-        "List(String)",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("List(String)"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,
@@ -307,10 +306,9 @@ fn resolve_type_string_parametric() {
 #[test]
 fn resolve_type_string_nested_parametric() {
     // Result(List(Integer), String) should parse correctly
-    let result = TypeChecker::resolve_type_string(
-        "Result(List(Integer), String)",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("Result(List(Integer), String)"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,
@@ -522,26 +520,6 @@ fn block_params_typed_via_method_parameter_annotation() {
         dynamic_warnings.is_empty(),
         "block params should be typed from method param List(Dictionary), got: {dynamic_warnings:?}"
     );
-}
-
-#[test]
-fn split_union_respecting_parens_simple() {
-    let result = TypeChecker::split_union_respecting_parens("String | nil");
-    assert_eq!(result, vec!["String", "nil"]);
-}
-
-#[test]
-fn split_union_respecting_parens_inside_parametric() {
-    // Pipe inside parens should NOT cause a split
-    let result = TypeChecker::split_union_respecting_parens("Result(String | Integer, Error)");
-    assert_eq!(result, vec!["Result(String | Integer, Error)"]);
-}
-
-#[test]
-fn split_union_respecting_parens_mixed() {
-    // Top-level union with parametric member
-    let result = TypeChecker::split_union_respecting_parens("List(String) | nil");
-    assert_eq!(result, vec!["List(String)", "nil"]);
 }
 
 #[test]

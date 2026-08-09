@@ -18,6 +18,7 @@ use crate::beam_compiler::{
 use crate::commands::app_file;
 use crate::commands::build::build_alias_metadata;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
+use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -169,6 +170,10 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &class_metadata,
         &alias_source_texts_sorted_by_name(alias_sources),
     )?;
+
+    // BT-3085: Generate the Erlang-side twin of the same builtin-class list,
+    // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
+    generate_erlang_builtins_hrl(&class_metadata)?;
 
     println!("Built {} stdlib modules", source_files.len());
 
@@ -558,8 +563,8 @@ struct ClassMeta {
     class_kind: beamtalk_core::ast::ClassKind,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
-    /// Declared type annotations for state fields (field name → type name).
-    state_types: Vec<(String, String)>,
+    /// Declared type annotations for state fields (field name → type).
+    state_types: Vec<(String, DeclaredType)>,
     /// Which state fields have an explicit default value (field name → has default).
     /// BT-1976: Carries cross-file default-value presence so downstream
     /// consumers can identify typed-no-default fields without the AST.
@@ -574,10 +579,21 @@ struct ClassMeta {
     type_params: Vec<String>,
     /// Type arguments passed to the superclass, e.g. `["E"]` for
     /// `Collection(E) subclass: List(E)`. Empty when the parent isn't parametric.
-    superclass_type_args: Vec<String>,
+    superclass_type_args: Vec<DeclaredType>,
     /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
     /// The bare symbol text (e.g. `"process"`), or `None` when undeclared.
     handle_scope: Option<String>,
+}
+
+/// Sort class metadata by class name — every generated-artifact writer
+/// (`generate_builtins_rs`, `generate_erlang_builtins_hrl`) needs the same
+/// deterministic ordering so the checked-in `.rs`/`.hrl` files are stable
+/// across regenerations. Single implementation per CLAUDE.md's
+/// "No duplicate implementations" rule.
+fn sorted_by_class_name(class_metadata: &[ClassMeta]) -> Vec<&ClassMeta> {
+    let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
+    sorted.sort_by_key(|m| &m.class_name);
+    sorted
 }
 
 /// Metadata for a single method, extracted from the AST.
@@ -595,9 +611,9 @@ struct MethodMeta {
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
     /// Return type annotation (e.g., `"Integer"`), if present.
-    return_type: Option<String>,
+    return_type: Option<DeclaredType>,
     /// Parameter type annotations, one per parameter. `None` means untyped.
-    param_types: Vec<Option<String>>,
+    param_types: Vec<Option<DeclaredType>>,
     /// Doc comment extracted from the source (`///` lines before the method).
     doc: Option<String>,
 }
@@ -633,15 +649,11 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
         is_sealed: m.is_sealed,
         is_internal: m.is_internal,
         spawns_block: false,
-        return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
+        return_type: m.return_type.as_ref().map(DeclaredType::from),
         param_types: m
             .parameters
             .iter()
-            .map(|p| {
-                p.type_annotation
-                    .as_ref()
-                    .map(|t| t.type_name().to_string())
-            })
+            .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
             .collect(),
         doc: m.doc_comment.clone(),
     }
@@ -684,10 +696,7 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: slot
-                    .type_annotation
-                    .as_ref()
-                    .map(|t| t.type_name().to_string()),
+                return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
                 param_types: vec![],
                 doc: Some(getter_doc),
             });
@@ -705,10 +714,7 @@ fn synthesize_value_auto_methods(
             }
         };
         if !user_selectors.contains(&with_sel) {
-            let param_type = slot
-                .type_annotation
-                .as_ref()
-                .map(|t| t.type_name().to_string());
+            let param_type = slot.type_annotation.as_ref().map(DeclaredType::from);
             let setter_doc = format!(
                 "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
             );
@@ -719,7 +725,7 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(class_name.to_string()),
+                return_type: Some(DeclaredType::simple(class_name)),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
             });
@@ -737,11 +743,7 @@ fn synthesize_value_auto_methods(
         let param_types = class
             .state
             .iter()
-            .map(|s| {
-                s.type_annotation
-                    .as_ref()
-                    .map(|t| t.type_name().to_string())
-            })
+            .map(|s| s.type_annotation.as_ref().map(DeclaredType::from))
             .collect();
         let args_desc: String = class
             .state
@@ -764,7 +766,7 @@ fn synthesize_value_auto_methods(
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(class_name.to_string()),
+            return_type: Some(DeclaredType::simple(class_name)),
             param_types,
             doc: Some(ctor_doc),
         });
@@ -1142,7 +1144,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .filter_map(|s| {
             s.type_annotation
                 .as_ref()
-                .map(|ty| (s.name.name.to_string(), ty.type_name().to_string()))
+                .map(|ty| (s.name.name.to_string(), DeclaredType::from(ty)))
         })
         .collect();
 
@@ -1187,7 +1189,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
     let superclass_type_args = class
         .superclass_type_args
         .iter()
-        .map(|ty| ty.type_name().to_string())
+        .map(DeclaredType::from)
         .collect();
 
     Ok(ClassMeta {
@@ -1250,9 +1252,7 @@ fn format_stdlib_class_entry(m: &ClassMeta) -> String {
 /// to be walked in. Without this, moving a class into a `stdlib/src/`
 /// subdirectory reshuffles a checked-in generated file for no semantic reason.
 fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> String {
-    let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
-    sorted.sort_by(|a, b| a.class_name.cmp(&b.class_name));
-    sorted
+    sorted_by_class_name(class_metadata)
         .into_iter()
         .map(format_stdlib_class_entry)
         .collect::<Vec<_>>()
@@ -1384,6 +1384,10 @@ fn generate_app_src_file(
 const GENERATED_BUILTINS_PATH: &str =
     "crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs";
 
+/// Default path for the generated Erlang builtin-class-list header (BT-3085).
+const GENERATED_BUILTINS_HRL_PATH: &str =
+    "runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl";
+
 /// Generate the `generated_builtins.rs` file from parsed stdlib class and
 /// type-alias metadata.
 ///
@@ -1444,7 +1448,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
          //! **Do not edit this file.** Modify the `.bt` source in `stdlib/src/` and\n\
          //! run `just build` (or `beamtalk build-stdlib`) to regenerate.\n\
          \n\
-         use super::super::{ClassInfo, MethodInfo, SuperclassTypeArg};\n\
+         use super::super::{ClassInfo, DeclaredType, MethodInfo, SuperclassTypeArg};\n\
          use crate::ast::MethodKind;\n\
          use ecow::EcoString;\n\
          use std::collections::HashMap;\n\
@@ -1462,8 +1466,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
          \x20       name,\n",
     );
 
-    let mut sorted_meta: Vec<&ClassMeta> = class_metadata.iter().collect();
-    sorted_meta.sort_by_key(|m| &m.class_name);
+    let sorted_meta = sorted_by_class_name(class_metadata);
 
     for (i, meta) in sorted_meta.iter().enumerate() {
         if i == 0 {
@@ -1510,6 +1513,68 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
         debug!("Generated {}", dest);
     } else {
         debug!("Generated builtins unchanged, skipping write");
+    }
+    Ok(())
+}
+
+/// Generate the `beamtalk_generated_builtins.hrl` Erlang header from parsed
+/// stdlib class metadata (BT-3085).
+///
+/// Defines `?BEAMTALK_GENERATED_BUILTIN_CLASSES`, the Erlang-side twin of
+/// `generated_builtins.rs`'s `is_generated_builtin_class` match arms — both
+/// are emitted from the exact same `class_metadata` list computed earlier in
+/// `build_stdlib()`, so they cannot drift the way the old hand-typed
+/// `beamtalk_class_metadata:all_builtins/0` list did. `beamtalk_class_metadata.erl`
+/// includes this header and prepends the one runtime-only exception
+/// (`'Future'`, no `stdlib/src/Future.bt` source — mirrors `builtins.rs`'s
+/// `is_builtin_class` on the Rust side).
+fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
+    let sorted_meta = sorted_by_class_name(class_metadata);
+
+    let mut code = String::new();
+    code.push_str(
+        "%% AUTO-GENERATED from stdlib/src/*.bt by `beamtalk build-stdlib` — do not edit manually.\n\
+         %% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         %% Generated built-in class list derived from `stdlib/src/*.bt` sources.\n\
+         %%\n\
+         %% Do not edit this file. Modify the `.bt` source in `stdlib/src/` and run\n\
+         %% `just build` (or `beamtalk build-stdlib`) to regenerate.\n\
+         %%\n\
+         %% Mirrors `is_generated_builtin_class` in\n\
+         %% crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs\n\
+         %% (BT-3085) — both are generated from the same stdlib class-metadata pass\n\
+         %% in build_stdlib.rs, so they cannot drift out of sync with each other.\n\
+         \n\
+         -ifndef(BEAMTALK_GENERATED_BUILTINS_HRL).\n\
+         -define(BEAMTALK_GENERATED_BUILTINS_HRL, true).\n\
+         \n\
+         -define(BEAMTALK_GENERATED_BUILTIN_CLASSES, [\n",
+    );
+
+    for (i, meta) in sorted_meta.iter().enumerate() {
+        let sep = if i + 1 == sorted_meta.len() { "" } else { "," };
+        let _ = writeln!(code, "    '{}'{sep}", meta.class_name);
+    }
+
+    code.push_str("]).\n\n-endif.\n");
+
+    let dest = Utf8PathBuf::from(GENERATED_BUILTINS_HRL_PATH);
+
+    // Only write if content changed to avoid unnecessary recompilation.
+    let needs_write = match fs::read_to_string(&dest) {
+        Ok(existing) => existing != code,
+        Err(_) => true,
+    };
+
+    if needs_write {
+        fs::write(&dest, &code)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write '{dest}'"))?;
+        debug!("Generated {}", dest);
+    } else {
+        debug!("Generated Erlang builtins header unchanged, skipping write");
     }
     Ok(())
 }
@@ -1575,7 +1640,11 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
             if i > 0 {
                 code.push_str(", ");
             }
-            let _ = write!(code, "(\"{field}\".into(), \"{ty}\".into())");
+            let _ = write!(
+                code,
+                "(\"{field}\".into(), {})",
+                declared_type_to_rust_expr(ty)
+            );
         }
         code.push_str("]),\n");
     }
@@ -1686,7 +1755,7 @@ fn generate_alias_sources_section(code: &mut String, alias_sources: &[String]) {
 /// names one of the subclass's own type parameters (e.g. `Collection(E)
 /// subclass: Array(E)`) or a [`SuperclassTypeArg::Concrete`] otherwise (e.g.
 /// `Collection(Integer) subclass: IntArray`).
-fn generate_superclass_type_args(code: &mut String, args: &[String], type_params: &[String]) {
+fn generate_superclass_type_args(code: &mut String, args: &[DeclaredType], type_params: &[String]) {
     if args.is_empty() {
         code.push_str("            superclass_type_args: vec![],\n");
         return;
@@ -1696,17 +1765,88 @@ fn generate_superclass_type_args(code: &mut String, args: &[String], type_params
         if i > 0 {
             code.push_str(", ");
         }
-        if let Some(idx) = type_params.iter().position(|p| p == arg) {
+        let param_ref_idx = match arg {
+            DeclaredType::Simple(name) => type_params.iter().position(|p| p == name.as_str()),
+            _ => None,
+        };
+        if let Some(idx) = param_ref_idx {
             let _ = write!(code, "SuperclassTypeArg::ParamRef {{ param_index: {idx} }}");
         } else {
-            let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
             let _ = write!(
                 code,
-                "SuperclassTypeArg::Concrete {{ type_name: \"{escaped}\".into() }}"
+                "SuperclassTypeArg::Concrete {{ declared: {} }}",
+                declared_type_to_rust_expr(arg)
             );
         }
     }
     code.push_str("],\n");
+}
+
+/// Serialise a [`DeclaredType`] into a Rust source expression that
+/// reconstructs it verbatim — the structured counterpart to stringifying via
+/// `Display` and re-parsing on read. Mirrors every `DeclaredType` variant
+/// (BT-3076 stage 3b.2): `Simple`/`Singleton`/`Generic`/`Union` go through
+/// the compact constructors added for this purpose
+/// ([`DeclaredType::simple`], etc.); the remaining variants (`FalseOr`,
+/// `Difference`, `Intersection`, `SelfType`, `SelfClass`, `ClassOf`) are rare
+/// in stdlib signatures but still emitted structurally rather than silently
+/// dropped, so a stdlib author who *does* write one of them gets a correct
+/// generated artifact rather than a degraded one.
+fn declared_type_to_rust_expr(dt: &DeclaredType) -> String {
+    match dt {
+        DeclaredType::Simple(name) => format!("DeclaredType::simple({})", rust_str_lit(name)),
+        DeclaredType::Singleton(name) => {
+            format!("DeclaredType::singleton({})", rust_str_lit(name))
+        }
+        DeclaredType::Union(members) => {
+            let parts: Vec<String> = members.iter().map(declared_type_to_rust_expr).collect();
+            format!("DeclaredType::union(vec![{}])", parts.join(", "))
+        }
+        DeclaredType::Generic { base, parameters } => {
+            let parts: Vec<String> = parameters.iter().map(declared_type_to_rust_expr).collect();
+            format!(
+                "DeclaredType::generic({}, vec![{}])",
+                rust_str_lit(base),
+                parts.join(", ")
+            )
+        }
+        DeclaredType::FalseOr(inner) => {
+            format!(
+                "DeclaredType::FalseOr(Box::new({}))",
+                declared_type_to_rust_expr(inner)
+            )
+        }
+        DeclaredType::Difference { base, excluded } => format!(
+            "DeclaredType::Difference {{ base: Box::new({}), excluded: Box::new({}) }}",
+            declared_type_to_rust_expr(base),
+            declared_type_to_rust_expr(excluded)
+        ),
+        DeclaredType::Intersection { left, right } => format!(
+            "DeclaredType::Intersection {{ left: Box::new({}), right: Box::new({}) }}",
+            declared_type_to_rust_expr(left),
+            declared_type_to_rust_expr(right)
+        ),
+        DeclaredType::SelfType => "DeclaredType::SelfType".to_string(),
+        DeclaredType::SelfClass => "DeclaredType::SelfClass".to_string(),
+        DeclaredType::ClassOf(name) => {
+            format!("DeclaredType::ClassOf({})", rust_str_lit_into(name))
+        }
+    }
+}
+
+/// Escaped Rust string literal (no `.into()` suffix) — for use as an
+/// argument to a `DeclaredType` compact constructor (`impl Into<EcoString>`
+/// parameters accept a bare `&str` literal directly).
+fn rust_str_lit(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// Escaped Rust string literal with a trailing `.into()` — for direct
+/// enum-variant construction where the field type is a bare `EcoString`
+/// (no `impl Into` coercion available).
+fn rust_str_lit_into(s: &str) -> String {
+    format!("{}.into()", rust_str_lit(s))
 }
 
 /// Generate a method list field (`methods` or `class_methods`).
@@ -1727,10 +1867,7 @@ fn generate_method_list(
         // Escape backslashes and quotes in selector for Rust string literals
         let selector = m.selector.replace('\\', "\\\\").replace('"', "\\\"");
         let return_type_expr = match &m.return_type {
-            Some(t) => {
-                let escaped = t.replace('\\', "\\\\").replace('"', "\\\"");
-                format!("Some(\"{escaped}\".into())")
-            }
+            Some(t) => format!("Some({})", declared_type_to_rust_expr(t)),
             None => "None".to_string(),
         };
         let param_types_expr = if m.param_types.is_empty() {
@@ -1740,10 +1877,7 @@ fn generate_method_list(
                 .param_types
                 .iter()
                 .map(|p| match p {
-                    Some(t) => {
-                        let escaped = t.replace('\\', "\\\\").replace('"', "\\\"");
-                        format!("Some(\"{escaped}\".into())")
-                    }
+                    Some(t) => format!("Some({})", declared_type_to_rust_expr(t)),
                     None => "None".to_string(),
                 })
                 .collect();
@@ -2519,8 +2653,8 @@ mod tests {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some("Counter".to_string()),
-                    param_types: vec![Some("Integer".to_string())],
+                    return_type: Some(DeclaredType::simple("Counter")),
+                    param_types: vec![Some(DeclaredType::simple("Integer"))],
                     doc: None,
                 },
             ],
@@ -2531,7 +2665,7 @@ mod tests {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("Counter".to_string()),
+                return_type: Some(DeclaredType::simple("Counter")),
                 param_types: vec![],
                 doc: None,
             }],
@@ -2620,7 +2754,7 @@ mod tests {
     #[test]
     fn test_generate_superclass_type_args_param_ref() {
         let mut code = String::new();
-        generate_superclass_type_args(&mut code, &["E".to_string()], &["E".to_string()]);
+        generate_superclass_type_args(&mut code, &[DeclaredType::simple("E")], &["E".to_string()]);
         assert!(
             code.contains(
                 "superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }]"
@@ -2635,7 +2769,7 @@ mod tests {
         let mut code = String::new();
         generate_superclass_type_args(
             &mut code,
-            &["V".to_string()],
+            &[DeclaredType::simple("V")],
             &["K".to_string(), "V".to_string()],
         );
         assert!(
@@ -2650,10 +2784,10 @@ mod tests {
     fn test_generate_superclass_type_args_concrete() {
         // `Collection(Integer) subclass: IntArray` — Integer is not a type param.
         let mut code = String::new();
-        generate_superclass_type_args(&mut code, &["Integer".to_string()], &[]);
+        generate_superclass_type_args(&mut code, &[DeclaredType::simple("Integer")], &[]);
         assert!(
             code.contains(
-                "superclass_type_args: vec![SuperclassTypeArg::Concrete { type_name: \"Integer\".into() }]"
+                "superclass_type_args: vec![SuperclassTypeArg::Concrete { declared: DeclaredType::simple(\"Integer\") }]"
             ),
             "Non-type-param args should emit Concrete. Got: {code}"
         );
@@ -2663,9 +2797,15 @@ mod tests {
     fn test_generate_superclass_type_args_concrete_escaped() {
         // Guard against unescaped quotes/backslashes breaking the generated Rust.
         let mut code = String::new();
-        generate_superclass_type_args(&mut code, &["My\\\"Type".to_string()], &["E".to_string()]);
+        generate_superclass_type_args(
+            &mut code,
+            &[DeclaredType::simple("My\\\"Type")],
+            &["E".to_string()],
+        );
         assert!(
-            code.contains("SuperclassTypeArg::Concrete { type_name: \"My\\\\\\\"Type\".into() }"),
+            code.contains(
+                "SuperclassTypeArg::Concrete { declared: DeclaredType::simple(\"My\\\\\\\"Type\") }"
+            ),
             "Should emit escaped Concrete type_name. Got: {code}"
         );
     }
@@ -2712,8 +2852,7 @@ mod tests {
 
         let mut code = String::new();
         // Simulate the sorted generation from generate_builtins_rs
-        let mut sorted: Vec<&ClassMeta> = meta.iter().collect();
-        sorted.sort_by_key(|m| &m.class_name);
+        let sorted = sorted_by_class_name(&meta);
 
         for m in &sorted {
             generate_class_entry(&mut code, m);
@@ -2737,18 +2876,18 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some("Counter".to_string()),
-            param_types: vec![Some("Integer".to_string())],
+            return_type: Some(DeclaredType::simple("Counter")),
+            param_types: vec![Some(DeclaredType::simple("Integer"))],
             doc: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");
         assert!(
-            code.contains("return_type: Some(\"Counter\".into())"),
+            code.contains("return_type: Some(DeclaredType::simple(\"Counter\"))"),
             "Should emit return type. Got: {code}"
         );
         assert!(
-            code.contains("param_types: vec![Some(\"Integer\".into())]"),
+            code.contains("param_types: vec![Some(DeclaredType::simple(\"Integer\"))]"),
             "Should emit param types. Got: {code}"
         );
     }
@@ -2788,7 +2927,7 @@ mod tests {
             is_internal: false,
             spawns_block: true,
             return_type: None,
-            param_types: vec![Some("Integer".to_string()), None],
+            param_types: vec![Some(DeclaredType::simple("Integer")), None],
             doc: None,
         }];
         let mut code = String::new();
@@ -2811,8 +2950,8 @@ mod tests {
             is_sealed: false,
             is_internal: true,
             spawns_block: false,
-            return_type: Some("Dictionary".to_string()),
-            param_types: vec![Some("Symbol".to_string())],
+            return_type: Some(DeclaredType::simple("Dictionary")),
+            param_types: vec![Some(DeclaredType::simple("Symbol"))],
             doc: None,
         }];
         let mut code = String::new();

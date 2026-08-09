@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SpawnerActor - an actor whose method spawns another actor, for testing
+// actor-to-actor spawn interaction against real compiled dispatch
+// (BT-3093 migration of the hand-simulated spawner_module_state fixture in
+// beamtalk_codegen_simulation_tests.erl).
+
+Actor subclass: SpawnerActor
+  state: lastPid = nil
+
+  spawnChild =>
+    self.lastPid := ArithmeticActor spawn
+    self.lastPid
+
+  lastPid => self.lastPid

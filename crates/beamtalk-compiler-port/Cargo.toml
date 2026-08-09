@@ -38,8 +38,13 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # why: property-based testing for compiler port robustness (ADR 0011 Phase 4)
 proptest = { workspace = true }
+# why: BT-3100 — reuse beamtalk-core's shared `arb_declared_type` property-test
+# generator (test_helpers::test_support) instead of duplicating it.
+beamtalk-core = { workspace = true, features = ["test"] }
 # why: isolated beamtalk.toml fixtures for load_diagnostics_overrides_from tests (BT-2839)
 tempfile = "3.14"
+# why: parse the shared compiler-port command-vocabulary conformance corpus (BT-3095)
+serde_json = { workspace = true }
 
 [build-dependencies]
 beamtalk-build.workspace = true

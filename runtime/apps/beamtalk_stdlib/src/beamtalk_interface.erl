@@ -517,10 +517,10 @@ ffiSitesIn(_Source, _Module, _Function, _Arity) ->
     ),
     beamtalk_error:raise(Err2).
 
-%% Normalise an atom-or-binary identifier to a binary.
--spec to_binary(atom() | binary()) -> binary().
-to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
-to_binary(B) when is_binary(B) -> B.
+%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — was an
+%% atom/binary-only copy (would raise `function_clause` on a list input).
+-spec to_binary(term()) -> binary().
+to_binary(Name) -> beamtalk_text:to_binary(Name).
 
 %%% ============================================================================
 %%% Internal method implementations
@@ -902,33 +902,16 @@ resolve_help_method(ClassName, ClassPid, SelectorAtom) ->
 
 %% BT-2091: Walk the class hierarchy looking at *class-side* method tables
 %% so the help header attributes the method to the class that actually
-%% defines it (mirrors find_defining_class/3 for the instance side).
+%% defines it (mirrors find_defining_class/2 for the instance side).
+%% BT-3087: Delegates to beamtalk_hierarchy_docs:find_defining_class_method/2,
+%% the implementation shared with beamtalk_repl_docs.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
-    find_defining_class_method(ClassPid, Selector, 0).
+    beamtalk_hierarchy_docs:find_defining_class_method(ClassPid, Selector).
 
--spec find_defining_class_method(pid(), atom(), non_neg_integer()) -> atom().
-find_defining_class_method(ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    beamtalk_object_class:class_name(ClassPid);
-find_defining_class_method(ClassPid, Selector, Depth) ->
-    Name = beamtalk_object_class:class_name(ClassPid),
-    LocalClassMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
-    case maps:is_key(Selector, LocalClassMethods) of
-        true ->
-            Name;
-        false ->
-            case gen_server:call(ClassPid, superclass, 5000) of
-                none ->
-                    Name;
-                SuperName ->
-                    case beamtalk_class_registry:whereis_class(SuperName) of
-                        undefined -> Name;
-                        SuperPid -> find_defining_class_method(SuperPid, Selector, Depth + 1)
-                    end
-            end
-    end.
-
-%% BT-2091: Hardcoded Metaclass method docs (mirrors beamtalk_repl_docs').
+%% BT-2091: Hardcoded Metaclass method docs.
+%% BT-3087: metaclass_method_doc/1 itself is shared with beamtalk_repl_docs
+%% via beamtalk_hierarchy_docs.
 %% Caller must normalise SelectorArg via ensure_atom/1 first so a binary
 %% selector cannot reach this path; that keeps make_method_not_found_error
 %% unable to crash on a binary input.
@@ -936,7 +919,7 @@ find_defining_class_method(ClassPid, Selector, Depth) ->
     binary() | {error, #beamtalk_error{}}.
 handle_metaclass_help_selector(SelectorAtom) ->
     SelectorBin = atom_to_binary(SelectorAtom, utf8),
-    case metaclass_method_doc(SelectorBin) of
+    case beamtalk_hierarchy_docs:metaclass_method_doc(SelectorBin) of
         {ok, Doc} ->
             iolist_to_binary([
                 <<"== Metaclass >> ">>,
@@ -950,16 +933,6 @@ handle_metaclass_help_selector(SelectorAtom) ->
         not_found ->
             {error, make_method_not_found_error('Metaclass', SelectorAtom)}
     end.
-
--spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
-metaclass_method_doc(<<"new">>) ->
-    {ok, <<"Create a new instance of the class.">>};
-metaclass_method_doc(<<"spawn">>) ->
-    {ok, <<"Create a new actor instance. Returns an actor reference.">>};
-metaclass_method_doc(<<"spawnWith:">>) ->
-    {ok, <<"Create a new actor with initial state from a Dictionary.">>};
-metaclass_method_doc(_) ->
-    not_found.
 
 -doc "Resolve a class argument to an atom class name.".
 -spec resolve_class_name(term()) -> {ok, atom()} | {error, #beamtalk_error{}}.
@@ -1193,54 +1166,25 @@ get_method_sig(ClassPid, Selector) ->
             {atom_to_binary(Selector, utf8), Doc}
     end.
 
--doc "Walk the class hierarchy to collect flattened method map.".
+-doc """
+Walk the class hierarchy to collect flattened method map.
+
+BT-3087: Delegates to `beamtalk_hierarchy_docs:collect_flattened_methods/2`,
+the implementation shared with `beamtalk_repl_docs` (both apps depend on
+`beamtalk_runtime`).
+""".
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
-    collect_flattened_methods(ClassName, ClassPid, 0).
+    beamtalk_hierarchy_docs:collect_flattened_methods(ClassName, ClassPid).
 
--spec collect_flattened_methods(atom(), pid(), non_neg_integer()) -> map().
-collect_flattened_methods(_ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    #{};
-collect_flattened_methods(ClassName, ClassPid, Depth) ->
-    {ok, LocalMethods} = gen_server:call(ClassPid, get_instance_methods, 5000),
-    LocalFlat = maps:map(fun(_Sel, Info) -> {ClassName, Info} end, LocalMethods),
-    Superclass = gen_server:call(ClassPid, superclass, 5000),
-    SuperFlat = collect_chain_methods(Superclass, Depth + 1),
-    maps:merge(SuperFlat, LocalFlat).
+-doc """
+Find which class in the hierarchy defines a selector.
 
--spec collect_chain_methods(atom() | none, non_neg_integer()) -> map().
-collect_chain_methods(none, _Depth) ->
-    #{};
-collect_chain_methods(SuperName, Depth) ->
-    case beamtalk_class_registry:whereis_class(SuperName) of
-        undefined -> #{};
-        SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
-    end.
-
--doc "Find which class in the hierarchy defines a selector.".
+BT-3087: Delegates to `beamtalk_hierarchy_docs:find_defining_class/2`.
+""".
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
-    find_defining_class(ClassPid, Selector, 0).
-
--spec find_defining_class(pid(), atom(), non_neg_integer()) -> atom().
-find_defining_class(ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    gen_server:call(ClassPid, class_name, 5000);
-find_defining_class(ClassPid, Selector, Depth) ->
-    ClassName = gen_server:call(ClassPid, class_name, 5000),
-    case gen_server:call(ClassPid, {method, Selector}, 5000) of
-        nil ->
-            case gen_server:call(ClassPid, superclass, 5000) of
-                none ->
-                    ClassName;
-                Super ->
-                    case beamtalk_class_registry:whereis_class(Super) of
-                        undefined -> ClassName;
-                        SuperPid -> find_defining_class(SuperPid, Selector, Depth + 1)
-                    end
-            end;
-        _MethodInfo ->
-            ClassName
-    end.
+    beamtalk_hierarchy_docs:find_defining_class(ClassPid, Selector).
 
 -doc "Group inherited methods by defining class.".
 -spec group_by_class([{atom(), atom()}]) -> [{atom(), [atom()]}].

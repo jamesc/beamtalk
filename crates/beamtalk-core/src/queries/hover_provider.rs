@@ -230,7 +230,7 @@ fn find_hover_in_declarations(
                     return Some(HoverInfo::new(
                         format!(
                             "Type annotation: `{}`",
-                            type_annotation_label(type_annotation)
+                            crate::unparse::unparse_type_annotation_display(type_annotation)
                         ),
                         type_span,
                     ));
@@ -279,7 +279,7 @@ fn alias_definition_hover_info(alias: &crate::ast::TypeAliasDefinition) -> Hover
     let title = format!(
         "`{keyword} {} = {}`",
         alias.name.name,
-        type_annotation_label(&alias.annotation)
+        crate::unparse::unparse_type_annotation_display(&alias.annotation)
     );
     let mut hover = HoverInfo::new(title, alias.name.span);
 
@@ -316,7 +316,7 @@ fn find_hover_on_method_signature(
             if let Some(type_annotation) = &parameter.type_annotation {
                 hover = hover.with_documentation(format!(
                     "Type: `{}`",
-                    type_annotation_label(type_annotation)
+                    crate::unparse::unparse_type_annotation_display(type_annotation)
                 ));
             }
             return Some(hover);
@@ -328,7 +328,7 @@ fn find_hover_on_method_signature(
                 return Some(HoverInfo::new(
                     format!(
                         "Type annotation: `{}`",
-                        type_annotation_label(type_annotation)
+                        crate::unparse::unparse_type_annotation_display(type_annotation)
                     ),
                     type_span,
                 ));
@@ -340,7 +340,10 @@ fn find_hover_on_method_signature(
         let return_span = return_type.span();
         if offset >= return_span.start() && offset < return_span.end() {
             return Some(HoverInfo::new(
-                format!("Return type: `{}`", type_annotation_label(return_type)),
+                format!(
+                    "Return type: `{}`",
+                    crate::unparse::unparse_type_annotation_display(return_type)
+                ),
                 return_span,
             ));
         }
@@ -405,7 +408,11 @@ fn method_declaration_selector_hover_info(
 
 fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
     let title = if let Some(ty) = &state.type_annotation {
-        format!("`{} :: {}`", state.name.name, type_annotation_label(ty))
+        format!(
+            "`{} :: {}`",
+            state.name.name,
+            crate::unparse::unparse_type_annotation_display(ty)
+        )
     } else {
         format!("`{}`", state.name.name)
     };
@@ -425,51 +432,68 @@ fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
     hover
 }
 
+/// Renders a method declaration's display signature (BT-3097): builds
+/// [`crate::unparse::SignatureParam`]s from the AST (type text rendered via
+/// [`crate::unparse::unparse_type_annotation_display`], the same renderer
+/// `bt fmt` and the doc extractor use) and composes them with the shared
+/// [`crate::unparse::render_signature_text`] core. Hover shows no
+/// `sealed`/`internal` prefix and no trailing ` =>` — just the plain
+/// declaration shape, matching this function's pre-BT-3097 output.
 fn method_signature(method: &MethodDefinition) -> String {
-    let base = selector_with_parameters(&method.selector, &method.parameters);
-    if let Some(return_type) = &method.return_type {
-        format!("{base} -> {}", type_annotation_label(return_type))
-    } else {
-        base
-    }
-}
+    use crate::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+        unparse_type_annotation_display,
+    };
 
-fn selector_with_parameters(
-    selector: &MessageSelector,
-    parameters: &[crate::ast::ParameterDefinition],
-) -> String {
-    match selector {
-        MessageSelector::Unary(name) => name.to_string(),
+    let return_type = method
+        .return_type
+        .as_ref()
+        .map(unparse_type_annotation_display);
+    let param_type_text = |i: usize| -> Option<String> {
+        method
+            .parameters
+            .get(i)
+            .and_then(|p| p.type_annotation.as_ref())
+            .map(unparse_type_annotation_display)
+    };
+
+    match &method.selector {
+        MessageSelector::Unary(name) => render_signature_text(
+            SignatureSelector::Unary(name),
+            return_type.as_deref(),
+            &SignatureRenderOptions::DISPLAY,
+        ),
         MessageSelector::Binary(op) => {
-            let mut signature = op.to_string();
-            if let Some(parameter) = parameters.first() {
-                signature.push(' ');
-                signature.push_str(&parameter_signature(parameter));
-            }
-            signature
+            let type_text = param_type_text(0);
+            let params = [SignatureParam {
+                keyword: op,
+                name: method.parameters.first().map(|p| p.name.name.as_str()),
+                type_text: type_text.as_deref(),
+            }];
+            render_signature_text(
+                SignatureSelector::Params(&params),
+                return_type.as_deref(),
+                &SignatureRenderOptions::DISPLAY,
+            )
         }
         MessageSelector::Keyword(parts) => {
-            let mut fragments = Vec::with_capacity(parts.len());
-            for (index, part) in parts.iter().enumerate() {
-                let mut fragment = part.keyword.to_string();
-                if let Some(parameter) = parameters.get(index) {
-                    fragment.push(' ');
-                    fragment.push_str(&parameter_signature(parameter));
-                }
-                fragments.push(fragment);
-            }
-            fragments.join(" ")
+            let type_texts: Vec<Option<String>> = (0..parts.len()).map(param_type_text).collect();
+            let params: Vec<SignatureParam<'_>> = parts
+                .iter()
+                .enumerate()
+                .map(|(i, part)| SignatureParam {
+                    keyword: &part.keyword,
+                    name: method.parameters.get(i).map(|p| p.name.name.as_str()),
+                    type_text: type_texts[i].as_deref(),
+                })
+                .collect();
+            render_signature_text(
+                SignatureSelector::Params(&params),
+                return_type.as_deref(),
+                &SignatureRenderOptions::DISPLAY,
+            )
         }
     }
-}
-
-fn parameter_signature(parameter: &crate::ast::ParameterDefinition) -> String {
-    let mut text = parameter.name.name.to_string();
-    if let Some(type_annotation) = &parameter.type_annotation {
-        text.push_str(" :: ");
-        text.push_str(&type_annotation_label(type_annotation));
-    }
-    text
 }
 
 /// Extends a parameter-name span to include trailing `:` in signatures like `aBlock:`.
@@ -479,50 +503,6 @@ fn parameter_name_span_in_signature(span: Span, source: &str) -> Span {
         Span::new(span.start(), span.end() + 1)
     } else {
         span
-    }
-}
-
-pub(crate) fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String {
-    match type_annotation {
-        crate::ast::TypeAnnotation::Simple(id) => id.name.to_string(),
-        crate::ast::TypeAnnotation::Singleton { name, .. } => format!("#{name}"),
-        crate::ast::TypeAnnotation::Union { types, .. } => types
-            .iter()
-            .map(type_annotation_label)
-            .collect::<Vec<_>>()
-            .join(" | "),
-        crate::ast::TypeAnnotation::Generic {
-            base, parameters, ..
-        } => {
-            let params = parameters
-                .iter()
-                .map(type_annotation_label)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{}({params})", base.name)
-        }
-        crate::ast::TypeAnnotation::FalseOr { inner, .. } => {
-            format!("{}?", type_annotation_label(inner))
-        }
-        crate::ast::TypeAnnotation::Difference { base, excluded, .. } => {
-            format!(
-                "{} \\ {}",
-                type_annotation_label(base),
-                type_annotation_label(excluded)
-            )
-        }
-        crate::ast::TypeAnnotation::Intersection { left, right, .. } => {
-            format!(
-                "{} & {}",
-                type_annotation_label(left),
-                type_annotation_label(right)
-            )
-        }
-        crate::ast::TypeAnnotation::SelfType { .. } => "Self".to_string(),
-        crate::ast::TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
-        crate::ast::TypeAnnotation::ClassOf { class_name, .. } => {
-            format!("{} class", class_name.name)
-        }
     }
 }
 
@@ -977,9 +957,19 @@ fn find_hover_in_expr(
                     _ => None,
                 };
                 let contents = if let Some(ty) = field_type {
-                    let display = alias_registry
-                        .and_then(|registry| registry.resolve_display_name(&ty))
-                        .unwrap_or(ty);
+                    // Alias lookup only applies to a bare `Simple` name — a
+                    // `Generic`/`Union`/etc. declared type was never a
+                    // registered alias name to begin with (ADR 0108 aliases
+                    // are single bare identifiers), so it falls straight
+                    // through to its own `Display`.
+                    let display: String = match &ty {
+                        crate::semantic_analysis::class_hierarchy::DeclaredType::Simple(name) => {
+                            alias_registry
+                                .and_then(|registry| registry.resolve_display_name(name))
+                                .map_or_else(|| ty.to_string(), |s| s.to_string())
+                        }
+                        _ => ty.to_string(),
+                    };
                     format!("`{} :: {display}`", field.name)
                 } else {
                     format!("`{}`", field.name)
@@ -1409,37 +1399,72 @@ fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Opti
 ///
 /// Uses `param_types` and `return_type` from the hierarchy (populated by BT-669).
 /// Example output: `deposit: amount: Integer -> Integer`
+/// Renders a resolved-call signature from a `ClassHierarchy::MethodInfo`
+/// (BT-3097). Unlike [`method_signature`], `MethodInfo` carries only
+/// resolved *types* per parameter, no parameter names (the hierarchy
+/// doesn't retain them) — so each parameter renders as `keyword: Type`
+/// (no ` :: `) rather than the declaration's `keyword name :: Type`. This
+/// is the same shared core, driven by `SignatureParam { name: None, .. }`
+/// (see the module's Family-B parity fixture in
+/// `unparse::signature_text::tests`).
 fn method_info_signature(method: &crate::semantic_analysis::class_hierarchy::MethodInfo) -> String {
-    use std::fmt::Write;
-    let selector = &method.selector;
-    let base = if selector.contains(':') {
-        // Keyword message: interleave keyword parts with param types
-        let parts: Vec<&str> = selector.split(':').filter(|s| !s.is_empty()).collect();
-        let mut fragments = Vec::with_capacity(parts.len());
-        for (i, part) in parts.iter().enumerate() {
-            let mut fragment = format!("{part}:");
-            if let Some(Some(ty)) = method.param_types.get(i) {
-                let _ = write!(fragment, " {ty}");
-            }
-            fragments.push(fragment);
-        }
-        fragments.join(" ")
-    } else if method.arity == 1 {
-        // Binary message
-        let mut sig = selector.to_string();
-        if let Some(Some(ty)) = method.param_types.first() {
-            let _ = write!(sig, " {ty}");
-        }
-        sig
-    } else {
-        // Unary message
-        selector.to_string()
+    use crate::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
     };
 
-    if let Some(ref return_type) = method.return_type {
-        format!("{base} -> {return_type}")
+    let selector = method.selector.as_str();
+    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
+    // and hand the composer the text it contracts for.
+    let return_type_text = method.return_type.as_ref().map(ToString::to_string);
+    let return_type = return_type_text.as_deref();
+    let param_type_texts: Vec<Option<String>> = method
+        .param_types
+        .iter()
+        .map(|ty| ty.as_ref().map(ToString::to_string))
+        .collect();
+
+    if selector.contains(':') {
+        // Keyword message: interleave keyword parts (re-adding the trailing
+        // `:` the split strips) with param types.
+        let keywords: Vec<String> = selector
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(|part| format!("{part}:"))
+            .collect();
+        let params: Vec<SignatureParam<'_>> = keywords
+            .iter()
+            .enumerate()
+            .map(|(i, keyword)| SignatureParam {
+                keyword,
+                name: None,
+                type_text: param_type_texts.get(i).and_then(Option::as_deref),
+            })
+            .collect();
+        render_signature_text(
+            SignatureSelector::Params(&params),
+            return_type,
+            &SignatureRenderOptions::DISPLAY,
+        )
+    } else if method.arity == 1 {
+        // Binary message
+        let params = [SignatureParam {
+            keyword: selector,
+            name: None,
+            type_text: param_type_texts.first().and_then(Option::as_deref),
+        }];
+        render_signature_text(
+            SignatureSelector::Params(&params),
+            return_type,
+            &SignatureRenderOptions::DISPLAY,
+        )
     } else {
-        base
+        // Unary message
+        render_signature_text(
+            SignatureSelector::Unary(selector),
+            return_type,
+            &SignatureRenderOptions::DISPLAY,
+        )
     }
 }
 

@@ -435,7 +435,7 @@ impl CoreErlangGenerator {
             parts.push(docvec![
                 ", ",
                 fname(
-                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
+                    safe_class_method_fn_name(m.selector.name().as_ref()),
                     m.selector.arity() + 2
                 ),
             ]);

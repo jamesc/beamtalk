@@ -457,8 +457,10 @@ fn argument_that_is_itself_an_alias_typed_return_value_is_not_flagged() {
     // no `AliasRegistry` access, so `policy` was inferred as a bare
     // `Known { class_name: "RestartStrategy", .. }` and the argument check
     // had to accept an unexpanded alias name; since BT-3075 the unified
-    // `resolve_type_string` expands the alias at the send site, so `policy`
-    // carries the structural union directly. Either shape must stay green.
+    // resolver (`resolve_declared_type`, folded in from BT-3075's
+    // `resolve_type_string` and BT-3080's FFI path alike) expands the alias
+    // at the send site, so `policy` carries the structural union directly.
+    // Either shape must stay green.
     // Reproduces the exact stdlib shape that surfaced this
     // (`Actor>>supervisionSpec`'s `policy := self supervisionPolicy.
     // spec withRestart: policy`, hit by `just build-stdlib` once
@@ -536,7 +538,9 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
     // `instance_identifier_still_rejected_for_class_param`, through the
     // alias.
     use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
-    use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo, MethodInfo};
+    use crate::semantic_analysis::class_hierarchy::{
+        ClassHierarchy, ClassInfo, DeclaredType, MethodInfo,
+    };
 
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
@@ -585,8 +589,8 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("Boolean".into()),
-                param_types: vec![Some("ClassAlias".into())],
+                return_type: Some(DeclaredType::parse("Boolean")),
+                param_types: vec![Some(DeclaredType::parse("ClassAlias"))],
                 doc: None,
             }],
             class_methods: vec![],
@@ -652,7 +656,9 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
     // expected_structural side has nothing to resolve, since `expected_ty`
     // here is never a registered alias name.
     use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
-    use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo, MethodInfo};
+    use crate::semantic_analysis::class_hierarchy::{
+        ClassHierarchy, ClassInfo, DeclaredType, MethodInfo,
+    };
 
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
@@ -678,8 +684,10 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some("Boolean".into()),
-            param_types: vec![Some("#temporary | #transient | #permanent".into())],
+            return_type: Some(DeclaredType::parse("Boolean")),
+            param_types: vec![Some(DeclaredType::parse(
+                "#temporary | #transient | #permanent",
+            ))],
             doc: None,
         }],
         class_methods: vec![],

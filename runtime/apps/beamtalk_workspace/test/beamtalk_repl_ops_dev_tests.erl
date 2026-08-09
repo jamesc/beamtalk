@@ -260,12 +260,13 @@ handle_describe_contains_versions_test() ->
     ?assert(maps:is_key(<<"protocol">>, Versions)),
     ?assert(maps:is_key(<<"beamtalk">>, Versions)).
 
-%% BT-2991: beamtalk_version:get/0 (the desktop-attach readiness RPC target)
-%% hardcodes its own "2.0" protocol_version literal, separate from the
-%% "protocol" value describe reports here. beamtalk_workspace already depends
-%% on beamtalk_runtime (dependencies flow down only, and workspace sits above
-%% runtime), so this cross-module check can live here to catch the two
-%% literals drifting when the wire protocol changes.
+%% BT-2991 / BT-3090: `beamtalk_version:get/0` (the desktop-attach readiness
+%% RPC target) and the "protocol" value describe reports here now both read
+%% the single `?PROTOCOL_VERSION` macro (`beamtalk.hrl`) instead of two
+%% independent "2.0" literals — a bump can no longer drift the two apart, but
+%% this integration-level check stays as a golden test of the real wiring
+%% (beamtalk_workspace already depends on beamtalk_runtime, so it can call
+%% both sides directly).
 handle_describe_protocol_version_matches_beamtalk_version_test() ->
     Msg = make_msg(<<"describe">>, <<"d-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
@@ -776,8 +777,10 @@ handle_describe_omits_removed_ops_test() ->
     ?assertEqual(false, maps:is_key(<<"reload">>, Ops)),
     ?assertEqual(false, maps:is_key(<<"modules">>, Ops)),
     %% Protocol version was bumped to 2.0 to mark the breaking change.
+    %% BT-3090: asserted through the shared ?PROTOCOL_VERSION macro so a
+    %% future bump only requires editing beamtalk.hrl.
     Versions = maps:get(<<"versions">>, Decoded),
-    ?assertEqual(<<"2.0">>, maps:get(<<"protocol">>, Versions)).
+    ?assertEqual(?PROTOCOL_VERSION, maps:get(<<"protocol">>, Versions)).
 
 handle_describe_contains_actors_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined),
@@ -1230,9 +1233,25 @@ dev_runtime_test_() ->
             {"type-annotation position with empty prefix offers all candidates",
                 fun type_annotation_completion_empty_prefix/0},
             {"single-colon keyword-selector prefix is not annotation position",
-                fun single_colon_not_annotation_position/0}
+                fun single_colon_not_annotation_position/0},
+            {"collect_all_methods dedups an overridden inherited selector",
+                fun collect_all_methods_dedups_override/0}
         ]
     end}.
+
+collect_all_methods_dedups_override() ->
+    %% BT-3087 regression: WidgetDev overrides WidgetDevBase's inheritedGreet
+    %% (see setup_dev_runtime/0). Before the fix, collect_methods_with_fun
+    %% built the result as `LocalMethods ++ InheritedMethods` with no dedup,
+    %% so the overridden selector appeared twice — once from WidgetDev's own
+    %% local methods, once from WidgetDevBase's. Local-overrides-wins
+    %% shadowing means it must appear exactly once now.
+    Result = beamtalk_repl_ops_dev:collect_all_methods('WidgetDev', 0),
+    Occurrences = [S || S <- Result, S =:= 'inheritedGreet'],
+    ?assertEqual(1, length(Occurrences)),
+    %% Sanity: non-overridden local and inherited methods are still present.
+    ?assert(lists:member('render', Result)),
+    ?assert(lists:member('next', Result)).
 
 context_completion_expression_empty_prefix() ->
     %% "WidgetDev create " — resolved instance receiver with empty prefix returns
@@ -1361,7 +1380,12 @@ setup_dev_runtime() ->
         instance_methods => #{
             'render' => #{block => fun(_, _) -> ok end, arity => 0},
             'resize' => #{block => fun(_, _, _) -> ok end, arity => 2},
-            'next' => #{block => fun(_, _) -> ok end, arity => 0}
+            'next' => #{block => fun(_, _) -> ok end, arity => 0},
+            %% BT-3087: overrides WidgetDevBase's inheritedGreet — regression
+            %% fixture for the duplicate-listing bug (collect_all_methods
+            %% used to return an overridden selector twice, once from
+            %% LocalMethods and once from InheritedMethods).
+            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0}
         },
         method_return_types => #{
             'next' => 'WidgetDev'
@@ -1964,3 +1988,102 @@ handle_list_classes_non_binary_filter_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ErrMsg = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown filter">>)).
+
+%%====================================================================
+%% is_identifier_char/1 — shared word-boundary conformance corpus (BT-3083)
+%%====================================================================
+
+%% BT-3083 conformance: every case in the shared corpus must classify
+%% identically here and in the Rust side's `is_completion_word_char`
+%% (`crates/beamtalk-core/src/source_analysis/mod.rs`). The corpus is the
+%% single source of truth both implementations are pinned to; the Rust side
+%% asserts the identical cases in
+%% `source_analysis::completion_word_boundary_tests::completion_word_char_matches_shared_corpus`.
+is_identifier_char_matches_shared_corpus_test() ->
+    Cases = load_word_boundary_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            [Char | _] = unicode:characters_to_list(maps:get(<<"char">>, Case)),
+            Expected = maps:get(<<"is_word_char">>, Case),
+            Why = maps:get(<<"why">>, Case, <<>>),
+            ?assertEqual(
+                Expected,
+                beamtalk_repl_ops_dev:is_identifier_char(Char),
+                {corpus_mismatch, Char, Why}
+            )
+        end,
+        Cases
+    ).
+
+%% Load the shared word-boundary conformance corpus from the repo tree. Walks
+%% up from the test CWD to the project root (the dir holding `Cargo.toml`),
+%% then reads the fixture both surfaces share.
+load_word_boundary_corpus() ->
+    Root = find_word_boundary_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "completion_word_boundary_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).
+
+find_word_boundary_corpus_root("/") ->
+    error(project_root_not_found);
+find_word_boundary_corpus_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_word_boundary_corpus_root(filename:dirname(Dir))
+    end.
+
+%%====================================================================
+%% builtin_keywords/0 — shared keyword-vocabulary conformance corpus (BT-3083)
+%%====================================================================
+
+%% BT-3083 conformance: every keyword in the shared corpus must be offered
+%% here and by the Rust LSP's static `add_keyword_completions`
+%% (`crates/beamtalk-core/src/queries/completion_provider.rs`). The corpus is
+%% the single source of truth both implementations are pinned to; the Rust
+%% side asserts the identical cases in
+%% `completion_provider::tests::keyword_completions_cover_shared_vocabulary_corpus`.
+builtin_keywords_covers_shared_vocabulary_corpus_test() ->
+    Corpus = load_keyword_vocabulary_corpus(),
+    ?assert(length(Corpus) > 0),
+    Keywords = beamtalk_repl_ops_dev:builtin_keywords(),
+    lists:foreach(
+        fun(Keyword) ->
+            ?assert(
+                lists:member(Keyword, Keywords),
+                {corpus_keyword_missing_from_builtin_keywords, Keyword}
+            )
+        end,
+        Corpus
+    ).
+
+%% Load the shared keyword-vocabulary conformance corpus from the repo tree.
+load_keyword_vocabulary_corpus() ->
+    Root = find_word_boundary_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "completion_keyword_vocabulary_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).

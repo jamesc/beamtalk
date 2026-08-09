@@ -29,8 +29,11 @@
 //! ```
 
 use super::native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
-use super::types::{DynamicReason, InferredType, TypeProvenance};
-use super::well_known::WellKnownClass;
+use super::type_resolver;
+#[cfg(test)]
+use super::types::DynamicReason;
+use super::types::{InferredType, TypeProvenance};
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -42,13 +45,29 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 ///
 /// The Erlang side already maps Erlang abstract types to Beamtalk type name
 /// strings (e.g., `integer()` → `"Integer"`, `binary()` → `"String"`). This
-/// function converts those string names into the Rust type representation.
+/// function parses that string into a [`DeclaredType`] (the same span-free
+/// grammar every other stored type-name string in the checker parses
+/// through) and resolves it via [`type_resolver::resolve_declared_type`] with
+/// [`super::TypeStringContext::Extracted`] — the same canonical resolver
+/// `resolve_type_annotation` and (pre-BT-3080) `TypeChecker::resolve_type_string`
+/// use, rather than a hand-rolled parallel implementation (BT-3080).
+///
+/// Folding onto the canonical resolver means this now also gets, for free:
+/// - **BT-2016 keyword normalisation**: `"Nil"` resolves to `UndefinedObject`
+///   (not a `Known("Nil")` pseudo-class), so `isNil`/`ifNil:` narrowing —
+///   which keys on `UndefinedObject` — recognises FFI-typed values too.
+/// - Alias expansion and type-param substitution, if a future caller threads
+///   an `alias_registry` / `SubstitutionMap` through (today's FFI spec
+///   parsing has neither available, so those lookups are inert — see
+///   `resolve_declared_type`'s doc for the `None`/empty contract).
 ///
 /// ## Type Variable Handling
 ///
 /// - Concrete type names (e.g., `"Integer"`, `"List"`) produce `Known` types
 ///   with `Extracted` provenance.
-/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::DynamicSpec)`.
+/// - `"Dynamic"` produces `InferredType::Dynamic(DynamicReason::DynamicSpec)`
+///   — not `ExplicitDynamic`; see `resolve_declared_type_inner`'s `Extracted`
+///   arm (BT-3080) for why the two `Dynamic` reasons must stay distinct here.
 /// - Union types (e.g., `"Integer | String"`) are split and produce `Union` types.
 /// - Parametric types (e.g., `"List(Integer)"`, `"Tuple(Symbol, Integer)"`,
 ///   `"Result(String, Symbol)"`) parse their element types into `type_args`
@@ -61,72 +80,20 @@ const SPECS_MODULE_PREFIX: &str = "beamtalk-specs-module:";
 /// ```ignore
 /// map_type_name("Integer")           // => Known { class_name: "Integer", .. }
 /// map_type_name("Dynamic")           // => Dynamic
+/// map_type_name("Nil")               // => Known { class_name: "UndefinedObject", .. }
 /// map_type_name("Integer | String")  // => Union { members: [Integer, String], .. }
 /// map_type_name("List(Integer)")     // => Known { class_name: "List", type_args: [Integer] }
 /// ```
 #[must_use]
 pub fn map_type_name(type_name: &str) -> InferredType {
-    let trimmed = type_name.trim();
-
-    if WellKnownClass::from_str(trimmed) == Some(WellKnownClass::Dynamic) {
-        return InferredType::Dynamic(DynamicReason::DynamicSpec);
-    }
-
-    // Handle union types, splitting on `|` while respecting parenthesis nesting
-    // so `List(String | Binary)` and `Result(String, Symbol)` are not split at
-    // an interior `|`.
-    if trimmed.contains('|') {
-        let members = super::TypeChecker::split_union_respecting_parens(trimmed);
-        if members.len() > 1 {
-            let resolved: Vec<InferredType> = members
-                .into_iter()
-                .map(|part| map_single_type_name(part.trim()))
-                .collect();
-            return InferredType::union_of(&resolved);
-        }
-        // Single member — the `|` was inside parens; fall through to the
-        // parametric-type handling below.
-    }
-
-    map_single_type_name(trimmed)
-}
-
-/// Maps a single (non-top-level-union) type name to an [`InferredType`].
-///
-/// Handles bare names (`"Integer"`), `"Dynamic"`/`"Never"` keywords, and
-/// parametric types (`"List(Integer)"`, `"Tuple(Symbol, Integer)"`). Element
-/// types recurse through [`map_type_name`] so nested parametric/union shapes
-/// (`"Result(List(String), Symbol)"`) parse fully.
-fn map_single_type_name(name: &str) -> InferredType {
-    if WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic) {
-        return InferredType::Dynamic(DynamicReason::DynamicSpec);
-    }
-    if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
-        return InferredType::Never;
-    }
-
-    // Parametric type: e.g., `List(Integer)`, `Tuple(Symbol, Integer)`.
-    // BT-2254: parse element types into `type_args` so iteration and
-    // literal-index `at:` can recover them. Parenthesis-aware arg splitting
-    // lives in the centralised resolver helper.
-    let (base, args_slice) = super::type_resolver::split_generic_base(name);
-    if let Some(inner) = args_slice {
-        let type_args: Vec<InferredType> = super::TypeChecker::split_type_params(inner)
-            .into_iter()
-            .map(map_type_name)
-            .collect();
-        return InferredType::Known {
-            class_name: EcoString::from(base),
-            type_args,
-            provenance: TypeProvenance::Extracted,
-        };
-    }
-
-    InferredType::Known {
-        class_name: EcoString::from(name),
-        type_args: vec![],
-        provenance: TypeProvenance::Extracted,
-    }
+    let declared = DeclaredType::parse(type_name.trim());
+    type_resolver::resolve_declared_type(
+        &declared,
+        &type_resolver::SubstitutionMap::new(),
+        None,
+        None,
+        super::TypeStringContext::Extracted,
+    )
 }
 
 /// Parses a `beamtalk-specs-module:` line and registers the specs in the registry.
@@ -536,8 +503,16 @@ mod tests {
 
     #[test]
     fn map_type_name_nil() {
+        // BT-3080: `beamtalk_spec_reader.erl` emits `"Nil"` for the `nil`
+        // atom type. Before this fix, `map_type_name` returned a bare
+        // `Known("Nil")` pseudo-class — this test pinned that wrong
+        // behaviour (BT-2016). Folding onto the canonical resolver's
+        // `resolve_type_keyword` normalisation resolves it to the real nil
+        // class, `UndefinedObject`, so `isNil`/`ifNil:` narrowing recognises
+        // FFI-typed `Nil` members exactly like a source-written `Integer |
+        // Nil` annotation.
         let ty = map_type_name("Nil");
-        assert_eq!(ty, InferredType::known("Nil"));
+        assert_eq!(ty, InferredType::known("UndefinedObject"));
     }
 
     #[test]
@@ -951,6 +926,99 @@ mod tests {
             sig.params[1].keyword.as_deref(),
             Some("arg"),
             "Bare spec's unnamed param should win over keyword alias's 'class'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-3080: conformance with `beamtalk_spec_reader.erl`'s `map_type/1`
+    // vocabulary — every string shape that function can emit
+    // (runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl:849-948)
+    // must parse *structurally*, not degrade to an opaque nominal class
+    // whose name happens to be the whole string.
+    // -----------------------------------------------------------------------
+
+    /// (wire string, assertion) pair type for
+    /// `map_type_name_conforms_to_spec_reader_vocabulary` below.
+    type VocabCase = (&'static str, fn(&InferredType) -> bool);
+
+    #[test]
+    fn map_type_name_conforms_to_spec_reader_vocabulary() {
+        // (wire string, assertion) pairs mirroring every `map_type/1` clause.
+        // A `Known`/`Union`/`Dynamic`/`Never` result with a *shorter*
+        // class-name than the input string is the structural-parse signal:
+        // an unparsed shape would instead degrade to `Known(<whole string>)`.
+        let cases: &[VocabCase] = &[
+            ("Integer", |t| *t == InferredType::known("Integer")),
+            ("Float", |t| *t == InferredType::known("Float")),
+            ("Number", |t| *t == InferredType::known("Number")),
+            ("String | Binary", |t| {
+                *t == InferredType::simple_union(&["String", "Binary"])
+            }),
+            ("Boolean", |t| *t == InferredType::known("Boolean")),
+            ("Symbol", |t| *t == InferredType::known("Symbol")),
+            ("Pid", |t| *t == InferredType::known("Pid")),
+            ("Block", |t| *t == InferredType::known("Block")),
+            ("List", |t| *t == InferredType::known("List")),
+            ("String | List", |t| {
+                *t == InferredType::simple_union(&["String", "List"])
+            }),
+            ("List(Integer)", |t| {
+                matches!(t, InferredType::Known { class_name, type_args, .. }
+                    if class_name == "List" && type_args == &[InferredType::known("Integer")])
+            }),
+            ("Tuple", |t| *t == InferredType::known("Tuple")),
+            ("Tuple(Symbol, Integer)", |t| {
+                matches!(t, InferredType::Known { class_name, type_args, .. }
+                    if class_name == "Tuple" && type_args.len() == 2)
+            }),
+            ("Dictionary", |t| *t == InferredType::known("Dictionary")),
+            ("True", |t| *t == InferredType::known("True")),
+            ("False", |t| *t == InferredType::known("False")),
+            // BT-2016 / BT-3080: the whole point — `Nil` must resolve to the
+            // canonical nil class, not stay a `Known("Nil")` pseudo-class.
+            ("Nil", |t| *t == InferredType::known("UndefinedObject")),
+            ("Dynamic", |t| matches!(t, InferredType::Dynamic(_))),
+            ("Result(Integer, Symbol)", |t| {
+                matches!(t, InferredType::Known { class_name, type_args, .. }
+                    if class_name == "Result" && type_args.len() == 2)
+            }),
+            ("#permanent | #temporary", |t| {
+                *t == InferredType::simple_union(&["#permanent", "#temporary"])
+            }),
+        ];
+
+        for (wire, check) in cases {
+            let ty = map_type_name(wire);
+            assert!(
+                check(&ty),
+                "wire string {wire:?} did not parse structurally: got {ty:?}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-3080: FFI Nil narrows correctly under `ifNil:`/`ifNotNil:` — the
+    // fix demonstration for the acceptance criterion. Full checker-level
+    // narrowing coverage (`ifNil:`, `isNil`) lives in `tests/ffi.rs`
+    // (`bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil`); this is the
+    // registry-level guarantee that test depends on: an FFI spec's `Integer |
+    // Nil` return type resolves its `Nil` member to `UndefinedObject`.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_specs_line_integer_or_nil_return_normalizes_nil_member() {
+        let mut reg = NativeTypeRegistry::new();
+        let line = "beamtalk-specs-module:mymod:[#{arity => 1,name => <<\"maybeInt\">>,\
+            params => [#{name => <<\"x\">>,type => <<\"Dynamic\">>}],\
+            return_type => <<\"Integer | Nil\">>}]";
+        parse_specs_line(line, &mut reg);
+        let sig = reg.lookup("mymod", "maybeInt", 1).unwrap();
+        assert_eq!(
+            sig.return_type,
+            InferredType::simple_union(&["Integer", "UndefinedObject"]),
+            "FFI `Nil` member must canonicalize to `UndefinedObject` so \
+             isNil/ifNil: narrowing (which keys on UndefinedObject) \
+             recognises it"
         );
     }
 }

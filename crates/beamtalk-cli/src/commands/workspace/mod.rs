@@ -292,9 +292,10 @@ mod tests {
     #[test]
     fn test_save_and_read_workspace_metadata() {
         let ws = TestWorkspace::new("meta_rt");
+        let project_path = std::env::temp_dir().join("test-project");
         let metadata = WorkspaceMetadata {
             workspace_id: ws.id.clone(),
-            project_path: PathBuf::from("/tmp/test-project"),
+            project_path: project_path.clone(),
             created_at: 1_000_000,
         };
 
@@ -302,7 +303,7 @@ mod tests {
         let loaded = get_workspace_metadata(&ws.id).unwrap();
 
         assert_eq!(loaded.workspace_id, ws.id);
-        assert_eq!(loaded.project_path, PathBuf::from("/tmp/test-project"));
+        assert_eq!(loaded.project_path, project_path);
         assert_eq!(loaded.created_at, 1_000_000);
     }
 
@@ -425,7 +426,7 @@ mod tests {
         let ws = TestWorkspace::new("exists_true");
         let metadata = WorkspaceMetadata {
             workspace_id: ws.id.clone(),
-            project_path: PathBuf::from("/tmp/test"),
+            project_path: std::env::temp_dir().join("test"),
             created_at: 1_000_000,
         };
         save_workspace_metadata(&metadata).unwrap();
@@ -662,9 +663,10 @@ mod tests {
     #[test]
     fn test_list_workspaces_returns_created_workspace() {
         let ws = TestWorkspace::new("list_test");
+        let project_path = std::env::temp_dir().join("list-test-project");
         let metadata = WorkspaceMetadata {
             workspace_id: ws.id.clone(),
-            project_path: PathBuf::from("/tmp/list-test-project"),
+            project_path: project_path.clone(),
             created_at: 2_000_000,
         };
         save_workspace_metadata(&metadata).unwrap();
@@ -674,10 +676,7 @@ mod tests {
         assert!(found.is_some(), "Should find the created workspace");
 
         let ws_summary = found.unwrap();
-        assert_eq!(
-            ws_summary.project_path,
-            PathBuf::from("/tmp/list-test-project")
-        );
+        assert_eq!(ws_summary.project_path, project_path);
         assert_eq!(ws_summary.status, WorkspaceStatus::Stopped);
         assert!(ws_summary.port.is_none());
     }
@@ -697,7 +696,7 @@ mod tests {
         for ws in [&ws_a, &ws_b] {
             let metadata = WorkspaceMetadata {
                 workspace_id: ws.id.clone(),
-                project_path: PathBuf::from("/tmp/sort-test"),
+                project_path: std::env::temp_dir().join("sort-test"),
                 created_at: 1_000_000,
             };
             save_workspace_metadata(&metadata).unwrap();
@@ -726,7 +725,7 @@ mod tests {
         let ws = TestWorkspace::new("stop_not_running");
         let metadata = WorkspaceMetadata {
             workspace_id: ws.id.clone(),
-            project_path: PathBuf::from("/tmp/stop-test"),
+            project_path: std::env::temp_dir().join("stop-test"),
             created_at: 1_000_000,
         };
         save_workspace_metadata(&metadata).unwrap();
@@ -740,16 +739,17 @@ mod tests {
     #[test]
     fn test_workspace_status_returns_details() {
         let ws = TestWorkspace::new("status_test");
+        let project_path = std::env::temp_dir().join("status-test");
         let metadata = WorkspaceMetadata {
             workspace_id: ws.id.clone(),
-            project_path: PathBuf::from("/tmp/status-test"),
+            project_path: project_path.clone(),
             created_at: 3_000_000,
         };
         save_workspace_metadata(&metadata).unwrap();
 
         let detail = workspace_status(Some(&ws.id)).unwrap();
         assert_eq!(detail.workspace_id, ws.id);
-        assert_eq!(detail.project_path, PathBuf::from("/tmp/status-test"));
+        assert_eq!(detail.project_path, project_path);
         assert_eq!(detail.status, WorkspaceStatus::Stopped);
         assert!(detail.node_name.is_none());
         assert!(detail.port.is_none());
