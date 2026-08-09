@@ -251,3 +251,58 @@ module_to_class_plain_known_atom_not_registered_test() ->
 module_to_class_non_atom_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:module_to_class(42)),
     ?assertEqual(nil, beamtalk_stack_frame:module_to_class(<<"counter">>)).
+
+%%% ===================================================================
+%%% module_to_class/1 — class registry resolution (BT-3081 regression)
+%%%
+%%% The string heuristic (bt@/beamtalk_ prefix parsing + snake_to_class) is
+%%% provably lossy for acronym-cased classes: 'bt@stdlib@beamerror' can only
+%%% capitalize back to 'Beamerror', never the real 'BEAMError' — the original
+%%% casing inside the letter run is gone once folded to snake_case. A class
+%%% registered with such a module must resolve via the live class registry
+%%% instead, which knows the real name.
+%%% ===================================================================
+
+module_to_class_resolves_acronym_class_via_registry_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            ClassInfo = #{
+                superclass => none,
+                methods => #{},
+                class_methods => #{},
+                %% Same shape as the real BEAMError/bt@stdlib@beamerror
+                %% collision (BT-3081), namespaced so it can't collide with
+                %% the real stdlib class if this suite runs against a live
+                %% stdlib-loaded node.
+                module => 'bt@stdlib@beamerror_bt3081_test'
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(
+                'BEAMErrorBT3081Test', ClassInfo
+            ),
+            Pid
+        end,
+        fun(Pid) ->
+            (try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end)
+        end,
+        fun(_Pid) ->
+            [
+                {"resolves the real acronym-preserving class name via the registry, not the lossy heuristic guess",
+                    fun() ->
+                        ?assertEqual(
+                            'BEAMErrorBT3081Test',
+                            beamtalk_stack_frame:module_to_class('bt@stdlib@beamerror_bt3081_test')
+                        ),
+                        %% Confirm the heuristic alone really would have gotten
+                        %% this wrong — that's the bug this regression guards.
+                        ?assertNotEqual(
+                            'BEAMErrorBT3081Test',
+                            beamtalk_module_name:snake_to_class("beamerror_bt3081_test")
+                        )
+                    end}
+            ]
+        end}.

@@ -676,51 +676,41 @@ module_for_value(X) when is_pid(X) -> 'bt@stdlib@pid';
 module_for_value(X) when is_port(X) -> 'bt@stdlib@port';
 module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
+    %% BT-3081: only the two genuine exceptions are hardcoded — 'ErlangModule'
+    %% dispatches to a hand-written native proxy module, not a compiled `.bt`
+    %% class, and an untagged map (no '$beamtalk_class') is Dictionary by
+    %% convention, not by class name. Every other tagged-map class name is
+    %% derivable from the `ClassName ⇄ bt@stdlib@snake_case` convention
+    %% (BT-2999 comment on the old hand-written ~35-entry table this replaced).
     case beamtalk_tagged_map:class_of(X) of
-        'CompiledMethod' ->
-            'bt@stdlib@compiled_method';
-        'Set' ->
-            'bt@stdlib@set';
-        'Stream' ->
-            'bt@stdlib@stream';
-        'Random' ->
-            'bt@stdlib@random';
-        'TestCase' ->
-            'bt@stdlib@test_case';
-        'Regex' ->
-            'bt@stdlib@regex';
-        'DateTime' ->
-            'bt@stdlib@date_time';
-        'Duration' ->
-            'bt@stdlib@duration';
-        'Timer' ->
-            'bt@stdlib@timer';
-        'TestResult' ->
-            'bt@stdlib@test_result';
-        'BeamtalkInterface' ->
-            'bt@stdlib@beamtalk_interface';
-        'WorkspaceInterface' ->
-            'bt@stdlib@workspace_interface';
-        'Package' ->
-            'bt@stdlib@package';
         'ErlangModule' ->
             beamtalk_erlang_proxy;
-        'Announcer' ->
-            'bt@stdlib@announcer';
-        'SystemAnnouncer' ->
-            'bt@stdlib@system_announcer';
-        'Subscription' ->
-            'bt@stdlib@subscription';
         undefined ->
             'bt@stdlib@dictionary';
         Other ->
             case beamtalk_exception_handler:is_exception_class(Other) of
                 true -> 'bt@stdlib@exception';
-                false -> undefined
+                false -> stdlib_module_for_tagged_class(Other)
             end
     end;
 module_for_value(_) ->
     undefined.
+
+-doc """
+Derive a tagged-map class's stdlib dispatch module from its class name
+(BT-3081), verifying the module actually exists rather than trusting the
+naming convention blindly — a class name that doesn't correspond to a
+loaded `bt@stdlib@…` module (e.g. a typo, or a class removed from stdlib)
+falls back to `undefined`, matching `module_for_value/1`'s prior behaviour
+for anything outside its hand-written table.
+""".
+-spec stdlib_module_for_tagged_class(atom()) -> atom() | undefined.
+stdlib_module_for_tagged_class(ClassName) ->
+    Candidate = beamtalk_module_name:to_stdlib_module_atom(ClassName),
+    case code:ensure_loaded(Candidate) of
+        {module, _} -> Candidate;
+        {error, _} -> undefined
+    end.
 
 -doc "Send a message to a value type instance (BT-354).".
 -spec value_type_send(map(), atom(), atom(), list()) -> term().
@@ -917,34 +907,16 @@ class_name_to_module(Class) when is_atom(Class) ->
             end
     end.
 
--doc "Static module name from class name (bt@{snake_case}).".
+-doc """
+Static module name from class name (bt@{snake_case}).
+
+BT-3081: delegates the CamelCase→snake_case conversion to
+`beamtalk_module_name:to_module_atom/1`, the single Erlang-side authority
+for the `ClassName ⇄ bt@[pkg@]snake_case` convention (ADR 0016).
+""".
 -spec static_class_module_name(atom()) -> atom().
 static_class_module_name(Class) ->
-    SnakeCase = camel_to_snake(atom_to_list(Class)),
-    ModName = "bt@" ++ SnakeCase,
-    try
-        list_to_existing_atom(ModName)
-    catch
-        error:badarg ->
-            % elp:fixme W0023 intentional atom creation
-            list_to_atom(ModName)
-    end.
-
--doc "CamelCase string to snake_case string conversion.".
--spec camel_to_snake(string()) -> string().
-camel_to_snake(Str) ->
-    camel_to_snake(Str, false, []).
-
-camel_to_snake([], _PrevWasLower, Acc) ->
-    lists:reverse(Acc);
-camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
-    Lower = H + 32,
-    case PrevWasLower of
-        true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
-        false -> camel_to_snake(T, false, [Lower | Acc])
-    end;
-camel_to_snake([H | T], _PrevWasLower, Acc) ->
-    camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
+    beamtalk_module_name:to_module_atom(Class).
 
 -doc """
 Whether a binary holds valid UTF-8 text (BT-2999).

@@ -221,6 +221,44 @@ foldl_empty_returns_acc_test() ->
         ?assertEqual(sentinel, beamtalk_class_metadata:foldl(fun(_, Acc) -> Acc end, sentinel))
     end).
 
+%% BT-3081: foldl_modules/2 collects {ClassName, Module} for every row with a
+%% module written, regardless of superclass.
+foldl_modules_collects_entries_with_module_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Object', bt@object, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert('Actor', bt@actor, undefined, 'Object', undefined),
+        Result = beamtalk_class_metadata:foldl_modules(fun({C, M}, Acc) -> Acc#{C => M} end, #{}),
+        ?assertEqual(#{'Object' => bt@object, 'Actor' => bt@actor}, Result)
+    end).
+
+%% A row with no module written (module = undefined) is skipped, even if it
+%% has a superclass — mirrors foldl_skips_rows_without_superclass_test's
+%% coverage of the opposite field.
+foldl_modules_skips_rows_without_module_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Actor', bt@actor, undefined, 'Object', undefined),
+        ok = beamtalk_class_metadata:insert(
+            'SuperclassOnly', undefined, undefined, 'Object', undefined
+        ),
+        Result = beamtalk_class_metadata:foldl_modules(fun({C, M}, Acc) -> Acc#{C => M} end, #{}),
+        ?assertEqual(#{'Actor' => bt@actor}, Result)
+    end).
+
+foldl_modules_empty_returns_acc_test() ->
+    with_clean_table(fun() ->
+        ?assertEqual(
+            sentinel, beamtalk_class_metadata:foldl_modules(fun(_, Acc) -> Acc end, sentinel)
+        )
+    end).
+
+%% foldl_modules/2 returns the initial accumulator when the metadata table
+%% does not exist — mirrors foldl_when_table_absent_test.
+foldl_modules_when_table_absent_test() ->
+    with_no_main_table(fun() ->
+        Result = beamtalk_class_metadata:foldl_modules(fun({_, _}, Acc) -> Acc end, sentinel),
+        ?assertEqual(sentinel, Result)
+    end).
+
 %%====================================================================
 %% Runtime class-method funs + gate flag (BT-2266 / ADR 0084)
 %%====================================================================
