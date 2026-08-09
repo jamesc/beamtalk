@@ -119,3 +119,104 @@ fn without_analysis_codegen_computes_its_own() {
          (via infer_method_return_types) for the return-type writeback"
     );
 }
+
+/// A minimal `ClassInfo` stub, mirroring the private helpers of the same
+/// name used throughout `semantic_analysis` tests (e.g.
+/// `receiver_knowledge::tests::base_class_info`).
+fn base_class_info(
+    name: &str,
+    superclass: &str,
+) -> crate::semantic_analysis::class_hierarchy::ClassInfo {
+    crate::semantic_analysis::class_hierarchy::ClassInfo {
+        surface_incomplete: false,
+        name: name.into(),
+        superclass: Some(superclass.into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }
+}
+
+/// Real multi-file package drivers (`compile_source_with_bindings`,
+/// compiler-port's `handle_compile`) feed the *same* cross-file class list to
+/// both `AnalysisContext::with_pre_loaded_classes` (for `analyse_full`) and
+/// `CodegenOptions::with_class_hierarchy`/`with_class_superclass_index` (for
+/// codegen) — see `write_core_erlang_with_bindings`'s BT-3123 comment. This
+/// guards against a regression where that overlap stops being a no-op: if
+/// `add_from_beam_meta`/`add_external_superclasses` ever "see" a class that
+/// wasn't already in the handed-off hierarchy for realistic same-driver
+/// inputs, codegen's safety net (correctly!) falls back to recomputing
+/// `method_return_types` — which would silently defeat the fix for every
+/// real multi-file package build, while every other test here only exercises
+/// the empty-cross-file-metadata (REPL/single-file) case.
+#[test]
+fn with_analysis_skips_re_derivation_with_overlapping_cross_file_metadata() {
+    let module = parse_fixture(
+        "Object subclass: Bar\n  useFoo: f => f.\n\nBar subclass: Baz\n  hi => \"hi\".\n",
+    );
+
+    // Mirrors a package build's Pass 1 output: full ClassInfo for a
+    // same-package sibling file's class, AND a name-only superclass index
+    // entry for the very same class (BT-894's codegen-only field, populated
+    // from the same Pass 1 walk as the full ClassInfo list in every real
+    // driver).
+    let foo_info = base_class_info("Foo", "Object");
+    let mut superclass_index = std::collections::HashMap::new();
+    superclass_index.insert("Foo".to_string(), "Object".to_string());
+
+    let build_before = BUILD_CALL_COUNT.with(std::cell::Cell::get);
+    let check_before = CHECK_MODULE_CALL_COUNT.with(std::cell::Cell::get);
+
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_classes(vec![foo_info.clone()]),
+    );
+    assert_eq!(
+        BUILD_CALL_COUNT.with(std::cell::Cell::get) - build_before,
+        1
+    );
+    assert_eq!(
+        CHECK_MODULE_CALL_COUNT.with(std::cell::Cell::get) - check_before,
+        1
+    );
+
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("bar")
+            .with_class_hierarchy(vec![foo_info])
+            .with_class_superclass_index(superclass_index)
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(code.contains("useFoo"));
+
+    // The overlap must be recognised as a no-op: codegen must not fall back
+    // to rebuilding the hierarchy or re-running the type checker just
+    // because `pre_class_hierarchy`/`class_superclass_index` were non-empty.
+    assert_eq!(
+        BUILD_CALL_COUNT.with(std::cell::Cell::get) - build_before,
+        1,
+        "codegen must not rebuild the hierarchy when the pre-loaded class/superclass \
+         data it's given is already reflected in the handed-off analysis"
+    );
+    assert_eq!(
+        CHECK_MODULE_CALL_COUNT.with(std::cell::Cell::get) - check_before,
+        1,
+        "codegen must not re-run the type checker when the pre-loaded class/superclass \
+         data it's given is already reflected in the handed-off analysis"
+    );
+}
