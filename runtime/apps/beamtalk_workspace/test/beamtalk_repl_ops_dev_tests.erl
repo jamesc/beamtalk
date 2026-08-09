@@ -2020,3 +2020,46 @@ find_word_boundary_corpus_root(Dir) ->
         true -> Dir;
         false -> find_word_boundary_corpus_root(filename:dirname(Dir))
     end.
+
+%%====================================================================
+%% builtin_keywords/0 — shared keyword-vocabulary conformance corpus (BT-3083)
+%%====================================================================
+
+%% BT-3083 conformance: every keyword in the shared corpus must be offered
+%% here and by the Rust LSP's static `add_keyword_completions`
+%% (`crates/beamtalk-core/src/queries/completion_provider.rs`). The corpus is
+%% the single source of truth both implementations are pinned to; the Rust
+%% side asserts the identical cases in
+%% `completion_provider::tests::keyword_completions_cover_shared_vocabulary_corpus`.
+builtin_keywords_covers_shared_vocabulary_corpus_test() ->
+    Corpus = load_keyword_vocabulary_corpus(),
+    ?assert(length(Corpus) > 0),
+    Keywords = beamtalk_repl_ops_dev:builtin_keywords(),
+    lists:foreach(
+        fun(Keyword) ->
+            ?assert(
+                lists:member(Keyword, Keywords),
+                {corpus_keyword_missing_from_builtin_keywords, Keyword}
+            )
+        end,
+        Corpus
+    ).
+
+%% Load the shared keyword-vocabulary conformance corpus from the repo tree.
+load_keyword_vocabulary_corpus() ->
+    Root = find_word_boundary_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "completion_keyword_vocabulary_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).

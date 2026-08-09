@@ -532,10 +532,20 @@ impl CodeInventory {
     /// Paired with `repl_command_consts` (from `REPL_COMMANDS_TABLE`) in
     /// `check_drift` to catch a completion-table entry with no dispatch
     /// reference (BT-3083's `:actors`/`:kill`/`:inspect`/`:sessions` bug).
+    /// Excludes every `#[cfg(test)] mod { .. }` block — otherwise a stray
+    /// `commands::IDENT` reference in one of `mod.rs`'s test modules (e.g. a
+    /// test helper building an expression from a table constant) can mask a
+    /// real dispatch-arm removal in `classify_command`, defeating this exact
+    /// drift check. `mod.rs` interleaves several small `#[cfg(test)] mod`
+    /// blocks among production code rather than trailing it all in one
+    /// block, so `production_portion`'s find-first-occurrence split (correct
+    /// for `commands.rs`) isn't used here — it would also cut off
+    /// `classify_command` itself.
     fn scan_repl_command_dispatch(&mut self, path: &Path) -> Result<(), String> {
         let text = fs::read_to_string(path)
             .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        extract_repl_command_dispatch_refs(&text, &mut self.repl_command_dispatch_refs);
+        let production = strip_cfg_test_mod_blocks(&text);
+        extract_repl_command_dispatch_refs(&production, &mut self.repl_command_dispatch_refs);
         Ok(())
     }
 
@@ -669,6 +679,56 @@ fn extract_async_fn_name(line: &str) -> Option<String> {
     } else {
         Some(name.to_string())
     }
+}
+
+/// Removes every `#[cfg(test)] mod <name> { .. }` block from `text`,
+/// brace-balanced so a nested `{`/`}` inside the module doesn't truncate the
+/// strip early. A `#[cfg(test)]` attribute on something other than a `mod`
+/// item (e.g. a single `use`) is left untouched — there's no block to strip.
+///
+/// Unlike `production_portion` (a single find-first-occurrence split, which
+/// only works when a file's test code is one trailing module), this handles
+/// files like `repl/mod.rs` that interleave several small `#[cfg(test)] mod`
+/// blocks among production code — cutting at the first occurrence there
+/// would remove production code (e.g. `classify_command`) that follows it.
+fn strip_cfg_test_mod_blocks(text: &str) -> String {
+    let marker = "#[cfg(test)]";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(idx) = rest.find(marker) {
+        let after_marker = idx + marker.len();
+        let Some(brace_offset) = rest[after_marker..].find('{') else {
+            out.push_str(&rest[..after_marker]);
+            rest = &rest[after_marker..];
+            continue;
+        };
+        let between = &rest[after_marker..after_marker + brace_offset];
+        if !between.trim_start().starts_with("mod ") {
+            out.push_str(&rest[..after_marker]);
+            rest = &rest[after_marker..];
+            continue;
+        }
+        out.push_str(&rest[..idx]);
+        let block_start = after_marker + brace_offset;
+        let mut depth = 0usize;
+        let mut block_end = rest.len();
+        for (i, c) in rest[block_start..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        block_end = block_start + i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        rest = &rest[block_end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Truncates `REPL_COMMANDS_TABLE`'s (`commands.rs`) source at its first
@@ -1067,6 +1127,36 @@ mod tests {
     fn production_portion_stops_at_test_module() {
         let src = "const A: u8 = 1;\n#[cfg(test)]\nmod tests {\n    const B: u8 = 2;\n}\n";
         assert_eq!(production_portion(src), "const A: u8 = 1;\n");
+    }
+
+    /// Regression for the `scan_repl_command_dispatch` bug: a stray
+    /// `commands::IDENT` reference inside a `#[cfg(test)] mod` block sitting
+    /// *between* two pieces of production code must not survive the strip —
+    /// even though it isn't a single trailing test module the way
+    /// `production_portion` assumes.
+    #[test]
+    fn strip_cfg_test_mod_blocks_removes_every_interleaved_test_module() {
+        let src = "fn before() {}\n\
+             #[cfg(test)]\n\
+             mod first_tests {\n\
+                 fn nested() { let x = commands::DECOY; }\n\
+             }\n\
+             fn classify_command() { let _ = commands::HELP; }\n\
+             #[cfg(test)]\n\
+             mod tests {\n\
+                 fn helper() { let _ = commands::FLUSH; }\n\
+             }\n";
+        let stripped = strip_cfg_test_mod_blocks(src);
+        assert!(stripped.contains("fn before()"));
+        assert!(stripped.contains("commands::HELP"));
+        assert!(!stripped.contains("commands::DECOY"));
+        assert!(!stripped.contains("commands::FLUSH"));
+    }
+
+    #[test]
+    fn strip_cfg_test_mod_blocks_leaves_non_mod_attributes_untouched() {
+        let src = "#[cfg(test)]\nuse foo::Bar;\nfn prod() { let _ = commands::HELP; }\n";
+        assert_eq!(strip_cfg_test_mod_blocks(src), src);
     }
 
     #[test]

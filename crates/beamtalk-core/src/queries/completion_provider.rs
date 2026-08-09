@@ -423,8 +423,14 @@ fn add_keyword_completions(
     // `builtin_keywords/0` (`beamtalk_repl_ops_dev.erl`) are two engines that
     // cannot literally share code (Rust vs. Erlang) but should offer the same
     // control-flow vocabulary — a keyword missing from one and not the other
-    // is a completion gap on whichever surface is missing it. Keep the two
-    // lists in sync when adding a keyword here.
+    // is a completion gap on whichever surface is missing it. This list's
+    // core control-flow keywords are pinned against `builtin_keywords/0` by a
+    // shared conformance fixture
+    // (`runtime/apps/beamtalk_workspace/test/fixtures/completion_keyword_vocabulary_corpus.json`),
+    // asserted by `keyword_completions_cover_shared_vocabulary_corpus` below
+    // and `builtin_keywords_covers_shared_vocabulary_corpus_test` in
+    // `beamtalk_repl_ops_dev_tests.erl` — keep both lists a superset of the
+    // corpus.
     let keywords = [
         ("self", "Reference to the current object"),
         ("super", "Reference to the superclass"),
@@ -1437,6 +1443,35 @@ mod tests {
                 completion.documentation.is_some(),
                 "Keyword '{}' should have documentation",
                 completion.label
+            );
+        }
+    }
+    /// BT-3083 conformance: every keyword in the shared corpus must be
+    /// offered here and by the Erlang REPL/MCP engine's `builtin_keywords/0`.
+    /// The corpus is the single source of truth both implementations are
+    /// pinned to; the Erlang side asserts the identical cases in
+    /// `beamtalk_repl_ops_dev_tests:builtin_keywords_covers_shared_vocabulary_corpus_test/0`.
+    #[test]
+    fn keyword_completions_cover_shared_vocabulary_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join(
+                "runtime/apps/beamtalk_workspace/test/fixtures/completion_keyword_vocabulary_corpus.json",
+            );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let corpus: Vec<String> = serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!corpus.is_empty(), "corpus must have cases");
+        let completions = completions_at("x := 42", Position::new(0, 0));
+        let labels: std::collections::HashSet<&str> =
+            completions.iter().map(|c| c.label.as_str()).collect();
+        for keyword in &corpus {
+            assert!(
+                labels.contains(keyword.as_str()),
+                "corpus keyword {keyword:?} missing from add_keyword_completions"
             );
         }
     }
