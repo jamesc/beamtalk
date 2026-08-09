@@ -55,15 +55,16 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 /// resolver's existing `subst.get("Self")` convention below).
 ///
 /// When `self_type` is `Some`, additionally binds the reserved `"Self"` key
-/// to it. `DeclaredType::parse` has no dedicated `SelfType` production (only
-/// [`TypeAnnotation::SelfType`] does) — a bare `"Self"` string parses to
-/// [`DeclaredType::Simple`], which falls through
-/// [`resolve_declared_type_inner`]'s ordinary `subst.get(name)` lookup.
-/// Binding `"Self"` here reproduces `resolve_type_string`'s dedicated
-/// `type_name == "Self"` special case through that same, already-existing
-/// lookup rather than a second one. `"Self"` is reserved (ADR 0108 forbids it
-/// as a generic type-param or alias name), so this can never collide with a
-/// real substitution entry.
+/// to it. Both spellings of a self type route through this binding:
+/// [`DeclaredType::SelfType`] (built from [`TypeAnnotation::SelfType`], or
+/// parsed from a bare `"Self"` string — `DeclaredType::parse` recognises the
+/// flat rendering) reads it in [`resolve_declared_type_inner`]'s dedicated
+/// `SelfType` arm, and [`DeclaredType::SelfClass`] derives its metatype from
+/// the same key. Binding `"Self"` here reproduces `resolve_type_string`'s
+/// dedicated `type_name == "Self"` special case through one shared binding
+/// rather than a second lookup path. `"Self"` is reserved (ADR 0108 forbids
+/// it as a generic type-param or alias name), so this can never collide with
+/// a real substitution entry.
 #[must_use]
 pub(in crate::semantic_analysis) fn merge_substitutions(
     class_subst: &SubstitutionMap,
