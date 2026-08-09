@@ -120,18 +120,24 @@ resolve_class_name(_, _ModuleToClass) ->
 Map Erlang module name to Beamtalk class name.
 
 BT-3081: Resolves via the class metadata table first
-(`beamtalk_class_registry:class_name_for_module/1`, an ETS lookup — no live
-process needed), which is authoritative — it reads each class's actual
-registered name rather than guessing one from its module name, so it can't
-mis-capitalize acronym-cased classes the way the string heuristic below
-provably does (`bt@stdlib@beamerror` → `'BEAMError'` via the metadata table,
-vs. the heuristic's lossy `'Beamerror'`). Falls back to the heuristic only
-when the module isn't a registered class at all — no class was ever
-registered for it, or the metadata table doesn't exist yet (early boot or
-unit tests), or it's an Erlang module that was never a Beamtalk class. Unlike
-an earlier version of this lookup, resolution does not depend on the class's
-gen_server process currently being alive — the metadata table is written at
+(`beamtalk_class_registry:class_name_for_module/1` — no live process needed),
+which is authoritative — it reads each class's actual registered name rather
+than guessing one from its module name, so it can't mis-capitalize
+acronym-cased classes the way the string heuristic below provably does
+(`bt@stdlib@beamerror` → `'BEAMError'` via the metadata table, vs. the
+heuristic's lossy `'Beamerror'`). Falls back to the heuristic only when the
+module isn't a registered class at all — no class was ever registered for
+it, or the metadata table doesn't exist yet (early boot or unit tests), or
+it's an Erlang module that was never a Beamtalk class. Unlike an earlier
+version of this lookup, resolution does not depend on the class's gen_server
+process currently being alive — the metadata table is written at
 registration time and persists independently of process liveness.
+
+`class_name_for_module/1` rebuilds the whole module→class map (a full ETS
+scan via `module_to_class_map/0`) on every call — it is not an O(1) lookup.
+Resolving a single module here is fine, but a caller resolving many modules
+should build the map once with `module_to_class_map/0` and look each one up
+in the result, exactly as `wrap/1` below does for a stacktrace.
 
 Compiled module naming conventions the heuristic fallback handles:
   - 'counter' → 'Counter' (user classes)
