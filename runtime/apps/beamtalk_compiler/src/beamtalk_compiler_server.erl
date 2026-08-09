@@ -658,7 +658,7 @@ compile_core_erlang({cerl, Etf}) when is_binary(Etf) ->
     %% failure mode.
     try binary_to_term(Etf, [safe]) of
         CoreModule ->
-            compile_core_forms(CoreModule, [from_core, binary, return_errors])
+            compile_core_forms(CoreModule, [from_core, binary, return_errors, clint])
     catch
         error:badarg ->
             {error, {cerl_decode_error, unsafe_atoms_or_malformed_etf}}
@@ -670,7 +670,7 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
                     compile_core_forms(
-                        CoreModule, [from_core, binary, return_errors]
+                        CoreModule, [from_core, binary, return_errors, clint]
                     );
                 {error, ParseError} ->
                     {error, {core_parse_error, ParseError}}
@@ -680,6 +680,13 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
     end.
 
 %% Internal: shared `compile:forms/2' arm used by both wire shapes.
+%%
+%% BT-3115: `clint' is passed explicitly by both callers above for
+%% documentation purposes, but is a no-op today — see
+%% `beamtalk_compile_diagnostics' moduledoc for why `core_lint' already runs
+%% unconditionally on this `from_core' pipeline regardless of `clint'.
+%% `strong_validation'/`basic_validation' were evaluated and are NOT
+%% applicable: both skip code generation, which this path requires.
 compile_core_forms(CoreModule, Options) ->
     case compile:forms(CoreModule, Options) of
         {ok, ModuleName, Binary} ->
@@ -687,7 +694,11 @@ compile_core_forms(CoreModule, Options) ->
         {ok, ModuleName, Binary, _Warnings} ->
             {ok, ModuleName, Binary};
         {error, Errors, _Warnings} ->
-            {error, {core_compile_error, Errors}}
+            {error,
+                {core_compile_error, #{
+                    message => beamtalk_compile_diagnostics:format_errors(Errors),
+                    raw => Errors
+                }}}
     end.
 
 %%% gen_server callbacks

@@ -1215,6 +1215,59 @@ end
         result.expect("compile_batch should succeed when escript is available");
     }
 
+    /// BT-3115: a deliberately-malformed Core Erlang module — `foo/1`
+    /// references `State`, which is never a parameter or let-bound — must
+    /// fail with a readable `core_lint` message naming the unbound
+    /// variable, actually reaching this process's stderr (and therefore
+    /// this error message), not a raw term dump or a silently-dropped
+    /// stdout line (`compile.escript`'s `worker_loop/2` used to rely on
+    /// `report_errors`, which prints via the compiling process's default
+    /// group leader — verified empirically to land on stdout, invisible to
+    /// `read_compilation_output`'s protocol-marker-only parser). Exercises
+    /// the same acceptance criterion the Port-backend `EUnit` tests
+    /// (`beamtalk_build_worker_tests`/`beamtalk_compiler_server_tests`
+    /// `compile_core_erlang_unbound_var_test`) cover for the other backend —
+    /// together they demonstrate the two backends stay in parity.
+    #[test]
+    fn test_compile_batch_escript_core_lint_unbound_var() {
+        if check_escript_available().is_err() {
+            println!("Skipping test - escript not installed");
+            return;
+        }
+
+        let temp = TempDir::new().unwrap();
+        let output_dir = Utf8PathBuf::from_path_buf(temp.path().join("build")).unwrap();
+        fs::create_dir_all(&output_dir).unwrap();
+        let compiler = BeamCompiler::new(output_dir);
+
+        let core_content = r"module 'bt_cli_unbound_var' ['foo'/1]
+  attributes []
+  'foo'/1 = fun (X) ->
+    let Y = call 'erlang':'+' (X, State)
+    in Y
+end
+";
+
+        let core_file = Utf8PathBuf::from_path_buf(temp.path().join("bad.core")).unwrap();
+        fs::write(&core_file, core_content).unwrap();
+
+        let result = compiler.compile_batch_escript(&[core_file]);
+        let err = result.expect_err("malformed Core Erlang must fail to compile");
+        let message = format!("{err}");
+        assert!(
+            message.contains("unbound variable"),
+            "expected a readable core_lint message, got: {message}"
+        );
+        assert!(
+            message.contains("'State'"),
+            "expected the offending variable name in the message, got: {message}"
+        );
+        assert!(
+            !message.contains("{unbound_var,"),
+            "expected readable prose, not a raw term dump: {message}"
+        );
+    }
+
     // Tests for is_valid_module_name
     #[test]
     fn test_is_valid_module_name_valid() {

@@ -83,6 +83,24 @@ compile_core_erlang_compile_error_test() ->
     Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
     ?assertMatch({error, {core_compile_error, _}}, Result).
 
+%% BT-3115: Core Erlang that scans, parses, and passes compile:forms'
+%% earlier passes, but fails core_lint — 'State' is referenced in 'foo'/1
+%% without ever being bound. Demonstrates the failure is caught (core_lint
+%% already runs unconditionally on the from_core pipeline — see
+%% beamtalk_compile_diagnostics' moduledoc) *and* reported with the
+%% offending variable name, not a raw `~p` term dump.
+compile_core_erlang_unbound_var_test() ->
+    CoreErlang = unbound_var_core_erlang_source(),
+    Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
+    ?assertMatch({error, {core_compile_error, #{message := _, raw := _}}}, Result),
+    {error, {core_compile_error, #{message := Message}}} = Result,
+    ?assert(is_binary(Message)),
+    %% Readable prose, not the raw {unbound_var, 'State', {foo, 1}} term.
+    ?assertEqual(nomatch, binary:match(Message, <<"{unbound_var,">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"unbound variable">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
+
 %% {cerl, Etf} path: cerl module that exports foo/0 but only defines bar/0.
 %% Covers the same compile_core_forms error arm via the ETF wire.
 compile_core_erlang_cerl_compile_error_test() ->
@@ -264,6 +282,20 @@ valid_core_erlang_source() ->
         "module 'test_build_worker_mod' ['hello'/0]\n"
         "  attributes []\n"
         "  'hello'/0 = fun () -> 'world'\n"
+        "end\n"
+    >>.
+
+%% BT-3115: Core Erlang whose 'foo'/1 references an unbound variable
+%% ('State' is never a parameter or let-bound) — a genuine core_lint
+%% unbound_var failure, the historical codegen failure mode this issue
+%% targets (docs/development/debugging.md § Codegen Debugging).
+unbound_var_core_erlang_source() ->
+    <<
+        "module 'bt_bw_unbound_var' ['foo'/1]\n"
+        "  attributes []\n"
+        "  'foo'/1 = fun (X) ->\n"
+        "    let Y = call 'erlang':'+' (X, State)\n"
+        "    in Y\n"
         "end\n"
     >>.
 

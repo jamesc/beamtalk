@@ -229,8 +229,8 @@ compile_core_file(CoreFile, OutDir) ->
                     io:put_chars(
                         standard_error,
                         io_lib:format(
-                            "Error compiling ~s: ~p~n",
-                            [CoreFile, Reason]
+                            "Error compiling ~s: ~ts~n",
+                            [CoreFile, describe_compile_error(Reason)]
                         )
                     ),
                     error
@@ -292,6 +292,15 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 
 %% Internal: shared `compile:forms/2' arm used by both wire shapes.
 %% Includes `debug_info' (this is the build path).
+%%
+%% BT-3115: `clint' is passed explicitly for documentation purposes, but is
+%% a no-op today — `core_lint' already runs unconditionally on the
+%% `from_core' pipeline this call takes (see `beamtalk_compile_diagnostics'
+%% moduledoc for the full explanation of why `clint'/`clint0' only matter on
+%% the `verified_core' branch, which compiling from Core Erlang never
+%% reaches). `strong_validation'/`basic_validation' were evaluated and are
+%% NOT applicable here: both skip code generation entirely, which this build
+%% path requires (it must produce a `.beam' binary, not just diagnostics).
 compile_core_forms(CoreModule) ->
     case
         compile:forms(
@@ -301,7 +310,8 @@ compile_core_forms(CoreModule) ->
                 binary,
                 return_errors,
                 report_warnings,
-                debug_info
+                debug_info,
+                clint
             ]
         )
     of
@@ -310,5 +320,20 @@ compile_core_forms(CoreModule) ->
         {ok, ModuleName, Binary, _Warnings} ->
             {ok, ModuleName, Binary};
         {error, Errors, _Warnings} ->
-            {error, {core_compile_error, Errors}}
+            {error,
+                {core_compile_error, #{
+                    message => beamtalk_compile_diagnostics:format_errors(Errors),
+                    raw => Errors
+                }}}
     end.
+
+%% Render a `compile_core_erlang/1' error `Reason' for stderr. The
+%% `core_compile_error' shape (compile:forms failures — by definition an
+%% internal-compiler-error at this pipeline stage, BT-3115) gets the
+%% human-readable `sys_messages'-formatted text carrying the offending
+%% variable/function name; every other shape (scan/parse errors, which are
+%% already compact) falls back to a plain term dump.
+describe_compile_error({core_compile_error, #{message := Message}}) ->
+    Message;
+describe_compile_error(Reason) ->
+    unicode:characters_to_binary(io_lib:format("~p", [Reason])).
