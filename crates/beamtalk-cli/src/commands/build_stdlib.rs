@@ -584,6 +584,17 @@ struct ClassMeta {
     handle_scope: Option<String>,
 }
 
+/// Sort class metadata by class name — every generated-artifact writer
+/// (`generate_builtins_rs`, `generate_erlang_builtins_hrl`) needs the same
+/// deterministic ordering so the checked-in `.rs`/`.hrl` files are stable
+/// across regenerations. Single implementation per CLAUDE.md's
+/// "No duplicate implementations" rule.
+fn sorted_by_class_name(class_metadata: &[ClassMeta]) -> Vec<&ClassMeta> {
+    let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
+    sorted.sort_by_key(|m| &m.class_name);
+    sorted
+}
+
 /// Metadata for a single method, extracted from the AST.
 struct MethodMeta {
     /// Message selector (e.g., `"increment"` or `"add:"`).
@@ -1470,8 +1481,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
          \x20       name,\n",
     );
 
-    let mut sorted_meta: Vec<&ClassMeta> = class_metadata.iter().collect();
-    sorted_meta.sort_by_key(|m| &m.class_name);
+    let sorted_meta = sorted_by_class_name(class_metadata);
 
     for (i, meta) in sorted_meta.iter().enumerate() {
         if i == 0 {
@@ -1534,8 +1544,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
 /// (`'Future'`, no `stdlib/src/Future.bt` source — mirrors `builtins.rs`'s
 /// `is_builtin_class` on the Rust side).
 fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
-    let mut sorted_meta: Vec<&ClassMeta> = class_metadata.iter().collect();
-    sorted_meta.sort_by_key(|m| &m.class_name);
+    let sorted_meta = sorted_by_class_name(class_metadata);
 
     let mut code = String::new();
     code.push_str(
@@ -2783,8 +2792,7 @@ mod tests {
 
         let mut code = String::new();
         // Simulate the sorted generation from generate_builtins_rs
-        let mut sorted: Vec<&ClassMeta> = meta.iter().collect();
-        sorted.sort_by_key(|m| &m.class_name);
+        let sorted = sorted_by_class_name(&meta);
 
         for m in &sorted {
             generate_class_entry(&mut code, m);
