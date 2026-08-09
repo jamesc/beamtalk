@@ -13,6 +13,8 @@ This document defines the core development architecture principles for the beamt
 3. [Testing Pyramid](#3-testing-pyramid)
 4. [Security-First Development](#4-security-first-development)
 5. [Dependency Management Philosophy](#5-dependency-management-philosophy)
+6. [Duplication & the Shared-Leaf-Module Pattern](#6-duplication--the-shared-leaf-module-pattern)
+7. [Consistency-Test Disposition Rule](#7-consistency-test-disposition-rule)
 
 ---
 
@@ -499,10 +501,81 @@ cargo deny check
 
 ---
 
+## 6. Duplication & the Shared-Leaf-Module Pattern
+
+### Principle
+
+**"Layer X can't depend on layer Y" is never a reason to duplicate a rule.** If two modules on different sides of a dependency edge need the same logic, extract it into a shared module that sits *below both of them*, and have both import it. Duplication should always be a deliberate, reviewed extraction decision — not a default reached for because importing looked awkward.
+
+### The anti-pattern
+
+The 2026-08 duplication audit found this comment in `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/declared_type.rs`:
+
+```rust
+/// Mirrors `type_resolver::split_generic_base` — duplicated here (rather
+/// than imported) because `class_hierarchy` sits below `type_checker` in the
+/// dependency graph and must not reach up into it.
+fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
+    ...
+}
+```
+
+This reasoning is backwards. `class_hierarchy` sitting below `type_checker` is exactly why the shared logic should **not** live in `type_checker::type_resolver` — it should live somewhere both can reach: a small leaf module (or a free function in a module) that has no dependency on either `class_hierarchy` or `type_checker`, so both can import it downward. The "layering" observation correctly identifies *that* something is misplaced; it does not justify a second implementation.
+
+### The fix pattern
+
+1. Identify the lowest common layer both consumers can depend on (often a leaf module with no domain logic beyond the one function/table in question — string parsing, a shared constant table, a small pure algorithm).
+2. Move the logic there (or create the module if none fits).
+3. Have both original sites import it and delete the duplicate.
+4. If a "mirrors"/"keep in sync" comment existed at either site, delete it — the comment's job is now done by the compiler (a single definition can't drift from itself).
+
+### Rationale
+
+1. **Drift is silent** — two implementations of the same rule will diverge under normal maintenance; nothing forces them to stay aligned except developer discipline, which does not scale across agents or contributors.
+2. **The layering rule stays intact** — extraction respects "dependencies flow down only" (§1) rather than special-casing around it.
+3. **Review is cheaper** — one implementation to read, one place to fix a bug.
+
+### Enforcement
+
+**Decision:** Document + code review (no automated enforcement for this class of duplication — it requires judgment about what counts as "the same rule").
+
+**Action on violation:** Flag in code review (see `code-review`/`review-code` skill checklist); extract to a shared leaf module rather than approving a second implementation. See §7 for what happens to any existing "these two agree" test once the duplicate is deleted.
+
+---
+
+## 7. Consistency-Test Disposition Rule
+
+### Principle
+
+Tests that assert "these two independent implementations produce the same result" are a smell **unless** the two implementations are on opposite sides of a boundary you cannot delete (different language, different process, different deployable surface). This rule tells you, for any given pair-test, whether to keep it, convert it, or migrate it.
+
+> **A consistency test across a boundary you cannot delete is enforcement — keep it and extend it. A consistency test between two copies you can delete is a smell — delete the copy; the test becomes an ordinary unit/golden test of the single implementation.**
+
+### Applying the rule
+
+| Situation | Disposition | Example |
+|---|---|---|
+| Two implementations in different languages, compiled/reviewed separately, that must agree on wire format or behavior | **Keep** — this is the permanent boundary the test exists to guard | `beamtalk-surface-drift` (CLI/REPL/MCP/LSP), `beamtalk-parity-tests` (cross-process parity), the Rust↔Erlang conformance fixtures from BT-3080/BT-3081/BT-3085/BT-3090 |
+| Two Rust (or two Erlang) implementations of the same rule, previously duplicated, now being consolidated into one | **Convert** to a golden test (fixed input → fixed expected output) once the duplicate is deleted; delete the re-implementation the test used for comparison | `crates/beamtalk-workspace/tests/cross_crate_consistency.rs` — see below |
+| A hand-written "simulated compiler output" fixture that stands in for real compiled output | **Migrate** the fixture onto compiled/generated output so drift fails at build time instead of needing a human to update the simulation | `beamtalk_codegen_simulation_tests.erl`'s simulated-state sections; precedent in BT-239 |
+
+### Worked example: `cross_crate_consistency.rs`
+
+Before BT-3091, `crates/beamtalk-workspace/tests/cross_crate_consistency.rs` re-implemented the (already-deleted) CLI and MCP workspace-ID hashing algorithms inline, purely so it could assert the shared `generate_workspace_id` helper matched them. Once the CLI/MCP duplicates were deleted, there was nothing left to be inconsistent *with* — the "matches the CLI algorithm" and "matches the MCP algorithm" tests were really just two copies of "hashes this known path to this known 12-hex string." The first conversion pass still hand-reimplemented SHA-256 inline to compute the expected value against a platform-dependent `std::env::temp_dir()` path — the same "two implementations that must be hand-kept in sync" smell, just moved from CLI/MCP-vs-shared to test-vs-shared. The fix: extract the pure hashing step (`hash_workspace_path_string`, no `canonicalize()`, no filesystem) out of `generate_workspace_id`, and golden-test *that* directly against a fixed literal input and a hardcoded expected output (`test_workspace_id_hash_is_stable_for_known_input`) — one production code path, zero re-implementation, and no per-OS variance. A separate, unpinned structural test (`test_generate_workspace_id_returns_well_formed_id_for_real_path`) still covers the `canonicalize()`-and-delegate wiring against a real path. This is the template: when a sibling consolidation issue deletes one side of a pair, revisit that pair's consistency test, and if computing the "expected" value still means re-deriving the algorithm by hand, extract the pure computation and golden-test that instead of the wrapper.
+
+### Rationale
+
+1. **Pair-tests across a deletable duplication hide the real bug** — they make the duplication look "safe" (tested!) instead of flagging it for removal.
+2. **Golden tests are cheaper to maintain** — one code path, one set of fixtures, no risk of the "reference" implementation silently drifting out of sync with reality the way the thing under test can.
+3. **Boundary tests earn their complexity** — when the two sides genuinely can't merge (different language runtimes, different processes), the dual-implementation test is the correct design, not a smell.
+
+---
+
 ## Cross-References
 
 - **Domain-Driven Design:** [AGENTS.md - Domain-Driven Design section](../../docs/agents/expanded.md#domain-driven-design-ddd)
 - **Rust Best Practices:** [AGENTS.md - Rust Development Best Practices](../../docs/agents/expanded.md#development-architecture-principles)
+- **Duplication & Drift Prevention (agent guidelines):** [docs/agents/expanded.md § Duplication & Drift Prevention](../../docs/agents/expanded.md#duplication--drift-prevention)
 
 ---
 
@@ -510,4 +583,4 @@ cargo deny check
 
 If these principles are unclear or don't address a specific scenario, open a Linear issue with the `Documentation` label.
 
-**Last updated:** 2026-02-03
+**Last updated:** 2026-08-09
