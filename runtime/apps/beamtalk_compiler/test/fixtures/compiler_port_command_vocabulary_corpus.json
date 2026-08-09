@@ -1,0 +1,18 @@
+[
+  "compile_expression",
+  "compile_expression_trace",
+  "compile",
+  "compile_method",
+  "diagnostics",
+  "version",
+  "resolve_completion_type",
+  "find_senders_in_source",
+  "find_all_sends_in_source",
+  "find_references_to_in_source",
+  "find_field_readers_in_source",
+  "find_field_writers_in_source",
+  "find_ffi_sites_in_source",
+  "find_announce_sites_in_source",
+  "resolve_method_span",
+  "reindent_method_source"
+]
