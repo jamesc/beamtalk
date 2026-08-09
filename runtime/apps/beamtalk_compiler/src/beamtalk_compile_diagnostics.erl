@@ -43,9 +43,16 @@ process's default group leader, which lands on stdout, not stderr — the
 Rust CLI's stdout parser only recognises the `beamtalk-compile-*'
 protocol markers and silently drops every other line, so the message was
 being lost outright rather than merely unformatted.
+
+BT-3126 extended this module with `format_warnings/1' for the same
+reason on the *warning* path: `beamtalk_build_worker''s Port backend
+passed `report_warnings' to `compile:forms/2', which hits the same
+stdout-not-stderr sink and the same silent-drop, so `compile:forms'
+warnings (e.g. unused-variable warnings in generated Core Erlang) were
+never surfaced at all.
 """.
 
--export([format_errors/1]).
+-export([format_errors/1, format_warnings/1]).
 
 -doc """
 Turn a `compile:forms/2' `{error, Errors, Warnings}' error list into a
@@ -56,10 +63,24 @@ carrying whatever identifying detail the originating lint pass reports
 """.
 -spec format_errors([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
 format_errors(Errors) when is_list(Errors) ->
+    format_messages(Errors, "").
+
+-doc """
+Turn a `compile:forms/2' `Warnings' list (from `return_warnings') into a
+single human-readable binary, one line per underlying warning, prefixed
+`"Warning: "' — matching the wording `report_warnings' would have
+printed, and what `compile.escript''s `print_messages/2' already prints
+for the escript backend (BT-3115).
+""".
+-spec format_warnings([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
+format_warnings(Warnings) when is_list(Warnings) ->
+    format_messages(Warnings, "Warning: ").
+
+format_messages(Messages, Prefix) ->
     Lines = [
         Text
-     || {File, ErrorInfos} <- Errors,
-        {_Loc, Text} <- sys_messages:format_messages(to_filename(File), "", ErrorInfos, [])
+     || {File, ErrorInfos} <- Messages,
+        {_Loc, Text} <- sys_messages:format_messages(to_filename(File), Prefix, ErrorInfos, [])
     ],
     unicode:characters_to_binary(Lines).
 

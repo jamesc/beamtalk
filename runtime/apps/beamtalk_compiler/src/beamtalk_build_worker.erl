@@ -301,6 +301,17 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 %% reaches). `strong_validation'/`basic_validation' were evaluated and are
 %% NOT applicable here: both skip code generation entirely, which this build
 %% path requires (it must produce a `.beam' binary, not just diagnostics).
+%%
+%% BT-3126: `return_warnings' replaces `report_warnings' — the latter prints
+%% via `io:fwrite' to the compiling process's default group leader, which
+%% lands on stdout, not stderr (same finding as BT-3115's `report_errors'
+%% fix). `return_warnings' hands the warning terms back instead, printed
+%% here explicitly to `standard_error' via
+%% `beamtalk_compile_diagnostics:format_warnings/1' so they reach the
+%% developer instead of being silently dropped by the Rust CLI's stdout
+%% parser. `compile_core_erlang/1''s `{ok, atom(), binary()} | {error, term()}'
+%% return contract is unchanged — warnings are a side effect (printed), not
+%% a return value, matching every existing caller/test's 3-tuple match.
 compile_core_forms(CoreModule) ->
     case
         compile:forms(
@@ -309,7 +320,7 @@ compile_core_forms(CoreModule) ->
                 from_core,
                 binary,
                 return_errors,
-                report_warnings,
+                return_warnings,
                 debug_info,
                 clint
             ]
@@ -317,15 +328,22 @@ compile_core_forms(CoreModule) ->
     of
         {ok, ModuleName, Binary} ->
             {ok, ModuleName, Binary};
-        {ok, ModuleName, Binary, _Warnings} ->
+        {ok, ModuleName, Binary, Warnings} ->
+            print_warnings(Warnings),
             {ok, ModuleName, Binary};
-        {error, Errors, _Warnings} ->
+        {error, Errors, Warnings} ->
+            print_warnings(Warnings),
             {error,
                 {core_compile_error, #{
                     message => beamtalk_compile_diagnostics:format_errors(Errors),
                     raw => Errors
                 }}}
     end.
+
+print_warnings([]) ->
+    ok;
+print_warnings(Warnings) ->
+    io:put_chars(standard_error, beamtalk_compile_diagnostics:format_warnings(Warnings)).
 
 %% Render a `compile_core_erlang/1' error `Reason' for stderr. The
 %% `core_compile_error' shape (compile:forms failures — by definition an

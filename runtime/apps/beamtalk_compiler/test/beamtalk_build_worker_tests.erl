@@ -101,6 +101,23 @@ compile_core_erlang_unbound_var_test() ->
     ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
     ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
 
+%% BT-3126: Core Erlang that compiles *successfully* but produces a
+%% compile:forms warning (sys_core_fold's "ignored result of a call"
+%% warning, triggered by a `do' whose first expression's value is
+%% discarded). Before the fix, `compile_core_forms/1' passed
+%% `report_warnings' — which prints via `io:fwrite' to the compiling
+%% process's default group leader (stdout), not stderr — so this warning
+%% was silently dropped. Demonstrates the Port backend now reaches
+%% stderr, matching compile.escript's `return_warnings' fix from BT-3115.
+compile_core_erlang_warning_reaches_stderr_test() ->
+    CoreErlang = warning_core_erlang_source(),
+    Captured = capture_stderr(fun() ->
+        {ok, ModuleName, Binary} = beamtalk_build_worker:compile_core_erlang(CoreErlang),
+        ?assertEqual(bt_bw_warn_test, ModuleName),
+        ?assert(is_binary(Binary))
+    end),
+    ?assertNotEqual(nomatch, binary:match(Captured, <<"Warning:">>)).
+
 %% {cerl, Etf} path: cerl module that exports foo/0 but only defines bar/0.
 %% Covers the same compile_core_forms error arm via the ETF wire.
 compile_core_erlang_cerl_compile_error_test() ->
@@ -299,6 +316,21 @@ unbound_var_core_erlang_source() ->
         "end\n"
     >>.
 
+%% BT-3126: 'foo'/1 discards the result of `erlang:+/2' via a `do' sequence
+%% — a genuine `sys_core_fold' "ignored result of a call" warning, while
+%% still compiling successfully (the module returns X unchanged).
+warning_core_erlang_source() ->
+    <<
+        "module 'bt_bw_warn_test' ['foo'/1]\n"
+        "  attributes []\n"
+        "  'foo'/1 =\n"
+        "    fun (X) ->\n"
+        "        do\n"
+        "            call 'erlang':'+' (1, 2)\n"
+        "        X\n"
+        "end\n"
+    >>.
+
 %% Generate a Core Erlang module with a given name.
 core_erlang_module(Name) ->
     NameBin = atom_to_binary(Name, utf8),
@@ -307,6 +339,43 @@ core_erlang_module(Name) ->
         "  attributes []\n"
         "  'hello'/0 = fun () -> 'ok'\n"
         "end\n">>.
+
+%% BT-3126: Temporarily swap the globally-registered `standard_error'
+%% process for a capturing loop for the duration of Fun(), so
+%% `io:put_chars(standard_error, ...)' calls made inside Fun() are
+%% captured instead of going to the real console. `io:put_chars(standard_error,
+%% _)' resolves the target device via `whereis(standard_error)' (see
+%% `io.erl''s `request/3'), NOT via the calling process' group leader — a
+%% plain `group_leader/2' swap does not intercept it. Returns the
+%% captured text.
+capture_stderr(Fun) ->
+    OldStdErr = erlang:whereis(standard_error),
+    Capturer = spawn(fun() -> capture_loop(<<>>) end),
+    true = unregister(standard_error),
+    true = register(standard_error, Capturer),
+    try
+        Fun()
+    after
+        true = unregister(standard_error),
+        true = register(standard_error, OldStdErr)
+    end,
+    Capturer ! {get_captured, self()},
+    receive
+        {captured, Text} -> Text
+    after 1000 -> <<>>
+    end.
+
+capture_loop(Acc) ->
+    receive
+        {io_request, From, ReplyAs, {put_chars, _Encoding, Chars}} ->
+            From ! {io_reply, ReplyAs, ok},
+            capture_loop(<<Acc/binary, (iolist_to_binary(Chars))/binary>>);
+        {io_request, From, ReplyAs, _Other} ->
+            From ! {io_reply, ReplyAs, ok},
+            capture_loop(Acc);
+        {get_captured, From} ->
+            From ! {captured, Acc}
+    end.
 
 %% Smallest cerl module that compiles: only module_info/0 and module_info/1.
 cerl_minimum_module(ModName) ->
