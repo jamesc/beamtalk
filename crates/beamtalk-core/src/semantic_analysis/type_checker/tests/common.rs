@@ -7,6 +7,7 @@
 //! monolithic `tests.rs`. They are re-exported into every child test module
 //! via `use super::common::*;`.
 
+pub(super) use super::super::type_resolver;
 pub(super) use super::super::*;
 pub(super) use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
@@ -14,6 +15,7 @@ pub(super) use crate::ast::{
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
+pub(super) use crate::semantic_analysis::class_hierarchy::DeclaredType;
 pub(super) use crate::source_analysis::{DiagnosticCategory, Span};
 
 pub(super) fn span() -> Span {

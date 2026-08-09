@@ -29,15 +29,15 @@
 //!   tier), generic `type_args` (`List(Port)` → `HandleScoped`), and user
 //!   `handleScope:` declarations.
 
-use std::collections::HashMap;
-
 use ecow::EcoString;
 
 use crate::ast::ClassKind;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 
 use super::InferredType;
+use super::type_resolver;
 
 /// The scope over which a `HandleScoped` value's backing handle stays valid.
 ///
@@ -325,10 +325,9 @@ fn tier_of_known(
                 // to its declared type before tiering, instead of treating
                 // the alias name as an unresolved nominal class.
                 Some(field_ty) => {
-                    let field_type = super::TypeChecker::resolve_type_string(
-                        &field_ty,
-                        &HashMap::new(),
-                        &HashMap::new(),
+                    let field_type = type_resolver::resolve_declared_type(
+                        &DeclaredType::parse(&field_ty),
+                        &type_resolver::SubstitutionMap::new(),
                         None,
                         alias_registry,
                         super::TypeStringContext::Declared,
