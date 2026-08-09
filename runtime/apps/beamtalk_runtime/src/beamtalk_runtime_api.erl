@@ -207,6 +207,14 @@ Remove a class from the system by name, with full cleanup.
 Returns the BEAM module atom of the removed class on success (so the caller
 can update its own tracking state), or {error, Reason} if the removal fails
 (class not found, stdlib class, has subclasses, etc.).
+
+Caveat: this is reachable from inside an ADR 0109 foreign-process block
+(directly, or via the unrestricted `Erlang <module>` FFI gateway), so the
+module lookup above uses `beamtalk_object_class:module_name_safe/1` rather
+than an unsafe `gen_server:call`-based precheck. That means it cannot detect
+a class process killed via an untrappable `kill` signal before `terminate/2`
+ran (it will resolve `ModuleName` for the dead pid rather than signalling
+death) — see `module_name_safe/1`'s doc for the full explanation.
 """.
 -spec remove_class_from_system(atom()) -> {ok, module()} | {error, #beamtalk_error{}}.
 remove_class_from_system(ClassName) ->
@@ -232,6 +240,15 @@ remove_class_from_system(ClassName) ->
 class_name(Pid) ->
     beamtalk_object_class:class_name(Pid).
 
+-doc """
+Get the BEAM module name for a class object's pid.
+
+Delegates to `beamtalk_object_class:module_name_safe/1` (BT-3054) and
+inherits its caveat verbatim: it may not raise `noproc`/`timeout` for a
+class process killed via an untrappable `kill` signal before `terminate/2`
+ran, because the ETS rows it reads survive that kind of death. See
+`module_name_safe/1`'s doc for the full explanation.
+""".
 -spec module_name(pid()) -> module().
 module_name(Pid) ->
     beamtalk_object_class:module_name_safe(Pid).

@@ -1242,6 +1242,15 @@ is_singleton_binding_name(Name) ->
 
 %% Tier 4: class registry → a class object tuple, mirroring REPL codegen for a
 %% capitalised name (`{beamtalk_object, '<Name> class', Module, ClassPid}`).
+%%
+%% Caveat: reachable from inside an ADR 0109 foreign-process block (directly,
+%% or via the unrestricted `Erlang <module>` FFI gateway), so the module is
+%% resolved via `beamtalk_runtime_api:module_name/1`, which delegates to
+%% `beamtalk_object_class:module_name_safe/1` rather than an unsafe
+%% `gen_server:call`-based precheck. That means the catch-all below cannot
+%% detect a class process killed via an untrappable `kill` signal before
+%% `terminate/2` ran — see `module_name_safe/1`'s doc for the full
+%% explanation.
 -spec lookup_class_object(atom()) -> {ok, tuple()} | error.
 lookup_class_object(Name) ->
     case beamtalk_runtime_api:whereis_class(Name) of
