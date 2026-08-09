@@ -19,20 +19,16 @@ use super::common::*;
 
 use crate::source_analysis::Severity;
 
-/// Parses `source`, runs the full `analyse_with_options_and_classes`
-/// pipeline (so `type` declarations get registered into an `AliasRegistry`
-/// exactly as they would for a real compile — see `semantic_analysis::mod`'s
-/// `analyse_full`), and returns every diagnostic.
+/// Parses `source`, runs the full semantic-analysis pipeline (so `type`
+/// declarations get registered into an `AliasRegistry` exactly as they would
+/// for a real compile — see `semantic_analysis::mod`'s `analyse_full`), and
+/// returns every diagnostic.
 fn analyse_diagnostics(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     result.diagnostics
 }
 

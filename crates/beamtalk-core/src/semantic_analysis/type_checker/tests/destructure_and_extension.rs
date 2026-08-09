@@ -401,10 +401,10 @@ Base subclass: Child
     };
 
     // Use the full analysis pipeline (same as the build command)
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+    let result = crate::semantic_analysis::analyse_full(
         &module,
-        &crate::CompilerOptions::default(),
-        vec![base_info],
+        crate::semantic_analysis::AnalysisContext::default()
+            .with_pre_loaded_classes(vec![base_info]),
     );
     let dnu_warnings: Vec<_> = result
         .diagnostics

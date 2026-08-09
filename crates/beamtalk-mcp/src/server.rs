@@ -2342,12 +2342,11 @@ fn run_module_analysis(
         current_package: current_package.map(str::to_string),
         ..Default::default()
     };
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
-        module,
-        &options,
-        cross_file_classes,
-        native_type_registry,
-    );
+    let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
+        .with_options(&options)
+        .with_pre_loaded_classes(cross_file_classes)
+        .with_native_type_registry(native_type_registry);
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     diags.extend(
         analysis_result
             .diagnostics

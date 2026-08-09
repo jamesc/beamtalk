@@ -84,16 +84,14 @@ fn collect_diagnostics(
         current_package: current_package.map(str::to_string),
         ..Default::default()
     };
-    let analysis_result =
-        beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
-            module,
-            &options,
-            cross_file_classes,
-            pre_loaded_protocols,
-            pre_loaded_aliases,
-            native_type_registry,
-            cross_file_extensions,
-        );
+    let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
+        .with_options(&options)
+        .with_pre_loaded_classes(cross_file_classes)
+        .with_pre_loaded_protocols(pre_loaded_protocols)
+        .with_pre_loaded_aliases(pre_loaded_aliases)
+        .with_native_type_registry(native_type_registry)
+        .with_cross_file_extensions(cross_file_extensions);
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     lint_diags.extend(
         analysis_result
             .diagnostics
@@ -1168,8 +1166,8 @@ mod tests {
         // stage (`merge_dependency_infos`/`ResolvedDependency.alias_infos`
         // carry every declaration, filtered or not) — the seeding-boundary
         // exclusion happens downstream, inside `AliasRegistry::add_pre_loaded`
-        // when `collect_diagnostics` calls `analyse_with_natives_and_protocols_and_aliases`
-        // below. That exclusion logic itself is already covered by
+        // when `collect_diagnostics` calls `analyse_full` below. That
+        // exclusion logic itself is already covered by
         // `add_pre_loaded_never_seeds_internal_alias_from_different_package`
         // in `alias_registry.rs` (BT-2898); what this test proves is that the
         // wiring correctly delivers `is_internal`/`package` all the way from
@@ -1188,9 +1186,8 @@ mod tests {
         );
 
         // Directly exercise the seeding step `collect_diagnostics` performs
-        // internally (`AliasRegistry::add_pre_loaded`, via
-        // `analyse_with_natives_and_protocols_and_aliases`), rather than
-        // trying to observe the exclusion through a lint diagnostic: a `::
+        // internally (`AliasRegistry::add_pre_loaded`, via `analyse_full`),
+        // rather than trying to observe the exclusion through a lint diagnostic: a `::
         // Secret` annotation on its own produces no diagnostic either way —
         // `check_unresolved_type_aliases` (structural_validators.rs) is
         // deliberately scoped to near-miss *typos* of already-registered

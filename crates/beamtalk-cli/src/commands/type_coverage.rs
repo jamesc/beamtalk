@@ -78,11 +78,11 @@ pub fn run(
     for (file, _source, module) in &parsed_files {
         let cross_file_classes = ClassHierarchy::cross_file_class_infos(&all_class_infos, module);
 
-        let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
-            module,
-            &beamtalk_core::CompilerOptions::default(),
-            cross_file_classes,
-        );
+        let default_options = beamtalk_core::CompilerOptions::default();
+        let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
+            .with_options(&default_options)
+            .with_pre_loaded_classes(cross_file_classes);
+        let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
 
         let type_map = infer_types(
             module,

@@ -692,7 +692,8 @@ pub struct CompileContext<'a> {
     pub strict_deps: bool,
     /// Native type registry for FFI call inference during build (ADR 0075).
     ///
-    /// When set, semantic analysis uses [`beamtalk_core::semantic_analysis::analyse_with_natives`]
+    /// When set, semantic analysis threads it through
+    /// [`beamtalk_core::semantic_analysis::AnalysisContext::with_native_type_registry`]
     /// so that `Erlang <module> <function>:` calls get return type inference and
     /// argument type checking in build output, not just the LSP.
     pub native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,

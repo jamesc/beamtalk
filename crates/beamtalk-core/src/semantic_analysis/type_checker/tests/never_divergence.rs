@@ -34,11 +34,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -68,11 +64,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -103,11 +95,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -137,11 +125,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -177,11 +161,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     // The `ifTrue:` branch constructs a block that *would* diverge if run,
     // but the outer branch doesn't execute it — control falls through to
     // `Receiver process: ms` with `ms` still `Integer | Nil`, so the

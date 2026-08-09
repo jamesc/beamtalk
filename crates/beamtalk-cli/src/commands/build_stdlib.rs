@@ -2154,32 +2154,26 @@ mod tests {
             current_package: Some("not_stdlib".into()),
             ..options.clone()
         };
-        let result =
-            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
-                &module_b,
-                &mismatched,
-                vec![],
-                vec![],
-                pre_loaded_aliases.clone(),
-                None,
-                &extensions,
-            );
+        let result = beamtalk_core::semantic_analysis::analyse_full(
+            &module_b,
+            beamtalk_core::semantic_analysis::AnalysisContext::default()
+                .with_options(&mismatched)
+                .with_pre_loaded_aliases(pre_loaded_aliases.clone())
+                .with_cross_file_extensions(&extensions),
+        );
         assert!(
             !result.alias_registry.has_alias("Direction"),
             "a mismatched current_package must drop the internal stdlib alias \
              at the seeding boundary"
         );
 
-        let result =
-            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
-                &module_b,
-                &options,
-                vec![],
-                vec![],
-                pre_loaded_aliases,
-                None,
-                &extensions,
-            );
+        let result = beamtalk_core::semantic_analysis::analyse_full(
+            &module_b,
+            beamtalk_core::semantic_analysis::AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_aliases(pre_loaded_aliases)
+                .with_cross_file_extensions(&extensions),
+        );
         assert!(
             result.alias_registry.has_alias("Direction"),
             "the matching \"stdlib\" current_package must seed the internal alias"
@@ -2283,16 +2277,13 @@ mod tests {
         let (module_b, _diags) = beamtalk_core::source_analysis::parse(tokens_b);
         let extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::default();
 
-        let result =
-            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
-                &module_b,
-                &options,
-                vec![],
-                protocol_infos,
-                vec![],
-                None,
-                &extensions,
-            );
+        let result = beamtalk_core::semantic_analysis::analyse_full(
+            &module_b,
+            beamtalk_core::semantic_analysis::AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_protocols(protocol_infos)
+                .with_cross_file_extensions(&extensions),
+        );
         assert!(
             result.protocol_registry.has_protocol("ProtocolFixtureA"),
             "expected pre_loaded_protocols to seed the cross-file protocol into \
@@ -2302,16 +2293,12 @@ mod tests {
         // Negative control: WITHOUT pre_loaded_protocols (the pre-BT-3034
         // gap), the cross-file protocol never gets registered — proving the
         // assertion above exercises the fix rather than a tautology.
-        let result_unfixed =
-            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
-                &module_b,
-                &options,
-                vec![],
-                vec![],
-                vec![],
-                None,
-                &extensions,
-            );
+        let result_unfixed = beamtalk_core::semantic_analysis::analyse_full(
+            &module_b,
+            beamtalk_core::semantic_analysis::AnalysisContext::default()
+                .with_options(&options)
+                .with_cross_file_extensions(&extensions),
+        );
         assert!(
             !result_unfixed
                 .protocol_registry

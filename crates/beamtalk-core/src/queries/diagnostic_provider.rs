@@ -109,19 +109,18 @@ pub fn compute_project_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = initial_diagnostics;
 
-    // Run semantic analysis with the richest available entry point.
+    // Run semantic analysis with the richest available context.
     // BT-2928: thread `pre_loaded_aliases` through so a cross-file/package
     // type alias resolves the same way a cross-file class reference already
     // does — see `AnalysisContext::pre_loaded_aliases`'s doc.
-    let analysis_result = crate::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
-        module,
-        &ctx.options,
-        ctx.cross_file_classes.clone(),
-        ctx.pre_loaded_protocols.clone(),
-        ctx.pre_loaded_aliases.clone(),
-        ctx.native_type_registry.clone(),
-        &ctx.cross_file_extensions,
-    );
+    let analysis_ctx = crate::semantic_analysis::AnalysisContext::default()
+        .with_options(&ctx.options)
+        .with_pre_loaded_classes(ctx.cross_file_classes.clone())
+        .with_pre_loaded_protocols(ctx.pre_loaded_protocols.clone())
+        .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
+        .with_native_type_registry(ctx.native_type_registry.clone())
+        .with_cross_file_extensions(&ctx.cross_file_extensions);
+    let analysis_result = crate::semantic_analysis::analyse_full(module, analysis_ctx);
     diagnostics.extend(analysis_result.diagnostics);
 
     // BT-1732: Enrich unresolved class warnings with dependency package hints.
@@ -232,7 +231,10 @@ pub fn compute_diagnostics_with_known_vars(
     let mut all_diagnostics = parse_diagnostics;
 
     // Run semantic analysis with known variables
-    let analysis_result = semantic_analysis::analyse_with_known_vars(module, known_vars);
+    let analysis_result = semantic_analysis::analyse_full(
+        module,
+        semantic_analysis::AnalysisContext::default().with_known_vars(known_vars),
+    );
     all_diagnostics.extend(analysis_result.diagnostics);
 
     apply_expect_directives(module, &mut all_diagnostics);
@@ -256,8 +258,10 @@ pub fn compute_diagnostics_with_native_types(
 
     if native_types.is_some() {
         let options = crate::CompilerOptions::default();
-        let analysis_result =
-            crate::semantic_analysis::analyse_with_natives(module, &options, vec![], native_types);
+        let ctx = crate::semantic_analysis::AnalysisContext::default()
+            .with_options(&options)
+            .with_native_type_registry(native_types);
+        let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
         all_diagnostics.extend(analysis_result.diagnostics);
     } else {
         let analysis_result = crate::semantic_analysis::analyse(module);
@@ -314,11 +318,10 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
     pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
-    let analysis_result = crate::semantic_analysis::analyse_with_known_vars_and_classes(
-        module,
-        known_vars,
-        pre_loaded_classes,
-    );
+    let ctx = crate::semantic_analysis::AnalysisContext::default()
+        .with_known_vars(known_vars)
+        .with_pre_loaded_classes(pre_loaded_classes);
+    let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
     run_diagnostic_pipeline(
         module,
         parse_diagnostics,
@@ -345,12 +348,11 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
     pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
-    let analysis_result = crate::semantic_analysis::analyse_with_known_vars_classes_and_aliases(
-        module,
-        known_vars,
-        pre_loaded_classes,
-        pre_loaded_aliases,
-    );
+    let ctx = crate::semantic_analysis::AnalysisContext::default()
+        .with_known_vars(known_vars)
+        .with_pre_loaded_classes(pre_loaded_classes)
+        .with_pre_loaded_aliases(pre_loaded_aliases);
+    let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
     run_diagnostic_pipeline(
         module,
         parse_diagnostics,
@@ -379,12 +381,11 @@ pub fn compute_diagnostics_and_referenced_aliases(
     pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, Vec<EcoString>) {
-    let analysis_result = crate::semantic_analysis::analyse_with_known_vars_classes_and_aliases(
-        module,
-        known_vars,
-        pre_loaded_classes,
-        pre_loaded_aliases,
-    );
+    let ctx = crate::semantic_analysis::AnalysisContext::default()
+        .with_known_vars(known_vars)
+        .with_pre_loaded_classes(pre_loaded_classes)
+        .with_pre_loaded_aliases(pre_loaded_aliases);
+    let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
     let referenced_aliases = analysis_result.referenced_aliases;
     let diagnostics = run_diagnostic_pipeline(
         module,

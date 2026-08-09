@@ -84,9 +84,9 @@ pub struct CompilerOptions {
 
     /// The package name of the module being compiled (ADR 0071, BT-1700).
     ///
-    /// Used by `analyse_with_packages` to set the `package` field on
-    /// `ClassInfo` entries built from AST source. `None` for REPL sessions
-    /// and contexts where no package is active.
+    /// Threaded into semantic analysis via `AnalysisContext::with_options` to
+    /// set the `package` field on `ClassInfo` entries built from AST source.
+    /// `None` for REPL sessions and contexts where no package is active.
     pub current_package: Option<String>,
 
     /// How complete the cross-file knowledge injected into analysis is
