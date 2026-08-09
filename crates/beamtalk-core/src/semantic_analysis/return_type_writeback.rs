@@ -25,10 +25,11 @@
 use crate::ast::{Identifier, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{
-    InferredType, NativeTypeRegistry, infer_method_return_types,
+    InferredType, MethodReturnKey, NativeTypeRegistry, infer_method_return_types,
 };
 use crate::source_analysis::Span;
 use ecow::EcoString;
+use std::collections::HashMap;
 
 /// Build a `TypeAnnotation` from an `InferredType` for AST writeback.
 ///
@@ -89,7 +90,21 @@ pub fn apply_return_type_writeback(
     native_type_registry: Option<&NativeTypeRegistry>,
 ) {
     let inferred = infer_method_return_types(module, hierarchy, native_type_registry);
+    apply_return_type_writeback_from_map(module, &inferred);
+}
 
+/// [`apply_return_type_writeback`], given an already-computed inferred-return-types
+/// map instead of running [`infer_method_return_types`] itself.
+///
+/// BT-3123: used by codegen when a driver hands off an [`AnalysisResult`](crate::semantic_analysis::AnalysisResult)
+/// whose `method_return_types` field was populated by the same [`TypeChecker`](crate::semantic_analysis::type_checker::TypeChecker)
+/// pass that already ran for diagnostics — avoids a second, full type-checking
+/// pass over the module purely to re-derive the same map.
+#[allow(clippy::implicit_hasher)] // concrete HashMap (matches AnalysisResult::method_return_types) is simpler for callers
+pub fn apply_return_type_writeback_from_map(
+    module: &mut Module,
+    inferred: &HashMap<MethodReturnKey, InferredType>,
+) {
     for class in &mut module.classes {
         for method in &mut class.methods {
             if method.return_type.is_some() {

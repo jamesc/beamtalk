@@ -29,6 +29,22 @@ pub use class_info::{ClassInfo, MethodInfo, SuperclassTypeArg, format_default_va
 pub use declared_type::DeclaredType;
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
+
+#[cfg(test)]
+thread_local! {
+    /// BT-3123 test-only instrumentation: counts calls to
+    /// [`ClassHierarchy::build_with_options`] (which [`ClassHierarchy::build`]
+    /// delegates to) — the from-scratch hierarchy construction pass. Used by a
+    /// codegen test to verify that a driver threading an `AnalysisResult` into
+    /// codegen via `CodegenOptions::with_analysis` doesn't trigger a second
+    /// build. `#[cfg(test)]` only — compiled out of release builds entirely.
+    ///
+    /// Thread-local, not a shared global counter — see
+    /// `type_checker::CHECK_MODULE_CALL_COUNT`'s doc for why a global counter's
+    /// absolute value would be meaningless under `cargo test`'s concurrency.
+    pub(crate) static BUILD_CALL_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
 /// Static class hierarchy built during semantic analysis.
 ///
 /// Provides compile-time knowledge of the full class hierarchy,
@@ -133,6 +149,10 @@ impl ClassHierarchy {
         module: &Module,
         stdlib_mode: bool,
     ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
+        // BT-3123 test-only instrumentation — see `BUILD_CALL_COUNT`'s doc.
+        #[cfg(test)]
+        BUILD_CALL_COUNT.with(|c| c.set(c.get() + 1));
+
         let mut hierarchy = Self::with_builtins();
         let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
         hierarchy.rebuild_all_indexes();
@@ -359,7 +379,15 @@ impl ClassHierarchy {
     ///
     /// BT-1528: After all entries are inserted, walks the ancestor chain for
     /// each new class to resolve `is_value` correctly for indirect subclasses.
-    pub fn add_external_superclasses(&mut self, index: &std::collections::HashMap<String, String>) {
+    ///
+    /// BT-3123: Returns whether any stub was actually inserted — `false` means
+    /// every class in `index` was already present, so a caller holding a
+    /// hierarchy-derived cache (e.g. codegen's handed-off `method_return_types`)
+    /// can trust it's still valid without recomputing.
+    pub fn add_external_superclasses(
+        &mut self,
+        index: &std::collections::HashMap<String, String>,
+    ) -> bool {
         // BT-1545: Track which classes are newly inserted so the is_value
         // fixup loop only walks them and their descendants, not everything.
         let mut newly_inserted: HashSet<EcoString> = HashSet::new();
@@ -400,7 +428,7 @@ impl ClassHierarchy {
             }
         }
         if newly_inserted.is_empty() {
-            return;
+            return false;
         }
         // BT-1528: Fix is_value for indirect Value subclasses now that all
         // entries are in the hierarchy and superclass_chain can walk them.
@@ -436,6 +464,7 @@ impl ClassHierarchy {
                 }
             }
         }
+        true
     }
     /// Populate the hierarchy with user-class entries pre-deserialized from
     /// `__beamtalk_meta/0` maps (ADR 0050 Phase 4).
@@ -443,7 +472,10 @@ impl ClassHierarchy {
     /// Skips builtins (stdlib has richer data) and classes already present
     /// in the hierarchy (AST-derived entries from `build()` are authoritative
     /// over cached BEAM metadata, which may be stale during redefinition).
-    pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) {
+    ///
+    /// BT-3123: Returns whether any entry was actually inserted — see
+    /// [`Self::add_external_superclasses`]'s doc for why callers care.
+    pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) -> bool {
         let mut changed = false;
         for info in classes {
             if !Self::is_builtin_class(&info.name) {
@@ -458,6 +490,7 @@ impl ClassHierarchy {
         if changed {
             self.rebuild_all_indexes();
         }
+        changed
     }
     /// Set the `package` field on all non-builtin classes that don't already
     /// have a package assigned (ADR 0071, BT-1700).

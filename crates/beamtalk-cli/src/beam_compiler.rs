@@ -723,6 +723,7 @@ pub fn write_core_erlang_with_bindings(
     hierarchy: &ClassHierarchyContext,
     source: Option<(&str, Option<&str>)>,
     native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
+    analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
 ) -> Result<()> {
     validate_module_name(module_name)?;
 
@@ -730,33 +731,39 @@ pub fn write_core_erlang_with_bindings(
         Some((text, path)) => (Some(text), path),
         None => (None, None),
     };
-    let core_erlang = beamtalk_core::erlang::generate_module(
-        module,
-        beamtalk_core::erlang::CodegenOptions::new(module_name)
-            .with_bindings(bindings.clone())
-            .with_source_opt(source_text)
-            .with_workspace_mode(options.workspace_mode)
-            .with_stdlib_mode(options.stdlib_mode)
-            .with_class_module_index(hierarchy.class_module_index.clone())
-            .with_class_superclass_index(hierarchy.class_superclass_index.clone())
-            .with_source_path_opt(source_path)
-            .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
-            // BT-2932: thread cross-module type aliases through to codegen so
-            // an alias-typed annotation referencing a `type Name = ...` from
-            // another module in the same compilation unit resolves to a
-            // `user_type` reference in generated `-spec`/`-type` attributes
-            // instead of falling through to `any()` — mirrors
-            // `pre_loaded_classes` immediately above.
-            .with_pre_loaded_aliases(hierarchy.pre_loaded_aliases.clone())
-            .with_native_type_registry(native_type_registry)
-            // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
-            .with_provenance(
-                env!("BEAMTALK_VERSION"),
-                crate::commands::build_stamp::current_otp_version(),
-            ),
-    )
-    .into_diagnostic()
-    .wrap_err("Failed to generate Core Erlang")?;
+    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(module_name)
+        .with_bindings(bindings.clone())
+        .with_source_opt(source_text)
+        .with_workspace_mode(options.workspace_mode)
+        .with_stdlib_mode(options.stdlib_mode)
+        .with_class_module_index(hierarchy.class_module_index.clone())
+        .with_class_superclass_index(hierarchy.class_superclass_index.clone())
+        .with_source_path_opt(source_path)
+        .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
+        // BT-2932: thread cross-module type aliases through to codegen so
+        // an alias-typed annotation referencing a `type Name = ...` from
+        // another module in the same compilation unit resolves to a
+        // `user_type` reference in generated `-spec`/`-type` attributes
+        // instead of falling through to `any()` — mirrors
+        // `pre_loaded_classes` immediately above.
+        .with_pre_loaded_aliases(hierarchy.pre_loaded_aliases.clone())
+        .with_native_type_registry(native_type_registry)
+        // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
+        .with_provenance(
+            env!("BEAMTALK_VERSION"),
+            crate::commands::build_stamp::current_otp_version(),
+        );
+    // BT-3123: thread the driver's already-computed semantic analysis (class
+    // hierarchy, semantic facts, inferred method return types) into codegen
+    // when the caller ran `analyse_full` itself (via
+    // `compute_project_diagnostics_with_analysis`) — avoids codegen re-deriving
+    // all three from scratch, including a second full type-checking pass.
+    if let Some(analysis) = analysis {
+        codegen_options = codegen_options.with_analysis(analysis);
+    }
+    let core_erlang = beamtalk_core::erlang::generate_module(module, codegen_options)
+        .into_diagnostic()
+        .wrap_err("Failed to generate Core Erlang")?;
 
     write_core_erlang_bytes(&core_erlang, output_path)
 }
@@ -874,11 +881,17 @@ pub(crate) fn compile_source_with_bindings(
         // call, so severity can never drift between the two surfaces.
         diagnostics_overrides: ctx.diagnostics_overrides.clone(),
     };
-    diagnostics = beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics(
-        &module,
-        diagnostics,
-        &diag_ctx,
-    );
+    // BT-3123: capture the `AnalysisResult` this pipeline's `analyse_full`
+    // call already produced, so it can be handed to codegen below instead of
+    // codegen re-deriving the class hierarchy, semantic facts, and inferred
+    // method return types from scratch (a second full type-checking pass).
+    let (new_diagnostics, analysis_result) =
+        beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
+            &module,
+            diagnostics,
+            &diag_ctx,
+        );
+    diagnostics = new_diagnostics;
 
     // Check for errors (and optionally treat warnings/hints as errors).
     // Deprecation-category warnings (BT-1529) and structural validation warnings
@@ -996,6 +1009,14 @@ pub(crate) fn compile_source_with_bindings(
         &codegen_hierarchy,
         Some((&source, embed_source_path)),
         ctx.native_type_registry.clone(),
+        // BT-3123: hand off the `AnalysisResult` this function's own
+        // `compute_project_diagnostics_with_analysis` call above already
+        // computed — `cross_file_classes` (this analysis's
+        // `AnalysisContext::pre_loaded_classes`) is exactly `codegen_hierarchy`'s
+        // `pre_loaded_classes` above, so codegen's `add_from_beam_meta` call
+        // is a guaranteed no-op and this handoff always skips the second
+        // type-checking pass for this driver.
+        Some(analysis_result),
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 

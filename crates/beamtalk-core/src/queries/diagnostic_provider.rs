@@ -107,6 +107,25 @@ pub fn compute_project_diagnostics(
     initial_diagnostics: Vec<Diagnostic>,
     ctx: &ProjectDiagnosticContext<'_>,
 ) -> Vec<Diagnostic> {
+    compute_project_diagnostics_with_analysis(module, initial_diagnostics, ctx).0
+}
+
+/// [`compute_project_diagnostics`], additionally returning the
+/// [`AnalysisResult`](crate::semantic_analysis::AnalysisResult) the pipeline's
+/// `analyse_full` call produced (BT-3123).
+///
+/// Callers that go on to run codegen for the same module (e.g. the CLI build
+/// pipeline) should use this variant and thread the returned `AnalysisResult`
+/// into `CodegenOptions::with_analysis`, instead of letting codegen re-derive
+/// the class hierarchy, semantic facts, and inferred method return types from
+/// scratch. Callers that only need diagnostics (e.g. the LSP) can keep using
+/// [`compute_project_diagnostics`].
+#[must_use]
+pub fn compute_project_diagnostics_with_analysis(
+    module: &Module,
+    initial_diagnostics: Vec<Diagnostic>,
+    ctx: &ProjectDiagnosticContext<'_>,
+) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
     let mut diagnostics = initial_diagnostics;
 
     // Run semantic analysis with the richest available context.
@@ -120,8 +139,12 @@ pub fn compute_project_diagnostics(
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
         .with_cross_file_extensions(&ctx.cross_file_extensions);
-    let analysis_result = crate::semantic_analysis::analyse_full(module, analysis_ctx);
-    diagnostics.extend(analysis_result.diagnostics);
+    let mut analysis_result = crate::semantic_analysis::analyse_full(module, analysis_ctx);
+    // BT-3123: diagnostics are consumed below (and by every downstream pass
+    // in this pipeline); take them out of `analysis_result` so the rest of
+    // `AnalysisResult` (hierarchy, semantic facts, inferred return types,
+    // alias registry) can be handed to codegen without cloning it.
+    diagnostics.extend(std::mem::take(&mut analysis_result.diagnostics));
 
     // BT-1732: Enrich unresolved class warnings with dependency package hints.
     if let Some(registry) = ctx.dep_registry {
@@ -184,7 +207,7 @@ pub fn compute_project_diagnostics(
         &ctx.diagnostics_overrides,
     );
 
-    diagnostics
+    (diagnostics, analysis_result)
 }
 
 /// Computes diagnostics for a module.
@@ -381,19 +404,54 @@ pub fn compute_diagnostics_and_referenced_aliases(
     pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, Vec<EcoString>) {
+    let (diagnostics, analysis_result) = compute_diagnostics_and_analysis(
+        module,
+        parse_diagnostics,
+        known_vars,
+        pre_loaded_classes,
+        pre_loaded_aliases,
+        diagnostics_overrides,
+    );
+    (diagnostics, analysis_result.referenced_aliases)
+}
+
+/// [`compute_diagnostics_and_referenced_aliases`], additionally returning the
+/// full [`AnalysisResult`](semantic_analysis::AnalysisResult) (BT-3123) —
+/// class hierarchy, semantic facts, and inferred method return types,
+/// alongside `referenced_aliases` (still reachable as a field on the result).
+///
+/// Used by compiler-port handlers that go on to run codegen for the same
+/// module (`compile`, `compile_method`, and `compile_expression`'s
+/// class/protocol-defining paths) so codegen can consume this analysis via
+/// `CodegenOptions::with_analysis` instead of re-deriving the class
+/// hierarchy, semantic facts, and inferred method return types from scratch.
+/// Callers that only need diagnostics/`referenced_aliases` should keep using
+/// [`compute_diagnostics_and_referenced_aliases`].
+#[must_use]
+pub fn compute_diagnostics_and_analysis(
+    module: &crate::ast::Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
+    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
     let ctx = crate::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
         .with_pre_loaded_aliases(pre_loaded_aliases);
-    let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
-    let referenced_aliases = analysis_result.referenced_aliases;
+    let mut analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
+    // BT-3123: diagnostics are consumed by `run_diagnostic_pipeline` below;
+    // take them out so the rest of `analysis_result` can be returned for
+    // codegen without cloning it.
+    let analysis_diagnostics = std::mem::take(&mut analysis_result.diagnostics);
     let diagnostics = run_diagnostic_pipeline(
         module,
         parse_diagnostics,
-        analysis_result.diagnostics,
+        analysis_diagnostics,
         diagnostics_overrides,
     );
-    (diagnostics, referenced_aliases)
+    (diagnostics, analysis_result)
 }
 
 /// Applies `@expect` directives to suppress matching diagnostics.

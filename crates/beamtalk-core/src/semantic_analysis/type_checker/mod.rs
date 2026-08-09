@@ -27,6 +27,28 @@ use ecow::EcoString;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(test)]
+thread_local! {
+    /// BT-3123 test-only instrumentation: counts calls to
+    /// [`TypeChecker::check_module`] — the actual full type-checking pass (the
+    /// costly operation the issue's "runs twice per file" complaint is about).
+    /// Used by a codegen test to verify that a driver threading an
+    /// `AnalysisResult` into codegen via `CodegenOptions::with_analysis` doesn't
+    /// trigger a second pass. `#[cfg(test)]` only — compiled out of release
+    /// builds entirely, so it has no runtime cost or behavioural effect outside
+    /// `cargo test`.
+    ///
+    /// Thread-local (not a shared global counter): `cargo test` runs many tests
+    /// concurrently across threads, and plenty of *other* tests call
+    /// `check_module` too — a global counter's absolute value is meaningless
+    /// under that concurrency. A thread-local counter isolates each test's own
+    /// before/after delta from unrelated tests running on other threads, since a
+    /// single `#[test]` function body always runs start-to-finish on one thread
+    /// with no other test scheduled onto it in between.
+    pub(crate) static CHECK_MODULE_CALL_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 mod env_key;
 mod inference;
 mod narrowing;
