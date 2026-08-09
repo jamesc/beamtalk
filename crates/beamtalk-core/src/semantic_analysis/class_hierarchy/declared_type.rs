@@ -141,17 +141,32 @@ impl DeclaredType {
             return DeclaredType::Union(union_parts.into_iter().map(DeclaredType::parse).collect());
         }
 
-        // Generic: `Base(Arg1, Arg2)`, nesting-aware.
+        // Generic: `Base(Arg1, Arg2)`, nesting-aware. `split_generic_base`
+        // only knows about the first top-level `(` — it has no notion of
+        // what a valid class/generic base name looks like, so it will
+        // happily hand back a "base" like `"A &"` for `"A & (B | C)"` (a
+        // parenthesised `&`/`\` operand, per this grammar's lack of `&`/`\`
+        // support, see the doc comment above). Reject any base that isn't a
+        // bare identifier before committing to `Generic` — anything else
+        // falls through to the opaque `Simple` fallback below, which is what
+        // this grammar promises for constructs it can't parse.
         let (base_str, args) = split_generic_base(trimmed);
         if let Some(inner) = args {
-            let parameters = split_top_level(inner, ',')
-                .into_iter()
-                .map(DeclaredType::parse)
-                .collect();
-            return DeclaredType::Generic {
-                base: base_str.trim().into(),
-                parameters,
-            };
+            let base_trimmed = base_str.trim();
+            if !base_trimmed.is_empty()
+                && base_trimmed
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_')
+            {
+                let parameters = split_top_level(inner, ',')
+                    .into_iter()
+                    .map(DeclaredType::parse)
+                    .collect();
+                return DeclaredType::Generic {
+                    base: base_trimmed.into(),
+                    parameters,
+                };
+            }
         }
 
         // Singleton: `#name`.
@@ -523,6 +538,46 @@ mod tests {
     fn parse_unterminated_generic_degrades_to_simple() {
         let result = DeclaredType::parse("Array(Integer");
         assert_eq!(result, DeclaredType::Simple("Array(Integer".into()));
+    }
+
+    #[test]
+    fn parse_intersection_with_parenthesised_union_operand_degrades_to_simple() {
+        // BT-3102: `split_generic_base` finds the first top-level `(` with
+        // no awareness that `&`/`\` can't appear in a class/generic base
+        // name, so naively it would misread this as
+        // `Generic { base: "A &", parameters: [Union([B, C])] }`. The
+        // grammar has no representation for `&` (see `parse`'s doc comment)
+        // so this must degrade to an opaque `Simple` instead, exactly like
+        // `Display` would produce it in the first place.
+        let dt = DeclaredType::Intersection {
+            left: Box::new(DeclaredType::simple("A")),
+            right: Box::new(DeclaredType::Union(vec![
+                DeclaredType::simple("B"),
+                DeclaredType::simple("C"),
+            ])),
+        };
+        let text = dt.to_string();
+        assert_eq!(text, "A & (B | C)");
+        let reparsed = DeclaredType::parse(&text);
+        assert_eq!(reparsed, DeclaredType::Simple(text.clone().into()));
+        assert_eq!(reparsed.to_string(), text);
+    }
+
+    #[test]
+    fn parse_difference_with_parenthesised_union_operand_degrades_to_simple() {
+        // BT-3102: same misparse, but for `\` (difference).
+        let dt = DeclaredType::Difference {
+            base: Box::new(DeclaredType::simple("A")),
+            excluded: Box::new(DeclaredType::Union(vec![
+                DeclaredType::simple("B"),
+                DeclaredType::simple("C"),
+            ])),
+        };
+        let text = dt.to_string();
+        assert_eq!(text, "A \\ (B | C)");
+        let reparsed = DeclaredType::parse(&text);
+        assert_eq!(reparsed, DeclaredType::Simple(text.clone().into()));
+        assert_eq!(reparsed.to_string(), text);
     }
 
     #[test]
@@ -924,18 +979,18 @@ mod tests {
 /// union/intersection/difference/`FalseOr`/generic shapes are nested
 /// (BT-2760 grouping-paren shapes included).
 ///
-/// One concrete non-idempotence this uncovered and pins deliberately: an
+/// BT-3102 fixed a first-pass non-idempotence this suite uncovered: an
 /// intersection/difference whose right/excluded operand needs
-/// parenthesising (e.g. `A & (B | C)`) is misread by `parse` on the first
-/// pass as a single-argument `Generic` whose "base name" is the literal
-/// text `"A &"` — `split_generic_base` finds the first `(` in the whole
-/// string and doesn't know `&`/`\` aren't part of a class name. Displaying
-/// that `Generic` back out drops the space before the paren (`"A &(B | C)"`),
-/// but from there it's stable: reparsing that already-collapsed text
-/// reproduces the same `Generic` byte-for-byte forever after. Filed as a
-/// follow-up (not fixed here — out of scope per this issue's "Out of
-/// Scope" section, which restricts BT-3100 to adding the properties, not
-/// reworking `parse`'s grammar).
+/// parenthesising (e.g. `A & (B | C)`) used to be misread by `parse` on the
+/// first pass as a single-argument `Generic` whose "base name" was the
+/// literal text `"A &"` — `split_generic_base` finds the first `(` in the
+/// whole string and doesn't know `&`/`\` aren't part of a class name.
+/// `parse` now rejects a would-be generic base that isn't a bare identifier
+/// and falls through to the documented opaque-`Simple` degrade instead, so
+/// this case now lands on the correct value on the very first pass — see
+/// `parse_intersection_with_parenthesised_union_operand_degrades_to_simple`
+/// / `parse_difference_with_parenthesised_union_operand_degrades_to_simple`
+/// above for the pinned regression.
 #[cfg(test)]
 mod property_tests {
     use super::*;
