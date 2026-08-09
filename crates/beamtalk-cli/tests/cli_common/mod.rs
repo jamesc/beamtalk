@@ -9,10 +9,11 @@
 //! it returns, so tests are safe to run in parallel.
 
 use assert_cmd::Command;
+use beamtalk_cli::pid_liveness::is_process_alive;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 
 /// Resolve the workspace root (repo root) from `CARGO_MANIFEST_DIR`.
@@ -68,10 +69,21 @@ pub fn beamtalk() -> Command {
         // matching. Long-lived developer machines accumulate this state;
         // ephemeral CI runners mostly don't, which is why this surfaced as
         // a "deterministic on this Windows box" failure rather than a CI
-        // one. Each invocation gets its own never-reused directory so no
-        // test run can read a poisoned cache written by an earlier one, or
-        // poison the cache for a later one.
-        .env("BEAMTALK_CACHE_DIR", isolated_cache_dir())
+        // one. BT-3077: every `beamtalk()` call made from a given test
+        // *thread* shares that thread's isolated directory (see
+        // `thread_cache_dir`) rather than littering a fresh one per call.
+        // libtest runs each `#[test]` on its own worker thread and never
+        // runs two tests concurrently on the same thread, so calls sharing
+        // a directory are always sequential — this can't reintroduce the
+        // cross-test races/poisoning a fully process-wide shared directory
+        // would (verified: that was tried and did reproduce spurious
+        // failures under `--test-threads` > 1). The directory is a
+        // `TempDir` guard, so it's deleted automatically when its owning
+        // thread exits (libtest joins every worker thread before the test
+        // binary exits), and a startup sweep mops up any directory a prior
+        // *process* left behind (e.g. Ctrl-C/timeout kill skipped the
+        // thread-local `Drop`).
+        .env("BEAMTALK_CACHE_DIR", thread_cache_dir())
         // Disable colored output so assertions on text content are stable.
         .env("NO_COLOR", "1")
         // Quiet tracing — some tests assert on stderr content.
@@ -79,22 +91,83 @@ pub fn beamtalk() -> Command {
     cmd
 }
 
-/// Returns a fresh, never-reused directory path under the system temp dir
-/// for `BEAMTALK_CACHE_DIR` isolation (BT-3066). The directory is not
-/// created here — `beamtalk_core::ffi_type_specs`'s cache readers treat a
-/// missing directory as an empty cache, and writers create it lazily on
-/// first write — so a plain unique path is sufficient.
-fn isolated_cache_dir() -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    std::env::temp_dir().join(format!(
-        "beamtalk-cli-test-cache-{}-{n}-{nanos}",
-        std::process::id()
-    ))
+/// Prefix shared by every `BEAMTALK_CACHE_DIR` this helper ever creates, so
+/// [`sweep_stale_cache_dirs`] can recognise its own litter under the OS
+/// temp dir (and the encoded PID within it) without touching unrelated
+/// entries.
+const CACHE_DIR_PREFIX: &str = "beamtalk-cli-test-cache-";
+
+thread_local! {
+    /// This test thread's `BEAMTALK_CACHE_DIR` (BT-3066), created lazily on
+    /// first use and reused by every `beamtalk()` call made from this
+    /// thread (BT-3077) instead of littering a fresh directory per call.
+    /// Dropping the `TempDir` deletes it — which happens when this worker
+    /// thread exits, i.e. after libtest has run every test scheduled on it
+    /// and joins the thread, well after any subprocess using the directory
+    /// has finished.
+    static CACHE_DIR: RefCell<Option<TempDir>> = const { RefCell::new(None) };
+}
+
+/// Returns this test thread's `BEAMTALK_CACHE_DIR` isolation directory
+/// (BT-3066/BT-3077), creating it on first call from this thread.
+///
+/// Threads (not the whole process) are the sharing unit because libtest
+/// runs each `#[test]` on its own worker thread and never runs two tests
+/// concurrently on the same thread — so every `beamtalk()` call sharing a
+/// directory is guaranteed sequential, which is what keeps this from
+/// reintroducing the cross-test cache-poisoning race BT-3066 fixed. A
+/// process-wide shared directory does not have that guarantee (many test
+/// threads run truly concurrently) and was confirmed to reproduce spurious
+/// `beamtalk lint`/`build` FFI-check failures under parallel test
+/// execution.
+fn thread_cache_dir() -> PathBuf {
+    sweep_stale_cache_dirs_once();
+    CACHE_DIR.with(|cell| {
+        cell.borrow_mut()
+            .get_or_insert_with(|| {
+                tempfile::Builder::new()
+                    .prefix(&format!("{CACHE_DIR_PREFIX}{}-", std::process::id()))
+                    .tempdir()
+                    .expect("create BEAMTALK_CACHE_DIR tempdir")
+            })
+            .path()
+            .to_path_buf()
+    })
+}
+
+/// Best-effort removal, once per test *process*, of `BEAMTALK_CACHE_DIR`
+/// directories left behind by earlier processes that never got to run their
+/// [`CACHE_DIR`] thread-local destructors — e.g. a `cargo test` run killed
+/// by Ctrl-C or a CI timeout mid-suite. Normal completion doesn't need this:
+/// every directory is already cleaned up by `TempDir::drop` as its owning
+/// thread exits.
+fn sweep_stale_cache_dirs_once() {
+    static SWEPT: Once = Once::new();
+    SWEPT.call_once(|| {
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(rest) = name.strip_prefix(CACHE_DIR_PREFIX) else {
+                continue;
+            };
+            // rest is "{pid}-{random}"; only the pid field matters here.
+            let Some(pid_str) = rest.split('-').next() else {
+                continue;
+            };
+            let Ok(pid) = pid_str.parse::<u32>() else {
+                continue;
+            };
+            if pid == std::process::id() || is_process_alive(pid) {
+                continue;
+            }
+            // Best-effort: the owning process may have raced back to life
+            // with a reused PID between the check above and this removal.
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    });
 }
 
 /// Locate the workspace `runtime/` directory.
