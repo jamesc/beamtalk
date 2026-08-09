@@ -43,6 +43,24 @@ compile_core_erlang_empty_test() ->
     Result = beamtalk_compiler_server:compile_core_erlang(<<>>),
     ?assertMatch({error, _}, Result).
 
+%% BT-3115: 'State' is referenced in 'foo'/1 without ever being bound — a
+%% genuine core_lint unbound_var failure. core_lint already runs
+%% unconditionally on the from_core pipeline this call takes (see
+%% beamtalk_compile_diagnostics' moduledoc); this test demonstrates the
+%% failure surfaces as readable prose naming the offending variable, not a
+%% raw `~p` term dump — and that the Port backend (this module) matches the
+%% escript backend's report_errors-driven wording (both go through OTP's
+%% sys_messages formatter).
+compile_core_erlang_unbound_var_test() ->
+    Result = beamtalk_compiler_server:compile_core_erlang(unbound_var_core_erlang()),
+    ?assertMatch({error, {core_compile_error, #{message := _, raw := _}}}, Result),
+    {error, {core_compile_error, #{message := Message}}} = Result,
+    ?assert(is_binary(Message)),
+    ?assertEqual(nomatch, binary:match(Message, <<"{unbound_var,">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"unbound variable">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
+
 %%% ---------------------------------------------------------------
 %%% handle_compile_response/1 — internal response handler
 %%% ---------------------------------------------------------------
@@ -586,5 +604,17 @@ valid_core_erlang() ->
         "module 'test_server_mod' ['hello'/0]\n"
         "  attributes []\n"
         "  'hello'/0 = fun () -> 'world'\n"
+        "end\n"
+    >>.
+
+%% BT-3115: 'foo'/1 references 'State', which is never a parameter or
+%% let-bound — a genuine core_lint unbound_var failure.
+unbound_var_core_erlang() ->
+    <<
+        "module 'bt_server_unbound_var' ['foo'/1]\n"
+        "  attributes []\n"
+        "  'foo'/1 = fun (X) ->\n"
+        "    let Y = call 'erlang':'+' (X, State)\n"
+        "    in Y\n"
         "end\n"
     >>.

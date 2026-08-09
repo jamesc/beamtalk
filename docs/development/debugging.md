@@ -111,6 +111,40 @@ dbg!(&expr);
 // Rebuild and check output
 ```
 
+### core_lint (BT-3115)
+
+Every scoping bug in the list above — unbound `StateX`, missing `State`/`Self`,
+wrong arities — is a Core Erlang well-formedness violation that OTP's
+`core_lint` pass catches during `beamtalk build`, with a message naming the
+offending variable and function/arity directly:
+
+```
+build/failing.core: unbound variable 'State' in myMethod/2
+```
+
+`core_lint` runs **unconditionally** as part of `compile:forms`/`compile:file`'s
+`from_core` pipeline (every Beamtalk compile path takes this route) —
+independent of the `clint`/`clint0`/`no_lint` options, which only affect lint
+re-runs when compiling from Erlang *source*, a path Beamtalk never takes. So
+this check was always on; what changed in BT-3115 was making the failure
+readable everywhere it can surface:
+
+- **Port backend** (`beamtalk_build_worker`/`beamtalk_compiler_server`, the
+  default): formats `compile:forms`' raw error term via
+  `beamtalk_compile_diagnostics:format_errors/1`, which calls the same
+  `sys_messages:format_messages/4` OTP itself uses internally.
+- **Escript backend** (`BEAMTALK_COMPILER=escript`, `compile.escript`):
+  formats the same way and prints to this process's actual stderr — a prior
+  version relied on `compile:file`'s `report_errors`/`report_warnings`
+  options, which print via the compiling process's default group leader;
+  that lands on **stdout**, not stderr, so the Rust CLI's stdout parser
+  (which only recognises the `beamtalk-compile-*` protocol markers) silently
+  dropped the message rather than showing it.
+
+If you see a bare `internal error` or a build failure with no readable cause,
+run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
+expected to produce the same wording for the same malformed input.
+
 ## Runtime/REPL Debugging
 
 ```bash

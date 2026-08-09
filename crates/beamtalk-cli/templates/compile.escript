@@ -111,14 +111,36 @@ start_compiler_workers(OutDir) ->
 
 worker_loop(Parent, OutDir) ->
     %% Compile options for Core Erlang
+    %%
+    %% BT-3115: previously used `report_errors'/`report_warnings', which
+    %% print via `io:fwrite' to the compiling process's *default group
+    %% leader* — verified empirically (`erl -eval 'compile:file(...)' 1>out
+    %% 2>err`) that this lands on stdout, not stderr. The Rust CLI's stdout
+    %% parser (`read_compilation_output') only recognises the
+    %% `beamtalk-compile-*' protocol markers and silently drops every other
+    %% line, so compiler diagnostics were being lost outright, not just
+    %% poorly formatted. `return_errors'/`return_warnings' get the
+    %% structured terms back instead; `worker_loop' below formats them via
+    %% the same OTP `sys_messages' function `report_errors' would have used
+    %% internally, and prints explicitly to `standard_error' — where the
+    %% Rust side's stderr-reading thread actually looks.
+    %%
+    %% `clint' is passed explicitly for documentation purposes but is a
+    %% no-op — `core_lint' already runs unconditionally as part of the
+    %% `from_core' pipeline `compile:file/2' selects (independent of
+    %% `clint'/`clint0'/`no_lint', which only gate lint re-runs on the
+    %% source-compilation branch this escript never takes; see the Port
+    %% backend's `beamtalk_compile_diagnostics' moduledoc for the full
+    %% explanation).
     Options = [
         from_core,           % Compile from Core Erlang
-        report_errors,       % Print errors
-        report_warnings,     % Print warnings
+        return_errors,       % BT-3115: structured errors, formatted below
+        return_warnings,     % BT-3115: structured warnings, formatted below
         debug_info,          % Include debug info for hot code reload
+        clint,               % BT-3115: explicit core_lint pass (no-op, see above)
         {outdir, OutDir}     % Output directory
     ],
-    
+
     erlang:send(Parent, {work_please, self()}),
     receive
         {module, CoreFile} ->
@@ -128,11 +150,41 @@ worker_loop(Parent, OutDir) ->
                     inject_docs_chunk(CoreFile, ModuleName, OutDir),
                     erlang:send(Parent, {compiled, ModuleName}),
                     worker_loop(Parent, OutDir);
+                {ok, ModuleName, Warnings} ->
+                    print_messages(Warnings, "Warning: "),
+                    inject_docs_chunk(CoreFile, ModuleName, OutDir),
+                    erlang:send(Parent, {compiled, ModuleName}),
+                    worker_loop(Parent, OutDir);
+                {error, Errors, Warnings} ->
+                    print_messages(Warnings, "Warning: "),
+                    print_messages(Errors, ""),
+                    erlang:send(Parent, failed),
+                    worker_loop(Parent, OutDir);
                 error ->
                     erlang:send(Parent, failed),
                     worker_loop(Parent, OutDir)
             end
     end.
+
+%% BT-3115: format compile:file/2's structured error/warning list — each
+%% entry `{File, [{Loc, Mod, ErrDesc}]}' — via OTP's own
+%% `sys_messages:format_messages/4' (the exact function `report_errors'/
+%% `report_warnings' use internally, so the rendered text is unchanged from
+%% before) and print each line to `standard_error' explicitly, instead of
+%% letting `compile:file/2' print it to the default group leader (stdout —
+%% see `worker_loop/2's doc for why that loses the message entirely).
+print_messages([], _Prefix) ->
+    ok;
+print_messages(Messages, Prefix) ->
+    lists:foreach(
+        fun({File, Infos}) ->
+            lists:foreach(
+                fun({_Loc, Text}) -> io:put_chars(standard_error, Text) end,
+                sys_messages:format_messages(File, Prefix, Infos, [])
+            )
+        end,
+        Messages
+    ).
 
 %% BT-499: Inject EEP-48 doc chunk into compiled .beam file.
 %%
