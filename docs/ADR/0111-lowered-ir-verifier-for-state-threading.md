@@ -620,7 +620,7 @@ substitute.
 ### Negative
 - **New internal API surface** for contributors to the in-scope files.
 - **A real test-migration cost the first draft omitted:** ~1,484 `#[test]`s
-  and ~298 `to_pretty_string()` assertion sites live under `codegen/`
+  and 231 `to_pretty_string()` assertion sites live under `codegen/`
   (`tests/control_flow.rs` alone is 2,591 lines; `list_ops/tests.rs`
   2,660). Functions returning `ThreadedIr` instead of `Document` would
   break every test asserting on their output. **Mitigation, committed in
