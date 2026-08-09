@@ -5403,62 +5403,24 @@ mod property_tests {
     /// the Erlang-side decode; that's `beamtalk_compiler_port.erl`'s job,
     /// exercised by the runtime `EUnit` suite, not this crate.
     ///
-    /// Generated strings reuse [`DeclaredType`]'s `Display` rendering
+    /// Generated strings reuse `DeclaredType`'s `Display` rendering
     /// (byte-identical to `TypeAnnotation::type_name()`, enforced by
     /// `declared_type.rs`'s own `assert_display_parity` tests) so the
     /// shapes this test carries across the wire — union, generic,
     /// singleton, `FalseOr`, difference, intersection, self-types — are
     /// the exact same canonical text a real compiled method signature
     /// would send, not an ad hoc string format.
+    ///
+    /// The generator itself (`arb_declared_type`) lives in beamtalk-core's
+    /// `test_helpers::test_support` (behind the `test` Cargo feature this
+    /// crate's dev-dependency enables) rather than being copied here, so
+    /// this test and `declared_type.rs`'s own fixed-point property tests
+    /// exercise the exact same shape space by construction — see this
+    /// repo's "No duplicate implementations" rule.
     #[cfg(test)]
     mod type_string_wire_fidelity {
         use super::*;
-        use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
-
-        /// Leaves: simple/singleton names plus every `Self`-family shape.
-        fn leaf() -> impl Strategy<Value = DeclaredType> {
-            prop_oneof![
-                "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(DeclaredType::simple),
-                "[a-z][a-z0-9]{0,4}".prop_map(DeclaredType::singleton),
-                Just(DeclaredType::SelfType),
-                Just(DeclaredType::SelfClass),
-                "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(|n| DeclaredType::ClassOf(n.into())),
-            ]
-        }
-
-        /// Arbitrary `DeclaredType`s covering every grouping shape named in
-        /// BT-3100's acceptance criteria (union/intersection/difference/
-        /// `FalseOr`/generic), mirrored from `declared_type.rs`'s own
-        /// property-test generator so both halves of the type-string
-        /// fidelity story (in-process round trip, wire round trip) exercise
-        /// the same shape space.
-        fn arb_declared_type() -> impl Strategy<Value = DeclaredType> {
-            leaf().prop_recursive(4, 32, 4, |inner| {
-                prop_oneof![
-                    prop::collection::vec(inner.clone(), 2..4).prop_map(DeclaredType::Union),
-                    (
-                        "[A-Za-z][A-Za-z0-9]{0,4}",
-                        prop::collection::vec(inner.clone(), 1..3),
-                    )
-                        .prop_map(|(base, params)| DeclaredType::generic(base, params)),
-                    inner
-                        .clone()
-                        .prop_map(|t| DeclaredType::FalseOr(Box::new(t))),
-                    (inner.clone(), inner.clone()).prop_map(|(base, excluded)| {
-                        DeclaredType::Difference {
-                            base: Box::new(base),
-                            excluded: Box::new(excluded),
-                        }
-                    }),
-                    (inner.clone(), inner.clone()).prop_map(|(left, right)| {
-                        DeclaredType::Intersection {
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        }
-                    }),
-                ]
-            })
-        }
+        use beamtalk_core::test_helpers::test_support::arb_declared_type;
 
         fn arb_type_annotation_string() -> impl Strategy<Value = String> {
             arb_declared_type().prop_map(|dt| dt.to_string())

@@ -845,50 +845,8 @@ mod tests {
 #[cfg(test)]
 mod property_tests {
     use super::*;
+    use crate::test_helpers::test_support::arb_declared_type;
     use proptest::prelude::*;
-
-    /// Leaves: simple/singleton names plus every `Self`-family shape
-    /// `parse` recognises structurally.
-    fn leaf() -> impl Strategy<Value = DeclaredType> {
-        prop_oneof![
-            "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(DeclaredType::simple),
-            "[a-z][a-z0-9]{0,4}".prop_map(DeclaredType::singleton),
-            Just(DeclaredType::SelfType),
-            Just(DeclaredType::SelfClass),
-            "[A-Za-z][A-Za-z0-9]{0,4}".prop_map(|n| DeclaredType::ClassOf(n.into())),
-        ]
-    }
-
-    /// Arbitrary `DeclaredType`s, recursively built from every grouping
-    /// shape named in the acceptance criteria: union, generic, `FalseOr`,
-    /// difference, and intersection.
-    fn arb_declared_type() -> impl Strategy<Value = DeclaredType> {
-        leaf().prop_recursive(4, 32, 4, |inner| {
-            prop_oneof![
-                prop::collection::vec(inner.clone(), 2..4).prop_map(DeclaredType::Union),
-                (
-                    "[A-Za-z][A-Za-z0-9]{0,4}",
-                    prop::collection::vec(inner.clone(), 1..3),
-                )
-                    .prop_map(|(base, params)| DeclaredType::generic(base, params)),
-                inner
-                    .clone()
-                    .prop_map(|t| DeclaredType::FalseOr(Box::new(t))),
-                (inner.clone(), inner.clone()).prop_map(|(base, excluded)| {
-                    DeclaredType::Difference {
-                        base: Box::new(base),
-                        excluded: Box::new(excluded),
-                    }
-                }),
-                (inner.clone(), inner.clone()).prop_map(|(left, right)| {
-                    DeclaredType::Intersection {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    }
-                }),
-            ]
-        })
-    }
 
     fn proptest_config() -> ProptestConfig {
         crate::test_helpers::test_support::proptest_config_default()
