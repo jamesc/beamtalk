@@ -106,7 +106,7 @@ impl ErlangAtom {
     /// Beamtalk selectors to Erlang atoms.
     #[must_use]
     pub fn from_selector(selector: &crate::ast::MessageSelector) -> Self {
-        Self::new(selector.to_erlang_atom())
+        Self::new(selector.name().to_string())
     }
 }
 

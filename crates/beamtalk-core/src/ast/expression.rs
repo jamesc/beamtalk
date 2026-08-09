@@ -564,6 +564,15 @@ impl MessageSelector {
     ///
     /// For keyword messages, this concatenates all keyword parts.
     /// For unary and binary messages, returns the operator/name directly.
+    ///
+    /// This is the single authority for selector → string text (BT-3089):
+    /// codegen also uses it directly (e.g. `leaf::atom(selector.name())`) as
+    /// the Erlang atom's textual content — Beamtalk selector characters
+    /// (letters, digits, `:`, operator symbols) never need escaping to be
+    /// valid atom *content*; `leaf::atom` (the BT-875-sanctioned funnel, see
+    /// `codegen::core_erlang::util::escape_atom_chars`) is what decides
+    /// whether/how the text gets quoted for Core Erlang output. There is no
+    /// separate "mangling" step.
     #[must_use]
     pub fn name(&self) -> EcoString {
         match self {
@@ -585,51 +594,6 @@ impl MessageSelector {
             Self::Unary(_) => 0,
             Self::Binary(_) => 1,
             Self::Keyword(parts) => parts.len(),
-        }
-    }
-
-    /// Converts this selector to a Core Erlang atom representation.
-    ///
-    /// This is the **domain service** for selector mangling - converting Beamtalk
-    /// selectors to valid Erlang atoms. The returned string is ready to be wrapped
-    /// in single quotes for Core Erlang output.
-    ///
-    /// # DDD: `SelectorMangler` Domain Service
-    ///
-    /// In the Code Generation bounded context, selector mangling is a key domain
-    /// operation. This method encapsulates the domain knowledge of how Beamtalk
-    /// selectors map to Erlang atoms.
-    ///
-    /// # Returns
-    ///
-    /// The selector as a string suitable for use as an Erlang atom:
-    /// - Unary: `"increment"` → `'increment'`
-    /// - Binary: `"+"` → `'+'`
-    /// - Keyword: `["at:", "put:"]` → `'at:put:'`
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use beamtalk_core::ast::{MessageSelector, KeywordPart};
-    /// use beamtalk_core::source_analysis::Span;
-    ///
-    /// // Unary selector
-    /// let selector = MessageSelector::Unary("increment".into());
-    /// assert_eq!(selector.to_erlang_atom(), "increment");
-    ///
-    /// // Keyword selector
-    /// let selector = MessageSelector::Keyword(vec![
-    ///     KeywordPart::new("at:", Span::new(0, 3)),
-    ///     KeywordPart::new("put:", Span::new(5, 9)),
-    /// ]);
-    /// assert_eq!(selector.to_erlang_atom(), "at:put:");
-    /// ```
-    #[must_use]
-    pub fn to_erlang_atom(&self) -> String {
-        match self {
-            Self::Unary(name) => name.to_string(),
-            Self::Binary(op) => op.to_string(),
-            Self::Keyword(parts) => parts.iter().map(|p| p.keyword.as_str()).collect(),
         }
     }
 

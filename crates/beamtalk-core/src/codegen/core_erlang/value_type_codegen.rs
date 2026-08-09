@@ -456,7 +456,7 @@ impl CoreErlangGenerator {
         // Add instance method exports (each takes Self as first parameter)
         for method in &class.methods {
             let arity = method.parameters.len() + 1; // +1 for Self parameter
-            let mangled = method.selector.to_erlang_atom();
+            let mangled = method.selector.name().to_string();
             parts.push(leaf::fname(mangled, arity));
         }
 
@@ -1580,7 +1580,7 @@ impl CoreErlangGenerator {
             "], {",
             leaf::atom(class_name.to_string()),
             ", ",
-            leaf::atom(selector.to_erlang_atom()),
+            leaf::atom(selector.name().to_string()),
             "})"
         ]
     }
@@ -1604,7 +1604,7 @@ impl CoreErlangGenerator {
         method: &MethodDefinition,
         class_def: &ClassDefinition,
     ) -> Result<Document<'static>> {
-        let mangled = method.selector.to_erlang_atom();
+        let mangled = method.selector.name().to_string();
         let arity = method.parameters.len() + 1; // +1 for Self
 
         // BT-833: Reset Self-threading version so each method starts with Self (version 0).
@@ -3590,7 +3590,7 @@ impl CoreErlangGenerator {
     ) -> Vec<Document<'static>> {
         let mut method_branches: Vec<Document<'static>> = Vec::new();
         for method in &class.methods {
-            let mangled = method.selector.to_erlang_atom();
+            let mangled = method.selector.name().to_string();
             method_branches.push(docvec![
                 "        <",
                 leaf::atom(mangled.clone()),
@@ -3929,7 +3929,7 @@ impl CoreErlangGenerator {
 
         // Add class-defined methods
         for method in &class.methods {
-            let mangled = method.selector.to_erlang_atom();
+            let mangled = method.selector.name().to_string();
             selectors.push(leaf::atom(mangled));
         }
 

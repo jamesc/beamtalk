@@ -1577,7 +1577,7 @@ impl CoreErlangGenerator {
             ..
         } = expr
         {
-            let selector_atom = selector.to_erlang_atom();
+            let selector_atom = selector.name().to_string();
             let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
             for (j, arg) in arguments.iter().enumerate() {
                 if j > 0 {
@@ -2888,7 +2888,7 @@ impl CoreErlangGenerator {
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| m.selector.to_erlang_atom())
+            .map(|m| m.selector.name().to_string())
             .collect();
 
         // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
@@ -4691,7 +4691,7 @@ impl CoreErlangGenerator {
             })
             .collect();
         (
-            m.selector.to_erlang_atom(),
+            m.selector.name().to_string(),
             m.selector.arity(),
             return_type,
             param_types,

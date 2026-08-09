@@ -18,8 +18,10 @@
 //! # Usage
 //!
 //! Selectors are converted to Erlang atom *strings* by
-//! [`MessageSelector::to_erlang_atom()`], defined on the AST type itself. This
-//! module provides the atom-length-safe mangling utilities layered on top —
+//! [`MessageSelector::name()`](crate::ast::MessageSelector::name), the single
+//! selector→string authority (BT-3089; selector text needs no mangling of
+//! its own to become atom content). This module provides the
+//! atom-*length*-safe mangling utilities layered on top —
 //! [`safe_class_method_selector`] and [`safe_class_method_fn_name`].
 //!
 //! Quoting an atom string for Core Erlang output is **not** done here: that is

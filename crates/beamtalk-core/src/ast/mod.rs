@@ -518,27 +518,6 @@ mod tests {
     }
 
     #[test]
-    fn message_selector_to_erlang_atom_unary() {
-        let selector = MessageSelector::Unary("increment".into());
-        assert_eq!(selector.to_erlang_atom(), "increment");
-    }
-
-    #[test]
-    fn message_selector_to_erlang_atom_binary() {
-        let selector = MessageSelector::Binary("+".into());
-        assert_eq!(selector.to_erlang_atom(), "+");
-    }
-
-    #[test]
-    fn message_selector_to_erlang_atom_keyword() {
-        let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", Span::new(0, 3)),
-            KeywordPart::new("put:", Span::new(5, 9)),
-        ]);
-        assert_eq!(selector.to_erlang_atom(), "at:put:");
-    }
-
-    #[test]
     fn block_creation() {
         let block = Block::new(
             vec![

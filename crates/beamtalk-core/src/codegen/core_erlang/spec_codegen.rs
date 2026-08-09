@@ -312,7 +312,7 @@ pub fn generate_method_spec(
         return None;
     }
 
-    let erlang_name = method.selector.to_erlang_atom();
+    let erlang_name = method.selector.name().to_string();
 
     let mut param_types: Vec<Document<'static>> = Vec::new();
 
@@ -394,7 +394,7 @@ fn generate_class_method_spec(
         return None;
     }
 
-    let erlang_name = safe_class_method_fn_name(&method.selector.to_erlang_atom());
+    let erlang_name = safe_class_method_fn_name(method.selector.name().as_ref());
 
     let mut param_types: Vec<Document<'static>> = vec![
         Document::Str("{'type', 0, 'any', []}"),    // ClassSelf
