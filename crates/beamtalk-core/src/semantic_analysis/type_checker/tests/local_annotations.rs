@@ -260,11 +260,7 @@ Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     // Filter by DiagnosticCategory::Type so argument-type warnings
     // (formatted as "Argument ... expects ... got ...") are caught too,
     // not only assignment-style "Type mismatch" messages.
@@ -294,11 +290,7 @@ Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -331,11 +323,7 @@ Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()

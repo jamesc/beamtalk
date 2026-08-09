@@ -17,20 +17,16 @@
 //! `check_argument_types`) — see the tests below asserting a valid alias
 //! member is no longer flagged, and an invalid one still is.
 
-/// Parses `source` and runs the full `analyse_with_options_and_classes`
-/// pipeline (alias registration + `check_module_with_protocols_and_aliases`,
-/// exactly as a real compile would — see `type_alias_exhaustiveness.rs`'s
-/// identical helper), returning every diagnostic.
+/// Parses `source` and runs the full semantic-analysis pipeline (alias
+/// registration + `check_module_with_protocols_and_aliases`, exactly as a
+/// real compile would — see `type_alias_exhaustiveness.rs`'s identical
+/// helper), returning every diagnostic.
 fn analyse_diagnostics(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     result.diagnostics
 }
 

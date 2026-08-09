@@ -1139,7 +1139,11 @@ fn test_analyse_with_known_vars_suppresses_undefined() {
     );
 
     // With 'x' in known vars - should NOT report undefined
-    let result_with = analyse_with_known_vars(&module, &["x"]);
+    let known_vars = ["x"];
+    let result_with = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
     assert!(
         !result_with
             .diagnostics
@@ -1169,7 +1173,11 @@ fn test_analyse_with_known_vars_handles_reassignment() {
     let module = Module::new(vec![bare(expr)], test_span());
 
     // With 'x' known, the RHS reference should not report undefined
-    let result = analyse_with_known_vars(&module, &["x"]);
+    let known_vars = ["x"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
     assert!(
         !result
             .diagnostics
@@ -1348,7 +1356,11 @@ fn test_responds_to_with_symbol_no_diagnostic() {
     };
 
     let module = Module::new(vec![bare(expr)], test_span());
-    let result = analyse_with_known_vars(&module, &["counter"]);
+    let known_vars = ["counter"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
 
     // No symbol-related diagnostics
     assert!(
@@ -1382,7 +1394,11 @@ fn test_responds_to_with_identifier_no_error() {
     };
 
     let module = Module::new(vec![bare(expr)], test_span());
-    let result = analyse_with_known_vars(&module, &["counter", "sel"]);
+    let known_vars = ["counter", "sel"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
 
     let symbol_errors: Vec<_> = result
         .diagnostics
@@ -1459,7 +1475,11 @@ fn test_inst_var_at_with_integer_emits_error() {
     };
 
     let module = Module::new(vec![bare(expr)], test_span());
-    let result = analyse_with_known_vars(&module, &["obj"]);
+    let known_vars = ["obj"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
 
     let symbol_errors: Vec<_> = result
         .diagnostics
@@ -1498,7 +1518,11 @@ fn test_non_reflection_method_no_validation() {
     };
 
     let module = Module::new(vec![bare(expr)], test_span());
-    let result = analyse_with_known_vars(&module, &["obj"]);
+    let known_vars = ["obj"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
 
     assert!(
         !result
@@ -1540,7 +1564,11 @@ fn test_cascade_responds_to_with_identifier_no_error() {
     };
 
     let module = Module::new(vec![bare(cascade)], test_span());
-    let result = analyse_with_known_vars(&module, &["counter", "sel"]);
+    let known_vars = ["counter", "sel"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
 
     let symbol_errors: Vec<_> = result
         .diagnostics
@@ -3936,7 +3964,10 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
     let src = "42.";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars_and_classes(&module, &[], vec![pre_class]);
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_classes(vec![pre_class]),
+    );
     assert!(
         result.class_hierarchy.has_class("UserClass"),
         "UserClass should be visible in the hierarchy after injection"
@@ -3948,8 +3979,11 @@ fn analyse_with_known_vars_and_classes_empty_is_equivalent_to_base() {
     let src = "1 + 2.";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result_base = analyse_with_known_vars(&module, &[]);
-    let result_new = analyse_with_known_vars_and_classes(&module, &[], vec![]);
+    let result_base = analyse(&module);
+    let result_new = analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_classes(vec![]),
+    );
     // Same number of diagnostics (both should be empty for valid source)
     assert_eq!(result_base.diagnostics.len(), result_new.diagnostics.len());
 }
@@ -4192,7 +4226,7 @@ fn extension_method_suppresses_dnu_in_analyse_pipeline() {
     ";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars(&module, &[]);
+    let result = analyse(&module);
     let dnu: Vec<_> = result
         .diagnostics
         .iter()
@@ -4214,7 +4248,7 @@ fn extension_method_return_type_flows_through_pipeline() {
     "#;
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars(&module, &[]);
+    let result = analyse(&module);
     let dnu: Vec<_> = result
         .diagnostics
         .iter()
@@ -4236,7 +4270,7 @@ fn extension_method_unannotated_no_false_errors() {
     ";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars(&module, &[]);
+    let result = analyse(&module);
     let dnu: Vec<_> = result
         .diagnostics
         .iter()
@@ -4257,7 +4291,7 @@ fn missing_method_still_warns_with_extensions() {
     ";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars(&module, &[]);
+    let result = analyse(&module);
     let dnu: Vec<_> = result
         .diagnostics
         .iter()
@@ -4282,7 +4316,7 @@ fn extension_double_colon_return_type_flows_through_pipeline() {
     ";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars(&module, &[]);
+    let result = analyse(&module);
     let dnu: Vec<_> = result
         .diagnostics
         .iter()
@@ -4304,7 +4338,7 @@ fn class_side_extension_suppresses_dnu_in_pipeline() {
     "#;
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
-    let result = analyse_with_known_vars(&module, &[]);
+    let result = analyse(&module);
     let dnu: Vec<_> = result
         .diagnostics
         .iter()
@@ -4352,7 +4386,13 @@ fn workspace_binding_shadowing_class_emits_warning() {
     let (module, _parse_diags) = crate::source_analysis::parse(tokens);
 
     // Analyse with "Workspace" as both a known_var and a pre-loaded class.
-    let result = analyse_with_known_vars_and_classes(&module, &["Workspace"], vec![pre_class]);
+    let known_vars = ["Workspace"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_known_vars(&known_vars)
+            .with_pre_loaded_classes(vec![pre_class]),
+    );
 
     let shadow_warnings: Vec<_> = result
         .diagnostics
@@ -4408,7 +4448,13 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
         superclass_type_args: vec![],
     };
 
-    let result = analyse_with_known_vars_and_classes(&module, &["myCustomVar"], vec![dummy_class]);
+    let known_vars = ["myCustomVar"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_known_vars(&known_vars)
+            .with_pre_loaded_classes(vec![dummy_class]),
+    );
 
     let shadow_warnings: Vec<_> = result
         .diagnostics
@@ -4477,14 +4523,17 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     };
 
     let options = crate::CompilerOptions::default();
-    let result = analyse_with_natives_and_protocols(
-        &module,
-        &options,
-        vec![dummy_class],
-        vec![fixture_protocol],
-        None,
-        &crate::compilation::extension_index::ExtensionIndex::new(),
-    );
+    let result =
+        analyse_full(
+            &module,
+            AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_classes(vec![dummy_class])
+                .with_pre_loaded_protocols(vec![fixture_protocol])
+                .with_cross_file_extensions(
+                    &crate::compilation::extension_index::ExtensionIndex::new(),
+                ),
+        );
 
     let unresolved: Vec<_> = result
         .diagnostics
@@ -4548,15 +4597,20 @@ fn pre_loaded_alias_is_seeded_and_current_module_wins() {
         current_package: Some("app".to_string()),
         ..Default::default()
     };
-    let result = analyse_with_natives_and_protocols_and_aliases(
-        &module,
-        &options,
-        vec![],
-        vec![],
-        vec![cross_file_alias, shadowed_alias, foreign_internal_alias],
-        None,
-        &crate::compilation::extension_index::ExtensionIndex::new(),
-    );
+    let result =
+        analyse_full(
+            &module,
+            AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_aliases(vec![
+                    cross_file_alias,
+                    shadowed_alias,
+                    foreign_internal_alias,
+                ])
+                .with_cross_file_extensions(
+                    &crate::compilation::extension_index::ExtensionIndex::new(),
+                ),
+        );
 
     assert!(
         result
@@ -4613,15 +4667,16 @@ fn pre_loaded_internal_alias_from_same_package_is_still_seeded() {
         current_package: Some("json".to_string()),
         ..Default::default()
     };
-    let result = analyse_with_natives_and_protocols_and_aliases(
-        &module,
-        &options,
-        vec![],
-        vec![],
-        vec![same_package_internal_alias],
-        None,
-        &crate::compilation::extension_index::ExtensionIndex::new(),
-    );
+    let result =
+        analyse_full(
+            &module,
+            AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_aliases(vec![same_package_internal_alias])
+                .with_cross_file_extensions(
+                    &crate::compilation::extension_index::ExtensionIndex::new(),
+                ),
+        );
 
     assert!(
         result.alias_registry.has_alias("ParserState"),
@@ -4679,15 +4734,16 @@ fn referenced_aliases_records_a_seeded_cross_package_alias_and_excludes_a_foreig
         current_package: Some("app".to_string()),
         ..Default::default()
     };
-    let result = analyse_with_natives_and_protocols_and_aliases(
-        &module,
-        &options,
-        vec![],
-        vec![],
-        vec![public_dependency_alias, foreign_internal_alias],
-        None,
-        &crate::compilation::extension_index::ExtensionIndex::new(),
-    );
+    let result =
+        analyse_full(
+            &module,
+            AnalysisContext::default()
+                .with_options(&options)
+                .with_pre_loaded_aliases(vec![public_dependency_alias, foreign_internal_alias])
+                .with_cross_file_extensions(
+                    &crate::compilation::extension_index::ExtensionIndex::new(),
+                ),
+        );
 
     // (a) The public dependency alias is seeded and, once referenced by
     // `TimeoutUser`'s parameter, recorded as a dependency edge — exactly
@@ -4748,7 +4804,7 @@ fn protocol_method_signature_records_referenced_aliases() {
 }
 
 // BT-2898: end-to-end wiring check — the E0402 alias-leak checks (Phase 8)
-// must fire through the full `analyse_with_options` pipeline, not just when
+// must fire through the full `analyse_full` pipeline, not just when
 // the validator functions are called directly in `visibility_validators.rs`.
 #[test]
 fn analyse_full_pipeline_reports_internal_alias_leaked_in_public_signature() {
@@ -4761,7 +4817,7 @@ fn analyse_full_pipeline_reports_internal_alias_leaked_in_public_signature() {
         current_package: Some("json".to_string()),
         ..Default::default()
     };
-    let result = analyse_with_options(&module, &options);
+    let result = analyse_full(&module, AnalysisContext::default().with_options(&options));
 
     assert!(
         result
@@ -4879,7 +4935,7 @@ fn analyse_with_options_stamps_project_complete_scope() {
         knowledge_scope: KnowledgeScope::ProjectComplete,
         ..Default::default()
     };
-    let result = analyse_with_options(&module, &options);
+    let result = analyse_full(&module, AnalysisContext::default().with_options(&options));
     assert_eq!(
         result.class_hierarchy.knowledge_scope(),
         KnowledgeScope::ProjectComplete,
@@ -4916,12 +4972,11 @@ fn cross_file_extension_resolves_instead_of_dnu_hint() {
 
     // With the index: the extension resolves, the hint disappears.
     let options = crate::CompilerOptions::default();
-    let result = analyse_with_natives_and_extensions(
+    let result = analyse_full(
         &module,
-        &options,
-        vec![],
-        None,
-        &cross_file_extensions,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_cross_file_extensions(&cross_file_extensions),
     );
     let dnu: Vec<_> = result
         .diagnostics
@@ -4949,12 +5004,11 @@ fn genuinely_unresolved_selector_still_hints_with_extensions_registered() {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
     let options = crate::CompilerOptions::default();
-    let result = analyse_with_natives_and_extensions(
+    let result = analyse_full(
         &module,
-        &options,
-        vec![],
-        None,
-        &cross_file_extensions,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_cross_file_extensions(&cross_file_extensions),
     );
     assert!(
         result
@@ -4980,7 +5034,7 @@ fn typo_hints_in_project_complete_dependency_free_package() {
         has_package_dependencies: false,
         ..Default::default()
     };
-    let result = analyse_with_options(&module, &options);
+    let result = analyse_full(&module, AnalysisContext::default().with_options(&options));
     assert!(
         result
             .diagnostics
@@ -5004,7 +5058,7 @@ fn dependency_package_suppresses_unresolved_selector_hints_pre_ws3() {
         has_package_dependencies: true,
         ..Default::default()
     };
-    let result = analyse_with_options(&module, &options);
+    let result = analyse_full(&module, AnalysisContext::default().with_options(&options));
     let dnu: Vec<_> = result
         .diagnostics
         .iter()

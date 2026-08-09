@@ -29,7 +29,7 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
 - **Module**: `crates/beamtalk-core/src/semantic_analysis/mod.rs`
   - `AnalysisResult` - Container for diagnostics, block metadata, and class hierarchy
   - `BlockInfo` - Block context, captures, and mutations
-  - `analyse()` / `analyse_with_known_vars()` - Public API (fully functional)
+  - `analyse()` / `analyse_full()` with `AnalysisContext` - Public API (fully functional)
   - Pattern binding extraction with duplicate detection
   - AST traversal for scope population and block analysis
   - **48 tests**
@@ -70,7 +70,7 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
   - Stub for future gradual typing (Phase 3)
 
 - **Integration**: `crates/beamtalk-core/src/queries/diagnostic_provider.rs`
-  - `compute_diagnostics()` calls `analyse_with_known_vars()`
+  - `compute_diagnostics()` calls `analyse_full()` with an `AnalysisContext::default().with_known_vars(...)`
   - Merges parse + semantic diagnostics
   - REPL-aware variable handling
 

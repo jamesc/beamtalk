@@ -222,14 +222,17 @@ pub enum MutationKind {
     Field { name: EcoString },
 }
 
-/// Bundles the knobs threaded through `analyse_full` (BT-2804).
+/// Bundles the knobs threaded through [`analyse_full`], the single semantic
+/// analysis entry point (BT-3114, consolidating BT-2804's wrapper family).
 ///
-/// Every public `analyse_*` entry point builds one of these and passes it to
-/// `analyse_full` instead of threading positional parameters through ~6
-/// wrappers. Each field's `Default` reproduces today's most conservative
-/// behaviour (empty cross-file knowledge, `ModuleOnly` scope, no package
-/// context) — so a new entry point that forgets to set a field degrades
-/// safely (quietly loses precision) rather than silently misbehaving.
+/// Call sites build a context with the builder methods below —
+/// `AnalysisContext::default().with_known_vars(...).with_natives(...)` — and
+/// pass it to `analyse_full` instead of calling one of a dozen
+/// progressively-richer `analyse_with_*` free functions. Each field's
+/// `Default` reproduces today's most conservative behaviour (empty
+/// cross-file knowledge, `ModuleOnly` scope, no package context) — so a
+/// context that leaves a field unset degrades safely (quietly loses
+/// precision) rather than silently misbehaving.
 #[derive(Debug, Default)]
 pub struct AnalysisContext<'a> {
     /// Pre-defined variables treated as already bound (REPL context).
@@ -281,6 +284,102 @@ pub struct AnalysisContext<'a> {
     pub has_package_dependencies: bool,
 }
 
+impl<'a> AnalysisContext<'a> {
+    /// Pre-defined variables treated as already bound (REPL context).
+    ///
+    /// Prevents "Undefined variable" errors for REPL session variables.
+    #[must_use]
+    pub fn with_known_vars(mut self, known_vars: &'a [&'a str]) -> Self {
+        self.known_vars = known_vars;
+        self
+    }
+
+    /// Applies the subset of [`crate::CompilerOptions`] that semantic
+    /// analysis cares about: `stdlib_mode`, `skip_module_expression_lint`,
+    /// `current_package`, `knowledge_scope`, `has_package_dependencies`.
+    #[must_use]
+    pub fn with_options(mut self, options: &'a crate::CompilerOptions) -> Self {
+        self.stdlib_mode = options.stdlib_mode;
+        self.skip_module_expression_lint = options.skip_module_expression_lint;
+        self.current_package = options.current_package.as_deref();
+        self.knowledge_scope = options.knowledge_scope;
+        self.has_package_dependencies = options.has_package_dependencies;
+        self
+    }
+
+    /// Cross-file class metadata injected into the class hierarchy before
+    /// type checking (BT-1523, ADR 0050 Phase 4).
+    #[must_use]
+    pub fn with_pre_loaded_classes(
+        mut self,
+        pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    ) -> Self {
+        self.pre_loaded_classes = pre_loaded_classes;
+        self
+    }
+
+    /// Protocol definitions extracted from other source files, e.g. `BUnit`
+    /// fixtures (BT-2006).
+    #[must_use]
+    pub fn with_pre_loaded_protocols(
+        mut self,
+        pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    ) -> Self {
+        self.pre_loaded_protocols = pre_loaded_protocols;
+        self
+    }
+
+    /// Type alias definitions extracted from other source files/packages, or
+    /// carried over from earlier turns of the same REPL session — see the
+    /// `pre_loaded_aliases` field's own doc for the full semantics.
+    #[must_use]
+    pub fn with_pre_loaded_aliases(
+        mut self,
+        pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+    ) -> Self {
+        self.pre_loaded_aliases = pre_loaded_aliases;
+        self
+    }
+
+    /// Known package names for package-qualifier validation (ADR 0070 Phase
+    /// 2). Unknown package qualifiers produce compile errors.
+    #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
+    #[must_use]
+    pub fn with_known_packages(
+        mut self,
+        known_packages: std::collections::HashSet<String>,
+    ) -> Self {
+        self.known_packages = Some(known_packages);
+        self
+    }
+
+    /// Native type registry for FFI call inference (ADR 0075). When `Some`,
+    /// FFI calls (`Erlang <module> <function>:`) get return type inference
+    /// and keyword mismatch warnings from the registry.
+    #[must_use]
+    pub fn with_native_type_registry(
+        mut self,
+        native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    ) -> Self {
+        self.native_type_registry = native_type_registry;
+        self
+    }
+
+    /// Project-wide standalone extension definitions (BT-2795, ADR 0066), so
+    /// a cross-file `ClassName >> selector` extension resolves instead of
+    /// producing a false `Dnu` hint. May safely include the current file's
+    /// own entries — the current module's extensions are registered first
+    /// and duplicates are skipped.
+    #[must_use]
+    pub fn with_cross_file_extensions(
+        mut self,
+        cross_file_extensions: &'a crate::compilation::extension_index::ExtensionIndex,
+    ) -> Self {
+        self.cross_file_extensions = Some(cross_file_extensions);
+        self
+    }
+}
+
 /// Perform semantic analysis on a module.
 ///
 /// This is the main entry point for semantic analysis. It orchestrates the
@@ -308,272 +407,37 @@ pub fn analyse(module: &Module) -> AnalysisResult {
     analyse_full(module, AnalysisContext::default())
 }
 
-/// Analyse a module with pre-defined variables (for REPL context).
-///
-/// Variables passed in `known_vars` are treated as already defined,
-/// preventing "Undefined variable" errors for REPL session variables.
-///
-/// **DDD Context:** Semantic Analysis
-///
-/// This function orchestrates the `NameResolver`, `TypeChecker`, and block analysis
-/// services. Pre-defining known variables is essential for REPL contexts where
-/// users build up state incrementally across multiple evaluations.
-pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            known_vars,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with compiler options controlling stdlib-specific behaviour.
-///
-/// When `stdlib_mode` is true, built-in classes are permitted to subclass sealed
-/// classes (BT-791). This should only be set when compiling stdlib sources.
-pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            current_package: options.current_package.as_deref(),
-            knowledge_scope: options.knowledge_scope,
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with compiler options and pre-loaded class entries.
-///
-/// BT-1523: Used by the build pipeline to inject cross-file class metadata
-/// from Pass 1 into Pass 2's semantic analysis, enabling proper method
-/// resolution across files.
-pub fn analyse_with_options_and_classes(
-    module: &Module,
-    options: &crate::CompilerOptions,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            pre_loaded_classes,
-            current_package: options.current_package.as_deref(),
-            knowledge_scope: options.knowledge_scope,
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with compiler options, pre-loaded classes, and native type registry.
-///
-/// ADR 0075: When `native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
-/// get return type inference and keyword mismatch warnings from the registry.
-///
-/// This is the build-pipeline entry point for Phase 1 typed FFI.
-pub fn analyse_with_natives(
-    module: &Module,
-    options: &crate::CompilerOptions,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            pre_loaded_classes,
-            current_package: options.current_package.as_deref(),
-            native_type_registry,
-            knowledge_scope: options.knowledge_scope,
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with compiler options, pre-loaded classes, a native type
-/// registry, and project-wide cross-file extensions (BT-2795, ADR 0066).
-///
-/// `cross_file_extensions` carries standalone extension definitions
-/// (`ClassName >> selector => ...`) collected from the rest of the project,
-/// so a cross-file extension resolves instead of producing a false `Dnu`
-/// hint. It may safely include the current file's own entries — the current
-/// module's extensions are registered first and duplicates are skipped.
-pub fn analyse_with_natives_and_extensions(
-    module: &Module,
-    options: &crate::CompilerOptions,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            pre_loaded_classes,
-            current_package: options.current_package.as_deref(),
-            native_type_registry,
-            knowledge_scope: options.knowledge_scope,
-            cross_file_extensions: Some(cross_file_extensions),
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with compiler options, pre-loaded classes, pre-loaded
-/// protocols, and native type registry.
-///
-/// BT-2006: Mirrors `analyse_with_natives` but also accepts protocol
-/// definitions extracted from other source files (e.g. `BUnit` fixtures) so
-/// the unresolved-class validator and type checker recognise fixture-only
-/// protocol names when analysing a downstream module.
-pub fn analyse_with_natives_and_protocols(
-    module: &Module,
-    options: &crate::CompilerOptions,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
-    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            pre_loaded_classes,
-            pre_loaded_protocols,
-            current_package: options.current_package.as_deref(),
-            native_type_registry,
-            knowledge_scope: options.knowledge_scope,
-            cross_file_extensions: Some(cross_file_extensions),
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with compiler options, pre-loaded classes, pre-loaded
-/// protocols, pre-loaded type aliases, and native type registry.
-///
-/// BT-2898: Mirrors `analyse_with_natives_and_protocols` but also accepts
-/// alias definitions extracted from other source files or packages (ADR 0108
-/// Phase 5) so the alias registry recognises fixture/dependency-only alias
-/// names when analysing a downstream module.
-#[allow(clippy::too_many_arguments)]
-pub fn analyse_with_natives_and_protocols_and_aliases(
-    module: &Module,
-    options: &crate::CompilerOptions,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
-    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
-    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            pre_loaded_classes,
-            pre_loaded_protocols,
-            pre_loaded_aliases,
-            current_package: options.current_package.as_deref(),
-            native_type_registry,
-            knowledge_scope: options.knowledge_scope,
-            cross_file_extensions: Some(cross_file_extensions),
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with pre-defined variables and pre-loaded class entries
-/// from BEAM metadata (ADR 0050 Phase 4).
-///
-/// `pre_loaded_classes` are injected into the `ClassHierarchy` *before*
-/// `TypeChecking`, so user-defined REPL classes are visible to the `TypeChecker`.
-pub fn analyse_with_known_vars_and_classes(
-    module: &Module,
-    known_vars: &[&str],
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            known_vars,
-            pre_loaded_classes,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with pre-defined variables, pre-loaded class entries,
-/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8,
-/// BT-2902).
-///
-/// Mirrors [`analyse_with_known_vars_and_classes`] — see its doc — with one
-/// addition: `pre_loaded_aliases` makes alias names declared in *earlier*
-/// turns of the same REPL session resolvable in the current turn's `::`
-/// annotations (`resolve_type_annotation`'s `subst → alias table → nominal
-/// class` order, ADR 0108 Semantics).
-pub fn analyse_with_known_vars_classes_and_aliases(
-    module: &Module,
-    known_vars: &[&str],
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            known_vars,
-            pre_loaded_classes,
-            pre_loaded_aliases,
-            ..Default::default()
-        },
-    )
-}
-
-/// Analyse a module with known package dependencies (ADR 0070 Phase 2).
-///
-/// Package qualifiers in class references and extension targets are validated
-/// against the provided set of known package names. Unknown package qualifiers
-/// produce compile errors.
-#[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
-pub fn analyse_with_packages(
-    module: &Module,
-    options: &crate::CompilerOptions,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    known_packages: std::collections::HashSet<String>,
-) -> AnalysisResult {
-    analyse_full(
-        module,
-        AnalysisContext {
-            stdlib_mode: options.stdlib_mode,
-            skip_module_expression_lint: options.skip_module_expression_lint,
-            pre_loaded_classes,
-            known_packages: Some(known_packages),
-            current_package: options.current_package.as_deref(),
-            knowledge_scope: options.knowledge_scope,
-            has_package_dependencies: options.has_package_dependencies,
-            ..Default::default()
-        },
-    )
-}
-
-/// Internal: full analysis with all knobs, bundled into `ctx` (BT-2804).
+/// Perform semantic analysis on a module with a fully-populated
+/// [`AnalysisContext`] (BT-3114, the single entry point that replaces the
+/// former `analyse_with_*` wrapper family — REPL known-vars, compiler
+/// options, cross-file classes/protocols/aliases, native FFI types,
+/// cross-file extensions, and package-qualifier validation all thread
+/// through `ctx`, built via its `with_*` builder methods).
 ///
 /// ADR 0075: When `ctx.native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
 /// get return type inference and keyword mismatch warnings from the registry.
+///
+/// # Panics
+///
+/// Never panics in practice: `ClassHierarchy::build_with_options` is
+/// documented infallible and its `Result` is unwrapped internally with an
+/// `.expect()` that exists only to surface a contract violation loudly
+/// rather than silently, should that documented invariant ever break.
+///
+/// # Examples
+///
+/// ```
+/// # use beamtalk_core::semantic_analysis::{analyse_full, AnalysisContext};
+/// # use beamtalk_core::ast::Module;
+/// # use beamtalk_core::source_analysis::Span;
+/// let module = Module::new(vec![], Span::default());
+/// let known_vars = ["x"];
+/// let ctx = AnalysisContext::default().with_known_vars(&known_vars);
+/// let result = analyse_full(&module, ctx);
+/// assert_eq!(result.diagnostics.len(), 0);
+/// ```
 #[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
-fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
+pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
     let AnalysisContext {
         known_vars,
         stdlib_mode,

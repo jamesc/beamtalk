@@ -7,7 +7,7 @@
 //! arbitrary parsed AST, and that diagnostics have valid spans:
 //!
 //! 1. **`analyse` never panics** — any parsed module can be analysed
-//! 2. **`analyse_with_known_vars` never panics** — REPL context analysis is safe
+//! 2. **`analyse_full` with known vars never panics** — REPL context analysis is safe
 //! 3. **Semantic diagnostic spans within input** — all span bounds are valid
 //! 4. **Class hierarchy never panics** — building hierarchy from any AST is safe
 //! 5. **Type inference never panics** — type checking any parsed AST is safe
@@ -20,7 +20,7 @@ use proptest::prelude::*;
 
 use crate::source_analysis::{lex_with_eof, parse};
 
-use super::{ClassHierarchy, analyse, analyse_with_known_vars, infer_types};
+use super::{AnalysisContext, ClassHierarchy, analyse, analyse_full, infer_types};
 
 // ============================================================================
 // Generators
@@ -126,7 +126,7 @@ proptest! {
         let _result = analyse(&module);
     }
 
-    /// Property 2: `analyse_with_known_vars` never panics.
+    /// Property 2: `analyse_full` with known vars never panics.
     ///
     /// REPL-style analysis with pre-defined variables must be safe.
     #[test]
@@ -136,7 +136,7 @@ proptest! {
     ) {
         let (module, _) = parse_source(&input);
         let var_refs: Vec<&str> = vars.iter().map(String::as_str).collect();
-        let _result = analyse_with_known_vars(&module, &var_refs);
+        let _result = analyse_full(&module, AnalysisContext::default().with_known_vars(&var_refs));
     }
 
     /// Property 3: Semantic diagnostic spans are within input bounds.

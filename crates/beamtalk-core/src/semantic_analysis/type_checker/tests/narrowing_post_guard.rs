@@ -26,11 +26,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -61,11 +57,7 @@ typed Actor subclass: Engine
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -95,11 +87,7 @@ typed Actor subclass: Engine
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -129,11 +117,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     // The negative case must produce the specific argument-mismatch
     // diagnostic at the `process:` call site: `ms` should still be
     // `Integer | Nil` because the `ifTrue: [42]` block does not
@@ -193,11 +177,7 @@ typed Actor subclass: Engine
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -231,11 +211,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -267,11 +243,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     // Because the ifFalse: block reassigns `ms` to nil, we must still warn
     // on the `process:` call — otherwise we'd be unsound.
     //
@@ -329,11 +301,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -370,11 +338,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -407,11 +371,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -446,11 +406,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -481,11 +437,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -515,11 +467,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let mismatch_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -560,11 +508,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let mismatch_warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -605,11 +549,7 @@ typed Object subclass: Caller
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
 
-    let result = crate::semantic_analysis::analyse_with_options_and_classes(
-        &module,
-        &crate::CompilerOptions::default(),
-        vec![],
-    );
+    let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
         .diagnostics
         .iter()
