@@ -4330,4 +4330,42 @@ mod tests {
             "generated module should include new constructor. Got: {output}"
         );
     }
+
+    /// BT-3085: `STDLIB_CLASS_NAMES` (this module's `build.rs`-generated
+    /// constant, a raw scan of every `stdlib/src/*.bt` file stem — including
+    /// protocol-only files like `Printable.bt`/`JsonRepresentable.bt` that
+    /// declare no class) must be a superset of every real built-in class
+    /// (`ClassHierarchy::with_builtins()`, built from
+    /// `generated_builtins.rs::is_generated_builtin_class` — the richer,
+    /// `beamtalk build-stdlib`-generated table of *actual* classes).
+    ///
+    /// The one expected exception is `'Future'`: a runtime-only built-in
+    /// with no `stdlib/src/Future.bt` source (see `builtins.rs::is_builtin_class`'s
+    /// doc), so it can never appear in a directory scan.
+    ///
+    /// This is a superset check, not equality, because `STDLIB_CLASS_NAMES`
+    /// also contains protocol-only file stems that never become classes —
+    /// asserting equality would make this test fail on every new protocol
+    /// file. What must never happen is a real class silently missing from
+    /// `STDLIB_CLASS_NAMES`, which would make `is_known_stdlib_type` emit the
+    /// wrong `bt@{snake}` (non-stdlib) module prefix for it instead of
+    /// `bt@stdlib@{snake}`.
+    #[test]
+    fn test_stdlib_class_names_superset_of_builtin_classes() {
+        use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        for name in hierarchy.class_names() {
+            if name == "Future" {
+                continue;
+            }
+            assert!(
+                super::STDLIB_CLASS_NAMES.contains(&name.as_str()),
+                "built-in class '{name}' is missing from build.rs's \
+                 STDLIB_CLASS_NAMES (stdlib/src/*.bt directory scan) — expected \
+                 every real generated_builtins.rs class to have a matching \
+                 stdlib/src/{name}.bt file"
+            );
+        }
+    }
 }
