@@ -2012,6 +2012,59 @@ fn test_is_actor_class_root_class_is_value_type() {
 }
 
 #[test]
+fn test_actor_value_classification_consistent_regardless_of_exception_grandchild_declaration_order()
+{
+    // BT-3086: MyBaseError is a grandchild of Exception (Exception -> Error -> MyBaseError);
+    // MySpecificError extends MyBaseError. Neither analysis (`resolve_class_kind`) nor codegen
+    // (`is_actor_class`) should ever classify these as actors, and the answer must not depend
+    // on which order the two classes are declared in — `add_module_classes` registers every
+    // class in a module before any chain is walked (Pass 1), so within-module declaration
+    // order must never change the result.
+    let base_declared_first =
+        "Error subclass: MyBaseError\n\nMyBaseError subclass: MySpecificError\n";
+    let child_declared_first =
+        "MyBaseError subclass: MySpecificError\n\nError subclass: MyBaseError\n";
+
+    for src in [base_declared_first, child_declared_first] {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+
+        // Analysis: both classes resolve to Object — Exception's hierarchy is neither
+        // Actor nor Value.
+        for name in ["MyBaseError", "MySpecificError"] {
+            assert_eq!(
+                hierarchy.resolve_class_kind(name),
+                ClassKind::Object,
+                "{name} should resolve to ClassKind::Object regardless of declaration order. src:\n{src}"
+            );
+        }
+
+        // Codegen: routing each class's own single-class module through `is_actor_class`
+        // must agree with analysis — neither routes to actor (gen_server) codegen.
+        for class in &module.classes {
+            let single_class_module = Module {
+                classes: vec![class.clone()],
+                method_definitions: Vec::new(),
+                protocols: Vec::new(),
+                type_aliases: Vec::new(),
+                expressions: vec![],
+                span: Span::new(0, 0),
+                file_leading_comments: vec![],
+                file_trailing_comments: Vec::new(),
+            };
+            assert!(
+                !CoreErlangGenerator::is_actor_class(&single_class_module, &hierarchy),
+                "{} should route to value-type codegen, not actor. src:\n{src}",
+                class.name.name
+            );
+        }
+    }
+}
+
+#[test]
 fn test_generate_with_bindings_compiles_value_type() {
     // Test that generate_with_bindings produces valid output for a value type
     let class = ClassDefinition::new(
