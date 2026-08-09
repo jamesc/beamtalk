@@ -385,24 +385,51 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
                     {continue, beamtalk_object_class:superclass(ClassPid)};
                 true ->
-                    %% Intercept printString/displayString/inspect for actor
-                    %% instances and route them to beamtalk_object_ops — but only
-                    %% when the method resolved to the base `Object` class (i.e. the
-                    %% actor did NOT override it). A user subclass override is found
-                    %% earlier in the walk (MethodOwner =/= 'Object') and must be
-                    %% honoured.
+                    %% Intercept printString/displayString/inspect for actor and
+                    %% supervisor instances and route them to beamtalk_object_ops —
+                    %% but only when the method resolved to a class the instance
+                    %% did NOT override it on. A user subclass override is found
+                    %% earlier in the walk (MethodOwner is that subclass) and must
+                    %% be honoured.
                     %%
-                    %% ADR 0094: a default actor's printString/displayString must
-                    %% render the kind-headed `Actor(ClassName, pid)` label, which
-                    %% only beamtalk_object_ops produces — the compiled Object
-                    %% methods return a bare class name. Routing here unifies all
-                    %% three display selectors onto the runtime renderer.
+                    %% ADR 0094: a default actor's or supervisor's
+                    %% printString/displayString must render the kind-headed
+                    %% `Actor(ClassName, pid)` / `Supervisor(ClassName, pid)` /
+                    %% `DynamicSupervisor(ClassName, pid)` label, which only
+                    %% beamtalk_object_ops produces — the compiled Object methods
+                    %% return a bare class name. Routing here unifies all three
+                    %% display selectors onto the runtime renderer.
+                    %%
+                    %% For actors, an unoverridden printString/displayString/inspect
+                    %% resolves with MethodOwner = 'Object': actor-class codegen only
+                    %% reports `has_method` true for locally-declared selectors, so the
+                    %% hierarchy walk (`class_chain_step`) keeps advancing until it
+                    %% reaches Object itself.
+                    %%
+                    %% For supervisors it's different (BT-3082): `Supervisor`/
+                    %% `DynamicSupervisor` are plain "Value" classes (`Object
+                    %% subclass: Supervisor`), and value-type codegen's `has_method/1`
+                    %% *delegates* to its superclass for any selector it doesn't
+                    %% locally list (see `value_type_codegen.rs`
+                    %% `generate_primitive_has_method`/`generate_minimal_has_method`).
+                    %% That delegation makes `beamtalk_object_class:has_method/2`
+                    %% report `true` as soon as it reaches `Supervisor`/
+                    %% `DynamicSupervisor` — the walk never actually visits a node
+                    %% named `'Object'` for an unoverridden supervisor, it stops one
+                    %% level short. So an unoverridden supervisor's MethodOwner is
+                    %% `'Supervisor'` or `'DynamicSupervisor'`, never `'Object'` —
+                    %% before this fix, that meant `aSupervisor printString` fell
+                    %% through to the compiled Object method's bare class name
+                    %% instead of matching the REPL's kind-headed label.
                     %%
                     %% This also avoids the displayString deadlock: the compiled
                     %% Object displayString sends a message back to Self
                     %% (displayString calls self printString), producing a second
                     %% gen_server:call on the same actor process. beamtalk_object_ops
                     %% derives the label directly from the tuple with no self-sends.
+                    %% (Supervisors dispatch in-process — not via gen_server:call —
+                    %% so they're not deadlock-prone the same way, but routing them
+                    %% through the same renderer keeps one label authority.)
                     %%
                     %% ADR 0095 Phase 3 (BT-2504): `inspect` on a default actor is
                     %% also routed here. Although it returns an `Inspector` cursor
@@ -413,14 +440,22 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% `#unavailable`). beamtalk_object_ops:dispatch(inspect, ...)
                     %% instead seeds the cursor from the in-hand `State` via
                     %% `on/2` — the self-inspection-safe path. A user `inspect`
-                    %% override (MethodOwner =/= 'Object') is honoured as usual.
-                    case
-                        MethodOwner =:= 'Object' andalso
-                            is_actor_instance(Self) andalso
-                            (Selector =:= 'printString' orelse
-                                Selector =:= 'displayString' orelse
-                                Selector =:= inspect)
-                    of
+                    %% override is honoured as usual.
+                    %% `inspect` is deliberately *not* extended to supervisors here
+                    %% (unlike printString/displayString above): supervisors dispatch
+                    %% in-process, so `Object>>inspect`'s self-send isn't deadlock-prone
+                    %% for them, and BT-3082 only reported the printString/displayString
+                    %% divergence — widening `inspect`'s behaviour is out of scope.
+                    IsDisplaySelector =
+                        Selector =:= 'printString' orelse Selector =:= 'displayString',
+                    IsUnoverriddenSupervisorMethod =
+                        is_supervisor_instance(Self) andalso IsDisplaySelector andalso
+                            (MethodOwner =:= 'Object' orelse MethodOwner =:= 'Supervisor' orelse
+                                MethodOwner =:= 'DynamicSupervisor'),
+                    IsUnoverriddenActorMethod =
+                        MethodOwner =:= 'Object' andalso is_actor_instance(Self) andalso
+                            (IsDisplaySelector orelse Selector =:= inspect),
+                    case IsUnoverriddenActorMethod orelse IsUnoverriddenSupervisorMethod of
                         true ->
                             %% beamtalk_object_ops:dispatch is known-safe, but wrap it
                             %% with the same normalization as the slow path so callers
@@ -563,3 +598,16 @@ these methods safely without any self-sends.
 -spec is_actor_instance(term()) -> boolean().
 is_actor_instance(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> true;
 is_actor_instance(_) -> false.
+
+-doc """
+Return true if Self is a live supervisor reference (BT-3082).
+
+Used alongside `is_actor_instance/1` to route a default (unoverridden)
+`printString`/`displayString` to `beamtalk_object_ops`, which renders the
+ADR 0094 kind-headed `Supervisor(ClassName, pid)` / `DynamicSupervisor(...)`
+label — matching the REPL's canonical rendering — instead of the compiled
+`Object>>printString`'s bare class name.
+""".
+-spec is_supervisor_instance(term()) -> boolean().
+is_supervisor_instance({beamtalk_supervisor, _ClassName, _Module, _Pid}) -> true;
+is_supervisor_instance(_) -> false.

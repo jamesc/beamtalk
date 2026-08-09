@@ -110,7 +110,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 -export([
     print_string/1,
     process_label/1,
-    primitive_class_of/1
+    primitive_class_of/1,
+    pid_label/1
 ]).
 
 %%% ===================================================================
@@ -350,6 +351,11 @@ process_label(Value) ->
 -spec primitive_class_of(term()) -> atom().
 primitive_class_of(Value) ->
     beamtalk_primitive:class_of(Value).
+
+-doc "BT-3082: canonical liveness-probed pid label (#Actor<>/#Dead<>/#Future<...>).".
+-spec pid_label(pid()) -> binary().
+pid_label(Pid) ->
+    beamtalk_primitive:pid_label(Pid).
 
 %%% ====================================================================
 %%% Hot Reload Delegators

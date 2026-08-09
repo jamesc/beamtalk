@@ -43,6 +43,26 @@ format_result_float_test() ->
 format_result_float_whole_test() ->
     ?assertEqual(<<"1.0">>, beamtalk_stdlib_test:format_result(1.0)).
 
+%% BT-3082: format_result/1 delegates float rendering to
+%% beamtalk_primitive:print_string/1 — the same function the REPL wire
+%% encoder now delegates to via beamtalk_runtime_api — so all three paths
+%% render identically. Covers the values called out in the acceptance
+%% criteria: a whole number, scientific notation, and negative zero.
+format_result_float_matches_print_string_test_() ->
+    Values = [1.0, 1.5e10, -0.0, 3.14159, -2.5],
+    [
+        {lists:flatten(io_lib:format("~p", [V])), fun() ->
+            ?assertEqual(beamtalk_primitive:print_string(V), beamtalk_stdlib_test:format_result(V))
+        end}
+     || V <- Values
+    ].
+
+format_result_float_scientific_notation_test() ->
+    ?assertEqual(<<"1.5e10">>, beamtalk_stdlib_test:format_result(1.5e10)).
+
+format_result_float_negative_zero_test() ->
+    ?assertEqual(<<"-0.0">>, beamtalk_stdlib_test:format_result(-0.0)).
+
 %%% ============================================================================
 %%% format_result/1 — Boolean and Nil
 %%% ============================================================================
@@ -107,6 +127,21 @@ format_result_pid_inner_matches_pid_to_list_test() ->
     PidStr = pid_to_list(Pid),
     Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
     ?assertEqual(<<"#Actor<", Inner/binary, ">">>, Result).
+
+%% BT-3082: format_result/1 used to render every pid — dead or alive — as
+%% `#Actor<...>`. It now delegates to beamtalk_primitive:pid_label/1 (the
+%% same liveness-probed renderer the REPL wire encoder uses), so a dead pid
+%% must render `#Dead<...>`, never `#Actor<...>`.
+format_result_dead_pid_renders_as_dead_test() ->
+    Pid = spawn(fun() -> ok end),
+    Ref = monitor(process, Pid),
+    receive
+        {'DOWN', Ref, process, Pid, _Reason} -> ok
+    after 5000 -> error(setup_timeout)
+    end,
+    Result = beamtalk_stdlib_test:format_result(Pid),
+    ?assertMatch(<<"#Dead<", _/binary>>, Result),
+    ?assertNotMatch(<<"#Actor<", _/binary>>, Result).
 
 %%% ============================================================================
 %%% format_result/1 — List

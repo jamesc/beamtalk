@@ -24,6 +24,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     print_string/1,
     display_string/1,
     process_label/1,
+    pid_label/1,
     is_object/1,
     is_utf8/1
 ]).
@@ -242,6 +243,22 @@ print_string(#beamtalk_object{class = ClassName} = Obj) ->
 print_string(X) when is_map(X) -> print_string_map(X);
 print_string(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
+print_string({beamtalk_supervisor, _, _, _} = Sup) ->
+    %% BT-3082: supervisors have no #beamtalk_object{} wrapper, so without this
+    %% clause they fell into the generic is_tuple/1 clause below and printed as
+    %% a raw Erlang tuple instead of the ADR 0094 kind-headed label — e.g. when
+    %% a supervisor appears nested inside a collection being printed (printString
+    %% dispatch on the supervisor itself is handled separately, in
+    %% beamtalk_dispatch:invoke_method/6).
+    process_label(Sup);
+print_string(X) when is_function(X) ->
+    %% BT-3082: without this clause, a Block nested inside a collection (whose
+    %% elements are printed via direct recursion, not message dispatch — see
+    %% print_string/1's is_list/1 and print_string_map/1's 'Array' clauses)
+    %% fell into the ~p catch-all and rendered as a raw `#Fun<...>`, diverging
+    %% from the REPL/format_result's `Block/N` convention.
+    {arity, Arity} = erlang:fun_info(X, arity),
+    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
 print_string(X) when is_tuple(X) ->
     Elements = tuple_to_list(X),
     iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
@@ -331,6 +348,27 @@ display_string(#beamtalk_object{class = ClassName} = Obj) ->
     end;
 display_string(X) when is_map(X) ->
     beamtalk_tagged_map:format_for_display(X);
+display_string({beamtalk_supervisor, _, _, _} = Sup) ->
+    %% BT-3082: see the matching print_string/1 clause.
+    process_label(Sup);
+display_string(X) when is_function(X) ->
+    %% BT-3082: see the matching print_string/1 clause.
+    {arity, Arity} = erlang:fun_info(X, arity),
+    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
+display_string(X) when is_tuple(X) ->
+    %% BT-3082: this clause was missing entirely (unlike print_string/1's),
+    %% so a plain tuple fell into the ~p catch-all below instead of recursing
+    %% with display_string/1 (no quotes on nested strings, matching the rest
+    %% of this function's contract).
+    Elements = tuple_to_list(X),
+    iolist_to_binary([<<"{">>, lists:join(<<", ">>, [display_string(E) || E <- Elements]), <<"}">>]);
+display_string(X) when is_pid(X) ->
+    %% BT-3082: this clause was missing entirely (unlike print_string/1's),
+    %% so a raw pid fell into the ~p catch-all below and rendered as the bare
+    %% Erlang `<0.123.0>` instead of `#Pid<0.123.0>`.
+    beamtalk_opaque_ops:pid_to_string(X);
+display_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
+display_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 display_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
@@ -378,6 +416,58 @@ identity_inner({registered, Name}) when is_atom(Name) ->
     iolist_to_binary([<<"registered, ">>, atom_to_binary(Name, utf8)]);
 identity_inner(Other) ->
     iolist_to_binary(io_lib:format("~tp", [Other])).
+
+-doc """
+Liveness-probed label for a bare pid: `#Actor<X.Y.Z>` for a live process,
+`#Dead<X.Y.Z>` for a dead/unreachable one, or the matching `#Future<...>`
+tag when the pid is (or was) executing `beamtalk_future` code (BT-3082).
+
+This is the single canonical algorithm shared by the REPL wire encoder
+(`beamtalk_repl_json:term_to_json/1`, via the `beamtalk_runtime_api` facade)
+and the stdlib-test result formatter (`beamtalk_stdlib_test:format_result/1`)
+for rendering a raw, unwrapped pid — previously duplicated between the two
+with drifted liveness handling: the test-runner copy unconditionally
+rendered `#Actor<...>`, so a dead pid was reported as alive.
+
+Deliberately distinct from `print_string/1`'s `#Pid<...>` rendering for
+`Pid`-class values (ADR-documented in `stdlib/src/Pid.bt`, liveness-agnostic
+by design) — this is wire/test display only, layered on top of the same
+underlying pid, not a replacement for it.
+""".
+-spec pid_label(pid()) -> binary().
+pid_label(Pid) ->
+    case is_pid_alive_safe(Pid) of
+        true ->
+            case process_info(Pid, current_function) of
+                {current_function, {beamtalk_future, pending, _}} ->
+                    <<"#Future<pending>">>;
+                {current_function, {beamtalk_future, resolved, _}} ->
+                    <<"#Future<resolved>">>;
+                {current_function, {beamtalk_future, rejected, _}} ->
+                    <<"#Future<rejected>">>;
+                undefined ->
+                    %% Race: died between the liveness check above and here.
+                    dead_pid_label(Pid);
+                _ ->
+                    iolist_to_binary([<<"#Actor<">>, identity_inner(Pid), <<">">>])
+            end;
+        false ->
+            dead_pid_label(Pid)
+    end.
+
+-doc "Render the `#Dead<X.Y.Z>` label shared by both pid_label/1 branches.".
+-spec dead_pid_label(pid()) -> binary().
+dead_pid_label(Pid) ->
+    iolist_to_binary([<<"#Dead<">>, identity_inner(Pid), <<">">>]).
+
+-doc "Liveness probe that treats a remote/unreachable pid as not alive (never raises).".
+-spec is_pid_alive_safe(pid()) -> boolean().
+is_pid_alive_safe(Pid) ->
+    try
+        is_process_alive(Pid)
+    catch
+        _:_ -> false
+    end.
 
 -doc "Send a message to any value (actor or primitive).".
 -spec send(term(), atom(), list()) -> term().
