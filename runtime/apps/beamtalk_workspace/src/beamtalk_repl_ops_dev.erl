@@ -2189,7 +2189,9 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
             PkgBin = binary:part(ClassBin, 0, Pos),
             ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
             %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
-            SnakeCase = camel_to_snake(binary_to_list(ClassNameBin)),
+            %% BT-3081: delegates to beamtalk_module_name, the single Erlang-side
+            %% authority for the ClassName ⇄ bt@[pkg@]snake_case convention.
+            SnakeCase = beamtalk_module_name:camel_to_snake(binary_to_list(ClassNameBin)),
             ModNameStr = "bt@" ++ binary_to_list(PkgBin) ++ "@" ++ SnakeCase,
             try list_to_existing_atom(ModNameStr) of
                 _ModAtom ->
@@ -2200,25 +2202,6 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
                     {error, badarg}
             end
     end.
-
--doc """
-CamelCase string to snake_case string conversion.
-Mirrors beamtalk_primitive:camel_to_snake/1 for use in REPL ops.
-""".
--spec camel_to_snake(string()) -> string().
-camel_to_snake(Str) ->
-    camel_to_snake(Str, false, []).
-
-camel_to_snake([], _PrevWasLower, Acc) ->
-    lists:reverse(Acc);
-camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
-    Lower = H + 32,
-    case PrevWasLower of
-        true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
-        false -> camel_to_snake(T, false, [Lower | Acc])
-    end;
-camel_to_snake([H | T], _PrevWasLower, Acc) ->
-    camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
 
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->

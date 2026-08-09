@@ -34,16 +34,27 @@ StackFrame objects are value types (tagged maps) with fields:
     module_to_class/1
 ]).
 
--doc "Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.".
+-doc """
+Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.
+
+BT-3081: resolves the module→class registry map once for the whole
+stacktrace rather than once per frame. `module_to_class/1` (what each frame
+would otherwise call individually) resolves via a live class-registry scan
+that is O(registered classes) with a gen_server round trip per class
+(`beamtalk_class_registry:live_class_entries/0`); paying that once per
+exception instead of once per frame keeps a deep stacktrace on a
+many-classes system from turning into O(frames × classes) round trips.
+""".
 -spec wrap(list()) -> list().
 wrap(Stacktrace) when is_list(Stacktrace) ->
-    [wrap_frame(Frame) || Frame <- Stacktrace];
+    ModuleToClass = beamtalk_class_registry:module_to_class_map(),
+    [wrap_frame(Frame, ModuleToClass) || Frame <- Stacktrace];
 wrap(_) ->
     [].
 
 -doc "Convert a single Erlang stacktrace entry to a StackFrame tagged map.".
--spec wrap_frame(tuple()) -> map().
-wrap_frame({Module, Function, ArityOrArgs, Location}) ->
+-spec wrap_frame(tuple(), #{atom() => atom()}) -> map().
+wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
     Arity =
         case is_list(ArityOrArgs) of
             true -> length(ArityOrArgs);
@@ -59,7 +70,7 @@ wrap_frame({Module, Function, ArityOrArgs, Location}) ->
             undefined -> nil;
             L -> L
         end,
-    ClassName = module_to_class(Module),
+    ClassName = resolve_class_name(Module, ModuleToClass),
     #{
         '$beamtalk_class' => 'StackFrame',
         module => Module,
@@ -69,7 +80,7 @@ wrap_frame({Module, Function, ArityOrArgs, Location}) ->
         line => Line,
         class_name => ClassName
     };
-wrap_frame(_Other) ->
+wrap_frame(_Other, _ModuleToClass) ->
     #{
         '$beamtalk_class' => 'StackFrame',
         module => undefined,
@@ -81,9 +92,38 @@ wrap_frame(_Other) ->
     }.
 
 -doc """
+Resolve `Module` to a class name using a pre-built module→class map (from
+`beamtalk_class_registry:module_to_class_map/0`), falling back to the string
+heuristic — the batched counterpart to `module_to_class/1`'s single-module
+registry lookup, used by `wrap/1` to avoid re-scanning the class registry
+per frame (BT-3081).
+""".
+-spec resolve_class_name(atom(), #{atom() => atom()}) -> atom() | 'nil'.
+resolve_class_name(Module, ModuleToClass) when is_atom(Module) ->
+    case maps:find(Module, ModuleToClass) of
+        {ok, ClassName} ->
+            ClassName;
+        error ->
+            module_to_class_heuristic(Module)
+    end;
+resolve_class_name(_, _ModuleToClass) ->
+    nil.
+
+-doc """
 Map Erlang module name to Beamtalk class name.
 
-Handles compiled module naming conventions:
+BT-3081: Resolves via the live class registry first
+(`beamtalk_class_registry:class_name_for_module/1`), which is authoritative
+— it reads each class's actual registered name rather than guessing one
+from its module name, so it can't mis-capitalize acronym-cased classes the
+way the string heuristic below provably does (`bt@stdlib@beamerror` →
+`'BEAMError'` via the registry, vs. the heuristic's lossy `'Beamerror'`).
+Falls back to the heuristic only when the module isn't a registered class
+— no class process has (yet) started for it, or the registry/`pg` isn't
+running at all (early boot, unit tests, or Erlang modules that were never
+Beamtalk classes).
+
+Compiled module naming conventions the heuristic fallback handles:
   - 'counter' → 'Counter' (user classes)
   - 'bt@stdlib@integer' → 'Integer' (stdlib classes)
   - 'bt@integer' → 'Integer' (stdlib alt format)
@@ -92,20 +132,38 @@ Handles compiled module naming conventions:
 """.
 -spec module_to_class(atom()) -> atom() | 'nil'.
 module_to_class(Module) when is_atom(Module) ->
+    case beamtalk_class_registry:class_name_for_module(Module) of
+        {ok, ClassName} ->
+            ClassName;
+        not_found ->
+            module_to_class_heuristic(Module)
+    end;
+module_to_class(_) ->
+    nil.
+
+-doc """
+Lossy snake_case→CamelCase fallback for `module_to_class/1`, used only when
+the module isn't found in the live class registry — see that function's doc
+for why this alone is not authoritative (BT-3081).
+""".
+-spec module_to_class_heuristic(atom()) -> atom() | 'nil'.
+module_to_class_heuristic(Module) ->
     ModStr = atom_to_list(Module),
     case ModStr of
         "bt@" ++ Rest ->
             %% bt@stdlib@integer, bt@exdura@workflow_engine, bt@counter
             %% Take the segment after the last '@' for the class name.
             Parts = string:split(Rest, "@", all),
-            snake_to_class(lists:last(Parts));
+            beamtalk_module_name:snake_to_class(lists:last(Parts));
         "beamtalk_" ++ Rest ->
             %% Runtime primitive modules like beamtalk_integer, beamtalk_string
-            snake_to_class(Rest);
+            beamtalk_module_name:snake_to_class(Rest);
         _ ->
-            %% Could be a user class compiled as snake_case module
-            %% Try to look it up in the class registry
-            ClassName = snake_to_class(ModStr),
+            %% Could be a user class compiled as snake_case module that just
+            %% isn't registered under this exact module (already ruled out
+            %% by the registry lookup above) — only trust the guess if a
+            %% class by that guessed name is registered at all.
+            ClassName = beamtalk_module_name:snake_to_class(ModStr),
             case ClassName of
                 nil ->
                     nil;
@@ -115,30 +173,7 @@ module_to_class(Module) when is_atom(Module) ->
                         _ -> ClassName
                     end
             end
-    end;
-module_to_class(_) ->
-    nil.
-
--doc """
-Convert snake_case module name to CamelCase class name atom.
-
-Uses list_to_existing_atom to avoid atom table growth from arbitrary module names.
-""".
--spec snake_to_class(string()) -> atom() | 'nil'.
-snake_to_class(Snake) ->
-    Words = string:split(Snake, "_", all),
-    Capitalized = [capitalize(W) || W <- Words],
-    try
-        list_to_existing_atom(lists:flatten(Capitalized))
-    catch
-        error:badarg -> nil
     end.
-
--doc "Capitalize first letter of a string.".
--spec capitalize(string()) -> string().
-capitalize([]) -> [];
-capitalize([H | T]) when H >= $a, H =< $z -> [H - 32 | T];
-capitalize(Str) -> Str.
 
 -doc "Dispatch a message to a StackFrame object.".
 -spec dispatch(atom(), list(), map()) -> term().

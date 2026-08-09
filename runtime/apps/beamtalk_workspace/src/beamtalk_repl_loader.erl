@@ -437,24 +437,17 @@ is_stdlib_path(Path) ->
 Convert a string to snake_case (e.g., "SchemeSymbol" -> "scheme_symbol").
 Matches the Rust to_module_name() convention: inserts underscore before
 uppercase only when the previous character was lowercase.
+
+BT-3081: delegates to `beamtalk_module_name:camel_to_snake/1`, the single
+Erlang-side authority for this conversion. This function previously had its
+own drifted copy that force-lowercased the first character unconditionally
+(discarding whether it actually started lowercase) and used Unicode
+`string:to_lower/1` where the other three copies used ASCII-only `$A..$Z`
+arithmetic — e.g. `"eTag"` wrongly became `"etag"` instead of `"e_tag"`.
 """.
 -spec to_snake_case(string()) -> string().
-to_snake_case([]) ->
-    [];
-to_snake_case([H | T]) ->
-    to_snake_case(T, [string:to_lower(H)], false).
-
-to_snake_case([], Acc, _PrevWasLower) ->
-    lists:reverse(Acc);
-to_snake_case([C | Rest], Acc, PrevWasLower) when C >= $A, C =< $Z ->
-    case PrevWasLower of
-        true ->
-            to_snake_case(Rest, [string:to_lower(C), $_ | Acc], false);
-        false ->
-            to_snake_case(Rest, [string:to_lower(C) | Acc], false)
-    end;
-to_snake_case([C | Rest], Acc, _PrevWasLower) ->
-    to_snake_case(Rest, [C | Acc], C >= $a andalso C =< $z).
+to_snake_case(Str) ->
+    beamtalk_module_name:camel_to_snake(Str).
 
 -doc """
 Verify that the expected class name appears in the compiled class list (BT-868).

@@ -1295,15 +1295,14 @@ ensure_code_step(ClassName, Module, Step, false) ->
 -doc """
 Check if a module name belongs to the Beamtalk stdlib.
 BT-785: Stdlib modules have the prefix `bt@stdlib@`.
+
+BT-3081: delegates to `beamtalk_module_name:is_stdlib_module/1`, the single
+authority for this check (was byte-identical to
+`beamtalk_class_registry:is_stdlib_module/1`).
 """.
 -spec is_stdlib_module_name(atom()) -> boolean().
-is_stdlib_module_name(Module) when is_atom(Module) ->
-    case atom_to_binary(Module, utf8) of
-        <<"bt@stdlib@", _/binary>> -> true;
-        _ -> false
-    end;
-is_stdlib_module_name(_) ->
-    false.
+is_stdlib_module_name(Module) ->
+    beamtalk_module_name:is_stdlib_module(Module).
 
 -doc """
 Stop all live actors of a given class.

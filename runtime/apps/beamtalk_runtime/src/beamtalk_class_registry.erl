@@ -49,6 +49,8 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     drain_pending_load_errors_by_names/1,
     validate_class_update/3,
     is_stdlib_module/1,
+    class_name_for_module/1,
+    module_to_class_map/0,
     inherits_from/2,
     direct_subclasses/1,
     all_subclasses/1,
@@ -448,15 +450,61 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
 -doc """
 Returns true if the given module atom belongs to the Beamtalk stdlib.
 BT-738: Stdlib modules have the prefix 'bt@stdlib@'.
+
+BT-3081: delegates to `beamtalk_module_name:is_stdlib_module/1`, the single
+authority for this check (was byte-identical to
+`beamtalk_behaviour_intrinsics:is_stdlib_module_name/1`).
 """.
 -spec is_stdlib_module(atom()) -> boolean().
-is_stdlib_module(Module) when is_atom(Module) ->
-    case atom_to_binary(Module, utf8) of
-        <<"bt@stdlib@", _/binary>> -> true;
-        _ -> false
+is_stdlib_module(Module) ->
+    beamtalk_module_name:is_stdlib_module(Module).
+
+-doc """
+Resolve a compiled BEAM module atom to its Beamtalk class name via the live
+class registry (BT-3081).
+
+Authoritative — unlike the snake_case→CamelCase string heuristic
+(`beamtalk_module_name:snake_to_class/1`), this reads each class's actual
+registered name rather than guessing one from its module name, so it cannot
+mis-capitalize acronym-cased classes (`bt@stdlib@beamerror` heuristically
+re-capitalizes to `'Beamerror'`, but the real class is `'BEAMError'`).
+
+Returns `not_found` when no live class process has this module (including
+when the class registry / pg process group isn't running at all — see
+`live_class_entries/0`), not an error — callers should fall back to the
+string heuristic in that case, exactly as
+`beamtalk_repl_ops_load:module_to_class_name_map/0` already does in bulk.
+
+For resolving many modules at once (e.g. every frame of a stacktrace), prefer
+`module_to_class_map/0` and look up each module in the result — this function
+rebuilds the whole map (an O(registered classes) scan with a gen_server round
+trip per class, via `live_class_entries/0`) on every call, so calling it once
+per module in a loop pays that scan once per module instead of once total.
+""".
+-spec class_name_for_module(atom()) -> {ok, class_name()} | not_found.
+class_name_for_module(Module) when is_atom(Module) ->
+    case maps:find(Module, module_to_class_map()) of
+        {ok, Name} -> {ok, Name};
+        error -> not_found
     end;
-is_stdlib_module(_) ->
-    false.
+class_name_for_module(_) ->
+    not_found.
+
+-doc """
+Build the full module→class-name map from the live class registry in a
+single pass (BT-3081) — the batch counterpart to `class_name_for_module/1`.
+
+Use this when resolving many modules at once (e.g. `beamtalk_stack_frame:wrap/1`
+mapping every frame of a stacktrace to its class): one `live_class_entries/0`
+scan plus O(1) map lookups thereafter, instead of one full scan per module.
+""".
+-spec module_to_class_map() -> #{atom() => class_name()}.
+module_to_class_map() ->
+    lists:foldl(
+        fun({Name, Mod, _Pid}, Acc) -> Acc#{Mod => Name} end,
+        #{},
+        live_class_entries()
+    ).
 
 -doc """
 Returns true if the given module atom is a bootstrap stub.

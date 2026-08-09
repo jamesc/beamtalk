@@ -435,9 +435,47 @@ pub fn resolve_qualified_module_name(class_name: &str, package: Option<&str>) ->
     }
 }
 
+/// BT-3081 cross-language conformance fixture for `to_module_name`.
+///
+/// Kept byte-identical to the Erlang-side fixture in
+/// `runtime/apps/beamtalk_runtime/test/beamtalk_module_name_tests.erl`
+/// (`beamtalk_module_name:camel_to_snake/1`) — the single Erlang authority
+/// this Rust function is mirrored by. If either list changes, update both so
+/// the two implementations stay provably in sync on the same inputs,
+/// including the acronym case-fold collision (`BEAMError`/`Beamerror`,
+/// BT-3081) and the lowercase-initial + Unicode cases that previously drifted
+/// between the four now-deleted Erlang copies of this conversion.
+#[cfg(test)]
+const MODULE_NAME_CONFORMANCE_FIXTURES: &[(&str, &str)] = &[
+    ("Counter", "counter"),
+    ("MyCounterActor", "my_counter_actor"),
+    ("HTTPRouter", "httprouter"),
+    ("BEAMError", "beamerror"),
+    ("Beamerror", "beamerror"),
+    ("myClass", "my_class"),
+    ("aB", "a_b"),
+    ("already_snake", "already_snake"),
+    ("App2", "app2"),
+    ("ABC", "abc"),
+    ("", ""),
+    ("École", "école"),
+    ("MonÉcole", "mon_école"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn to_module_name_conformance_fixtures() {
+        for (input, expected) in MODULE_NAME_CONFORMANCE_FIXTURES {
+            assert_eq!(
+                to_module_name(input),
+                *expected,
+                "to_module_name({input:?}) mismatch"
+            );
+        }
+    }
 
     #[test]
     fn module_creation() {
