@@ -1230,9 +1230,25 @@ dev_runtime_test_() ->
             {"type-annotation position with empty prefix offers all candidates",
                 fun type_annotation_completion_empty_prefix/0},
             {"single-colon keyword-selector prefix is not annotation position",
-                fun single_colon_not_annotation_position/0}
+                fun single_colon_not_annotation_position/0},
+            {"collect_all_methods dedups an overridden inherited selector",
+                fun collect_all_methods_dedups_override/0}
         ]
     end}.
+
+collect_all_methods_dedups_override() ->
+    %% BT-3087 regression: WidgetDev overrides WidgetDevBase's inheritedGreet
+    %% (see setup_dev_runtime/0). Before the fix, collect_methods_with_fun
+    %% built the result as `LocalMethods ++ InheritedMethods` with no dedup,
+    %% so the overridden selector appeared twice — once from WidgetDev's own
+    %% local methods, once from WidgetDevBase's. Local-overrides-wins
+    %% shadowing means it must appear exactly once now.
+    Result = beamtalk_repl_ops_dev:collect_all_methods('WidgetDev', 0),
+    Occurrences = [S || S <- Result, S =:= 'inheritedGreet'],
+    ?assertEqual(1, length(Occurrences)),
+    %% Sanity: non-overridden local and inherited methods are still present.
+    ?assert(lists:member('render', Result)),
+    ?assert(lists:member('next', Result)).
 
 context_completion_expression_empty_prefix() ->
     %% "WidgetDev create " — resolved instance receiver with empty prefix returns
@@ -1361,7 +1377,12 @@ setup_dev_runtime() ->
         instance_methods => #{
             'render' => #{block => fun(_, _) -> ok end, arity => 0},
             'resize' => #{block => fun(_, _, _) -> ok end, arity => 2},
-            'next' => #{block => fun(_, _) -> ok end, arity => 0}
+            'next' => #{block => fun(_, _) -> ok end, arity => 0},
+            %% BT-3087: overrides WidgetDevBase's inheritedGreet — regression
+            %% fixture for the duplicate-listing bug (collect_all_methods
+            %% used to return an overridden selector twice, once from
+            %% LocalMethods and once from InheritedMethods).
+            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0}
         },
         method_return_types => #{
             'next' => 'WidgetDev'

@@ -50,7 +50,10 @@ Extracted from beamtalk_repl_server (BT-705).
     is_identifier_char/1,
     %% BT-3083: white-box test of the completion keyword vocabulary against
     %% the shared Rust/Erlang conformance corpus.
-    builtin_keywords/0
+    builtin_keywords/0,
+    %% BT-3087: white-box test of the local-overrides-wins dedup fix for
+    %% "all methods including inherited".
+    collect_all_methods/2
 ]).
 -endif.
 
@@ -1834,39 +1837,73 @@ Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 collect_all_methods(ClassName, Depth) ->
     collect_methods_with_fun(ClassName, Depth, fun beamtalk_runtime_api:class_methods/1).
 
--doc "Walk the superclass chain collecting methods via a caller-supplied getter fun.".
+-doc """
+Walk the superclass chain collecting methods via a caller-supplied getter fun.
+
+Local methods shadow inherited ones (Smalltalk-style override): a selector
+redefined by a subclass appears exactly once in the result, attributed to
+the subclass. BT-3087: previously `LocalMethods ++ InheritedMethods` with no
+dedup at all, so an overridden selector appeared twice — a real user-visible
+bug in method-listing completions.
+
+BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` — one depth guard,
+one `?LOG_WARNING`-on-exhaustion policy, matching every other consolidated
+hierarchy walker (`beamtalk_behaviour_intrinsics:walk_hierarchy/3`,
+`beamtalk_hierarchy_docs`). `Depth` is accepted for API compatibility with
+existing callers (always 0) but the walk itself always starts fresh at 0 —
+`walk_ancestors/3` owns depth-counting internally.
+""".
 -spec collect_methods_with_fun(atom(), non_neg_integer(), fun((pid()) -> [atom()])) -> [atom()].
-collect_methods_with_fun(_ClassName, Depth, _Fun) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    [];
-collect_methods_with_fun(ClassName, Depth, Fun) ->
-    case
-        try
-            beamtalk_runtime_api:whereis_class(ClassName)
-        catch
-            _:_ -> undefined
-        end
-    of
-        undefined ->
-            [];
-        ClassPid ->
-            LocalMethods =
-                try
-                    Fun(ClassPid)
-                catch
-                    _:_ -> []
-                end,
-            Superclass =
-                try
-                    beamtalk_runtime_api:superclass(ClassPid)
-                catch
-                    _:_ -> none
-                end,
-            InheritedMethods =
+collect_methods_with_fun(ClassName, _Depth, Fun) ->
+    StepFun = fun({CurrentClassName, AccMap}, _WalkDepth) ->
+        case
+            try
+                beamtalk_runtime_api:whereis_class(CurrentClassName)
+            catch
+                _:_ -> undefined
+            end
+        of
+            undefined ->
+                {found, AccMap};
+            ClassPid ->
+                LocalMethods =
+                    try
+                        Fun(ClassPid)
+                    catch
+                        _:_ -> []
+                    end,
+                LocalMap = maps:from_keys(LocalMethods, true),
+                %% AccMap already reflects every closer (subclass-side)
+                %% selector winning over farther ancestors; keep that
+                %% invariant as this (farther) level's LocalMap is folded in.
+                NewAcc = maps:merge(LocalMap, AccMap),
+                Superclass =
+                    try
+                        beamtalk_runtime_api:superclass(ClassPid)
+                    catch
+                        _:_ -> none
+                    end,
                 case Superclass of
-                    none -> [];
-                    Super -> collect_methods_with_fun(Super, Depth + 1, Fun)
-                end,
-            LocalMethods ++ InheritedMethods
+                    none -> {found, NewAcc};
+                    Super -> {next, {Super, NewAcc}}
+                end
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors({ClassName, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, ResultMap} ->
+            maps:keys(ResultMap);
+        max_depth_exceeded ->
+            ?LOG_WARNING(
+                "collect_methods_with_fun: max hierarchy depth ~p exceeded at ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            [];
+        not_found ->
+            %% Unreachable: StepFun above always resolves to {found, _} — an
+            %% unregistered class or a `none` superclass is translated to a
+            %% terminal {found, _}, never a bare `none` node.
+            erlang:error({unreachable, not_found, ClassName})
     end.
 
 -doc """
