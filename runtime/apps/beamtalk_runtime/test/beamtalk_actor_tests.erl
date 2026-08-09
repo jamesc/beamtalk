@@ -3768,3 +3768,57 @@ bt2717_watch_setup() ->
 
 bt2717_watch_teardown(_) ->
     ok.
+
+%%====================================================================
+%% BT-3090: pid_class_name/1 and registered_name_for_pid/1 — consolidated
+%% sentinel policy.
+%%
+%% Before BT-3090, `beamtalk_actor:pid_class_name/1` and
+%% `beamtalk_actor:registered_name_for_pid/1` returned Erlang's `undefined`
+%% on a miss, while the (now-deleted) copies in `beamtalk_inspector` and
+%% `beamtalk_process_navigation` returned Beamtalk's `nil`. This pins the
+%% decided policy: `nil` everywhere, because these values flow into
+%% user-visible Beamtalk output (inspector labels, supervision-tree node
+%% maps) where `nil` is the correct null representation, not raw `undefined`.
+%%====================================================================
+
+pid_class_name_returns_nil_on_non_beamtalk_pid_test() ->
+    %% A plain, non-Beamtalk process has no `'$beamtalk_actor'` process-dict
+    %% marker, so the miss case must surface Beamtalk's `nil`, not `undefined`.
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid))
+    after
+        Pid ! stop
+    end.
+
+registered_name_for_pid_returns_nil_when_unregistered_test() ->
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        ?assertEqual(nil, beamtalk_actor:registered_name_for_pid(Pid))
+    after
+        Pid ! stop
+    end.
+
+registered_name_for_pid_returns_name_when_registered_test() ->
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Name = bt3090_test_registered_name,
+    true = erlang:register(Name, Pid),
+    try
+        ?assertEqual(Name, beamtalk_actor:registered_name_for_pid(Pid))
+    after
+        catch erlang:unregister(Name),
+        Pid ! stop
+    end.
