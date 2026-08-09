@@ -10,7 +10,7 @@
 
 use assert_cmd::Command;
 use beamtalk_cli::pid_liveness::is_process_alive;
-use std::cell::RefCell;
+use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 use std::sync::OnceLock;
@@ -105,7 +105,7 @@ thread_local! {
     /// thread exits, i.e. after libtest has run every test scheduled on it
     /// and joins the thread, well after any subprocess using the directory
     /// has finished.
-    static CACHE_DIR: RefCell<Option<TempDir>> = const { RefCell::new(None) };
+    static CACHE_DIR: OnceCell<TempDir> = const { OnceCell::new() };
 }
 
 /// Returns this test thread's `BEAMTALK_CACHE_DIR` isolation directory
@@ -123,15 +123,14 @@ thread_local! {
 fn thread_cache_dir() -> PathBuf {
     sweep_stale_cache_dirs_once();
     CACHE_DIR.with(|cell| {
-        cell.borrow_mut()
-            .get_or_insert_with(|| {
-                tempfile::Builder::new()
-                    .prefix(&format!("{CACHE_DIR_PREFIX}{}-", std::process::id()))
-                    .tempdir()
-                    .expect("create BEAMTALK_CACHE_DIR tempdir")
-            })
-            .path()
-            .to_path_buf()
+        cell.get_or_init(|| {
+            tempfile::Builder::new()
+                .prefix(&format!("{CACHE_DIR_PREFIX}{}-", std::process::id()))
+                .tempdir()
+                .expect("create BEAMTALK_CACHE_DIR tempdir")
+        })
+        .path()
+        .to_path_buf()
     })
 }
 
