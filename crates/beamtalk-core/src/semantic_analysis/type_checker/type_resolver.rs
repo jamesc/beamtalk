@@ -602,6 +602,18 @@ fn resolve_declared_type_inner(
             // doc), so this fallback only matters for the nested case.
             // Without a threaded binding, falls back to `Dynamic` — the
             // pre-BT-3076 behaviour for every caller that never threads one.
+            //
+            // Provenance: unlike the `SelfClass` arm above (which constructs
+            // a fresh `Meta` and stamps `declared_type_provenance(ctx)`),
+            // this arm returns the bound receiver type *verbatim*, keeping
+            // whatever provenance the caller's receiver carried (typically
+            // `Inferred`). That's deliberate: the substituted `Self` IS the
+            // receiver's type, not a type this annotation constructed, and
+            // re-stamping it `Substituted` would erase where it came from —
+            // e.g. flow-sensitive narrowing keyed on inferred provenance.
+            // Pinned by `substitute_self_in_union_uses_full_receiver_type`
+            // (inference.rs), which asserts the receiver's exact
+            // `InferredType` (provenance included) survives substitution.
             if let Some(self_ty) = subst.get("Self") {
                 return self_ty.clone();
             }

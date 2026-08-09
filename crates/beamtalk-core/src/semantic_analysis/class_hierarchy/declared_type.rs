@@ -191,14 +191,23 @@ impl DeclaredType {
     /// [`ClassHierarchy::apply_inferred_return_types`](super::ClassHierarchy::apply_inferred_return_types)
     /// (only `Known` and `Never` are ever written back today):
     /// - [`InferredType::Known`] → [`DeclaredType::Simple`] (no type args) or
-    ///   [`DeclaredType::Generic`] (with type args, recursively converted;
-    ///   `None` if any argument is unconvertible).
+    ///   [`DeclaredType::Generic`] (with type args, converted via
+    ///   [`Self::from_inferred_nested`]; `None` if any argument is
+    ///   unconvertible).
     /// - [`InferredType::Never`] → `Simple("Never")`.
-    /// - [`InferredType::Union`] → `Union` of converted members, `None` if
-    ///   any member is unconvertible.
+    /// - [`InferredType::Union`] → `Union` of converted members (also via
+    ///   `from_inferred_nested`), `None` if any member is unconvertible.
     /// - Everything else (`Dynamic`, `Meta`, `Negation`, `Intersection`) →
     ///   `None` — these don't have a single canonical declared-type spelling
-    ///   the writeback path should commit to.
+    ///   the writeback path should commit to. Note the top-level/nested
+    ///   asymmetry for `Dynamic`: a bare `Dynamic` return is *not* written
+    ///   back (same as the pre-BT-3076 `Known | Never` filter), but a
+    ///   `Dynamic` nested inside a `Known`/`Union` converts to
+    ///   `Simple("Dynamic")` so partially-inferred generics like
+    ///   `List(Dynamic)` still write back — matching the old
+    ///   `display_name()` string path, which rendered exactly
+    ///   `"List(Dynamic)"` (BT-3101). Lossy cases that remain: a nested
+    ///   `Meta`/`Negation`/`Intersection` still aborts the whole conversion.
     #[must_use]
     pub fn from_inferred(ty: &InferredType) -> Option<DeclaredType> {
         match ty {
@@ -214,7 +223,7 @@ impl DeclaredType {
             } => {
                 let parameters = type_args
                     .iter()
-                    .map(DeclaredType::from_inferred)
+                    .map(DeclaredType::from_inferred_nested)
                     .collect::<Option<Vec<_>>>()?;
                 Some(DeclaredType::Generic {
                     base: class_name.clone(),
@@ -225,11 +234,24 @@ impl DeclaredType {
             InferredType::Union { members, .. } => {
                 let converted = members
                     .iter()
-                    .map(DeclaredType::from_inferred)
+                    .map(DeclaredType::from_inferred_nested)
                     .collect::<Option<Vec<_>>>()?;
                 Some(DeclaredType::Union(converted))
             }
             _ => None,
+        }
+    }
+
+    /// [`Self::from_inferred`] for *nested* positions (generic type args,
+    /// union members), where `Dynamic` additionally converts to
+    /// `Simple("Dynamic")` — the resolver normalises that name back to
+    /// `Dynamic`, so the round-trip is faithful. Kept out of `from_inferred`
+    /// itself so a bare top-level `Dynamic` return type still skips
+    /// writeback entirely (see its doc, BT-3101).
+    fn from_inferred_nested(ty: &InferredType) -> Option<DeclaredType> {
+        match ty {
+            InferredType::Dynamic(_) => Some(DeclaredType::Simple("Dynamic".into())),
+            other => DeclaredType::from_inferred(other),
         }
     }
 
@@ -812,5 +834,77 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn from_inferred_nested_dynamic_arg_writes_back_as_dynamic_name() {
+        // BT-3101: `List(Dynamic)` must still write back — the pre-BT-3076
+        // string path always produced `"List(Dynamic)"`; skipping the whole
+        // conversion was a precision regression. The nested `Dynamic`
+        // becomes `Simple("Dynamic")`, which the resolver normalises back
+        // to the real `Dynamic` variant (BT-2865).
+        use crate::semantic_analysis::type_checker::{DynamicReason, TypeProvenance};
+        let ty = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::Dynamic(DynamicReason::Unknown)],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        assert_eq!(
+            DeclaredType::from_inferred(&ty),
+            Some(DeclaredType::Generic {
+                base: "List".into(),
+                parameters: vec![DeclaredType::Simple("Dynamic".into())],
+            })
+        );
+    }
+
+    #[test]
+    fn from_inferred_deeply_nested_dynamic_arg() {
+        use crate::semantic_analysis::type_checker::{DynamicReason, TypeProvenance};
+        let inner = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::Dynamic(DynamicReason::Unknown)],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        let ty = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![inner, InferredType::known("Error")],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        assert_eq!(
+            DeclaredType::from_inferred(&ty).map(|dt| dt.to_string()),
+            Some("Result(List(Dynamic), Error)".to_string())
+        );
+    }
+
+    #[test]
+    fn from_inferred_union_with_dynamic_member() {
+        use crate::semantic_analysis::type_checker::{DynamicReason, TypeProvenance};
+        let ty = InferredType::Union {
+            members: vec![
+                InferredType::known("Integer"),
+                InferredType::Dynamic(DynamicReason::Unknown),
+            ],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        let result = DeclaredType::from_inferred(&ty).expect("expected Some");
+        assert_eq!(result.to_string(), "Integer | Dynamic");
+    }
+
+    #[test]
+    fn from_inferred_nested_meta_still_aborts() {
+        // The nested-`Dynamic` carve-out (BT-3101) is deliberately narrow:
+        // a nested `Meta` still has no declared-type spelling the writeback
+        // should commit to, so the whole conversion aborts as before.
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        let ty = InferredType::Known {
+            class_name: "List".into(),
+            type_args: vec![InferredType::Meta {
+                class_name: "Foo".into(),
+                provenance: TypeProvenance::Inferred(span()),
+            }],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        assert_eq!(DeclaredType::from_inferred(&ty), None);
     }
 }
