@@ -403,9 +403,8 @@ is_known_error_reason(Reason) when is_tuple(Reason), tuple_size(Reason) > 0 ->
 is_known_error_reason(_) ->
     false.
 
+%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — was a
+%% byte-identical copy of `beamtalk_repl_protocol:to_binary/1`.
 -doc "Format a name for error messages.".
 -spec format_name(term()) -> binary().
-format_name(Name) when is_atom(Name) -> atom_to_binary(Name, utf8);
-format_name(Name) when is_binary(Name) -> Name;
-format_name(Name) when is_list(Name) -> list_to_binary(Name);
-format_name(Name) -> iolist_to_binary(io_lib:format("~p", [Name])).
+format_name(Name) -> beamtalk_text:to_binary(Name).

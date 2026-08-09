@@ -210,6 +210,24 @@ handle_response_unexpected_test() ->
     ).
 
 %%% ---------------------------------------------------------------
+%%% to_binary/1 — BT-3090: golden test for the compiler-local copy.
+%%%
+%%% This deliberately does NOT compare against `beamtalk_text:to_binary/1`
+%%% (the canonical runtime-side helper) — `beamtalk_compiler` is a peer of
+%%% `beamtalk_runtime`, not a dependent (ADR 0022), so it cannot reach that
+%%% module, and a "matches the other implementation" test across that
+%%% boundary would just be re-deriving the same two clauses by hand. This
+%%% pins the local implementation's own behavior instead, per
+%%% docs/development/architecture-principles.md §7.
+%%% ---------------------------------------------------------------
+
+to_binary_atom_test() ->
+    ?assertEqual(<<"foo">>, beamtalk_compiler_port:to_binary(foo)).
+
+to_binary_binary_test() ->
+    ?assertEqual(<<"already binary">>, beamtalk_compiler_port:to_binary(<<"already binary">>)).
+
+%%% ---------------------------------------------------------------
 %%% find_compiler_binary/0 — binary discovery paths
 %%% ---------------------------------------------------------------
 
