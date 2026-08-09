@@ -137,6 +137,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Accepted | 2026-07-15 |
 | [0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md) | Block-Scoped Class Methods Run Their Block in the Caller's Process | Accepted | 2026-07-28 |
 | [0110](0110-class-var-shadow-write-through-for-nlr-relay.md) | Class-Variable Shadow Write-Through for Foreign NLR Relay | Accepted | 2026-08-02 |
+| [0111](0111-lowered-ir-verifier-for-state-threading.md) | Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return | Proposed | 2026-08-09 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
