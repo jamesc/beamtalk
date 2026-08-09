@@ -54,7 +54,9 @@ compiler_test_() ->
         {"compiler app module callbacks", fun compiler_app_callbacks/0},
         {"resolve_method_span instance method", fun resolve_method_span_instance/0},
         {"resolve_method_span class method", fun resolve_method_span_class/0},
-        {"resolve_method_span selector not found", fun resolve_method_span_not_found/0}
+        {"resolve_method_span selector not found", fun resolve_method_span_not_found/0},
+        {"command vocabulary corpus is recognized (BT-3095)",
+            fun command_vocabulary_corpus_is_recognized/0}
     ]}.
 
 %%% Tests
@@ -258,3 +260,128 @@ resolve_method_span_not_found() ->
     Result =
         beamtalk_compiler:resolve_method_span(Source, <<"SpanCounter">>, <<"nope">>, instance),
     ?assertMatch({error, selector_not_found, _}, Result).
+
+%%% ---------------------------------------------------------------
+%%% Command-vocabulary conformance corpus (BT-3095)
+%%% ---------------------------------------------------------------
+
+%% BT-3095 conformance: every command in the shared wire-vocabulary corpus
+%% must dispatch successfully through `beamtalk_compiler`'s public API,
+%% against the REAL compiled `beamtalk-compiler-port` binary (via
+%% `beamtalk_compiler_server`'s port, opened by this file's `setup/0`). The
+%% corpus is the single source of truth both implementations are pinned to;
+%% the Rust side asserts the identical list against `handle_request`'s
+%% dispatch in `tests::handle_request_recognizes_shared_command_vocabulary_corpus`
+%% (`crates/beamtalk-compiler-port/src/main.rs`) — see that function's doc
+%% comment, and `handle_request`'s, for the full rationale. A command
+%% missing from either side therefore fails a build-time test instead of
+%% surfacing only as a runtime "Unknown command" error wherever it's
+%% invoked.
+command_vocabulary_corpus_is_recognized() ->
+    Corpus = load_command_vocabulary_corpus(),
+    ?assert(length(Corpus) > 0),
+    lists:foreach(fun assert_command_recognized/1, Corpus).
+
+%% Exercise one corpus command through a minimal-but-successful call to
+%% `beamtalk_compiler`'s public API. Each clause asserts an unambiguous
+%% success shape — not just "didn't error" — so an "Unknown command"
+%% mismatch can't hide behind a legitimate not-found/empty result.
+%% `resolve_completion_type` needs an *exact* expected value rather than
+%% just `{ok, _}`: its Erlang API collapses every failure shape (a
+%% legitimate not-found result *and* an unrecognized command) into the same
+%% `{error, type_unknown}`, so only a guaranteed-resolvable expression proves
+%% the command actually dispatched.
+assert_command_recognized(<<"compile_expression">>) ->
+    ?assertMatch(
+        {ok, _, _}, beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"bt3095_ce">>, [])
+    );
+assert_command_recognized(<<"compile_expression_trace">>) ->
+    ?assertMatch(
+        {ok, _, _},
+        beamtalk_compiler:compile_expression_trace(<<"1 + 2">>, <<"bt3095_cet">>, [])
+    );
+assert_command_recognized(<<"compile">>) ->
+    Source = <<"Object subclass: Bt3095CompileTarget\n  value => 42">>,
+    ?assertMatch({ok, _}, beamtalk_compiler:compile(Source, #{}));
+assert_command_recognized(<<"compile_method">>) ->
+    ClassSource = <<"Object subclass: Bt3095MethodTarget\n  greet => 42">>,
+    MethodSource = <<"greet => 43">>,
+    ?assertMatch({ok, _}, beamtalk_compiler:compile_method(ClassSource, MethodSource, #{}));
+assert_command_recognized(<<"diagnostics">>) ->
+    ?assertMatch({ok, _}, beamtalk_compiler:diagnostics(<<"1 + 2">>));
+assert_command_recognized(<<"version">>) ->
+    ?assertMatch({ok, _}, beamtalk_compiler:version());
+assert_command_recognized(<<"resolve_completion_type">>) ->
+    %% "42" resolves deterministically to 'Integer' — see
+    %% `completion_provider::tests::resolve_expression_type_integer_literal`.
+    ?assertEqual({ok, 'Integer'}, beamtalk_compiler:resolve_completion_type(<<"42">>));
+assert_command_recognized(<<"find_senders_in_source">>) ->
+    ?assertMatch({ok, _}, beamtalk_compiler:find_senders_in_source(<<"x printNl">>, printNl));
+assert_command_recognized(<<"find_all_sends_in_source">>) ->
+    ?assertMatch({ok, _}, beamtalk_compiler:find_all_sends_in_source(<<"x printNl">>));
+assert_command_recognized(<<"find_references_to_in_source">>) ->
+    ?assertMatch(
+        {ok, _},
+        beamtalk_compiler:find_references_to_in_source(<<"x := MyClass new">>, 'MyClass')
+    );
+assert_command_recognized(<<"find_field_readers_in_source">>) ->
+    ?assertMatch(
+        {ok, _}, beamtalk_compiler:find_field_readers_in_source(<<"^ self.value">>, value)
+    );
+assert_command_recognized(<<"find_field_writers_in_source">>) ->
+    ?assertMatch(
+        {ok, _},
+        beamtalk_compiler:find_field_writers_in_source(<<"self.value := 42">>, <<"value">>)
+    );
+assert_command_recognized(<<"find_ffi_sites_in_source">>) ->
+    ?assertMatch(
+        {ok, _},
+        beamtalk_compiler:find_ffi_sites_in_source(
+            <<"(Erlang lists) reverse: x">>, lists, reverse, any
+        )
+    );
+assert_command_recognized(<<"find_announce_sites_in_source">>) ->
+    ?assertMatch({ok, _}, beamtalk_compiler:find_announce_sites_in_source(<<"x printNl">>));
+assert_command_recognized(<<"resolve_method_span">>) ->
+    ?assertMatch(
+        {ok, _, _},
+        beamtalk_compiler:resolve_method_span(
+            span_fixture(), <<"SpanCounter">>, <<"increment">>, instance
+        )
+    );
+assert_command_recognized(<<"reindent_method_source">>) ->
+    ?assertMatch({ok, _}, beamtalk_compiler:reindent_method_source(<<"greet => 42">>, <<"  ">>));
+assert_command_recognized(Command) ->
+    %% A corpus entry with no dispatch clause is a test-authoring gap, not a
+    %% vocabulary mismatch — fail loudly rather than silently skipping it.
+    error({no_dispatch_table_entry_for_corpus_command, Command}).
+
+%% Load the shared compiler-port command-vocabulary conformance corpus
+%% (BT-3095) from the repo tree. Walks up from the test CWD to the project
+%% root (the dir holding `Cargo.toml`), mirroring
+%% `beamtalk_repl_ops_dev_tests:find_word_boundary_corpus_root/1`.
+load_command_vocabulary_corpus() ->
+    Root = find_command_vocabulary_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_compiler",
+        "test",
+        "fixtures",
+        "compiler_port_command_vocabulary_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).
+
+find_command_vocabulary_corpus_root("/") ->
+    error(project_root_not_found);
+find_command_vocabulary_corpus_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_command_vocabulary_corpus_root(filename:dirname(Dir))
+    end.

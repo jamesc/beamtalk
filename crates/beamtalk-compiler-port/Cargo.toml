@@ -40,6 +40,8 @@ tracing-subscriber = { workspace = true }
 proptest = { workspace = true }
 # why: isolated beamtalk.toml fixtures for load_diagnostics_overrides_from tests (BT-2839)
 tempfile = "3.14"
+# why: parse the shared compiler-port command-vocabulary conformance corpus (BT-3095)
+serde_json = { workspace = true }
 
 [build-dependencies]
 beamtalk-build.workspace = true
