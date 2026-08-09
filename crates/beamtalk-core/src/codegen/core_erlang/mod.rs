@@ -533,10 +533,27 @@ impl CodegenOptions {
     /// instead of re-deriving all three from scratch (see ADR 0006, BT-1288, BT-1005).
     ///
     /// `None` (the default) preserves the previous self-sufficient behaviour —
-    /// codegen computes its own analysis internally. Callers that already run
-    /// `analyse_full` before codegen (e.g. the CLI build pipeline via
+    /// codegen computes its own analysis internally, including running the
+    /// pre-codegen writeback trio (`semantic_analysis::lower_module_for_codegen`)
+    /// on its own clone of `module`. Callers that already run `analyse_full`
+    /// before codegen (e.g. the CLI build pipeline via
     /// `compile_source_with_bindings`) should always supply it here to avoid
     /// running the type checker twice per compiled module.
+    ///
+    /// **BT-3125 contract:** when supplying `Some`, the caller is expected to
+    /// have already called [`crate::semantic_analysis::lower_module_for_codegen`]
+    /// on its own `module` — using this same `analysis.class_hierarchy` and
+    /// `analysis.method_return_types` — *before* passing `module` to
+    /// `generate_module`. Codegen trusts that hand-off (skipping the writeback
+    /// trio itself, and the `module.clone()` it used to require) whenever no
+    /// cross-file enrichment from `with_class_hierarchy`/
+    /// `with_class_superclass_index` adds anything the driver's own hierarchy
+    /// didn't already have; codegen still prepares the AST itself in the
+    /// rarer case that enrichment invalidates the hand-off. Skipping the
+    /// `lower_module_for_codegen` call while still supplying `Some` silently
+    /// produces a module missing inferred return types / corrected
+    /// `class_kind` / `supervisor_kind` in the common case — see
+    /// `generate_module_with_warnings`'s BT-3125 comment.
     #[must_use]
     pub fn with_analysis(mut self, analysis: crate::semantic_analysis::AnalysisResult) -> Self {
         self.analysis = Some(analysis);
@@ -636,10 +653,9 @@ pub fn generate_module_with_warnings(
     // eliminating a second full type-checking pass per compiled module. `None`
     // preserves the previous self-sufficient behaviour for callers that don't
     // run analysis separately (unit tests, ad-hoc codegen).
-    let (mut hierarchy, precomputed_method_return_types) = if let Some(analysis) = options.analysis
-    {
+    let (mut hierarchy, analysis_handed_off) = if let Some(analysis) = options.analysis {
         generator.semantic_facts = analysis.semantic_facts;
-        (analysis.class_hierarchy, Some(analysis.method_return_types))
+        (analysis.class_hierarchy, true)
     } else {
         // BT-1288: Compute semantic facts before codegen begins.
         generator.semantic_facts = crate::semantic_analysis::compute_semantic_facts(module);
@@ -649,7 +665,7 @@ pub fn generate_module_with_warnings(
             crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
         let hierarchy =
             hierarchy_result.map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
-        (hierarchy, None)
+        (hierarchy, false)
     };
 
     // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
@@ -661,50 +677,46 @@ pub fn generate_module_with_warnings(
     // `AnalysisContext::with_pre_loaded_classes`. `class_superclass_index`
     // (BT-894) is codegen-only and has no `AnalysisContext` counterpart, so it
     // can still add genuinely new stub entries analysis never saw; both calls
-    // report whether they did so `method_return_types` below knows whether the
-    // handed-off inference is still trustworthy.
+    // report whether they did so the lowering step below knows whether the
+    // handed-off AST preparation is still trustworthy.
     let added_beam_meta = hierarchy.add_from_beam_meta(options.pre_class_hierarchy);
 
     // BT-894: Backfill missing cross-file superclass stubs (only for classes not
     // already present from build() or BEAM metadata).
     let added_superclasses = hierarchy.add_external_superclasses(&options.class_superclass_index);
 
-    // BT-3123: Use the driver's precomputed method-return-type inferences
-    // unless this generation's own cross-file enrichment (above) added stub
-    // classes analysis's own hierarchy didn't have — in that rare case, the
-    // handed-off map may be missing entries a class only visible through those
-    // stubs would need, so fall back to a full `infer_method_return_types`
-    // pass exactly as the no-analysis-supplied path always has. The common
-    // case (nothing added, or no analysis supplied at all) never re-runs
-    // inference the driver already did.
-    let method_return_types = match precomputed_method_return_types {
-        Some(map) if !added_beam_meta && !added_superclasses => map,
-        _ => crate::semantic_analysis::type_checker::infer_method_return_types(
+    // BT-3125: A driver that handed off `AnalysisResult` is expected to have
+    // already called `semantic_analysis::lower_module_for_codegen` on its own
+    // module — using the very same `class_hierarchy`/`method_return_types` —
+    // *before* invoking `generate_module`, per `CodegenOptions::with_analysis`'s
+    // contract. When that hand-off is still trustworthy (no cross-file
+    // enrichment above added anything the driver's own hierarchy didn't have),
+    // codegen no longer schedules the writeback trio itself: it trusts the
+    // already-prepared `module` it was given and skips the clone entirely.
+    //
+    // Two cases still require preparing the AST here, exactly as before
+    // BT-3125: no analysis was handed off at all (self-sufficient codegen —
+    // unit tests, ad-hoc codegen, REPL trace mode), or this generation's own
+    // cross-file enrichment (above) added stub classes the driver's
+    // `lower_module_for_codegen` call never saw, making its writeback
+    // possibly incomplete for this generation's fuller view of the hierarchy.
+    let mut module_owned;
+    let module: &Module = if analysis_handed_off && !added_beam_meta && !added_superclasses {
+        module
+    } else {
+        let method_return_types = crate::semantic_analysis::type_checker::infer_method_return_types(
             module,
             &hierarchy,
             options.native_type_registry.as_deref(),
-        ),
+        );
+        module_owned = module.clone();
+        crate::semantic_analysis::lower_module_for_codegen(
+            &mut module_owned,
+            &hierarchy,
+            &method_return_types,
+        );
+        &module_owned
     };
-
-    // BT-1005: Writeback inferred return types into the AST before codegen so
-    // that unannotated methods appear in the emitted `method_return_types` map.
-    // BT-1218: Also writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
-    // We clone to avoid mutating the caller's Module.
-    let mut module_with_writeback = module.clone();
-    crate::semantic_analysis::apply_return_type_writeback_from_map(
-        &mut module_with_writeback,
-        &method_return_types,
-    );
-    crate::semantic_analysis::apply_supervisor_kind_writeback(
-        &mut module_with_writeback,
-        &hierarchy,
-    );
-    // BT-1534: Correct class_kind for indirect Value/Actor subclasses.
-    // E.g. `TestCase subclass: MyTest` gets ClassKind::Object from the parser
-    // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
-    // so codegen generates auto-slot methods (withX: setters).
-    crate::semantic_analysis::apply_class_kind_writeback(&mut module_with_writeback, &hierarchy);
-    let module = &module_with_writeback;
 
     // BT-2932: build the alias registry once, merging this module's own
     // `type_aliases` with any pre-loaded aliases from other modules in the

@@ -12,11 +12,18 @@
 //! plenty of *other* tests call these functions too and may run concurrently
 //! on other threads — only the delta this test's own thread accumulates is
 //! meaningful. See `CHECK_MODULE_CALL_COUNT`'s doc for the full rationale.
+//!
+//! BT-3125 extends this file with `with_analysis_trusts_driver_prepared_module`
+//! and `with_analysis_without_driver_prep_omits_writeback` (below) — these pin
+//! the *new* contract `CodegenOptions::with_analysis` documents: codegen no
+//! longer runs the writeback trio itself when the hand-off is trustworthy, so
+//! a driver that forgets `semantic_analysis::lower_module_for_codegen` gets
+//! silently incomplete output rather than codegen quietly covering for it.
 
 use crate::semantic_analysis::class_hierarchy::BUILD_CALL_COUNT;
 use crate::semantic_analysis::facts::COMPUTE_SEMANTIC_FACTS_CALL_COUNT;
 use crate::semantic_analysis::type_checker::CHECK_MODULE_CALL_COUNT;
-use crate::semantic_analysis::{AnalysisContext, analyse_full};
+use crate::semantic_analysis::{AnalysisContext, analyse_full, lower_module_for_codegen};
 
 fn parse_fixture(src: &str) -> crate::ast::Module {
     let tokens = crate::source_analysis::lex_with_eof(src);
@@ -218,5 +225,60 @@ fn with_analysis_skips_re_derivation_with_overlapping_cross_file_metadata() {
         1,
         "codegen must not re-run the type checker when the pre-loaded class/superclass \
          data it's given is already reflected in the handed-off analysis"
+    );
+}
+
+/// BT-3125: a driver that calls `lower_module_for_codegen` on its own module
+/// — using the same `AnalysisResult` it goes on to hand to `with_analysis`
+/// — gets the return-type writeback reflected in the generated `-spec`: an
+/// unannotated method whose body infers to `Integer` gets a spec entry
+/// (`generate_method_spec` returns `None` for an entirely unannotated
+/// method — see its doc — so the spec's mere presence, not just its
+/// content, proves the writeback ran).
+#[test]
+fn with_analysis_trusts_driver_prepared_module() {
+    let mut module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
+    let analysis = analyse_full(&module, AnalysisContext::default());
+
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+    );
+
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("foo").with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("{'type', 0, 'integer', []}"),
+        "expected the driver-prepared module's inferred Integer return type \
+         to appear in the generated spec; got:\n{code}"
+    );
+}
+
+/// BT-3125's inverse: a driver that hands off `AnalysisResult` via
+/// `with_analysis` WITHOUT first calling `lower_module_for_codegen` no
+/// longer gets the writeback applied on its behalf — codegen trusts the
+/// hand-off is already prepared instead of re-running it. This pins the
+/// contract documented on `CodegenOptions::with_analysis` and is the
+/// behavioural counterpart to `with_analysis_skips_codegen_re_derivation`'s
+/// call-count assertions above (which prove *no work happens*; this proves
+/// *the AST is consequently unprepared*).
+#[test]
+fn with_analysis_without_driver_prep_omits_writeback() {
+    let module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
+    let analysis = analyse_full(&module, AnalysisContext::default());
+
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("foo").with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        !code.contains("{'type', 0, 'integer', []}"),
+        "expected no writeback-derived spec without a prior \
+         `lower_module_for_codegen` call; got:\n{code}"
     );
 }

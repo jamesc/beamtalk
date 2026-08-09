@@ -15,7 +15,7 @@ use std::hint::black_box;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::semantic_analysis::analyse;
+use beamtalk_core::semantic_analysis::{analyse, lower_module_for_codegen};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
 // ---------------------------------------------------------------------------
@@ -198,8 +198,16 @@ fn bench_end_to_end(c: &mut Criterion) {
             |b, src| {
                 b.iter(|| {
                     let tokens = lex_with_eof(src);
-                    let (module, _diags) = parse(tokens);
+                    let (mut module, _diags) = parse(tokens);
                     let analysis = analyse(&module);
+                    // BT-3125: drivers prepare the AST (writeback trio) at
+                    // this boundary now, before codegen — matches the fixed
+                    // pipeline's actual call sequence.
+                    lower_module_for_codegen(
+                        &mut module,
+                        &analysis.class_hierarchy,
+                        &analysis.method_return_types,
+                    );
                     let opts = CodegenOptions::new(input.module_name)
                         .with_source(src)
                         .with_analysis(analysis);
@@ -238,8 +246,14 @@ fn bench_project(c: &mut Criterion) {
         b.iter(|| {
             for (module_name, source) in &sources {
                 let tokens = lex_with_eof(source);
-                let (module, _) = parse(tokens);
+                let (mut module, _) = parse(tokens);
                 let analysis = analyse(&module);
+                // BT-3125: mirrors bench_end_to_end's driver-boundary prep.
+                lower_module_for_codegen(
+                    &mut module,
+                    &analysis.class_hierarchy,
+                    &analysis.method_return_types,
+                );
                 let opts = CodegenOptions::new(module_name)
                     .with_source(source)
                     .with_analysis(analysis);
@@ -278,8 +292,14 @@ fn bench_project_otp(c: &mut Criterion) {
         b.iter(|| {
             for (module_name, source) in &sources {
                 let tokens = lex_with_eof(source);
-                let (module, _) = parse(tokens);
+                let (mut module, _) = parse(tokens);
                 let analysis = analyse(&module);
+                // BT-3125: mirrors bench_end_to_end's driver-boundary prep.
+                lower_module_for_codegen(
+                    &mut module,
+                    &analysis.class_hierarchy,
+                    &analysis.method_return_types,
+                );
                 let opts = CodegenOptions::new(module_name)
                     .with_source(source)
                     .with_analysis(analysis);
