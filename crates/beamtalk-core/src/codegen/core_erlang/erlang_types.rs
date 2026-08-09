@@ -59,7 +59,7 @@
 
 use std::fmt;
 
-use super::util::to_module_name;
+use super::util::{escape_atom_chars, to_module_name};
 
 /// A Core Erlang atom value object.
 ///
@@ -112,19 +112,10 @@ impl ErlangAtom {
 
 impl fmt::Display for ErlangAtom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Escape special characters in atom names
-        write!(f, "'")?;
-        for c in self.name.chars() {
-            match c {
-                '\'' => write!(f, "\\'")?,
-                '\\' => write!(f, "\\\\")?,
-                '\n' => write!(f, "\\n")?,
-                '\r' => write!(f, "\\r")?,
-                '\t' => write!(f, "\\t")?,
-                _ => write!(f, "{c}")?,
-            }
-        }
-        write!(f, "'")
+        // BT-3089: delegate to the one canonical atom-escaping funnel
+        // (`util::escape_atom_chars`, also used by `leaf::atom`) instead of
+        // hand-rolling a second escape table here.
+        write!(f, "'{}'", escape_atom_chars(&self.name))
     }
 }
 
