@@ -522,19 +522,10 @@ fn block_params_typed_via_method_parameter_annotation() {
     );
 }
 
-#[test]
-fn split_union_respecting_parens_simple() {
-    let result = TypeChecker::split_union_respecting_parens("String | nil");
-    assert_eq!(result, vec!["String", "nil"]);
-}
-
-#[test]
-fn split_union_respecting_parens_inside_parametric() {
-    // Pipe inside parens should NOT cause a split
-    let result = TypeChecker::split_union_respecting_parens("Result(String | Integer, Error)");
-    assert_eq!(result, vec!["Result(String | Integer, Error)"]);
-}
-
+// `split_union_respecting_parens` is a thin wrapper over
+// `string_utils::split_top_level`, whose exhaustive nesting/edge-case
+// coverage lives at its definition site (BT-3089). This is a smoke test
+// that the wrapper is wired up correctly.
 #[test]
 fn split_union_respecting_parens_mixed() {
     // Top-level union with parametric member

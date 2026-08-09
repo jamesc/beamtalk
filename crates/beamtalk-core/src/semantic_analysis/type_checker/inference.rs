@@ -5499,52 +5499,24 @@ impl TypeChecker {
     ///
     /// `"T, E"` → `["T", "E"]`
     /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
+    ///
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089) — kept as a method so the
+    /// many `Self::split_type_params` call sites in this module don't need
+    /// to change.
     pub(super) fn split_type_params(s: &str) -> Vec<&str> {
-        let mut result = Vec::new();
-        let mut depth = 0;
-        let mut start = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth -= 1,
-                ',' if depth == 0 => {
-                    result.push(s[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        let last = s[start..].trim();
-        if !last.is_empty() {
-            result.push(last);
-        }
-        result
+        crate::semantic_analysis::string_utils::split_top_level(s, ',')
     }
 
     /// Split a type string on `|` while respecting parenthesis nesting.
     ///
     /// This ensures `Result(String | Integer, Error)` is NOT split at the inner `|`,
     /// but `String | nil` IS split into `["String", "nil"]`.
+    ///
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089).
     pub(super) fn split_union_respecting_parens(s: &str) -> Vec<&str> {
-        let mut result = Vec::new();
-        let mut depth = 0i32;
-        let mut start = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth = depth.saturating_sub(1),
-                '|' if depth == 0 => {
-                    result.push(s[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        let last = s[start..].trim();
-        if !last.is_empty() {
-            result.push(last);
-        }
-        result
+        crate::semantic_analysis::string_utils::split_top_level(s, '|')
     }
 
     /// BT-1986: Does the return type mention `Self` *nested* inside a
@@ -6670,35 +6642,15 @@ mod tests {
     }
 
     // ---- split_type_params ----
-
-    #[test]
-    fn split_type_params_simple() {
-        let result = TypeChecker::split_type_params("T, E");
-        assert_eq!(result, vec!["T", "E"]);
-    }
-
-    #[test]
-    fn split_type_params_single() {
-        let result = TypeChecker::split_type_params("Integer");
-        assert_eq!(result, vec!["Integer"]);
-    }
+    //
+    // Thin wrapper over `string_utils::split_top_level`, whose exhaustive
+    // nesting/edge-case coverage lives at its definition site (BT-3089).
+    // This is a smoke test that the wrapper is wired up correctly.
 
     #[test]
     fn split_type_params_nested() {
         let result = TypeChecker::split_type_params("GenResult(A, B), E");
         assert_eq!(result, vec!["GenResult(A, B)", "E"]);
-    }
-
-    #[test]
-    fn split_type_params_empty() {
-        let result = TypeChecker::split_type_params("");
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn split_type_params_deeply_nested() {
-        let result = TypeChecker::split_type_params("Outer(Inner(A, B), C), D");
-        assert_eq!(result, vec!["Outer(Inner(A, B), C)", "D"]);
     }
 
     // ---- resolve_type_string (substitution) ----

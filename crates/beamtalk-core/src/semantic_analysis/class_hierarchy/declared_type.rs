@@ -35,6 +35,7 @@ use std::fmt;
 use ecow::EcoString;
 
 use crate::ast::TypeAnnotation;
+use crate::semantic_analysis::string_utils::{split_generic_base, split_top_level};
 use crate::semantic_analysis::type_checker::InferredType;
 
 /// A span-free, structured type signature — the value-object counterpart to
@@ -320,55 +321,6 @@ impl From<&TypeAnnotation> for DeclaredType {
                 DeclaredType::ClassOf(class_name.name.clone())
             }
         }
-    }
-}
-
-/// Split a type-parameter/argument string on `,` while respecting
-/// parenthesis nesting — e.g. `"Outer(Inner(A, B), C), D"` splits into
-/// `["Outer(Inner(A, B), C)", "D"]`, not four pieces.
-///
-/// Shared implementation for [`split_top_level`]'s `,` case; kept as one
-/// function (parameterised on the separator char) since the nesting-aware
-/// scan is otherwise identical for `|` and `,`.
-fn split_top_level(s: &str, sep: char) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0;
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            c if c == sep && depth == 0 => {
-                result.push(s[start..i].trim());
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    let last = s[start..].trim();
-    if !last.is_empty() {
-        result.push(last);
-    }
-    result
-}
-
-/// Split a stored type-name string into `(base, args_slice)`.
-///
-/// Given `"Array(Integer)"` returns `("Array", Some("Integer"))`. Given
-/// `"Integer"` (no parentheses) returns `("Integer", None)`. Given
-/// `"Array(Integer)extra"` (not terminated by `)`) falls back to
-/// `("Array(Integer)extra", None)` — the caller treats the string as opaque.
-///
-/// Mirrors `type_resolver::split_generic_base` — duplicated here (rather
-/// than imported) because `class_hierarchy` sits below `type_checker` in the
-/// dependency graph and must not reach up into it.
-fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
-    match type_name.split_once('(') {
-        Some((base, rest)) if rest.ends_with(')') => {
-            let args = &rest[..rest.len() - 1];
-            (base, Some(args))
-        }
-        _ => (type_name, None),
     }
 }
 

@@ -3236,26 +3236,17 @@ impl TypeChecker {
     /// Used by [`check_protocol_conformance_in_expr`](super::protocol::TypeChecker::check_protocol_conformance_in_expr)
     /// so a parameter declared `:: P1 & P2` is checked for conformance to
     /// **both** protocol parts, per ADR 0068's protocol-composition use case.
+    ///
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089), layering on "no top-level
+    /// `&` found ⇒ `None`" — the one behavioural difference this consumer
+    /// actually needs (see doc comment above): callers use `None` to detect
+    /// "not an intersection annotation at all" and fall back to single-type
+    /// handling, which a bare 1-element `Vec` can't distinguish from "an
+    /// intersection of one part".
     pub(super) fn split_intersection_type_string(type_name: &str) -> Option<Vec<&str>> {
-        let mut depth: usize = 0;
-        let mut parts = Vec::new();
-        let mut start = 0usize;
-        for (i, byte) in type_name.bytes().enumerate() {
-            match byte {
-                b'(' => depth += 1,
-                b')' => depth = depth.saturating_sub(1),
-                b'&' if depth == 0 => {
-                    parts.push(type_name[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        if parts.is_empty() {
-            return None;
-        }
-        parts.push(type_name[start..].trim());
-        Some(parts)
+        let parts = crate::semantic_analysis::string_utils::split_top_level(type_name, '&');
+        if parts.len() < 2 { None } else { Some(parts) }
     }
 
     /// Check type parameter bounds for a generic type application (ADR 0068 Phase 2d).
