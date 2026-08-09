@@ -334,6 +334,10 @@ fn resolve_ffi_signature_help(
     type_map: &TypeMap,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<SignatureHelp> {
+    use crate::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+    };
+
     // Check if receiver is typed as ErlangModule
     let receiver_ty = type_map.get(receiver.span())?;
     let InferredType::Known {
@@ -364,37 +368,66 @@ fn resolve_ffi_signature_help(
     let registry = native_types?;
     let sig = registry.lookup(module_name, function_name, arity)?;
 
-    // Build signature help from the FFI signature
-    let mut parameters = Vec::with_capacity(sig.params.len());
-    let mut label_fragments = Vec::with_capacity(sig.params.len());
-
-    for (i, param) in sig.params.iter().enumerate() {
-        let keyword = if i == 0 {
-            format!("{function_name}:")
-        } else {
-            match &param.keyword {
-                Some(kw) => format!("{kw}:"),
-                None => "with:".to_string(),
+    // Build signature help from the FFI signature via the shared
+    // signature-text composer (BT-3097): each parameter's keyword/name/type
+    // is pre-rendered here (native-type registry types don't have a
+    // `TypeAnnotation`, so they render through their own
+    // `display_for_diagnostic`, not `unparse::unparse_type_annotation_display`),
+    // then composed identically to every other consumer.
+    let keywords: Vec<String> = sig
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| {
+            if i == 0 {
+                format!("{function_name}:")
+            } else {
+                match &param.keyword {
+                    Some(kw) => format!("{kw}:"),
+                    None => "with:".to_string(),
+                }
             }
-        };
-        let param_name = param.keyword.as_deref().unwrap_or("arg");
-        let type_display = param
-            .type_
-            .display_for_diagnostic()
-            .unwrap_or_else(|| EcoString::from("Dynamic"));
-        let param_label = format!("{keyword} {param_name} :: {type_display}");
-        label_fragments.push(param_label.clone());
-        parameters.push(ParameterInfo {
-            label: EcoString::from(param_label),
+        })
+        .collect();
+    let type_displays: Vec<EcoString> = sig
+        .params
+        .iter()
+        .map(|param| {
+            param
+                .type_
+                .display_for_diagnostic()
+                .unwrap_or_else(|| EcoString::from("Dynamic"))
+        })
+        .collect();
+    let sig_params: Vec<SignatureParam<'_>> = sig
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| SignatureParam {
+            keyword: &keywords[i],
+            name: Some(param.keyword.as_deref().unwrap_or("arg")),
+            type_text: Some(type_displays[i].as_str()),
+        })
+        .collect();
+
+    let parameters: Vec<ParameterInfo> = sig_params
+        .iter()
+        .zip(&type_displays)
+        .map(|(param, type_display)| ParameterInfo {
+            label: EcoString::from(param.render()),
             documentation: Some(EcoString::from(format!("Type: {type_display}"))),
-        });
-    }
+        })
+        .collect();
 
     let ret_display = sig
         .return_type
         .display_for_diagnostic()
         .unwrap_or_else(|| EcoString::from("Dynamic"));
-    let label = format!("{} -> {ret_display}", label_fragments.join(" "));
+    let label = render_signature_text(
+        SignatureSelector::Params(&sig_params),
+        Some(&ret_display),
+        &SignatureRenderOptions::DISPLAY,
+    );
 
     let documentation = Some(EcoString::from(format!(
         "Erlang FFI: `{module_name}:{function_name}/{arity}`"
@@ -510,33 +543,61 @@ fn resolve_receiver_class(
 }
 
 /// Builds a `SignatureHelp` from a resolved `MethodInfo`.
+/// Builds signature help from a resolved `ClassHierarchy::MethodInfo`
+/// (BT-3097). Like [`crate::queries::hover_provider`]'s resolved-call
+/// display, `MethodInfo` has no parameter names — only types — so each
+/// parameter renders as `keyword: Type` via the shared
+/// [`crate::unparse::render_signature_text`] core (`SignatureParam { name:
+/// None, .. }`), not the declaration's `keyword name :: Type`.
 fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> SignatureHelp {
+    use crate::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+    };
+
     let selector = &method.selector;
 
-    // Build parameter list from keyword parts and param_types
-    let parts: Vec<&str> = selector.split(':').filter(|s| !s.is_empty()).collect();
-    let mut parameters = Vec::with_capacity(parts.len());
-    let mut label_fragments = Vec::with_capacity(parts.len());
+    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
+    // and hand the composer the text it contracts for.
+    let return_type_text = method.return_type.as_ref().map(ToString::to_string);
+    let param_type_texts: Vec<Option<String>> = method
+        .param_types
+        .iter()
+        .map(|ty| ty.as_ref().map(ToString::to_string))
+        .collect();
 
-    for (i, part) in parts.iter().enumerate() {
-        let param_type = method.param_types.get(i).and_then(|t| t.as_ref());
-        let param_label = if let Some(ty) = param_type {
-            format!("{part}: {ty}")
-        } else {
-            format!("{part}:")
-        };
-        label_fragments.push(param_label.clone());
-        parameters.push(ParameterInfo {
-            label: EcoString::from(param_label),
-            documentation: param_type.map(|ty| EcoString::from(format!("Type: {ty}"))),
-        });
-    }
+    // Build parameter list from keyword parts (re-adding the trailing `:`
+    // the split strips) and param_types.
+    let keywords: Vec<String> = selector
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(|part| format!("{part}:"))
+        .collect();
+    let sig_params: Vec<SignatureParam<'_>> = keywords
+        .iter()
+        .enumerate()
+        .map(|(i, keyword)| SignatureParam {
+            keyword,
+            name: None,
+            type_text: param_type_texts.get(i).and_then(Option::as_deref),
+        })
+        .collect();
 
-    let mut label = label_fragments.join(" ");
-    if let Some(ref return_type) = method.return_type {
-        use std::fmt::Write;
-        let _ = write!(label, " -> {return_type}");
-    }
+    let parameters: Vec<ParameterInfo> = sig_params
+        .iter()
+        .map(|param| ParameterInfo {
+            label: EcoString::from(param.render()),
+            documentation: param
+                .type_text
+                .map(|ty| EcoString::from(format!("Type: {ty}"))),
+        })
+        .collect();
+
+    let label = render_signature_text(
+        SignatureSelector::Params(&sig_params),
+        return_type_text.as_deref(),
+        &SignatureRenderOptions::DISPLAY,
+    );
 
     let documentation = Some(EcoString::from(format!(
         "Defined in `{}`",

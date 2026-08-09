@@ -936,10 +936,10 @@ find_class_method_in_chain(Selector, ClassName) ->
             {ok, AncestorName, AncestorModule};
         not_found ->
             not_found;
-        max_depth_exceeded ->
+        {max_depth_exceeded, CycleAncestor} ->
             ?LOG_WARNING(
-                "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ClassName],
+                "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleAncestor, ClassName],
                 #{domain => [beamtalk, runtime]}
             ),
             not_found

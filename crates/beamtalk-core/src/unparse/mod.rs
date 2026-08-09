@@ -31,14 +31,19 @@
 //!   is the single place in the unparser that constructs an owned-string leaf.
 
 mod leaf;
+mod signature_text;
+
+pub use signature_text::{
+    SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+};
 
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
-    MatchArm, MessageSelector, MethodDefinition, Module, Pattern, ProtocolDefinition,
-    ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration, StringSegment,
-    TypeAliasDefinition, TypeAnnotation,
+    MatchArm, MessageSelector, MethodDefinition, Module, ParameterDefinition, Pattern,
+    ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
+    StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
 use crate::codegen::core_erlang::document::{
     DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil,
@@ -291,34 +296,7 @@ pub fn unparse_literal_display(lit: &Literal) -> String {
 
 /// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
 fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'static> {
-    let sig = match &method.selector {
-        MessageSelector::Unary(name) => leaf::ident(name),
-        MessageSelector::Binary(op) => {
-            let param = &method.parameters[0];
-            docvec![
-                leaf::ident(op),
-                " ",
-                leaf::ident(&param.name.name),
-                unparse_type_annotation_opt(param.type_annotation.as_ref()),
-            ]
-        }
-        MessageSelector::Keyword(parts) => {
-            let mut sig_docs: Vec<Document<'static>> = Vec::new();
-            for (i, part) in parts.iter().enumerate() {
-                if i > 0 {
-                    sig_docs.push(Document::Str(" "));
-                }
-                sig_docs.push(unparse_keyword_part(part));
-                if i < method.parameters.len() {
-                    sig_docs.push(Document::Str(" "));
-                    let param = &method.parameters[i];
-                    sig_docs.push(leaf::ident(&param.name.name));
-                    sig_docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
-                }
-            }
-            concat(sig_docs)
-        }
-    };
+    let sig = unparse_selector_and_params(&method.selector, &method.parameters);
 
     let return_type = if let Some(ret) = &method.return_type {
         docvec![" -> ", unparse_type_annotation(ret)]
@@ -327,6 +305,56 @@ fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'
     };
 
     docvec![sig, return_type]
+}
+
+/// Builds the selector-and-parameters portion of a signature — no return
+/// type, no `sealed`/`internal`/`class` prefix, no trailing ` =>`: `foo`,
+/// `+ other :: Number`, or `at: index :: Integer put: value`.
+///
+/// This is the one place that interleaves keyword parts with parameter
+/// names/types (BT-3097) — shared by [`unparse_method_display_signature_doc`]
+/// (and, through it, [`unparse_method_signature`]) and
+/// [`unparse_protocol_method_signature`], which previously carried
+/// independently-drifting copies of the same loop. A missing binary
+/// parameter (`parameters.first()` returns `None` — not producible by the
+/// parser for a real method definition, but reachable for a
+/// hand-constructed/synthesized one) degrades to the bare operator rather
+/// than panicking, matching protocol signatures' existing behaviour and
+/// CLAUDE.md's "never panic on user input" rule.
+fn unparse_selector_and_params(
+    selector: &MessageSelector,
+    parameters: &[ParameterDefinition],
+) -> Document<'static> {
+    match selector {
+        MessageSelector::Unary(name) => leaf::ident(name),
+        MessageSelector::Binary(op) => {
+            if let Some(param) = parameters.first() {
+                docvec![
+                    leaf::ident(op),
+                    " ",
+                    leaf::ident(&param.name.name),
+                    unparse_type_annotation_opt(param.type_annotation.as_ref()),
+                ]
+            } else {
+                leaf::ident(op)
+            }
+        }
+        MessageSelector::Keyword(parts) => {
+            let mut sig_docs: Vec<Document<'static>> = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    sig_docs.push(Document::Str(" "));
+                }
+                sig_docs.push(unparse_keyword_part(part));
+                if let Some(param) = parameters.get(i) {
+                    sig_docs.push(Document::Str(" "));
+                    sig_docs.push(leaf::ident(&param.name.name));
+                    sig_docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
+                }
+            }
+            concat(sig_docs)
+        }
+    }
 }
 
 // --- Document builders (pub(crate) for testing) ---
@@ -875,33 +903,10 @@ fn unparse_protocol_method_signature(
         docs.push(Document::Str(p));
     }
 
-    // Selector and parameters
-    match &sig.selector {
-        MessageSelector::Unary(name) => {
-            docs.push(leaf::ident(name));
-        }
-        MessageSelector::Binary(op) => {
-            docs.push(leaf::ident(op));
-            if let Some(param) = sig.parameters.first() {
-                docs.push(Document::Str(" "));
-                docs.push(leaf::ident(&param.name.name));
-                docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
-            }
-        }
-        MessageSelector::Keyword(parts) => {
-            for (i, part) in parts.iter().enumerate() {
-                if i > 0 {
-                    docs.push(Document::Str(" "));
-                }
-                docs.push(leaf::ident(&part.keyword));
-                if let Some(param) = sig.parameters.get(i) {
-                    docs.push(Document::Str(" "));
-                    docs.push(leaf::ident(&param.name.name));
-                    docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
-                }
-            }
-        }
-    }
+    // Selector and parameters (BT-3097: shared with method signatures via
+    // `unparse_selector_and_params`, rather than an independent copy of the
+    // same keyword/parameter interleaving loop).
+    docs.push(unparse_selector_and_params(&sig.selector, &sig.parameters));
 
     // Return type
     if let Some(ref ret) = sig.return_type {
@@ -1066,42 +1071,11 @@ fn unparse_method_definition_inner(
 }
 
 /// Builds the method signature (selector + parameters + return type + arrow).
+///
+/// Delegates the selector/parameters/return-type portion to
+/// [`unparse_method_display_signature_doc`] and adds the declaration-only
+/// wrapping: `sealed `/`internal ` prefixes and the trailing ` =>` (BT-3097).
 fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
-    let sig = match &method.selector {
-        MessageSelector::Unary(name) => leaf::ident(name),
-        MessageSelector::Binary(op) => {
-            let param = &method.parameters[0];
-            docvec![
-                leaf::ident(op),
-                " ",
-                leaf::ident(&param.name.name),
-                unparse_type_annotation_opt(param.type_annotation.as_ref()),
-            ]
-        }
-        MessageSelector::Keyword(parts) => {
-            let mut sig_docs: Vec<Document<'static>> = Vec::new();
-            for (i, part) in parts.iter().enumerate() {
-                if i > 0 {
-                    sig_docs.push(Document::Str(" "));
-                }
-                sig_docs.push(unparse_keyword_part(part));
-                if i < method.parameters.len() {
-                    sig_docs.push(Document::Str(" "));
-                    let param = &method.parameters[i];
-                    sig_docs.push(leaf::ident(&param.name.name));
-                    sig_docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
-                }
-            }
-            concat(sig_docs)
-        }
-    };
-
-    let return_type = if let Some(ret) = &method.return_type {
-        docvec![" -> ", unparse_type_annotation(ret)]
-    } else {
-        nil()
-    };
-
     let sealed = if method.is_sealed {
         Document::Str("sealed ")
     } else {
@@ -1114,7 +1088,12 @@ fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
         nil()
     };
 
-    docvec![internal, sealed, sig, return_type, " =>"]
+    docvec![
+        internal,
+        sealed,
+        unparse_method_display_signature_doc(method),
+        " =>"
+    ]
 }
 
 fn unparse_keyword_part(part: &KeywordPart) -> Document<'static> {

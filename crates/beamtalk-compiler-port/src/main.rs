@@ -2672,6 +2672,25 @@ fn handle_request(request_term: &Term) -> Term {
         _ => return error_response(&["Missing or invalid 'command' field".to_string()]),
     };
 
+    // BT-3095: this match arm's string literals are the Rust half of the
+    // compiler-port wire vocabulary; `beamtalk_compiler.erl` (fanning out
+    // through `beamtalk_compiler_server`/`beamtalk_compiler_port`) is the
+    // Erlang half, sending each `command => <atom>` from separate call
+    // sites. The two lists cannot literally share code (different
+    // languages/processes either side of the OTP port), so a command
+    // added to one side and not the other is a silent drift whose only
+    // symptom is a runtime "Unknown command" error wherever it's invoked
+    // (BT-3078 drift audit; BT-3091 flagged this pair for evaluation).
+    // A shared corpus fixture
+    // (`runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json`)
+    // pins both sides to the same 16-command list end-to-end: the Rust test
+    // below dispatches each corpus command through `handle_request` and
+    // checks it isn't the catch-all arm, while
+    // `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`
+    // drives the real compiled binary through `beamtalk_compiler`'s public
+    // API (one command per corpus entry) and asserts each one dispatches
+    // successfully — so a command missing on either side fails a build-time
+    // test instead of surfacing only at runtime.
     match command {
         "compile_expression" => handle_compile_expression(map),
         "compile_expression_trace" => handle_compile_expression_trace(map),
@@ -2800,6 +2819,59 @@ fn directive_for_verbosity(v: u8) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-3095 conformance: every command in the shared wire-vocabulary
+    /// corpus must be recognized by `handle_request`'s dispatch — i.e. it
+    /// must not fall through to the catch-all `"Unknown command: ..."` arm.
+    /// The corpus is the single source of truth both implementations are
+    /// pinned to; the Erlang side asserts the identical list drives real
+    /// dispatch on the compiled binary in
+    /// `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`.
+    /// See `handle_request`'s doc comment for the full rationale.
+    #[test]
+    fn handle_request_recognizes_shared_command_vocabulary_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join(
+                "runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json",
+            );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let corpus: Vec<String> = serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!corpus.is_empty(), "corpus must have cases");
+
+        for command in &corpus {
+            // Deliberately send no fields beyond `command` — a recognized
+            // command may still fail (e.g. "Missing or invalid 'source'
+            // field"), but that failure is distinct from the dispatcher's
+            // catch-all message, which is the unique fingerprint of an
+            // unrecognized command atom.
+            let request = Term::from(Map::from([(atom("command"), atom(command.as_str()))]));
+            let response = handle_request(&request);
+            let Term::Map(ref m) = response else {
+                panic!("command {command:?}: expected a map response, got {response:?}");
+            };
+            let unknown_message = format!("Unknown command: {command}");
+            if let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") {
+                for diag in &diagnostics.elements {
+                    let Term::Map(diag_map) = diag else {
+                        continue;
+                    };
+                    if let Some(msg) = map_get(diag_map, "message").and_then(term_to_string) {
+                        assert_ne!(
+                            msg, unknown_message,
+                            "corpus command {command:?} is not recognized by handle_request's \
+                             dispatch — add a match arm (or remove it from the corpus if it was \
+                             deliberately retired)"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     /// BT-907: Inline class definition with cross-file superclass index must compile
     /// as a value type, not an Actor, when the parent's chain resolves to Object.

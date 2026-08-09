@@ -257,10 +257,11 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, Result} ->
             Result;
-        max_depth_exceeded ->
+        {max_depth_exceeded, CycleClass} ->
             ?LOG_WARNING("Max hierarchy depth exceeded — possible cycle", #{
                 max_depth => ?MAX_HIERARCHY_DEPTH,
                 class => ClassName,
+                cycle_detected_at => CycleClass,
                 selector => Selector,
                 domain => [beamtalk, runtime]
             }),
