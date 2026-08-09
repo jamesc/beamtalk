@@ -16,45 +16,46 @@
 //! remains is an ordinary golden test of the one surviving implementation.
 
 use beamtalk_workspace::{
-    generate_workspace_id, read_cookie_file, read_port_file, workspaces_base_dir,
+    generate_workspace_id, hash_workspace_path_string, read_cookie_file, read_port_file,
+    workspaces_base_dir,
 };
 use std::fs;
 
-/// `generate_workspace_id` must keep producing the same 12-hex-char ID for a
-/// known input — SHA-256 of the path string, first 6 bytes hex-encoded.
-/// This is a golden test, not a consistency check: the expected value was
-/// computed once and is now the contract callers (CLI, MCP) rely on for
-/// stable workspace directories across runs.
+/// `hash_workspace_path_string` must keep producing the same 12-hex-char ID
+/// for a fixed literal input — SHA-256 of the string, first 6 bytes
+/// hex-encoded. A true golden test: the expected value below was computed
+/// once (`python3 -c "import hashlib; print(hashlib.sha256(b'...').hexdigest()[:12])"`)
+/// and is now the contract callers (CLI, MCP) rely on for stable workspace
+/// directories across runs. Fixed to a literal string rather than
+/// `std::env::temp_dir()` so the expected value doesn't vary per OS/CI
+/// runner, and calls the production hashing function directly rather than
+/// re-deriving SHA-256 inline — see `docs/development/architecture-principles.md`
+/// §7 (a test that hand-reimplements the algorithm it's checking is the
+/// same "two implementations, hand-kept in sync" smell this rule exists to
+/// catch).
 #[test]
-fn test_workspace_id_is_stable_for_known_input() {
-    use sha2::{Digest, Sha256};
-    use std::fmt::Write as _;
-
-    // Use temp_dir which exists on all platforms.
-    let path = std::env::temp_dir();
-    let canonical = path.canonicalize().unwrap();
-    let path_str = canonical.to_str().unwrap();
-
-    let mut hasher = Sha256::new();
-    hasher.update(path_str.as_bytes());
-    let result = hasher.finalize();
-    // Expected: 12 hex chars from the first 6 hash bytes.
-    let expected_id = result[..6]
-        .iter()
-        .fold(String::with_capacity(12), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        });
-
-    let shared_id = generate_workspace_id(&path).unwrap();
+fn test_workspace_id_hash_is_stable_for_known_input() {
     assert_eq!(
-        shared_id, expected_id,
-        "generate_workspace_id must produce a stable 12-hex-char ID for a given path"
+        hash_workspace_path_string("/beamtalk/golden-test/fixed-workspace-path"),
+        "43e09723da2c",
+        "hash_workspace_path_string must produce a stable, known 12-hex-char ID for a fixed input"
     );
-    assert_eq!(
-        shared_id.len(),
-        12,
-        "workspace ID must always be 12 hex chars"
+}
+
+/// `generate_workspace_id` (the canonicalize-then-hash public entry point)
+/// delegates to `hash_workspace_path_string` and returns a well-formed
+/// 12-hex-char ID for a real path. Structural only — the exact value isn't
+/// pinned here because `canonicalize()` resolves `std::env::temp_dir()`
+/// differently per OS/CI runner; the algorithm itself is pinned by the
+/// golden test above.
+#[test]
+fn test_generate_workspace_id_returns_well_formed_id_for_real_path() {
+    let path = std::env::temp_dir();
+    let id = generate_workspace_id(&path).unwrap();
+    assert_eq!(id.len(), 12, "workspace ID must always be 12 hex chars");
+    assert!(
+        id.chars().all(|c| c.is_ascii_hexdigit()),
+        "workspace ID must be lowercase hex, got {id:?}"
     );
 }
 
