@@ -15,6 +15,14 @@
 //!
 //! Consumed by codegen: `compute_auto_slot_methods` checks `class_kind`
 //! to decide whether to generate `withX:` setters and keyword constructors.
+//!
+//! BT-3086: `ClassHierarchy::resolve_class_kind` is the single authority this
+//! pass and codegen's `CoreErlangGenerator::is_actor_class` both call — this
+//! pass corrects the AST's `class_kind` field in place for consumers that
+//! read it directly (e.g. `value_type_codegen.rs`), while `is_actor_class`
+//! calls `resolve_class_kind` itself for the actor-vs-value routing decision
+//! (plus a codegen-specific incomplete-chain fallback — see its doc comment).
+//! Neither re-derives the Actor/Value walk independently.
 
 use crate::ast::Module;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;

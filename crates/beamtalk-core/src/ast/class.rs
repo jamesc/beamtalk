@@ -64,7 +64,22 @@ pub enum ClassKind {
 }
 
 impl ClassKind {
-    /// Derive the class kind from the direct superclass name used in a `subclass:` declaration.
+    /// Derive a **pre-analysis placeholder** class kind from the direct superclass
+    /// name used in a `subclass:` declaration (BT-3086).
+    ///
+    /// This only inspects the literal direct-superclass identifier written in
+    /// source, so e.g. `TestCase subclass: MyTest` gets `ClassKind::Object`
+    /// here even though `TestCase` transitively descends from `Value`. It
+    /// exists solely to give a freshly-parsed `ClassDefinition` *some* answer
+    /// before a `ClassHierarchy` exists to walk the full ancestor chain.
+    ///
+    /// Every value this produces is corrected in place by
+    /// `apply_class_kind_writeback` once the hierarchy is built — see
+    /// `ClassHierarchy::resolve_class_kind`, the single authority for
+    /// actor/value classification. Nothing downstream of that writeback pass
+    /// (codegen, or any pass that runs after semantic analysis) should read
+    /// a class's `class_kind` and assume it reflects the full ancestor chain
+    /// unless writeback has already run on that `Module`.
     ///
     /// - `"Actor"` → [`ClassKind::Actor`]
     /// - `"Value"` → [`ClassKind::Value`]
@@ -131,7 +146,9 @@ pub struct ClassDefinition {
     /// Optional package qualifier on the superclass (ADR 0070).
     /// E.g., `json` in `json@Parser subclass: LenientParser`.
     pub superclass_package: Option<Identifier>,
-    /// The class kind derived from the declaration form (Actor/Value/Object).
+    /// The class kind (Actor/Value/Object). Parser-set to a shallow, direct-superclass-only
+    /// placeholder ([`ClassKind::from_superclass_name`]); corrected in place by
+    /// `apply_class_kind_writeback` before codegen — see that placeholder's doc comment.
     pub class_kind: ClassKind,
     /// Whether this is an abstract class (cannot be instantiated).
     pub is_abstract: bool,
