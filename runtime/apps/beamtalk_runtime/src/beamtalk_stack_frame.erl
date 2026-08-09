@@ -119,16 +119,19 @@ resolve_class_name(_, _ModuleToClass) ->
 -doc """
 Map Erlang module name to Beamtalk class name.
 
-BT-3081: Resolves via the live class registry first
-(`beamtalk_class_registry:class_name_for_module/1`), which is authoritative
-— it reads each class's actual registered name rather than guessing one
-from its module name, so it can't mis-capitalize acronym-cased classes the
-way the string heuristic below provably does (`bt@stdlib@beamerror` →
-`'BEAMError'` via the registry, vs. the heuristic's lossy `'Beamerror'`).
-Falls back to the heuristic only when the module isn't a registered class
-— no class process has (yet) started for it, or the registry/`pg` isn't
-running at all (early boot, unit tests, or Erlang modules that were never
-Beamtalk classes).
+BT-3081: Resolves via the class metadata table first
+(`beamtalk_class_registry:class_name_for_module/1`, an ETS lookup — no live
+process needed), which is authoritative — it reads each class's actual
+registered name rather than guessing one from its module name, so it can't
+mis-capitalize acronym-cased classes the way the string heuristic below
+provably does (`bt@stdlib@beamerror` → `'BEAMError'` via the metadata table,
+vs. the heuristic's lossy `'Beamerror'`). Falls back to the heuristic only
+when the module isn't a registered class at all — no class was ever
+registered for it, or the metadata table doesn't exist yet (early boot or
+unit tests), or it's an Erlang module that was never a Beamtalk class. Unlike
+an earlier version of this lookup, resolution does not depend on the class's
+gen_server process currently being alive — the metadata table is written at
+registration time and persists independently of process liveness.
 
 Compiled module naming conventions the heuristic fallback handles:
   - 'counter' → 'Counter' (user classes)
@@ -150,7 +153,7 @@ module_to_class(_) ->
 
 -doc """
 Lossy snake_case→CamelCase fallback for `module_to_class/1`, used only when
-the module isn't found in the live class registry — see that function's doc
+the module isn't found in the class metadata table — see that function's doc
 for why this alone is not authoritative (BT-3081).
 """.
 -spec module_to_class_heuristic(atom()) -> atom() | 'nil'.
