@@ -39,7 +39,6 @@ Method docs are retrieved via `>> #selector` (CompiledMethod maps).
     format_method_line/1,
     format_metaclass_docs/0,
     format_metaclass_method_doc/1,
-    metaclass_method_doc/1,
     format_selector_summary/2,
     format_class_side_output/5,
     extract_see_also/1,
@@ -342,7 +341,9 @@ format_metaclass_docs() ->
 -doc "Return documentation for a Metaclass method.".
 -spec format_metaclass_method_doc(binary()) -> {ok, binary()} | {error, term()}.
 format_metaclass_method_doc(SelectorBin) ->
-    case metaclass_method_doc(SelectorBin) of
+    %% BT-3087: metaclass_method_doc/1 is shared with beamtalk_interface via
+    %% beamtalk_hierarchy_docs (both apps depend on beamtalk_runtime).
+    case beamtalk_hierarchy_docs:metaclass_method_doc(SelectorBin) of
         {ok, Doc} ->
             {ok,
                 iolist_to_binary([
@@ -357,17 +358,6 @@ format_metaclass_method_doc(SelectorBin) ->
         not_found ->
             {error, {method_not_found, 'Metaclass', SelectorBin}}
     end.
-
--doc "Lookup doc text for known Metaclass class-side methods.".
--spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
-metaclass_method_doc(<<"new">>) ->
-    {ok, <<"Create a new instance of the class.">>};
-metaclass_method_doc(<<"spawn">>) ->
-    {ok, <<"Create a new actor instance. Returns an actor reference.">>};
-metaclass_method_doc(<<"spawnWith:">>) ->
-    {ok, <<"Create a new actor with initial state from a Dictionary.">>};
-metaclass_method_doc(_) ->
-    not_found.
 
 -doc """
 Safe atom conversion — returns error instead of creating new atoms.
@@ -479,68 +469,26 @@ get_method_doc_from_class(ClassPid, Selector) ->
 -doc """
 Find which class in the hierarchy defines a selector.
 Returns the class name atom.
+
+BT-3087: Delegates to `beamtalk_hierarchy_docs:find_defining_class/2`, the
+implementation shared with `beamtalk_interface`'s programmatic reflection
+path (both apps depend on `beamtalk_runtime`).
 """.
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
-    find_defining_class(ClassPid, Selector, 0).
-
--spec find_defining_class(pid(), atom(), non_neg_integer()) -> atom().
-find_defining_class(ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ClassName = beamtalk_runtime_api:class_name(ClassPid),
-    ?LOG_WARNING(
-        "find_defining_class: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, ClassName, Selector],
-        #{domain => [beamtalk, runtime]}
-    ),
-    ClassName;
-find_defining_class(ClassPid, Selector, Depth) ->
-    ClassName = beamtalk_runtime_api:class_name(ClassPid),
-    case gen_server:call(ClassPid, {method, Selector}, 5000) of
-        nil ->
-            %% Not in local instance_methods — check superclass
-            case beamtalk_runtime_api:superclass(ClassPid) of
-                none ->
-                    ClassName;
-                Super ->
-                    case beamtalk_runtime_api:whereis_class(Super) of
-                        undefined -> ClassName;
-                        SuperPid -> find_defining_class(SuperPid, Selector, Depth + 1)
-                    end
-            end;
-        _MethodInfo ->
-            ClassName
-    end.
+    beamtalk_hierarchy_docs:find_defining_class(ClassPid, Selector).
 
 -doc """
 Find which class in the hierarchy defines a class-side method.
 Uses {class_method, Selector} which walks the chain internally;
 we query each class locally via get_local_class_methods to find
 exactly where the method is defined.
+
+BT-3087: Delegates to `beamtalk_hierarchy_docs:find_defining_class_method/2`.
 """.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
-    find_defining_class_method(ClassPid, Selector, 0).
-
--spec find_defining_class_method(pid(), atom(), non_neg_integer()) -> atom().
-find_defining_class_method(ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    beamtalk_runtime_api:class_name(ClassPid);
-find_defining_class_method(ClassPid, Selector, Depth) ->
-    ClassName = beamtalk_runtime_api:class_name(ClassPid),
-    LocalClassMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
-    case maps:is_key(Selector, LocalClassMethods) of
-        true ->
-            ClassName;
-        false ->
-            case beamtalk_runtime_api:superclass(ClassPid) of
-                none ->
-                    ClassName;
-                Super ->
-                    case beamtalk_runtime_api:whereis_class(Super) of
-                        undefined -> ClassName;
-                        SuperPid -> find_defining_class_method(SuperPid, Selector, Depth + 1)
-                    end
-            end
-    end.
+    beamtalk_hierarchy_docs:find_defining_class_method(ClassPid, Selector).
 
 -doc """
 Find which class in the Class chain defines a class-protocol method.
@@ -556,7 +504,7 @@ exact defining class.
 find_class_protocol_defining_class(Selector) ->
     case beamtalk_runtime_api:whereis_class('Class') of
         undefined -> 'Class';
-        ClassPid -> find_defining_class(ClassPid, Selector, 0)
+        ClassPid -> find_defining_class(ClassPid, Selector)
     end.
 
 -doc "Group inherited methods by defining class.".
@@ -867,34 +815,13 @@ Walk the class hierarchy and build a flattened method map.
 ADR 0032 Phase 1: Replaces get_flattened_methods gen_server call.
 Returns #{Selector => {DefiningClass, MethodInfo}} where local methods
 shadow inherited ones, walking from ClassName upward.
+
+BT-3087: Delegates to `beamtalk_hierarchy_docs:collect_flattened_methods/2`,
+the implementation shared with `beamtalk_interface`.
 """.
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
-    collect_flattened_methods(ClassName, ClassPid, 0).
-
--spec collect_flattened_methods(atom(), pid(), non_neg_integer()) -> map().
-collect_flattened_methods(ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING(
-        "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, ClassName],
-        #{domain => [beamtalk, runtime]}
-    ),
-    #{};
-collect_flattened_methods(ClassName, ClassPid, Depth) ->
-    {ok, LocalMethods} = gen_server:call(ClassPid, get_instance_methods, 5000),
-    LocalFlat = maps:map(fun(_Sel, Info) -> {ClassName, Info} end, LocalMethods),
-    Superclass = beamtalk_runtime_api:superclass(ClassPid),
-    SuperFlat = collect_chain_methods(Superclass, Depth + 1),
-    maps:merge(SuperFlat, LocalFlat).
-
--spec collect_chain_methods(atom() | none, non_neg_integer()) -> map().
-collect_chain_methods(none, _Depth) ->
-    #{};
-collect_chain_methods(SuperName, Depth) ->
-    case beamtalk_runtime_api:whereis_class(SuperName) of
-        undefined -> #{};
-        SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
-    end.
+    beamtalk_hierarchy_docs:collect_flattened_methods(ClassName, ClassPid).
 
 -doc "Format method-specific documentation output.".
 -spec format_method_output(
@@ -1034,26 +961,55 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
 -doc """
 Walk the class hierarchy collecting class-side methods.
 Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
+
+On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns `#{}`
+— not the partial map folded up through the ancestors visited before the
+guard tripped — and logs a `?LOG_WARNING`. Deliberately narrower than
+returning partial results: `walk_ancestors/3`'s `max_depth_exceeded` carries
+no payload, so every caller falls back to a fixed default on this
+already-anomalous path.
+
+BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` (the shared depth
+guard + cycle warning) rather than a hand-rolled recursion, matching the
+instance-side `collect_flattened_methods/2` (now in `beamtalk_hierarchy_docs`)
+and every other consolidated hierarchy walker.
 """.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
-    collect_flattened_class_methods(ClassName, ClassPid, 0).
-
--spec collect_flattened_class_methods(atom(), pid(), non_neg_integer()) -> #{atom() => atom()}.
-collect_flattened_class_methods(_ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    #{};
-collect_flattened_class_methods(ClassName, ClassPid, Depth) ->
-    LocalMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
-    LocalFlat = maps:map(fun(_Sel, _Info) -> ClassName end, LocalMethods),
-    Superclass = beamtalk_runtime_api:superclass(ClassPid),
-    SuperFlat = collect_class_method_superchain(Superclass, Depth + 1),
-    maps:merge(SuperFlat, LocalFlat).
-
--spec collect_class_method_superchain(atom() | none, non_neg_integer()) -> #{atom() => atom()}.
-collect_class_method_superchain(none, _Depth) ->
-    #{};
-collect_class_method_superchain(SuperName, Depth) ->
-    case beamtalk_runtime_api:whereis_class(SuperName) of
-        undefined -> #{};
-        SuperPid -> collect_flattened_class_methods(SuperName, SuperPid, Depth)
+    StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
+        LocalMethods = gen_server:call(CurrentPid, get_local_class_methods, 5000),
+        LocalFlat = maps:map(fun(_Sel, _Info) -> CurrentName end, LocalMethods),
+        %% AccMap already reflects every closer (lower-depth) ancestor
+        %% winning over farther ones; keep that invariant as this
+        %% (farther) level's LocalFlat is folded in.
+        NewAcc = maps:merge(LocalFlat, AccMap),
+        case beamtalk_runtime_api:superclass(CurrentPid) of
+            none ->
+                {found, NewAcc};
+            SuperName ->
+                case beamtalk_runtime_api:whereis_class(SuperName) of
+                    undefined -> {found, NewAcc};
+                    SuperPid -> {next, {SuperName, SuperPid, NewAcc}}
+                end
+        end
+    end,
+    case
+        beamtalk_hierarchy:walk_ancestors(
+            {ClassName, ClassPid, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH
+        )
+    of
+        {found, Result} ->
+            Result;
+        max_depth_exceeded ->
+            ?LOG_WARNING(
+                "collect_flattened_class_methods: max hierarchy depth ~p exceeded at ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            #{};
+        not_found ->
+            %% Unreachable: StepFun above always resolves to {found, _} — a
+            %% `none` superclass or an unregistered ancestor is translated to
+            %% a terminal {found, NewAcc}, never a bare `none` node.
+            erlang:error({unreachable, not_found, ClassName})
     end.
