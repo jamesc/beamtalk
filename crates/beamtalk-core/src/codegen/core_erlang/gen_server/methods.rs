@@ -4734,7 +4734,11 @@ impl CoreErlangGenerator {
     /// `SelfType`, `SelfClass`, and `ClassOf` are rare in method signatures
     /// and still fall back to a flat `Atom` of the rendered string (old
     /// readers of a new artifact degrade gracefully; the format is internal
-    /// — see this module's `MetaTypeRepr` doc).
+    /// — see this module's `MetaTypeRepr` doc). The self-type renderings
+    /// (`'Self'`, `'Self class'`, `'<Name> class'`) are recognised by
+    /// `DeclaredType::parse` on the reader side, so they round-trip
+    /// structurally despite the flat encoding (compiler-port's
+    /// `self_type_return_survives_etf_meta`).
     fn declared_type_to_meta_repr(
         dt: &DeclaredType,
         class_type_params: &[TypeParamDecl],

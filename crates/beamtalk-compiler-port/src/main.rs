@@ -88,7 +88,12 @@ fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
 /// - A bare atom (e.g. `'Integer'`) → [`DeclaredType::parse`] — handles
 ///   legacy artifacts (pre-BT-3076 compiled modules only ever emitted flat
 ///   atoms) and the old return-type writeback union strings the same way
-///   `resolve_type_string` used to.
+///   `resolve_type_string` used to. `parse` also recognises the flat
+///   self-type renderings codegen still emits for method signatures
+///   (`'Self'`, `'Self class'`, `'<Name> class'` — the `MetaTypeRepr::Atom`
+///   fallback), so those round-trip structurally as
+///   `SelfType`/`SelfClass`/`ClassOf` instead of decaying to `Simple` (see
+///   `self_type_return_survives_etf_meta`).
 /// - `{'type_param', Name, _Index}` → `DeclaredType::Simple(Name)` — the
 ///   codegen-internal `Index` (class-param position, or `-1` for
 ///   method-local) has no `DeclaredType` counterpart; a bare type-param name
@@ -3018,6 +3023,78 @@ mod tests {
             )),
             "generic return type must survive the ETF meta boundary structurally, \
              not degrade to None (the pre-BT-3076 bug this test guards against)"
+        );
+    }
+
+    /// BT-3076: `-> Self` / `-> Self class` / `-> <Name> class` return types
+    /// cross the ETF `__beamtalk_meta/0` boundary as *flat atoms* (codegen's
+    /// `MetaTypeRepr::Atom` fallback renders them via `Display`), so a method
+    /// inherited from a class compiled in a previous REPL/workspace step must
+    /// re-enter `MethodInfo::return_type` as the structured
+    /// `SelfType`/`SelfClass`/`ClassOf` variants — the checker's fluent-setter
+    /// and metatype special cases match on those variants, and a degraded
+    /// `Simple("Self")` would silently fall back to `Dynamic`. Companion to
+    /// `generic_return_type_survives_etf_meta` for the self-type shapes.
+    #[test]
+    fn self_type_return_survives_etf_meta() {
+        use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+        use eetf::{FixInteger, List};
+
+        let method = |return_type: Term| {
+            Term::from(Map::from([
+                (atom("arity"), Term::from(FixInteger::from(0))),
+                (atom("param_types"), Term::from(List::from(vec![]))),
+                (atom("return_type"), return_type),
+            ]))
+        };
+        let method_info_map = Map::from([
+            (atom("withX"), method(atom("Self"))),
+            (atom("species"), method(atom("Self class"))),
+            (atom("actorClass"), method(atom("Actor class"))),
+        ]);
+
+        let meta_map = Map::from([
+            (atom("class"), atom("box")),
+            (atom("superclass"), atom("Object")),
+            (atom("meta_version"), Term::from(FixInteger::from(2))),
+            (atom("is_sealed"), atom("false")),
+            (atom("is_abstract"), atom("false")),
+            (atom("is_value"), atom("true")),
+            (atom("is_typed"), atom("false")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("field_types"), Term::from(Map::from([]))),
+            (atom("method_info"), Term::from(method_info_map)),
+            (atom("class_method_info"), Term::from(Map::from([]))),
+            (atom("class_variables"), Term::from(List::from(vec![]))),
+        ]);
+
+        let class_hierarchy_term = Term::from(Map::from([(atom("box"), Term::from(meta_map))]));
+        let classes = parse_class_hierarchy_from_term(&class_hierarchy_term);
+        assert_eq!(classes.len(), 1, "Should parse one class");
+
+        let info = &classes[0];
+        let return_type_of = |selector: &str| {
+            info.methods
+                .iter()
+                .find(|m| m.selector == selector)
+                .unwrap_or_else(|| panic!("{selector} method should be present"))
+                .return_type
+                .clone()
+        };
+        assert_eq!(
+            return_type_of("withX"),
+            Some(DeclaredType::SelfType),
+            "'Self' atom must round-trip as SelfType, not Simple(\"Self\")"
+        );
+        assert_eq!(
+            return_type_of("species"),
+            Some(DeclaredType::SelfClass),
+            "'Self class' atom must round-trip as SelfClass"
+        );
+        assert_eq!(
+            return_type_of("actorClass"),
+            Some(DeclaredType::ClassOf("Actor".into())),
+            "'Actor class' atom must round-trip as ClassOf(\"Actor\")"
         );
     }
 

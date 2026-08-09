@@ -6970,9 +6970,13 @@ mod tests {
     }
 
     #[test]
-    fn substitute_self_none_passes_through() {
-        // When self_type is None, `Self` should pass through as Known("Self")
-        // (backward-compatible behaviour).
+    fn substitute_self_none_falls_back_to_dynamic() {
+        // Without a threaded `Self` binding, a nested `Self` resolves to
+        // `Dynamic` — matching the AST-built `Generic { parameters:
+        // [SelfType] }` path (`resolve_declared_type`'s documented
+        // no-binding fallback). `parse` now yields the structured `SelfType`
+        // for the string spelling too, so the string path no longer passes
+        // `Self` through as a phantom nominal `Known("Self")`.
         let result = type_resolver::resolve_declared_type(
             &DeclaredType::parse("Result(Self, Error)"),
             &type_resolver::SubstitutionMap::new(),
@@ -6988,7 +6992,11 @@ mod tests {
             } => {
                 assert_eq!(class_name.as_str(), "Result");
                 assert_eq!(type_args.len(), 2);
-                assert_eq!(type_args[0], InferredType::known("Self"));
+                assert!(
+                    matches!(type_args[0], InferredType::Dynamic(_)),
+                    "unbound Self should resolve to Dynamic, got {:?}",
+                    type_args[0]
+                );
                 assert_eq!(type_args[1], InferredType::known("Error"));
             }
             other => panic!("Expected Known, got {other:?}"),

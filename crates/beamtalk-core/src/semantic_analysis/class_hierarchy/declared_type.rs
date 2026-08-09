@@ -112,14 +112,24 @@ impl DeclaredType {
     /// normalisation is the resolver's job, not the parser's (see
     /// `resolve_declared_type` in `type_resolver`).
     ///
+    /// The self-type shapes rendered flat by [`TypeAnnotation::type_name`]
+    /// (and by codegen's `MetaTypeRepr::Atom` fallback for method-signature
+    /// metadata) are recognised structurally: bare `Self` →
+    /// [`DeclaredType::SelfType`], `Self class` → [`DeclaredType::SelfClass`],
+    /// and `<Name> class` (identifier followed by the single word `class`) →
+    /// [`DeclaredType::ClassOf`]. This keeps a `-> Self` return type that
+    /// crosses a string boundary (ETF compiler-port metadata, extension-method
+    /// type info) behaving like its AST-built counterpart instead of decaying
+    /// to an opaque nominal name.
+    ///
     /// Never panics. This grammar has no representation for `\`
-    /// (difference), `&` (intersection), bare `Self`, `Self class`, or
-    /// `<Name> class` — strings in exactly those shapes (which *can* occur
-    /// in a legacy artifact, since a pre-BT-3076 `MethodInfo::return_type`
-    /// was populated via [`TypeAnnotation::type_name`], which does render
-    /// them) degrade to an opaque `Simple(whole_string)` — an unparsed
-    /// string becomes a nominal class name. Malformed/unbalanced input
-    /// (e.g. `"Array(Integer"`, no closing paren) degrades the same way.
+    /// (difference) or `&` (intersection) — strings in those shapes (which
+    /// *can* occur in a legacy artifact, since a pre-BT-3076
+    /// `MethodInfo::return_type` was populated via
+    /// [`TypeAnnotation::type_name`], which does render them) degrade to an
+    /// opaque `Simple(whole_string)` — an unparsed string becomes a nominal
+    /// class name. Malformed/unbalanced input (e.g. `"Array(Integer"`, no
+    /// closing paren) degrades the same way.
     #[must_use]
     pub fn parse(s: &str) -> DeclaredType {
         let trimmed = s.trim();
@@ -151,9 +161,25 @@ impl DeclaredType {
             }
         }
 
+        // Self-type shapes rendered flat by `TypeAnnotation::type_name` /
+        // codegen's `MetaTypeRepr::Atom` fallback. `Self class` must win
+        // over the generic `<Name> class` suffix strip below, or it would
+        // come back as `ClassOf("Self")`.
+        if trimmed == "Self" {
+            return DeclaredType::SelfType;
+        }
+        if trimmed == "Self class" {
+            return DeclaredType::SelfClass;
+        }
+        if let Some(base) = trimmed.strip_suffix(" class")
+            && !base.is_empty()
+            && base.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            return DeclaredType::ClassOf(base.into());
+        }
+
         // Fallback: opaque nominal name, including for constructs this
-        // grammar doesn't parse (`\`, `&`, `Self`, `Self class`, `<Name>
-        // class`) and malformed input.
+        // grammar doesn't parse (`\`, `&`) and malformed input.
         DeclaredType::Simple(trimmed.into())
     }
 
@@ -490,11 +516,61 @@ mod tests {
         assert_eq!(result, DeclaredType::Simple("#".into()));
     }
 
+    // ---- parse: self-type shapes come back structurally ----
+
     #[test]
-    fn parse_self_class_degrades_to_simple() {
+    fn parse_bare_self_returns_self_type() {
+        let result = DeclaredType::parse("Self");
+        assert_eq!(result, DeclaredType::SelfType);
+        assert_eq!(result.to_string(), "Self");
+    }
+
+    #[test]
+    fn parse_self_class_returns_self_class() {
+        // Must win over the `<Name> class` suffix rule — `ClassOf("Self")`
+        // would be wrong.
         let result = DeclaredType::parse("Self class");
-        assert_eq!(result, DeclaredType::Simple("Self class".into()));
+        assert_eq!(result, DeclaredType::SelfClass);
         assert_eq!(result.to_string(), "Self class");
+    }
+
+    #[test]
+    fn parse_class_of_returns_class_of() {
+        let result = DeclaredType::parse("Actor class");
+        assert_eq!(result, DeclaredType::ClassOf("Actor".into()));
+        assert_eq!(result.to_string(), "Actor class");
+    }
+
+    #[test]
+    fn parse_self_inside_union_and_generic() {
+        // Leaf recognition composes with the union/generic grammar.
+        assert_eq!(
+            DeclaredType::parse("Self | Nil"),
+            DeclaredType::union(vec![DeclaredType::SelfType, DeclaredType::simple("Nil")])
+        );
+        assert_eq!(
+            DeclaredType::parse("Result(Self, Error)"),
+            DeclaredType::generic(
+                "Result",
+                vec![DeclaredType::SelfType, DeclaredType::simple("Error")]
+            )
+        );
+    }
+
+    #[test]
+    fn parse_non_identifier_class_suffix_degrades_to_simple() {
+        // The base before ` class` must be a bare identifier — anything else
+        // (spaces, operators) keeps the whole string as an opaque Simple.
+        let result = DeclaredType::parse("A | B class");
+        assert_eq!(
+            result,
+            DeclaredType::union(vec![
+                DeclaredType::simple("A"),
+                DeclaredType::ClassOf("B".into())
+            ])
+        );
+        let opaque = DeclaredType::parse("not a name class");
+        assert_eq!(opaque, DeclaredType::Simple("not a name class".into()));
     }
 
     // ---- Display parity with TypeAnnotation::type_name() ----
