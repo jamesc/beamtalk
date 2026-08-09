@@ -775,30 +775,19 @@ fn resolve_type_keyword(name: &EcoString) -> EcoString {
 
 /// Split a stored-string type name into `(base, args_slice)`.
 ///
-/// Given `"Array(Integer)"` returns `("Array", Some("Integer"))`.
-/// Given `"Result(Integer, Error)"` returns `("Result", Some("Integer, Error"))`.
-/// Given `"Integer"` (no parentheses) returns `("Integer", None)`.
-/// Given `"Array(Integer)extra"` (not terminated by `)`) falls back to
-/// `("Array(Integer)extra", None)` — the caller should treat the string as an
-/// opaque class name.
-///
 /// Used by the string-form parsers (`resolve_type_param`,
 /// `parse_generic_type_string`, etc.) in
 /// place of manual `.find('(')` slicing. Centralising this keeps the
 /// parenthesis-parsing logic in one place and lets the
 /// `no .find('(')` grep check stay clean.
 ///
-/// **References:** BT-2025.
-#[must_use]
-pub(in crate::semantic_analysis) fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
-    match type_name.split_once('(') {
-        Some((base, rest)) if rest.ends_with(')') => {
-            let args = &rest[..rest.len() - 1];
-            (base, Some(args))
-        }
-        _ => (type_name, None),
-    }
-}
+/// Re-exported from [`string_utils`](crate::semantic_analysis::string_utils)
+/// — the shared implementation, below both `type_checker` and
+/// `class_hierarchy` (BT-3089) — so existing call sites that spell this as
+/// `type_resolver::split_generic_base` keep working unchanged.
+///
+/// **References:** BT-2025, BT-3089.
+pub(in crate::semantic_analysis) use crate::semantic_analysis::string_utils::split_generic_base;
 
 /// Extract the base class-name portion of a stored-string type name.
 ///
@@ -1967,34 +1956,10 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    // ---- split_generic_base / base_name_of_string ----
-
-    #[test]
-    fn split_generic_base_plain_name() {
-        assert_eq!(split_generic_base("Integer"), ("Integer", None));
-    }
-
-    #[test]
-    fn split_generic_base_single_arg() {
-        assert_eq!(
-            split_generic_base("Array(Integer)"),
-            ("Array", Some("Integer"))
-        );
-    }
-
-    #[test]
-    fn split_generic_base_multiple_args() {
-        assert_eq!(
-            split_generic_base("Result(Integer, Error)"),
-            ("Result", Some("Integer, Error"))
-        );
-    }
-
-    #[test]
-    fn split_generic_base_unterminated_treats_as_opaque() {
-        // No closing `)` — treat the whole string as an opaque class name.
-        assert_eq!(split_generic_base("Array(Integer"), ("Array(Integer", None));
-    }
+    // ---- base_name_of_string ----
+    //
+    // `split_generic_base` itself is tested once, at its definition site in
+    // `string_utils` (BT-3089) — no need to re-test it by proxy here.
 
     #[test]
     fn base_name_of_string_discards_args() {

@@ -25,7 +25,6 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
 use super::narrowing::extract::extract_variable_name;
-use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
 use super::narrowing::{ClassTestInfo, ClassTestKind, NarrowingInfo};
@@ -824,7 +823,7 @@ impl TypeChecker {
                 // class references (`(HTTPRouter) build: [...]; ...`) are
                 // treated as class-side both for block-param inference and
                 // downstream selector validation.
-                let unwrapped_target = unwrap_parens(cascade_target);
+                let unwrapped_target = cascade_target.unwrap_parens();
                 let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
                 // ADR 0083 / BT-2879: a Meta-typed cascade target (`someVar ::
                 // SomeClass class`) is also class-side for block-param
@@ -1087,7 +1086,7 @@ impl TypeChecker {
                 // applies when the scrutinee has a stable narrowable key
                 // (`extract_variable_name`) — an arbitrary expression
                 // scrutinee has nothing to narrow.
-                let scrutinee_key = extract_variable_name(unwrap_parens(value));
+                let scrutinee_key = extract_variable_name(value.unwrap_parens());
                 let mut residual_scrutinee_ty = scrutinee_ty.clone();
 
                 let arm_types: Vec<InferredType> = arms
@@ -1696,7 +1695,7 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods.
         // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.
-        if let Expression::ClassReference { name, package, .. } = unwrap_parens(receiver) {
+        if let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
@@ -1839,7 +1838,7 @@ impl TypeChecker {
         {
             // In class methods, self sends should check class-side methods.
             // BT-2158: unwrap parens so `(self) foo:` dispatches class-side.
-            if env.in_class_method && Self::is_self_receiver(unwrap_parens(receiver)) {
+            if env.in_class_method && Self::is_self_receiver(receiver.unwrap_parens()) {
                 if !in_abstract_method {
                     self.check_argument_types(
                         class_name,
@@ -1874,15 +1873,8 @@ impl TypeChecker {
                 && !is_class_protocol_selector(&selector_name)
                 && !matches!(selector, MessageSelector::Binary(_))
             {
-                return self.infer_ffi_call(
-                    type_args,
-                    selector,
-                    &selector_name,
-                    arguments,
-                    &arg_types,
-                    span,
-                    hierarchy,
-                );
+                return self
+                    .infer_ffi_call(type_args, selector, arguments, &arg_types, span, hierarchy);
             }
 
             // BT-2254 (ADR 0075 amendment): literal-index tuple access.
@@ -2228,7 +2220,7 @@ impl TypeChecker {
         if type_args.is_empty() || arguments.len() != 1 {
             return None;
         }
-        let index = match unwrap_parens(&arguments[0]) {
+        let index = match arguments[0].unwrap_parens() {
             Expression::Literal(Literal::Integer(n), _) => *n,
             _ => return None,
         };
@@ -2257,7 +2249,6 @@ impl TypeChecker {
         &mut self,
         receiver_type_args: &[InferredType],
         selector: &MessageSelector,
-        selector_name: &EcoString,
         arguments: &[Expression],
         arg_types: &[InferredType],
         span: Span,
@@ -2273,11 +2264,17 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
-        // Extract the canonical Erlang function name and arity from the selector.
-        // The canonical name is the first keyword without colons, matching the
-        // selector_to_function/1 logic in beamtalk_erlang_proxy. The spec reader
-        // normalizes stored names the same way, so a single lookup suffices.
-        let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
+        // Extract the canonical Erlang function name and arity from the selector
+        // (BT-3089: delegates to the one canonical erlang_function_name/erlang_arity
+        // pair, see extract_ffi_function_info's doc comment). `None` for a binary
+        // selector — unreachable today since the BT-1880 guard at this method's
+        // call site already excludes `MessageSelector::Binary` before we get here,
+        // but falling back to `UntypedFfi` rather than panicking/asserting keeps
+        // that a soft invariant instead of a hard one.
+        let Some((function_name, arity)) = Self::extract_ffi_function_info(selector, arguments)
+        else {
+            return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        };
 
         // Clone the signature to release the borrow on self before emitting diagnostics.
         let sig = self
@@ -2317,20 +2314,25 @@ impl TypeChecker {
     /// keyword ("seq") and the arity is the argument count.
     /// For unary selectors like `reverse`, the function name is the selector and
     /// arity is 0 (nullary Erlang call).
+    ///
+    /// Delegates to the canonical FFI-naming pair
+    /// [`erlang_function_name`](crate::semantic_analysis::validators::erlang_function_name) /
+    /// [`erlang_arity`](crate::semantic_analysis::validators::erlang_arity)
+    /// (BT-3089) rather than re-deriving "first keyword sans colon" with its
+    /// own `.split(':')` — that duplicate previously computed a name for
+    /// *binary* selectors too (e.g. `"+".split(':').next()` ⇒ `"+"`), which
+    /// disagreed with the canonical function (binary ⇒ `None`, no FFI-name
+    /// concept) and with `dispatch_codegen`'s `generate_direct_erlang_call`
+    /// (binary ⇒ falls through to normal dispatch, never emits a direct FFI
+    /// call). Returns `None` for a binary selector, matching both of those.
     fn extract_ffi_function_info(
-        selector_name: &EcoString,
+        selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> (String, u8) {
-        // The selector_name for keyword messages is "reverse:" or "seq:to:"
-        // The Erlang function name is the first keyword without the colon
-        let function_name = selector_name
-            .split(':')
-            .next()
-            .unwrap_or(selector_name.as_str())
-            .to_string();
-
-        let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
-        (function_name, arity)
+    ) -> Option<(String, u8)> {
+        let function_name = crate::semantic_analysis::validators::erlang_function_name(selector)?;
+        let arity = crate::semantic_analysis::validators::erlang_arity(selector, arguments.len());
+        let arity = u8::try_from(arity).unwrap_or(u8::MAX);
+        Some((function_name, arity))
     }
 
     /// Checks argument types against declared parameter types in an FFI signature.
@@ -2642,7 +2644,7 @@ impl TypeChecker {
     /// parentheses so `(HTTPRouter) foo:` and `(self) foo:` are treated
     /// identically to the un-parenthesised forms (BT-2158).
     fn is_class_side_receiver(expr: &Expression, env: &TypeEnv) -> bool {
-        let unwrapped = unwrap_parens(expr);
+        let unwrapped = expr.unwrap_parens();
         matches!(unwrapped, Expression::ClassReference { .. })
             || (env.in_class_method && Self::is_self_receiver(unwrapped))
     }
@@ -3022,7 +3024,7 @@ impl TypeChecker {
     /// shape (including `and:` sends whose receiver isn't a `notNil` test —
     /// those fall back to the generic block-context inference).
     fn detect_not_nil_and_narrowing(receiver: &Expression) -> Option<EnvKey> {
-        let receiver = unwrap_parens(receiver);
+        let receiver = receiver.unwrap_parens();
         let Expression::MessageSend {
             receiver: inner_recv,
             selector,
@@ -3919,8 +3921,8 @@ impl TypeChecker {
 
         // Unwrap parentheses so `on: (Error) do: ([:e | ...])` also gets the
         // contextual block-param typing.
-        let ex_class_inner = unwrap_parens(ex_class_arg);
-        let handler_inner = unwrap_parens(handler_arg);
+        let ex_class_inner = ex_class_arg.unwrap_parens();
+        let handler_inner = handler_arg.unwrap_parens();
 
         // Extract class name from ClassReference for block param typing
         let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_inner {
@@ -4012,7 +4014,7 @@ impl TypeChecker {
                     // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
                     // `infer_expr` would drop the `Block(..., R)` return type,
                     // degrading the whole send on statically-known receivers.
-                    let inner = unwrap_parens(arg);
+                    let inner = arg.unwrap_parens();
                     if let Expression::Block(block) = inner {
                         self.infer_block_with_typed_params(
                             block,
@@ -4047,7 +4049,7 @@ impl TypeChecker {
     ) -> InferredType {
         // Unwrap parens: `ifNotNil: ([:x | ...])` should narrow the same as
         // the unparenthesised form.
-        let inner = unwrap_parens(arg);
+        let inner = arg.unwrap_parens();
         let Expression::Block(block) = inner else {
             return self.infer_expr(arg, hierarchy, env, in_abstract_method);
         };
@@ -4127,7 +4129,7 @@ impl TypeChecker {
             // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
             // the method before the expression value is observed — treat
             // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = unwrap_parens(arg) {
+            if let Expression::Block(block) = arg.unwrap_parens() {
                 if block_has_any_return(block) {
                     return Some(InferredType::Never);
                 }
@@ -4204,7 +4206,7 @@ impl TypeChecker {
         if class_name.as_str() != "Block" {
             return None;
         }
-        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -4321,7 +4323,7 @@ impl TypeChecker {
         // exit the method on every path. Some blocks that may-but-not-always
         // diverge get widened to `Never` here — an accepted imprecision this
         // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
-        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -4416,7 +4418,7 @@ impl TypeChecker {
                         // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
                         // entirely and `if_true_false_solo_boolean_ret_ty`
                         // couldn't union it with the `Boolean` self-branch.
-                        let ty = if let Expression::Block(block) = unwrap_parens(arg) {
+                        let ty = if let Expression::Block(block) = arg.unwrap_parens() {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -4655,7 +4657,7 @@ impl TypeChecker {
                 return arguments
                     .iter()
                     .map(|arg| {
-                        if let Expression::Block(block) = unwrap_parens(arg) {
+                        if let Expression::Block(block) = arg.unwrap_parens() {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -4844,7 +4846,7 @@ impl TypeChecker {
                 // Unwrap parens so `foo: ([:x | ...])` gets the same
                 // Dynamic(DynamicReceiver) propagation as the unparenthesised
                 // `foo: [:x | ...]` form.
-                let inner = unwrap_parens(arg);
+                let inner = arg.unwrap_parens();
                 if let Expression::Block(block) = inner {
                     if propagate_dynamic {
                         let param_types: Vec<InferredType> = (0..block.parameters.len())
@@ -5499,52 +5501,24 @@ impl TypeChecker {
     ///
     /// `"T, E"` → `["T", "E"]`
     /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
+    ///
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089) — kept as a method so the
+    /// many `Self::split_type_params` call sites in this module don't need
+    /// to change.
     pub(super) fn split_type_params(s: &str) -> Vec<&str> {
-        let mut result = Vec::new();
-        let mut depth = 0;
-        let mut start = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth -= 1,
-                ',' if depth == 0 => {
-                    result.push(s[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        let last = s[start..].trim();
-        if !last.is_empty() {
-            result.push(last);
-        }
-        result
+        crate::semantic_analysis::string_utils::split_top_level(s, ',')
     }
 
     /// Split a type string on `|` while respecting parenthesis nesting.
     ///
     /// This ensures `Result(String | Integer, Error)` is NOT split at the inner `|`,
     /// but `String | nil` IS split into `["String", "nil"]`.
+    ///
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089).
     pub(super) fn split_union_respecting_parens(s: &str) -> Vec<&str> {
-        let mut result = Vec::new();
-        let mut depth = 0i32;
-        let mut start = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth = depth.saturating_sub(1),
-                '|' if depth == 0 => {
-                    result.push(s[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        let last = s[start..].trim();
-        if !last.is_empty() {
-            result.push(last);
-        }
-        result
+        crate::semantic_analysis::string_utils::split_top_level(s, '|')
     }
 
     /// BT-1986: Does the return type mention `Self` *nested* inside a
@@ -6670,18 +6644,10 @@ mod tests {
     }
 
     // ---- split_type_params ----
-
-    #[test]
-    fn split_type_params_simple() {
-        let result = TypeChecker::split_type_params("T, E");
-        assert_eq!(result, vec!["T", "E"]);
-    }
-
-    #[test]
-    fn split_type_params_single() {
-        let result = TypeChecker::split_type_params("Integer");
-        assert_eq!(result, vec!["Integer"]);
-    }
+    //
+    // Thin wrapper over `string_utils::split_top_level`, whose exhaustive
+    // nesting/edge-case coverage lives at its definition site (BT-3089).
+    // This is a smoke test that the wrapper is wired up correctly.
 
     #[test]
     fn split_type_params_nested() {
@@ -6689,16 +6655,45 @@ mod tests {
         assert_eq!(result, vec!["GenResult(A, B)", "E"]);
     }
 
+    // ---- extract_ffi_function_info (BT-3089) ----
+    //
+    // Pins the resolved binary-selector edge case: a binary selector has no
+    // FFI-proxy-call name (mirrors `erlang_function_name`/dispatch_codegen's
+    // `generate_direct_erlang_call`, both of which also decline to treat a
+    // binary send to `Erlang <module>` as a direct FFI call) — this used to
+    // disagree, deriving a name via `.split(':')` regardless of selector
+    // shape.
+
     #[test]
-    fn split_type_params_empty() {
-        let result = TypeChecker::split_type_params("");
-        assert!(result.is_empty());
+    fn extract_ffi_function_info_unary() {
+        let selector = MessageSelector::Unary("reverse".into());
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &[]),
+            Some(("reverse".to_string(), 0))
+        );
     }
 
     #[test]
-    fn split_type_params_deeply_nested() {
-        let result = TypeChecker::split_type_params("Outer(Inner(A, B), C), D");
-        assert_eq!(result, vec!["Outer(Inner(A, B), C)", "D"]);
+    fn extract_ffi_function_info_keyword() {
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("seq:", span()),
+            KeywordPart::new("to:", span()),
+        ]);
+        let args = [var("a"), var("b")];
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &args),
+            Some(("seq".to_string(), 2))
+        );
+    }
+
+    #[test]
+    fn extract_ffi_function_info_binary_is_none() {
+        let selector = MessageSelector::Binary("+".into());
+        let args = [var("a")];
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &args),
+            None
+        );
     }
 
     // ---- resolve_type_string (substitution) ----

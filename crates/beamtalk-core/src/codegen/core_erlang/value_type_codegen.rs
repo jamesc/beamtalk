@@ -456,7 +456,7 @@ impl CoreErlangGenerator {
         // Add instance method exports (each takes Self as first parameter)
         for method in &class.methods {
             let arity = method.parameters.len() + 1; // +1 for Self parameter
-            let mangled = method.selector.to_erlang_atom();
+            let mangled = method.selector.name().to_string();
             parts.push(leaf::fname(mangled, arity));
         }
 
@@ -1264,7 +1264,7 @@ impl CoreErlangGenerator {
         // `_r := (1 to: 5 do: [...])` — wraps the construct in `Expression::Parenthesized`.
         // Peel the wrappers so the `{value, StateAcc}` predicates (which only match
         // `MessageSend`) see the real construct.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         self.is_while_with_vt_local_threading(expr)
             || self.is_counted_loop_with_vt_local_threading(expr)
             || self.is_foldl_list_op_with_vt_local_threading(expr)
@@ -1565,7 +1565,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arg_vars: &[String],
     ) -> Document<'static> {
-        let fn_name = Self::native_delegate_fn_name(selector);
+        let fn_name = selector.leading_word();
         let args_list = join(
             arg_vars.iter().map(|v| leaf::var(v.clone())),
             &Document::Str(", "),
@@ -1580,23 +1580,9 @@ impl CoreErlangGenerator {
             "], {",
             leaf::atom(class_name.to_string()),
             ", ",
-            leaf::atom(selector.to_erlang_atom()),
+            leaf::atom(selector.name().to_string()),
             "})"
         ]
-    }
-
-    /// ADR 0101 / BT-2720: the Erlang function name a `native:` `self delegate`
-    /// method calls — the first keyword with its colon removed (or the bare
-    /// unary/binary selector). Mirrors the inline-FFI naming convention
-    /// (`docs/beamtalk-native-erlang.md`): `select: pred` → `select`,
-    /// `inject: i into: b` → `inject`, unary `asList` → `asList`.
-    pub(in crate::codegen::core_erlang) fn native_delegate_fn_name(
-        selector: &MessageSelector,
-    ) -> String {
-        match selector {
-            MessageSelector::Unary(name) | MessageSelector::Binary(name) => name.to_string(),
-            MessageSelector::Keyword(parts) => parts[0].keyword.trim_end_matches(':').to_string(),
-        }
     }
 
     fn generate_value_type_method(
@@ -1604,7 +1590,7 @@ impl CoreErlangGenerator {
         method: &MethodDefinition,
         class_def: &ClassDefinition,
     ) -> Result<Document<'static>> {
-        let mangled = method.selector.to_erlang_atom();
+        let mangled = method.selector.name().to_string();
         let arity = method.parameters.len() + 1; // +1 for Self
 
         // BT-833: Reset Self-threading version so each method starts with Self (version 0).
@@ -2050,7 +2036,7 @@ impl CoreErlangGenerator {
     ) -> Vec<String> {
         // BT-2359: peel `Expression::Parenthesized` so a parenthesized construct
         // (`(1 to: 5 do: [...])`) reports the same threaded locals its codegen packed.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         if self.is_while_with_vt_local_threading(expr) {
             self.get_while_threaded_locals(expr)
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
@@ -2963,7 +2949,7 @@ impl CoreErlangGenerator {
                             // is rebound (loop/foldl via emit_vt_threaded_local_assignment,
                             // conditional via emit_vt_conditional_assign_rhs) instead of being
                             // bound to the raw {value, StateAcc} tuple.
-                            let rhs = Self::peel_parens(value);
+                            let rhs = value.unwrap_parens();
                             if self.expr_yields_vt_threaded_tuple(value) {
                                 self.emit_vt_threaded_local_assignment(
                                     &id.name, value, &mut parts,
@@ -3014,7 +3000,7 @@ impl CoreErlangGenerator {
                         // BT-2359: a threaded construct as the final assignment RHS rebinds the
                         // target via element 1 of its {value, StateAcc} tuple and threads any
                         // sibling local; the block value is the rebound target.
-                        let rhs = Self::peel_parens(value);
+                        let rhs = value.unwrap_parens();
                         if self.expr_yields_vt_threaded_tuple(value) {
                             let core_var = self
                                 .emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
@@ -3590,7 +3576,7 @@ impl CoreErlangGenerator {
     ) -> Vec<Document<'static>> {
         let mut method_branches: Vec<Document<'static>> = Vec::new();
         for method in &class.methods {
-            let mangled = method.selector.to_erlang_atom();
+            let mangled = method.selector.name().to_string();
             method_branches.push(docvec![
                 "        <",
                 leaf::atom(mangled.clone()),
@@ -3929,7 +3915,7 @@ impl CoreErlangGenerator {
 
         // Add class-defined methods
         for method in &class.methods {
-            let mangled = method.selector.to_erlang_atom();
+            let mangled = method.selector.name().to_string();
             selectors.push(leaf::atom(mangled));
         }
 

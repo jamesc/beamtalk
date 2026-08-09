@@ -255,9 +255,18 @@ pub(crate) fn extract_assignment_var(expression: &str) -> Option<String> {
 
 /// Format an Erlang atom literal for use in generated assertion specs.
 ///
-/// Wraps the name in single quotes for Erlang atom safety.
+/// Wraps the name in single quotes for Erlang atom safety. Escaping goes
+/// through beamtalk-core's canonical `escape_atom_chars` funnel (BT-3089)
+/// rather than a hand-rolled/no-op rule of its own — every caller here
+/// currently only ever passes compiler-generated module names or
+/// already-validated identifier-like variable names, but routing through
+/// the shared funnel means that stays true by construction rather than by
+/// accident if a future caller passes less-trusted text.
 pub(crate) fn erlang_atom(name: &str) -> String {
-    format!("'{name}'")
+    format!(
+        "'{}'",
+        beamtalk_core::codegen::core_erlang::escape_atom_chars(name)
+    )
 }
 
 /// A single `EUnit` assertion case in normalised form.
@@ -1052,6 +1061,20 @@ fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_erlang_atom_plain() {
+        assert_eq!(erlang_atom("beamtalk_eval_0"), "'beamtalk_eval_0'");
+    }
+
+    /// BT-3089: `erlang_atom` used to do zero escaping (`format!("'{name}'")`)
+    /// — a latent bug if it ever received an atom needing escape. It now
+    /// routes through beamtalk-core's canonical `escape_atom_chars` funnel.
+    #[test]
+    fn test_erlang_atom_escapes_special_characters() {
+        assert_eq!(erlang_atom("it's"), "'it\\'s'");
+        assert_eq!(erlang_atom("back\\slash"), "'back\\\\slash'");
+    }
 
     #[test]
     fn test_parse_empty_file() {

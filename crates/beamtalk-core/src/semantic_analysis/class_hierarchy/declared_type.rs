@@ -35,6 +35,7 @@ use std::fmt;
 use ecow::EcoString;
 
 use crate::ast::TypeAnnotation;
+use crate::semantic_analysis::string_utils::{split_generic_base, split_top_level};
 use crate::semantic_analysis::type_checker::InferredType;
 
 /// A span-free, structured type signature — the value-object counterpart to
@@ -222,9 +223,14 @@ impl DeclaredType {
 }
 
 /// Byte-identical to [`TypeAnnotation::type_name`] — see that method for the
-/// per-variant rendering rules this mirrors (the single source of truth for
-/// both is documented there; keep them in sync by hand, matching what
-/// `TypeAnnotation` itself does across `type_name` / `needs_parens_in_*`).
+/// per-variant rendering rules this mirrors. `DeclaredType` is a separate,
+/// span-free type (see the module docs), so this can't literally call
+/// `TypeAnnotation::type_name` — keep them in sync by hand, matching what
+/// `TypeAnnotation` itself does across `type_name` / `needs_parens_in_*`.
+/// This invariant (and parity with the third independent renderer,
+/// `unparse::unparse_type_annotation_display`) is enforced by the
+/// `assert_display_parity` fixture tests below (BT-3089) — not just this
+/// comment, per this repo's "No duplicate implementations" rule.
 impl fmt::Display for DeclaredType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -320,55 +326,6 @@ impl From<&TypeAnnotation> for DeclaredType {
                 DeclaredType::ClassOf(class_name.name.clone())
             }
         }
-    }
-}
-
-/// Split a type-parameter/argument string on `,` while respecting
-/// parenthesis nesting — e.g. `"Outer(Inner(A, B), C), D"` splits into
-/// `["Outer(Inner(A, B), C)", "D"]`, not four pieces.
-///
-/// Shared implementation for [`split_top_level`]'s `,` case; kept as one
-/// function (parameterised on the separator char) since the nesting-aware
-/// scan is otherwise identical for `|` and `,`.
-fn split_top_level(s: &str, sep: char) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0;
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            c if c == sep && depth == 0 => {
-                result.push(s[start..i].trim());
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    let last = s[start..].trim();
-    if !last.is_empty() {
-        result.push(last);
-    }
-    result
-}
-
-/// Split a stored type-name string into `(base, args_slice)`.
-///
-/// Given `"Array(Integer)"` returns `("Array", Some("Integer"))`. Given
-/// `"Integer"` (no parentheses) returns `("Integer", None)`. Given
-/// `"Array(Integer)extra"` (not terminated by `)`) falls back to
-/// `("Array(Integer)extra", None)` — the caller treats the string as opaque.
-///
-/// Mirrors `type_resolver::split_generic_base` — duplicated here (rather
-/// than imported) because `class_hierarchy` sits below `type_checker` in the
-/// dependency graph and must not reach up into it.
-fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
-    match type_name.split_once('(') {
-        Some((base, rest)) if rest.ends_with(')') => {
-            let args = &rest[..rest.len() - 1];
-            (base, Some(args))
-        }
-        _ => (type_name, None),
     }
 }
 
@@ -520,13 +477,35 @@ mod tests {
             .unwrap_or_else(|| panic!("no return type annotation parsed from {src:?}"))
     }
 
+    /// Enforces the "byte-identical, keep in sync by hand" claim this
+    /// module's own doc comments make about `DeclaredType::Display` vs
+    /// `TypeAnnotation::type_name` — and additionally against the third
+    /// independent renderer, `unparse::unparse_type_annotation_display`
+    /// (BT-3089; per this repo's "No duplicate implementations" rule, a
+    /// "keep in sync" comment needs an enforcing test, not just a comment).
+    ///
+    /// All three are legitimately separate *implementations* — they operate
+    /// on different types (`TypeAnnotation` carries spans/`Identifier`s;
+    /// `DeclaredType` is a span-free structural mirror parsed back out of a
+    /// stored string; `unparse_type_annotation_display` builds a `Document`
+    /// through the same pretty-printer used for full source unparsing) — so
+    /// collapsing them into one function isn't a safe mechanical change.
+    /// What they share is a rendering *contract* (same text for the same
+    /// type), which this test pins directly instead of trusting the doc
+    /// comment.
     fn assert_display_parity(src: &str) {
         let ann = parse_return_type(src);
         let declared = DeclaredType::from(&ann);
+        let expected = ann.type_name();
         assert_eq!(
             declared.to_string(),
-            ann.type_name(),
-            "Display parity mismatch for {src:?}"
+            expected,
+            "DeclaredType::Display parity mismatch for {src:?}"
+        );
+        assert_eq!(
+            crate::unparse::unparse_type_annotation_display(&ann),
+            expected,
+            "unparse_type_annotation_display parity mismatch for {src:?}"
         );
     }
 

@@ -66,17 +66,6 @@ pub(crate) fn is_class_protocol_selector(selector: &str) -> bool {
     CLASS_PROTOCOL_SELECTORS.contains(&selector)
 }
 
-/// Peels any number of `Parenthesized` wrappers, returning the inner
-/// expression. `(Erlang lists)` and `Erlang lists` must be recognized
-/// identically.
-fn peel_parens(expr: &Expression) -> &Expression {
-    let mut current = expr;
-    while let Expression::Parenthesized { expression, .. } = current {
-        current = expression;
-    }
-    current
-}
-
 /// True when `expr` (after peeling any parentheses) is the bare, unqualified
 /// `Erlang` class reference — the compiler's built-in FFI bridge entry
 /// point. A package-qualified reference (`json@Erlang`) is excluded: it
@@ -84,7 +73,7 @@ fn peel_parens(expr: &Expression) -> &Expression {
 #[must_use]
 pub(crate) fn is_erlang_class_reference(expr: &Expression) -> bool {
     matches!(
-        peel_parens(expr),
+        expr.unwrap_parens(),
         Expression::ClassReference { name, package, .. }
             if package.is_none() && name.name == "Erlang"
     )
@@ -110,7 +99,7 @@ pub(crate) fn erlang_module_of_receiver(expr: &Expression) -> Option<&str> {
         receiver,
         selector: MessageSelector::Unary(module_name),
         ..
-    } = peel_parens(expr)
+    } = expr.unwrap_parens()
     {
         if is_erlang_class_reference(receiver) && !is_class_protocol_selector(module_name) {
             return Some(module_name.as_str());

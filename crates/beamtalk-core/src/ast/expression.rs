@@ -417,6 +417,27 @@ impl Expression {
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error { .. })
     }
+
+    /// Peels any number of `Parenthesized` wrappers, returning the inner
+    /// expression. `(Erlang lists)` and `Erlang lists`, or `(x)` and `x`,
+    /// must be recognized identically by any shape-matching code.
+    ///
+    /// Single authority for "unwrap parens" (BT-3089) — this was
+    /// independently reimplemented in `ffi_receiver.rs`,
+    /// `codegen::core_erlang` (`CoreErlangGenerator::peel_parens`),
+    /// `queries::ffi_sites_query`, and
+    /// `semantic_analysis::type_checker::narrowing::extract`. Lives on
+    /// `Expression` itself, in `ast` — the bottom of the dependency graph —
+    /// so every consumer above it (codegen, queries, `semantic_analysis`) can
+    /// call it directly instead of duplicating the loop.
+    #[must_use]
+    pub fn unwrap_parens(&self) -> &Expression {
+        let mut current = self;
+        while let Self::Parenthesized { expression, .. } = current {
+            current = expression;
+        }
+        current
+    }
 }
 
 /// A literal value.
@@ -564,6 +585,15 @@ impl MessageSelector {
     ///
     /// For keyword messages, this concatenates all keyword parts.
     /// For unary and binary messages, returns the operator/name directly.
+    ///
+    /// This is the single authority for selector → string text (BT-3089):
+    /// codegen also uses it directly (e.g. `leaf::atom(selector.name())`) as
+    /// the Erlang atom's textual content — Beamtalk selector characters
+    /// (letters, digits, `:`, operator symbols) never need escaping to be
+    /// valid atom *content*; `leaf::atom` (the BT-875-sanctioned funnel, see
+    /// `codegen::core_erlang::util::escape_atom_chars`) is what decides
+    /// whether/how the text gets quoted for Core Erlang output. There is no
+    /// separate "mangling" step.
     #[must_use]
     pub fn name(&self) -> EcoString {
         match self {
@@ -578,6 +608,44 @@ impl MessageSelector {
         }
     }
 
+    /// The selector's "leading word" — the bare unary/binary selector text,
+    /// or a keyword selector's *first* keyword with its trailing colon
+    /// stripped.
+    ///
+    /// `select: pred` → `select`; `inject: i into: b` → `inject`; unary
+    /// `asList` → `asList`; binary `+` → `+`. Distinct from [`name()`](Self::name),
+    /// which concatenates *all* keyword parts (`at:put:` stays `at:put:`
+    /// there) — this takes only the first.
+    ///
+    /// This is the naming convention `native: self delegate` methods use to
+    /// name their backing Erlang function (ADR 0101 / BT-2720,
+    /// `docs/beamtalk-native-erlang.md`). Single authority (BT-3089) for a
+    /// rule previously reimplemented in both
+    /// `codegen::core_erlang::value_type_codegen::native_delegate_fn_name`
+    /// and `semantic_analysis::validators::native_validators`'s
+    /// reserved-word check — moved down onto `MessageSelector` itself (the
+    /// bottom of the dependency graph) since neither of those two modules
+    /// may depend on the other (`semantic_analysis` must not depend on
+    /// `codegen`).
+    ///
+    /// Note this is a distinct concept from
+    /// [`erlang_function_name`](crate::semantic_analysis::validators::erlang_function_name):
+    /// that function is scoped to the `Erlang <module> <selector>` FFI-proxy
+    /// call shape and deliberately returns `None` for a binary selector
+    /// (there is no `(Erlang mod) + arg` FFI-call syntax); this method has
+    /// no such exclusion because the `native: self delegate` mechanism *can*
+    /// legitimately delegate a binary operator like `+` to a same-named
+    /// native function.
+    #[must_use]
+    pub fn leading_word(&self) -> &str {
+        match self {
+            Self::Unary(name) | Self::Binary(name) => name.as_str(),
+            Self::Keyword(parts) => parts
+                .first()
+                .map_or("", |kp| kp.keyword.trim_end_matches(':')),
+        }
+    }
+
     /// Returns the number of arguments this selector expects.
     #[must_use]
     pub fn arity(&self) -> usize {
@@ -585,51 +653,6 @@ impl MessageSelector {
             Self::Unary(_) => 0,
             Self::Binary(_) => 1,
             Self::Keyword(parts) => parts.len(),
-        }
-    }
-
-    /// Converts this selector to a Core Erlang atom representation.
-    ///
-    /// This is the **domain service** for selector mangling - converting Beamtalk
-    /// selectors to valid Erlang atoms. The returned string is ready to be wrapped
-    /// in single quotes for Core Erlang output.
-    ///
-    /// # DDD: `SelectorMangler` Domain Service
-    ///
-    /// In the Code Generation bounded context, selector mangling is a key domain
-    /// operation. This method encapsulates the domain knowledge of how Beamtalk
-    /// selectors map to Erlang atoms.
-    ///
-    /// # Returns
-    ///
-    /// The selector as a string suitable for use as an Erlang atom:
-    /// - Unary: `"increment"` → `'increment'`
-    /// - Binary: `"+"` → `'+'`
-    /// - Keyword: `["at:", "put:"]` → `'at:put:'`
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use beamtalk_core::ast::{MessageSelector, KeywordPart};
-    /// use beamtalk_core::source_analysis::Span;
-    ///
-    /// // Unary selector
-    /// let selector = MessageSelector::Unary("increment".into());
-    /// assert_eq!(selector.to_erlang_atom(), "increment");
-    ///
-    /// // Keyword selector
-    /// let selector = MessageSelector::Keyword(vec![
-    ///     KeywordPart::new("at:", Span::new(0, 3)),
-    ///     KeywordPart::new("put:", Span::new(5, 9)),
-    /// ]);
-    /// assert_eq!(selector.to_erlang_atom(), "at:put:");
-    /// ```
-    #[must_use]
-    pub fn to_erlang_atom(&self) -> String {
-        match self {
-            Self::Unary(name) => name.to_string(),
-            Self::Binary(op) => op.to_string(),
-            Self::Keyword(parts) => parts.iter().map(|p| p.keyword.as_str()).collect(),
         }
     }
 
@@ -1004,6 +1027,16 @@ impl TypeAnnotation {
     ///
     /// Used by the class hierarchy to store declared state field types
     /// and method parameter/return types.
+    ///
+    /// Two other renderers must produce byte-identical text for the same
+    /// type: `DeclaredType`'s `Display` impl (a separate, span-free type —
+    /// see `semantic_analysis::class_hierarchy::declared_type`) and
+    /// `unparse::unparse_type_annotation_display` (the `Document`-based
+    /// pretty-printer). All three are independent implementations for
+    /// structural reasons (different input types / rendering mechanisms),
+    /// not accidental duplication — kept honest by the
+    /// `assert_display_parity` fixture tests in `declared_type`'s test
+    /// module (BT-3089) rather than by comment alone.
     #[must_use]
     pub fn type_name(&self) -> EcoString {
         match self {
