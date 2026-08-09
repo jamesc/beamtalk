@@ -357,31 +357,17 @@ assert_command_recognized(Command) ->
     error({no_dispatch_table_entry_for_corpus_command, Command}).
 
 %% Load the shared compiler-port command-vocabulary conformance corpus
-%% (BT-3095) from the repo tree. Walks up from the test CWD to the project
-%% root (the dir holding `Cargo.toml`), mirroring
-%% `beamtalk_repl_ops_dev_tests:find_word_boundary_corpus_root/1`.
+%% (BT-3095) from the repo tree. `beamtalk_test_corpus` (BT-3099) walks up
+%% from the test CWD to the project root (the dir holding `Cargo.toml`),
+%% then reads the fixture both surfaces share. `beamtalk_test_support` is a
+%% test-only peer app (ADR 0022 — `beamtalk_compiler` has no dependency on
+%% `beamtalk_runtime`), never listed in `beamtalk_compiler.app.src`.
 load_command_vocabulary_corpus() ->
-    Root = find_command_vocabulary_corpus_root(filename:absname("")),
-    Path = filename:join([
-        Root,
+    beamtalk_test_corpus:load_json_fixture([
         "runtime",
         "apps",
         "beamtalk_compiler",
         "test",
         "fixtures",
         "compiler_port_command_vocabulary_corpus.json"
-    ]),
-    Bin =
-        case file:read_file(Path) of
-            {ok, B} -> B;
-            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
-        end,
-    json:decode(Bin).
-
-find_command_vocabulary_corpus_root("/") ->
-    error(project_root_not_found);
-find_command_vocabulary_corpus_root(Dir) ->
-    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
-        true -> Dir;
-        false -> find_command_vocabulary_corpus_root(filename:dirname(Dir))
-    end.
+    ]).

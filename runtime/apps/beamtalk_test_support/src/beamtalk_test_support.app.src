@@ -1,0 +1,10 @@
+{application, beamtalk_test_support, [
+    {description,
+        "Test-only helpers shared across beamtalk_compiler, beamtalk_runtime, and "
+        "beamtalk_workspace EUnit suites. Never a production dependency of any peer "
+        "app (ADR 0022) — see beamtalk_test_corpus."},
+    {vsn, {cmd, "escript ../../../scripts/version.escript"}},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib]}
+]}.
