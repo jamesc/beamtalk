@@ -25,6 +25,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     display_string/1,
     process_label/1,
     pid_label/1,
+    block_label/1,
     is_object/1,
     is_utf8/1
 ]).
@@ -256,9 +257,8 @@ print_string(X) when is_function(X) ->
     %% elements are printed via direct recursion, not message dispatch — see
     %% print_string/1's is_list/1 and print_string_map/1's 'Array' clauses)
     %% fell into the ~p catch-all and rendered as a raw `#Fun<...>`, diverging
-    %% from the REPL/format_result's `Block/N` convention.
-    {arity, Arity} = erlang:fun_info(X, arity),
-    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
+    %% from block_label/1's `Block/N` convention.
+    block_label(X);
 print_string(X) when is_tuple(X) ->
     Elements = tuple_to_list(X),
     iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
@@ -353,8 +353,7 @@ display_string({beamtalk_supervisor, _, _, _} = Sup) ->
     process_label(Sup);
 display_string(X) when is_function(X) ->
     %% BT-3082: see the matching print_string/1 clause.
-    {arity, Arity} = erlang:fun_info(X, arity),
-    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
+    block_label(X);
 display_string(X) when is_tuple(X) ->
     %% BT-3082: this clause was missing entirely (unlike print_string/1's),
     %% so a plain tuple fell into the ~p catch-all below instead of recursing
@@ -416,6 +415,21 @@ identity_inner({registered, Name}) when is_atom(Name) ->
     iolist_to_binary([<<"registered, ">>, atom_to_binary(Name, utf8)]);
 identity_inner(Other) ->
     iolist_to_binary(io_lib:format("~tp", [Other])).
+
+-doc """
+`Block/N` label for a bare fun, `N` being its arity (BT-3082).
+
+The single canonical algorithm shared by `print_string/1`/`display_string/1`
+(for a Block nested inside a collection, printed via direct recursion
+rather than message dispatch), the REPL wire encoder
+(`beamtalk_repl_json:term_to_json/1`), and the stdlib-test result formatter
+(`beamtalk_stdlib_test:format_result/1`) — previously four independent
+copies of the same `erlang:fun_info/2` + format logic.
+""".
+-spec block_label(function()) -> binary().
+block_label(Fun) when is_function(Fun) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]).
 
 -doc """
 Liveness-probed label for a bare pid: `#Actor<X.Y.Z>` for a live process,

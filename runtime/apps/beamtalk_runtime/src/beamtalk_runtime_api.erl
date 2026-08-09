@@ -111,7 +111,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     print_string/1,
     process_label/1,
     primitive_class_of/1,
-    pid_label/1
+    pid_label/1,
+    block_label/1
 ]).
 
 %%% ===================================================================
@@ -356,6 +357,11 @@ primitive_class_of(Value) ->
 -spec pid_label(pid()) -> binary().
 pid_label(Pid) ->
     beamtalk_primitive:pid_label(Pid).
+
+-doc "BT-3082: canonical `Block/N` label for a bare fun.".
+-spec block_label(function()) -> binary().
+block_label(Fun) ->
+    beamtalk_primitive:block_label(Fun).
 
 %%% ====================================================================
 %%% Hot Reload Delegators

@@ -216,8 +216,7 @@ format_result(V) when is_atom(V) ->
 format_result(V) when is_binary(V) ->
     V;
 format_result(V) when is_function(V) ->
-    {arity, A} = erlang:fun_info(V, arity),
-    iolist_to_binary([<<"Block/">>, integer_to_binary(A)]);
+    beamtalk_primitive:block_label(V);
 format_result(V) when is_pid(V) ->
     beamtalk_primitive:pid_label(V);
 format_result(V) when

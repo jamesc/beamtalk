@@ -294,8 +294,10 @@ term_to_json(Value) when is_pid(Value) ->
     %% to carry its own separate copy of the same Actor/Dead/Future logic.
     beamtalk_runtime_api:pid_label(Value);
 term_to_json(Value) when is_function(Value) ->
-    {arity, Arity} = erlang:fun_info(Value, arity),
-    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
+    %% BT-3082: beamtalk_primitive:block_label/1 is the single canonical
+    %% `Block/N` renderer, shared with format_result/1 — this used to carry
+    %% its own separate copy of the same erlang:fun_info/2 + format logic.
+    beamtalk_runtime_api:block_label(Value);
 term_to_json(Value) when is_map(Value) ->
     %% For tagged value objects (user-defined classes), dispatch Beamtalk printString
     %% so that class overrides (e.g. TestResult) are used. Untagged maps fall back
