@@ -44,7 +44,13 @@ Extracted from beamtalk_repl_server (BT-705).
     validate_selector_if_present/4,
     %% BT-2572: white-box test of the diagnostics `mode` normalisation that
     %% mirrors the Elixir facade at the Erlang op boundary.
-    normalize_diagnostics_mode/1
+    normalize_diagnostics_mode/1,
+    %% BT-3083: white-box test of the completion word-boundary rule against
+    %% the shared Rust/Erlang conformance corpus.
+    is_identifier_char/1,
+    %% BT-3083: white-box test of the completion keyword vocabulary against
+    %% the shared Rust/Erlang conformance corpus.
+    builtin_keywords/0
 ]).
 -endif.
 
@@ -2009,6 +2015,19 @@ read_class_meta(Module) ->
             #{}
     end.
 
+%% BT-3083: this list and the LSP's static `add_keyword_completions`
+%% (`crates/beamtalk-core/src/queries/completion_provider.rs`) are two
+%% engines that cannot literally share code (Erlang vs. Rust) but should
+%% offer the same control-flow vocabulary — a keyword missing from one and
+%% not the other is a completion gap on whichever surface is missing it.
+%% `match:`/`matchExhaustive:`/`if:then:else:` were LSP-only before this.
+%% This list's core control-flow keywords are pinned against
+%% `add_keyword_completions` by a shared conformance fixture
+%% (`runtime/apps/beamtalk_workspace/test/fixtures/completion_keyword_vocabulary_corpus.json`),
+%% asserted by `builtin_keywords_covers_shared_vocabulary_corpus_test` in
+%% `beamtalk_repl_ops_dev_tests.erl` and
+%% `keyword_completions_cover_shared_vocabulary_corpus` on the Rust side —
+%% keep both lists a superset of the corpus.
 -spec builtin_keywords() -> [binary()].
 builtin_keywords() ->
     [
@@ -2024,7 +2043,10 @@ builtin_keywords() ->
         <<"timesRepeat:">>,
         <<"subclass:">>,
         <<"spawn">>,
-        <<"new">>
+        <<"new">>,
+        <<"match:">>,
+        <<"matchExhaustive:">>,
+        <<"if:then:else:">>
     ].
 
 -doc """
