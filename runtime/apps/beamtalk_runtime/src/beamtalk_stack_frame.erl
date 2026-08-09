@@ -38,12 +38,19 @@ StackFrame objects are value types (tagged maps) with fields:
 Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.
 
 BT-3081: resolves the module→class registry map once for the whole
-stacktrace rather than once per frame. `module_to_class/1` (what each frame
-would otherwise call individually) resolves via a live class-registry scan
-that is O(registered classes) with a gen_server round trip per class
-(`beamtalk_class_registry:live_class_entries/0`); paying that once per
-exception instead of once per frame keeps a deep stacktrace on a
-many-classes system from turning into O(frames × classes) round trips.
+stacktrace rather than once per frame. `beamtalk_class_registry:module_to_class_map/0`
+is a plain ETS fold (`beamtalk_class_metadata:foldl_modules/2`, a
+`read_concurrency: true` table — no process round trips); paying that scan
+once per exception instead of once per frame still keeps a deep stacktrace
+on a many-classes system from turning into O(frames × classes) ETS scans.
+
+Earlier versions of this function (and `module_to_class_map/0`) built this
+map via a live class-registry scan with a `gen_server:call` per registered
+class (`beamtalk_class_registry:live_class_entries/0`). Since `wrap/1` runs
+on every Beamtalk exception via `beamtalk_exception_handler.erl`, a single
+momentarily-slow or call-cycle-blocked class process could stall or deadlock
+unrelated exception handling system-wide — fixed by moving to the ETS-backed
+fold, which needs no live process at all.
 """.
 -spec wrap(list()) -> list().
 wrap(Stacktrace) when is_list(Stacktrace) ->

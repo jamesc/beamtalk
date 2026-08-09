@@ -61,7 +61,7 @@ camel_to_snake_lowercase_initial_regression_test() ->
     ?assertEqual("a_b", beamtalk_module_name:camel_to_snake("aB")).
 
 %%% ============================================================================
-%%% to_module_atom/1, to_stdlib_module_atom/1, to_package_module_atom/2
+%%% to_module_atom/1, to_stdlib_module_atom/1
 %%% ============================================================================
 
 to_module_atom_test() ->
@@ -82,21 +82,6 @@ to_stdlib_module_atom_acronym_test() ->
     %% forward conversion is not lossy (only the inverse is).
     ?assertEqual(
         'bt@stdlib@beamerror', beamtalk_module_name:to_stdlib_module_atom('BEAMError')
-    ).
-
-to_package_module_atom_string_test() ->
-    ?assertEqual(
-        'bt@json@parser', beamtalk_module_name:to_package_module_atom('Parser', "json")
-    ).
-
-to_package_module_atom_atom_test() ->
-    ?assertEqual(
-        'bt@utils@my_class', beamtalk_module_name:to_package_module_atom('MyClass', utils)
-    ).
-
-to_package_module_atom_binary_test() ->
-    ?assertEqual(
-        'bt@json@parser', beamtalk_module_name:to_package_module_atom('Parser', <<"json">>)
     ).
 
 %%% ============================================================================

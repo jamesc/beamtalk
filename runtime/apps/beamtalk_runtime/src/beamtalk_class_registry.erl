@@ -460,8 +460,8 @@ is_stdlib_module(Module) ->
     beamtalk_module_name:is_stdlib_module(Module).
 
 -doc """
-Resolve a compiled BEAM module atom to its Beamtalk class name via the live
-class registry (BT-3081).
+Resolve a compiled BEAM module atom to its Beamtalk class name via the class
+metadata table (BT-3081).
 
 Authoritative — unlike the snake_case→CamelCase string heuristic
 (`beamtalk_module_name:snake_to_class/1`), this reads each class's actual
@@ -469,17 +469,14 @@ registered name rather than guessing one from its module name, so it cannot
 mis-capitalize acronym-cased classes (`bt@stdlib@beamerror` heuristically
 re-capitalizes to `'Beamerror'`, but the real class is `'BEAMError'`).
 
-Returns `not_found` when no live class process has this module (including
-when the class registry / pg process group isn't running at all — see
-`live_class_entries/0`), not an error — callers should fall back to the
-string heuristic in that case, exactly as
+Returns `not_found` when no registered class has this module, not an error —
+callers should fall back to the string heuristic in that case, exactly as
 `beamtalk_repl_ops_load:module_to_class_name_map/0` already does in bulk.
 
 For resolving many modules at once (e.g. every frame of a stacktrace), prefer
 `module_to_class_map/0` and look up each module in the result — this function
-rebuilds the whole map (an O(registered classes) scan with a gen_server round
-trip per class, via `live_class_entries/0`) on every call, so calling it once
-per module in a loop pays that scan once per module instead of once total.
+rebuilds the whole map (an ETS scan) on every call, so calling it once per
+module in a loop pays that scan once per module instead of once total.
 """.
 -spec class_name_for_module(atom()) -> {ok, class_name()} | not_found.
 class_name_for_module(Module) when is_atom(Module) ->
@@ -491,19 +488,28 @@ class_name_for_module(_) ->
     not_found.
 
 -doc """
-Build the full module→class-name map from the live class registry in a
+Build the full module→class-name map from the class metadata table in a
 single pass (BT-3081) — the batch counterpart to `class_name_for_module/1`.
 
 Use this when resolving many modules at once (e.g. `beamtalk_stack_frame:wrap/1`
-mapping every frame of a stacktrace to its class): one `live_class_entries/0`
-scan plus O(1) map lookups thereafter, instead of one full scan per module.
+mapping every frame of a stacktrace to its class): one ETS fold plus O(1) map
+lookups thereafter, instead of one full scan per module.
+
+Backed by `beamtalk_class_metadata:foldl_modules/2` — a plain
+`read_concurrency: true` ETS fold, not `live_class_entries/0`. The earlier
+`live_class_entries/0`-based version issued a `gen_server:call` (5s default
+timeout) to every live class process, sequentially; called from
+`beamtalk_stack_frame:wrap/1` on every Beamtalk exception, a single
+momentarily-slow or call-cycle-blocked class process could stall or deadlock
+unrelated exception handling system-wide. The metadata table already carries
+each registered class's module (written at registration time regardless of
+whether its process is currently alive), so no process round trip is needed.
 """.
 -spec module_to_class_map() -> #{atom() => class_name()}.
 module_to_class_map() ->
-    lists:foldl(
-        fun({Name, Mod, _Pid}, Acc) -> Acc#{Mod => Name} end,
-        #{},
-        live_class_entries()
+    beamtalk_class_metadata:foldl_modules(
+        fun({Name, Mod}, Acc) -> Acc#{Mod => Name} end,
+        #{}
     ).
 
 -doc """

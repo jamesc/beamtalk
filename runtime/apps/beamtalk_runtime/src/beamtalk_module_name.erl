@@ -31,10 +31,16 @@ and other non-ASCII letters the same way both sides of the compiler agree on.
 
 ## Assembly
 
-`to_module_atom/1`, `to_stdlib_module_atom/1`, and `to_package_module_atom/2`
-build the three `bt@…` module-atom shapes the compiler and runtime use:
-unqualified static (`bt@{snake}`), stdlib (`bt@stdlib@{snake}`), and
-package-qualified (`bt@{Package}@{snake}`).
+`to_module_atom/1` and `to_stdlib_module_atom/1` build the two `bt@…`
+module-atom shapes the compiler and runtime use on trusted (already-atom)
+class names: unqualified static (`bt@{snake}`) and stdlib
+(`bt@stdlib@{snake}`). The package-qualified shape (`bt@{Package}@{snake}`)
+has one caller today — `beamtalk_repl_ops_dev:resolve_qualified_class_name/1`
+— which takes raw, unbounded REPL user input, so it deliberately builds the
+module name as a string and checks it with `list_to_existing_atom` (erroring
+rather than creating an atom) instead of going through an atom-returning
+helper here; adding one would either duplicate that safety check or invite
+misuse against untrusted input.
 
 ## Inverse (lossy — fallback only)
 
@@ -52,7 +58,6 @@ to this heuristic only when a module isn't a registered class.
     camel_to_snake/1,
     to_module_atom/1,
     to_stdlib_module_atom/1,
-    to_package_module_atom/2,
     is_stdlib_module/1,
     snake_to_class/1
 ]).
@@ -143,20 +148,6 @@ to_module_atom(ClassName) when is_atom(ClassName) ->
 -spec to_stdlib_module_atom(atom()) -> atom().
 to_stdlib_module_atom(ClassName) when is_atom(ClassName) ->
     to_atom("bt@stdlib@" ++ camel_to_snake(atom_to_list(ClassName))).
-
--doc """
-Package-qualified module atom: `bt@{Package}@{snake_case}`.
-
-`Package` is inserted verbatim (it is already a valid module-name segment,
-e.g. a `beamtalk.toml` package name) — only the class name is snake_cased.
-""".
--spec to_package_module_atom(atom(), atom() | binary() | string()) -> atom().
-to_package_module_atom(ClassName, Package) when is_atom(ClassName), is_binary(Package) ->
-    to_package_module_atom(ClassName, unicode:characters_to_list(Package, utf8));
-to_package_module_atom(ClassName, Package) when is_atom(ClassName), is_atom(Package) ->
-    to_package_module_atom(ClassName, atom_to_list(Package));
-to_package_module_atom(ClassName, Package) when is_atom(ClassName), is_list(Package) ->
-    to_atom("bt@" ++ Package ++ "@" ++ camel_to_snake(atom_to_list(ClassName))).
 
 -spec to_atom(string()) -> atom().
 to_atom(Str) ->

@@ -62,6 +62,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_is_abstract/1,
     match_subclasses/1,
     foldl/2,
+    foldl_modules/2,
     all_builtins/0,
     %% BT-2266 / ADR 0084: runtime class-method fun retrieval store + gate flag.
     put_class_method_fun/3,
@@ -324,6 +325,34 @@ foldl(Fun, Acc0) ->
                     fun
                         (#class_metadata{superclass = undefined}, Acc) -> Acc;
                         (#class_metadata{name = N, superclass = S}, Acc) -> Fun({N, S}, Acc)
+                    end,
+                    Acc0,
+                    ?TABLE
+                )
+            catch
+                error:badarg -> Acc0
+            end
+    end.
+
+-doc """
+Fold over `{ClassName, Module}` pairs for every row with a known module.
+
+BT-3081: gives `beamtalk_class_registry:module_to_class_map/0` an ETS-only
+(no gen_server calls) way to build the module→class map, instead of scanning
+every live class process via `live_class_entries/0`. Rows whose module field
+is unset (`undefined`) are skipped. Returns `Acc0` if the table does not exist.
+""".
+-spec foldl_modules(fun(({class_name(), module()}, Acc) -> Acc), Acc) -> Acc.
+foldl_modules(Fun, Acc0) ->
+    case ets:info(?TABLE) of
+        undefined ->
+            Acc0;
+        _ ->
+            try
+                ets:foldl(
+                    fun
+                        (#class_metadata{module = undefined}, Acc) -> Acc;
+                        (#class_metadata{name = N, module = M}, Acc) -> Fun({N, M}, Acc)
                     end,
                     Acc0,
                     ?TABLE
