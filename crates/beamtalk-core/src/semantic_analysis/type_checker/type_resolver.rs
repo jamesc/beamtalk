@@ -612,15 +612,11 @@ fn declared_type_provenance(ctx: TypeStringContext) -> TypeProvenance {
 }
 
 /// Re-stamp `Substituted` provenance on a substitution-context union/false-or
-/// result — the `DeclaredType`-recursion counterpart of
-/// `TypeChecker::stamp_substituted_provenance` (inference.rs), duplicated
-/// rather than shared since that helper is private to `inference.rs`'s
-/// `impl TypeChecker` block. See its doc for the full rationale: `union_of`
-/// derives provenance from the members, and a plain nominal member never
-/// wins, so a substituted `V | Nil` would otherwise read as `Inferred`;
-/// `Aliased` results keep their tag (re-stamping would lose the alias
-/// display name); `Dynamic` and `Never` results carry no provenance and pass
-/// through unchanged.
+/// result. `union_of` derives provenance from the members, and a plain
+/// nominal member never wins, so a substituted `V | Nil` would otherwise
+/// read as `Inferred`; `Aliased` results keep their tag (re-stamping would
+/// lose the alias display name); `Dynamic` and `Never` results carry no
+/// provenance and pass through unchanged.
 fn stamp_substituted_provenance(mut ty: InferredType) -> InferredType {
     match &mut ty {
         InferredType::Known { provenance, .. }
