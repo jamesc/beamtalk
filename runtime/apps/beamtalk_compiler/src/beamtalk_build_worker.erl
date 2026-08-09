@@ -307,7 +307,7 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 %% lands on stdout, not stderr (same finding as BT-3115's `report_errors'
 %% fix). `return_warnings' hands the warning terms back instead, printed
 %% here explicitly to `standard_error' via
-%% `beamtalk_compile_diagnostics:format_warnings/1' so they reach the
+%% `beamtalk_compile_diagnostics:print_warnings/1' so they reach the
 %% developer instead of being silently dropped by the Rust CLI's stdout
 %% parser. `compile_core_erlang/1''s `{ok, atom(), binary()} | {error, term()}'
 %% return contract is unchanged — warnings are a side effect (printed), not
@@ -329,21 +329,16 @@ compile_core_forms(CoreModule) ->
         {ok, ModuleName, Binary} ->
             {ok, ModuleName, Binary};
         {ok, ModuleName, Binary, Warnings} ->
-            print_warnings(Warnings),
+            beamtalk_compile_diagnostics:print_warnings(Warnings),
             {ok, ModuleName, Binary};
         {error, Errors, Warnings} ->
-            print_warnings(Warnings),
+            beamtalk_compile_diagnostics:print_warnings(Warnings),
             {error,
                 {core_compile_error, #{
                     message => beamtalk_compile_diagnostics:format_errors(Errors),
                     raw => Errors
                 }}}
     end.
-
-print_warnings([]) ->
-    ok;
-print_warnings(Warnings) ->
-    io:put_chars(standard_error, beamtalk_compile_diagnostics:format_warnings(Warnings)).
 
 %% Render a `compile_core_erlang/1' error `Reason' for stderr. The
 %% `core_compile_error' shape (compile:forms failures — by definition an

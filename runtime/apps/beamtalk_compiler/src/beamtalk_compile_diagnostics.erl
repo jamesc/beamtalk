@@ -62,7 +62,7 @@ Either way, `compile:forms' warnings (e.g. unused-variable warnings in
 generated Core Erlang) were never surfaced to the developer.
 """.
 
--export([format_errors/1, format_warnings/1]).
+-export([format_errors/1, format_warnings/1, print_warnings/1]).
 
 -doc """
 Turn a `compile:forms/2' `{error, Errors, Warnings}' error list into a
@@ -93,6 +93,24 @@ format_messages(Messages, Prefix) ->
         {_Loc, Text} <- sys_messages:format_messages(to_filename(File), Prefix, ErrorInfos, [])
     ],
     unicode:characters_to_binary(Lines).
+
+-doc """
+Print a `compile:forms/2' `Warnings' list (from `return_warnings') to
+`standard_error' via [`format_warnings/1`](`format_warnings/1`), or do
+nothing for an empty list.
+
+Shared sink-selection wrapper for `beamtalk_build_worker' and
+`beamtalk_compiler_server' — both call this directly after `compile:forms'
+returns the `{ok, ModuleName, Binary, Warnings}' or `{error, Errors,
+Warnings}' shape, so the two never drift on *where* warnings get printed,
+matching `format_warnings/1' already doing so for *how* they get
+formatted.
+""".
+-spec print_warnings([{file:filename() | string() | binary(), [tuple()]}]) -> ok.
+print_warnings([]) ->
+    ok;
+print_warnings(Warnings) ->
+    io:put_chars(standard_error, format_warnings(Warnings)).
 
 %% sys_messages:format_messages/4 expects a string() file identifier;
 %% compile:forms/2's error tuples may carry it as a binary depending on

@@ -32,8 +32,10 @@ atom).
 -doc """
 Runs `Fun/0', capturing everything written to the node-global
 `standard_error' device during the call, and returns the captured text as
-a binary. Restores the original `standard_error' registration in an
-`after' block, so it is restored even if `Fun()' throws.
+a binary. Restores the original `standard_error' registration, and stops
+the capturing process, even if `Fun()' throws — both current call sites
+put `?assert*' macros inside `Fun()', so a failing assertion is the
+common exceptional case, not a rare one.
 """.
 -spec capture(fun(() -> term())) -> binary().
 capture(Fun) when is_function(Fun, 0) ->
@@ -41,12 +43,27 @@ capture(Fun) when is_function(Fun, 0) ->
     Capturer = spawn(fun() -> capture_loop(<<>>) end),
     true = unregister(standard_error),
     true = register(standard_error, Capturer),
-    try
-        Fun()
-    after
-        true = unregister(standard_error),
-        true = register(standard_error, OldStdErr)
-    end,
+    Outcome =
+        try
+            Fun(),
+            ok
+        catch
+            Class:Reason:Stack -> {raise, Class, Reason, Stack}
+        end,
+    true = unregister(standard_error),
+    true = register(standard_error, OldStdErr),
+    %% Always query (and thereby let self-terminate) the capturer, even on
+    %% the exception path — otherwise it leaks, parked forever in
+    %% capture_loop/1's receive.
+    Captured = fetch_captured(Capturer),
+    case Outcome of
+        ok ->
+            Captured;
+        {raise, RaiseClass, RaiseReason, RaiseStack} ->
+            erlang:raise(RaiseClass, RaiseReason, RaiseStack)
+    end.
+
+fetch_captured(Capturer) ->
     Capturer ! {get_captured, self()},
     receive
         {captured, Text} -> Text

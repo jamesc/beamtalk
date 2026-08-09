@@ -41,8 +41,11 @@ jobs:
         id: fuzz
         continue-on-error: true
         run: |
-          # BT-3124: split from 600s to 300s so the job's existing ~20-minute
-          # budget also covers the compile_pipeline fuzz job below.
+          # BT-3124: cut from 600s to 300s -- this job and the new
+          # fuzz-compile-pipeline job below run in parallel, each with its
+          # own independent 20-minute budget, so this isn't reclaiming time
+          # for that job; it's keeping total nightly runner-minutes across
+          # the two fuzz jobs roughly where they were with one.
           # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
           # -max_total_time=300: Run for exactly 5 minutes
           cargo +nightly fuzz run parse_arbitrary -- \

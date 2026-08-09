@@ -698,7 +698,7 @@ compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
 %% actual Port-owning gen_server (ADR 0022 Phase 1, see moduledoc) backing
 %% the REPL/LSP/in-memory compile path, so its warnings reach the
 %% developer the same way `beamtalk_build_worker''s do: printed to
-%% `standard_error' via `beamtalk_compile_diagnostics:format_warnings/1'.
+%% `standard_error' via `beamtalk_compile_diagnostics:print_warnings/1'.
 %% `compile_core_erlang/1''s `{ok, atom(), binary()} | {error, term()}'
 %% return contract is unchanged.
 compile_core_forms(CoreModule, Options) ->
@@ -706,21 +706,16 @@ compile_core_forms(CoreModule, Options) ->
         {ok, ModuleName, Binary} ->
             {ok, ModuleName, Binary};
         {ok, ModuleName, Binary, Warnings} ->
-            print_warnings(Warnings),
+            beamtalk_compile_diagnostics:print_warnings(Warnings),
             {ok, ModuleName, Binary};
         {error, Errors, Warnings} ->
-            print_warnings(Warnings),
+            beamtalk_compile_diagnostics:print_warnings(Warnings),
             {error,
                 {core_compile_error, #{
                     message => beamtalk_compile_diagnostics:format_errors(Errors),
                     raw => Errors
                 }}}
     end.
-
-print_warnings([]) ->
-    ok;
-print_warnings(Warnings) ->
-    io:put_chars(standard_error, beamtalk_compile_diagnostics:format_warnings(Warnings)).
 
 %%% gen_server callbacks
 
