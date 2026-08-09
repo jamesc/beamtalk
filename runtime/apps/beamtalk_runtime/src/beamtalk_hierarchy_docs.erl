@@ -78,10 +78,11 @@ find_defining_class(ClassPid, Selector) ->
     case beamtalk_hierarchy:walk_ancestors(ClassPid, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, DefiningClass} ->
             DefiningClass;
-        max_depth_exceeded ->
+        {max_depth_exceeded, CyclePid} ->
+            CycleClass = beamtalk_object_class:class_name(CyclePid),
             ?LOG_WARNING(
-                "find_defining_class: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ReceiverName, Selector],
+                "find_defining_class: max hierarchy depth ~p exceeded at ~p (starting from ~p) for selector ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleClass, ReceiverName, Selector],
                 #{domain => [beamtalk, runtime]}
             ),
             ReceiverName;
@@ -122,10 +123,11 @@ find_defining_class_method(ClassPid, Selector) ->
     case beamtalk_hierarchy:walk_ancestors(ClassPid, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, DefiningClass} ->
             DefiningClass;
-        max_depth_exceeded ->
+        {max_depth_exceeded, CyclePid} ->
+            CycleClass = beamtalk_object_class:class_name(CyclePid),
             ?LOG_WARNING(
-                "find_defining_class_method: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ReceiverName, Selector],
+                "find_defining_class_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) for selector ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleClass, ReceiverName, Selector],
                 #{domain => [beamtalk, runtime]}
             ),
             ReceiverName;
@@ -141,8 +143,10 @@ methods. Local methods shadow inherited ones (Smalltalk-style override):
 a selector redefined by a subclass is tagged with the subclass as its
 `DefiningClass`, never the ancestor it shadows.
 
-Returns `#{}` if the walk exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy
-cycle), logging a `?LOG_WARNING`.
+If the walk exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy cycle), returns the
+partial map folded up through the ancestors actually visited before the
+guard tripped (BT-3096) — not an empty map — and logs a `?LOG_WARNING`
+naming the ancestor where the cycle was detected.
 """.
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
@@ -170,13 +174,13 @@ collect_flattened_methods(ClassName, ClassPid) ->
     of
         {found, Result} ->
             Result;
-        max_depth_exceeded ->
+        {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
             ?LOG_WARNING(
-                "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ClassName],
+                "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
                 #{domain => [beamtalk, runtime]}
             ),
-            #{};
+            PartialAcc;
         not_found ->
             %% Unreachable: see find_defining_class/2.
             erlang:error({unreachable, not_found, ClassName})

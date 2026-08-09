@@ -962,12 +962,10 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
 Walk the class hierarchy collecting class-side methods.
 Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
 
-On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns `#{}`
-— not the partial map folded up through the ancestors visited before the
-guard tripped — and logs a `?LOG_WARNING`. Deliberately narrower than
-returning partial results: `walk_ancestors/3`'s `max_depth_exceeded` carries
-no payload, so every caller falls back to a fixed default on this
-already-anomalous path.
+On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns the
+partial map folded up through the ancestors actually visited before the
+guard tripped (BT-3096) — not `#{}` — and logs a `?LOG_WARNING` naming the
+ancestor where the cycle was detected.
 
 BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` (the shared depth
 guard + cycle warning) rather than a hand-rolled recursion, matching the
@@ -1000,13 +998,13 @@ collect_flattened_class_methods(ClassName, ClassPid) ->
     of
         {found, Result} ->
             Result;
-        max_depth_exceeded ->
+        {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
             ?LOG_WARNING(
-                "collect_flattened_class_methods: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ClassName],
+                "collect_flattened_class_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
                 #{domain => [beamtalk, runtime]}
             ),
-            #{};
+            PartialAcc;
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — a
             %% `none` superclass or an unregistered ancestor is translated to
