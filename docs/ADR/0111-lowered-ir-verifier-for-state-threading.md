@@ -77,7 +77,7 @@ save/restore disciplines:
 |---|---|---|---|
 | Actor/instance state | `StateThreading` struct (`state_codegen.rs:42`) | `CoreErlangGenerator.state_threading` field | `State`, `State1`, `State2`, … (renamed to `StateAcc*` inside loop bodies) |
 | Class variables | `usize` field + `next_class_var()` (`mod.rs:1132`, `mod.rs:2088`) | `ClassContext.class_var_version` | `ClassVars`, `ClassVars1`, … (ADR 0110's mechanism) |
-| Value-type fields | `usize` field + `next_self_var()` (`mod.rs:1211`, `mod.rs:2095`) | `ValueTypeContext.self_version` | `Self`, `Self1`, … |
+| Value-type fields | `usize` field + `next_self_var()` (`mod.rs:1211`, `mod.rs:2104`) | `ValueTypeContext.self_version` | `Self`, `Self1`, … |
 
 `with_branch_context` (`mod.rs:2064-2080`, BT-1449/BT-1550) already has to
 save, reset, and restore `state_version` *and* `class_var_version` together
