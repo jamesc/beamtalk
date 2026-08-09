@@ -480,10 +480,9 @@ fn method_call_union_return_no_false_binary_warning() {
 /// "Integer | Nil" into a proper Union type (not Known("Integer | Nil")).
 #[test]
 fn resolve_type_string_splits_union() {
-    let ty = TypeChecker::resolve_type_string(
-        "Integer | Nil",
-        &HashMap::new(),
-        &HashMap::new(),
+    let ty = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("Integer | Nil"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,

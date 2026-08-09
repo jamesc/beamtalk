@@ -16,7 +16,9 @@
 //! returns Never". The same gap covered `Dynamic` (BT-2865's fix never
 //! reached this resolver), the `nil`/`true`/`false` keywords, and `Never`
 //! nested in substituted generic/union positions. Fixed by merging the two
-//! string resolvers into one (`resolve_type_string`).
+//! string resolvers into one (BT-3075's `resolve_type_string`, itself later
+//! deleted in favour of `DeclaredType::parse` + `resolve_declared_type`,
+//! BT-3080).
 
 use super::common::*;
 use std::collections::HashMap;
@@ -101,10 +103,9 @@ Object subclass: Liar\n\
 /// canonical `InferredType::Never`, not a `Known("Never")` pseudo-class.
 #[test]
 fn substitute_never_resolves_to_never_variant() {
-    let result = TypeChecker::resolve_type_string(
-        "Never",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("Never"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Substitution,
@@ -119,10 +120,9 @@ fn substitute_never_resolves_to_never_variant() {
 /// real `Dynamic` variant (BT-2865's fix, previously missing here).
 #[test]
 fn substitute_dynamic_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_type_string(
-        "Dynamic",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("Dynamic"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Substitution,
@@ -138,10 +138,9 @@ fn substitute_dynamic_resolves_to_dynamic_variant() {
 /// `isNil`/`ifNil:` narrowing keeps working on class-method return values.
 #[test]
 fn substitute_union_with_nil_keyword_normalises_to_undefined_object() {
-    let result = TypeChecker::resolve_type_string(
-        "String | nil",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("String | nil"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Substitution,
@@ -167,10 +166,9 @@ fn substitute_union_with_nil_keyword_normalises_to_undefined_object() {
 fn substitute_union_with_never_member_collapses() {
     let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
     subst.insert("T".into(), InferredType::known("Integer"));
-    let result = TypeChecker::resolve_type_string(
-        "T | Never",
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("T | Never"),
         &subst,
-        &HashMap::new(),
         None,
         None,
         TypeStringContext::Substitution,
@@ -188,10 +186,9 @@ fn substitute_union_with_never_member_collapses() {
 fn substitute_never_nested_in_generic_resolves_to_never_variant() {
     let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
     subst.insert("T".into(), InferredType::known("Integer"));
-    let result = TypeChecker::resolve_type_string(
-        "GenResult(T, Never)",
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("GenResult(T, Never)"),
         &subst,
-        &HashMap::new(),
         None,
         None,
         TypeStringContext::Substitution,
@@ -265,10 +262,9 @@ typed Object subclass: Repro\n\
 fn substituted_union_collapsing_to_meta_gets_substituted_provenance() {
     let mut subst: HashMap<EcoString, InferredType> = HashMap::new();
     subst.insert("T".into(), InferredType::meta("Counter"));
-    let result = TypeChecker::resolve_type_string(
-        "T | Never",
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("T | Never"),
         &subst,
-        &HashMap::new(),
         None,
         None,
         TypeStringContext::Substitution,
@@ -287,10 +283,9 @@ fn substituted_union_collapsing_to_meta_gets_substituted_provenance() {
 /// `UndefinedObject` like every other resolver.
 #[test]
 fn substitute_bare_nil_normalises_to_undefined_object() {
-    let result = TypeChecker::resolve_type_string(
-        "Nil",
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse("Nil"),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Substitution,

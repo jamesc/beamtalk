@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -25,6 +25,7 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 use super::sendability;
+use super::type_resolver;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -248,11 +249,14 @@ impl TypeChecker {
                                 ),
                             }
                         };
-                        return super::TypeChecker::resolve_type_string(
-                            ret_ty,
-                            &class_subst,
-                            &HashMap::new(),
-                            Some(&self_type),
+                        return type_resolver::resolve_declared_type(
+                            &DeclaredType::parse(ret_ty),
+                            &type_resolver::merge_substitutions(
+                                &class_subst,
+                                &type_resolver::SubstitutionMap::new(),
+                                Some(&self_type),
+                            ),
+                            None,
                             self.alias_registry.as_ref(),
                             super::TypeStringContext::Substitution,
                         );
@@ -296,7 +300,7 @@ impl TypeChecker {
     /// Walks the method's declared parameter types and, for each parameter
     /// whose declared type is one of the class's type parameters (e.g. `T`
     /// in `Box(T)`), records the mapping `T -> arg_type`. The resulting map
-    /// is threaded into [`super::TypeChecker::resolve_type_string`]
+    /// is threaded into [`super::type_resolver::resolve_declared_type`]
     /// so the return type's references to those params resolve to the
     /// concrete inferred types.
     ///
@@ -1190,7 +1194,7 @@ impl TypeChecker {
             // send whose callee's `MethodInfo::return_type` is the raw alias
             // name `RestartStrategy` (send-site resolution expands aliases
             // only when a registry is threaded through — several
-            // `resolve_type_string` call sites, e.g. the class-object tower,
+            // `resolve_declared_type` call sites, e.g. the class-object tower,
             // pass `None`).
             // Structural compatibility below (`is_type_compatible` and the
             // `InferredType::Union` arm's `classify_union_members`) only
@@ -2890,8 +2894,9 @@ impl TypeChecker {
     /// alias deps, so non-alias assignability/compatibility behavior is
     /// untouched.
     ///
-    /// Deliberately not the more general `inference.rs::resolve_type_string`
-    /// (BT-2928, also alias-registry-aware): that helper additionally
+    /// Deliberately not the more general
+    /// `type_resolver::resolve_declared_type`
+    /// (BT-2928, also alias-registry-aware): that resolver additionally
     /// re-parses keywords (`nil`/`true`/`false`), generics, and pre-spelled
     /// unions, which would change what a *non-alias* declared type resolves
     /// to here (e.g. `"Nil"` -> `"UndefinedObject"`) — a broader behavior

@@ -46,6 +46,38 @@ use super::{DynamicReason, InferredType, TypeProvenance, TypeStringContext};
 /// substitutions apply — all type-parameter identifiers pass through unchanged.
 pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, InferredType>;
 
+/// Merge a class-level and a method-local substitution map into the single
+/// [`SubstitutionMap`] [`resolve_declared_type`] takes, with method-local
+/// bindings winning on key collision — the same two-map priority order the
+/// deleted `TypeChecker::resolve_type_string` (BT-3075) used to check
+/// separately (BT-3080: that function's three-parameter shape — class subst,
+/// method subst, `self_type` — collapses to this single map plus the
+/// resolver's existing `subst.get("Self")` convention below).
+///
+/// When `self_type` is `Some`, additionally binds the reserved `"Self"` key
+/// to it. `DeclaredType::parse` has no dedicated `SelfType` production (only
+/// [`TypeAnnotation::SelfType`] does) — a bare `"Self"` string parses to
+/// [`DeclaredType::Simple`], which falls through
+/// [`resolve_declared_type_inner`]'s ordinary `subst.get(name)` lookup.
+/// Binding `"Self"` here reproduces `resolve_type_string`'s dedicated
+/// `type_name == "Self"` special case through that same, already-existing
+/// lookup rather than a second one. `"Self"` is reserved (ADR 0108 forbids it
+/// as a generic type-param or alias name), so this can never collide with a
+/// real substitution entry.
+#[must_use]
+pub(in crate::semantic_analysis) fn merge_substitutions(
+    class_subst: &SubstitutionMap,
+    method_subst: &SubstitutionMap,
+    self_type: Option<&InferredType>,
+) -> SubstitutionMap {
+    let mut merged = class_subst.clone();
+    merged.extend(method_subst.iter().map(|(k, v)| (k.clone(), v.clone())));
+    if let Some(ty) = self_type {
+        merged.insert(EcoString::from("Self"), ty.clone());
+    }
+    merged
+}
+
 /// Resolve a [`TypeAnnotation`] into a fully-parameterised [`InferredType`],
 /// preserving generic arguments end-to-end.
 ///
@@ -290,11 +322,13 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
 /// Alias expansion threads `subst`, `protocol_registry`, `alias_registry`,
 /// and `ctx` through unchanged into the recursive call on the alias's own
 /// (converted) declared body — the same threading
-/// `resolve_type_annotation_inner` used. This is *not* what
-/// `TypeChecker::resolve_type_string`'s alias branch does (it resets to an
-/// empty `SubstitutionMap`, drops `protocol_registry`, and always resolves
-/// through the `Declared`-context AST path) — that divergence is pre-existing
-/// and out of scope here (BT-3076 stage 2 does not touch `resolve_type_string`).
+/// `resolve_type_annotation_inner` used. Before BT-3080 this diverged from
+/// `TypeChecker::resolve_type_string`'s alias branch, which reset to an empty
+/// `SubstitutionMap`, dropped `protocol_registry`, and always resolved
+/// through the `Declared`-context AST path; `resolve_type_string` is deleted
+/// (BT-3080), so this is now the *only* alias-expansion policy in the type
+/// checker — every former `resolve_type_string` call site resolves through
+/// this same threading.
 #[allow(clippy::too_many_lines)] // one match arm per DeclaredType variant — see resolve_declared_type's doc
 fn resolve_declared_type_inner(
     dt: &DeclaredType,
@@ -322,8 +356,23 @@ fn resolve_declared_type_inner(
             // `Result` never hits this path at all (no type args to resolve),
             // which is why the bug was invisible until a param was partially
             // parameterized.
+            //
+            // BT-3080: an FFI spec's `any()`/`term()` return type ("Dynamic"
+            // in the wire vocabulary) is not the same *reason* as a
+            // user-written `:: Dynamic` — `DynamicSpec` "loses" to a concrete
+            // binding observed elsewhere during merge, where `ExplicitDynamic`
+            // is authoritative (see `DynamicReason::ExplicitDynamic`'s doc).
+            // Folding `native_types::map_type_name` onto this resolver must
+            // not collapse that distinction, so `Extracted` context keeps the
+            // FFI-specific reason; every other context keeps the pre-existing
+            // `ExplicitDynamic`.
             if WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic) {
-                return InferredType::Dynamic(DynamicReason::ExplicitDynamic);
+                let reason = if ctx == TypeStringContext::Extracted {
+                    DynamicReason::DynamicSpec
+                } else {
+                    DynamicReason::ExplicitDynamic
+                };
+                return InferredType::Dynamic(reason);
             }
             // Method-local / class-level type-parameter substitution wins over
             // keyword resolution, because `T`, `E`, `R` would otherwise flow
@@ -550,17 +599,15 @@ fn resolve_declared_type_inner(
     }
 }
 
-/// `Declared` or `Substituted` provenance (both `Span::default()`, per
-/// `resolve_declared_type`'s doc), chosen by `ctx` — the `DeclaredType`
-/// recursion's single construction point for "this was a constructed nominal
-/// / generic / metatype / set-op result", mirroring
-/// `TypeChecker::resolve_type_string`'s equivalent inline `if` at its
-/// generic-parse arm (BT-3075).
+/// `Declared`, `Substituted`, or `Extracted` provenance, chosen by `ctx` — the
+/// `DeclaredType` recursion's single construction point for "this was a
+/// constructed nominal / generic / metatype / set-op result" (BT-3075,
+/// extended BT-3080 with the `Extracted` arm for the folded-in FFI path).
 fn declared_type_provenance(ctx: TypeStringContext) -> TypeProvenance {
-    if ctx == TypeStringContext::Substitution {
-        TypeProvenance::Substituted(Span::default())
-    } else {
-        TypeProvenance::Declared(Span::default())
+    match ctx {
+        TypeStringContext::Substitution => TypeProvenance::Substituted(Span::default()),
+        TypeStringContext::Extracted => TypeProvenance::Extracted,
+        TypeStringContext::Declared => TypeProvenance::Declared(Span::default()),
     }
 }
 
@@ -694,13 +741,12 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
             // generics (`List(Integer)`), unions (`Integer | Nil`), and `Nil`
             // keyword aliases canonicalise correctly instead of becoming an
             // opaque `Known("List(Integer)")`.
-            SuperclassTypeArg::Concrete { type_name } => super::TypeChecker::resolve_type_string(
-                type_name,
-                &HashMap::new(),
-                &HashMap::new(),
+            SuperclassTypeArg::Concrete { type_name } => resolve_declared_type(
+                &DeclaredType::parse(type_name),
+                &SubstitutionMap::new(),
                 None,
                 alias_registry,
-                super::TypeStringContext::Declared,
+                TypeStringContext::Declared,
             ),
         })
         .collect();
@@ -740,7 +786,7 @@ fn resolve_type_keyword(name: &EcoString) -> EcoString {
 /// `("Array(Integer)extra", None)` — the caller should treat the string as an
 /// opaque class name.
 ///
-/// Used by the string-form parsers (`resolve_type_string`,
+/// Used by the string-form parsers (`resolve_type_param`,
 /// `parse_generic_type_string`, etc.) in
 /// place of manual `.find('(')` slicing. Centralising this keeps the
 /// parenthesis-parsing logic in one place and lets the

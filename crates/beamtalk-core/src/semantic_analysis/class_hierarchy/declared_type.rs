@@ -8,20 +8,22 @@
 //! [`MethodInfo::return_type`](super::MethodInfo::return_type) and
 //! `param_types` store type signatures as flattened `EcoString`s (see
 //! [`crate::ast::TypeAnnotation::type_name`]). Every consumer that needs
-//! structure back out of one of those strings has historically hand-rolled
-//! its own parser — `TypeChecker::resolve_type_string` (BT-3075) being the
-//! canonical, merged one. `DeclaredType` gives that structure a proper value
+//! structure back out of one of those strings parses through this type —
+//! `TypeChecker::resolve_type_string` (BT-3075's canonical, merged
+//! hand-rolled parser) is deleted (BT-3080); every former call site now goes
+//! through [`DeclaredType::parse`] +
+//! [`resolve_declared_type`](crate::semantic_analysis::type_checker::resolve_type_annotation)-family
+//! resolution instead. `DeclaredType` gives that structure a proper value
 //! type: a span-free mirror of [`TypeAnnotation`] that can be built directly
 //! from an AST annotation ([`From<&TypeAnnotation>`](#impl-From<%26TypeAnnotation>-for-DeclaredType)),
 //! parsed back out of a stored string ([`DeclaredType::parse`]), or partially
 //! recovered from an already-resolved [`InferredType`]
 //! ([`DeclaredType::from_inferred`]).
 //!
-//! This module is purely additive (BT-3076 stage 1): nothing here replaces
-//! `resolve_type_string` or any existing call site yet. Stage 2 re-cores the
-//! canonical annotation resolver
+//! The canonical annotation resolver
 //! ([`resolve_type_annotation`](crate::semantic_analysis::type_checker::resolve_type_annotation))
-//! onto this type; a later stage migrates `MethodInfo` itself.
+//! is built on this type (BT-3076); `MethodInfo`'s string-typed fields
+//! themselves remain a possible future migration.
 //!
 //! Lives in the `class_hierarchy` layer (not `type_checker`) because
 //! `MethodInfo` — the eventual home for a structured field — lives here, and
@@ -91,28 +93,25 @@ impl DeclaredType {
     /// `param_types` entry, or a `ClassHierarchy::state_field_type` value)
     /// into a structured `DeclaredType`.
     ///
-    /// Grammar mirrors [`TypeChecker::resolve_type_string`]'s parsing (BT-3075):
-    /// split on top-level `|` (respecting parenthesis nesting) for unions,
-    /// then `Base(Arg1, Arg2)` for generics (args themselves split on
-    /// top-level `,`, respecting nesting), with `#name` recognised as a
-    /// [`DeclaredType::Singleton`]. Unlike `resolve_type_string`, this is
-    /// **parse only** — no keyword resolution: `Never`, `Dynamic`, `nil`,
-    /// `true`, `false` all come back as plain `Simple`/`Singleton` names,
-    /// exactly as written. That normalisation is the resolver's job, not the
-    /// parser's (see `resolve_declared_type` in `type_resolver`).
+    /// Grammar mirrors the deleted `TypeChecker::resolve_type_string`'s
+    /// parsing (BT-3075, folded into this type BT-3080): split on top-level
+    /// `|` (respecting parenthesis nesting) for unions, then `Base(Arg1,
+    /// Arg2)` for generics (args themselves split on top-level `,`,
+    /// respecting nesting), with `#name` recognised as a
+    /// [`DeclaredType::Singleton`]. This is **parse only** — no keyword
+    /// resolution: `Never`, `Dynamic`, `nil`, `true`, `false` all come back
+    /// as plain `Simple`/`Singleton` names, exactly as written. That
+    /// normalisation is the resolver's job, not the parser's (see
+    /// `resolve_declared_type` in `type_resolver`).
     ///
-    /// Never panics. `resolve_type_string`'s grammar has no representation
-    /// for `\` (difference), `&` (intersection), bare `Self`, `Self class`,
-    /// or `<Name> class` — strings in exactly those shapes (which *can* occur,
+    /// Never panics. This grammar has no representation for `\`
+    /// (difference), `&` (intersection), bare `Self`, `Self class`, or
+    /// `<Name> class` — strings in exactly those shapes (which *can* occur,
     /// since [`MethodInfo::return_type`](super::MethodInfo::return_type) is
     /// populated via [`TypeAnnotation::type_name`], which does render them)
-    /// degrade to an opaque `Simple(whole_string)`, matching
-    /// `resolve_type_string`'s own behaviour for any input it doesn't
-    /// specifically recognise (an unparsed string becomes a nominal class
-    /// name). Malformed/unbalanced input (e.g. `"Array(Integer"`, no closing
-    /// paren) degrades the same way.
-    ///
-    /// [`TypeChecker::resolve_type_string`]: crate::semantic_analysis::type_checker::TypeChecker
+    /// degrade to an opaque `Simple(whole_string)` (an unparsed string
+    /// becomes a nominal class name). Malformed/unbalanced input (e.g.
+    /// `"Array(Integer"`, no closing paren) degrades the same way.
     #[must_use]
     pub fn parse(s: &str) -> DeclaredType {
         let trimmed = s.trim();
