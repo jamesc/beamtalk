@@ -25,7 +25,6 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
 use super::narrowing::extract::extract_variable_name;
-use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
 use super::narrowing::{ClassTestInfo, ClassTestKind, NarrowingInfo};
@@ -824,7 +823,7 @@ impl TypeChecker {
                 // class references (`(HTTPRouter) build: [...]; ...`) are
                 // treated as class-side both for block-param inference and
                 // downstream selector validation.
-                let unwrapped_target = unwrap_parens(cascade_target);
+                let unwrapped_target = cascade_target.unwrap_parens();
                 let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
                 // ADR 0083 / BT-2879: a Meta-typed cascade target (`someVar ::
                 // SomeClass class`) is also class-side for block-param
@@ -1087,7 +1086,7 @@ impl TypeChecker {
                 // applies when the scrutinee has a stable narrowable key
                 // (`extract_variable_name`) — an arbitrary expression
                 // scrutinee has nothing to narrow.
-                let scrutinee_key = extract_variable_name(unwrap_parens(value));
+                let scrutinee_key = extract_variable_name(value.unwrap_parens());
                 let mut residual_scrutinee_ty = scrutinee_ty.clone();
 
                 let arm_types: Vec<InferredType> = arms
@@ -1696,7 +1695,7 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods.
         // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.
-        if let Expression::ClassReference { name, package, .. } = unwrap_parens(receiver) {
+        if let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
@@ -1839,7 +1838,7 @@ impl TypeChecker {
         {
             // In class methods, self sends should check class-side methods.
             // BT-2158: unwrap parens so `(self) foo:` dispatches class-side.
-            if env.in_class_method && Self::is_self_receiver(unwrap_parens(receiver)) {
+            if env.in_class_method && Self::is_self_receiver(receiver.unwrap_parens()) {
                 if !in_abstract_method {
                     self.check_argument_types(
                         class_name,
@@ -2228,7 +2227,7 @@ impl TypeChecker {
         if type_args.is_empty() || arguments.len() != 1 {
             return None;
         }
-        let index = match unwrap_parens(&arguments[0]) {
+        let index = match arguments[0].unwrap_parens() {
             Expression::Literal(Literal::Integer(n), _) => *n,
             _ => return None,
         };
@@ -2642,7 +2641,7 @@ impl TypeChecker {
     /// parentheses so `(HTTPRouter) foo:` and `(self) foo:` are treated
     /// identically to the un-parenthesised forms (BT-2158).
     fn is_class_side_receiver(expr: &Expression, env: &TypeEnv) -> bool {
-        let unwrapped = unwrap_parens(expr);
+        let unwrapped = expr.unwrap_parens();
         matches!(unwrapped, Expression::ClassReference { .. })
             || (env.in_class_method && Self::is_self_receiver(unwrapped))
     }
@@ -3022,7 +3021,7 @@ impl TypeChecker {
     /// shape (including `and:` sends whose receiver isn't a `notNil` test —
     /// those fall back to the generic block-context inference).
     fn detect_not_nil_and_narrowing(receiver: &Expression) -> Option<EnvKey> {
-        let receiver = unwrap_parens(receiver);
+        let receiver = receiver.unwrap_parens();
         let Expression::MessageSend {
             receiver: inner_recv,
             selector,
@@ -3919,8 +3918,8 @@ impl TypeChecker {
 
         // Unwrap parentheses so `on: (Error) do: ([:e | ...])` also gets the
         // contextual block-param typing.
-        let ex_class_inner = unwrap_parens(ex_class_arg);
-        let handler_inner = unwrap_parens(handler_arg);
+        let ex_class_inner = ex_class_arg.unwrap_parens();
+        let handler_inner = handler_arg.unwrap_parens();
 
         // Extract class name from ClassReference for block param typing
         let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_inner {
@@ -4012,7 +4011,7 @@ impl TypeChecker {
                     // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
                     // `infer_expr` would drop the `Block(..., R)` return type,
                     // degrading the whole send on statically-known receivers.
-                    let inner = unwrap_parens(arg);
+                    let inner = arg.unwrap_parens();
                     if let Expression::Block(block) = inner {
                         self.infer_block_with_typed_params(
                             block,
@@ -4047,7 +4046,7 @@ impl TypeChecker {
     ) -> InferredType {
         // Unwrap parens: `ifNotNil: ([:x | ...])` should narrow the same as
         // the unparenthesised form.
-        let inner = unwrap_parens(arg);
+        let inner = arg.unwrap_parens();
         let Expression::Block(block) = inner else {
             return self.infer_expr(arg, hierarchy, env, in_abstract_method);
         };
@@ -4127,7 +4126,7 @@ impl TypeChecker {
             // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
             // the method before the expression value is observed — treat
             // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = unwrap_parens(arg) {
+            if let Expression::Block(block) = arg.unwrap_parens() {
                 if block_has_any_return(block) {
                     return Some(InferredType::Never);
                 }
@@ -4204,7 +4203,7 @@ impl TypeChecker {
         if class_name.as_str() != "Block" {
             return None;
         }
-        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -4321,7 +4320,7 @@ impl TypeChecker {
         // exit the method on every path. Some blocks that may-but-not-always
         // diverge get widened to `Never` here — an accepted imprecision this
         // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
-        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -4416,7 +4415,7 @@ impl TypeChecker {
                         // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
                         // entirely and `if_true_false_solo_boolean_ret_ty`
                         // couldn't union it with the `Boolean` self-branch.
-                        let ty = if let Expression::Block(block) = unwrap_parens(arg) {
+                        let ty = if let Expression::Block(block) = arg.unwrap_parens() {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -4655,7 +4654,7 @@ impl TypeChecker {
                 return arguments
                     .iter()
                     .map(|arg| {
-                        if let Expression::Block(block) = unwrap_parens(arg) {
+                        if let Expression::Block(block) = arg.unwrap_parens() {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -4844,7 +4843,7 @@ impl TypeChecker {
                 // Unwrap parens so `foo: ([:x | ...])` gets the same
                 // Dynamic(DynamicReceiver) propagation as the unparenthesised
                 // `foo: [:x | ...]` form.
-                let inner = unwrap_parens(arg);
+                let inner = arg.unwrap_parens();
                 if let Expression::Block(block) = inner {
                     if propagate_dynamic {
                         let param_types: Vec<InferredType> = (0..block.parameters.len())

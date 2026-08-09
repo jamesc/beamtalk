@@ -37,6 +37,6 @@ pub(crate) use rules::singleton_eq::detect_binary as detect_singleton_eq;
 ///
 /// Returns `None` when no rule matches.
 pub(crate) fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
-    let receiver = extract::unwrap_parens(receiver);
+    let receiver = receiver.unwrap_parens();
     rules::RULES.iter().find_map(|rule| (rule.detect)(receiver))
 }

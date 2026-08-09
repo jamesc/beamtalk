@@ -2265,7 +2265,7 @@ impl CoreErlangGenerator {
         facts: &crate::semantic_analysis::SemanticFacts,
         out: &mut std::collections::HashSet<String>,
     ) {
-        match Self::peel_parens(expr) {
+        match expr.unwrap_parens() {
             Expression::Assignment { value, .. } => {
                 Self::collect_list_op_cross_scope_mutations_recursive(value, facts, out);
             }
@@ -2298,8 +2298,8 @@ impl CoreErlangGenerator {
         // Peel parens then an assignment RHS (which may itself be parenthesized) so
         // forms like `_r := (1 to: 5 do: [...])` are still inspected — mirrors
         // `expr_has_nested_counted_loop_threading`.
-        let inner = match Self::peel_parens(expr) {
-            Expression::Assignment { value, .. } => Self::peel_parens(value),
+        let inner = match expr.unwrap_parens() {
+            Expression::Assignment { value, .. } => value.unwrap_parens(),
             other => other,
         };
         let Expression::MessageSend {
@@ -3140,7 +3140,7 @@ impl CoreErlangGenerator {
         // BT-2355: `_r := (loop)` wraps the construct in parentheses; peel them so
         // the threaded locals are still discovered when the construct is an
         // assignment RHS or sub-expression.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         let Expression::MessageSend {
             receiver,
             selector,
@@ -3247,17 +3247,6 @@ impl CoreErlangGenerator {
     /// the Actor method-body sequencer consumes, where empty and absent are equivalent.
     fn non_empty(v: Vec<String>) -> Option<Vec<String>> {
         if v.is_empty() { None } else { Some(v) }
-    }
-
-    /// BT-2355: Peels any `Expression::Parenthesized` wrappers, returning the inner
-    /// expression. Used so control-flow classification/threading sees through the
-    /// parentheses in forms like `_r := (1 to: 5 do: [...])`.
-    pub(super) fn peel_parens(expr: &Expression) -> &Expression {
-        let mut current = expr;
-        while let Expression::Parenthesized { expression, .. } = current {
-            current = expression;
-        }
-        current
     }
 
     /// BT-2355: Collects the `Block` arguments of a message send (e.g. the branch

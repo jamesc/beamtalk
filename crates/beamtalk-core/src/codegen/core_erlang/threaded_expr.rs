@@ -158,7 +158,7 @@ impl CoreErlangGenerator {
         if matches!(boundary, ThreadingBoundary::Actor) {
             return self.lower_actor_threaded_last(expr, position);
         }
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         let mut parts: Vec<Document<'static>> = Vec::new();
         let result_var = if self.expr_yields_vt_threaded_tuple(expr) {
             self.emit_vt_threaded_tuple_unwrap_to_var(expr, &mut parts)?
@@ -280,7 +280,7 @@ impl CoreErlangGenerator {
                 self.emit_vt_threaded_local_assignment(var_name, value, body_parts)?,
             ));
         }
-        let rhs = Self::peel_parens(value);
+        let rhs = value.unwrap_parens();
         if self.is_conditional_with_vt_local_threading(rhs) {
             return Ok(Some(
                 self.emit_vt_conditional_assign_rhs(var_name, rhs, body_parts)?,

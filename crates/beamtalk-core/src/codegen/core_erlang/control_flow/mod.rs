@@ -3390,8 +3390,8 @@ impl CoreErlangGenerator {
     ) -> bool {
         use crate::ast::MessageSelector;
 
-        let inner = match Self::peel_parens(expr) {
-            Expression::Assignment { value, .. } => Self::peel_parens(value),
+        let inner = match expr.unwrap_parens() {
+            Expression::Assignment { value, .. } => value.unwrap_parens(),
             other => other,
         };
         let Expression::MessageSend {

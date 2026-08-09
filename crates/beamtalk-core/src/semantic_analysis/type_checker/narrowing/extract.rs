@@ -22,15 +22,6 @@
 use crate::ast::Expression;
 use crate::semantic_analysis::type_checker::EnvKey;
 
-/// Peel `Expression::Parenthesized` wrappers so callers can pattern-match on
-/// the inner expression directly.
-pub(crate) fn unwrap_parens(expr: &Expression) -> &Expression {
-    match expr {
-        Expression::Parenthesized { expression, .. } => unwrap_parens(expression),
-        other => other,
-    }
-}
-
 /// Extract a [`EnvKey`] naming the variable under a type test.
 ///
 /// Supports identifiers, parenthesized identifiers, and `self.<field>`

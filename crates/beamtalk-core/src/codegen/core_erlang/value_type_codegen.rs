@@ -1264,7 +1264,7 @@ impl CoreErlangGenerator {
         // `_r := (1 to: 5 do: [...])` — wraps the construct in `Expression::Parenthesized`.
         // Peel the wrappers so the `{value, StateAcc}` predicates (which only match
         // `MessageSend`) see the real construct.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         self.is_while_with_vt_local_threading(expr)
             || self.is_counted_loop_with_vt_local_threading(expr)
             || self.is_foldl_list_op_with_vt_local_threading(expr)
@@ -2050,7 +2050,7 @@ impl CoreErlangGenerator {
     ) -> Vec<String> {
         // BT-2359: peel `Expression::Parenthesized` so a parenthesized construct
         // (`(1 to: 5 do: [...])`) reports the same threaded locals its codegen packed.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         if self.is_while_with_vt_local_threading(expr) {
             self.get_while_threaded_locals(expr)
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
@@ -2963,7 +2963,7 @@ impl CoreErlangGenerator {
                             // is rebound (loop/foldl via emit_vt_threaded_local_assignment,
                             // conditional via emit_vt_conditional_assign_rhs) instead of being
                             // bound to the raw {value, StateAcc} tuple.
-                            let rhs = Self::peel_parens(value);
+                            let rhs = value.unwrap_parens();
                             if self.expr_yields_vt_threaded_tuple(value) {
                                 self.emit_vt_threaded_local_assignment(
                                     &id.name, value, &mut parts,
@@ -3014,7 +3014,7 @@ impl CoreErlangGenerator {
                         // BT-2359: a threaded construct as the final assignment RHS rebinds the
                         // target via element 1 of its {value, StateAcc} tuple and threads any
                         // sibling local; the block value is the rebound target.
-                        let rhs = Self::peel_parens(value);
+                        let rhs = value.unwrap_parens();
                         if self.expr_yields_vt_threaded_tuple(value) {
                             let core_var = self
                                 .emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;

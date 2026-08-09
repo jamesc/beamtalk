@@ -487,6 +487,35 @@ mod tests {
     }
 
     #[test]
+    fn unwrap_parens_bare_expression_is_identity() {
+        let ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        assert_eq!(ident.unwrap_parens(), &ident);
+    }
+
+    #[test]
+    fn unwrap_parens_single_layer() {
+        let inner = Expression::Identifier(Identifier::new("x", Span::new(1, 2)));
+        let wrapped = Expression::Parenthesized {
+            expression: Box::new(inner.clone()),
+            span: Span::new(0, 3),
+        };
+        assert_eq!(wrapped.unwrap_parens(), &inner);
+    }
+
+    #[test]
+    fn unwrap_parens_multiple_nested_layers() {
+        let inner = Expression::Identifier(Identifier::new("x", Span::new(2, 3)));
+        let wrapped = Expression::Parenthesized {
+            expression: Box::new(Expression::Parenthesized {
+                expression: Box::new(inner.clone()),
+                span: Span::new(1, 4),
+            }),
+            span: Span::new(0, 5),
+        };
+        assert_eq!(wrapped.unwrap_parens(), &inner);
+    }
+
+    #[test]
     fn identifier_creation() {
         let id = Identifier::new("myVar", Span::new(0, 5));
         assert_eq!(id.name, "myVar");

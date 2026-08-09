@@ -4091,7 +4091,7 @@ impl CoreErlangGenerator {
         // BT-2355: see through parentheses so `_r := (1 to: 5 do: [...])` is still
         // classified as control flow with mutations (and thus unpacked + threaded)
         // rather than falling through to a plain pure local assignment.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
 
         // BT-2880: `match:` is a dedicated `Expression::Match` node, not a
         // `MessageSend`, so it's otherwise invisible to this classifier — a

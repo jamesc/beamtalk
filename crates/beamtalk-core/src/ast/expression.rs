@@ -417,6 +417,27 @@ impl Expression {
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error { .. })
     }
+
+    /// Peels any number of `Parenthesized` wrappers, returning the inner
+    /// expression. `(Erlang lists)` and `Erlang lists`, or `(x)` and `x`,
+    /// must be recognized identically by any shape-matching code.
+    ///
+    /// Single authority for "unwrap parens" (BT-3089) — this was
+    /// independently reimplemented in `ffi_receiver.rs`,
+    /// `codegen::core_erlang` (`CoreErlangGenerator::peel_parens`),
+    /// `queries::ffi_sites_query`, and
+    /// `semantic_analysis::type_checker::narrowing::extract`. Lives on
+    /// `Expression` itself, in `ast` — the bottom of the dependency graph —
+    /// so every consumer above it (codegen, queries, `semantic_analysis`) can
+    /// call it directly instead of duplicating the loop.
+    #[must_use]
+    pub fn unwrap_parens(&self) -> &Expression {
+        let mut current = self;
+        while let Self::Parenthesized { expression, .. } = current {
+            current = expression;
+        }
+        current
+    }
 }
 
 /// A literal value.

@@ -126,15 +126,6 @@ struct FfiTarget<'a> {
     arity: Option<usize>,
 }
 
-/// Strip `Parenthesized` wrappers so a `(Erlang lists)` cascade receiver is
-/// matched the same as a bare `Erlang lists` one.
-fn unwrap_parens(mut expr: &Expression) -> &Expression {
-    while let Expression::Parenthesized { expression, .. } = expr {
-        expr = expression;
-    }
-    expr
-}
-
 /// Recover the Erlang module name from an FFI proxy receiver.
 ///
 /// Matches `Erlang <module>` or `(Erlang <module>)` — a `MessageSend` whose
@@ -230,7 +221,7 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
             // `(Erlang lists) reverse: xs; sort: ys`), so resolve the shared
             // module from there and match each cascade message against it.
             collect_ffi_sites(receiver, target, source, lines);
-            let shared_module = match unwrap_parens(receiver) {
+            let shared_module = match receiver.unwrap_parens() {
                 Expression::MessageSend {
                     receiver: inner, ..
                 } => extract_erlang_module(inner),
