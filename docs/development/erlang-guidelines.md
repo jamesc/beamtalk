@@ -823,6 +823,7 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `process_label/1` | `beamtalk_primitive:process_label/1` |
 | `primitive_class_of/1` | `beamtalk_primitive:class_of/1` |
 | `pid_label/1` | `beamtalk_primitive:pid_label/1` |
+| `block_label/1` | `beamtalk_primitive:block_label/1` |
 | `trigger_code_change/2` | `beamtalk_hot_reload:trigger_code_change/2` |
 | `trigger_code_change/3` | `beamtalk_hot_reload:trigger_code_change/3` |
 | `hot_reload_code_change/3` | `beamtalk_hot_reload:code_change/3` |
