@@ -271,30 +271,64 @@ fn format_stub_file(module_name: &str, functions: &[FunctionSignature]) -> Strin
 /// - Nullary: `functionName -> ReturnType`
 /// - Unary:   `functionName: param :: Type -> ReturnType`
 /// - Binary+: `functionName: param1 :: Type1 keyword2: param2 :: Type2 -> ReturnType`
+///
+/// `FunctionSignature`/`InferredType` come from the native-type registry, a
+/// structurally different input than the AST types (`MethodDefinition`/
+/// `TypeAnnotation`) every other signature-text consumer renders from — so
+/// there's no `TypeAnnotation` to hand to
+/// `unparse::unparse_type_annotation_display` here. Each parameter's type is
+/// rendered by this module's own [`format_type`] instead, and the result is
+/// composed with the same shared
+/// [`beamtalk_core::unparse::render_signature_text`] core every other
+/// consumer uses (BT-3097) — text-in/text-out is exactly the seam that lets
+/// one composer serve both AST- and native-type-rendered signatures without
+/// an AST adapter.
 fn format_signature(sig: &FunctionSignature) -> String {
+    use beamtalk_core::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+    };
+
     let ret_type = format_type(&sig.return_type);
 
     if sig.params.is_empty() {
-        return format!("{} -> {ret_type}", sig.name);
+        return render_signature_text(
+            SignatureSelector::Unary(&sig.name),
+            Some(&ret_type),
+            &SignatureRenderOptions::DISPLAY,
+        );
     }
 
-    let mut parts = Vec::new();
-    for (i, param) in sig.params.iter().enumerate() {
-        let param_type = format_type(&param.type_);
+    let type_texts: Vec<String> = sig.params.iter().map(|p| format_type(&p.type_)).collect();
+    let keywords: Vec<String> = sig
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| {
+            if i == 0 {
+                // First param: keyword is the function name.
+                format!("{}:", sig.name)
+            } else {
+                // Subsequent params: use keyword name or fallback to `with:`.
+                format!("{}:", param.keyword.as_deref().unwrap_or("with"))
+            }
+        })
+        .collect();
+    let params: Vec<SignatureParam<'_>> = sig
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| SignatureParam {
+            keyword: &keywords[i],
+            name: Some(param.keyword.as_deref().unwrap_or("arg")),
+            type_text: Some(type_texts[i].as_str()),
+        })
+        .collect();
 
-        if i == 0 {
-            // First param: keyword is the function name
-            let param_name = param.keyword.as_deref().unwrap_or("arg");
-            parts.push(format!("{}: {} :: {}", sig.name, param_name, param_type));
-        } else {
-            // Subsequent params: use keyword name or fallback to `with:`
-            let keyword = param.keyword.as_deref().unwrap_or("with");
-            let param_name = param.keyword.as_deref().unwrap_or("arg");
-            parts.push(format!("{keyword}: {param_name} :: {param_type}"));
-        }
-    }
-
-    format!("{} -> {ret_type}", parts.join(" "))
+    render_signature_text(
+        SignatureSelector::Params(&params),
+        Some(&ret_type),
+        &SignatureRenderOptions::DISPLAY,
+    )
 }
 
 /// Format an `InferredType` as a Beamtalk type annotation string.

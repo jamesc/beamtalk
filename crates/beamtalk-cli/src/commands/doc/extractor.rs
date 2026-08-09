@@ -115,33 +115,55 @@ pub(super) fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Optio
 }
 
 /// Format a method signature for display.
+///
+/// Names only, no types, no return arrow — `beamtalk doc`'s listing style is
+/// intentionally less detailed than hover/stub generation (BT-3097): it
+/// composes through the shared
+/// [`beamtalk_core::unparse::render_signature_text`] core with
+/// [`beamtalk_core::unparse::SignatureRenderOptions::NAMES_ONLY`], the same
+/// composer every other signature-text consumer in the codebase now shares.
 pub(super) fn format_signature(
     selector: &beamtalk_core::ast::MessageSelector,
     parameters: &[beamtalk_core::ast::ParameterDefinition],
 ) -> String {
     use beamtalk_core::ast::MessageSelector;
+    use beamtalk_core::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+    };
+
     match selector {
-        MessageSelector::Unary(name) => name.to_string(),
+        MessageSelector::Unary(name) => render_signature_text(
+            SignatureSelector::Unary(name),
+            None,
+            &SignatureRenderOptions::NAMES_ONLY,
+        ),
         MessageSelector::Binary(op) => {
-            if let Some(param) = parameters.first() {
-                format!("{op} {}", param.name.name)
-            } else {
-                op.to_string()
-            }
+            let params = [SignatureParam {
+                keyword: op,
+                name: parameters.first().map(|p| p.name.name.as_str()),
+                type_text: None,
+            }];
+            render_signature_text(
+                SignatureSelector::Params(&params),
+                None,
+                &SignatureRenderOptions::NAMES_ONLY,
+            )
         }
         MessageSelector::Keyword(parts) => {
-            let mut sig = String::new();
-            for (i, part) in parts.iter().enumerate() {
-                if i > 0 {
-                    sig.push(' ');
-                }
-                sig.push_str(&part.keyword);
-                if let Some(param) = parameters.get(i) {
-                    sig.push(' ');
-                    sig.push_str(&param.name.name);
-                }
-            }
-            sig
+            let params: Vec<SignatureParam<'_>> = parts
+                .iter()
+                .enumerate()
+                .map(|(i, part)| SignatureParam {
+                    keyword: &part.keyword,
+                    name: parameters.get(i).map(|p| p.name.name.as_str()),
+                    type_text: None,
+                })
+                .collect();
+            render_signature_text(
+                SignatureSelector::Params(&params),
+                None,
+                &SignatureRenderOptions::NAMES_ONLY,
+            )
         }
     }
 }
