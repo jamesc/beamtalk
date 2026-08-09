@@ -1855,12 +1855,10 @@ hierarchy walker (`beamtalk_behaviour_intrinsics:walk_hierarchy/3`,
 existing callers (always 0) but the walk itself always starts fresh at 0 —
 `walk_ancestors/3` owns depth-counting internally.
 
-On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns `[]`
-— not the partial set of selectors collected from the ancestors visited
-before the guard tripped — and logs a `?LOG_WARNING`. Deliberately narrower
-than returning partial results: `walk_ancestors/3`'s `max_depth_exceeded`
-carries no payload, so every caller falls back to a fixed default on this
-already-anomalous path.
+On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns the
+partial set of selectors collected from the ancestors actually visited
+before the guard tripped (BT-3096) — not `[]` — and logs a `?LOG_WARNING`
+naming the ancestor where the cycle was detected.
 """.
 -spec collect_methods_with_fun(atom(), non_neg_integer(), fun((pid()) -> [atom()])) -> [atom()].
 collect_methods_with_fun(ClassName, _Depth, Fun) ->
@@ -1901,13 +1899,13 @@ collect_methods_with_fun(ClassName, _Depth, Fun) ->
     case beamtalk_hierarchy:walk_ancestors({ClassName, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, ResultMap} ->
             maps:keys(ResultMap);
-        max_depth_exceeded ->
+        {max_depth_exceeded, {CycleClassName, PartialMap}} ->
             ?LOG_WARNING(
-                "collect_methods_with_fun: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ClassName],
+                "collect_methods_with_fun: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleClassName, ClassName],
                 #{domain => [beamtalk, runtime]}
             ),
-            [];
+            maps:keys(PartialMap);
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — an
             %% unregistered class or a `none` superclass is translated to a
