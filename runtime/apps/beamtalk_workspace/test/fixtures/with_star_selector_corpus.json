@@ -1,0 +1,47 @@
+[
+  {
+    "field_name": "x",
+    "expected_selector": "withX:",
+    "why": "single ASCII lowercase letter"
+  },
+  {
+    "field_name": "count",
+    "expected_selector": "withCount:",
+    "why": "ASCII lowercase-first field name"
+  },
+  {
+    "field_name": "firstName",
+    "expected_selector": "withFirstName:",
+    "why": "camelCase field name — only the first letter is capitalised"
+  },
+  {
+    "field_name": "",
+    "expected_selector": "with:",
+    "why": "empty field name — no capitalisation needed"
+  },
+  {
+    "field_name": "Name",
+    "expected_selector": "withName:",
+    "why": "already-uppercase first letter is unchanged"
+  },
+  {
+    "field_name": "_id",
+    "expected_selector": "with_id:",
+    "why": "underscore has no case, passes through unchanged"
+  },
+  {
+    "field_name": "123abc",
+    "expected_selector": "with123abc:",
+    "why": "digit has no case, passes through unchanged"
+  },
+  {
+    "field_name": "économie",
+    "expected_selector": "withÉconomie:",
+    "why": "BT-3090: non-ASCII first letter — 'e' with acute accent uppercases to 'E' with acute accent (U+00E9 -> U+00C9). A byte-wise ASCII-only 'First - 32' trick (the Erlang implementation's behavior before BT-3090) cannot uppercase this: the first UTF-8 byte of 'e-acute' falls outside 'a'..'z' and was passed through unchanged, silently producing 'witheconomie:' -- proving the ASCII-only version wrong for this case."
+  },
+  {
+    "field_name": "ñandu",
+    "expected_selector": "withÑandu:",
+    "why": "BT-3090: another non-ASCII first letter (Spanish enye), same Unicode-uppercase requirement as the economie case"
+  }
+]
