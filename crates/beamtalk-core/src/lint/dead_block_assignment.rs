@@ -76,19 +76,14 @@ impl LintPass for DeadBlockAssignmentPass {
 
         // Standalone method definitions: need to determine class kind from the hierarchy
         for standalone in &module.method_definitions {
-            let class_kind = find_class_kind(&hierarchy, &standalone.class_name.name);
-            if class_kind == ClassKind::Actor {
+            // Resolves the full ancestor chain (BT-3092) rather than only the
+            // direct superclass.
+            if hierarchy.resolve_class_kind(&standalone.class_name.name) == ClassKind::Actor {
                 continue;
             }
             check_method(&standalone.method, diagnostics);
         }
     }
-}
-
-/// Find the `ClassKind` for a standalone method's class name, resolving the
-/// full ancestor chain (BT-3092) rather than only the direct superclass.
-fn find_class_kind(hierarchy: &ClassHierarchy, class_name: &str) -> ClassKind {
-    hierarchy.resolve_class_kind(class_name)
 }
 
 // ── Scope tracking ────────────────────────────────────────────────────────────
@@ -705,8 +700,8 @@ Object subclass: Foo
     // ── Standalone method definitions ─────────────────────────────────────────
 
     /// Standalone method (`Counter >> increment`) on an indirect Actor
-    /// subclass — `find_class_kind` must also resolve the full ancestor
-    /// chain, not just the direct superclass (BT-3092).
+    /// subclass — the standalone-method path must also resolve the full
+    /// ancestor chain, not just the direct superclass (BT-3092).
     #[test]
     fn standalone_method_indirect_actor_subclass_no_warn() {
         let src = "\
