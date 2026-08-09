@@ -1265,9 +1265,7 @@ fn format_stdlib_class_entry(m: &ClassMeta) -> String {
 /// to be walked in. Without this, moving a class into a `stdlib/src/`
 /// subdirectory reshuffles a checked-in generated file for no semantic reason.
 fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> String {
-    let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
-    sorted.sort_by(|a, b| a.class_name.cmp(&b.class_name));
-    sorted
+    sorted_by_class_name(class_metadata)
         .into_iter()
         .map(format_stdlib_class_entry)
         .collect::<Vec<_>>()
