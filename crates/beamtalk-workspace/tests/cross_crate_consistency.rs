@@ -3,21 +3,30 @@
 
 //! Cross-crate consistency tests.
 //!
-//! Verifies that the shared `beamtalk-workspace` crate produces workspace IDs
-//! and reads port/cookie files identically to the logic previously duplicated
-//! in `beamtalk-cli` and `beamtalk-mcp`.
+//! `beamtalk-workspace` is the single source of truth for workspace IDs and
+//! for reading port/cookie files; `beamtalk-cli` and `beamtalk-mcp` both
+//! import it rather than re-implementing the hashing/parsing logic.
+//!
+//! This file used to duplicate the CLI's and MCP's (pre-extraction) hashing
+//! algorithms inline just to assert `generate_workspace_id` agreed with both.
+//! Per the consistency-test disposition rule
+//! (`docs/development/architecture-principles.md` §7 — a test between two
+//! *deletable* copies is a smell, not enforcement), those re-implementations
+//! were deleted once the CLI/MCP duplicates they modeled were gone; what
+//! remains is an ordinary golden test of the one surviving implementation.
 
 use beamtalk_workspace::{
     generate_workspace_id, read_cookie_file, read_port_file, workspaces_base_dir,
 };
 use std::fs;
 
-/// The CLI's algorithm (before extraction) used `format!("{result:x}")[..12]`.
-/// The MCP's algorithm used a custom `hex_encode(&result[..6])`.
-/// Both produce 12 hex chars. This test verifies the shared implementation
-/// matches both algorithms for a known input.
+/// `generate_workspace_id` must keep producing the same 12-hex-char ID for a
+/// known input — SHA-256 of the path string, first 6 bytes hex-encoded.
+/// This is a golden test, not a consistency check: the expected value was
+/// computed once and is now the contract callers (CLI, MCP) rely on for
+/// stable workspace directories across runs.
 #[test]
-fn test_workspace_id_matches_cli_algorithm() {
+fn test_workspace_id_is_stable_for_known_input() {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
 
@@ -29,8 +38,8 @@ fn test_workspace_id_matches_cli_algorithm() {
     let mut hasher = Sha256::new();
     hasher.update(path_str.as_bytes());
     let result = hasher.finalize();
-    // Build 12 hex chars from the first 6 bytes (avoids str byte-slicing).
-    let cli_id = result[..6]
+    // Expected: 12 hex chars from the first 6 hash bytes.
+    let expected_id = result[..6]
         .iter()
         .fold(String::with_capacity(12), |mut s, b| {
             let _ = write!(s, "{b:02x}");
@@ -39,38 +48,13 @@ fn test_workspace_id_matches_cli_algorithm() {
 
     let shared_id = generate_workspace_id(&path).unwrap();
     assert_eq!(
-        shared_id, cli_id,
-        "Shared crate must produce the same ID as the old CLI algorithm"
+        shared_id, expected_id,
+        "generate_workspace_id must produce a stable 12-hex-char ID for a given path"
     );
-}
-
-/// Simulate the MCP's old `hex_encode` algorithm and verify it matches.
-#[test]
-fn test_workspace_id_matches_mcp_algorithm() {
-    use sha2::{Digest, Sha256};
-
-    let path = std::env::temp_dir();
-    let canonical = path.canonicalize().unwrap();
-    // MCP used to_string_lossy; for valid UTF-8 paths this is identical to to_str().unwrap()
-    let path_str = canonical.to_string_lossy();
-
-    let mut hasher = Sha256::new();
-    hasher.update(path_str.as_bytes());
-    let result = hasher.finalize();
-
-    // MCP's old hex_encode(&result[..6])
-    let mcp_id: String = result[..6]
-        .iter()
-        .fold(String::with_capacity(12), |mut s, b| {
-            use std::fmt::Write;
-            let _ = write!(s, "{b:02x}");
-            s
-        });
-
-    let shared_id = generate_workspace_id(&path).unwrap();
     assert_eq!(
-        shared_id, mcp_id,
-        "Shared crate must produce the same ID as the old MCP algorithm for UTF-8 paths"
+        shared_id.len(),
+        12,
+        "workspace ID must always be 12 hex chars"
     );
 }
 
