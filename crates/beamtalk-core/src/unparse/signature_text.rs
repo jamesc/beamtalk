@@ -94,36 +94,29 @@ pub enum SignatureSelector<'a> {
 /// The optional pieces around a rendered signature — the legitimate
 /// per-consumer differences identified while unifying the diverged
 /// signature renderers (BT-3097).
+///
+/// No `prefix`/`suffix` fields: every current consumer needs neither (method
+/// declarations' `sealed `/`internal ` prefixes are handled by the `bt fmt`
+/// unparser directly — see module docs — since only that consumer needs
+/// them). Add them back if a real caller needs to wrap the signature, rather
+/// than speculatively now.
 #[derive(Debug, Clone, Copy)]
 pub struct SignatureRenderOptions {
-    /// Text before the selector (`"class "`, or empty for none). Method
-    /// declarations' `sealed `/`internal ` prefixes are handled by the
-    /// `bt fmt` unparser directly (see module docs) since only that
-    /// consumer needs them.
-    pub prefix: &'static str,
     /// Whether a present return type is appended as `" -> Type"`.
     pub show_return_type: bool,
-    /// Text appended at the very end (`" =>"` for a full method
-    /// declaration line, empty for a display-only signature).
-    pub suffix: &'static str,
 }
 
 impl SignatureRenderOptions {
-    /// The common case: no prefix, show the return type, no suffix. Used by
-    /// hover's declaration signature, resolved-call signature, and
-    /// generated stub signatures.
+    /// The common case: show the return type. Used by hover's declaration
+    /// signature, resolved-call signature, and generated stub signatures.
     pub const DISPLAY: Self = Self {
-        prefix: "",
         show_return_type: true,
-        suffix: "",
     };
 
     /// Names/keywords only, no return type — the `beamtalk doc` extractor's
     /// listing style, which intentionally omits types (BT-3097).
     pub const NAMES_ONLY: Self = Self {
-        prefix: "",
         show_return_type: false,
-        suffix: "",
     };
 }
 
@@ -137,7 +130,7 @@ pub fn render_signature_text(
     return_type: Option<&str>,
     options: &SignatureRenderOptions,
 ) -> String {
-    let mut out = options.prefix.to_string();
+    let mut out = String::new();
 
     match selector {
         SignatureSelector::Unary(name) => out.push_str(name),
@@ -157,7 +150,6 @@ pub fn render_signature_text(
         }
     }
 
-    out.push_str(options.suffix);
     out
 }
 
@@ -257,7 +249,7 @@ mod tests {
         assert_eq!(out, "at: index :: Integer put: value :: Object -> Object");
     }
 
-    // --- Options: return type, prefix, suffix ---
+    // --- Options: return type ---
 
     #[test]
     fn return_type_hidden_when_show_return_type_false() {
@@ -277,17 +269,6 @@ mod tests {
             &SignatureRenderOptions::DISPLAY,
         );
         assert_eq!(out, "size");
-    }
-
-    #[test]
-    fn prefix_and_suffix_wrap_the_signature() {
-        let opts = SignatureRenderOptions {
-            prefix: "class ",
-            show_return_type: true,
-            suffix: " =>",
-        };
-        let out = render_signature_text(SignatureSelector::Unary("size"), Some("Integer"), &opts);
-        assert_eq!(out, "class size -> Integer =>");
     }
 
     // --- Family-B (no parameter names): hover's resolved-call display and
