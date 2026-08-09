@@ -556,6 +556,16 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
 
     let selector = &method.selector;
 
+    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
+    // and hand the composer the text it contracts for.
+    let return_type_text = method.return_type.as_ref().map(ToString::to_string);
+    let param_type_texts: Vec<Option<String>> = method
+        .param_types
+        .iter()
+        .map(|ty| ty.as_ref().map(ToString::to_string))
+        .collect();
+
     // Build parameter list from keyword parts (re-adding the trailing `:`
     // the split strips) and param_types.
     let keywords: Vec<String> = selector
@@ -569,7 +579,7 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
         .map(|(i, keyword)| SignatureParam {
             keyword,
             name: None,
-            type_text: method.param_types.get(i).and_then(Option::as_deref),
+            type_text: param_type_texts.get(i).and_then(Option::as_deref),
         })
         .collect();
 
@@ -585,7 +595,7 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
 
     let label = render_signature_text(
         SignatureSelector::Params(&sig_params),
-        method.return_type.as_deref(),
+        return_type_text.as_deref(),
         &SignatureRenderOptions::DISPLAY,
     );
 

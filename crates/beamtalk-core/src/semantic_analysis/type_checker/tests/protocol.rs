@@ -381,8 +381,8 @@ fn setup_json_class_side_fixture(
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some("String".into()),
-            param_types: vec![Some(param_type.into())],
+            return_type: Some(DeclaredType::parse("String")),
+            param_types: vec![Some(DeclaredType::parse(param_type))],
             doc: None,
         }],
         class_variables: vec![],
@@ -812,12 +812,18 @@ fn setup_intersection_param_fixture() -> (
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("String".into()),
-                // `type_name()` for `TypeAnnotation::Intersection` renders as
-                // `"Printable & Serializable"` — this is exactly what
-                // `class_info.rs` stores for a real `:: Printable & Serializable`
-                // parameter annotation.
-                param_types: vec![Some("Printable & Serializable".into())],
+                return_type: Some(DeclaredType::parse("String")),
+                // A real `:: Printable & Serializable` parameter annotation
+                // builds a structural `DeclaredType::Intersection` (BT-3076)
+                // now, not this opaque `Simple`. Kept as a `Simple` here
+                // deliberately: this test exercises the protocol checker's
+                // *string-level* intersection-splitting path
+                // (`check_protocol_conformance_in_expr` renders the declared
+                // type via `Display` — byte-identical either way, see
+                // `DeclaredType`'s doc — before splitting on `&`), which
+                // behaves identically for a `Simple` whose text happens to
+                // look like an intersection and a real `Intersection` node.
+                param_types: vec![Some(DeclaredType::parse("Printable & Serializable"))],
                 doc: None,
             },
             MethodInfo {
@@ -828,8 +834,8 @@ fn setup_intersection_param_fixture() -> (
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("String".into()),
-                param_types: vec![Some("Serializable".into())],
+                return_type: Some(DeclaredType::parse("String")),
+                param_types: vec![Some(DeclaredType::parse("Serializable"))],
                 doc: None,
             },
             MethodInfo {
@@ -840,8 +846,8 @@ fn setup_intersection_param_fixture() -> (
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("String".into()),
-                param_types: vec![Some("Describable".into())],
+                return_type: Some(DeclaredType::parse("String")),
+                param_types: vec![Some(DeclaredType::parse("Describable"))],
                 doc: None,
             },
         ],
@@ -953,7 +959,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("String".into()),
+                return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![],
                 doc: None,
             },
@@ -965,7 +971,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("String".into()),
+                return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![],
                 doc: None,
             },
@@ -1039,7 +1045,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some("String".into()),
+            return_type: Some(DeclaredType::parse("String")),
             param_types: vec![],
             doc: None,
         })

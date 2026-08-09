@@ -13,6 +13,7 @@ use std::collections::HashSet;
 
 use super::ClassHierarchy;
 use super::class_info::MethodInfo;
+use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
     /// Returns the ordered superclass chain for a class (excluding the class itself).
@@ -480,7 +481,7 @@ impl ClassHierarchy {
         // We don't have the AST, so we build synthetic slot info from ClassInfo.
         for class_name in &classes_to_fix {
             // Extract state and existing selectors without holding a mutable borrow.
-            let slot_data: Option<Vec<(EcoString, Option<EcoString>)>> =
+            let slot_data: Option<Vec<(EcoString, Option<DeclaredType>)>> =
                 self.classes.get(class_name.as_str()).map(|info| {
                     info.state
                         .iter()
@@ -544,7 +545,7 @@ impl ClassHierarchy {
     /// works from the AST `ClassDefinition`.
     pub(super) fn synthesize_auto_methods_from_state(
         class_name: &EcoString,
-        slots: &[(EcoString, Option<EcoString>)],
+        slots: &[(EcoString, Option<DeclaredType>)],
         existing_instance_selectors: &HashSet<EcoString>,
         existing_class_selectors: &HashSet<EcoString>,
         instance_methods: &mut Vec<MethodInfo>,
@@ -579,7 +580,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(class_name.clone()),
+                    return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                 });
@@ -601,7 +602,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(class_name.clone()),
+                    return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None; slots.len()],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                 });
@@ -673,7 +674,7 @@ impl ClassHierarchy {
     /// Returns `None` if the field has no type annotation, the field does not
     /// exist, or the class is unknown.
     #[must_use]
-    pub fn state_field_type(&self, class_name: &str, field_name: &str) -> Option<EcoString> {
+    pub fn state_field_type(&self, class_name: &str, field_name: &str) -> Option<DeclaredType> {
         let mut visited = HashSet::new();
         let mut current = Some(class_name.to_string());
         while let Some(name) = current {
@@ -742,10 +743,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: slot
-                        .type_annotation
-                        .as_ref()
-                        .map(crate::ast::TypeAnnotation::type_name),
+                    return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
                     param_types: vec![],
                     doc: Some(getter_doc.into()),
                 });
@@ -766,7 +764,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(class_name.clone()),
+                    return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None],
                     doc: Some(setter_doc.into()),
                 });
@@ -804,7 +802,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(class_name.clone()),
+                    return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None; arity],
                     doc: Some(ctor_doc.into()),
                 });

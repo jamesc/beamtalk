@@ -39,7 +39,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
         state: vec![eco_string("count")],
         state_types: {
             let mut m = std::collections::HashMap::new();
-            m.insert(eco_string("count"), eco_string("Integer"));
+            m.insert(eco_string("count"), DeclaredType::parse("Integer"));
             m
         },
         state_has_default: std::collections::HashMap::new(),
@@ -53,7 +53,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 is_internal: false,
                 spawns_block: false,
                 // Declared `-> Integer`.
-                return_type: Some(eco_string("Integer")),
+                return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
             },
@@ -66,7 +66,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 is_internal: false,
                 spawns_block: false,
                 // Inferred from body (`^self.count`) — resolved to Integer.
-                return_type: Some(eco_string("Integer")),
+                return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
             },

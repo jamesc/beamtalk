@@ -1065,7 +1065,10 @@ fn method_completion_detail(
         let type_parts: Vec<String> = method
             .param_types
             .iter()
-            .map(|t| t.as_deref().unwrap_or("Dynamic").to_string())
+            .map(|t| {
+                t.as_ref()
+                    .map_or_else(|| "Dynamic".to_string(), ToString::to_string)
+            })
             .collect();
         let _ = write!(detail, " ({})", type_parts.join(", "));
     }

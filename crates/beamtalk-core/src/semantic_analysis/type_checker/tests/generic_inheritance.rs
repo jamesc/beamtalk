@@ -37,7 +37,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("E")),
+                return_type: Some(DeclaredType::parse("E")),
                 param_types: vec![],
                 doc: None,
             },
@@ -49,7 +49,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("Integer")),
+                return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
             },
@@ -61,8 +61,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("Self")),
-                param_types: vec![Some(eco_string("Block(E, Boolean)"))],
+                return_type: Some(DeclaredType::SelfType),
+                param_types: vec![Some(DeclaredType::parse("Block(E, Boolean)"))],
                 doc: None,
             },
         ],
@@ -96,8 +96,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(eco_string("Self")),
-            param_types: vec![Some(eco_string("E"))],
+            return_type: Some(DeclaredType::SelfType),
+            param_types: vec![Some(DeclaredType::parse("E"))],
             doc: None,
         }],
         class_methods: vec![],
@@ -202,7 +202,7 @@ fn generic_inheritance_concrete_superclass_type_arg() {
         type_params: vec![],
         type_param_bounds: vec![],
         superclass_type_args: vec![SuperclassTypeArg::Concrete {
-            type_name: eco_string("Integer"),
+            declared: DeclaredType::parse("Integer"),
         }],
     };
     hierarchy.add_from_beam_meta(vec![int_array_info]);
@@ -614,7 +614,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         state: vec![eco_string("value")],
         state_types: {
             let mut m = std::collections::HashMap::new();
-            m.insert(eco_string("value"), eco_string("T"));
+            m.insert(eco_string("value"), DeclaredType::parse("T"));
             m
         },
         state_has_default: std::collections::HashMap::new(),
@@ -626,7 +626,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             is_sealed: true,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(eco_string("T")),
+            return_type: Some(DeclaredType::parse("T")),
             param_types: vec![],
             doc: None,
         }],
@@ -638,8 +638,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             is_sealed: true,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(eco_string("Self")),
-            param_types: vec![Some(eco_string("T"))],
+            return_type: Some(DeclaredType::SelfType),
+            param_types: vec![Some(DeclaredType::parse("T"))],
             doc: None,
         }],
         class_variables: vec![],
@@ -664,7 +664,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         state: vec![eco_string("value")],
         state_types: {
             let mut m = std::collections::HashMap::new();
-            m.insert(eco_string("value"), eco_string("T"));
+            m.insert(eco_string("value"), DeclaredType::parse("T"));
             m
         },
         state_has_default: std::collections::HashMap::new(),
@@ -677,7 +677,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("T")),
+                return_type: Some(DeclaredType::parse("T")),
                 param_types: vec![],
                 doc: None,
             },
@@ -690,7 +690,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 is_internal: false,
                 spawns_block: false,
                 return_type: None,
-                param_types: vec![Some(eco_string("T"))],
+                param_types: vec![Some(DeclaredType::parse("T"))],
                 doc: None,
             },
         ],
@@ -750,8 +750,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("String")),
-                param_types: vec![Some(eco_string("SealedBox(Printable)"))],
+                return_type: Some(DeclaredType::parse("String")),
+                param_types: vec![Some(DeclaredType::parse("SealedBox(Printable)"))],
                 doc: None,
             },
             MethodInfo {
@@ -763,7 +763,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 is_internal: false,
                 spawns_block: false,
                 return_type: None,
-                param_types: vec![Some(eco_string("ActorBox(Printable)"))],
+                param_types: vec![Some(DeclaredType::parse("ActorBox(Printable)"))],
                 doc: None,
             },
         ],
@@ -1180,8 +1180,8 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some("String".into()),
-                param_types: vec![Some("String".into())],
+                return_type: Some(DeclaredType::parse("String")),
+                param_types: vec![Some(DeclaredType::parse("String"))],
                 doc: None,
             },
             MethodInfo {
@@ -1192,7 +1192,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
                 is_sealed: false,
                 is_internal: true,
                 spawns_block: false,
-                return_type: Some("Dictionary".into()),
+                return_type: Some(DeclaredType::parse("Dictionary")),
                 param_types: vec![None],
                 doc: None,
             },
@@ -1205,7 +1205,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
             is_sealed: false,
             is_internal: true,
             spawns_block: false,
-            return_type: Some("HttpClient".into()),
+            return_type: Some(DeclaredType::parse("HttpClient")),
             param_types: vec![],
             doc: None,
         }],

@@ -745,7 +745,7 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
             is_internal: false,
             spawns_block: false,
             return_type: None,
-            param_types: vec![Some(eco_string("Block(R)"))],
+            param_types: vec![Some(DeclaredType::parse("Block(R)"))],
             doc: None,
         }],
         class_methods: vec![],

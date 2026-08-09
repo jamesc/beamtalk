@@ -2954,12 +2954,12 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
 fn price_band_class_info_with_lo_type(
     lo_type: Option<&str>,
 ) -> crate::semantic_analysis::class_hierarchy::ClassInfo {
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
     use std::collections::HashMap;
 
     let mut state_types = HashMap::new();
     if let Some(ty) = lo_type {
-        state_types.insert(ecow::EcoString::from("lo"), ecow::EcoString::from(ty));
+        state_types.insert(ecow::EcoString::from("lo"), DeclaredType::parse(ty));
     }
     ClassInfo {
         surface_incomplete: false,
@@ -5764,15 +5764,15 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
             let mut m = HashMap::new();
             m.insert(
                 ecow::EcoString::from("nilField"),
-                ecow::EcoString::from("Nil"),
+                crate::semantic_analysis::class_hierarchy::DeclaredType::parse("Nil"),
             );
             m.insert(
                 ecow::EcoString::from("nilUnionField"),
-                ecow::EcoString::from("Integer | Nil"),
+                crate::semantic_analysis::class_hierarchy::DeclaredType::parse("Integer | Nil"),
             );
             m.insert(
                 ecow::EcoString::from("reqField"),
-                ecow::EcoString::from("Integer"),
+                crate::semantic_analysis::class_hierarchy::DeclaredType::parse("Integer"),
             );
             m
         },

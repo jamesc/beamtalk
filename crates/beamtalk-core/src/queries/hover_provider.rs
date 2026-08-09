@@ -957,9 +957,19 @@ fn find_hover_in_expr(
                     _ => None,
                 };
                 let contents = if let Some(ty) = field_type {
-                    let display = alias_registry
-                        .and_then(|registry| registry.resolve_display_name(&ty))
-                        .unwrap_or(ty);
+                    // Alias lookup only applies to a bare `Simple` name — a
+                    // `Generic`/`Union`/etc. declared type was never a
+                    // registered alias name to begin with (ADR 0108 aliases
+                    // are single bare identifiers), so it falls straight
+                    // through to its own `Display`.
+                    let display: String = match &ty {
+                        crate::semantic_analysis::class_hierarchy::DeclaredType::Simple(name) => {
+                            alias_registry
+                                .and_then(|registry| registry.resolve_display_name(name))
+                                .map_or_else(|| ty.to_string(), |s| s.to_string())
+                        }
+                        _ => ty.to_string(),
+                    };
                     format!("`{} :: {display}`", field.name)
                 } else {
                     format!("`{}`", field.name)
@@ -1403,7 +1413,16 @@ fn method_info_signature(method: &crate::semantic_analysis::class_hierarchy::Met
     };
 
     let selector = method.selector.as_str();
-    let return_type = method.return_type.as_deref();
+    // BT-3076: `MethodInfo` types are structured `DeclaredType`s — render
+    // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
+    // and hand the composer the text it contracts for.
+    let return_type_text = method.return_type.as_ref().map(ToString::to_string);
+    let return_type = return_type_text.as_deref();
+    let param_type_texts: Vec<Option<String>> = method
+        .param_types
+        .iter()
+        .map(|ty| ty.as_ref().map(ToString::to_string))
+        .collect();
 
     if selector.contains(':') {
         // Keyword message: interleave keyword parts (re-adding the trailing
@@ -1419,7 +1438,7 @@ fn method_info_signature(method: &crate::semantic_analysis::class_hierarchy::Met
             .map(|(i, keyword)| SignatureParam {
                 keyword,
                 name: None,
-                type_text: method.param_types.get(i).and_then(Option::as_deref),
+                type_text: param_type_texts.get(i).and_then(Option::as_deref),
             })
             .collect();
         render_signature_text(
@@ -1432,7 +1451,7 @@ fn method_info_signature(method: &crate::semantic_analysis::class_hierarchy::Met
         let params = [SignatureParam {
             keyword: selector,
             name: None,
-            type_text: method.param_types.first().and_then(Option::as_deref),
+            type_text: param_type_texts.first().and_then(Option::as_deref),
         }];
         render_signature_text(
             SignatureSelector::Params(&params),

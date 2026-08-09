@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::ClassHierarchy;
 use super::class_info::{ClassInfo, MethodInfo};
+use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
     /// Returns all methods available on a class (local + inherited).
@@ -386,23 +387,16 @@ impl ClassHierarchy {
     ///   as returned by `infer_method_return_types`.
     ///
     /// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString`.
-    /// For hierarchy enrichment we extract the display name (which includes
-    /// generic type args, e.g. `"List(String)"`) so downstream consumers see
-    /// the full parametric return type.
+    /// BT-3076: writeback goes through [`DeclaredType::from_inferred`] — the
+    /// same `Known`/`Never` filter as before, but converted structurally
+    /// instead of via `display_name()` string formatting (which the type
+    /// checker would otherwise have to re-parse on the way back in).
     pub fn apply_inferred_return_types(
         &mut self,
         inferred: &HashMap<(EcoString, EcoString, bool), InferredType>,
     ) {
         for ((class_name, selector, is_class_method), inferred_ty) in inferred {
-            // Extract display name: "List(String)" for Known with type_args,
-            // "Integer" for Known without, "Never" for Never.
-            let return_type_name = match inferred_ty {
-                InferredType::Known { .. } | InferredType::Never => {
-                    Some(inferred_ty.display_name())
-                }
-                _ => None,
-            };
-            let Some(return_type) = return_type_name else {
+            let Some(return_type) = DeclaredType::from_inferred(inferred_ty) else {
                 continue;
             };
             if let Some(class_info) = self.classes.get_mut(class_name) {

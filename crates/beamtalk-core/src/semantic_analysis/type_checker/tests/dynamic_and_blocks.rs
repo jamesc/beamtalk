@@ -522,17 +522,6 @@ fn block_params_typed_via_method_parameter_annotation() {
     );
 }
 
-// `split_union_respecting_parens` is a thin wrapper over
-// `string_utils::split_top_level`, whose exhaustive nesting/edge-case
-// coverage lives at its definition site (BT-3089). This is a smoke test
-// that the wrapper is wired up correctly.
-#[test]
-fn split_union_respecting_parens_mixed() {
-    // Top-level union with parametric member
-    let result = TypeChecker::split_union_respecting_parens("List(String) | nil");
-    assert_eq!(result, vec!["List(String)", "nil"]);
-}
-
 #[test]
 fn block_params_typed_in_cascade_sends() {
     // Cascade sends should also propagate block param types.

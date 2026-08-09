@@ -34,7 +34,6 @@ use ecow::EcoString;
 use crate::ast::ClassKind;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
-use crate::semantic_analysis::class_hierarchy::DeclaredType;
 
 use super::InferredType;
 use super::type_resolver;
@@ -313,20 +312,21 @@ fn tier_of_known(
     if kind == ClassKind::Value {
         for field in hierarchy.all_state(name) {
             let field_tier = match hierarchy.state_field_type(name, &field) {
-                // Parse the stored type-name string through the shared resolver
-                // so generic annotations keep their `type_args`: `"List(Port)"`
-                // becomes `Known("List", [Known("Port")])`, not an opaque
-                // `Known("List(Port)")`. Without this the whole annotation would
-                // be treated as the class name, `resolve_class_kind` would find
-                // no such class, and a generic field would silently drop to
-                // `Unknown` instead of composing its element tier (BT-2770).
+                // Resolve the stored `DeclaredType` through the shared
+                // resolver so generic annotations keep their `type_args`:
+                // `List(Port)` becomes `Known("List", [Known("Port")])`, not
+                // an opaque `Known("List(Port)")`. Without this the whole
+                // annotation would be treated as the class name,
+                // `resolve_class_kind` would find no such class, and a
+                // generic field would silently drop to `Unknown` instead of
+                // composing its element tier (BT-2770).
                 // BT-2936: `alias_registry` (threaded from the top-level
                 // `tier_of` call) additionally expands an alias-typed field
                 // to its declared type before tiering, instead of treating
                 // the alias name as an unresolved nominal class.
                 Some(field_ty) => {
                     let field_type = type_resolver::resolve_declared_type(
-                        &DeclaredType::parse(&field_ty),
+                        &field_ty,
                         &type_resolver::SubstitutionMap::new(),
                         None,
                         alias_registry,

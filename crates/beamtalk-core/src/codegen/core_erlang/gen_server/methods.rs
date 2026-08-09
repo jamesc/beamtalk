@@ -22,6 +22,7 @@ use crate::ast::{
     ProtocolMethodSignature, StateDeclaration, TypeAnnotation, TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
@@ -202,6 +203,11 @@ pub(super) enum MetaTypeRepr {
         base: String,
         parameters: Vec<MetaTypeRepr>,
     },
+    /// A union type (BT-3076) — rendered as `{'union', [Member1, Member2, ...]}`.
+    Union(Vec<MetaTypeRepr>),
+    /// A singleton/literal type (BT-3076), e.g. `#north` — rendered as
+    /// `{'singleton', 'north'}` (the name, without the leading `#`).
+    Singleton(String),
 }
 
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
@@ -4702,56 +4708,84 @@ impl CoreErlangGenerator {
 
     /// Converts a `TypeAnnotation` into a `MetaTypeRepr`.
     ///
-    /// ADR 0068: If the type name matches one of the class-level type parameters,
-    /// it becomes a `TypeParam { name, index }`. Generic types with parameters
-    /// become `Generic { base, parameters }`. Method-local type params (not in
-    /// `class_type_params`) get index `-1`.
+    /// Thin wrapper (BT-3076) around [`Self::declared_type_to_meta_repr`] —
+    /// converts to the span-free [`DeclaredType`] first and delegates, so the
+    /// AST and the structured `MethodInfo`/generator paths share one
+    /// conversion. See that function's doc for the per-variant rules.
     fn type_annotation_to_meta_repr(
         ta: &crate::ast::TypeAnnotation,
         class_type_params: &[TypeParamDecl],
     ) -> MetaTypeRepr {
-        use crate::ast::TypeAnnotation;
-        match ta {
-            TypeAnnotation::Simple(id) => {
+        Self::declared_type_to_meta_repr(&DeclaredType::from(ta), class_type_params)
+    }
+
+    /// Converts a [`DeclaredType`] into a `MetaTypeRepr` (BT-3076).
+    ///
+    /// ADR 0068: If a bare `Simple` name matches one of the class-level type
+    /// parameters, it becomes a `TypeParam { name, index }`. A single
+    /// uppercase-letter `Simple` name not among `class_type_params` becomes a
+    /// method-local `TypeParam` (index `-1`). `Generic` types with
+    /// parameters become `Generic { base, parameters }`, recursively.
+    ///
+    /// BT-3076: `Union` and `Singleton` now convert structurally too
+    /// (`MetaTypeRepr::Union` / `MetaTypeRepr::Singleton`), rather than
+    /// degrading to a flat atom of the rendered string — the wire-format
+    /// extension this stage adds. `FalseOr`, `Difference`, `Intersection`,
+    /// `SelfType`, `SelfClass`, and `ClassOf` are rare in method signatures
+    /// and still fall back to a flat `Atom` of the rendered string (old
+    /// readers of a new artifact degrade gracefully; the format is internal
+    /// — see this module's `MetaTypeRepr` doc). The self-type renderings
+    /// (`'Self'`, `'Self class'`, `'<Name> class'`) are recognised by
+    /// `DeclaredType::parse` on the reader side, so they round-trip
+    /// structurally despite the flat encoding (compiler-port's
+    /// `self_type_return_survives_etf_meta`).
+    fn declared_type_to_meta_repr(
+        dt: &DeclaredType,
+        class_type_params: &[TypeParamDecl],
+    ) -> MetaTypeRepr {
+        match dt {
+            DeclaredType::Simple(name) => {
                 // Check if this is a class-level type parameter
                 if let Some(index) = class_type_params
                     .iter()
-                    .position(|tp| tp.name.name == id.name)
+                    .position(|tp| tp.name.name == *name)
                 {
                     MetaTypeRepr::TypeParam {
-                        name: id.name.to_string(),
+                        name: name.to_string(),
                         index: i32::try_from(index).unwrap_or(0),
                     }
-                } else if id.name.len() == 1
-                    && id
-                        .name
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_uppercase())
+                } else if name.len() == 1
+                    && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                 {
                     // Single uppercase letter not in class type params → method-local type param
                     MetaTypeRepr::TypeParam {
-                        name: id.name.to_string(),
+                        name: name.to_string(),
                         index: -1,
                     }
                 } else {
-                    MetaTypeRepr::Atom(id.name.to_string())
+                    MetaTypeRepr::Atom(name.to_string())
                 }
             }
-            TypeAnnotation::Generic {
-                base, parameters, ..
-            } => {
+            DeclaredType::Generic { base, parameters } => {
                 let params: Vec<MetaTypeRepr> = parameters
                     .iter()
-                    .map(|p| Self::type_annotation_to_meta_repr(p, class_type_params))
+                    .map(|p| Self::declared_type_to_meta_repr(p, class_type_params))
                     .collect();
                 MetaTypeRepr::Generic {
-                    base: base.name.to_string(),
+                    base: base.to_string(),
                     parameters: params,
                 }
             }
-            // Union, FalseOr, Singleton, SelfType → fall back to flat atom string
-            _ => MetaTypeRepr::Atom(ta.type_name().to_string()),
+            DeclaredType::Union(members) => MetaTypeRepr::Union(
+                members
+                    .iter()
+                    .map(|m| Self::declared_type_to_meta_repr(m, class_type_params))
+                    .collect(),
+            ),
+            DeclaredType::Singleton(name) => MetaTypeRepr::Singleton(name.to_string()),
+            // FalseOr, Difference, Intersection, SelfType, SelfClass, ClassOf
+            // → fall back to flat atom string (see doc above).
+            _ => MetaTypeRepr::Atom(dt.to_string()),
         }
     }
 
@@ -4762,6 +4796,8 @@ impl CoreErlangGenerator {
     /// - `TypeParam { name: "T", index: 0 }` → `{'type_param', 'T', 0}`
     /// - `Generic { base: "Result", params: [TypeParam T, Atom E] }` →
     ///   `{'generic', 'Result', [{'type_param', 'T', 0}, 'E']}`
+    /// - `Union([Atom A, Atom B])` → `{'union', ['A', 'B']}` (BT-3076)
+    /// - `Singleton("north")` → `{'singleton', 'north'}` (BT-3076)
     pub(super) fn meta_type_repr_doc(repr: &MetaTypeRepr) -> Document<'static> {
         match repr {
             MetaTypeRepr::None => Document::Str("'none'"),
@@ -4774,24 +4810,36 @@ impl CoreErlangGenerator {
                 "}"
             ],
             MetaTypeRepr::Generic { base, parameters } => {
-                let mut params: Vec<Document<'static>> = Vec::new();
-                params.push(Document::Str("["));
-                for (i, p) in parameters.iter().enumerate() {
-                    if i > 0 {
-                        params.push(Document::Str(", "));
-                    }
-                    params.push(Self::meta_type_repr_doc(p));
-                }
-                params.push(Document::Str("]"));
                 docvec![
                     "{'generic', ",
                     leaf::atom(base.clone()),
                     ", ",
-                    Document::Vec(params),
+                    Self::meta_type_repr_list_doc(parameters),
                     "}"
                 ]
             }
+            MetaTypeRepr::Union(members) => {
+                docvec!["{'union', ", Self::meta_type_repr_list_doc(members), "}"]
+            }
+            MetaTypeRepr::Singleton(name) => {
+                docvec!["{'singleton', ", leaf::atom(name.clone()), "}"]
+            }
         }
+    }
+
+    /// Renders a `[MetaTypeRepr, ...]` Core Erlang list — the shared
+    /// bracket/comma-join helper `Generic` and `Union` (BT-3076) both use.
+    fn meta_type_repr_list_doc(items: &[MetaTypeRepr]) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("["));
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(Self::meta_type_repr_doc(item));
+        }
+        parts.push(Document::Str("]"));
+        Document::Vec(parts)
     }
 
     /// Builds a Core Erlang map of selector → method info map.
@@ -4855,7 +4903,7 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::{MetaProvenance, MetaTypeRepr, extract_package_from_module_name};
+    use super::{DeclaredType, MetaProvenance, MetaTypeRepr, extract_package_from_module_name};
     use crate::ast::{
         ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, KeywordPart,
         Literal, MessageSelector, MethodDefinition, Module, ParameterDefinition, TypeParamDecl,
@@ -5019,6 +5067,69 @@ mod tests {
             doc.to_pretty_string(),
             "{'generic', 'Result', [{'type_param', 'T', 0}, {'type_param', 'E', 1}]}"
         );
+    }
+
+    #[test]
+    fn test_meta_type_repr_union_renders_tagged_tuple() {
+        // BT-3076: `Integer | String` → `{'union', ['Integer', 'String']}`.
+        let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Union(vec![
+            MetaTypeRepr::Atom("Integer".to_string()),
+            MetaTypeRepr::Atom("String".to_string()),
+        ]));
+        assert_eq!(doc.to_pretty_string(), "{'union', ['Integer', 'String']}");
+    }
+
+    #[test]
+    fn test_meta_type_repr_singleton_renders_tagged_tuple() {
+        // BT-3076: `#north` → `{'singleton', 'north'}`.
+        let doc =
+            CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Singleton("north".to_string()));
+        assert_eq!(doc.to_pretty_string(), "{'singleton', 'north'}");
+    }
+
+    #[test]
+    fn test_meta_type_repr_generic_of_union_nests_tagged_tuples() {
+        // BT-3076: `Result(Integer | String, Error)` — Union nested inside
+        // Generic, exercising the shared `meta_type_repr_list_doc` helper.
+        let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Generic {
+            base: "Result".to_string(),
+            parameters: vec![
+                MetaTypeRepr::Union(vec![
+                    MetaTypeRepr::Atom("Integer".to_string()),
+                    MetaTypeRepr::Atom("String".to_string()),
+                ]),
+                MetaTypeRepr::Atom("Error".to_string()),
+            ],
+        });
+        assert_eq!(
+            doc.to_pretty_string(),
+            "{'generic', 'Result', [{'union', ['Integer', 'String']}, 'Error']}"
+        );
+    }
+
+    #[test]
+    fn test_declared_type_to_meta_repr_union_converts_structurally() {
+        // BT-3076: `declared_type_to_meta_repr` — not the pre-existing
+        // atom-of-rendered-string fallback — handles `Union` structurally.
+        let dt = DeclaredType::Union(vec![
+            DeclaredType::simple("Integer"),
+            DeclaredType::simple("String"),
+        ]);
+        let repr = CoreErlangGenerator::declared_type_to_meta_repr(&dt, &[]);
+        assert_eq!(
+            repr,
+            MetaTypeRepr::Union(vec![
+                MetaTypeRepr::Atom("Integer".to_string()),
+                MetaTypeRepr::Atom("String".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_declared_type_to_meta_repr_singleton_converts_structurally() {
+        let dt = DeclaredType::singleton("north");
+        let repr = CoreErlangGenerator::declared_type_to_meta_repr(&dt, &[]);
+        assert_eq!(repr, MetaTypeRepr::Singleton("north".to_string()));
     }
 
     #[test]

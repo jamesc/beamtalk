@@ -400,8 +400,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
         state: vec![eco_string("okValue"), eco_string("errReason")],
         state_types: {
             let mut m = std::collections::HashMap::new();
-            m.insert(eco_string("okValue"), eco_string("T"));
-            m.insert(eco_string("errReason"), eco_string("E"));
+            m.insert(eco_string("okValue"), DeclaredType::parse("T"));
+            m.insert(eco_string("errReason"), DeclaredType::parse("E"));
             m
         },
         state_has_default: std::collections::HashMap::new(),
@@ -414,7 +414,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("T")),
+                return_type: Some(DeclaredType::parse("T")),
                 param_types: vec![],
                 doc: None,
             },
@@ -426,7 +426,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("E")),
+                return_type: Some(DeclaredType::parse("E")),
                 param_types: vec![],
                 doc: None,
             },
@@ -438,8 +438,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("GenResult(R, E)")),
-                param_types: vec![Some(eco_string("Block(T, R)"))],
+                return_type: Some(DeclaredType::parse("GenResult(R, E)")),
+                param_types: vec![Some(DeclaredType::parse("Block(T, R)"))],
                 doc: None,
             },
             MethodInfo {
@@ -450,7 +450,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("Boolean")),
+                return_type: Some(DeclaredType::parse("Boolean")),
                 param_types: vec![],
                 doc: None,
             },
@@ -464,8 +464,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("Self")),
-                param_types: vec![Some(eco_string("T"))],
+                return_type: Some(DeclaredType::SelfType),
+                param_types: vec![Some(DeclaredType::parse("T"))],
                 doc: None,
             },
             MethodInfo {
@@ -476,8 +476,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(eco_string("Self")),
-                param_types: vec![Some(eco_string("E"))],
+                return_type: Some(DeclaredType::SelfType),
+                param_types: vec![Some(DeclaredType::parse("E"))],
                 doc: None,
             },
         ],

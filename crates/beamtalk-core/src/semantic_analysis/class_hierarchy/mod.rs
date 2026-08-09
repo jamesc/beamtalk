@@ -167,7 +167,7 @@ impl ClassHierarchy {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some("List".into()),
+                    return_type: Some(DeclaredType::simple("List")),
                     param_types: vec![],
                     doc: Some(
                         format!("Return the required method selectors for the `{name}` protocol.")
@@ -182,7 +182,7 @@ impl ClassHierarchy {
                     is_sealed: true,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some("List".into()),
+                    return_type: Some(DeclaredType::simple("List")),
                     param_types: vec![],
                     doc: Some(
                         format!("Return the classes conforming to the `{name}` protocol.").into(),
@@ -560,8 +560,20 @@ impl ClassHierarchy {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: first.type_info.return_type.clone(),
-                param_types: first.type_info.param_types.clone(),
+                // `ExtensionTypeInfo` stores flattened strings (compilation-layer
+                // metadata, out of BT-3076's scope) — parse back into structure
+                // rather than carrying the string through as an opaque `Simple`.
+                return_type: first
+                    .type_info
+                    .return_type
+                    .as_deref()
+                    .map(DeclaredType::parse),
+                param_types: first
+                    .type_info
+                    .param_types
+                    .iter()
+                    .map(|p| p.as_deref().map(DeclaredType::parse))
+                    .collect(),
                 doc: None,
             };
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
