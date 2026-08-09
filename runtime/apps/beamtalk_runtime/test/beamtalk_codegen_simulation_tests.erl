@@ -573,15 +573,17 @@ async_multiple_awaits_same_future_test() ->
 %%% Edge cases — MIGRATED / TRIMMED (BT-3093)
 %%% ===========================================================================
 %%%
-%%% spawn_with_empty_map_same_as_spawn_zero_test and
-%%% spawn_preserves_class_and_methods_test were removed: both only asserted
-%%% properties of counter_module_state/1's own `maps:merge/2` call (that
-%%% merging preserves untouched keys, that spawn() and spawn(#{}) merge
-%%% identically) — plain Erlang map semantics, not Beamtalk codegen
-%%% behavior, and already implied by the real-dispatch coverage in the
-%%% spawn/0 and spawn/1 sections above (spawn_zero_uses_default_state_test,
+%%% spawn_with_empty_map_same_as_spawn_zero_test was removed: it only
+%%% asserted a property of counter_module_state/1's own `maps:merge/2` call
+%%% (that spawn() and spawn(#{}) merge identically) — plain Erlang map
+%%% semantics, not Beamtalk codegen behavior, and already implied by the
+%%% real-dispatch coverage in the spawn/0 and spawn/1 sections above
+%%% (spawn_zero_uses_default_state_test,
 %%% spawn_with_preserves_unspecified_defaults_test, etc., all against the
 %%% real compiled 'bt@counter' module). No scenario coverage was lost.
+%%%
+%%% spawn_preserves_class_and_methods_test is kept below (not removed) —
+%%% see its own doc comment for why.
 %%%
 %%% spawn_with_nil_values_override_test migrated onto real 'bt@counter'
 %%% spawn/1, since that scenario (spawnWith: #{value => nil}) was not
