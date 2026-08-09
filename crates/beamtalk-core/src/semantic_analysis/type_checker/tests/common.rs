@@ -7,6 +7,7 @@
 //! monolithic `tests.rs`. They are re-exported into every child test module
 //! via `use super::common::*;`.
 
+pub(super) use super::super::type_resolver;
 pub(super) use super::super::*;
 pub(super) use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,

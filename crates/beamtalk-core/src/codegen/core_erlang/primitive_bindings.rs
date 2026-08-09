@@ -88,7 +88,7 @@ impl PrimitiveBindingTable {
                         name, is_quoted, ..
                     } = &method.body[0].expression
                     {
-                        let selector = method.selector.to_erlang_atom();
+                        let selector = method.selector.name().to_string();
                         let binding = if *is_quoted {
                             PrimitiveBinding::SelectorBased {
                                 selector: name.to_string(),

@@ -16,7 +16,7 @@ use ecow::EcoString;
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, EnvKey, InferredType};
 
-use super::super::extract::{extract_variable_name, unwrap_parens};
+use super::super::extract::extract_variable_name;
 use super::super::info::{NarrowingInfo, SingletonEqInfo, SingletonName};
 use super::NarrowingRule;
 
@@ -92,7 +92,7 @@ pub(crate) fn detect_binary(
 /// Returns the symbol name of a `#foo` literal (without the leading `#`),
 /// unwrapping any nesting of parentheses; `None` for any other expression.
 fn symbol_literal(expr: &Expression) -> Option<&EcoString> {
-    match unwrap_parens(expr) {
+    match expr.unwrap_parens() {
         Expression::Literal(Literal::Symbol(name), _) => Some(name),
         _ => None,
     }

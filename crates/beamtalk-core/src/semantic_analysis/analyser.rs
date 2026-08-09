@@ -175,7 +175,7 @@ impl Analyser {
                 self.analyse_expression(receiver, None);
 
                 // Determine context for block arguments
-                let selector_str = block_context::selector_to_string(selector);
+                let selector_str = selector.name();
 
                 // Run method-specific validators (reuse selector_str to avoid extra allocation)
                 if let Some(validator) = self.method_validators.get(&selector_str) {
@@ -219,7 +219,7 @@ impl Analyser {
                 self.analyse_expression(receiver, None);
                 for msg in messages {
                     // Apply selector-based context detection for cascade messages
-                    let selector_str = block_context::selector_to_string(&msg.selector);
+                    let selector_str = msg.selector.name();
 
                     // Run method-specific validators for cascade messages
                     if let Some(validator) = self.method_validators.get(&selector_str) {

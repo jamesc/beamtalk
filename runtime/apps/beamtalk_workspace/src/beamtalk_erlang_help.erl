@@ -541,10 +541,11 @@ is_keyword_alias(Name, Arity, ColonSet) ->
         false -> sets:is_element({Name, Arity}, ColonSet)
     end.
 
+%% BT-3090: delegates to the canonical `beamtalk_class_builder:is_keyword_selector/1`
+%% via `beamtalk_runtime_api` — was a byte-identical copy.
 -doc "True when a binary name ends with ':'.".
 -spec is_keyword_name(binary()) -> boolean().
-is_keyword_name(<<>>) -> false;
-is_keyword_name(Name) -> binary:last(Name) =:= $:.
+is_keyword_name(Name) -> beamtalk_runtime_api:is_keyword_selector(Name).
 
 -doc """
 Extract the base name from a keyword selector — the segment before

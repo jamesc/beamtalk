@@ -12,6 +12,7 @@ desktop-attach readiness handshake (ADR 0097, BT-2991).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 get_returns_map_test() ->
     ?assert(is_map(beamtalk_version:get())).
@@ -23,13 +24,14 @@ get_returns_expected_keys_test() ->
         lists:sort(maps:keys(Report))
     ).
 
-%% Not a cross-module guarantee: beamtalk_runtime cannot depend on
-%% beamtalk_workspace (dependencies flow down only), so this only pins the
-%% literal in beamtalk_version itself. Keeping the two literals in sync when
-%% the wire protocol changes is a manual step (see the module doc).
+%% BT-3090: `beamtalk_version:get/0` and `beamtalk_repl_ops_dev`'s `describe`
+%% op now both read the same `?PROTOCOL_VERSION` macro (`beamtalk.hrl`)
+%% instead of two independent `"2.0"` literals synced only by a comment — a
+%% future bump only requires editing the macro, and this test (and
+%% `beamtalk_repl_ops_dev_tests`'s equivalent pin) keeps passing unchanged.
 get_protocol_version_is_expected_literal_test() ->
     #{protocol_version := Vsn} = beamtalk_version:get(),
-    ?assertEqual(<<"2.0">>, Vsn).
+    ?assertEqual(?PROTOCOL_VERSION, Vsn).
 
 get_otp_release_returns_non_empty_binary_test() ->
     #{otp_release := Release} = beamtalk_version:get(),

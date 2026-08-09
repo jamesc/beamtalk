@@ -1175,17 +1175,11 @@ actor_class_label(Pid) when is_pid(Pid) ->
     end.
 
 %% The actor's behaviour class atom from its process dictionary, or nil.
+%% BT-3090: delegates to the canonical `beamtalk_actor:pid_class_name/1` —
+%% previously a hand-duplicated copy here.
 -spec actor_class(pid()) -> atom() | nil.
 actor_class(Pid) ->
-    case erlang:process_info(Pid, dictionary) of
-        {dictionary, Dict} when is_list(Dict) ->
-            case lists:keyfind('$beamtalk_actor', 1, Dict) of
-                {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
-                _ -> nil
-            end;
-        _ ->
-            nil
-    end.
+    beamtalk_actor:pid_class_name(Pid).
 
 %% Indent padding: two spaces per level.
 -spec pad(non_neg_integer()) -> binary().

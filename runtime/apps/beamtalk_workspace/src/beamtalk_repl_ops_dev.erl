@@ -44,7 +44,16 @@ Extracted from beamtalk_repl_server (BT-705).
     validate_selector_if_present/4,
     %% BT-2572: white-box test of the diagnostics `mode` normalisation that
     %% mirrors the Elixir facade at the Erlang op boundary.
-    normalize_diagnostics_mode/1
+    normalize_diagnostics_mode/1,
+    %% BT-3083: white-box test of the completion word-boundary rule against
+    %% the shared Rust/Erlang conformance corpus.
+    is_identifier_char/1,
+    %% BT-3083: white-box test of the completion keyword vocabulary against
+    %% the shared Rust/Erlang conformance corpus.
+    builtin_keywords/0,
+    %% BT-3087: white-box test of the local-overrides-wins dedup fix for
+    %% "all methods including inherited".
+    collect_all_methods/2
 ]).
 -endif.
 
@@ -562,7 +571,9 @@ handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
         end,
     Versions = #{
         %% BT-2091: Bumped to 2.0 — removed deprecated ops docs/load-file/reload/modules.
-        <<"protocol">> => <<"2.0">>,
+        %% BT-3090: shared with beamtalk_version:get/0 via the ?PROTOCOL_VERSION
+        %% macro (beamtalk.hrl) — no more hand-synced literals.
+        <<"protocol">> => ?PROTOCOL_VERSION,
         <<"beamtalk">> => BeamtalkVsnBin
     },
     {describe, Ops, Versions}.
@@ -1828,39 +1839,80 @@ Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 collect_all_methods(ClassName, Depth) ->
     collect_methods_with_fun(ClassName, Depth, fun beamtalk_runtime_api:class_methods/1).
 
--doc "Walk the superclass chain collecting methods via a caller-supplied getter fun.".
+-doc """
+Walk the superclass chain collecting methods via a caller-supplied getter fun.
+
+Local methods shadow inherited ones (Smalltalk-style override): a selector
+redefined by a subclass appears exactly once in the result, attributed to
+the subclass. BT-3087: previously `LocalMethods ++ InheritedMethods` with no
+dedup at all, so an overridden selector appeared twice — a real user-visible
+bug in method-listing completions.
+
+BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` — one depth guard,
+one `?LOG_WARNING`-on-exhaustion policy, matching every other consolidated
+hierarchy walker (`beamtalk_behaviour_intrinsics:walk_hierarchy/3`,
+`beamtalk_hierarchy_docs`). `Depth` is accepted for API compatibility with
+existing callers (always 0) but the walk itself always starts fresh at 0 —
+`walk_ancestors/3` owns depth-counting internally.
+
+On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns `[]`
+— not the partial set of selectors collected from the ancestors visited
+before the guard tripped — and logs a `?LOG_WARNING`. Deliberately narrower
+than returning partial results: `walk_ancestors/3`'s `max_depth_exceeded`
+carries no payload, so every caller falls back to a fixed default on this
+already-anomalous path.
+""".
 -spec collect_methods_with_fun(atom(), non_neg_integer(), fun((pid()) -> [atom()])) -> [atom()].
-collect_methods_with_fun(_ClassName, Depth, _Fun) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    [];
-collect_methods_with_fun(ClassName, Depth, Fun) ->
-    case
-        try
-            beamtalk_runtime_api:whereis_class(ClassName)
-        catch
-            _:_ -> undefined
-        end
-    of
-        undefined ->
-            [];
-        ClassPid ->
-            LocalMethods =
-                try
-                    Fun(ClassPid)
-                catch
-                    _:_ -> []
-                end,
-            Superclass =
-                try
-                    beamtalk_runtime_api:superclass(ClassPid)
-                catch
-                    _:_ -> none
-                end,
-            InheritedMethods =
+collect_methods_with_fun(ClassName, _Depth, Fun) ->
+    StepFun = fun({CurrentClassName, AccMap}, _WalkDepth) ->
+        case
+            try
+                beamtalk_runtime_api:whereis_class(CurrentClassName)
+            catch
+                _:_ -> undefined
+            end
+        of
+            undefined ->
+                {found, AccMap};
+            ClassPid ->
+                LocalMethods =
+                    try
+                        Fun(ClassPid)
+                    catch
+                        _:_ -> []
+                    end,
+                LocalMap = maps:from_keys(LocalMethods, true),
+                %% AccMap already reflects every closer (subclass-side)
+                %% selector winning over farther ancestors; keep that
+                %% invariant as this (farther) level's LocalMap is folded in.
+                NewAcc = maps:merge(LocalMap, AccMap),
+                Superclass =
+                    try
+                        beamtalk_runtime_api:superclass(ClassPid)
+                    catch
+                        _:_ -> none
+                    end,
                 case Superclass of
-                    none -> [];
-                    Super -> collect_methods_with_fun(Super, Depth + 1, Fun)
-                end,
-            LocalMethods ++ InheritedMethods
+                    none -> {found, NewAcc};
+                    Super -> {next, {Super, NewAcc}}
+                end
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors({ClassName, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, ResultMap} ->
+            maps:keys(ResultMap);
+        max_depth_exceeded ->
+            ?LOG_WARNING(
+                "collect_methods_with_fun: max hierarchy depth ~p exceeded at ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            [];
+        not_found ->
+            %% Unreachable: StepFun above always resolves to {found, _} — an
+            %% unregistered class or a `none` superclass is translated to a
+            %% terminal {found, _}, never a bare `none` node.
+            erlang:error({unreachable, not_found, ClassName})
     end.
 
 -doc """
@@ -2009,6 +2061,19 @@ read_class_meta(Module) ->
             #{}
     end.
 
+%% BT-3083: this list and the LSP's static `add_keyword_completions`
+%% (`crates/beamtalk-core/src/queries/completion_provider.rs`) are two
+%% engines that cannot literally share code (Erlang vs. Rust) but should
+%% offer the same control-flow vocabulary — a keyword missing from one and
+%% not the other is a completion gap on whichever surface is missing it.
+%% `match:`/`matchExhaustive:`/`if:then:else:` were LSP-only before this.
+%% This list's core control-flow keywords are pinned against
+%% `add_keyword_completions` by a shared conformance fixture
+%% (`runtime/apps/beamtalk_workspace/test/fixtures/completion_keyword_vocabulary_corpus.json`),
+%% asserted by `builtin_keywords_covers_shared_vocabulary_corpus_test` in
+%% `beamtalk_repl_ops_dev_tests.erl` and
+%% `keyword_completions_cover_shared_vocabulary_corpus` on the Rust side —
+%% keep both lists a superset of the corpus.
 -spec builtin_keywords() -> [binary()].
 builtin_keywords() ->
     [
@@ -2024,7 +2089,10 @@ builtin_keywords() ->
         <<"timesRepeat:">>,
         <<"subclass:">>,
         <<"spawn">>,
-        <<"new">>
+        <<"new">>,
+        <<"match:">>,
+        <<"matchExhaustive:">>,
+        <<"if:then:else:">>
     ].
 
 -doc """
@@ -2189,7 +2257,9 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
             PkgBin = binary:part(ClassBin, 0, Pos),
             ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
             %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
-            SnakeCase = camel_to_snake(binary_to_list(ClassNameBin)),
+            %% BT-3081: delegates to beamtalk_module_name, the single Erlang-side
+            %% authority for the ClassName ⇄ bt@[pkg@]snake_case convention.
+            SnakeCase = beamtalk_module_name:camel_to_snake(binary_to_list(ClassNameBin)),
             ModNameStr = "bt@" ++ binary_to_list(PkgBin) ++ "@" ++ SnakeCase,
             try list_to_existing_atom(ModNameStr) of
                 _ModAtom ->
@@ -2200,25 +2270,6 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
                     {error, badarg}
             end
     end.
-
--doc """
-CamelCase string to snake_case string conversion.
-Mirrors beamtalk_primitive:camel_to_snake/1 for use in REPL ops.
-""".
--spec camel_to_snake(string()) -> string().
-camel_to_snake(Str) ->
-    camel_to_snake(Str, false, []).
-
-camel_to_snake([], _PrevWasLower, Acc) ->
-    lists:reverse(Acc);
-camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
-    Lower = H + 32,
-    case PrevWasLower of
-        true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
-        false -> camel_to_snake(T, false, [Lower | Acc])
-    end;
-camel_to_snake([H | T], _PrevWasLower, Acc) ->
-    camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
 
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->

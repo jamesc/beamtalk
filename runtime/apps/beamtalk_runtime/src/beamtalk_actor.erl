@@ -202,6 +202,8 @@ handle_getValue([], State) ->
 %% Named registration (ADR 0079, BT-1987)
 -export([
     is_beamtalk_actor/1,
+    pid_class_name/1,
+    registered_name_for_pid/1,
     register_name/2,
     unregister_name/1,
     whereis_name/1,
@@ -2734,7 +2736,7 @@ unregister(Self) ->
 -spec unregister_resolved(#beamtalk_object{}, pid()) -> ok.
 unregister_resolved(Self, Pid) ->
     case registered_name_for_pid(Pid) of
-        undefined ->
+        nil ->
             ok;
         Name ->
             %% TOCTOU guard: between `registered_name_for_pid/1` above and
@@ -2777,10 +2779,7 @@ registeredName(Self) when is_record(Self, beamtalk_object) ->
             %% being restarted under the same name.
             Name;
         Pid when is_pid(Pid) ->
-            case registered_name_for_pid(Pid) of
-                undefined -> nil;
-                Name -> Name
-            end
+            registered_name_for_pid(Pid)
     end;
 registeredName(_) ->
     nil.
@@ -2798,7 +2797,7 @@ isRegistered(Self) when is_record(Self, beamtalk_object) ->
             %% the name on each restart.
             true;
         Pid when is_pid(Pid) ->
-            registered_name_for_pid(Pid) =/= undefined
+            registered_name_for_pid(Pid) =/= nil
     end;
 isRegistered(_) ->
     false.
@@ -2835,7 +2834,7 @@ named(Self, Name) when is_atom(Name) ->
                         )};
                 Pid when is_pid(Pid) ->
                     case pid_class_name(Pid) of
-                        undefined ->
+                        nil ->
                             {error,
                                 beamtalk_error:with_hint(
                                     beamtalk_error:new(
@@ -2931,7 +2930,7 @@ allRegistered(_Self) ->
                     false;
                 Pid when is_pid(Pid) ->
                     case pid_class_name(Pid) of
-                        undefined ->
+                        nil ->
                             false;
                         ClassName ->
                             case class_mod_for(ClassName) of
@@ -3018,24 +3017,37 @@ proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
             )
         )}.
 
--spec registered_name_for_pid(pid()) -> atom() | undefined.
+%% The registered name of a pid, or the Beamtalk `nil` atom when unregistered
+%% or dead. Canonical implementation (BT-3090): previously duplicated (with a
+%% disagreeing `undefined` sentinel in this module and a `nil` sentinel in
+%% beamtalk_process_navigation.erl's now-removed `registered_name/1`).
+%% Beamtalk-facing surfaces speak Beamtalk's null concept, not raw Erlang
+%% `undefined`, so `nil` is the one true sentinel; callers that need Erlang's
+%% `undefined` for an internal `=/=`/`case` guard pattern-match on `nil` now
+%% instead.
+-spec registered_name_for_pid(pid()) -> atom() | nil.
 registered_name_for_pid(Pid) when is_pid(Pid) ->
     case erlang:process_info(Pid, registered_name) of
-        {registered_name, Name} -> Name;
-        [] -> undefined;
-        undefined -> undefined
+        {registered_name, Name} when is_atom(Name) -> Name;
+        _ -> nil
     end.
 
--spec pid_class_name(pid()) -> atom() | undefined.
+%% The Beamtalk class name for an actor pid, read from the `'$beamtalk_actor'`
+%% process-dictionary marker planted by every actor's `init/1`. Canonical
+%% implementation (BT-3090): previously duplicated as `pid_class_name/1` here
+%% (sentinel `undefined`), `beamtalk_inspector:actor_class/1` and
+%% `beamtalk_process_navigation:actor_class_name/1` (both sentinel `nil`).
+%% `nil` wins as the single sentinel — see `registered_name_for_pid/1` above.
+-spec pid_class_name(pid()) -> atom() | nil.
 pid_class_name(Pid) ->
     case erlang:process_info(Pid, dictionary) of
         {dictionary, Dict} when is_list(Dict) ->
             case lists:keyfind('$beamtalk_actor', 1, Dict) of
                 {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
-                _ -> undefined
+                _ -> nil
             end;
         _ ->
-            undefined
+            nil
     end.
 
 -spec class_matches(atom(), atom()) -> boolean().

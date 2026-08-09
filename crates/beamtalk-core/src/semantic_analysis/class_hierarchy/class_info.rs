@@ -6,7 +6,7 @@
 //! Contains `MethodInfo`, `SuperclassTypeArg`, and `ClassInfo` — the value objects
 //! that describe classes and methods in the static hierarchy.
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, Literal, MethodKind};
+use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind};
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -329,7 +329,7 @@ impl ClassInfo {
 /// Complex expressions fall back to `"..."`.
 pub fn format_default_value(expr: &Expression) -> String {
     match expr {
-        Expression::Literal(lit, _) => format_literal_default(lit),
+        Expression::Literal(lit, _) => crate::unparse::unparse_literal_display(lit),
         Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
         Expression::Identifier(ident) if ident.name == "true" => "true".to_string(),
         Expression::Identifier(ident) if ident.name == "false" => "false".to_string(),
@@ -352,29 +352,51 @@ pub fn format_default_value(expr: &Expression) -> String {
     }
 }
 
-/// Formats a single literal (recursing into list elements) as Beamtalk source syntax.
-fn format_literal_default(lit: &Literal) -> String {
-    match lit {
-        Literal::Integer(n) => n.to_string(),
-        Literal::Float(f) => {
-            let rendered = f.to_string();
-            // Preserve decimal point so 1.0 stays as "1.0" not "1"
-            if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
-                rendered
-            } else {
-                format!("{rendered}.0")
-            }
-        }
-        Literal::String(s) => format!("{s:?}"),
-        Literal::Symbol(s) => format!("#{s}"),
-        Literal::Character(c) => format!("${}", c.escape_default()),
-        Literal::List(items) => {
-            let inner = items
-                .iter()
-                .map(format_literal_default)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("#({inner})")
-        }
+#[cfg(test)]
+mod tests {
+    use super::format_default_value;
+    use crate::ast::{Expression, Literal};
+    use crate::source_analysis::Span;
+    use crate::unparse::unparse_literal_display;
+
+    fn span() -> Span {
+        Span::new(0, 0)
+    }
+
+    // Parity tests (BT-3088): the stdlib-metadata path (`format_default_value`)
+    // must render literals identically to the unparse path
+    // (`unparse_literal_display`) — they used to disagree because
+    // `format_default_value` had its own hand-rolled, Rust-flavoured escaping.
+
+    #[test]
+    fn string_with_embedded_quote_matches_unparse() {
+        let lit = Literal::String("say \"hi\"".into());
+        let expr = Expression::Literal(lit.clone(), span());
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
+        assert_eq!(format_default_value(&expr), "\"say \"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn symbol_with_space_matches_unparse() {
+        let lit = Literal::Symbol("with space".into());
+        let expr = Expression::Literal(lit.clone(), span());
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
+        assert_eq!(format_default_value(&expr), "#'with space'");
+    }
+
+    #[test]
+    fn newline_character_matches_unparse() {
+        let lit = Literal::Character('\n');
+        let expr = Expression::Literal(lit.clone(), span());
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
+        assert_eq!(format_default_value(&expr), "$\\n");
+    }
+
+    #[test]
+    fn integral_float_matches_unparse() {
+        let lit = Literal::Float(1.0);
+        let expr = Expression::Literal(lit.clone(), span());
+        assert_eq!(format_default_value(&expr), unparse_literal_display(&lit));
+        assert_eq!(format_default_value(&expr), "1.0");
     }
 }

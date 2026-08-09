@@ -1398,7 +1398,7 @@ impl CoreErlangGenerator {
         for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {
             let is_last = index == total_messages - 1;
 
-            let selector_atom = selector.to_erlang_atom();
+            let selector_atom = selector.name().to_string();
             if matches!(selector, MessageSelector::Binary(_)) {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "binary selectors in cascades".to_string(),

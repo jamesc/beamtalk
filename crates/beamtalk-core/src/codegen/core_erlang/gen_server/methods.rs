@@ -1583,7 +1583,7 @@ impl CoreErlangGenerator {
             ..
         } = expr
         {
-            let selector_atom = selector.to_erlang_atom();
+            let selector_atom = selector.name().to_string();
             let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
             for (j, arg) in arguments.iter().enumerate() {
                 if j > 0 {
@@ -2894,7 +2894,7 @@ impl CoreErlangGenerator {
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| m.selector.to_erlang_atom())
+            .map(|m| m.selector.name().to_string())
             .collect();
 
         // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
@@ -4097,7 +4097,7 @@ impl CoreErlangGenerator {
         // BT-2355: see through parentheses so `_r := (1 to: 5 do: [...])` is still
         // classified as control flow with mutations (and thus unpacked + threaded)
         // rather than falling through to a plain pure local assignment.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
 
         // BT-2880: `match:` is a dedicated `Expression::Match` node, not a
         // `MessageSend`, so it's otherwise invisible to this classifier — a
@@ -4697,7 +4697,7 @@ impl CoreErlangGenerator {
             })
             .collect();
         (
-            m.selector.to_erlang_atom(),
+            m.selector.name().to_string(),
             m.selector.arity(),
             return_type,
             param_types,

@@ -278,6 +278,17 @@ pub fn unparse_type_annotation_display(ty: &TypeAnnotation) -> String {
     unparse_type_annotation(ty).to_pretty_string()
 }
 
+/// Renders a literal AST node as Beamtalk source syntax (e.g. `"a ""quoted"" string"`,
+/// `#'with space'`, `$\n`, `1.0`).
+///
+/// This is the single source of truth for literal-to-source rendering — used by
+/// codegen doc comments, hover info, and generated stdlib metadata alike, so all
+/// three agree on escaping/quoting rules instead of drifting (BT-3088).
+#[must_use]
+pub fn unparse_literal_display(lit: &Literal) -> String {
+    unparse_literal(lit).to_pretty_string()
+}
+
 /// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
 fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'static> {
     let sig = match &method.selector {
@@ -4851,5 +4862,42 @@ mod tests {
             reindent_method_source("  ", "class spawn => self new\n"),
             "  class spawn => self new\n"
         );
+    }
+
+    // --- unparse_literal_display (BT-3088) ---
+    //
+    // These are the single source of truth for literal-to-source rendering;
+    // `format_default_value` (stdlib-metadata path) and hover's literal
+    // rendering both delegate here, so any case fixed here fixes them too.
+
+    #[test]
+    fn unparse_literal_display_string_with_embedded_quote() {
+        // A `"` inside a string literal is doubled per Beamtalk convention,
+        // not backslash-escaped like Rust's `{s:?}` would render it.
+        let lit = Literal::String("say \"hi\"".into());
+        assert_eq!(unparse_literal_display(&lit), "\"say \"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn unparse_literal_display_symbol_with_space_is_quoted() {
+        // A symbol containing a space must be rendered as `#'...'`, never as
+        // an unquoted `#with space` (which isn't valid Beamtalk syntax).
+        let lit = Literal::Symbol("with space".into());
+        assert_eq!(unparse_literal_display(&lit), "#'with space'");
+    }
+
+    #[test]
+    fn unparse_literal_display_newline_character() {
+        // `$\n` uses Beamtalk's own escape rules (via `leaf::char_lit`), not
+        // Rust's `char::escape_default`.
+        let lit = Literal::Character('\n');
+        assert_eq!(unparse_literal_display(&lit), "$\\n");
+    }
+
+    #[test]
+    fn unparse_literal_display_integral_float_keeps_decimal_point() {
+        // `1.0` must round-trip as `1.0`, not collapse to the integer `1`.
+        let lit = Literal::Float(1.0);
+        assert_eq!(unparse_literal_display(&lit), "1.0");
     }
 }

@@ -294,8 +294,17 @@ Example:
 is_does_not_understand(#beamtalk_error{kind = does_not_understand}) -> true;
 is_does_not_understand(#beamtalk_error{}) -> false.
 
--doc "Generate a human-readable error message from kind, class, and optional selector.".
--spec generate_message(atom(), atom(), atom() | undefined) -> binary().
+-doc """
+Generate a human-readable error message from kind, class, and optional selector.
+
+Selector is normally an atom, but callers that only have an unregistered
+method name as a binary (e.g. `binary_to_existing_atom/2` failed, so there is
+no atom to attach to the record's `selector` field) may pass a binary
+instead — both format identically via `~s`. BT-3084: this keeps the
+canonical `does_not_understand` wording (quoted selector) reachable from
+call sites that can't safely mint a new atom.
+""".
+-spec generate_message(atom(), atom(), atom() | binary() | undefined) -> binary().
 generate_message(does_not_understand, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s does not understand message", [Class]));
 generate_message(does_not_understand, Class, Selector) ->

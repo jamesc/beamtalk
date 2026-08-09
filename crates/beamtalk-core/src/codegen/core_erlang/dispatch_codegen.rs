@@ -707,7 +707,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
 
         let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
         all_exprs.push(receiver);
@@ -784,7 +784,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
         let discard_var = self.fresh_temp_var("Cast");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
@@ -818,7 +818,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
         // BT-1937: Capture receiver + args as one ordered sub-expression
         // sequence so left-to-right evaluation order is preserved when ANY
         // sub-expression has an open scope from a class method self-send.
@@ -858,7 +858,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
         if matches!(selector, MessageSelector::Binary(_)) {
             return Err(CodeGenError::Internal(format!(
                 "unexpected binary selector in generate_message_send: {selector_atom}"
@@ -976,53 +976,33 @@ impl CoreErlangGenerator {
     /// Standard class-protocol selectors (e.g. `class`, `new`, `superclass`)
     /// fall through to normal class dispatch so that `Erlang class` returns the
     /// metaclass rather than a proxy for module `'class'`.
+    ///
+    /// BT-3079: FFI receiver recognition (the class-protocol filter, the
+    /// package-qualification check, and parenthesized-receiver peeling) is
+    /// centralized in [`crate::ffi_receiver`] — this is the only place those
+    /// rules are implemented.
     fn try_handle_erlang_interop(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        /// Class-protocol selectors that must NOT be intercepted as module
-        /// lookups. These are handled by `beamtalk_object_class:class_send/3`.
-        const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
-            "new",
-            "spawn",
-            "class",
-            "methods",
-            "superclass",
-            "subclasses",
-            "allSubclasses",
-            "class_name",
-            "module_name",
-            "printString",
-        ];
-
-        // BT-682: Direct call optimization — `Erlang lists reverse: xs` →
-        // `call 'lists':'reverse'(Xs)` with no proxy map allocation.
-        // Only when the module name is a compile-time literal (ClassReference path).
-        if let Expression::MessageSend {
-            receiver: inner_receiver,
-            selector: MessageSelector::Unary(module_name),
-            ..
-        } = receiver
-        {
-            if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-                if name.name == "Erlang"
-                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
-                {
-                    return self.generate_direct_erlang_call(module_name, selector, arguments);
-                }
-            }
+        // BT-682: Direct call optimization — `Erlang lists reverse: xs` (and the
+        // parenthesized `(Erlang lists) reverse: xs`) → `call 'lists':'reverse'(Xs)`
+        // with no proxy map allocation. Only when the module name is a
+        // compile-time literal (ClassReference path).
+        if let Some(module_name) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
+            return self.generate_direct_erlang_call(module_name, selector, arguments);
         }
 
         // BT-677: Proxy construction — `Erlang lists` → inline proxy map
-        if let Expression::ClassReference { name, .. } = receiver {
-            if name.name != "Erlang" {
+        if let Expression::ClassReference { name, package, .. } = receiver {
+            if package.is_some() || name.name != "Erlang" {
                 return Ok(None);
             }
             match selector {
                 MessageSelector::Unary(module_name)
-                    if !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str()) =>
+                    if !crate::ffi_receiver::is_class_protocol_selector(module_name) =>
                 {
                     let doc = docvec![
                         "~{'$beamtalk_class' => 'ErlangModule', 'module' => ",
@@ -1190,7 +1170,7 @@ impl CoreErlangGenerator {
         if class_name != "File" || package.is_some() {
             return Ok(None);
         }
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
         if !matches!(selector_atom.as_str(), "open:do:" | "open:mode:do:") {
             return Ok(None);
         }
@@ -1334,7 +1314,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
 
         // ADR 0084 / BT-2267: inside a programmatic ClassBuilder class-method fun
         // there is no `class_<sel>` module export to call, so self-sends route
@@ -1737,7 +1717,7 @@ impl CoreErlangGenerator {
             return self.generate_sealed_self_dispatch(selector, arguments);
         }
 
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
         let current_state = self.current_state_var();
@@ -1802,7 +1782,7 @@ impl CoreErlangGenerator {
             ..
         } = expr
         {
-            let selector_atom = selector.to_erlang_atom();
+            let selector_atom = selector.name().to_string();
             // BT-2822: `selector_atom` is moved into `call_doc` below (some
             // branches consume it via `leaf::atom`), so clone the value
             // needed for the error-clause breadcrumb before that happens.
@@ -1931,12 +1911,12 @@ impl CoreErlangGenerator {
 
         // Level 1: Direct call to standalone sealed method function
         if self.sealed_method_selectors().contains(&selector_name) {
-            let selector_atom = selector.to_erlang_atom();
+            let selector_atom = selector.name().to_string();
             return self.generate_direct_sealed_call(&selector_name, &selector_atom, arguments);
         }
 
         // Level 2: Direct dispatch/4 call (skip safe_dispatch try/catch)
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
         let result_var = self.fresh_var("SealedResult");
         let self_var = self.fresh_temp_var("SealedSelf");
         let current_state = self.current_state_var();
@@ -1991,7 +1971,7 @@ impl CoreErlangGenerator {
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
-        // BT-2822: `selector_atom` (from `MessageSelector::to_erlang_atom`) is
+        // BT-2822: `selector_atom` (from `MessageSelector::name`) is
         // the breadcrumb value — kept independent of `selector_name` (used
         // below for `sealed_fn_name` mangling) so a future change to either
         // mangling scheme can't silently desync the breadcrumb from the
@@ -2088,7 +2068,7 @@ impl CoreErlangGenerator {
         {
             if let Expression::Identifier(id) = receiver.as_ref() {
                 if id.name == "self" {
-                    let sel_atom = selector.to_erlang_atom();
+                    let sel_atom = selector.name().to_string();
                     return self.class_method_selectors().contains(&sel_atom);
                 }
             }
@@ -2480,7 +2460,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        let selector_atom = selector.name().to_string();
 
         // ADR 0084 / BT-2267: `super` inside a builder class-method fun resolves
         // up the metaclass chain via the runtime helper, keyed on the builder
@@ -2715,7 +2695,7 @@ impl CoreErlangGenerator {
         // lookup works normally.  The class_send fallback uses the class-method
         // mangled selector which triggers earlier (when "class_" + selector
         // exceeds the limit).
-        let raw = selector.to_erlang_atom();
+        let raw = selector.name().to_string();
         let instance_selector = super::selector_mangler::safe_atom_name(&raw);
         let binding_val_var = self.fresh_var("BindingVal");
         let state_var = self.current_state_var();
@@ -2850,7 +2830,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let raw_selector = selector.to_erlang_atom();
+        let raw_selector = selector.name().to_string();
 
         // BT-1639: Direct call optimization for sealed class methods
         if let Some(info) = self.direct_call_eligible.get(class_name) {
@@ -2944,7 +2924,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let raw_selector = selector.to_erlang_atom();
+        let raw_selector = selector.name().to_string();
 
         // BT-1639: Check if this class method is eligible for direct call optimization.
         if let Some(info) = self.direct_call_eligible.get(class_name) {
@@ -3310,7 +3290,7 @@ impl CoreErlangGenerator {
             }
 
             // Step 2: Generate argument list with Tier 2 blocks
-            let selector_atom = selector.to_erlang_atom();
+            let selector_atom = selector.name().to_string();
             let dispatch_var = self.fresh_temp_var("SD");
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");

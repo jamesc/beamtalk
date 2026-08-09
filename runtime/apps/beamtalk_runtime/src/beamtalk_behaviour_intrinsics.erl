@@ -1192,41 +1192,62 @@ Fun receives (ClassName, ClassPid, Acc) and returns:
   {cont, NewAcc}   — continue walking to superclass
   {halt, Result}   — stop and return Result immediately
 
-Returns Acc when the chain is exhausted (none or unregistered class).
-Guards against cycles via ?MAX_HIERARCHY_DEPTH.
+When the chain is exhausted (none or unregistered class), returns the fully
+folded accumulator built up through every ancestor visited.
+
+When the walk instead exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy cycle),
+returns the ORIGINAL `Acc` passed into this call — not the partial
+accumulator folded up through the ~`?MAX_HIERARCHY_DEPTH` ancestors visited
+before the guard tripped — and logs a `?LOG_WARNING`. This is a deliberate,
+narrower contract than the hand-rolled recursion this function replaced
+(which did return the partial fold): `walk_ancestors/3`'s `max_depth_exceeded`
+carries no payload, so every caller here falls back to a fixed default on
+this already-anomalous path rather than threading partial state back out.
+Only reachable via an actual hierarchy cycle or a legitimately
+`?MAX_HIERARCHY_DEPTH`-level-deep hierarchy.
+
+BT-3087: The walk itself (depth guard, cycle warning, advance-to-superclass)
+is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+per-ancestor registry lookup and threads Acc through the walk. Since
+`walk_ancestors/3` only threads a bare node id between steps (not a
+separate accumulator), Acc rides along inside the node as `{ClassName, Acc}`.
 """.
 -spec walk_hierarchy(atom() | none, fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}), Acc) ->
     Acc | Result.
+walk_hierarchy(none, _Fun, Acc) ->
+    Acc;
 walk_hierarchy(ClassName, Fun, Acc) ->
-    walk_hierarchy(ClassName, Fun, Acc, 0).
-
--spec walk_hierarchy(
-    atom() | none,
-    fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}),
-    Acc,
-    non_neg_integer()
-) -> Acc | Result.
-walk_hierarchy(none, _Fun, Acc, _Depth) ->
-    Acc;
-walk_hierarchy(_ClassName, _Fun, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING(
-        "walk_hierarchy: max hierarchy depth ~p exceeded — possible cycle",
-        [?MAX_HIERARCHY_DEPTH],
-        #{domain => [beamtalk, runtime]}
-    ),
-    Acc;
-walk_hierarchy(ClassName, Fun, Acc, Depth) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
+    StepFun = fun({CurrentClassName, CurrentAcc}, _Depth) ->
+        case beamtalk_class_registry:whereis_class(CurrentClassName) of
+            undefined ->
+                {found, {result, CurrentAcc}};
+            ClassPid ->
+                case Fun(CurrentClassName, ClassPid, CurrentAcc) of
+                    {halt, Result} ->
+                        {found, {result, Result}};
+                    {cont, NewAcc} ->
+                        case gen_server:call(ClassPid, superclass) of
+                            none -> {found, {result, NewAcc}};
+                            Super -> {next, {Super, NewAcc}}
+                        end
+                end
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors({ClassName, Acc}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, {result, Result}} ->
+            Result;
+        max_depth_exceeded ->
+            ?LOG_WARNING(
+                "walk_hierarchy: max hierarchy depth ~p exceeded — possible cycle",
+                [?MAX_HIERARCHY_DEPTH],
+                #{domain => [beamtalk, runtime]}
+            ),
             Acc;
-        ClassPid ->
-            case Fun(ClassName, ClassPid, Acc) of
-                {halt, Result} ->
-                    Result;
-                {cont, NewAcc} ->
-                    Super = gen_server:call(ClassPid, superclass),
-                    walk_hierarchy(Super, Fun, NewAcc, Depth + 1)
-            end
+        not_found ->
+            %% Unreachable: StepFun above always resolves to {found, _} — a
+            %% `none` superclass or an unregistered ancestor is translated to
+            %% a terminal {found, {result, _}}, never a bare `none` node.
+            erlang:error({unreachable, not_found, ClassName})
     end.
 
 -doc """
@@ -1295,15 +1316,14 @@ ensure_code_step(ClassName, Module, Step, false) ->
 -doc """
 Check if a module name belongs to the Beamtalk stdlib.
 BT-785: Stdlib modules have the prefix `bt@stdlib@`.
+
+BT-3081: delegates to `beamtalk_module_name:is_stdlib_module/1`, the single
+authority for this check (was byte-identical to
+`beamtalk_class_registry:is_stdlib_module/1`).
 """.
 -spec is_stdlib_module_name(atom()) -> boolean().
-is_stdlib_module_name(Module) when is_atom(Module) ->
-    case atom_to_binary(Module, utf8) of
-        <<"bt@stdlib@", _/binary>> -> true;
-        _ -> false
-    end;
-is_stdlib_module_name(_) ->
-    false.
+is_stdlib_module_name(Module) ->
+    beamtalk_module_name:is_stdlib_module(Module).
 
 -doc """
 Stop all live actors of a given class.

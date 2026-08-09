@@ -25,6 +25,8 @@ This module is purely additive — it does not change any existing RPC call
 site or the shape of any existing response.
 """.
 
+-include("beamtalk.hrl").
+
 -export([get/0]).
 
 -export_type([version_report/0]).
@@ -45,10 +47,10 @@ Fields:
   `scripts/version.escript`). `<<"unknown">>` if the application is not
   loaded, which should not happen on a running workspace node.
 - `protocol_version` — the RPC/protocol surface version that
-  `beamtalk_repl_ops`/`beamtalk_repl_protocol` implement. Mirrors the
-  `<<"protocol">>` value already reported by the `describe` op
-  (`beamtalk_repl_ops_dev:handle_term/4`) — keep the two literals in sync
-  when the wire protocol changes.
+  `beamtalk_repl_ops`/`beamtalk_repl_protocol` implement. Shares the
+  `?PROTOCOL_VERSION` macro (`beamtalk.hrl`, BT-3090) with the `<<"protocol">>`
+  value reported by the `describe` op (`beamtalk_repl_ops_dev:handle_term/4`)
+  — bump the macro once and both surfaces move together.
 - `otp_release` / `erts_version` — the hosting OTP release and ERTS
   version, so the front can also detect an Erlang distribution-protocol
   mismatch (ADR 0097 Consequences: "the dist protocol itself must also
@@ -58,9 +60,9 @@ Fields:
 get() ->
     #{
         runtime_version => app_vsn(beamtalk_runtime),
-        %% Keep in sync with the "protocol" value in
-        %% beamtalk_repl_ops_dev:handle_term(<<"describe">>, ...) (BT-2091).
-        protocol_version => <<"2.0">>,
+        %% BT-3090: shared with beamtalk_repl_ops_dev's "describe" op via the
+        %% ?PROTOCOL_VERSION macro (beamtalk.hrl) — no more hand-synced literals.
+        protocol_version => ?PROTOCOL_VERSION,
         otp_release => iolist_to_binary(erlang:system_info(otp_release)),
         erts_version => iolist_to_binary(erlang:system_info(version))
     }.

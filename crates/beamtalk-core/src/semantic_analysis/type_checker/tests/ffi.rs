@@ -802,6 +802,26 @@ fn test_erlang_new_resolves_as_class_protocol_not_ffi() {
 }
 
 #[test]
+fn test_package_qualified_erlang_does_not_infer_ffi_module() {
+    // BT-3079 regression: `json@Erlang lists` names a package-scoped `Erlang`
+    // class, not the compiler's built-in FFI bridge — it must not be
+    // inferred as `ErlangModule<lists>`.
+    let module = parse_source("go => json@Erlang lists");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(lists_registry());
+    checker.check_module(&module, &hierarchy);
+
+    let has_erlang_module_type = checker.type_map().iter().any(|(_, ty)| {
+        matches!(ty, InferredType::Known { class_name, .. } if class_name.as_str() == "ErlangModule")
+    });
+    assert!(
+        !has_erlang_module_type,
+        "`json@Erlang lists` should not be inferred as ErlangModule"
+    );
+}
+
+#[test]
 fn test_erlang_module_proxy_class_uses_normal_dispatch() {
     // `proxy := Erlang lists; proxy class` — `class` on an ErlangModule instance
     // should use normal dispatch (class protocol), not FFI lookup.
@@ -1171,5 +1191,65 @@ fn test_erlang_lists_still_infers_ffi() {
         send_type,
         Some(&InferredType::known("List")),
         "FFI call should still infer correct return type"
+    );
+}
+
+/// BT-3080: an FFI function spec'd `-> integer() | nil` — the `"Integer |
+/// Nil"` wire vocabulary `beamtalk_spec_reader:map_type/1` emits for a
+/// `-spec ... -> integer() | nil.` — narrows correctly under
+/// `ifNil:`/`ifNotNil:`, exactly like a source-written `Integer | Nil` field
+/// annotation (BT-2047). Registered via `parse_specs_line` with the exact
+/// wire format (not a hand-built `InferredType`), so this exercises the real
+/// `map_type_name` parsing path. Before this fix, `map_type_name` bypassed
+/// the BT-2016 nil-keyword normalisation and left the union's second member
+/// as the foreign `Known("Nil")` pseudo-class — which narrowing (keyed on
+/// `UndefinedObject`) never matches — so the `ifNotNil:` block param would
+/// have stayed the full `Integer | Nil` union instead of narrowing to plain
+/// `Integer`.
+#[test]
+fn bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil() {
+    let mut reg = NativeTypeRegistry::new();
+    let line = "beamtalk-specs-module:mymod:[#{arity => 0,name => <<\"maybeInt\">>,\
+        params => [],return_type => <<\"Integer | Nil\">>}]";
+    parse_specs_line(line, &mut reg);
+
+    let src = "typed Object subclass: Nav\n  \
+        run =>\n    \
+          (Erlang mymod) maybeInt\n      \
+            ifNil: [0]\n      \
+            ifNotNil: [:x | x + 1]";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+
+    let diags = checker.take_diagnostics();
+    let bad: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("understand") || d.message.contains("expects"))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "ifNotNil: block param should narrow to Integer (excluding the FFI \
+         Nil member) so `x + 1` type-checks cleanly; got diagnostics: {bad:#?}"
+    );
+
+    // The whole `ifNil:ifNotNil:` send's return type should be the plain
+    // `Integer` branch union (BT-2047's dedup rule) — not `Integer |
+    // UndefinedObject` — confirming the FFI `Nil` member was recognised and
+    // excluded from the `ifNotNil:` branch's param type rather than passing
+    // through as an opaque, narrowing-invisible pseudo-class.
+    let send_span = module.classes[0].methods[0]
+        .body
+        .last()
+        .unwrap()
+        .expression
+        .span();
+    let send_type = checker.type_map().get(send_span);
+    assert_eq!(
+        send_type,
+        Some(&InferredType::known("Integer")),
+        "expected ifNil:ifNotNil: branch union to be plain Integer, got {send_type:?}"
     );
 }

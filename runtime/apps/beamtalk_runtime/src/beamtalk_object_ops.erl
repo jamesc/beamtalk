@@ -259,6 +259,12 @@ print_string_label(#beamtalk_object{} = Self, State) ->
             %% Live actor instance — kind-headed positional label (BT-2462).
             beamtalk_primitive:process_label(Self)
     end;
+print_string_label({beamtalk_supervisor, _, _, _} = Self, _State) ->
+    %% BT-3082: supervisors aren't #beamtalk_object{} but still get the
+    %% ADR 0094 kind-headed positional label — derived directly from the
+    %% tuple (no message round-trip), matching the REPL's canonical
+    %% rendering instead of the compiled Object>>printString bare class name.
+    beamtalk_primitive:process_label(Self);
 print_string_label(Self, State) ->
     case map_size(State) =:= 0 of
         true ->

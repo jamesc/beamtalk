@@ -79,4 +79,43 @@ mod tests {
     fn keyword_constructor_empty() {
         assert_eq!(keyword_constructor_selector(std::iter::empty()), "");
     }
+
+    /// BT-3090: `with_star_selector` has a hand-rolled Erlang mirror,
+    /// `beamtalk_recheck:with_star_selector/1`
+    /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`), needed
+    /// because the workspace app cannot depend on this Rust crate. A shared
+    /// corpus fixture
+    /// (`runtime/apps/beamtalk_workspace/test/fixtures/with_star_selector_corpus.json`)
+    /// pins both implementations to the same cases — including non-ASCII
+    /// first letters — so the two can't silently drift apart. The Erlang
+    /// side asserts the identical cases in
+    /// `beamtalk_recheck_tests:with_star_selector_matches_shared_corpus_test/0`.
+    #[test]
+    fn with_star_selector_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/with_star_selector_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let field_name = case["field_name"]
+                .as_str()
+                .expect("case.field_name is a string");
+            let expected = case["expected_selector"]
+                .as_str()
+                .expect("case.expected_selector is a string");
+            let why = case["why"].as_str().unwrap_or("");
+            assert_eq!(
+                with_star_selector(field_name),
+                expected,
+                "corpus mismatch for field_name {field_name:?} ({why})"
+            );
+        }
+    }
 }

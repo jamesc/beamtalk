@@ -873,6 +873,64 @@ with_star_selector_test_() ->
         ?_assertEqual(<<"with:">>, beamtalk_recheck:with_star_selector(<<>>))
     ].
 
+%%====================================================================
+%% with_star_selector/1 — shared Rust<->Erlang conformance corpus (BT-3090)
+%%====================================================================
+
+%% BT-3090 conformance: `with_star_selector/1` must capitalise a field name's
+%% first character identically to the Rust naming authority
+%% (`crate::synthetic_selectors::with_star_selector`,
+%% `crates/beamtalk-core/src/synthetic_selectors.rs`) — including non-ASCII
+%% first letters, which the Erlang side's previous ASCII-only byte-arithmetic
+%% implementation got wrong. The corpus is the single source of truth both
+%% implementations are pinned to; the Rust side asserts the identical cases
+%% in `synthetic_selectors::tests::with_star_selector_matches_shared_corpus`.
+with_star_selector_matches_shared_corpus_test() ->
+    Cases = load_with_star_selector_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            FieldName = maps:get(<<"field_name">>, Case),
+            Expected = maps:get(<<"expected_selector">>, Case),
+            Why = maps:get(<<"why">>, Case, <<>>),
+            ?assertEqual(
+                Expected,
+                beamtalk_recheck:with_star_selector(FieldName),
+                {corpus_mismatch, FieldName, Why}
+            )
+        end,
+        Cases
+    ).
+
+%% Load the shared with-star-selector conformance corpus from the repo tree.
+%% Walks up from the test CWD to the project root (the dir holding
+%% `Cargo.toml`), then reads the fixture both surfaces share.
+load_with_star_selector_corpus() ->
+    Root = find_with_star_selector_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "with_star_selector_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).
+
+find_with_star_selector_corpus_root("/") ->
+    error(project_root_not_found);
+find_with_star_selector_corpus_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_with_star_selector_corpus_root(filename:dirname(Dir))
+    end.
+
 %% Pure helper — relevant_diagnostic_shape/3.
 
 relevant_diagnostic_shape_matches_spawn_with_unknown_key_test() ->

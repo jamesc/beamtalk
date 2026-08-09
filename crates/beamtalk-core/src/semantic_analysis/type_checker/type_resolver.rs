@@ -46,6 +46,38 @@ use super::{DynamicReason, InferredType, TypeProvenance, TypeStringContext};
 /// substitutions apply — all type-parameter identifiers pass through unchanged.
 pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, InferredType>;
 
+/// Merge a class-level and a method-local substitution map into the single
+/// [`SubstitutionMap`] [`resolve_declared_type`] takes, with method-local
+/// bindings winning on key collision — the same two-map priority order the
+/// deleted `TypeChecker::resolve_type_string` (BT-3075) used to check
+/// separately (BT-3080: that function's three-parameter shape — class subst,
+/// method subst, `self_type` — collapses to this single map plus the
+/// resolver's existing `subst.get("Self")` convention below).
+///
+/// When `self_type` is `Some`, additionally binds the reserved `"Self"` key
+/// to it. `DeclaredType::parse` has no dedicated `SelfType` production (only
+/// [`TypeAnnotation::SelfType`] does) — a bare `"Self"` string parses to
+/// [`DeclaredType::Simple`], which falls through
+/// [`resolve_declared_type_inner`]'s ordinary `subst.get(name)` lookup.
+/// Binding `"Self"` here reproduces `resolve_type_string`'s dedicated
+/// `type_name == "Self"` special case through that same, already-existing
+/// lookup rather than a second one. `"Self"` is reserved (ADR 0108 forbids it
+/// as a generic type-param or alias name), so this can never collide with a
+/// real substitution entry.
+#[must_use]
+pub(in crate::semantic_analysis) fn merge_substitutions(
+    class_subst: &SubstitutionMap,
+    method_subst: &SubstitutionMap,
+    self_type: Option<&InferredType>,
+) -> SubstitutionMap {
+    let mut merged = class_subst.clone();
+    merged.extend(method_subst.iter().map(|(k, v)| (k.clone(), v.clone())));
+    if let Some(ty) = self_type {
+        merged.insert(EcoString::from("Self"), ty.clone());
+    }
+    merged
+}
+
 /// Resolve a [`TypeAnnotation`] into a fully-parameterised [`InferredType`],
 /// preserving generic arguments end-to-end.
 ///
@@ -298,7 +330,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
 /// this (it reset to an empty `SubstitutionMap`, dropped `protocol_registry`,
 /// and always resolved through the `Declared`-context AST path); that
 /// divergence no longer exists now that every call site resolves through
-/// this one recursion (BT-3076 stage 3c).
+/// this one recursion (BT-3076 stage 3c / BT-3080).
 #[allow(clippy::too_many_lines)] // one match arm per DeclaredType variant — see resolve_declared_type's doc
 fn resolve_declared_type_inner(
     dt: &DeclaredType,
@@ -326,8 +358,23 @@ fn resolve_declared_type_inner(
             // `Result` never hits this path at all (no type args to resolve),
             // which is why the bug was invisible until a param was partially
             // parameterized.
+            //
+            // BT-3080: an FFI spec's `any()`/`term()` return type ("Dynamic"
+            // in the wire vocabulary) is not the same *reason* as a
+            // user-written `:: Dynamic` — `DynamicSpec` "loses" to a concrete
+            // binding observed elsewhere during merge, where `ExplicitDynamic`
+            // is authoritative (see `DynamicReason::ExplicitDynamic`'s doc).
+            // Folding `native_types::map_type_name` onto this resolver must
+            // not collapse that distinction, so `Extracted` context keeps the
+            // FFI-specific reason; every other context keeps the pre-existing
+            // `ExplicitDynamic`.
             if WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic) {
-                return InferredType::Dynamic(DynamicReason::ExplicitDynamic);
+                let reason = if ctx == TypeStringContext::Extracted {
+                    DynamicReason::DynamicSpec
+                } else {
+                    DynamicReason::ExplicitDynamic
+                };
+                return InferredType::Dynamic(reason);
             }
             // Method-local / class-level type-parameter substitution wins over
             // keyword resolution, because `T`, `E`, `R` would otherwise flow
@@ -563,30 +610,24 @@ fn resolve_declared_type_inner(
     }
 }
 
-/// `Declared` or `Substituted` provenance (both `Span::default()`, per
-/// `resolve_declared_type`'s doc), chosen by `ctx` — the `DeclaredType`
-/// recursion's single construction point for "this was a constructed nominal
-/// / generic / metatype / set-op result", mirroring
-/// the deleted `TypeChecker::resolve_type_string`'s equivalent inline `if`
-/// at its generic-parse arm (BT-3075).
+/// `Declared`, `Substituted`, or `Extracted` provenance, chosen by `ctx` — the
+/// `DeclaredType` recursion's single construction point for "this was a
+/// constructed nominal / generic / metatype / set-op result" (BT-3075,
+/// extended BT-3080 with the `Extracted` arm for the folded-in FFI path).
 fn declared_type_provenance(ctx: TypeStringContext) -> TypeProvenance {
-    if ctx == TypeStringContext::Substitution {
-        TypeProvenance::Substituted(Span::default())
-    } else {
-        TypeProvenance::Declared(Span::default())
+    match ctx {
+        TypeStringContext::Substitution => TypeProvenance::Substituted(Span::default()),
+        TypeStringContext::Extracted => TypeProvenance::Extracted,
+        TypeStringContext::Declared => TypeProvenance::Declared(Span::default()),
     }
 }
 
 /// Re-stamp `Substituted` provenance on a substitution-context union/false-or
-/// result — the `DeclaredType`-recursion counterpart of
-/// `TypeChecker::stamp_substituted_provenance` (inference.rs), duplicated
-/// rather than shared since that helper is private to `inference.rs`'s
-/// `impl TypeChecker` block. See its doc for the full rationale: `union_of`
-/// derives provenance from the members, and a plain nominal member never
-/// wins, so a substituted `V | Nil` would otherwise read as `Inferred`;
-/// `Aliased` results keep their tag (re-stamping would lose the alias
-/// display name); `Dynamic` and `Never` results carry no provenance and pass
-/// through unchanged.
+/// result. `union_of` derives provenance from the members, and a plain
+/// nominal member never wins, so a substituted `V | Nil` would otherwise
+/// read as `Inferred`; `Aliased` results keep their tag (re-stamping would
+/// lose the alias display name); `Dynamic` and `Never` results carry no
+/// provenance and pass through unchanged.
 fn stamp_substituted_provenance(mut ty: InferredType) -> InferredType {
     match &mut ty {
         InferredType::Known { provenance, .. }
@@ -753,23 +794,18 @@ fn resolve_type_keyword(name: &EcoString) -> EcoString {
 /// opaque class name.
 ///
 /// Used by the remaining string-form parsers (`parse_generic_type_string`,
-/// `infer_method_local_params`'s param-type matching, `native_types`'s FFI
-/// signature parsing, etc.) in place of manual `.find('(')` slicing.
-/// Centralising this keeps the
+/// `infer_method_local_params`'s param-type matching, etc.) in place of
+/// manual `.find('(')` slicing. Centralising this keeps the
 /// parenthesis-parsing logic in one place and lets the
 /// `no .find('(')` grep check stay clean.
 ///
-/// **References:** BT-2025.
-#[must_use]
-pub(in crate::semantic_analysis) fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
-    match type_name.split_once('(') {
-        Some((base, rest)) if rest.ends_with(')') => {
-            let args = &rest[..rest.len() - 1];
-            (base, Some(args))
-        }
-        _ => (type_name, None),
-    }
-}
+/// Re-exported from [`string_utils`](crate::semantic_analysis::string_utils)
+/// — the shared implementation, below both `type_checker` and
+/// `class_hierarchy` (BT-3089) — so existing call sites that spell this as
+/// `type_resolver::split_generic_base` keep working unchanged.
+///
+/// **References:** BT-2025, BT-3089.
+pub(in crate::semantic_analysis) use crate::semantic_analysis::string_utils::split_generic_base;
 
 /// Extract the base class-name portion of a stored-string type name.
 ///
@@ -1938,34 +1974,10 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    // ---- split_generic_base / base_name_of_string ----
-
-    #[test]
-    fn split_generic_base_plain_name() {
-        assert_eq!(split_generic_base("Integer"), ("Integer", None));
-    }
-
-    #[test]
-    fn split_generic_base_single_arg() {
-        assert_eq!(
-            split_generic_base("Array(Integer)"),
-            ("Array", Some("Integer"))
-        );
-    }
-
-    #[test]
-    fn split_generic_base_multiple_args() {
-        assert_eq!(
-            split_generic_base("Result(Integer, Error)"),
-            ("Result", Some("Integer, Error"))
-        );
-    }
-
-    #[test]
-    fn split_generic_base_unterminated_treats_as_opaque() {
-        // No closing `)` — treat the whole string as an opaque class name.
-        assert_eq!(split_generic_base("Array(Integer"), ("Array(Integer", None));
-    }
+    // ---- base_name_of_string ----
+    //
+    // `split_generic_base` itself is tested once, at its definition site in
+    // `string_utils` (BT-3089) — no need to re-test it by proxy here.
 
     #[test]
     fn base_name_of_string_discards_args() {

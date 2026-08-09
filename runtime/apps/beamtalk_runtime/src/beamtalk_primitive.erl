@@ -24,6 +24,8 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     print_string/1,
     display_string/1,
     process_label/1,
+    pid_label/1,
+    block_label/1,
     is_object/1,
     is_utf8/1
 ]).
@@ -242,6 +244,21 @@ print_string(#beamtalk_object{class = ClassName} = Obj) ->
 print_string(X) when is_map(X) -> print_string_map(X);
 print_string(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
+print_string({beamtalk_supervisor, _, _, _} = Sup) ->
+    %% BT-3082: supervisors have no #beamtalk_object{} wrapper, so without this
+    %% clause they fell into the generic is_tuple/1 clause below and printed as
+    %% a raw Erlang tuple instead of the ADR 0094 kind-headed label — e.g. when
+    %% a supervisor appears nested inside a collection being printed (printString
+    %% dispatch on the supervisor itself is handled separately, in
+    %% beamtalk_dispatch:invoke_method/6).
+    process_label(Sup);
+print_string(X) when is_function(X) ->
+    %% BT-3082: without this clause, a Block nested inside a collection (whose
+    %% elements are printed via direct recursion, not message dispatch — see
+    %% print_string/1's is_list/1 and print_string_map/1's 'Array' clauses)
+    %% fell into the ~p catch-all and rendered as a raw `#Fun<...>`, diverging
+    %% from block_label/1's `Block/N` convention.
+    block_label(X);
 print_string(X) when is_tuple(X) ->
     Elements = tuple_to_list(X),
     iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
@@ -331,6 +348,26 @@ display_string(#beamtalk_object{class = ClassName} = Obj) ->
     end;
 display_string(X) when is_map(X) ->
     beamtalk_tagged_map:format_for_display(X);
+display_string({beamtalk_supervisor, _, _, _} = Sup) ->
+    %% BT-3082: see the matching print_string/1 clause.
+    process_label(Sup);
+display_string(X) when is_function(X) ->
+    %% BT-3082: see the matching print_string/1 clause.
+    block_label(X);
+display_string(X) when is_tuple(X) ->
+    %% BT-3082: this clause was missing entirely (unlike print_string/1's),
+    %% so a plain tuple fell into the ~p catch-all below instead of recursing
+    %% with display_string/1 (no quotes on nested strings, matching the rest
+    %% of this function's contract).
+    Elements = tuple_to_list(X),
+    iolist_to_binary([<<"{">>, lists:join(<<", ">>, [display_string(E) || E <- Elements]), <<"}">>]);
+display_string(X) when is_pid(X) ->
+    %% BT-3082: this clause was missing entirely (unlike print_string/1's),
+    %% so a raw pid fell into the ~p catch-all below and rendered as the bare
+    %% Erlang `<0.123.0>` instead of `#Pid<0.123.0>`.
+    beamtalk_opaque_ops:pid_to_string(X);
+display_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
+display_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 display_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
@@ -378,6 +415,73 @@ identity_inner({registered, Name}) when is_atom(Name) ->
     iolist_to_binary([<<"registered, ">>, atom_to_binary(Name, utf8)]);
 identity_inner(Other) ->
     iolist_to_binary(io_lib:format("~tp", [Other])).
+
+-doc """
+`Block/N` label for a bare fun, `N` being its arity (BT-3082).
+
+The single canonical algorithm shared by `print_string/1`/`display_string/1`
+(for a Block nested inside a collection, printed via direct recursion
+rather than message dispatch), the REPL wire encoder
+(`beamtalk_repl_json:term_to_json/1`), and the stdlib-test result formatter
+(`beamtalk_stdlib_test:format_result/1`) — previously four independent
+copies of the same `erlang:fun_info/2` + format logic.
+""".
+-spec block_label(function()) -> binary().
+block_label(Fun) when is_function(Fun) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]).
+
+-doc """
+Liveness-probed label for a bare pid: `#Actor<X.Y.Z>` for a live process,
+`#Dead<X.Y.Z>` for a dead/unreachable one, or the matching `#Future<...>`
+tag when the pid is (or was) executing `beamtalk_future` code (BT-3082).
+
+This is the single canonical algorithm shared by the REPL wire encoder
+(`beamtalk_repl_json:term_to_json/1`, via the `beamtalk_runtime_api` facade)
+and the stdlib-test result formatter (`beamtalk_stdlib_test:format_result/1`)
+for rendering a raw, unwrapped pid — previously duplicated between the two
+with drifted liveness handling: the test-runner copy unconditionally
+rendered `#Actor<...>`, so a dead pid was reported as alive.
+
+Deliberately distinct from `print_string/1`'s `#Pid<...>` rendering for
+`Pid`-class values (ADR-documented in `stdlib/src/Pid.bt`, liveness-agnostic
+by design) — this is wire/test display only, layered on top of the same
+underlying pid, not a replacement for it.
+""".
+-spec pid_label(pid()) -> binary().
+pid_label(Pid) ->
+    case is_pid_alive_safe(Pid) of
+        true ->
+            case process_info(Pid, current_function) of
+                {current_function, {beamtalk_future, pending, _}} ->
+                    <<"#Future<pending>">>;
+                {current_function, {beamtalk_future, resolved, _}} ->
+                    <<"#Future<resolved>">>;
+                {current_function, {beamtalk_future, rejected, _}} ->
+                    <<"#Future<rejected>">>;
+                undefined ->
+                    %% Race: died between the liveness check above and here.
+                    dead_pid_label(Pid);
+                _ ->
+                    iolist_to_binary([<<"#Actor<">>, identity_inner(Pid), <<">">>])
+            end;
+        false ->
+            dead_pid_label(Pid)
+    end.
+
+-doc "Render the `#Dead<X.Y.Z>` label shared by both pid_label/1 branches.".
+-spec dead_pid_label(pid()) -> binary().
+dead_pid_label(Pid) ->
+    iolist_to_binary([<<"#Dead<">>, identity_inner(Pid), <<">">>]).
+
+-doc "Liveness probe that treats a remote/unreachable pid as not alive (never raises).".
+-spec is_pid_alive_safe(pid()) -> boolean().
+is_pid_alive_safe(Pid) ->
+    try
+        is_process_alive(Pid)
+    catch
+        _:_ -> false
+    end.
 
 -doc "Send a message to any value (actor or primitive).".
 -spec send(term(), atom(), list()) -> term().
@@ -676,51 +780,41 @@ module_for_value(X) when is_pid(X) -> 'bt@stdlib@pid';
 module_for_value(X) when is_port(X) -> 'bt@stdlib@port';
 module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
+    %% BT-3081: only the two genuine exceptions are hardcoded — 'ErlangModule'
+    %% dispatches to a hand-written native proxy module, not a compiled `.bt`
+    %% class, and an untagged map (no '$beamtalk_class') is Dictionary by
+    %% convention, not by class name. Every other tagged-map class name is
+    %% derivable from the `ClassName ⇄ bt@stdlib@snake_case` convention
+    %% (BT-2999 comment on the old hand-written ~35-entry table this replaced).
     case beamtalk_tagged_map:class_of(X) of
-        'CompiledMethod' ->
-            'bt@stdlib@compiled_method';
-        'Set' ->
-            'bt@stdlib@set';
-        'Stream' ->
-            'bt@stdlib@stream';
-        'Random' ->
-            'bt@stdlib@random';
-        'TestCase' ->
-            'bt@stdlib@test_case';
-        'Regex' ->
-            'bt@stdlib@regex';
-        'DateTime' ->
-            'bt@stdlib@date_time';
-        'Duration' ->
-            'bt@stdlib@duration';
-        'Timer' ->
-            'bt@stdlib@timer';
-        'TestResult' ->
-            'bt@stdlib@test_result';
-        'BeamtalkInterface' ->
-            'bt@stdlib@beamtalk_interface';
-        'WorkspaceInterface' ->
-            'bt@stdlib@workspace_interface';
-        'Package' ->
-            'bt@stdlib@package';
         'ErlangModule' ->
             beamtalk_erlang_proxy;
-        'Announcer' ->
-            'bt@stdlib@announcer';
-        'SystemAnnouncer' ->
-            'bt@stdlib@system_announcer';
-        'Subscription' ->
-            'bt@stdlib@subscription';
         undefined ->
             'bt@stdlib@dictionary';
         Other ->
             case beamtalk_exception_handler:is_exception_class(Other) of
                 true -> 'bt@stdlib@exception';
-                false -> undefined
+                false -> stdlib_module_for_tagged_class(Other)
             end
     end;
 module_for_value(_) ->
     undefined.
+
+-doc """
+Derive a tagged-map class's stdlib dispatch module from its class name
+(BT-3081), verifying the module actually exists rather than trusting the
+naming convention blindly — a class name that doesn't correspond to a
+loaded `bt@stdlib@…` module (e.g. a typo, or a class removed from stdlib)
+falls back to `undefined`, matching `module_for_value/1`'s prior behaviour
+for anything outside its hand-written table.
+""".
+-spec stdlib_module_for_tagged_class(atom()) -> atom() | undefined.
+stdlib_module_for_tagged_class(ClassName) ->
+    Candidate = beamtalk_module_name:to_stdlib_module_atom(ClassName),
+    case code:ensure_loaded(Candidate) of
+        {module, _} -> Candidate;
+        {error, _} -> undefined
+    end.
 
 -doc "Send a message to a value type instance (BT-354).".
 -spec value_type_send(map(), atom(), atom(), list()) -> term().
@@ -917,34 +1011,16 @@ class_name_to_module(Class) when is_atom(Class) ->
             end
     end.
 
--doc "Static module name from class name (bt@{snake_case}).".
+-doc """
+Static module name from class name (bt@{snake_case}).
+
+BT-3081: delegates the CamelCase→snake_case conversion to
+`beamtalk_module_name:to_module_atom/1`, the single Erlang-side authority
+for the `ClassName ⇄ bt@[pkg@]snake_case` convention (ADR 0016).
+""".
 -spec static_class_module_name(atom()) -> atom().
 static_class_module_name(Class) ->
-    SnakeCase = camel_to_snake(atom_to_list(Class)),
-    ModName = "bt@" ++ SnakeCase,
-    try
-        list_to_existing_atom(ModName)
-    catch
-        error:badarg ->
-            % elp:fixme W0023 intentional atom creation
-            list_to_atom(ModName)
-    end.
-
--doc "CamelCase string to snake_case string conversion.".
--spec camel_to_snake(string()) -> string().
-camel_to_snake(Str) ->
-    camel_to_snake(Str, false, []).
-
-camel_to_snake([], _PrevWasLower, Acc) ->
-    lists:reverse(Acc);
-camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
-    Lower = H + 32,
-    case PrevWasLower of
-        true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
-        false -> camel_to_snake(T, false, [Lower | Acc])
-    end;
-camel_to_snake([H | T], _PrevWasLower, Acc) ->
-    camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
+    beamtalk_module_name:to_module_atom(Class).
 
 -doc """
 Whether a binary holds valid UTF-8 text (BT-2999).

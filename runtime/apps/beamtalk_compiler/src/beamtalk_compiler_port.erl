@@ -36,7 +36,8 @@ verification that BEAM can invoke the Rust compiler via a port.
 -export([
     handle_response/1,
     find_compiler_binary/0,
-    find_project_root/0
+    find_project_root/0,
+    to_binary/1
 ]).
 -endif.
 
@@ -960,6 +961,19 @@ handle_reindent_response(Other) ->
     {error, port_error, <<"Unexpected compiler response">>}.
 
 %% Normalise an atom-or-binary identifier to a binary.
+%%
+%% BT-3090: this is the same two-clause shape as `beamtalk_text:to_binary/1`
+%% (the runtime-side canonical helper covering atom/binary/list/other), but it
+%% deliberately stays local rather than delegating: `beamtalk_compiler` is a
+%% peer of `beamtalk_runtime`, not a dependent (ADR 0022 — "the compiler has
+%% no dependency on the runtime"), so it cannot reach `beamtalk_text` without
+%% breaking that boundary. Every call site here guards
+%% `is_atom(X) orelse is_binary(X)` before calling this, so the list/other
+%% case `beamtalk_text:to_binary/1` handles can never actually be reached from
+%% this module — this is a narrower, correctly-scoped function, not an
+%% incomplete copy of the wider one. Pinned by
+%% `beamtalk_compiler_port_tests:to_binary_test_/0` so a future edit can't
+%% silently narrow or widen it.
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
 to_binary(B) when is_binary(B) -> B.

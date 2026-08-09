@@ -838,37 +838,12 @@ impl CoreErlangGenerator {
     /// `ClassReference("Erlang")` and whose selector is a unary module name.  These
     /// expressions should **not** be treated as blocks by the `value:` handler; instead
     /// they fall through to `try_handle_erlang_interop` (step 7 of dispatch).
+    ///
+    /// BT-3079: delegates to the single shared recognizer in
+    /// [`crate::ffi_receiver`] (class-protocol filter, package check, and
+    /// BT-2685's parenthesized-receiver peeling all live there now).
     fn is_erlang_ffi_receiver(expr: &Expression) -> bool {
-        /// Class-protocol selectors excluded from Erlang FFI proxy construction.
-        /// Mirrors `CLASS_PROTOCOL_SELECTORS` in `dispatch_codegen.rs` so that
-        /// e.g. `(Erlang class) value: x` falls through to the `is_function` guard
-        /// instead of being treated as a module proxy (consistent with step 7).
-        const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
-            "new",
-            "spawn",
-            "class",
-            "methods",
-            "superclass",
-            "subclasses",
-            "allSubclasses",
-            "class_name",
-            "module_name",
-            "printString",
-        ];
-        // BT-2685: peel `(Erlang mod)` parentheses so a parenthesized FFI receiver
-        // is recognised (the canonical `(Erlang beamtalk_console) error: x` form).
-        if let Expression::MessageSend {
-            receiver: inner_receiver,
-            selector: MessageSelector::Unary(module_name),
-            ..
-        } = Self::peel_parens(expr)
-        {
-            if let Expression::ClassReference { name, .. } = Self::peel_parens(inner_receiver) {
-                return name.name == "Erlang"
-                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str());
-            }
-        }
-        false
+        crate::ffi_receiver::erlang_module_of_receiver(expr).is_some()
     }
 
     /// BT-1260: Generates a runtime `erlang:is_function/1` guard for keyword `value:` sends.

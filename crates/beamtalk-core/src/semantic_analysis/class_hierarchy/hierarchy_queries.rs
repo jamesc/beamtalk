@@ -343,11 +343,32 @@ impl ClassHierarchy {
 
     /// Resolve the `ClassKind` for a class by walking its ancestor chain (BT-1528).
     ///
-    /// Returns `ClassKind::Actor` if any ancestor is Actor, `ClassKind::Value` if
-    /// any ancestor is Value, or `ClassKind::Object` otherwise.
+    /// This is the **single authority** for actor/value classification (BT-3086)
+    /// — the only place that should decide whether a class is `Actor`, `Value`,
+    /// or `Object`. Returns `ClassKind::Actor` if any ancestor is `Actor`,
+    /// `ClassKind::Value` if any ancestor is `Value`, or `ClassKind::Object`
+    /// otherwise, walking the *full* transitive chain regardless of how many
+    /// hops away the deciding ancestor is or what order sibling classes were
+    /// declared in (`add_module_classes` registers every class in a module
+    /// before any chain is walked, so within-module order never matters).
     ///
-    /// This supersedes `ClassKind::from_superclass_name` which only checks the
-    /// direct superclass literal.
+    /// This supersedes `ClassKind::from_superclass_name`, which is a
+    /// pre-analysis placeholder that only checks the direct superclass
+    /// literal — nothing downstream of `apply_class_kind_writeback` should
+    /// treat that placeholder as authoritative once this method is available.
+    ///
+    /// **Incomplete-chain default:** when the chain terminates before
+    /// reaching a registered root (an ancestor is missing from this
+    /// `ClassHierarchy` entirely — see [`Self::has_cross_file_parent`]),
+    /// neither the `Actor` nor `Value` literal can be found, so this method
+    /// returns `ClassKind::Object`. That is the one default this method
+    /// documents; callers that need a *different* fallback for a genuinely
+    /// incomplete chain (for example, codegen's `is_actor_class` defaults
+    /// such classes to actor, for backward compatibility with independent
+    /// per-file compilation — see its doc comment) must layer that policy on
+    /// top of this method's result themselves, using
+    /// [`Self::has_cross_file_parent`] to detect the incomplete-chain case,
+    /// rather than re-deriving it from a separate hardcoded list.
     #[must_use]
     pub fn resolve_class_kind(&self, class_name: &str) -> ClassKind {
         if self.is_actor_subclass(class_name) {

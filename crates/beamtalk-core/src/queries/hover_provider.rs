@@ -791,13 +791,17 @@ fn find_hover_in_expr(
         }
         Expression::Literal(lit, span) => {
             if offset >= span.start() && offset < span.end() {
+                // Render the literal via `unparse_literal_display` — the single
+                // source of truth for literal-to-source rendering (BT-3088) —
+                // so hover text agrees with Beamtalk quoting/escaping rules.
+                let rendered = crate::unparse::unparse_literal_display(lit);
                 let info = match lit {
-                    Literal::Integer(n) => format!("Integer: `{n}`"),
-                    Literal::Float(f) => format!("Float: `{f}`"),
-                    Literal::String(s) => format!("String: `\"{s}\"`"),
-                    Literal::Symbol(s) => format!("Symbol: `#{s}`"),
+                    Literal::Integer(_) => format!("Integer: `{rendered}`"),
+                    Literal::Float(_) => format!("Float: `{rendered}`"),
+                    Literal::String(_) => format!("String: `{rendered}`"),
+                    Literal::Symbol(_) => format!("Symbol: `{rendered}`"),
                     Literal::List(_) => "List literal".to_string(),
-                    Literal::Character(c) => format!("Character: `${c}`"),
+                    Literal::Character(_) => format!("Character: `{rendered}`"),
                 };
                 Some(HoverInfo::new(info, *span))
             } else {

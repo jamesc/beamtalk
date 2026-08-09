@@ -857,10 +857,30 @@ print_string_plain_map_test_() ->
             ?assert(is_binary(Result))
         end}.
 
-print_string_catchall_test() ->
-    %% Pid/reference should use the catch-all io_lib:format path
+print_string_pid_test() ->
+    %% BT-3082: raw pids (the `Pid` class, ADR-documented in Pid.bt) render
+    %% `#Pid<X.Y.Z>` — liveness-agnostic, distinct from pid_label/1's
+    %% liveness-probed `#Actor<>`/`#Dead<>` wire/test-only rendering.
     Result = beamtalk_primitive:print_string(self()),
-    ?assert(is_binary(Result)).
+    ?assertMatch(<<"#Pid<", _/binary>>, Result),
+    ?assertEqual($>, binary:last(Result)).
+
+print_string_reference_test() ->
+    Result = beamtalk_primitive:print_string(make_ref()),
+    ?assertMatch(<<"#Ref<", _/binary>>, Result).
+
+print_string_block_test() ->
+    %% BT-3082: a Block reached via direct recursion (e.g. nested inside a
+    %% collection) previously fell into the ~p catch-all as a raw `#Fun<...>`.
+    ?assertEqual(<<"Block/0">>, beamtalk_primitive:print_string(fun() -> ok end)),
+    ?assertEqual(<<"Block/2">>, beamtalk_primitive:print_string(fun(_, _) -> ok end)).
+
+print_string_supervisor_tuple_test() ->
+    %% BT-3082: without a dedicated clause, a supervisor tuple nested inside a
+    %% collection (printed via direct recursion) fell into the generic
+    %% is_tuple/1 clause and rendered as a raw Erlang tuple.
+    Result = beamtalk_primitive:print_string({beamtalk_supervisor, 'MySup', mysup_mod, self()}),
+    ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result).
 
 %%% ============================================================================
 %%% class_of_object/1 Tests
@@ -1031,10 +1051,31 @@ display_string_list_of_strings_test() ->
     Result = beamtalk_primitive:display_string([<<"a">>, <<"b">>]),
     ?assertEqual(<<"#(a, b)">>, Result).
 
-display_string_catchall_test() ->
-    %% Pids use fallback io_lib:format path
+display_string_pid_test() ->
+    %% BT-3082: display_string/1 had no is_pid/1 clause at all, so a raw pid
+    %% fell into the ~p catch-all and rendered as the bare Erlang `<0.123.0>`
+    %% instead of matching print_string/1's `#Pid<0.123.0>`.
     Result = beamtalk_primitive:display_string(self()),
-    ?assert(is_binary(Result)).
+    ?assertMatch(<<"#Pid<", _/binary>>, Result),
+    ?assertEqual($>, binary:last(Result)).
+
+display_string_reference_test() ->
+    Result = beamtalk_primitive:display_string(make_ref()),
+    ?assertMatch(<<"#Ref<", _/binary>>, Result).
+
+display_string_block_test() ->
+    ?assertEqual(<<"Block/0">>, beamtalk_primitive:display_string(fun() -> ok end)),
+    ?assertEqual(<<"Block/1">>, beamtalk_primitive:display_string(fun(_) -> ok end)).
+
+display_string_tuple_test() ->
+    %% BT-3082: display_string/1 had no is_tuple/1 clause at all, so a plain
+    %% tuple fell into the ~p catch-all instead of recursing via display_string.
+    Result = beamtalk_primitive:display_string({1, <<"two">>, 3}),
+    ?assertEqual(<<"{1, two, 3}">>, Result).
+
+display_string_supervisor_tuple_test() ->
+    Result = beamtalk_primitive:display_string({beamtalk_supervisor, 'MySup', mysup_mod, self()}),
+    ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result).
 
 display_string_unicode_string_test() ->
     %% Valid UTF-8 binary is returned as-is
@@ -2060,3 +2101,35 @@ process_label_supervisor_test() ->
     Result = beamtalk_primitive:process_label(Sup),
     ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result),
     ?assert(binary:match(Result, <<"DynamicSupervisor">>) =:= nomatch).
+
+%%% ============================================================================
+%%% BT-3082: pid_label/1 — canonical liveness-probed pid label, shared by the
+%%% REPL wire encoder (via beamtalk_runtime_api) and format_result/1.
+%%% ============================================================================
+
+pid_label_live_pid_test() ->
+    Pid = self(),
+    Result = beamtalk_primitive:pid_label(Pid),
+    ?assertMatch(<<"#Actor<", _/binary>>, Result),
+    ?assertEqual($>, binary:last(Result)),
+    PidStr = erlang:pid_to_list(Pid),
+    Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
+    ?assertEqual(<<"#Actor<", Inner/binary, ">">>, Result).
+
+pid_label_dead_pid_test() ->
+    %% BT-3082: format_result/1 previously rendered every pid — dead or alive
+    %% — as `#Actor<...>`. pid_label/1 is the shared fix: a dead pid must
+    %% never be reported as a live actor.
+    Pid = spawn(fun() -> ok end),
+    %% Deterministically wait for the process to exit rather than a raw sleep.
+    Ref = monitor(process, Pid),
+    receive
+        {'DOWN', Ref, process, Pid, _Reason} -> ok
+    after 5000 -> error(setup_timeout)
+    end,
+    Result = beamtalk_primitive:pid_label(Pid),
+    ?assertMatch(<<"#Dead<", _/binary>>, Result),
+    ?assertEqual($>, binary:last(Result)),
+    PidStr = erlang:pid_to_list(Pid),
+    Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
+    ?assertEqual(<<"#Dead<", Inner/binary, ">">>, Result).

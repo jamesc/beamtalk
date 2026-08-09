@@ -108,10 +108,9 @@ fn resolve_type_annotation_dynamic_nested_in_generic_resolves_to_dynamic_variant
 /// resolve a bare `Dynamic` to the real `InferredType::Dynamic` variant.
 #[test]
 fn resolve_type_string_dynamic_keyword_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_declared_type_string_for_test(
-        &eco_string("Dynamic"),
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse(&eco_string("Dynamic")),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,
@@ -126,10 +125,9 @@ fn resolve_type_string_dynamic_keyword_resolves_to_dynamic_variant() {
 /// a generic's type args too.
 #[test]
 fn resolve_type_string_dynamic_nested_in_generic_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_declared_type_string_for_test(
-        &eco_string("MyResult(Dynamic, Error)"),
-        &HashMap::new(),
-        &HashMap::new(),
+    let result = type_resolver::resolve_declared_type(
+        &DeclaredType::parse(&eco_string("MyResult(Dynamic, Error)")),
+        &type_resolver::SubstitutionMap::new(),
         None,
         None,
         TypeStringContext::Declared,

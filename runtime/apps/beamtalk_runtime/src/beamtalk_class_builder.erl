@@ -43,6 +43,10 @@ timeout. The builder is single-use: create, configure, register, done.
 %% API
 -export([register/1]).
 
+%% BT-3090: selector-shape helpers, shared with the workspace app via
+%% `beamtalk_runtime_api` — see the moduledoc on `is_keyword_selector/1`.
+-export([is_keyword_selector/1, selector_arity/1]).
+
 %%% ============================================================================
 %%% API
 %%% ============================================================================
@@ -634,11 +638,32 @@ selector_arity(Selector) when is_atom(Selector) ->
             end
     end.
 
--doc "True when the selector chars form a keyword selector (non-empty and ending with `:`).".
--spec is_keyword_selector(string()) -> boolean().
+-doc """
+True when a selector is a keyword selector — non-empty and ending with `:`
+(BT-3090: canonical for atom, binary, and string selector representations).
+
+Before BT-3090 this exact "non-empty and ends with `:`" check was re-typed as
+`beamtalk_repl_eval:is_keyword_selector/1` (binary) and
+`beamtalk_erlang_help:is_keyword_name/1` (binary); both now delegate here via
+`beamtalk_runtime_api:is_keyword_selector/1`. All three copies already agreed
+on this boolean (a malformed selector like `'at:put'` — interior colon, no
+trailing colon — correctly answers `false` in all of them, since none of them
+inspects anything but the last character), so consolidating removes the
+duplication without changing behavior. `selector_arity/1` below is what
+actually needs the "malformed selector = arity 0, not 1" guard this check
+enables — see its doc.
+""".
+-spec is_keyword_selector(atom() | binary() | string()) -> boolean().
+is_keyword_selector(Selector) when is_atom(Selector) ->
+    is_keyword_selector(atom_to_list(Selector));
+is_keyword_selector(Selector) when is_binary(Selector) ->
+    case Selector of
+        <<>> -> false;
+        _ -> binary:last(Selector) =:= $:
+    end;
 is_keyword_selector([]) ->
     false;
-is_keyword_selector(Chars) ->
+is_keyword_selector(Chars) when is_list(Chars) ->
     lists:last(Chars) =:= $:.
 
 -doc "Count the `:` characters in a selector's chars (keyword argument slots).".

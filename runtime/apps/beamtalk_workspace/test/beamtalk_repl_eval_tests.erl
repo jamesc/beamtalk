@@ -1950,6 +1950,13 @@ is_keyword_selector_test() ->
     ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<"run">>)),
     ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<>>)).
 
+%% BT-3090: `is_keyword_selector/1` now delegates to the canonical
+%% `beamtalk_class_builder:is_keyword_selector/1` (via `beamtalk_runtime_api`).
+%% A malformed selector with an interior colon but no trailing colon (e.g.
+%% `at:put`) is NOT a keyword selector — only the last character matters.
+is_keyword_selector_malformed_interior_colon_test() ->
+    ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<"at:put">>)).
+
 %% A class that is not loaded resolves to a structured class_not_found error,
 %% never a raise — so the connecting client gets a clean message + exit 1.
 do_dispatch_class_not_found_test() ->

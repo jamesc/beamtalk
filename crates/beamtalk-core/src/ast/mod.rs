@@ -435,9 +435,47 @@ pub fn resolve_qualified_module_name(class_name: &str, package: Option<&str>) ->
     }
 }
 
+/// BT-3081 cross-language conformance fixture for `to_module_name`.
+///
+/// Kept byte-identical to the Erlang-side fixture in
+/// `runtime/apps/beamtalk_runtime/test/beamtalk_module_name_tests.erl`
+/// (`beamtalk_module_name:camel_to_snake/1`) — the single Erlang authority
+/// this Rust function is mirrored by. If either list changes, update both so
+/// the two implementations stay provably in sync on the same inputs,
+/// including the acronym case-fold collision (`BEAMError`/`Beamerror`,
+/// BT-3081) and the lowercase-initial + Unicode cases that previously drifted
+/// between the four now-deleted Erlang copies of this conversion.
+#[cfg(test)]
+const MODULE_NAME_CONFORMANCE_FIXTURES: &[(&str, &str)] = &[
+    ("Counter", "counter"),
+    ("MyCounterActor", "my_counter_actor"),
+    ("HTTPRouter", "httprouter"),
+    ("BEAMError", "beamerror"),
+    ("Beamerror", "beamerror"),
+    ("myClass", "my_class"),
+    ("aB", "a_b"),
+    ("already_snake", "already_snake"),
+    ("App2", "app2"),
+    ("ABC", "abc"),
+    ("", ""),
+    ("École", "école"),
+    ("MonÉcole", "mon_école"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn to_module_name_conformance_fixtures() {
+        for (input, expected) in MODULE_NAME_CONFORMANCE_FIXTURES {
+            assert_eq!(
+                to_module_name(input),
+                *expected,
+                "to_module_name({input:?}) mismatch"
+            );
+        }
+    }
 
     #[test]
     fn module_creation() {
@@ -446,6 +484,58 @@ mod tests {
         assert!(module.expressions.is_empty());
         assert_eq!(module.span, span);
         assert!(module.file_leading_comments.is_empty());
+    }
+
+    #[test]
+    fn leading_word_unary() {
+        let selector = MessageSelector::Unary("asList".into());
+        assert_eq!(selector.leading_word(), "asList");
+    }
+
+    #[test]
+    fn leading_word_binary() {
+        let selector = MessageSelector::Binary("+".into());
+        assert_eq!(selector.leading_word(), "+");
+    }
+
+    #[test]
+    fn leading_word_keyword_takes_only_first_part() {
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("inject:", Span::new(0, 7)),
+            KeywordPart::new("into:", Span::new(8, 13)),
+        ]);
+        assert_eq!(selector.leading_word(), "inject");
+        // Unlike leading_word, name() concatenates every part.
+        assert_eq!(selector.name(), "inject:into:");
+    }
+
+    #[test]
+    fn unwrap_parens_bare_expression_is_identity() {
+        let ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        assert_eq!(ident.unwrap_parens(), &ident);
+    }
+
+    #[test]
+    fn unwrap_parens_single_layer() {
+        let inner = Expression::Identifier(Identifier::new("x", Span::new(1, 2)));
+        let wrapped = Expression::Parenthesized {
+            expression: Box::new(inner.clone()),
+            span: Span::new(0, 3),
+        };
+        assert_eq!(wrapped.unwrap_parens(), &inner);
+    }
+
+    #[test]
+    fn unwrap_parens_multiple_nested_layers() {
+        let inner = Expression::Identifier(Identifier::new("x", Span::new(2, 3)));
+        let wrapped = Expression::Parenthesized {
+            expression: Box::new(Expression::Parenthesized {
+                expression: Box::new(inner.clone()),
+                span: Span::new(1, 4),
+            }),
+            span: Span::new(0, 5),
+        };
+        assert_eq!(wrapped.unwrap_parens(), &inner);
     }
 
     #[test]
@@ -477,27 +567,6 @@ mod tests {
         ]);
         assert_eq!(selector.name(), "at:put:");
         assert_eq!(selector.arity(), 2);
-    }
-
-    #[test]
-    fn message_selector_to_erlang_atom_unary() {
-        let selector = MessageSelector::Unary("increment".into());
-        assert_eq!(selector.to_erlang_atom(), "increment");
-    }
-
-    #[test]
-    fn message_selector_to_erlang_atom_binary() {
-        let selector = MessageSelector::Binary("+".into());
-        assert_eq!(selector.to_erlang_atom(), "+");
-    }
-
-    #[test]
-    fn message_selector_to_erlang_atom_keyword() {
-        let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", Span::new(0, 3)),
-            KeywordPart::new("put:", Span::new(5, 9)),
-        ]);
-        assert_eq!(selector.to_erlang_atom(), "at:put:");
     }
 
     #[test]

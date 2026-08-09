@@ -171,10 +171,7 @@ fn check_selector_reserved_word(
     span: crate::source_analysis::Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let fn_name = match selector {
-        MessageSelector::Unary(name) | MessageSelector::Binary(name) => name.as_str(),
-        MessageSelector::Keyword(parts) => parts[0].keyword.trim_end_matches(':'),
-    };
+    let fn_name = selector.leading_word();
     if ERLANG_RESERVED_WORDS.contains(&fn_name) {
         diagnostics.push(
             Diagnostic::error(

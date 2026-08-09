@@ -25,6 +25,7 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 use super::sendability;
+use super::type_resolver;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -253,12 +254,13 @@ impl TypeChecker {
                         // `SelfType` arm) so nested `Self` in the return type
                         // resolves the same way the old `self_type` parameter
                         // did.
-                        let mut merged_subst: super::type_resolver::SubstitutionMap =
-                            class_subst.clone();
-                        merged_subst.insert("Self".into(), self_type);
-                        return super::type_resolver::resolve_declared_type(
+                        return type_resolver::resolve_declared_type(
                             ret_ty,
-                            &merged_subst,
+                            &type_resolver::merge_substitutions(
+                                &class_subst,
+                                &type_resolver::SubstitutionMap::new(),
+                                Some(&self_type),
+                            ),
                             self.protocol_registry.as_ref(),
                             self.alias_registry.as_ref(),
                             super::TypeStringContext::Substitution,
@@ -303,7 +305,7 @@ impl TypeChecker {
     /// Walks the method's declared parameter types and, for each parameter
     /// whose declared type is one of the class's type parameters (e.g. `T`
     /// in `Box(T)`), records the mapping `T -> arg_type`. The resulting map
-    /// is threaded into [`super::type_resolver::resolve_declared_type`]
+    /// is threaded into [`type_resolver::resolve_declared_type`]
     /// so the return type's references to those params resolve to the
     /// concrete inferred types.
     ///
@@ -379,7 +381,7 @@ impl TypeChecker {
         class_info: &crate::semantic_analysis::class_hierarchy::ClassInfo,
         subst: &mut HashMap<EcoString, InferredType>,
     ) {
-        let (declared_base, declared_args) = super::type_resolver::split_generic_base(declared);
+        let (declared_base, declared_args) = type_resolver::split_generic_base(declared);
         let Some(inner) = declared_args else {
             return;
         };
@@ -1169,7 +1171,7 @@ impl TypeChecker {
             // mismatch here for an argument that structurally conforms.
             // Applies to both class-side and instance-side params — the
             // nominal walk has no protocol awareness on either path.
-            if hierarchy.is_protocol_class(super::type_resolver::base_name_of_string(expected_ty)) {
+            if hierarchy.is_protocol_class(type_resolver::base_name_of_string(expected_ty)) {
                 continue;
             }
             // BT-2911: `method.param_types` predates ADR 0108 and stores a
@@ -1230,7 +1232,7 @@ impl TypeChecker {
                             span: info.span,
                         });
                         let (resolved, arg_alias_deps) =
-                            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                            type_resolver::resolve_type_annotation_with_alias_deps(
                                 &reference,
                                 &HashMap::new(),
                                 None,
@@ -1451,7 +1453,7 @@ impl TypeChecker {
         // its structural union instead of an opaque unknown class.
         let expected = match declared {
             TypeAnnotation::SelfType { .. } => {
-                super::type_resolver::receiver_type_for_class(class_name, hierarchy)
+                type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
             TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
             _ => {
@@ -1459,13 +1461,12 @@ impl TypeChecker {
                 // `-> RestartStrategy` return type is an annotation site too
                 // — record its (transitive) alias deps the same as every
                 // other resolved annotation.
-                let (expected, deps) =
-                    super::type_resolver::resolve_type_annotation_with_alias_deps(
-                        declared,
-                        &super::type_resolver::SubstitutionMap::new(),
-                        None,
-                        self.alias_registry.as_ref(),
-                    );
+                let (expected, deps) = type_resolver::resolve_type_annotation_with_alias_deps(
+                    declared,
+                    &type_resolver::SubstitutionMap::new(),
+                    None,
+                    self.alias_registry.as_ref(),
+                );
                 self.referenced_aliases.extend(deps);
                 expected
             }
@@ -2518,9 +2519,9 @@ impl TypeChecker {
             // site passes an empty `SubstitutionMap`) round-trips unchanged,
             // so the `type_param_names` check below is unaffected.
             let (resolved_declared, alias_deps) =
-                super::type_resolver::resolve_type_annotation_with_alias_deps(
+                type_resolver::resolve_type_annotation_with_alias_deps(
                     type_annotation,
-                    &super::type_resolver::SubstitutionMap::new(),
+                    &type_resolver::SubstitutionMap::new(),
                     None,
                     self.alias_registry.as_ref(),
                 );
@@ -2675,8 +2676,8 @@ impl TypeChecker {
         // the base type name and compare structurally. BT-2025: go through
         // the centralised `base_name_of_string` helper so the grep for
         // ad-hoc `.find('(')` slicing stays clean.
-        let declared_base = super::type_resolver::base_name_of_string(declared_type);
-        let value_base = super::type_resolver::base_name_of_string(value_type);
+        let declared_base = type_resolver::base_name_of_string(declared_type);
+        let value_base = type_resolver::base_name_of_string(value_type);
         if value_base == declared_base {
             // BT-2623: same base — compare type args so `Array(String)` is not
             // silently assignable to a declared `Array(Integer)`. Conservative
@@ -2746,7 +2747,7 @@ impl TypeChecker {
                 // Protocol types are NOT classes in the hierarchy, so is_type_compatible
                 // would return true (conservative unknown-type fallback), masking real errors.
                 if Self::is_protocol_type(decl_arg, hierarchy, protocol_registry) {
-                    let base_protocol = super::type_resolver::base_name_of_string(decl_arg);
+                    let base_protocol = type_resolver::base_name_of_string(decl_arg);
                     if protocol_registry
                         .check_conformance(&val_eco, base_protocol, hierarchy)
                         .is_ok()
@@ -2780,7 +2781,7 @@ impl TypeChecker {
     /// balanced splitter used elsewhere in the type checker (BT-2025).
     /// For non-generic types, returns the full name and an empty vec.
     pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
-        let (base, args_slice) = super::type_resolver::split_generic_base(type_str);
+        let (base, args_slice) = type_resolver::split_generic_base(type_str);
         let args: Vec<String> = args_slice
             .map(|s| {
                 super::TypeChecker::split_type_params(s)
@@ -2909,7 +2910,7 @@ impl TypeChecker {
     ///
     /// Reconstructs a `TypeAnnotation::Simple` reference to `name` (mirroring
     /// [`AliasRegistry::resolve_display_name`]'s own approach) and routes it
-    /// through the shared [`super::type_resolver::resolve_type_annotation_with_alias_deps`]
+    /// through the shared [`type_resolver::resolve_type_annotation_with_alias_deps`]
     /// resolver, so an alias-of-alias chain expands all the way down to a
     /// plain structural type exactly like every other alias reference in the
     /// checker. The second element of the returned pair is the (possibly
@@ -2924,7 +2925,7 @@ impl TypeChecker {
     /// untouched.
     ///
     /// Deliberately not the more general
-    /// [`super::type_resolver::resolve_declared_type`] (BT-2928, also
+    /// [`type_resolver::resolve_declared_type`] (BT-2928, also
     /// alias-registry-aware): that resolver additionally re-parses keywords
     /// (`nil`/`true`/`false`), generics, and pre-spelled unions, which would
     /// change what a *non-alias* declared type resolves to here (e.g.
@@ -2949,9 +2950,9 @@ impl TypeChecker {
             name: alias_info.name.clone(),
             span: alias_info.span,
         });
-        let (resolved, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+        let (resolved, deps) = type_resolver::resolve_type_annotation_with_alias_deps(
             &reference,
-            &super::type_resolver::SubstitutionMap::new(),
+            &type_resolver::SubstitutionMap::new(),
             None,
             Some(registry),
         );
@@ -3045,7 +3046,7 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) {
         // Extract base protocol name for generic protocols (e.g., "Enumerable(T)" → "Enumerable")
-        let base_protocol = super::type_resolver::base_name_of_string(expected_protocol);
+        let base_protocol = type_resolver::base_name_of_string(expected_protocol);
 
         match arg_type {
             InferredType::Known { class_name, .. } => {
@@ -3148,7 +3149,7 @@ impl TypeChecker {
         let Some((compat, total, non_conforming)) = Self::classify_union_members(members, |m| {
             // BT-2623: members now carry type args (e.g. `Array(Integer)`);
             // conformance is a property of the base class, so strip them.
-            let base = super::type_resolver::base_name_of_string(m);
+            let base = type_resolver::base_name_of_string(m);
             protocol_registry
                 .check_conformance(base, base_protocol, hierarchy)
                 .is_ok()
@@ -3243,7 +3244,7 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) -> bool {
         // Extract base name for generic types
-        let base_name = super::type_resolver::base_name_of_string(type_name);
+        let base_name = type_resolver::base_name_of_string(type_name);
 
         // A protocol type is one that's in the registry and either not a class name,
         // or only present as a synthetic protocol class entry (added by register_protocol_classes)
@@ -3265,26 +3266,17 @@ impl TypeChecker {
     /// Used by [`check_protocol_conformance_in_expr`](super::protocol::TypeChecker::check_protocol_conformance_in_expr)
     /// so a parameter declared `:: P1 & P2` is checked for conformance to
     /// **both** protocol parts, per ADR 0068's protocol-composition use case.
+    ///
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089), layering on "no top-level
+    /// `&` found ⇒ `None`" — the one behavioural difference this consumer
+    /// actually needs (see doc comment above): callers use `None` to detect
+    /// "not an intersection annotation at all" and fall back to single-type
+    /// handling, which a bare 1-element `Vec` can't distinguish from "an
+    /// intersection of one part".
     pub(super) fn split_intersection_type_string(type_name: &str) -> Option<Vec<&str>> {
-        let mut depth: usize = 0;
-        let mut parts = Vec::new();
-        let mut start = 0usize;
-        for (i, byte) in type_name.bytes().enumerate() {
-            match byte {
-                b'(' => depth += 1,
-                b')' => depth = depth.saturating_sub(1),
-                b'&' if depth == 0 => {
-                    parts.push(type_name[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        if parts.is_empty() {
-            return None;
-        }
-        parts.push(type_name[start..].trim());
-        Some(parts)
+        let parts = crate::semantic_analysis::string_utils::split_top_level(type_name, '&');
+        if parts.len() < 2 { None } else { Some(parts) }
     }
 
     /// Check type parameter bounds for a generic type application (ADR 0068 Phase 2d).
@@ -3367,7 +3359,7 @@ impl TypeChecker {
                         Self::classify_union_members(members, |m| {
                             // BT-2623: strip type args (`Array(Integer)` → `Array`);
                             // conformance is checked on the base class.
-                            let base = super::type_resolver::base_name_of_string(m);
+                            let base = type_resolver::base_name_of_string(m);
                             protocol_registry
                                 .check_conformance(base, bound_protocol, hierarchy)
                                 .is_ok()

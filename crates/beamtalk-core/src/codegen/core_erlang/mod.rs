@@ -114,7 +114,7 @@ pub use util::escape_atom_chars;
 pub use util::escape_erlang_string;
 pub use util::to_module_name;
 
-use crate::ast::{Block, Expression, MessageSelector, Module, WellKnownSelector};
+use crate::ast::{Block, ClassKind, Expression, MessageSelector, Module, WellKnownSelector};
 use crate::docvec;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use document::leaf;
@@ -2261,7 +2261,7 @@ impl CoreErlangGenerator {
         facts: &crate::semantic_analysis::SemanticFacts,
         out: &mut std::collections::HashSet<String>,
     ) {
-        match Self::peel_parens(expr) {
+        match expr.unwrap_parens() {
             Expression::Assignment { value, .. } => {
                 Self::collect_list_op_cross_scope_mutations_recursive(value, facts, out);
             }
@@ -2294,8 +2294,8 @@ impl CoreErlangGenerator {
         // Peel parens then an assignment RHS (which may itself be parenthesized) so
         // forms like `_r := (1 to: 5 do: [...])` are still inspected — mirrors
         // `expr_has_nested_counted_loop_threading`.
-        let inner = match Self::peel_parens(expr) {
-            Expression::Assignment { value, .. } => Self::peel_parens(value),
+        let inner = match expr.unwrap_parens() {
+            Expression::Assignment { value, .. } => value.unwrap_parens(),
             other => other,
         };
         let Expression::MessageSend {
@@ -2596,74 +2596,54 @@ impl CoreErlangGenerator {
 
     ///
     /// **Actor classes:** Inherit from Actor or its subclasses. Generate `gen_server` code.
-    /// **Value types:** Inherit from Object (but not Actor). Generate plain Erlang maps/records.
+    /// **Value types:** Inherit from Object or Value (but not Actor). Generate plain Erlang
+    /// maps/records via `generate_value_type_module`.
     ///
     /// # Implementation Note
     ///
-    /// Uses the `ClassHierarchy` to walk the full inheritance chain and determine
-    /// if a class is an actor (inherits from `Actor` at any level in the hierarchy).
+    /// BT-3086: Delegates to `ClassHierarchy::resolve_class_kind`, the single authority for
+    /// actor/value classification (see its doc comment for the walk + default-to-`Object`
+    /// policy on a fully-known chain). This used to be a third, independent implementation
+    /// that re-walked the chain itself and consulted a hand-maintained list of "known value
+    /// roots" (`Object`, `Exception`, `RuntimeError`, ...) that went stale every time the
+    /// exception hierarchy grew. Both `ClassKind::Value` and `ClassKind::Object` route to
+    /// `generate_value_type_module` here — the Value/Object distinction only matters for
+    /// auto-slot codegen *within* the value-type path, not for actor-vs-value routing.
+    ///
+    /// The one case `resolve_class_kind` cannot see through is a genuinely incomplete
+    /// ancestor chain — a superclass that isn't registered in this `ClassHierarchy` at all
+    /// (e.g. compiling a subclass file independently of its parent). `resolve_class_kind`
+    /// resolves that to `ClassKind::Object` (neither `Actor` nor `Value` literal is found),
+    /// but codegen has historically defaulted such classes to *actor* instead, for backward
+    /// compatibility with independent per-file compilation. `ClassHierarchy::has_cross_file_parent`
+    /// is the existing, already-tested predicate for "this chain has an unregistered
+    /// ancestor" — reused here rather than re-deriving the same fact from a hardcoded list.
     ///
     /// # Returns
     ///
-    /// - `true` if class inherits from Actor anywhere in the chain
-    /// - `false` if class inherits only from Object/ProtoObject (value type)
+    /// - `true` if class inherits from Actor anywhere in the (fully-known) chain
+    /// - `true` if a concrete (non-abstract) Supervisor/DynamicSupervisor subclass (BT-1220)
+    /// - `true` if the chain has an unregistered ancestor (incomplete-chain default, above)
+    /// - `false` if class resolves to Value or Object on a fully-known chain
     /// - `true` if module contains no class (backward compatibility for REPL)
     fn is_actor_class(
         module: &Module,
         hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) -> bool {
-        if let Some(class) = module.classes.first() {
-            // BT-1220: Concrete Supervisor/DynamicSupervisor subclasses use supervisor codegen,
-            // routed through generate_actor_module which delegates to supervisor_codegen.
-            // Abstract base classes (Supervisor, DynamicSupervisor themselves) remain value types.
-            if class.supervisor_kind.is_some() && !class.is_abstract {
-                return true;
-            }
-            let name = class.name.name.as_str();
-            if name == "Actor" {
-                return true;
-            }
-            let chain = hierarchy.superclass_chain(name);
-            if chain.iter().any(|s| s.as_str() == "Actor") {
-                return true;
-            }
-            // If the chain terminated at a known value-type root (Object/ProtoObject/Value),
-            // this is definitely a value type.
-            // BT-480: Include exception hierarchy classes — these inherit from Object
-            // (Exception → Object) and must compile as value types, not actors.
-            // BT-925: Include "Value" — when cross-file superclass indexing is incomplete
-            // (e.g. independent file compilation), chains for direct Value subclasses
-            // (Collection, Number, Boolean, Exception) can terminate at "Value". Treat
-            // "Value" as a known value-type root so these classes compile as value types
-            // instead of actors.
-            let known_value_roots = [
-                "Object",
-                "ProtoObject",
-                "Value",
-                "Exception",
-                "Error",
-                "RuntimeError",
-                "TypeError",
-                "InstantiationError",
-                "Character",
-            ];
-            if let Some(last) = chain.last() {
-                if known_value_roots.contains(&last.as_str()) {
-                    return false;
-                }
-            }
-            // Also check direct superclass against known value types for incomplete chains
-            // (e.g., `Error subclass: MyCustomError` compiled without Exception in hierarchy).
-            if known_value_roots.contains(&class.superclass_name()) {
-                return false;
-            }
-            // Chain is incomplete (superclass not in hierarchy) or empty with
-            // non-Object superclass. Default to actor for backward compatibility
-            // (e.g. compiling subclass files independently without parent).
-            // Root classes (superclass "none") are value types, not actors.
-            !matches!(class.superclass_name(), "Object" | "none")
-        } else {
-            true
+        let Some(class) = module.classes.first() else {
+            return true;
+        };
+        // BT-1220: Concrete Supervisor/DynamicSupervisor subclasses use supervisor codegen,
+        // routed through generate_actor_module which delegates to supervisor_codegen.
+        // Abstract base classes (Supervisor, DynamicSupervisor themselves) remain value types.
+        if class.supervisor_kind.is_some() && !class.is_abstract {
+            return true;
+        }
+        let name = class.name.name.as_str();
+        match hierarchy.resolve_class_kind(name) {
+            ClassKind::Actor => true,
+            ClassKind::Value => false,
+            ClassKind::Object => hierarchy.has_cross_file_parent(name),
         }
     }
 
@@ -3156,7 +3136,7 @@ impl CoreErlangGenerator {
         // BT-2355: `_r := (loop)` wraps the construct in parentheses; peel them so
         // the threaded locals are still discovered when the construct is an
         // assignment RHS or sub-expression.
-        let expr = Self::peel_parens(expr);
+        let expr = expr.unwrap_parens();
         let Expression::MessageSend {
             receiver,
             selector,
@@ -3263,17 +3243,6 @@ impl CoreErlangGenerator {
     /// the Actor method-body sequencer consumes, where empty and absent are equivalent.
     fn non_empty(v: Vec<String>) -> Option<Vec<String>> {
         if v.is_empty() { None } else { Some(v) }
-    }
-
-    /// BT-2355: Peels any `Expression::Parenthesized` wrappers, returning the inner
-    /// expression. Used so control-flow classification/threading sees through the
-    /// parentheses in forms like `_r := (1 to: 5 do: [...])`.
-    pub(super) fn peel_parens(expr: &Expression) -> &Expression {
-        let mut current = expr;
-        while let Expression::Parenthesized { expression, .. } = current {
-            current = expression;
-        }
-        current
     }
 
     /// BT-2355: Collects the `Block` arguments of a message send (e.g. the branch

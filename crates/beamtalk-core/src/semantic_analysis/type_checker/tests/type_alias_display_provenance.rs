@@ -457,8 +457,10 @@ fn argument_that_is_itself_an_alias_typed_return_value_is_not_flagged() {
     // no `AliasRegistry` access, so `policy` was inferred as a bare
     // `Known { class_name: "RestartStrategy", .. }` and the argument check
     // had to accept an unexpanded alias name; since BT-3075 the unified
-    // `resolve_type_string` expands the alias at the send site, so `policy`
-    // carries the structural union directly. Either shape must stay green.
+    // resolver (`resolve_declared_type`, folded in from BT-3075's
+    // `resolve_type_string` and BT-3080's FFI path alike) expands the alias
+    // at the send site, so `policy` carries the structural union directly.
+    // Either shape must stay green.
     // Reproduces the exact stdlib shape that surfaced this
     // (`Actor>>supervisionSpec`'s `policy := self supervisionPolicy.
     // spec withRestart: policy`, hit by `just build-stdlib` once

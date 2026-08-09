@@ -18,7 +18,7 @@
 //! — it is not a correctness gate. New collection methods get Tier 2 state threading
 //! automatically without whitelist additions.
 
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::Expression;
 use crate::semantic_analysis::BlockContext;
 use crate::source_analysis::Span;
 
@@ -95,15 +95,6 @@ pub(crate) fn is_collection_hof_selector(selector: &str, arg_index: usize) -> bo
         "collect:" | "do:" | "select:" | "reject:" | "detect:" => arg_index == 0,
         "inject:into:" | "detect:ifNone:" => arg_index == 1,
         _ => false,
-    }
-}
-
-/// Extracts the selector string from a message selector.
-pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
-    match selector {
-        MessageSelector::Unary(name) => name.to_string(),
-        MessageSelector::Binary(op) => op.to_string(),
-        MessageSelector::Keyword(parts) => parts.iter().map(|p| p.keyword.as_str()).collect(),
     }
 }
 
@@ -192,7 +183,7 @@ pub(crate) fn classify_block(
         ..
     } = parent_expr
     {
-        let selector_str = selector_to_string(selector);
+        let selector_str = selector.name();
 
         // Check each argument to see if it's our block
         for (i, arg) in arguments.iter().enumerate() {
@@ -236,7 +227,7 @@ pub(crate) fn classify_block(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Block, BlockParameter, Identifier, KeywordPart};
+    use crate::ast::{Block, BlockParameter, Identifier, MessageSelector};
     use crate::source_analysis::Span;
 
     #[test]
@@ -311,27 +302,6 @@ mod tests {
     fn test_is_literal_block_with_identifier() {
         let expr = Expression::Identifier(Identifier::new("block", Span::default()));
         assert!(!is_literal_block(&expr));
-    }
-
-    #[test]
-    fn test_selector_to_string_unary() {
-        let selector = MessageSelector::Unary("value".into());
-        assert_eq!(selector_to_string(&selector), "value");
-    }
-
-    #[test]
-    fn test_selector_to_string_binary() {
-        let selector = MessageSelector::Binary("+".into());
-        assert_eq!(selector_to_string(&selector), "+");
-    }
-
-    #[test]
-    fn test_selector_to_string_keyword() {
-        let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", Span::default()),
-            KeywordPart::new("put:", Span::default()),
-        ]);
-        assert_eq!(selector_to_string(&selector), "at:put:");
     }
 
     #[test]

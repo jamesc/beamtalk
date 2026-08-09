@@ -122,6 +122,95 @@ class_method_fun_name_test_() ->
             )}
     ].
 
+%%====================================================================
+%% class_method_fun_name/1 — long-selector hashing guard (BT-3090)
+%%
+%% Before BT-3090, a selector long enough that `"class_" ++ Selector`
+%% exceeds Erlang's 255-byte atom limit crashed `list_to_atom/1` with
+%% `system_limit` instead of producing a name — reachable at runtime via
+%% `perform:` with a dynamically-built selector, even though no
+%% *compile-time* selector is ever that long. This now mirrors the Rust
+%% codegen's compile-time hashing guard exactly (same FNV-1a 64-bit hash,
+%% same 255-byte threshold, same "class_kw_<16-hex>" naming) so a selector
+%% built at runtime gets the same atom the compiler would have produced for
+%% the equivalent selector at compile time.
+%%====================================================================
+
+class_method_fun_name_long_selector_does_not_crash_test() ->
+    %% Simulates a selector assembled at runtime (e.g. via `perform:`) rather
+    %% than known at compile time — `list_to_atom/1` on the raw
+    %% "class_" ++ Selector string would have raised `system_limit` here
+    %% before BT-3090.
+    LongSelector = list_to_atom(lists:duplicate(250, $a)),
+    Result = beamtalk_class_dispatch:class_method_fun_name(LongSelector),
+    ?assert(is_atom(Result)),
+    ?assert(lists:prefix("class_kw_", atom_to_list(Result))).
+
+class_method_fun_name_boundary_exactly_fits_unhashed_test() ->
+    %% "class_" (6) + 249 chars = 255, exactly at the atom limit — unchanged.
+    Selector = list_to_atom(lists:duplicate(249, $a)),
+    Expected = list_to_atom("class_" ++ lists:duplicate(249, $a)),
+    ?assertEqual(Expected, beamtalk_class_dispatch:class_method_fun_name(Selector)).
+
+%% BT-3090 conformance: `class_method_fun_name/1` must hash a long selector
+%% identically to the Rust codegen's `safe_class_method_fn_name`
+%% (`crates/beamtalk-core/src/codegen/core_erlang/selector_mangler.rs`) — same
+%% FNV-1a 64-bit hash, same threshold, same naming scheme. The corpus is the
+%% single source of truth both implementations are pinned to; the Rust side
+%% asserts the identical cases in
+%% `selector_mangler::tests::safe_class_method_fn_name_matches_shared_corpus`.
+class_method_fun_name_matches_shared_corpus_test() ->
+    Cases = load_class_method_fun_name_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            SelectorBin = maps:get(<<"selector">>, Case),
+            ExpectedBin = maps:get(<<"expected_fn_name">>, Case),
+            Why = maps:get(<<"why">>, Case, <<>>),
+            %% BT-3090: selectors are bound atoms from user programs — the
+            %% corpus values are all valid Erlang atom text (<=300 bytes
+            %% raw), so `binary_to_atom/2` here mirrors real usage, not a
+            %% test-only shortcut.
+            Selector = binary_to_atom(SelectorBin, utf8),
+            Expected = binary_to_atom(ExpectedBin, utf8),
+            ?assertEqual(
+                Expected,
+                beamtalk_class_dispatch:class_method_fun_name(Selector),
+                {corpus_mismatch, byte_size(SelectorBin), Why}
+            )
+        end,
+        Cases
+    ).
+
+%% Load the shared class-method-fun-name conformance corpus from the repo
+%% tree. Walks up from the test CWD to the project root (the dir holding
+%% `Cargo.toml`), then reads the fixture both surfaces share.
+load_class_method_fun_name_corpus() ->
+    Root = find_class_method_fun_name_corpus_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "class_method_fun_name_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).
+
+find_class_method_fun_name_corpus_root("/") ->
+    error(project_root_not_found);
+find_class_method_fun_name_corpus_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_class_method_fun_name_corpus_root(filename:dirname(Dir))
+    end.
+
 is_test_execution_selector_test_() ->
     [
         {"runAll is a test execution selector",

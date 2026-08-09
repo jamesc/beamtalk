@@ -1,0 +1,15 @@
+[
+  "self",
+  "super",
+  "true",
+  "false",
+  "nil",
+  "match:",
+  "matchExhaustive:",
+  "if:then:else:",
+  "ifTrue:",
+  "ifFalse:",
+  "ifTrue:ifFalse:",
+  "whileTrue:",
+  "timesRepeat:"
+]

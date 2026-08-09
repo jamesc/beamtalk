@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3082: Supervisor/DynamicSupervisor printString and displayString must
+// render the ADR 0094 kind-headed positional label — Supervisor(ClassName,
+// pid) / DynamicSupervisor(ClassName, pid) — matching the REPL's rendering.
+//
+// Before this fix, `aSupervisor printString` fell through to the compiled
+// Object default (`self class name asString`) and returned the bare class
+// name instead, because Supervisor/DynamicSupervisor are plain "Value"
+// classes whose compiled `has_method/1` transparently delegates to Object —
+// so the dispatch hierarchy walk never actually stopped at literal `Object`.
+//
+// Reuses the ClassMethodSupervisor fixture (BT-1862) and
+// TestDynamicSupervisorCustom fixture (BT-1222).
+
+TestCase subclass: SupervisorDisplayTest
+
+  testSupervisorPrintStringIsKindHeaded =>
+    sup := (ClassMethodSupervisor supervise) unwrap
+    self assert: (sup printString startsWith: "Supervisor(ClassMethodSupervisor, ") equals: true
+    [sup stop] on: Error do: [:e | nil]
+
+  testSupervisorDisplayStringMatchesPrintString =>
+    sup := (ClassMethodSupervisor supervise) unwrap
+    self assert: sup displayString equals: sup printString
+    [sup stop] on: Error do: [:e | nil]
+
+  testDynamicSupervisorPrintStringIsKindHeaded =>
+    pool := (TestDynamicSupervisorCustom supervise) unwrap
+    self assert: (pool printString startsWith: "DynamicSupervisor(TestDynamicSupervisorCustom, ") equals: true
+    [pool stop] on: Error do: [:e | nil]

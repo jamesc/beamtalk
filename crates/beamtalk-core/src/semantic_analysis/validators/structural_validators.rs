@@ -478,23 +478,6 @@ pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Ve
     });
 }
 
-/// Class-protocol selectors that are NOT Erlang module names.
-///
-/// Mirrors `CLASS_PROTOCOL_SELECTORS` in codegen so that `Erlang class`,
-/// `Erlang new`, etc. are not treated as FFI module lookups.
-const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
-    "new",
-    "spawn",
-    "class",
-    "methods",
-    "superclass",
-    "subclasses",
-    "allSubclasses",
-    "class_name",
-    "module_name",
-    "printString",
-];
-
 /// Visitor for Erlang FFI module references in expressions.
 ///
 /// Matches `Erlang <module>` — a `MessageSend` whose receiver is
@@ -509,10 +492,12 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         ..
     } = expr
     {
-        if let Expression::ClassReference { name, .. } = receiver.as_ref() {
-            // Skip class-protocol selectors (class, new, methods, etc.)
-            if name.name == "Erlang"
-                && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
+        if let Expression::ClassReference { name, package, .. } = receiver.as_ref() {
+            // Skip class-protocol selectors (class, new, methods, etc.) and
+            // package-qualified references (`json@Erlang` is not the FFI bridge).
+            if package.is_none()
+                && name.name == "Erlang"
+                && !crate::ffi_receiver::is_class_protocol_selector(module_name.as_str())
                 && !is_known_erlang_module(module_name.as_str())
             {
                 diagnostics.push(
@@ -654,36 +639,15 @@ pub(crate) fn check_ffi_arity(module: &Module, diagnostics: &mut Vec<Diagnostic>
     });
 }
 
-/// Unwraps `Parenthesized` wrappers to get the inner expression.
-///
-/// `(Erlang lists)` parses as `Parenthesized { expression: MessageSend { ... } }`.
-/// This strips the parentheses so pattern matching sees the send underneath.
-fn unwrap_parens(mut expr: &Expression) -> &Expression {
-    while let Expression::Parenthesized { expression, .. } = expr {
-        expr = expression;
-    }
-    expr
-}
-
 /// Extracts the Erlang module name from an FFI proxy expression.
 ///
 /// Matches `Erlang <module>` or `(Erlang <module>)` — a `MessageSend`
 /// whose receiver is `ClassReference("Erlang")` with a `Unary` selector.
+///
+/// BT-3079: delegates to the single shared recognizer in
+/// [`crate::ffi_receiver`].
 fn extract_erlang_module(expr: &Expression) -> Option<&str> {
-    let expr = unwrap_parens(expr);
-    if let Expression::MessageSend {
-        receiver,
-        selector: MessageSelector::Unary(module_name),
-        ..
-    } = expr
-    {
-        if let Expression::ClassReference { name, .. } = receiver.as_ref() {
-            if name.name == "Erlang" {
-                return Some(module_name.as_str());
-            }
-        }
-    }
-    None
+    crate::ffi_receiver::erlang_module_of_receiver(expr)
 }
 
 /// Derives the Erlang function name from a Beamtalk selector.
@@ -1214,6 +1178,34 @@ mod tests {
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("typo_mod"));
+    }
+
+    #[test]
+    fn test_ffi_package_qualified_erlang_not_warned() {
+        // BT-3079 regression: `json@Erlang typo_mod` names a package-scoped
+        // `Erlang` class, not the compiler's built-in FFI bridge — it must
+        // NOT be treated as an unresolved FFI module lookup, even though
+        // `typo_mod` is not a known OTP module name.
+        let proxy = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: ident("Erlang"),
+                package: Some(ident("json")),
+                span: test_span(),
+            }),
+            selector: MessageSelector::Unary("typo_mod".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let module = empty_module_with_exprs(vec![proxy]);
+        let mut diags = Vec::new();
+
+        check_unresolved_ffi_modules(&module, &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Package-qualified `Erlang` should not be treated as the FFI bridge. Got: {diags:?}"
+        );
     }
 
     #[test]

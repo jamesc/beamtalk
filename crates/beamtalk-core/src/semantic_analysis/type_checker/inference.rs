@@ -25,29 +25,34 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
 use super::narrowing::extract::extract_variable_name;
-use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
 use super::narrowing::{ClassTestInfo, ClassTestKind, NarrowingInfo};
+use super::type_resolver;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, narrowing};
 
-/// How [`super::type_resolver::resolve_declared_type`] treats constructs
-/// that only make sense while substituting generics at a send site
-/// (originated in the now-deleted `TypeChecker::resolve_type_string`,
-/// BT-3075).
+/// How [`type_resolver::resolve_declared_type`] treats constructs that
+/// only make sense in a particular resolution setting (BT-3075, BT-3080).
 ///
 /// `Substitution` collapses an unresolved bare type param (`T`) to `Dynamic`
 /// (BT-1834) and stamps `Substituted` provenance on parsed generics.
 /// `Declared` keeps a bare single-letter name as a nominal class — its
 /// callers guard with `is_generic_type_param` themselves — and stamps
-/// `Declared` provenance.
+/// `Declared` provenance. `Extracted` is `Declared`'s sibling for types that
+/// came from an Erlang `-spec` rather than Beamtalk source text — same
+/// keyword/alias/generic handling, but stamps `Extracted` provenance instead
+/// (BT-3080: folds `native_types::map_type_name`'s parsing into this same
+/// resolver rather than reimplementing it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TypeStringContext {
     /// Resolving a declared signature/field type string as-is.
     Declared,
     /// Resolving a return type while substituting generic params at a send.
     Substitution,
+    /// Resolving a type name string auto-extracted from `.beam` abstract
+    /// code (ADR 0075) via the Erlang-FFI spec-reader protocol.
+    Extracted,
 }
 
 impl TypeChecker {
@@ -137,7 +142,7 @@ impl TypeChecker {
                 let mut method_env = TypeEnv::new();
                 method_env.set_local(
                     "self",
-                    super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
+                    type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
                 );
                 Self::set_param_types(
                     &mut method_env,
@@ -186,7 +191,7 @@ impl TypeChecker {
                 method_env.in_class_method = true;
                 method_env.set_local(
                     "self",
-                    super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
+                    type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
                 );
                 Self::set_param_types(
                     &mut method_env,
@@ -253,7 +258,7 @@ impl TypeChecker {
             method_env.in_class_method = standalone.is_class_method;
             method_env.set_local(
                 "self",
-                super::type_resolver::receiver_type_for_class(class_name, hierarchy),
+                type_resolver::receiver_type_for_class(class_name, hierarchy),
             );
             Self::set_param_types(
                 &mut method_env,
@@ -311,7 +316,7 @@ impl TypeChecker {
     /// Sets parameter types in the type environment from annotations.
     ///
     /// All parameters are always registered. Typed parameters are resolved
-    /// via [`super::type_resolver::resolve_type_annotation`]; untyped
+    /// via [`type_resolver::resolve_type_annotation`]; untyped
     /// parameters are registered as `Dynamic`. Generic annotations (e.g.,
     /// `:: Result(Integer, Error)`) are resolved to `Known` with `type_args`.
     /// Type parameters of enclosing generic classes (e.g., `T` in
@@ -332,7 +337,7 @@ impl TypeChecker {
     /// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899)
     /// accumulates every alias name touched while resolving each typed
     /// parameter's annotation — see
-    /// [`super::type_resolver::resolve_type_annotation_with_alias_deps`]'s
+    /// [`type_resolver::resolve_type_annotation_with_alias_deps`]'s
     /// doc for why this already covers the full transitive expansion walk.
     /// An associated function (not `&mut self`) since it also takes `env:
     /// &mut TypeEnv`; callers pass `&mut self.referenced_aliases` directly
@@ -345,11 +350,11 @@ impl TypeChecker {
         alias_registry: Option<&crate::semantic_analysis::alias_registry::AliasRegistry>,
         referenced_aliases: &mut std::collections::HashSet<EcoString>,
     ) {
-        let subst = super::type_resolver::SubstitutionMap::new();
+        let subst = type_resolver::SubstitutionMap::new();
         for param in parameters {
             let ty = match &param.type_annotation {
                 Some(ann) => {
-                    let (ty, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+                    let (ty, deps) = type_resolver::resolve_type_annotation_with_alias_deps(
                         ann,
                         &subst,
                         protocol_registry,
@@ -367,68 +372,22 @@ impl TypeChecker {
     /// Resolves a [`TypeAnnotation`] to an [`InferredType`].
     ///
     /// Thin wrapper around
-    /// [`super::type_resolver::resolve_type_annotation`] that supplies an
+    /// [`type_resolver::resolve_type_annotation`] that supplies an
     /// empty substitution map and no protocol registry or alias registry
     /// (ADR 0108, BT-2895). Test-only: every production call site needs at
     /// least one of method-local / class-level type-parameter substitution,
     /// correct resolution of `&`-typed protocol intersections (ADR 0102
     /// §1/§3, BT-2743), or type-alias expansion, so they all call the
     /// resolver function directly with a populated
-    /// [`super::type_resolver::SubstitutionMap`] / protocol registry / alias
+    /// [`type_resolver::SubstitutionMap`] / protocol registry / alias
     /// registry instead. Kept as a convenience for tests that only care
     /// about the "no registries" resolution path.
     ///
     /// **References:** BT-2025 — centralised parametric type resolution.
     #[cfg(test)]
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
-        let subst = super::type_resolver::SubstitutionMap::new();
-        super::type_resolver::resolve_type_annotation(ann, &subst, None, None)
-    }
-
-    /// Test-only migration shim for the deleted `TypeChecker::resolve_type_string`
-    /// (BT-3075, removed by BT-3076): mirrors its exact parameter shape —
-    /// `(type_name, class_subst, method_local_subst, self_type,
-    /// alias_registry, context)` — purely so every pre-existing
-    /// `resolve_type_string` unit test needed only its call site swapped, not
-    /// its assertions (same behaviour, new entry point per BT-3076's
-    /// verification bar).
-    ///
-    /// Implementation is exactly "`DeclaredType::parse` +
-    /// `resolve_declared_type`" per BT-3076 stage 3c.3's migration
-    /// instruction: parses `type_name` with the same grammar
-    /// `resolve_type_string` used ([`DeclaredType::parse`]'s doc), merges
-    /// `method_local_subst` over `class_subst` (method-local wins, matching
-    /// `resolve_type_string`'s own resolution order), and threads
-    /// `self_type` under the reserved `Self` subst key — the same mechanism
-    /// [`super::type_resolver::resolve_declared_type`]'s `SelfType`/
-    /// `SelfClass` arms already read (see their docs) — instead of a
-    /// dedicated parameter.
-    #[cfg(test)]
-    pub(super) fn resolve_declared_type_string_for_test(
-        type_name: &str,
-        class_subst: &HashMap<EcoString, InferredType>,
-        method_local_subst: &HashMap<EcoString, InferredType>,
-        self_type: Option<&InferredType>,
-        alias_registry: Option<&crate::semantic_analysis::alias_registry::AliasRegistry>,
-        context: TypeStringContext,
-    ) -> InferredType {
-        let declared = DeclaredType::parse(type_name);
-        let mut subst: super::type_resolver::SubstitutionMap = class_subst.clone();
-        subst.extend(
-            method_local_subst
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone())),
-        );
-        if let Some(self_ty) = self_type {
-            subst.insert("Self".into(), self_ty.clone());
-        }
-        super::type_resolver::resolve_declared_type(
-            &declared,
-            &subst,
-            None,
-            alias_registry,
-            context,
-        )
+        let subst = type_resolver::SubstitutionMap::new();
+        type_resolver::resolve_type_annotation(ann, &subst, None, None)
     }
 
     /// BT-2862: When a method body is exactly `self delegate` (the ADR 0056 /
@@ -477,7 +436,7 @@ impl TypeChecker {
         };
         let resolved = match declared {
             TypeAnnotation::SelfType { .. } => {
-                super::type_resolver::receiver_type_for_class(class_name, hierarchy)
+                type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
             // `Self class` / `X class` return a class object — no concrete
             // instance type to trust here, so leave the Dynamic body alone
@@ -486,13 +445,12 @@ impl TypeChecker {
                 return body_type;
             }
             _ => {
-                let (resolved, deps) =
-                    super::type_resolver::resolve_type_annotation_with_alias_deps(
-                        declared,
-                        &super::type_resolver::SubstitutionMap::new(),
-                        None,
-                        self.alias_registry.as_ref(),
-                    );
+                let (resolved, deps) = type_resolver::resolve_type_annotation_with_alias_deps(
+                    declared,
+                    &type_resolver::SubstitutionMap::new(),
+                    None,
+                    self.alias_registry.as_ref(),
+                );
                 self.referenced_aliases.extend(deps);
                 resolved
             }
@@ -550,9 +508,9 @@ impl TypeChecker {
                                 } else if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
                                 {
-                                    super::type_resolver::resolve_declared_type(
+                                    type_resolver::resolve_declared_type(
                                         &field_type,
-                                        &super::type_resolver::SubstitutionMap::new(),
+                                        &type_resolver::SubstitutionMap::new(),
                                         None,
                                         self.alias_registry.as_ref(),
                                         TypeStringContext::Declared,
@@ -605,9 +563,9 @@ impl TypeChecker {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
                             {
-                                result = super::type_resolver::resolve_declared_type(
+                                result = type_resolver::resolve_declared_type(
                                     &field_type,
-                                    &super::type_resolver::SubstitutionMap::new(),
+                                    &type_resolver::SubstitutionMap::new(),
                                     None,
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Declared,
@@ -679,9 +637,9 @@ impl TypeChecker {
                     // REPL example builds on, so recording its alias deps here
                     // is load-bearing, not incidental.
                     let (declared, alias_deps) =
-                        super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        type_resolver::resolve_type_annotation_with_alias_deps(
                             ann,
-                            &super::type_resolver::SubstitutionMap::new(),
+                            &type_resolver::SubstitutionMap::new(),
                             self.protocol_registry.as_ref(),
                             self.alias_registry.as_ref(),
                         );
@@ -864,7 +822,7 @@ impl TypeChecker {
                 // class references (`(HTTPRouter) build: [...]; ...`) are
                 // treated as class-side both for block-param inference and
                 // downstream selector validation.
-                let unwrapped_target = unwrap_parens(cascade_target);
+                let unwrapped_target = cascade_target.unwrap_parens();
                 let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
                 // ADR 0083 / BT-2879: a Meta-typed cascade target (`someVar ::
                 // SomeClass class`) is also class-side for block-param
@@ -1127,7 +1085,7 @@ impl TypeChecker {
                 // applies when the scrutinee has a stable narrowable key
                 // (`extract_variable_name`) — an arbitrary expression
                 // scrutinee has nothing to narrow.
-                let scrutinee_key = extract_variable_name(unwrap_parens(value));
+                let scrutinee_key = extract_variable_name(value.unwrap_parens());
                 let mut residual_scrutinee_ty = scrutinee_ty.clone();
 
                 let arm_types: Vec<InferredType> = arms
@@ -1326,7 +1284,7 @@ impl TypeChecker {
                 {
                     if let Some(class_info) = hierarchy.get_class(&class_name) {
                         if let Some(ref parent) = class_info.superclass {
-                            super::type_resolver::super_receiver_type(
+                            type_resolver::super_receiver_type(
                                 &class_name,
                                 &type_args,
                                 parent,
@@ -1736,15 +1694,20 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods.
         // BT-2158: unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.
-        if let Expression::ClassReference { name, .. } = unwrap_parens(receiver) {
+        if let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() {
             let class_name = &name.name;
 
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
             // to enable FFI call type inference on the outer message send.
             // BT-1880: Class protocol selectors (class, new, superclass, etc.)
             // must NOT be intercepted as module lookups — they are handled by
-            // normal class-side dispatch (matching codegen CLASS_PROTOCOL_SELECTORS).
-            if class_name == "Erlang" {
+            // normal class-side dispatch. BT-3079: package-qualified references
+            // (`json@Erlang lists`) are excluded too — they name a package-scoped
+            // class, not the compiler's built-in FFI bridge. Both rules are
+            // centralized in `crate::ffi_receiver` (mirrored here via
+            // `is_class_protocol_selector` since this call site splits the
+            // receiver/selector apart rather than holding the combined send).
+            if class_name == "Erlang" && package.is_none() {
                 if let MessageSelector::Unary(module_name) = selector {
                     if !is_class_protocol_selector(module_name) {
                         // Static module name: `Erlang lists` → ErlangModule<lists>
@@ -1874,7 +1837,7 @@ impl TypeChecker {
         {
             // In class methods, self sends should check class-side methods.
             // BT-2158: unwrap parens so `(self) foo:` dispatches class-side.
-            if env.in_class_method && Self::is_self_receiver(unwrap_parens(receiver)) {
+            if env.in_class_method && Self::is_self_receiver(receiver.unwrap_parens()) {
                 if !in_abstract_method {
                     self.check_argument_types(
                         class_name,
@@ -1909,15 +1872,8 @@ impl TypeChecker {
                 && !is_class_protocol_selector(&selector_name)
                 && !matches!(selector, MessageSelector::Binary(_))
             {
-                return self.infer_ffi_call(
-                    type_args,
-                    selector,
-                    &selector_name,
-                    arguments,
-                    &arg_types,
-                    span,
-                    hierarchy,
-                );
+                return self
+                    .infer_ffi_call(type_args, selector, arguments, &arg_types, span, hierarchy);
             }
 
             // BT-2254 (ADR 0075 amendment): literal-index tuple access.
@@ -2085,13 +2041,13 @@ impl TypeChecker {
                         // `Box(Integer)` not bare `Box` (BT-3076: the shared
                         // `resolve_declared_type` resolver's `SelfType` arm reads
                         // this same key — see its doc).
-                        let mut merged_subst: super::type_resolver::SubstitutionMap = subst.clone();
-                        merged_subst
-                            .extend(method_subst.iter().map(|(k, v)| (k.clone(), v.clone())));
-                        merged_subst.insert("Self".into(), receiver_ty.clone());
-                        return super::type_resolver::resolve_declared_type(
+                        return type_resolver::resolve_declared_type(
                             ret_ty,
-                            &merged_subst,
+                            &type_resolver::merge_substitutions(
+                                &subst,
+                                &method_subst,
+                                Some(&receiver_ty),
+                            ),
                             self.protocol_registry.as_ref(),
                             self.alias_registry.as_ref(),
                             TypeStringContext::Substitution,
@@ -2123,9 +2079,9 @@ impl TypeChecker {
                     //  * BT-2928: a cross-file alias name expands to its
                     //    declared union/structural type instead of staying
                     //    an opaque nominal class.
-                    return super::type_resolver::resolve_declared_type(
+                    return type_resolver::resolve_declared_type(
                         ret_ty,
-                        &super::type_resolver::SubstitutionMap::new(),
+                        &type_resolver::SubstitutionMap::new(),
                         self.protocol_registry.as_ref(),
                         self.alias_registry.as_ref(),
                         TypeStringContext::Declared,
@@ -2269,7 +2225,7 @@ impl TypeChecker {
         if type_args.is_empty() || arguments.len() != 1 {
             return None;
         }
-        let index = match unwrap_parens(&arguments[0]) {
+        let index = match arguments[0].unwrap_parens() {
             Expression::Literal(Literal::Integer(n), _) => *n,
             _ => return None,
         };
@@ -2298,7 +2254,6 @@ impl TypeChecker {
         &mut self,
         receiver_type_args: &[InferredType],
         selector: &MessageSelector,
-        selector_name: &EcoString,
         arguments: &[Expression],
         arg_types: &[InferredType],
         span: Span,
@@ -2314,11 +2269,17 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
-        // Extract the canonical Erlang function name and arity from the selector.
-        // The canonical name is the first keyword without colons, matching the
-        // selector_to_function/1 logic in beamtalk_erlang_proxy. The spec reader
-        // normalizes stored names the same way, so a single lookup suffices.
-        let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
+        // Extract the canonical Erlang function name and arity from the selector
+        // (BT-3089: delegates to the one canonical erlang_function_name/erlang_arity
+        // pair, see extract_ffi_function_info's doc comment). `None` for a binary
+        // selector — unreachable today since the BT-1880 guard at this method's
+        // call site already excludes `MessageSelector::Binary` before we get here,
+        // but falling back to `UntypedFfi` rather than panicking/asserting keeps
+        // that a soft invariant instead of a hard one.
+        let Some((function_name, arity)) = Self::extract_ffi_function_info(selector, arguments)
+        else {
+            return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        };
 
         // Clone the signature to release the borrow on self before emitting diagnostics.
         let sig = self
@@ -2358,20 +2319,25 @@ impl TypeChecker {
     /// keyword ("seq") and the arity is the argument count.
     /// For unary selectors like `reverse`, the function name is the selector and
     /// arity is 0 (nullary Erlang call).
+    ///
+    /// Delegates to the canonical FFI-naming pair
+    /// [`erlang_function_name`](crate::semantic_analysis::validators::erlang_function_name) /
+    /// [`erlang_arity`](crate::semantic_analysis::validators::erlang_arity)
+    /// (BT-3089) rather than re-deriving "first keyword sans colon" with its
+    /// own `.split(':')` — that duplicate previously computed a name for
+    /// *binary* selectors too (e.g. `"+".split(':').next()` ⇒ `"+"`), which
+    /// disagreed with the canonical function (binary ⇒ `None`, no FFI-name
+    /// concept) and with `dispatch_codegen`'s `generate_direct_erlang_call`
+    /// (binary ⇒ falls through to normal dispatch, never emits a direct FFI
+    /// call). Returns `None` for a binary selector, matching both of those.
     fn extract_ffi_function_info(
-        selector_name: &EcoString,
+        selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> (String, u8) {
-        // The selector_name for keyword messages is "reverse:" or "seq:to:"
-        // The Erlang function name is the first keyword without the colon
-        let function_name = selector_name
-            .split(':')
-            .next()
-            .unwrap_or(selector_name.as_str())
-            .to_string();
-
-        let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
-        (function_name, arity)
+    ) -> Option<(String, u8)> {
+        let function_name = crate::semantic_analysis::validators::erlang_function_name(selector)?;
+        let arity = crate::semantic_analysis::validators::erlang_arity(selector, arguments.len());
+        let arity = u8::try_from(arity).unwrap_or(u8::MAX);
+        Some((function_name, arity))
     }
 
     /// Checks argument types against declared parameter types in an FFI signature.
@@ -2672,9 +2638,9 @@ impl TypeChecker {
         // out of scope: the tower's method table is fixed, built-in, and
         // has no alias-typed entries to expand, so there is nothing for a
         // registry to do here.
-        Some(super::type_resolver::resolve_declared_type(
+        Some(type_resolver::resolve_declared_type(
             ret_ty,
-            &super::type_resolver::SubstitutionMap::new(),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Declared,
@@ -2686,7 +2652,7 @@ impl TypeChecker {
     /// parentheses so `(HTTPRouter) foo:` and `(self) foo:` are treated
     /// identically to the un-parenthesised forms (BT-2158).
     fn is_class_side_receiver(expr: &Expression, env: &TypeEnv) -> bool {
-        let unwrapped = unwrap_parens(expr);
+        let unwrapped = expr.unwrap_parens();
         matches!(unwrapped, Expression::ClassReference { .. })
             || (env.in_class_method && Self::is_self_receiver(unwrapped))
     }
@@ -2900,12 +2866,13 @@ impl TypeChecker {
                                 // BT-1992: thread the concrete member type under
                                 // the `Self` subst key (BT-3076, see
                                 // `resolve_declared_type`'s `SelfType` arm).
-                                let mut merged_subst: super::type_resolver::SubstitutionMap =
-                                    subst.clone();
-                                merged_subst.insert("Self".into(), member.clone());
-                                return_types.push(super::type_resolver::resolve_declared_type(
+                                return_types.push(type_resolver::resolve_declared_type(
                                     ret_ty,
-                                    &merged_subst,
+                                    &type_resolver::merge_substitutions(
+                                        &subst,
+                                        &type_resolver::SubstitutionMap::new(),
+                                        Some(member),
+                                    ),
                                     self.protocol_registry.as_ref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Substitution,
@@ -2919,9 +2886,9 @@ impl TypeChecker {
                                 // parametric type args (`List(String)` keeps
                                 // its element type) and resolve union return
                                 // types into `InferredType::Union`.
-                                return_types.push(super::type_resolver::resolve_declared_type(
+                                return_types.push(type_resolver::resolve_declared_type(
                                     ret_ty,
-                                    &super::type_resolver::SubstitutionMap::new(),
+                                    &type_resolver::SubstitutionMap::new(),
                                     self.protocol_registry.as_ref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Declared,
@@ -2983,9 +2950,9 @@ impl TypeChecker {
                     {
                         InferredType::Never
                     } else {
-                        super::type_resolver::resolve_declared_type(
+                        type_resolver::resolve_declared_type(
                             ret_ty,
-                            &super::type_resolver::SubstitutionMap::new(),
+                            &type_resolver::SubstitutionMap::new(),
                             self.protocol_registry.as_ref(),
                             self.alias_registry.as_ref(),
                             TypeStringContext::Declared,
@@ -3070,7 +3037,7 @@ impl TypeChecker {
     /// shape (including `and:` sends whose receiver isn't a `notNil` test —
     /// those fall back to the generic block-context inference).
     fn detect_not_nil_and_narrowing(receiver: &Expression) -> Option<EnvKey> {
-        let receiver = unwrap_parens(receiver);
+        let receiver = receiver.unwrap_parens();
         let Expression::MessageSend {
             receiver: inner_recv,
             selector,
@@ -3967,8 +3934,8 @@ impl TypeChecker {
 
         // Unwrap parentheses so `on: (Error) do: ([:e | ...])` also gets the
         // contextual block-param typing.
-        let ex_class_inner = unwrap_parens(ex_class_arg);
-        let handler_inner = unwrap_parens(handler_arg);
+        let ex_class_inner = ex_class_arg.unwrap_parens();
+        let handler_inner = handler_arg.unwrap_parens();
 
         // Extract class name from ClassReference for block param typing
         let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_inner {
@@ -4060,7 +4027,7 @@ impl TypeChecker {
                     // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
                     // `infer_expr` would drop the `Block(..., R)` return type,
                     // degrading the whole send on statically-known receivers.
-                    let inner = unwrap_parens(arg);
+                    let inner = arg.unwrap_parens();
                     if let Expression::Block(block) = inner {
                         self.infer_block_with_typed_params(
                             block,
@@ -4095,7 +4062,7 @@ impl TypeChecker {
     ) -> InferredType {
         // Unwrap parens: `ifNotNil: ([:x | ...])` should narrow the same as
         // the unparenthesised form.
-        let inner = unwrap_parens(arg);
+        let inner = arg.unwrap_parens();
         let Expression::Block(block) = inner else {
             return self.infer_expr(arg, hierarchy, env, in_abstract_method);
         };
@@ -4175,7 +4142,7 @@ impl TypeChecker {
             // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
             // the method before the expression value is observed — treat
             // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = unwrap_parens(arg) {
+            if let Expression::Block(block) = arg.unwrap_parens() {
                 if block_has_any_return(block) {
                     return Some(InferredType::Never);
                 }
@@ -4252,7 +4219,7 @@ impl TypeChecker {
         if class_name.as_str() != "Block" {
             return None;
         }
-        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -4370,7 +4337,7 @@ impl TypeChecker {
         // exit the method on every path. Some blocks that may-but-not-always
         // diverge get widened to `Never` here — an accepted imprecision this
         // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
-        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -4465,7 +4432,7 @@ impl TypeChecker {
                         // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
                         // entirely and `if_true_false_solo_boolean_ret_ty`
                         // couldn't union it with the `Boolean` self-branch.
-                        let ty = if let Expression::Block(block) = unwrap_parens(arg) {
+                        let ty = if let Expression::Block(block) = arg.unwrap_parens() {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -4711,7 +4678,7 @@ impl TypeChecker {
                 return arguments
                     .iter()
                     .map(|arg| {
-                        if let Expression::Block(block) = unwrap_parens(arg) {
+                        if let Expression::Block(block) = arg.unwrap_parens() {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -4898,7 +4865,7 @@ impl TypeChecker {
                 // Unwrap parens so `foo: ([:x | ...])` gets the same
                 // Dynamic(DynamicReceiver) propagation as the unparenthesised
                 // `foo: [:x | ...]` form.
-                let inner = unwrap_parens(arg);
+                let inner = arg.unwrap_parens();
                 if let Expression::Block(block) = inner {
                     if propagate_dynamic {
                         let param_types: Vec<InferredType> = (0..block.parameters.len())
@@ -4983,7 +4950,7 @@ impl TypeChecker {
     /// the parameter cannot be resolved.
     ///
     /// BT-2023(B): Handles nested generics (e.g., `List(E)`) by delegating to
-    /// [`super::type_resolver::resolve_declared_type`], which recursively
+    /// [`type_resolver::resolve_declared_type`], which recursively
     /// resolves inner type params.
     ///
     /// BT-3076: `param` is a structured [`DeclaredType`] rather than a raw
@@ -5019,9 +4986,9 @@ impl TypeChecker {
         // resolver, which recursively resolves inner type params. Merge
         // `method_subst` over `class_subst` (method-local wins) to match
         // this function's own bare-name precedence above.
-        let mut subst: super::type_resolver::SubstitutionMap = class_subst.clone();
+        let mut subst: type_resolver::SubstitutionMap = class_subst.clone();
         subst.extend(method_subst.iter().map(|(k, v)| (k.clone(), v.clone())));
-        super::type_resolver::resolve_declared_type(
+        type_resolver::resolve_declared_type(
             param,
             &subst,
             None,
@@ -5209,9 +5176,9 @@ impl TypeChecker {
         if let EnvKey::SelfField(field_name) = var_key {
             if let Some(InferredType::Known { class_name, .. }) = env.get_local("self") {
                 if let Some(field_type) = hierarchy.state_field_type(&class_name, field_name) {
-                    return super::type_resolver::resolve_declared_type(
+                    return type_resolver::resolve_declared_type(
                         &field_type,
-                        &super::type_resolver::SubstitutionMap::new(),
+                        &type_resolver::SubstitutionMap::new(),
                         None,
                         alias_registry,
                         TypeStringContext::Declared,
@@ -5558,7 +5525,7 @@ impl TypeChecker {
                             // `Base(List(Integer))`) — resolve through the
                             // shared resolver instead of the bare-name-only
                             // lookup above.
-                            super_args.push(super::type_resolver::resolve_declared_type(
+                            super_args.push(type_resolver::resolve_declared_type(
                                 declared,
                                 &current_subst,
                                 None,
@@ -5582,52 +5549,13 @@ impl TypeChecker {
     ///
     /// `"T, E"` → `["T", "E"]`
     /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
-    pub(super) fn split_type_params(s: &str) -> Vec<&str> {
-        let mut result = Vec::new();
-        let mut depth = 0;
-        let mut start = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth -= 1,
-                ',' if depth == 0 => {
-                    result.push(s[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        let last = s[start..].trim();
-        if !last.is_empty() {
-            result.push(last);
-        }
-        result
-    }
-
-    /// Split a type string on `|` while respecting parenthesis nesting.
     ///
-    /// This ensures `Result(String | Integer, Error)` is NOT split at the inner `|`,
-    /// but `String | nil` IS split into `["String", "nil"]`.
-    pub(super) fn split_union_respecting_parens(s: &str) -> Vec<&str> {
-        let mut result = Vec::new();
-        let mut depth = 0i32;
-        let mut start = 0;
-        for (i, c) in s.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth = depth.saturating_sub(1),
-                '|' if depth == 0 => {
-                    result.push(s[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        let last = s[start..].trim();
-        if !last.is_empty() {
-            result.push(last);
-        }
-        result
+    /// Thin wrapper over the shared nesting-aware scanner
+    /// (`string_utils::split_top_level`, BT-3089) — kept as a method so the
+    /// many `Self::split_type_params` call sites in this module don't need
+    /// to change.
+    pub(super) fn split_type_params(s: &str) -> Vec<&str> {
+        crate::semantic_analysis::string_utils::split_top_level(s, ',')
     }
 
     /// BT-1986: Does the declared type mention `Self` / `Self class`
@@ -5724,7 +5652,7 @@ impl TypeChecker {
             // Handle any parametric type: TypeName(A, B, ...) parameter types.
             // BT-2025: Parenthesis-aware split via the centralised helper.
             let (declared_base, declared_args_slice) =
-                super::type_resolver::split_generic_base(param_type);
+                type_resolver::split_generic_base(param_type);
             if let Some(inner) = declared_args_slice {
                 let declared_params = Self::split_type_params(inner);
 
@@ -5858,22 +5786,11 @@ impl TypeChecker {
 /// Class-protocol selectors that must NOT be intercepted as FFI module lookups.
 ///
 /// These are handled by `beamtalk_object_class:class_send/3` at runtime.
-/// This list mirrors `CLASS_PROTOCOL_SELECTORS` in `dispatch_codegen.rs`
-/// to keep codegen and type-checker behaviour consistent (BT-1880).
+/// BT-3079: delegates to the single shared recognizer in
+/// [`crate::ffi_receiver`], which codegen and the semantic-analysis validators
+/// also use, to keep this behaviour consistent everywhere (BT-1880).
 fn is_class_protocol_selector(selector: &str) -> bool {
-    matches!(
-        selector,
-        "new"
-            | "spawn"
-            | "class"
-            | "methods"
-            | "superclass"
-            | "subclasses"
-            | "allSubclasses"
-            | "class_name"
-            | "module_name"
-            | "printString"
-    )
+    crate::ffi_receiver::is_class_protocol_selector(selector)
 }
 
 /// Returns `true` for the equality / identity comparison binary operators —
@@ -6184,10 +6101,9 @@ mod tests {
     #[test]
     fn resolve_type_string_simple() {
         assert_eq!(
-            TypeChecker::resolve_declared_type_string_for_test(
-                "Integer",
-                &HashMap::new(),
-                &HashMap::new(),
+            type_resolver::resolve_declared_type(
+                &DeclaredType::parse("Integer"),
+                &type_resolver::SubstitutionMap::new(),
                 None,
                 None,
                 TypeStringContext::Declared
@@ -6199,10 +6115,9 @@ mod tests {
     #[test]
     fn resolve_type_string_nil_keyword() {
         assert_eq!(
-            TypeChecker::resolve_declared_type_string_for_test(
-                "nil",
-                &HashMap::new(),
-                &HashMap::new(),
+            type_resolver::resolve_declared_type(
+                &DeclaredType::parse("nil"),
+                &type_resolver::SubstitutionMap::new(),
                 None,
                 None,
                 TypeStringContext::Declared
@@ -6213,10 +6128,9 @@ mod tests {
 
     #[test]
     fn resolve_type_string_union() {
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "String | nil",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("String | nil"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Declared,
@@ -6233,10 +6147,9 @@ mod tests {
 
     #[test]
     fn resolve_type_string_three_way_union() {
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Integer | String | nil",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Integer | String | nil"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Declared,
@@ -6293,10 +6206,9 @@ mod tests {
         let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "RestartStrategy",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("RestartStrategy"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             Some(&registry),
             TypeStringContext::Declared,
@@ -6313,10 +6225,9 @@ mod tests {
         // Without the registry, the same raw string stays an opaque nominal
         // class — the pre-BT-2928 behaviour this test guards against
         // regressing back to.
-        let unresolved = TypeChecker::resolve_declared_type_string_for_test(
-            "RestartStrategy",
-            &HashMap::new(),
-            &HashMap::new(),
+        let unresolved = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("RestartStrategy"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Declared,
@@ -6796,18 +6707,10 @@ mod tests {
     }
 
     // ---- split_type_params ----
-
-    #[test]
-    fn split_type_params_simple() {
-        let result = TypeChecker::split_type_params("T, E");
-        assert_eq!(result, vec!["T", "E"]);
-    }
-
-    #[test]
-    fn split_type_params_single() {
-        let result = TypeChecker::split_type_params("Integer");
-        assert_eq!(result, vec!["Integer"]);
-    }
+    //
+    // Thin wrapper over `string_utils::split_top_level`, whose exhaustive
+    // nesting/edge-case coverage lives at its definition site (BT-3089).
+    // This is a smoke test that the wrapper is wired up correctly.
 
     #[test]
     fn split_type_params_nested() {
@@ -6815,16 +6718,45 @@ mod tests {
         assert_eq!(result, vec!["GenResult(A, B)", "E"]);
     }
 
+    // ---- extract_ffi_function_info (BT-3089) ----
+    //
+    // Pins the resolved binary-selector edge case: a binary selector has no
+    // FFI-proxy-call name (mirrors `erlang_function_name`/dispatch_codegen's
+    // `generate_direct_erlang_call`, both of which also decline to treat a
+    // binary send to `Erlang <module>` as a direct FFI call) — this used to
+    // disagree, deriving a name via `.split(':')` regardless of selector
+    // shape.
+
     #[test]
-    fn split_type_params_empty() {
-        let result = TypeChecker::split_type_params("");
-        assert!(result.is_empty());
+    fn extract_ffi_function_info_unary() {
+        let selector = MessageSelector::Unary("reverse".into());
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &[]),
+            Some(("reverse".to_string(), 0))
+        );
     }
 
     #[test]
-    fn split_type_params_deeply_nested() {
-        let result = TypeChecker::split_type_params("Outer(Inner(A, B), C), D");
-        assert_eq!(result, vec!["Outer(Inner(A, B), C)", "D"]);
+    fn extract_ffi_function_info_keyword() {
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("seq:", span()),
+            KeywordPart::new("to:", span()),
+        ]);
+        let args = [var("a"), var("b")];
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &args),
+            Some(("seq".to_string(), 2))
+        );
+    }
+
+    #[test]
+    fn extract_ffi_function_info_binary_is_none() {
+        let selector = MessageSelector::Binary("+".into());
+        let args = [var("a")];
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &args),
+            None
+        );
     }
 
     // ---- resolve_type_string (substitution) ----
@@ -6833,10 +6765,9 @@ mod tests {
     fn substitute_direct_param() {
         let mut subst = HashMap::new();
         subst.insert(EcoString::from("T"), InferredType::known("Integer"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "T",
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("T"),
             &subst,
-            &HashMap::new(),
             None,
             None,
             TypeStringContext::Substitution,
@@ -6848,9 +6779,8 @@ mod tests {
     fn substitute_method_local_param() {
         let mut method_subst = HashMap::new();
         method_subst.insert(EcoString::from("R"), InferredType::known("String"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "R",
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("R"),
             &method_subst,
             None,
             None,
@@ -6865,10 +6795,9 @@ mod tests {
         subst.insert(EcoString::from("R"), InferredType::known("Integer"));
         let mut method_subst = HashMap::new();
         method_subst.insert(EcoString::from("R"), InferredType::known("String"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "R",
-            &subst,
-            &method_subst,
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("R"),
+            &type_resolver::merge_substitutions(&subst, &method_subst, None),
             None,
             None,
             TypeStringContext::Substitution,
@@ -6881,10 +6810,9 @@ mod tests {
         let mut subst = HashMap::new();
         subst.insert(EcoString::from("T"), InferredType::known("Integer"));
         subst.insert(EcoString::from("E"), InferredType::known("IOError"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Result(T, E)",
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Result(T, E)"),
             &subst,
-            &HashMap::new(),
             None,
             None,
             TypeStringContext::Substitution,
@@ -6906,10 +6834,9 @@ mod tests {
 
     #[test]
     fn substitute_no_match_passes_through() {
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "String",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("String"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Substitution,
@@ -6921,10 +6848,9 @@ mod tests {
     fn substitute_generic_base_extracted() {
         // When return type is "Array(R)" and R is not in subst, base "Array" is still extracted
         // BT-1834: Unresolved type param R falls back to Dynamic instead of Known("R")
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Array(R)",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Array(R)"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Substitution,
@@ -6955,11 +6881,14 @@ mod tests {
             type_args: vec![InferredType::known("Integer")],
             provenance: TypeProvenance::Inferred(Span::default()),
         };
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Result(Self, Error)",
-            &HashMap::new(),
-            &HashMap::new(),
-            Some(&receiver_ty),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Result(Self, Error)"),
+            &type_resolver::merge_substitutions(
+                &type_resolver::SubstitutionMap::new(),
+                &type_resolver::SubstitutionMap::new(),
+                Some(&receiver_ty),
+            ),
+            None,
             None,
             TypeStringContext::Substitution,
         );
@@ -6984,11 +6913,14 @@ mod tests {
         // Non-parameterised receiver: `Result(Self, Error)` on `Counter`
         // should produce `Result(Counter, Error)`.
         let receiver_ty = InferredType::known("Counter");
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Result(Self, Error)",
-            &HashMap::new(),
-            &HashMap::new(),
-            Some(&receiver_ty),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Result(Self, Error)"),
+            &type_resolver::merge_substitutions(
+                &type_resolver::SubstitutionMap::new(),
+                &type_resolver::SubstitutionMap::new(),
+                Some(&receiver_ty),
+            ),
+            None,
             None,
             TypeStringContext::Substitution,
         );
@@ -7016,11 +6948,14 @@ mod tests {
             type_args: vec![InferredType::known("Integer")],
             provenance: TypeProvenance::Inferred(Span::default()),
         };
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Self | Error",
-            &HashMap::new(),
-            &HashMap::new(),
-            Some(&receiver_ty),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Self | Error"),
+            &type_resolver::merge_substitutions(
+                &type_resolver::SubstitutionMap::new(),
+                &type_resolver::SubstitutionMap::new(),
+                Some(&receiver_ty),
+            ),
+            None,
             None,
             TypeStringContext::Substitution,
         );
@@ -7038,10 +6973,9 @@ mod tests {
     fn substitute_self_none_passes_through() {
         // When self_type is None, `Self` should pass through as Known("Self")
         // (backward-compatible behaviour).
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Result(Self, Error)",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Result(Self, Error)"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Substitution,
@@ -8387,9 +8321,8 @@ mod tests {
         let mut method_subst = HashMap::new();
         method_subst.insert(EcoString::from("T"), InferredType::known("Integer"));
         method_subst.insert(EcoString::from("E"), InferredType::known("Error"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "T",
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("T"),
             &method_subst,
             None,
             None,
@@ -8403,9 +8336,8 @@ mod tests {
         // collect: returns Array(R) where R=String → Array(String)
         let mut method_subst = HashMap::new();
         method_subst.insert(EcoString::from("R"), InferredType::known("String"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Array(R)",
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Array(R)"),
             &method_subst,
             None,
             None,
@@ -8439,9 +8371,8 @@ mod tests {
             },
         );
         method_subst.insert(EcoString::from("E"), InferredType::known("Error"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Result(T, E)",
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Result(T, E)"),
             &method_subst,
             None,
             None,
@@ -8481,10 +8412,9 @@ mod tests {
         // `isNil`/`ifNil:` narrowing recognises the member.
         let mut subst = HashMap::new();
         subst.insert(EcoString::from("E"), InferredType::known("Integer"));
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "E | Nil",
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("E | Nil"),
             &subst,
-            &HashMap::new(),
             None,
             None,
             TypeStringContext::Substitution,
@@ -8503,10 +8433,9 @@ mod tests {
     fn substitute_return_type_union_no_params() {
         // "Behaviour | Nil" with no substitutions should pass through as Union
         // (with `Nil` normalised to `UndefinedObject`, BT-3075).
-        let result = TypeChecker::resolve_declared_type_string_for_test(
-            "Behaviour | Nil",
-            &HashMap::new(),
-            &HashMap::new(),
+        let result = type_resolver::resolve_declared_type(
+            &DeclaredType::parse("Behaviour | Nil"),
+            &type_resolver::SubstitutionMap::new(),
             None,
             None,
             TypeStringContext::Substitution,

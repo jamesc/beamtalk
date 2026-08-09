@@ -102,6 +102,24 @@ ensure_structured_error_eval_error_unknown_reason_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({eval_error, error, some_weird_reason}),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result).
 
+ensure_structured_error_eval_error_same_tag_different_arity_test() ->
+    %% BT-3084: is_known_error_reason/1 matches {Tag, Arity} pairs, not bare
+    %% Tag. beamtalk_behaviour_intrinsics.erl:706 constructs a 4-arity
+    %% {class_not_found, _, Path, Defined}, distinct from the REPL's own
+    %% 2-arity {class_not_found, ClassName} clause in ensure_structured_error/1.
+    %% A 4-arity reason must NOT be misidentified as "known" and delegated
+    %% (there is no ensure_structured_error/1 clause for that arity) — it
+    %% should fall through to the generic "Evaluation error: Class:Reason"
+    %% wrapper, preserving the eval_error Class context.
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {eval_error, error, {class_not_found, some_mod, "path", true}}
+    ),
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
+    ?assertMatch(
+        <<"Evaluation error: error:", _/binary>>,
+        Result#beamtalk_error.message
+    ).
+
 %%% ============================================================================
 %%% ensure_structured_error/1 — compile_error variants
 %%% ============================================================================
@@ -314,3 +332,145 @@ ensure_structured_error_2_fallback_different_classes_test() ->
     ResultExit = beamtalk_repl_errors:ensure_structured_error(unknown_reason, exit),
     ?assert(binary:match(ResultErr#beamtalk_error.message, <<"error">>) =/= nomatch),
     ?assert(binary:match(ResultExit#beamtalk_error.message, <<"exit">>) =/= nomatch).
+
+%%% ============================================================================
+%%% BT-3084: vocabulary previously only handled by
+%%% beamtalk_repl_json:format_error_message/1's separate dispatch table.
+%%% Folded into ensure_structured_error/1 so there is one canonical table.
+%%% ============================================================================
+
+ensure_structured_error_module_not_found_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({module_not_found, <<"counter">>}),
+    ?assertMatch(#beamtalk_error{kind = module_not_found}, Result),
+    ?assertEqual(<<"Module not loaded: counter">>, Result#beamtalk_error.message).
+
+ensure_structured_error_invalid_module_name_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({invalid_module_name, <<"123bad">>}),
+    ?assertMatch(#beamtalk_error{kind = invalid_module_name}, Result),
+    ?assertEqual(<<"Invalid module name: 123bad">>, Result#beamtalk_error.message).
+
+ensure_structured_error_actors_exist_singular_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({actors_exist, counter, 1}),
+    ?assertMatch(#beamtalk_error{kind = actors_exist}, Result),
+    ?assertNotEqual(
+        nomatch, binary:match(Result#beamtalk_error.message, <<"1 actor still running">>)
+    ).
+
+ensure_structured_error_actors_exist_plural_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({actors_exist, counter, 3}),
+    ?assertNotEqual(
+        nomatch, binary:match(Result#beamtalk_error.message, <<"3 actors still running">>)
+    ),
+    ?assertNotEqual(nomatch, binary:match(Result#beamtalk_error.message, <<":kill">>)).
+
+ensure_structured_error_class_not_found_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({class_not_found, 'Foo'}),
+    ?assertMatch(#beamtalk_error{kind = class_not_found}, Result),
+    ?assertEqual(
+        <<"Unknown class: Foo. Use Workspace classes to see loaded classes.">>,
+        Result#beamtalk_error.message
+    ).
+
+%% BT-3084 acceptance criteria: DNU rendered only by
+%% beamtalk_error:generate_message/3 — the selector is quoted, and the
+%% record's `selector` field is populated when the selector is an atom.
+ensure_structured_error_method_not_found_atom_selector_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {method_not_found, 'Counter', increment}
+    ),
+    ?assertMatch(#beamtalk_error{kind = does_not_understand}, Result),
+    ?assertEqual(<<"Counter does not understand 'increment'">>, Result#beamtalk_error.message),
+    ?assertEqual(increment, Result#beamtalk_error.selector).
+
+%% Selector arriving as a binary (no existing atom to attach to the record)
+%% still renders the canonical quoted wording via generate_message/3.
+ensure_structured_error_method_not_found_binary_selector_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {method_not_found, 'Counter', <<"increment">>}
+    ),
+    ?assertMatch(#beamtalk_error{kind = does_not_understand}, Result),
+    ?assertEqual(<<"Counter does not understand 'increment'">>, Result#beamtalk_error.message).
+
+ensure_structured_error_unknown_op_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({unknown_op, <<"badop">>}),
+    ?assertMatch(#beamtalk_error{kind = unknown_op}, Result),
+    ?assertEqual(<<"Unknown operation: badop">>, Result#beamtalk_error.message).
+
+ensure_structured_error_inspect_failed_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({inspect_failed, "<0.100.0>"}),
+    ?assertMatch(#beamtalk_error{kind = inspect_failed}, Result),
+    ?assertEqual(<<"Failed to inspect actor: <0.100.0>">>, Result#beamtalk_error.message).
+
+ensure_structured_error_actor_not_alive_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({actor_not_alive, "<0.100.0>"}),
+    ?assertMatch(#beamtalk_error{kind = actor_not_alive}, Result),
+    ?assertEqual(<<"Actor is not alive: <0.100.0>">>, Result#beamtalk_error.message).
+
+ensure_structured_error_no_source_file_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({no_source_file, "counter"}),
+    ?assertMatch(#beamtalk_error{kind = no_source_file}, Result),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(Result#beamtalk_error.message, <<"No source file recorded for module">>)
+    ).
+
+ensure_structured_error_module_not_loaded_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({module_not_loaded, <<"counter">>}),
+    ?assertMatch(#beamtalk_error{kind = module_not_loaded}, Result),
+    ?assertNotEqual(
+        nomatch, binary:match(Result#beamtalk_error.message, <<"Module not loaded: counter">>)
+    ).
+
+ensure_structured_error_missing_module_name_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({missing_module_name, reload}),
+    ?assertMatch(#beamtalk_error{kind = missing_module_name}, Result),
+    ?assertNotEqual(nomatch, binary:match(Result#beamtalk_error.message, <<":reload">>)).
+
+ensure_structured_error_session_creation_failed_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({session_creation_failed, timeout}),
+    ?assertMatch(#beamtalk_error{kind = session_creation_failed}, Result),
+    ?assertEqual(<<"Failed to create session: timeout">>, Result#beamtalk_error.message).
+
+%% BT-3084 acceptance criteria: no raw-`~p` fallthrough for known tuples —
+%% {registration_error, ...} was already structured here, but was previously
+%% absent from beamtalk_repl_json's separate table (fixed by unifying on
+%% this one). Assert the message never degrades to a bare tuple dump.
+ensure_structured_error_registration_error_no_raw_fallthrough_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {registration_error, {'Counter', already_registered}}
+    ),
+    ?assertMatch(#beamtalk_error{kind = registration_error}, Result),
+    ?assertEqual(nomatch, binary:match(Result#beamtalk_error.message, <<"{registration_error">>)).
+
+%% BT-3084: previously this clause silently dropped the exception Class,
+%% diverging from beamtalk_repl_json's separate "Evaluation error: Class:Reason"
+%% wording for the same shape. Assert Class now survives.
+ensure_structured_error_eval_error_generic_preserves_class_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({eval_error, error, badarg}),
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
+    ?assertEqual(<<"Evaluation error: error:badarg">>, Result#beamtalk_error.message).
+
+%%% ============================================================================
+%%% ensure_structured_error/2 — delegation for the BT-3084 vocabulary above
+%%% ============================================================================
+
+ensure_structured_error_2_delegates_module_not_found_test() ->
+    Reason = {module_not_found, <<"counter">>},
+    ?assertEqual(
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+        beamtalk_repl_errors:ensure_structured_error(Reason, error)
+    ).
+
+ensure_structured_error_2_delegates_method_not_found_test() ->
+    Reason = {method_not_found, 'Counter', increment},
+    ?assertEqual(
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+        beamtalk_repl_errors:ensure_structured_error(Reason, error)
+    ).
+
+ensure_structured_error_2_delegates_actors_exist_test() ->
+    Reason = {actors_exist, counter, 1},
+    ?assertEqual(
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+        beamtalk_repl_errors:ensure_structured_error(Reason, error)
+    ).

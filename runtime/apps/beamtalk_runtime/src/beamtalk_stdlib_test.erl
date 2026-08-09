@@ -192,13 +192,19 @@ Format a Beamtalk runtime value to its display binary string.
 
 Mirrors the REPL's term_to_json formatting so that expected values
 written as strings (like E2E tests) match correctly.
+
+BT-3082: the float, pid, `#beamtalk_object{}`, and `{beamtalk_supervisor,
+...}` cases delegate to `beamtalk_primitive`'s canonical renderers
+(`print_string/1`, `pid_label/1`) instead of each carrying its own drifted
+copy — this used to unconditionally render every pid as `#Actor<...>`,
+reporting a dead pid as alive, and re-derived the `#beamtalk_object{}`
+class/Metaclass branch with raw `element/2` calls instead of the record.
 """.
 -spec format_result(term()) -> binary().
 format_result(V) when is_integer(V) ->
     integer_to_binary(V);
 format_result(V) when is_float(V) ->
-    %% Match Erlang/REPL float formatting
-    list_to_binary(io_lib:format("~p", [V]));
+    beamtalk_primitive:print_string(V);
 format_result(true) ->
     <<"true">>;
 format_result(false) ->
@@ -210,36 +216,18 @@ format_result(V) when is_atom(V) ->
 format_result(V) when is_binary(V) ->
     V;
 format_result(V) when is_function(V) ->
-    {arity, A} = erlang:fun_info(V, arity),
-    iolist_to_binary([<<"Block/">>, integer_to_binary(A)]);
+    beamtalk_primitive:block_label(V);
 format_result(V) when is_pid(V) ->
-    S = pid_to_list(V),
-    I = lists:sublist(S, 2, length(S) - 2),
-    iolist_to_binary([<<"#Actor<">>, I, <<">">>]);
+    beamtalk_primitive:pid_label(V);
 format_result(V) when
     is_tuple(V),
     tuple_size(V) >= 2,
     element(1, V) =:= beamtalk_object
 ->
-    %% BT-412: Match REPL formatting for class objects vs actor instances.
-    %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
-    Class = element(2, V),
-    case Class of
-        'Metaclass' ->
-            Pid = element(4, V),
-            ClassName = beamtalk_object_class:class_name(Pid),
-            iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
-        _ ->
-            case beamtalk_class_registry:is_class_name(Class) of
-                true ->
-                    beamtalk_class_registry:class_display_name(Class);
-                false ->
-                    %% ADR 0094: live actor instances render kind-headed and
-                    %% positional, e.g. Actor(Counter, 0.123.0). Derived from the
-                    %% tuple to match the REPL/runtime renderer byte-for-byte.
-                    beamtalk_primitive:process_label(V)
-            end
-    end;
+    %% BT-412 / ADR 0036 / ADR 0094: class objects, Metaclass objects, and
+    %% live actor instances — beamtalk_primitive:print_string/1 pattern-matches
+    %% the #beamtalk_object{} record directly and handles all three shapes.
+    beamtalk_primitive:print_string(V);
 format_result(V) when is_map(V) ->
     %% BT-535: Use print_string for Beamtalk display format
     beamtalk_primitive:print_string(V);
@@ -257,7 +245,7 @@ format_result(V) when is_list(V) ->
 format_result({beamtalk_supervisor, _, _, _} = Sup) ->
     %% ADR 0094: supervisors render kind-headed and positional,
     %% Supervisor(Class, pid) / DynamicSupervisor(Class, pid) by ancestry.
-    beamtalk_primitive:process_label(Sup);
+    beamtalk_primitive:print_string(Sup);
 format_result({beamtalk_future, _} = Future) ->
     %% BT-840: Auto-await tagged futures before formatting.
     Value = beamtalk_future:await(Future),

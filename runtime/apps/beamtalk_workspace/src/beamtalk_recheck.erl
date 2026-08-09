@@ -1073,16 +1073,29 @@ field_accessor_atoms(NameBin) ->
 The `with*:` copy-setter selector name for a slot field (mirrors
 `crate::synthetic_selectors::with_star_selector` on the Rust side — see
 `crates/beamtalk-core/src/synthetic_selectors.rs` — capitalising the first
-byte and wrapping in `with`/`:`). Beamtalk identifiers are ASCII, so a
-byte-wise uppercase of the first character is exact, not an approximation.
+character and wrapping in `with`/`:`).
+
+BT-3090: this used to capitalise via ASCII-only byte arithmetic
+(`First - 32`), which is exact for the ASCII range but silently leaves a
+non-ASCII lowercase first letter (e.g. `"économie"`) uncapitalised — the
+first UTF-8 byte of a multi-byte codepoint never falls in `$a..$z`, so it hit
+the byte-passthrough clause unchanged. `string:to_upper/1` is Unicode-aware
+(same technique as `beamtalk_module_name:to_upper_chars/1`) and matches the
+Rust side's `char::to_uppercase()`, so both sides now agree on non-ASCII
+field names too — see the shared conformance fixture
+`test/fixtures/with_star_selector_corpus.json`, asserted here by
+`beamtalk_recheck_tests:with_star_selector_matches_shared_corpus_test/0` and
+on the Rust side by
+`synthetic_selectors::tests::with_star_selector_matches_shared_corpus`.
 """.
 -spec with_star_selector(binary()) -> binary().
 with_star_selector(<<>>) ->
     <<"with:">>;
-with_star_selector(<<First, Rest/binary>>) when First >= $a, First =< $z ->
-    <<"with", (First - 32), Rest/binary, ":">>;
-with_star_selector(<<First, Rest/binary>>) ->
-    <<"with", First, Rest/binary, ":">>.
+with_star_selector(NameBin) when is_binary(NameBin) ->
+    [First | RestChars] = unicode:characters_to_list(NameBin),
+    UpperFirst = unicode:characters_to_binary(string:to_upper([First])),
+    RestBin = unicode:characters_to_binary(RestChars),
+    <<"with", UpperFirst/binary, RestBin/binary, ":">>.
 
 -doc "Read the per-reload caller cap (ADR 0105 §Mechanism step 2).".
 -spec recheck_caller_cap() -> pos_integer().

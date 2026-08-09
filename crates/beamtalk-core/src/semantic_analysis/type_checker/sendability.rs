@@ -36,6 +36,7 @@ use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 
 use super::InferredType;
+use super::type_resolver;
 
 /// The scope over which a `HandleScoped` value's backing handle stays valid.
 ///
@@ -324,9 +325,9 @@ fn tier_of_known(
                 // to its declared type before tiering, instead of treating
                 // the alias name as an unresolved nominal class.
                 Some(field_ty) => {
-                    let field_type = super::type_resolver::resolve_declared_type(
+                    let field_type = type_resolver::resolve_declared_type(
                         &field_ty,
-                        &super::type_resolver::SubstitutionMap::new(),
+                        &type_resolver::SubstitutionMap::new(),
                         None,
                         alias_registry,
                         super::TypeStringContext::Declared,
