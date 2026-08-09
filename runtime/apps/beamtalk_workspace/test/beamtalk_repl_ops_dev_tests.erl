@@ -2016,34 +2016,19 @@ is_identifier_char_matches_shared_corpus_test() ->
         Cases
     ).
 
-%% Load the shared word-boundary conformance corpus from the repo tree. Walks
-%% up from the test CWD to the project root (the dir holding `Cargo.toml`),
-%% then reads the fixture both surfaces share.
+%% Load the shared word-boundary conformance corpus from the repo tree.
+%% `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% project root (the dir holding `Cargo.toml`), then reads the fixture both
+%% surfaces share.
 load_word_boundary_corpus() ->
-    Root = find_word_boundary_corpus_root(filename:absname("")),
-    Path = filename:join([
-        Root,
+    beamtalk_test_corpus:load_json_fixture([
         "runtime",
         "apps",
         "beamtalk_workspace",
         "test",
         "fixtures",
         "completion_word_boundary_corpus.json"
-    ]),
-    Bin =
-        case file:read_file(Path) of
-            {ok, B} -> B;
-            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
-        end,
-    json:decode(Bin).
-
-find_word_boundary_corpus_root("/") ->
-    error(project_root_not_found);
-find_word_boundary_corpus_root(Dir) ->
-    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
-        true -> Dir;
-        false -> find_word_boundary_corpus_root(filename:dirname(Dir))
-    end.
+    ]).
 
 %%====================================================================
 %% builtin_keywords/0 — shared keyword-vocabulary conformance corpus (BT-3083)
@@ -2071,19 +2056,11 @@ builtin_keywords_covers_shared_vocabulary_corpus_test() ->
 
 %% Load the shared keyword-vocabulary conformance corpus from the repo tree.
 load_keyword_vocabulary_corpus() ->
-    Root = find_word_boundary_corpus_root(filename:absname("")),
-    Path = filename:join([
-        Root,
+    beamtalk_test_corpus:load_json_fixture([
         "runtime",
         "apps",
         "beamtalk_workspace",
         "test",
         "fixtures",
         "completion_keyword_vocabulary_corpus.json"
-    ]),
-    Bin =
-        case file:read_file(Path) of
-            {ok, B} -> B;
-            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
-        end,
-    json:decode(Bin).
+    ]).

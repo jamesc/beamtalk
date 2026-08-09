@@ -8,8 +8,11 @@
 -include_lib("eunit/include/eunit.hrl").
 %% Helper to find the compiler binary
 compiler_binary() ->
-    %% Look in target/debug from project root
-    ProjectRoot = find_project_root(filename:absname("")),
+    %% Look in target/debug from project root. `beamtalk_test_corpus`
+    %% (BT-3099) walks up from the test CWD to the project root (the dir
+    %% holding `Cargo.toml`) — shared with the other EUnit suites that also
+    %% need project-root discovery.
+    ProjectRoot = beamtalk_test_corpus:project_root(),
     %% On Windows, executables have a .exe extension.
     ExeName =
         case os:type() of
@@ -20,14 +23,6 @@ compiler_binary() ->
     case filelib:is_regular(Path) of
         true -> Path;
         false -> error({compiler_not_found, Path})
-    end.
-
-find_project_root("/") ->
-    filename:absname("");
-find_project_root(Dir) ->
-    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
-        true -> Dir;
-        false -> find_project_root(filename:dirname(Dir))
     end.
 
 %% Helper to open and close a port around a test

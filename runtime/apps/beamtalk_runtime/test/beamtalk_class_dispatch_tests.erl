@@ -183,33 +183,18 @@ class_method_fun_name_matches_shared_corpus_test() ->
     ).
 
 %% Load the shared class-method-fun-name conformance corpus from the repo
-%% tree. Walks up from the test CWD to the project root (the dir holding
-%% `Cargo.toml`), then reads the fixture both surfaces share.
+%% tree. `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% project root (the dir holding `Cargo.toml`), then reads the fixture both
+%% surfaces share.
 load_class_method_fun_name_corpus() ->
-    Root = find_class_method_fun_name_corpus_root(filename:absname("")),
-    Path = filename:join([
-        Root,
+    beamtalk_test_corpus:load_json_fixture([
         "runtime",
         "apps",
         "beamtalk_runtime",
         "test",
         "fixtures",
         "class_method_fun_name_corpus.json"
-    ]),
-    Bin =
-        case file:read_file(Path) of
-            {ok, B} -> B;
-            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
-        end,
-    json:decode(Bin).
-
-find_class_method_fun_name_corpus_root("/") ->
-    error(project_root_not_found);
-find_class_method_fun_name_corpus_root(Dir) ->
-    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
-        true -> Dir;
-        false -> find_class_method_fun_name_corpus_root(filename:dirname(Dir))
-    end.
+    ]).
 
 is_test_execution_selector_test_() ->
     [

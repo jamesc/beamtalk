@@ -162,34 +162,19 @@ clause_selector_corpus_test() ->
         Cases
     ).
 
-%% Load the shared selector-conformance corpus from the repo tree. Walks up from
-%% the test CWD to the project root (the dir holding `Cargo.toml`), then reads
-%% the fixture both surfaces share.
+%% Load the shared selector-conformance corpus from the repo tree.
+%% `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% project root (the dir holding `Cargo.toml`), then reads the fixture both
+%% surfaces share.
 load_clause_corpus() ->
-    Root = find_project_root(filename:absname("")),
-    Path = filename:join([
-        Root,
+    beamtalk_test_corpus:load_json_fixture([
         "runtime",
         "apps",
         "beamtalk_workspace",
         "test",
         "fixtures",
         "handle_call_clause_corpus.json"
-    ]),
-    Bin =
-        case file:read_file(Path) of
-            {ok, B} -> B;
-            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
-        end,
-    json:decode(Bin).
-
-find_project_root("/") ->
-    error(project_root_not_found);
-find_project_root(Dir) ->
-    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
-        true -> Dir;
-        false -> find_project_root(filename:dirname(Dir))
-    end.
+    ]).
 
 %% native_delegate is keyed off the facade's `dispatch_<selector>` exports — the
 %% compiler's own `is_self_delegate` decision (native_facade.rs), not a body-text
