@@ -391,9 +391,10 @@ resolve_entry(ClassNameBin, SelectorBin) ->
 %% True when the selector is the arity-1 keyword form (`main:`), i.e. it ends in
 %% a single trailing colon — the CLI validates the shape, so a non-empty binary
 %% ending in `:` is the keyword entry and anything else is the unary entry.
+%% BT-3090: delegates to the canonical `beamtalk_class_builder:is_keyword_selector/1`
+%% via `beamtalk_runtime_api` — was a byte-identical copy.
 -spec is_keyword_selector(binary()) -> boolean().
-is_keyword_selector(<<>>) -> false;
-is_keyword_selector(SelectorBin) -> binary:last(SelectorBin) =:= $:.
+is_keyword_selector(SelectorBin) -> beamtalk_runtime_api:is_keyword_selector(SelectorBin).
 
 -spec dispatch_class_not_found_error(binary()) -> #beamtalk_error{}.
 dispatch_class_not_found_error(ClassNameBin) ->

@@ -829,6 +829,7 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `hot_reload_code_change/3` | `beamtalk_hot_reload:code_change/3` |
 | `future_await/2` | `beamtalk_future:await/2` |
 | `hierarchy_foldl/2` | `beamtalk_class_hierarchy_table:foldl/2` |
+| `is_keyword_selector/1` | `beamtalk_class_builder:is_keyword_selector/1` |
 
 ### Rules
 

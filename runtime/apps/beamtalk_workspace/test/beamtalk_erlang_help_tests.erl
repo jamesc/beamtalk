@@ -206,6 +206,15 @@ dedupe_empty_name_spec_is_kept_test() ->
     Result = beamtalk_erlang_help:dedupe_keyword_aliases([#{name => <<>>, arity => 0}]),
     ?assertEqual(1, length(Result)).
 
+%% BT-3090: `is_keyword_name/1` now delegates to the canonical
+%% `beamtalk_class_builder:is_keyword_selector/1` (via `beamtalk_runtime_api`).
+%% A malformed name with an interior colon but no trailing colon (`at:put`) is
+%% NOT a keyword name, so it is never treated as a colon-suffixed alias target
+%% and is kept as-is (no dedup).
+dedupe_malformed_interior_colon_name_is_kept_test() ->
+    Result = beamtalk_erlang_help:dedupe_keyword_aliases([#{name => <<"at:put">>, arity => 1}]),
+    ?assertEqual(1, length(Result)).
+
 %%====================================================================
 %% format_beamtalk_signature/3 — empty param name fallback
 %%====================================================================

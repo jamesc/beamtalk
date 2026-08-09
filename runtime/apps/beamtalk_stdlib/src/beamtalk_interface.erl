@@ -517,10 +517,10 @@ ffiSitesIn(_Source, _Module, _Function, _Arity) ->
     ),
     beamtalk_error:raise(Err2).
 
-%% Normalise an atom-or-binary identifier to a binary.
--spec to_binary(atom() | binary()) -> binary().
-to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
-to_binary(B) when is_binary(B) -> B.
+%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — was an
+%% atom/binary-only copy (would raise `function_clause` on a list input).
+-spec to_binary(term()) -> binary().
+to_binary(Name) -> beamtalk_text:to_binary(Name).
 
 %%% ============================================================================
 %%% Internal method implementations

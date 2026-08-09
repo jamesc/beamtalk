@@ -604,16 +604,13 @@ encode_load_project(Classes, Errors, Summary, Warnings, Msg) ->
 
 %%% Utilities
 
+%% BT-3090: delegates to the canonical `beamtalk_text:to_binary/1` — kept as a
+%% local re-export since it is part of this module's public API and used
+%% across the workspace app.
 -doc "Normalise an atom, binary, list, or arbitrary term to a binary.".
 -spec to_binary(term()) -> binary().
-to_binary(Name) when is_atom(Name) ->
-    atom_to_binary(Name, utf8);
-to_binary(Name) when is_binary(Name) ->
-    Name;
-to_binary(Name) when is_list(Name) ->
-    list_to_binary(Name);
 to_binary(Name) ->
-    list_to_binary(io_lib:format("~p", [Name])).
+    beamtalk_text:to_binary(Name).
 
 %%% Internal functions
 

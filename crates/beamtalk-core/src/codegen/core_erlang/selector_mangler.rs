@@ -216,4 +216,43 @@ mod tests {
             format!("class_{}", safe_class_method_selector("x:y:"))
         );
     }
+
+    /// BT-3090: the Erlang runtime's `beamtalk_class_dispatch:class_method_fun_name/1`
+    /// ports this exact FNV-1a hashing scheme (same offset basis, same prime,
+    /// same 255-byte threshold, same `"class_kw_<16-hex>"` naming) so that a
+    /// selector long enough to need hashing produces the *same* atom whether
+    /// it was known at compile time (this function) or assembled at runtime
+    /// via `perform:` (the Erlang path). The corpus is the single source of
+    /// truth both implementations are pinned to; the Erlang side asserts the
+    /// identical cases in
+    /// `beamtalk_class_dispatch_tests:class_method_fun_name_matches_shared_corpus_test/0`.
+    #[test]
+    fn safe_class_method_fn_name_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join("runtime/apps/beamtalk_runtime/test/fixtures/class_method_fun_name_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let selector = case["selector"]
+                .as_str()
+                .expect("case.selector is a string");
+            let expected = case["expected_fn_name"]
+                .as_str()
+                .expect("case.expected_fn_name is a string");
+            let why = case["why"].as_str().unwrap_or("");
+            assert_eq!(
+                safe_class_method_fn_name(selector),
+                expected,
+                "corpus mismatch for selector of length {} ({why})",
+                selector.len()
+            );
+        }
+    }
 }

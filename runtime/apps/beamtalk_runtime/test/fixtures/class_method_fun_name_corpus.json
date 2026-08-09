@@ -1,0 +1,37 @@
+[
+  {
+    "selector": "defaultValue",
+    "expected_fn_name": "class_defaultValue",
+    "why": "short selector - no hashing, plain concatenation"
+  },
+  {
+    "selector": "x:y:",
+    "expected_fn_name": "class_x:y:",
+    "why": "short keyword selector - no hashing"
+  },
+  {
+    "selector": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expected_fn_name": "class_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "why": "boundary: class_ (6) + 249 a's = 255, exactly at the atom limit - unchanged, not hashed"
+  },
+  {
+    "selector": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expected_fn_name": "class_kw_924785600b73a84f",
+    "why": "boundary: class_ (6) + 250 a's = 256, one over the atom limit - hashed. BT-3090: proves the Erlang runtime path (list_to_atom with no guard, before this fix) would have crashed with system_limit on a selector this long if built at runtime via perform:, instead of matching the compile-time-hashed name the Rust codegen would produce for the equivalent selector"
+  },
+  {
+    "selector": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expected_fn_name": "class_kw_7b04934eeef462a6",
+    "why": "selector at the maximum possible Erlang atom length (255 bytes) itself - well over once class_ is prepended - hashed"
+  },
+  {
+    "selector": "codexInputTokens:codexOutputTokens:codexModelName:codexCachedTokens:codexReasoning:codexReasoningEffort:codexMaxOutputTokens:codexSystemFingerprint:codexServiceTier:operationTokens:operationCost:operationDuration:apiCallCount:errorCount:retryCount:tota",
+    "expected_fn_name": "class_kw_ab458970f92ddfc7",
+    "why": "realistic long multi-keyword selector truncated to 252 bytes (a valid atom length) so it is reachable on the Erlang side, where the selector itself must already be a <=255-byte atom before class_ is prepended - hashed"
+  },
+  {
+    "selector": "veryLongDynamicallyBuiltSelectorFromPerform:withArguments:thatSomehowExceedsTwoHundredAndFortyNineCharactersInTotalLengthWhichIsQuiteALotOfCharactersToTypeButWeNeedItForTestingThePathWherePerformBuildsASelectorAtRuntimeInsteadOfCompileTimeSoTheHashingKic",
+    "expected_fn_name": "class_kw_618f1e3abe9657df",
+    "why": "BT-3090: the shape this fixes was written for - a selector assembled dynamically (e.g. via perform:) rather than known at compile time, long enough to need hashing"
+  }
+]

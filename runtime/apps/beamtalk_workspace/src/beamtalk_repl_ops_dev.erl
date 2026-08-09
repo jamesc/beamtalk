@@ -571,7 +571,9 @@ handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
         end,
     Versions = #{
         %% BT-2091: Bumped to 2.0 — removed deprecated ops docs/load-file/reload/modules.
-        <<"protocol">> => <<"2.0">>,
+        %% BT-3090: shared with beamtalk_version:get/0 via the ?PROTOCOL_VERSION
+        %% macro (beamtalk.hrl) — no more hand-synced literals.
+        <<"protocol">> => ?PROTOCOL_VERSION,
         <<"beamtalk">> => BeamtalkVsnBin
     },
     {describe, Ops, Versions}.

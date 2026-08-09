@@ -965,11 +965,48 @@ not loaded or the method is absent).  Atom exhaustion is not a concern:
 selectors are bound atoms from user programs, so the class_ versions are
 equally bounded.  If the resulting function does not exist in the module,
 erlang:apply will raise undef, which invoke_class_method already handles.
+
+BT-3090: a selector built at runtime (e.g. via `perform:` with a
+dynamically-assembled selector) can exceed Erlang's 255-byte atom limit even
+though no *compile-time* selector ever does — `list_to_atom` on the raw
+`"class_" ++ Selector` string would then crash with `system_limit` instead of
+producing a name. This mirrors the compile-time guard in the Rust codegen's
+`safe_class_method_fn_name` (`crates/beamtalk-core/src/codegen/core_erlang/selector_mangler.rs`)
+byte-for-byte — same 255-byte threshold on `"class_" ++ Selector`, same
+FNV-1a 64-bit hash, same `"class_kw_<16-hex-digits>"` naming scheme — so a
+selector that is long at compile time and the *same* selector text
+constructed at runtime via `perform:` produce the identical atom.
 """.
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
-    % elp:fixme W0023 intentional atom creation
-    list_to_atom("class_" ++ atom_to_list(Selector)).
+    SelectorBin = atom_to_binary(Selector, utf8),
+    Combined = <<"class_", SelectorBin/binary>>,
+    case byte_size(Combined) =< 255 of
+        true ->
+            % elp:fixme W0023 intentional atom creation
+            binary_to_atom(Combined, utf8);
+        false ->
+            Hash = fnv1a_64(SelectorBin),
+            HashHex = io_lib:format("~16.16.0b", [Hash]),
+            % elp:fixme W0023 intentional atom creation
+            list_to_atom(lists:flatten(["class_kw_", HashHex]))
+    end.
+
+%% Deterministic FNV-1a 64-bit hash — bit-for-bit identical to the Rust
+%% `fnv1a_64` in `selector_mangler.rs` (same offset basis, same prime,
+%% same 64-bit wraparound). No external dependency; ~20 lines is not worth
+%% pulling in a hashing library for.
+-spec fnv1a_64(binary()) -> non_neg_integer().
+fnv1a_64(Data) when is_binary(Data) ->
+    fnv1a_64(Data, 16#cbf29ce484222325).
+
+-spec fnv1a_64(binary(), non_neg_integer()) -> non_neg_integer().
+fnv1a_64(<<>>, Hash) ->
+    Hash;
+fnv1a_64(<<Byte, Rest/binary>>, Hash) ->
+    H1 = Hash bxor Byte,
+    H2 = (H1 * 16#0100000001b3) band 16#ffffffffffffffff,
+    fnv1a_64(Rest, H2).
 
 -doc """
 Check if a class method selector is a test execution command.
