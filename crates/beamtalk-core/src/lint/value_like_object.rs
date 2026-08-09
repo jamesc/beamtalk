@@ -26,6 +26,7 @@ use std::collections::HashSet;
 
 use crate::ast::{ClassDefinition, ClassKind, Expression, Identifier, MethodDefinition, Module};
 use crate::lint::LintPass;
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Diagnostic;
 
 /// Lint pass that flags `Object subclass:` classes that look like value types.
@@ -40,15 +41,33 @@ pub(crate) struct ValueLikeObjectPass;
 
 impl LintPass for ValueLikeObjectPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+        // BT-3098: `run_lint_passes` runs on the freshly-parsed module, before
+        // `apply_class_kind_writeback` (which only runs inside codegen). So
+        // `class.class_kind` here is still `ClassKind::from_superclass_name`'s
+        // shallow, direct-superclass-only placeholder — it misses indirect
+        // Value/Actor subclasses (e.g. `class Foo extends Bar` where `Bar
+        // extends Value`). Build a lightweight hierarchy from this module and
+        // use `resolve_class_kind`, the single authority for actor/value
+        // classification (BT-3086), which walks the full ancestor chain.
+        // Same pattern as BT-3092's fix in `dead_block_assignment.rs`.
+        let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
+        let hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+
         for class in &module.classes {
-            check_class(class, diagnostics);
+            check_class(class, &hierarchy, diagnostics);
         }
     }
 }
 
-fn check_class(class: &ClassDefinition, diagnostics: &mut Vec<Diagnostic>) {
-    // Only check Object subclasses with state fields
-    if class.class_kind != ClassKind::Object || class.state.is_empty() {
+fn check_class(
+    class: &ClassDefinition,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Only check Object subclasses with state fields. Resolves the full
+    // ancestor chain (BT-3098) rather than only the direct superclass.
+    if hierarchy.resolve_class_kind(&class.name.name) != ClassKind::Object || class.state.is_empty()
+    {
         return;
     }
 
@@ -225,6 +244,45 @@ mod tests {
         assert!(
             diags.is_empty(),
             "Value subclass should not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// Indirect Value subclass (two hops: `Value <- BasePoint <- Point`) —
+    /// already a value type via its ancestor chain, so it should not be
+    /// flagged as "looks like it should be a Value subclass" (BT-3098).
+    ///
+    /// `Point`'s direct superclass is `BasePoint`, not `Value` literally, so
+    /// `class.class_kind` (the pre-writeback `ClassKind::from_superclass_name`
+    /// placeholder) would be `ClassKind::Object` here. The lint must resolve
+    /// the full ancestor chain instead to correctly skip this class.
+    #[test]
+    fn indirect_value_subclass_not_flagged() {
+        let diags = value_like_lints(
+            "Value subclass: BasePoint\n  state: z = 0\n\
+             BasePoint subclass: Point\n  state: x = 0\n  state: y = 0\n  x => self.x\n  y => self.y\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "Indirect Value subclass should not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// Indirect Actor subclass (two hops: `Actor <- BaseActor <- Counter`) —
+    /// actors are never flagged regardless of state/getter shape (BT-3098).
+    ///
+    /// `Counter`'s direct superclass is `BaseActor`, not `Actor` literally,
+    /// so `class.class_kind` (the pre-writeback placeholder) would be
+    /// `ClassKind::Object` here. The lint must resolve the full ancestor
+    /// chain instead to correctly skip this class.
+    #[test]
+    fn indirect_actor_subclass_not_flagged() {
+        let diags = value_like_lints(
+            "Actor subclass: BaseActor\n  noop => nil\n\
+             BaseActor subclass: Counter\n  state: count = 0\n  count => self.count\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "Indirect Actor subclass should not be flagged, got: {diags:?}"
         );
     }
 
