@@ -720,7 +720,7 @@ fn add_alias_name_completions(
         if seen.insert(name.clone()) {
             let mut doc = format!(
                 "type alias: {name} = {}",
-                crate::queries::hover_provider::type_annotation_label(&alias.annotation)
+                crate::unparse::unparse_type_annotation_display(&alias.annotation)
             );
             if let Some(doc_comment) = alias
                 .doc_comment
@@ -743,7 +743,7 @@ fn add_alias_name_completions(
         if seen.insert(name.clone()) {
             let doc = format!(
                 "type alias: {name} = {}",
-                crate::queries::hover_provider::type_annotation_label(&info.annotation)
+                crate::unparse::unparse_type_annotation_display(&info.annotation)
             );
             completions.push(
                 Completion::new(name.as_str(), CompletionKind::Class).with_documentation(doc),
