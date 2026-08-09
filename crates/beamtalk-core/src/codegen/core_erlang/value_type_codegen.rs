@@ -1565,7 +1565,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arg_vars: &[String],
     ) -> Document<'static> {
-        let fn_name = Self::native_delegate_fn_name(selector);
+        let fn_name = selector.leading_word();
         let args_list = join(
             arg_vars.iter().map(|v| leaf::var(v.clone())),
             &Document::Str(", "),
@@ -1583,20 +1583,6 @@ impl CoreErlangGenerator {
             leaf::atom(selector.name().to_string()),
             "})"
         ]
-    }
-
-    /// ADR 0101 / BT-2720: the Erlang function name a `native:` `self delegate`
-    /// method calls — the first keyword with its colon removed (or the bare
-    /// unary/binary selector). Mirrors the inline-FFI naming convention
-    /// (`docs/beamtalk-native-erlang.md`): `select: pred` → `select`,
-    /// `inject: i into: b` → `inject`, unary `asList` → `asList`.
-    pub(in crate::codegen::core_erlang) fn native_delegate_fn_name(
-        selector: &MessageSelector,
-    ) -> String {
-        match selector {
-            MessageSelector::Unary(name) | MessageSelector::Binary(name) => name.to_string(),
-            MessageSelector::Keyword(parts) => parts[0].keyword.trim_end_matches(':').to_string(),
-        }
     }
 
     fn generate_value_type_method(

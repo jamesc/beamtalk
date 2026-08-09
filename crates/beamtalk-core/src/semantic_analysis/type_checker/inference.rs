@@ -1873,15 +1873,8 @@ impl TypeChecker {
                 && !is_class_protocol_selector(&selector_name)
                 && !matches!(selector, MessageSelector::Binary(_))
             {
-                return self.infer_ffi_call(
-                    type_args,
-                    selector,
-                    &selector_name,
-                    arguments,
-                    &arg_types,
-                    span,
-                    hierarchy,
-                );
+                return self
+                    .infer_ffi_call(type_args, selector, arguments, &arg_types, span, hierarchy);
             }
 
             // BT-2254 (ADR 0075 amendment): literal-index tuple access.
@@ -2256,7 +2249,6 @@ impl TypeChecker {
         &mut self,
         receiver_type_args: &[InferredType],
         selector: &MessageSelector,
-        selector_name: &EcoString,
         arguments: &[Expression],
         arg_types: &[InferredType],
         span: Span,
@@ -2272,11 +2264,17 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver); // Dynamic module name
         };
 
-        // Extract the canonical Erlang function name and arity from the selector.
-        // The canonical name is the first keyword without colons, matching the
-        // selector_to_function/1 logic in beamtalk_erlang_proxy. The spec reader
-        // normalizes stored names the same way, so a single lookup suffices.
-        let (function_name, arity) = Self::extract_ffi_function_info(selector_name, arguments);
+        // Extract the canonical Erlang function name and arity from the selector
+        // (BT-3089: delegates to the one canonical erlang_function_name/erlang_arity
+        // pair, see extract_ffi_function_info's doc comment). `None` for a binary
+        // selector — unreachable today since the BT-1880 guard at this method's
+        // call site already excludes `MessageSelector::Binary` before we get here,
+        // but falling back to `UntypedFfi` rather than panicking/asserting keeps
+        // that a soft invariant instead of a hard one.
+        let Some((function_name, arity)) = Self::extract_ffi_function_info(selector, arguments)
+        else {
+            return InferredType::Dynamic(DynamicReason::UntypedFfi);
+        };
 
         // Clone the signature to release the borrow on self before emitting diagnostics.
         let sig = self
@@ -2316,20 +2314,25 @@ impl TypeChecker {
     /// keyword ("seq") and the arity is the argument count.
     /// For unary selectors like `reverse`, the function name is the selector and
     /// arity is 0 (nullary Erlang call).
+    ///
+    /// Delegates to the canonical FFI-naming pair
+    /// [`erlang_function_name`](crate::semantic_analysis::validators::erlang_function_name) /
+    /// [`erlang_arity`](crate::semantic_analysis::validators::erlang_arity)
+    /// (BT-3089) rather than re-deriving "first keyword sans colon" with its
+    /// own `.split(':')` — that duplicate previously computed a name for
+    /// *binary* selectors too (e.g. `"+".split(':').next()` ⇒ `"+"`), which
+    /// disagreed with the canonical function (binary ⇒ `None`, no FFI-name
+    /// concept) and with `dispatch_codegen`'s `generate_direct_erlang_call`
+    /// (binary ⇒ falls through to normal dispatch, never emits a direct FFI
+    /// call). Returns `None` for a binary selector, matching both of those.
     fn extract_ffi_function_info(
-        selector_name: &EcoString,
+        selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> (String, u8) {
-        // The selector_name for keyword messages is "reverse:" or "seq:to:"
-        // The Erlang function name is the first keyword without the colon
-        let function_name = selector_name
-            .split(':')
-            .next()
-            .unwrap_or(selector_name.as_str())
-            .to_string();
-
-        let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
-        (function_name, arity)
+    ) -> Option<(String, u8)> {
+        let function_name = crate::semantic_analysis::validators::erlang_function_name(selector)?;
+        let arity = crate::semantic_analysis::validators::erlang_arity(selector, arguments.len());
+        let arity = u8::try_from(arity).unwrap_or(u8::MAX);
+        Some((function_name, arity))
     }
 
     /// Checks argument types against declared parameter types in an FFI signature.
@@ -6650,6 +6653,47 @@ mod tests {
     fn split_type_params_nested() {
         let result = TypeChecker::split_type_params("GenResult(A, B), E");
         assert_eq!(result, vec!["GenResult(A, B)", "E"]);
+    }
+
+    // ---- extract_ffi_function_info (BT-3089) ----
+    //
+    // Pins the resolved binary-selector edge case: a binary selector has no
+    // FFI-proxy-call name (mirrors `erlang_function_name`/dispatch_codegen's
+    // `generate_direct_erlang_call`, both of which also decline to treat a
+    // binary send to `Erlang <module>` as a direct FFI call) — this used to
+    // disagree, deriving a name via `.split(':')` regardless of selector
+    // shape.
+
+    #[test]
+    fn extract_ffi_function_info_unary() {
+        let selector = MessageSelector::Unary("reverse".into());
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &[]),
+            Some(("reverse".to_string(), 0))
+        );
+    }
+
+    #[test]
+    fn extract_ffi_function_info_keyword() {
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("seq:", span()),
+            KeywordPart::new("to:", span()),
+        ]);
+        let args = [var("a"), var("b")];
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &args),
+            Some(("seq".to_string(), 2))
+        );
+    }
+
+    #[test]
+    fn extract_ffi_function_info_binary_is_none() {
+        let selector = MessageSelector::Binary("+".into());
+        let args = [var("a")];
+        assert_eq!(
+            TypeChecker::extract_ffi_function_info(&selector, &args),
+            None
+        );
     }
 
     // ---- resolve_type_string (substitution) ----

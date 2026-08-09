@@ -608,6 +608,44 @@ impl MessageSelector {
         }
     }
 
+    /// The selector's "leading word" — the bare unary/binary selector text,
+    /// or a keyword selector's *first* keyword with its trailing colon
+    /// stripped.
+    ///
+    /// `select: pred` → `select`; `inject: i into: b` → `inject`; unary
+    /// `asList` → `asList`; binary `+` → `+`. Distinct from [`name()`](Self::name),
+    /// which concatenates *all* keyword parts (`at:put:` stays `at:put:`
+    /// there) — this takes only the first.
+    ///
+    /// This is the naming convention `native: self delegate` methods use to
+    /// name their backing Erlang function (ADR 0101 / BT-2720,
+    /// `docs/beamtalk-native-erlang.md`). Single authority (BT-3089) for a
+    /// rule previously reimplemented in both
+    /// `codegen::core_erlang::value_type_codegen::native_delegate_fn_name`
+    /// and `semantic_analysis::validators::native_validators`'s
+    /// reserved-word check — moved down onto `MessageSelector` itself (the
+    /// bottom of the dependency graph) since neither of those two modules
+    /// may depend on the other (`semantic_analysis` must not depend on
+    /// `codegen`).
+    ///
+    /// Note this is a distinct concept from
+    /// [`erlang_function_name`](crate::semantic_analysis::validators::erlang_function_name):
+    /// that function is scoped to the `Erlang <module> <selector>` FFI-proxy
+    /// call shape and deliberately returns `None` for a binary selector
+    /// (there is no `(Erlang mod) + arg` FFI-call syntax); this method has
+    /// no such exclusion because the `native: self delegate` mechanism *can*
+    /// legitimately delegate a binary operator like `+` to a same-named
+    /// native function.
+    #[must_use]
+    pub fn leading_word(&self) -> &str {
+        match self {
+            Self::Unary(name) | Self::Binary(name) => name.as_str(),
+            Self::Keyword(parts) => parts
+                .first()
+                .map_or("", |kp| kp.keyword.trim_end_matches(':')),
+        }
+    }
+
     /// Returns the number of arguments this selector expects.
     #[must_use]
     pub fn arity(&self) -> usize {

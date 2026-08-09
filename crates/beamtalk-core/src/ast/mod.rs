@@ -487,6 +487,29 @@ mod tests {
     }
 
     #[test]
+    fn leading_word_unary() {
+        let selector = MessageSelector::Unary("asList".into());
+        assert_eq!(selector.leading_word(), "asList");
+    }
+
+    #[test]
+    fn leading_word_binary() {
+        let selector = MessageSelector::Binary("+".into());
+        assert_eq!(selector.leading_word(), "+");
+    }
+
+    #[test]
+    fn leading_word_keyword_takes_only_first_part() {
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("inject:", Span::new(0, 7)),
+            KeywordPart::new("into:", Span::new(8, 13)),
+        ]);
+        assert_eq!(selector.leading_word(), "inject");
+        // Unlike leading_word, name() concatenates every part.
+        assert_eq!(selector.name(), "inject:into:");
+    }
+
+    #[test]
     fn unwrap_parens_bare_expression_is_identity() {
         let ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
         assert_eq!(ident.unwrap_parens(), &ident);
