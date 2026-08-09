@@ -181,6 +181,11 @@ fn bench_codegen(c: &mut Criterion) {
     group.finish();
 }
 
+/// BT-3123: threads `analyse`'s `AnalysisResult` into codegen via
+/// `CodegenOptions::with_analysis` — the fixed pipeline every real driver
+/// (CLI build, compiler-port) now uses, so this benchmark measures the
+/// analyse+codegen path new code actually takes, not the doubled-up
+/// analyse-then-codegen-re-derives-its-own-view path the fix eliminated.
 fn bench_end_to_end(c: &mut Criterion) {
     let mut group = c.benchmark_group("end_to_end");
 
@@ -194,8 +199,10 @@ fn bench_end_to_end(c: &mut Criterion) {
                 b.iter(|| {
                     let tokens = lex_with_eof(src);
                     let (module, _diags) = parse(tokens);
-                    let _analysis = analyse(&module);
-                    let opts = CodegenOptions::new(input.module_name).with_source(src);
+                    let analysis = analyse(&module);
+                    let opts = CodegenOptions::new(input.module_name)
+                        .with_source(src)
+                        .with_analysis(analysis);
                     black_box(generate_module(&module, opts).expect("compile must succeed"))
                 });
             },
@@ -232,8 +239,10 @@ fn bench_project(c: &mut Criterion) {
             for (module_name, source) in &sources {
                 let tokens = lex_with_eof(source);
                 let (module, _) = parse(tokens);
-                let _analysis = analyse(&module);
-                let opts = CodegenOptions::new(module_name).with_source(source);
+                let analysis = analyse(&module);
+                let opts = CodegenOptions::new(module_name)
+                    .with_source(source)
+                    .with_analysis(analysis);
                 black_box(generate_module(&module, opts).unwrap());
             }
         });
@@ -270,8 +279,10 @@ fn bench_project_otp(c: &mut Criterion) {
             for (module_name, source) in &sources {
                 let tokens = lex_with_eof(source);
                 let (module, _) = parse(tokens);
-                let _analysis = analyse(&module);
-                let opts = CodegenOptions::new(module_name).with_source(source);
+                let analysis = analyse(&module);
+                let opts = CodegenOptions::new(module_name)
+                    .with_source(source)
+                    .with_analysis(analysis);
                 black_box(generate_module(&module, opts).unwrap());
             }
         });

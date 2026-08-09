@@ -89,6 +89,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
     }
 }
 
+mod analysis_handoff;
 mod control_flow;
 mod dispatch;
 mod expressions;

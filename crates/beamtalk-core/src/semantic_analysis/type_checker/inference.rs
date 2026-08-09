@@ -121,6 +121,10 @@ impl TypeChecker {
     /// `method_return_types` map when the hierarchy has no explicit annotation.
     #[allow(clippy::too_many_lines)] // struct patterns expanded by BT-1569 refactor
     pub fn check_module(&mut self, module: &Module, hierarchy: &ClassHierarchy) {
+        // BT-3123 test-only instrumentation — see `CHECK_MODULE_CALL_COUNT`'s doc.
+        #[cfg(test)]
+        super::CHECK_MODULE_CALL_COUNT.with(|c| c.set(c.get() + 1));
+
         let mut env = TypeEnv::new();
 
         // Check method bodies inside class definitions first, so that inferred

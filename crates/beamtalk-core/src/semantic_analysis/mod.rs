@@ -63,7 +63,9 @@ pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
 pub use receiver_knowledge::{KnowledgeScope, ReceiverKnowledge, classify_receiver};
-pub use return_type_writeback::apply_return_type_writeback;
+pub use return_type_writeback::{
+    apply_return_type_writeback, apply_return_type_writeback_from_map,
+};
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
 pub use type_checker::{
@@ -84,7 +86,16 @@ pub fn check_stdlib_name_shadowing(
 }
 
 /// Result of semantic analysis.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// BT-3123: Also carries [`SemanticFacts`] and inferred method return types
+/// (`method_return_types`) alongside the class hierarchy, protocol registry,
+/// and alias registry already here — the full set of analysis outputs codegen
+/// needs. This lets a driver that already ran [`analyse_full`] for
+/// diagnostics hand the *same* `AnalysisResult` to codegen (via
+/// `CodegenOptions::with_analysis`) instead of codegen re-deriving its own
+/// view (a fresh `ClassHierarchy::build`, a fresh `compute_semantic_facts`,
+/// and a full re-run of `infer_method_return_types` — see BT-3123).
+#[derive(Debug, Clone)]
 pub struct AnalysisResult {
     /// Diagnostics (errors and warnings) from analysis.
     pub diagnostics: Vec<Diagnostic>,
@@ -100,6 +111,22 @@ pub struct AnalysisResult {
 
     /// Type alias registry (ADR 0108 Phase 2, BT-2895).
     pub alias_registry: AliasRegistry,
+
+    /// Pre-codegen semantic facts (BT-1288) computed in the same pass as the
+    /// rest of analysis (BT-3123) — block mutation/capture profiles, dispatch
+    /// classification, and non-local-return spans. Consumed by codegen via
+    /// `CodegenOptions::with_analysis` instead of a second
+    /// `compute_semantic_facts` call.
+    pub semantic_facts: facts::SemanticFacts,
+
+    /// Inferred return types for unannotated methods (BT-1005), keyed by
+    /// `(ClassName, Selector, IsClassMethod)`. Populated from the same
+    /// [`TypeChecker`] pass that builds `type_map` during Phase 2 below —
+    /// previously discarded here and re-derived by codegen's return-type
+    /// writeback pass via a second, full `infer_method_return_types` call
+    /// (BT-3123). `Dynamic` results are omitted (absence = dynamic), matching
+    /// [`type_checker::infer_method_return_types`]'s own contract.
+    pub method_return_types: HashMap<type_checker::MethodReturnKey, InferredType>,
 
     /// Every alias name transitively referenced by an annotation resolved
     /// during this compile (ADR 0108 hot-reload re-check trigger, BT-2899).
@@ -140,6 +167,8 @@ impl AnalysisResult {
             class_hierarchy: ClassHierarchy::with_builtins(),
             protocol_registry: ProtocolRegistry::new(),
             alias_registry: AliasRegistry::new(),
+            semantic_facts: facts::SemanticFacts::default(),
+            method_return_types: HashMap::new(),
             referenced_aliases: Vec::new(),
         }
     }
@@ -455,6 +484,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     let mut result = AnalysisResult::new();
 
+    // BT-1288 / BT-3123: Compute pre-codegen semantic facts in the same pass
+    // as the rest of analysis, on the same (pre-writeback) module AST that
+    // codegen's own `compute_semantic_facts(module)` call used to re-derive.
+    // A pure AST walk with no hierarchy/type dependency, so it can run
+    // anywhere in this function; done first for symmetry with the writeback
+    // trio's ordering in codegen.
+    result.semantic_facts = facts::compute_semantic_facts(module);
+
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
     let (hierarchy_result, hierarchy_diags) =
         ClassHierarchy::build_with_options(module, stdlib_mode);
@@ -658,6 +695,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         type_checker.take_referenced_aliases().into_iter().collect();
     referenced_aliases.sort();
     result.referenced_aliases = referenced_aliases;
+    // BT-3123: capture the method-return-type inferences this same
+    // `TypeChecker` pass already computed, so codegen's return-type
+    // writeback pass can consume them instead of re-running inference.
+    result.method_return_types = type_checker.take_method_return_types();
     let type_map = type_checker.take_type_map();
 
     // BT-2140: Lint redundant local-variable type annotations using the

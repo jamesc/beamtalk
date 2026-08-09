@@ -226,6 +226,21 @@ fn block_has_nlr(block: &Block) -> bool {
         .any(|s| expr_has_block_nlr(&s.expression, true))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// BT-3123 test-only instrumentation: counts calls to
+    /// [`compute_semantic_facts`]. Used by a codegen test to verify that a driver
+    /// threading an `AnalysisResult` into codegen via `CodegenOptions::with_analysis`
+    /// doesn't trigger a second pass. `#[cfg(test)]` only — compiled out of
+    /// release builds entirely.
+    ///
+    /// Thread-local, not a shared global counter — see
+    /// `type_checker::CHECK_MODULE_CALL_COUNT`'s doc for why a global counter's
+    /// absolute value would be meaningless under `cargo test`'s concurrency.
+    pub(crate) static COMPUTE_SEMANTIC_FACTS_CALL_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 /// Compute semantic facts for all nodes in a module.
 ///
 /// Performs a single top-level pass over the AST:
@@ -233,6 +248,10 @@ fn block_has_nlr(block: &Block) -> bool {
 /// - Populates `dispatch_kinds` for every [`Expression::MessageSend`] node.
 /// - Populates `methods_with_block_nlr` for methods whose body contains `^` inside a block.
 pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
+    // BT-3123 test-only instrumentation — see `COMPUTE_SEMANTIC_FACTS_CALL_COUNT`'s doc.
+    #[cfg(test)]
+    COMPUTE_SEMANTIC_FACTS_CALL_COUNT.with(|c| c.set(c.get() + 1));
+
     let mut facts = SemanticFacts::default();
 
     // Process module-level expressions

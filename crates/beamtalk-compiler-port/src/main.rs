@@ -1179,9 +1179,17 @@ fn load_native_type_registry_from(
 
 /// Parse a Beamtalk expression source and run full diagnostics with primitive validation.
 ///
-/// Returns `Ok((module, warnings, referenced_aliases))` on success, or
+/// Returns `Ok((module, warnings, analysis))` on success, or
 /// `Err(response_term)` containing a formatted `diagnostic_error_response`
-/// that the caller should return directly.
+/// that the caller should return directly. `analysis` is the full
+/// [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult) this
+/// function's own semantic-analysis pass produced (BT-3123) — callers that go
+/// on to run codegen for the same module thread it into
+/// `CodegenOptions::with_analysis` instead of letting codegen re-derive the
+/// class hierarchy, semantic facts, and inferred method return types from
+/// scratch. `analysis.referenced_aliases` is the alias-dependency set
+/// (ADR 0108 hot-reload re-check trigger, BT-2899) callers used to receive
+/// as this tuple's third element directly.
 ///
 /// `pre_loaded_aliases` (ADR 0108 Phase 8, BT-2902) carries type aliases
 /// declared in earlier turns of the same REPL session, re-parsed standalone
@@ -1189,11 +1197,11 @@ fn load_native_type_registry_from(
 /// aliases need their own re-parse path rather than `pre_class_hierarchy`'s
 /// recover-from-live-BEAM-state mechanism.
 ///
-/// BT-2952: uses `compute_diagnostics_and_referenced_aliases` (the same
-/// analysis as `compute_diagnostics_with_known_vars_classes_and_aliases`,
-/// additionally returning `AnalysisResult::referenced_aliases`) so the
-/// REPL-inline `compile_expression` path computes the same alias-dependency
-/// set `handle_compile`'s file-compile path already did — previously this
+/// BT-2952: uses `compute_diagnostics_and_analysis` (the same analysis as
+/// `compute_diagnostics_with_known_vars_classes_and_aliases`, additionally
+/// returning the full `AnalysisResult`) so the REPL-inline
+/// `compile_expression` path computes the same alias-dependency set
+/// `handle_compile`'s file-compile path already did — previously this
 /// function discarded it, so `handle_inline_class_definition` never got a
 /// real set to thread through and `handle_inline_protocol_definition` was
 /// called with a hardcoded `&[]` (BT-2917's known limitation).
@@ -1206,7 +1214,7 @@ fn parse_and_check_expression(
     (
         beamtalk_core::ast::Module,
         Vec<String>,
-        Vec<ecow::EcoString>,
+        beamtalk_core::semantic_analysis::AnalysisResult,
     ),
     Term,
 > {
@@ -1214,8 +1222,8 @@ fn parse_and_check_expression(
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
-    let (mut all_diagnostics, referenced_aliases) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
+    let (mut all_diagnostics, analysis) =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
             parse_diagnostics,
             &known_var_refs,
@@ -1238,10 +1246,11 @@ fn parse_and_check_expression(
         return Err(diagnostic_error_response(&error_diags, source));
     }
 
-    Ok((module, warnings, referenced_aliases))
+    Ok((module, warnings, analysis))
 }
 
 /// Handle a single `compile_expression` request.
+#[allow(clippy::too_many_lines)]
 fn handle_compile_expression(request: &Map) -> Term {
     // Extract required fields
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
@@ -1268,7 +1277,7 @@ fn handle_compile_expression(request: &Map) -> Term {
     let pre_class_hierarchy = extract_class_hierarchy(request);
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings, referenced_aliases) = match parse_and_check_expression(
+    let (module, warnings, analysis) = match parse_and_check_expression(
         &source,
         &known_vars,
         pre_class_hierarchy.clone(),
@@ -1284,6 +1293,20 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-571: If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
+        let referenced_aliases = analysis.referenced_aliases.clone();
+        // BT-3123: `handle_inline_class_definition` merges any standalone
+        // `module.method_definitions` into their target class *after* this
+        // point — a method the type checker saw as a standalone extension
+        // during `analysis` above. `infer_method_return_types`/writeback key
+        // return types by `(ClassName, Selector, IsClassMethod)` regardless
+        // of whether the method AST lives standalone or inside
+        // `class.methods`, so the map itself stays valid across the merge —
+        // but only thread `analysis` through when there's no merge about to
+        // happen at all, so this call site never has to reason about it:
+        // codegen's own no-analysis-supplied fallback (still correct, just
+        // not the fast path) covers the rarer "class def + inline standalone
+        // method in the same eval" REPL pattern.
+        let analysis = module.method_definitions.is_empty().then_some(analysis);
         return handle_inline_class_definition(
             module,
             &source,
@@ -1295,6 +1318,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             pre_loaded_aliases,
             module_name_override.as_deref(),
             &referenced_aliases,
+            analysis,
         );
     }
 
@@ -1338,6 +1362,7 @@ fn handle_compile_expression(request: &Map) -> Term {
         // (BT-2917 shipped the protocol-side wiring but left this call site
         // passing a hardcoded `&[]`, since the Rust side didn't compute a
         // real set yet).
+        let referenced_aliases = analysis.referenced_aliases.clone();
         return handle_inline_protocol_definition(
             &module,
             &source,
@@ -1349,6 +1374,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             module_name_override.as_deref(),
             false, // REPL expressions are never stdlib
             &referenced_aliases,
+            Some(analysis),
         );
     }
 
@@ -1407,10 +1433,12 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
     // Trace mode never defines classes/protocols/aliases (rejected below), so
-    // the `referenced_aliases` this also now computes (BT-2952) has no
-    // consumer here — trace-mode expressions can't reference an alias in a
-    // position that needs xref registration.
-    let (module, warnings, _referenced_aliases) = match parse_and_check_expression(
+    // neither the `referenced_aliases` nor the rest of the `AnalysisResult`
+    // this also now computes (BT-2952 / BT-3123) has a consumer here —
+    // trace-mode expressions never reach a `generate_module` call that could
+    // use it, and can't reference an alias in a position that needs xref
+    // registration either.
+    let (module, warnings, _analysis) = match parse_and_check_expression(
         &source,
         &known_vars,
         pre_class_hierarchy,
@@ -1490,10 +1518,18 @@ fn derive_class_module_name(
 /// are used consistently across all load paths.
 /// BT-2952: Accepts `referenced_aliases` — the caller's already-computed
 /// alias-dependency set (`parse_and_check_expression`'s
-/// `compute_diagnostics_and_referenced_aliases` result), threaded into the
+/// `compute_diagnostics_and_analysis` result), threaded into the
 /// response so the Erlang side can register the same `beamtalk_alias_xref`
 /// dependency edges a file-defining compile gets. Mirrors
 /// `handle_inline_protocol_definition`'s identical parameter.
+/// BT-3123: Accepts `analysis` — the caller's already-computed
+/// [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult),
+/// threaded into codegen via `CodegenOptions::with_analysis` so it doesn't
+/// re-derive the class hierarchy, semantic facts, and inferred method return
+/// types from scratch. `None` when the caller has no analysis to hand off
+/// (or, per `handle_compile_expression`'s call site, when a standalone
+/// method merge between `analysis` and codegen would make it stale) —
+/// codegen falls back to computing its own, exactly as before BT-3123.
 #[allow(clippy::too_many_arguments)]
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
@@ -1506,6 +1542,7 @@ fn handle_inline_class_definition(
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     module_name_override: Option<&str>,
     referenced_aliases: &[ecow::EcoString],
+    analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -1565,16 +1602,17 @@ fn handle_inline_class_definition(
         }
     };
 
-    match beamtalk_core::erlang::generate_module(
-        &module,
-        beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
-            .with_workspace_mode(true)
-            .with_source(source)
-            .with_class_superclass_index(class_superclass_index.clone())
-            .with_class_module_index(class_module_index)
-            .with_class_hierarchy(pre_class_hierarchy)
-            .with_pre_loaded_aliases(pre_loaded_aliases),
-    ) {
+    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
+        .with_workspace_mode(true)
+        .with_source(source)
+        .with_class_superclass_index(class_superclass_index.clone())
+        .with_class_module_index(class_module_index)
+        .with_class_hierarchy(pre_class_hierarchy)
+        .with_pre_loaded_aliases(pre_loaded_aliases);
+    if let Some(analysis) = analysis {
+        codegen_options = codegen_options.with_analysis(analysis);
+    }
+    match beamtalk_core::erlang::generate_module(&module, codegen_options) {
         Ok(code) => class_definition_ok_response(
             &code,
             &class_module_name,
@@ -1606,6 +1644,11 @@ fn handle_inline_class_definition(
 /// `handle_compile_method`) — so a protocol method signature referencing a
 /// cross-module alias resolves to a `user_type` reference in the generated
 /// `-type` attributes instead of silently dropping the alias (empty registry).
+/// BT-3123: Accepts `analysis` — mirrors `handle_inline_class_definition`'s
+/// identical parameter; both callers pass their own already-computed
+/// [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult)
+/// unconditionally since, unlike the class path, nothing mutates `module`
+/// between computing it and this call.
 #[allow(clippy::too_many_arguments)]
 fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
@@ -1618,6 +1661,7 @@ fn handle_inline_protocol_definition(
     module_name_override: Option<&str>,
     stdlib_mode: bool,
     referenced_aliases: &[ecow::EcoString],
+    analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
 ) -> Term {
     let first_protocol_name = &module.protocols[0].name.name;
     let protocol_module_name =
@@ -1629,16 +1673,17 @@ fn handle_inline_protocol_definition(
         .map(|p| p.name.name.to_string())
         .collect();
 
-    match beamtalk_core::erlang::generate_module(
-        module,
-        beamtalk_core::erlang::CodegenOptions::new(&protocol_module_name)
-            .with_workspace_mode(true)
-            .with_source(source)
-            .with_class_superclass_index(class_superclass_index.clone())
-            .with_class_module_index(class_module_index)
-            .with_class_hierarchy(pre_class_hierarchy)
-            .with_pre_loaded_aliases(pre_loaded_aliases),
-    ) {
+    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&protocol_module_name)
+        .with_workspace_mode(true)
+        .with_source(source)
+        .with_class_superclass_index(class_superclass_index.clone())
+        .with_class_module_index(class_module_index)
+        .with_class_hierarchy(pre_class_hierarchy)
+        .with_pre_loaded_aliases(pre_loaded_aliases);
+    if let Some(analysis) = analysis {
+        codegen_options = codegen_options.with_analysis(analysis);
+    }
+    match beamtalk_core::erlang::generate_module(module, codegen_options) {
         Ok(code) => protocol_definition_ok_response(
             &code,
             &protocol_module_name,
@@ -1724,8 +1769,13 @@ fn handle_compile(request: &Map) -> Term {
     // `beamtalk_alias_xref`'s alias-name → dependent-class index at class
     // install time (see `diagnostics_ok_response`/this handler's response
     // builder for where the field is attached).
-    let (mut all_diagnostics, referenced_aliases) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
+    // BT-3123: `compute_diagnostics_and_analysis` additionally returns the
+    // full `AnalysisResult`, threaded into codegen below via
+    // `CodegenOptions::with_analysis` so it doesn't re-derive the class
+    // hierarchy, semantic facts, and inferred method return types from
+    // scratch.
+    let (mut all_diagnostics, analysis) =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
             parse_diagnostics,
             &[],
@@ -1733,6 +1783,7 @@ fn handle_compile(request: &Map) -> Term {
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
+    let referenced_aliases = analysis.referenced_aliases.clone();
 
     // Run @primitive validation
     let options = beamtalk_core::CompilerOptions {
@@ -1765,7 +1816,11 @@ fn handle_compile(request: &Map) -> Term {
         return diagnostic_error_response(&error_diags, &source);
     }
 
-    // BT-571: Merge standalone method definitions into their target classes
+    // BT-571: Merge standalone method definitions into their target classes.
+    // BT-3123: captured *before* the merge so the class-codegen call below
+    // knows whether `analysis` (computed pre-merge) is still trustworthy —
+    // see `handle_compile_expression`'s identical `analysis` gating for why.
+    let had_standalone_method_definitions = !module.method_definitions.is_empty();
     let mut module = module;
     if !module.method_definitions.is_empty() {
         let method_defs = std::mem::take(&mut module.method_definitions);
@@ -1851,6 +1906,7 @@ fn handle_compile(request: &Map) -> Term {
             module_name_override.as_deref(),
             stdlib_mode,
             &referenced_aliases,
+            Some(analysis),
         );
     }
 
@@ -1866,17 +1922,21 @@ fn handle_compile(request: &Map) -> Term {
 
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
-    match beamtalk_core::erlang::generate_module(
-        &module,
-        beamtalk_core::erlang::CodegenOptions::new(&module_name)
-            .with_workspace_mode(workspace_mode)
-            .with_source(&source)
-            .with_class_module_index(class_module_index)
-            .with_class_superclass_index(class_superclass_index)
-            .with_class_hierarchy(pre_class_hierarchy)
-            .with_pre_loaded_aliases(pre_loaded_aliases)
-            .with_source_path_opt(source_path.as_deref()),
-    ) {
+    let mut codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
+        .with_workspace_mode(workspace_mode)
+        .with_source(&source)
+        .with_class_module_index(class_module_index)
+        .with_class_superclass_index(class_superclass_index)
+        .with_class_hierarchy(pre_class_hierarchy)
+        .with_pre_loaded_aliases(pre_loaded_aliases)
+        .with_source_path_opt(source_path.as_deref());
+    // BT-3123: only trust `analysis` (computed pre-merge) when nothing was
+    // merged into `module` afterward — see `had_standalone_method_definitions`'s
+    // doc above.
+    if !had_standalone_method_definitions {
+        codegen_options = codegen_options.with_analysis(analysis);
+    }
+    match beamtalk_core::erlang::generate_module(&module, codegen_options) {
         Ok(code) => compile_ok_response(
             &code,
             &module_name,
@@ -2045,8 +2105,12 @@ fn handle_compile_method(request: &Map) -> Term {
     //    relative to the patched method (so the method editor shows a snippet-local
     //    line) while rarer class-context errors keep their merged-source line — all
     //    accurate and in-range (BT-2563 #2).
-    let (mut all_diagnostics, referenced_aliases) =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
+    // BT-3123: `compute_diagnostics_and_analysis` additionally returns the
+    // full `AnalysisResult` for the already-merged `merged_module` — no
+    // further mutation happens before the codegen call below, so it's always
+    // safe to thread through via `CodegenOptions::with_analysis`.
+    let (mut all_diagnostics, analysis) =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &merged_module,
             merged_parse_diags,
             &[],
@@ -2054,6 +2118,7 @@ fn handle_compile_method(request: &Map) -> Term {
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
+    let referenced_aliases = analysis.referenced_aliases.clone();
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode,
         allow_primitives: false,
@@ -2099,17 +2164,18 @@ fn handle_compile_method(request: &Map) -> Term {
         .collect();
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
 
-    match beamtalk_core::erlang::generate_module(
-        &merged_module,
-        beamtalk_core::erlang::CodegenOptions::new(&module_name)
-            .with_workspace_mode(workspace_mode)
-            .with_source(&merged_class_source)
-            .with_class_module_index(class_module_index)
-            .with_class_superclass_index(class_superclass_index)
-            .with_class_hierarchy(pre_class_hierarchy)
-            .with_pre_loaded_aliases(pre_loaded_aliases)
-            .with_source_path_opt(source_path.as_deref()),
-    ) {
+    let codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
+        .with_workspace_mode(workspace_mode)
+        .with_source(&merged_class_source)
+        .with_class_module_index(class_module_index)
+        .with_class_superclass_index(class_superclass_index)
+        .with_class_hierarchy(pre_class_hierarchy)
+        .with_pre_loaded_aliases(pre_loaded_aliases)
+        .with_source_path_opt(source_path.as_deref())
+        // BT-3123: `analysis` was computed on `merged_module` with no
+        // mutation since — always safe to hand off.
+        .with_analysis(analysis);
+    match beamtalk_core::erlang::generate_module(&merged_module, codegen_options) {
         Ok(code) => compile_method_ok_response(
             &code,
             &module_name,
