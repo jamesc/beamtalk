@@ -1192,9 +1192,19 @@ Fun receives (ClassName, ClassPid, Acc) and returns:
   {cont, NewAcc}   — continue walking to superclass
   {halt, Result}   — stop and return Result immediately
 
-Returns Acc when the chain is exhausted (none or unregistered class), or
-when the walk exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy cycle) — the
-latter case also logs a `?LOG_WARNING`.
+When the chain is exhausted (none or unregistered class), returns the fully
+folded accumulator built up through every ancestor visited.
+
+When the walk instead exhausts `?MAX_HIERARCHY_DEPTH` (a hierarchy cycle),
+returns the ORIGINAL `Acc` passed into this call — not the partial
+accumulator folded up through the ~`?MAX_HIERARCHY_DEPTH` ancestors visited
+before the guard tripped — and logs a `?LOG_WARNING`. This is a deliberate,
+narrower contract than the hand-rolled recursion this function replaced
+(which did return the partial fold): `walk_ancestors/3`'s `max_depth_exceeded`
+carries no payload, so every caller here falls back to a fixed default on
+this already-anomalous path rather than threading partial state back out.
+Only reachable via an actual hierarchy cycle or a legitimately
+`?MAX_HIERARCHY_DEPTH`-level-deep hierarchy.
 
 BT-3087: The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the

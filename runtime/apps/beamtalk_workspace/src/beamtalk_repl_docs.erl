@@ -962,6 +962,13 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
 Walk the class hierarchy collecting class-side methods.
 Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
 
+On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns `#{}`
+— not the partial map folded up through the ancestors visited before the
+guard tripped — and logs a `?LOG_WARNING`. Deliberately narrower than
+returning partial results: `walk_ancestors/3`'s `max_depth_exceeded` carries
+no payload, so every caller falls back to a fixed default on this
+already-anomalous path.
+
 BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` (the shared depth
 guard + cycle warning) rather than a hand-rolled recursion, matching the
 instance-side `collect_flattened_methods/2` (now in `beamtalk_hierarchy_docs`)
