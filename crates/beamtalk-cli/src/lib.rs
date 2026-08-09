@@ -12,10 +12,13 @@
 //!   resolution shared with `beamtalk-mcp` (BT-2823)
 //! - [`native_type_specs`] — Erlang FFI type-spec extraction shared with
 //!   `beamtalk-mcp` (BT-2858)
+//! - [`pid_liveness`] — cross-platform "is this PID alive?" check, shared
+//!   with `tests/cli_common` (BT-3077)
 
 pub mod build_layout;
 pub mod dependency_classes;
 pub mod erlc;
 pub mod manifest;
 pub mod native_type_specs;
+pub mod pid_liveness;
 pub mod repl_startup;
