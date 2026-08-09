@@ -40,6 +40,7 @@ use crate::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
 use crate::lint::LintPass;
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Lint pass that warns about dead variable assignments inside blocks on value types.
@@ -51,9 +52,21 @@ impl LintPass for DeadBlockAssignmentPass {
         let mut scope = LintScope::new();
         walk_expr_seq(&module.expressions, &mut scope, None, diagnostics);
 
+        // BT-3092: `run_lint_passes` runs on the freshly-parsed module, before
+        // `apply_class_kind_writeback` (which only runs inside codegen). So
+        // `class.class_kind` here is still `ClassKind::from_superclass_name`'s
+        // shallow, direct-superclass-only placeholder — it misses indirect
+        // Actor subclasses (e.g. `class Foo extends Bar` where `Bar extends
+        // Actor`). Build a lightweight hierarchy from this module and use
+        // `resolve_class_kind`, the single authority for actor/value
+        // classification (BT-3086), which walks the full ancestor chain.
+        let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
+        let hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+
         for class in &module.classes {
-            // Skip Actor subclasses — block mutations DO propagate for actors
-            if class.class_kind == ClassKind::Actor {
+            // Skip Actor subclasses (including indirect ones) — block
+            // mutations DO propagate for actors.
+            if hierarchy.resolve_class_kind(&class.name.name) == ClassKind::Actor {
                 continue;
             }
             for method in class.methods.iter().chain(class.class_methods.iter()) {
@@ -61,9 +74,9 @@ impl LintPass for DeadBlockAssignmentPass {
             }
         }
 
-        // Standalone method definitions: need to determine class kind from module
+        // Standalone method definitions: need to determine class kind from the hierarchy
         for standalone in &module.method_definitions {
-            let class_kind = find_class_kind(module, &standalone.class_name.name);
+            let class_kind = find_class_kind(&hierarchy, &standalone.class_name.name);
             if class_kind == ClassKind::Actor {
                 continue;
             }
@@ -72,13 +85,10 @@ impl LintPass for DeadBlockAssignmentPass {
     }
 }
 
-/// Find the `ClassKind` for a standalone method's class name.
-fn find_class_kind(module: &Module, class_name: &str) -> ClassKind {
-    module
-        .classes
-        .iter()
-        .find(|c| c.name.name.as_str() == class_name)
-        .map_or(ClassKind::Object, |c| c.class_kind)
+/// Find the `ClassKind` for a standalone method's class name, resolving the
+/// full ancestor chain (BT-3092) rather than only the direct superclass.
+fn find_class_kind(hierarchy: &ClassHierarchy, class_name: &str) -> ClassKind {
+    hierarchy.resolve_class_kind(class_name)
 }
 
 // ── Scope tracking ────────────────────────────────────────────────────────────
@@ -596,6 +606,30 @@ Actor subclass: Counter
         );
     }
 
+    /// Indirect Actor subclass (two hops: `Actor <- BaseActor <- Counter`) —
+    /// block mutations still propagate for actors, no warning (BT-3092).
+    ///
+    /// `Counter`'s direct superclass is `BaseActor`, not `Actor` literally,
+    /// so `class.class_kind` (the pre-writeback `ClassKind::from_superclass_name`
+    /// placeholder) would be `ClassKind::Object` here. The lint must resolve
+    /// the full ancestor chain instead to correctly skip this class.
+    #[test]
+    fn indirect_actor_subclass_no_warn() {
+        let src = "\
+Actor subclass: BaseActor
+  noop => nil
+BaseActor subclass: Counter
+  state: count = 0
+  increment =>
+    x := 0
+    true ifTrue: [x := 1]";
+        let diags = lint(src);
+        assert!(
+            diags.is_empty(),
+            "Expected no lints for indirect Actor subclass, got: {diags:?}"
+        );
+    }
+
     /// Object subclass — block mutations DON'T propagate, should warn.
     #[test]
     fn object_class_warns() {
@@ -669,6 +703,26 @@ Object subclass: Foo
     }
 
     // ── Standalone method definitions ─────────────────────────────────────────
+
+    /// Standalone method (`Counter >> increment`) on an indirect Actor
+    /// subclass — `find_class_kind` must also resolve the full ancestor
+    /// chain, not just the direct superclass (BT-3092).
+    #[test]
+    fn standalone_method_indirect_actor_subclass_no_warn() {
+        let src = "\
+Actor subclass: BaseActor
+  noop => nil
+BaseActor subclass: Counter
+  state: count = 0
+Counter >> increment =>
+  x := 0
+  true ifTrue: [x := 1]";
+        let diags = lint(src);
+        assert!(
+            diags.is_empty(),
+            "Expected no lints for standalone method on indirect Actor subclass, got: {diags:?}"
+        );
+    }
 
     /// Standalone method on an Object class — should warn.
     #[test]
