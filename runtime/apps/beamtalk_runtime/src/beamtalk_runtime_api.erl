@@ -138,6 +138,13 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     hierarchy_foldl/2
 ]).
 
+%%% ===================================================================
+%%% Selector Shape (BT-3090)
+%%% ===================================================================
+-export([
+    is_keyword_selector/1
+]).
+
 %%% ====================================================================
 %%% Class Registry Delegators
 %%% ====================================================================
@@ -397,3 +404,16 @@ future_await(Future, Timeout) ->
 -spec hierarchy_foldl(fun(), term()) -> term().
 hierarchy_foldl(Fun, Acc) ->
     beamtalk_class_metadata:foldl(Fun, Acc).
+
+%%% ====================================================================
+%%% Selector Shape Delegators (BT-3090)
+%%% ====================================================================
+
+-doc """
+True when a selector is a keyword selector — non-empty and ending with `:`.
+See `beamtalk_class_builder:is_keyword_selector/1` for the canonical
+definition (correctly `false` for a malformed selector like `'at:put'`).
+""".
+-spec is_keyword_selector(atom() | binary() | string()) -> boolean().
+is_keyword_selector(Selector) ->
+    beamtalk_class_builder:is_keyword_selector(Selector).
