@@ -64,6 +64,7 @@ pub mod repl;
 pub mod run;
 pub mod test;
 pub mod test_docs;
+pub mod test_metamorphic;
 pub mod test_stdlib;
 pub(crate) mod toml_utils;
 pub mod transcript;

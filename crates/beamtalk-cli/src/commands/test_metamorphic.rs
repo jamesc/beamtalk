@@ -1,0 +1,995 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Metamorphic testing harness (BT-3117).
+//!
+//! **DDD Context:** CLI / Test System
+//!
+//! Applies semantics-preserving AST transforms to `.btscript` `// =>`
+//! expressions and asserts the transformed expression evaluates to the same
+//! expected result as the original -- reusing `test_stdlib`'s exact
+//! compile-to-Core-Erlang + `EUnit` execution pipeline for both, rather than a
+//! second hand-rolled evaluator (ADR 0011).
+//!
+//! Each transform is a probe into closure conversion, variable scoping, and
+//! state threading -- exactly the silently-wrong bug classes (ADR 0110's
+//! NLR-relay bug losing a side effect while returning the right value,
+//! state-threading bugs under mutation-in-control-flow) that hand-written
+//! `// =>` literals can't catch on their own, because nobody writes a
+//! second literal for "the same value as an equivalent-but-differently
+//! shaped program".
+//!
+//! Transforms:
+//! - **Block-wrap**: `expr` -> `[expr] value`
+//! - **Rename-locals**: consistent alpha-renaming of every name *bound*
+//!   inside the expression (block parameters, `:=` assignment targets,
+//!   match-pattern bindings). Free variables -- names referenced but never
+//!   bound inside this expression, which may resolve to an earlier `// =>`
+//!   unit's shared REPL-turn binding in the same file -- are left
+//!   untouched, since renaming those would break correctness rather than
+//!   test it.
+//! - **Redundant-temp**: `expr` -> `[tmp := expr. tmp] value`, block-wrapped
+//!   so the whole transform stays a single top-level expression (every
+//!   other `.btscript` unit is exactly one `Expression`).
+//!
+//! Each candidate transform output is unparsed and re-parsed before use
+//! (mirroring `unparse`'s own `unparse_roundtrip_preserves_structure`
+//! property test) -- a transform that doesn't round-trip cleanly is
+//! skipped for that unit rather than fed into the compiler.
+
+use crate::beam_compiler::BeamCompiler;
+use crate::commands::test_stdlib::{
+    self, AssertionCase, CompiledTestFile, EunitBatchResult, TestRunOptions, compile_erl_files,
+    compile_expression_to_core, compile_fixture, generate_eunit_wrapper_for, parse_test_file,
+    run_all_eunit_tests,
+};
+use crate::commands::util;
+use beamtalk_core::ast::{
+    Block, Expression, ExpressionStatement, Identifier, MessageSelector, Module, Pattern,
+    StringSegment,
+};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::unparse::unparse_module;
+use camino::Utf8PathBuf;
+use ecow::EcoString;
+use miette::{IntoDiagnostic, Result, WrapErr};
+use std::collections::{BTreeSet, HashMap};
+use std::fs;
+
+// ============================================================================
+// Transforms
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transform {
+    BlockWrap,
+    RenameLocals,
+    RedundantTemp,
+}
+
+impl Transform {
+    const ALL: [Transform; 3] = [Self::BlockWrap, Self::RenameLocals, Self::RedundantTemp];
+
+    fn tag(self) -> &'static str {
+        match self {
+            Self::BlockWrap => "block_wrap",
+            Self::RenameLocals => "rename_locals",
+            Self::RedundantTemp => "redundant_temp",
+        }
+    }
+
+    /// Applies the transform to `expr`, returning the transformed
+    /// expression, or `None` if the transform does not apply to this
+    /// particular expression (e.g. rename-locals when nothing is bound).
+    fn apply(self, expr: &Expression) -> Option<Expression> {
+        match self {
+            Self::BlockWrap => Some(block_wrap(expr)),
+            Self::RedundantTemp => Some(redundant_temp(expr)),
+            Self::RenameLocals => rename_locals(expr),
+        }
+    }
+}
+
+/// `expr` -> `[expr] value`.
+fn block_wrap(expr: &Expression) -> Expression {
+    let span = expr.span();
+    Expression::MessageSend {
+        receiver: Box::new(Expression::Block(Block::new(
+            vec![],
+            vec![ExpressionStatement::bare(expr.clone())],
+            span,
+        ))),
+        selector: MessageSelector::Unary("value".into()),
+        arguments: vec![],
+        is_cast: false,
+        span,
+    }
+}
+
+/// `expr` -> `[tmp := expr. tmp] value`, `tmp` chosen to avoid colliding
+/// with any name already appearing in `expr` (bound or free).
+fn redundant_temp(expr: &Expression) -> Expression {
+    let span = expr.span();
+    let mut used = BTreeSet::new();
+    collect_all_names(expr, &mut used);
+    let tmp: EcoString = fresh_name("mtTmp", &used).into();
+
+    let assign = Expression::Assignment {
+        target: Box::new(Expression::Identifier(Identifier::new(tmp.clone(), span))),
+        value: Box::new(expr.clone()),
+        type_annotation: None,
+        span,
+    };
+    let read_tmp = Expression::Identifier(Identifier::new(tmp, span));
+
+    Expression::MessageSend {
+        receiver: Box::new(Expression::Block(Block::new(
+            vec![],
+            vec![
+                ExpressionStatement::bare(assign),
+                ExpressionStatement::bare(read_tmp),
+            ],
+            span,
+        ))),
+        selector: MessageSelector::Unary("value".into()),
+        arguments: vec![],
+        is_cast: false,
+        span,
+    }
+}
+
+/// Consistently alpha-renames every name *bound* somewhere inside `expr`
+/// (block parameters, `:=` assignment targets, match-pattern bindings),
+/// including all of that name's occurrences within `expr`. Names that are
+/// only ever referenced, never bound, inside this expression are left
+/// alone -- see the module doc for why (they may be free variables
+/// resolving to an earlier `// =>` unit's shared binding).
+///
+/// Returns `None` if `expr` binds nothing (nothing to rename).
+fn rename_locals(expr: &Expression) -> Option<Expression> {
+    let mut bound = BTreeSet::new();
+    collect_bound_names(expr, &mut bound);
+    if bound.is_empty() {
+        return None;
+    }
+    let mut all_names = BTreeSet::new();
+    collect_all_names(expr, &mut all_names);
+
+    let mut mapping: HashMap<EcoString, EcoString> = HashMap::new();
+    for name in &bound {
+        let fresh: EcoString = fresh_name(&format!("{name}R"), &all_names).into();
+        all_names.insert(fresh.clone());
+        mapping.insert(name.clone(), fresh);
+    }
+
+    let mut renamed = expr.clone();
+    rename_names_mut(&mut renamed, &mapping);
+    Some(renamed)
+}
+
+/// Picks a name starting with `base` that isn't already in `used`,
+/// appending a numeric suffix if needed.
+fn fresh_name(base: &str, used: &BTreeSet<EcoString>) -> String {
+    if !used.iter().any(|u| u.as_str() == base) {
+        return base.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{base}{n}");
+        if !used.iter().any(|u| u.as_str() == candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+// ============================================================================
+// Name collection / renaming
+//
+// Two parallel tree walks over the same set of Expression/Pattern shapes:
+// walk_names_ref (read-only, tags each name as a Binding or a Reference,
+// used to collect the "what's bound"/"what's used at all" sets) and
+// rename_names_mut (in-place, renames every occurrence -- binding or
+// reference -- of any name present in the supplied mapping). They are kept
+// as two direct recursive functions rather than one generic visitor: the
+// two have genuinely different signatures (fold vs. mutate) and this
+// module's AST surface is small enough that a shared-abstraction visitor
+// would cost more than it saves here.
+// ============================================================================
+
+#[derive(Clone, Copy)]
+enum NameKind {
+    Binding,
+    Reference,
+}
+
+fn collect_all_names(expr: &Expression, names: &mut BTreeSet<EcoString>) {
+    walk_names_ref(expr, &mut |n, _kind| {
+        names.insert(n.clone());
+    });
+}
+
+fn collect_bound_names(expr: &Expression, names: &mut BTreeSet<EcoString>) {
+    walk_names_ref(expr, &mut |n, kind| {
+        if matches!(kind, NameKind::Binding) {
+            names.insert(n.clone());
+        }
+    });
+}
+
+fn walk_names_ref(expr: &Expression, on_name: &mut dyn FnMut(&EcoString, NameKind)) {
+    match expr {
+        Expression::Literal(_, _)
+        | Expression::ClassReference { .. }
+        | Expression::Super(_)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. }
+        | Expression::Error { .. } => {}
+        Expression::Identifier(id) => on_name(&id.name, NameKind::Reference),
+        Expression::FieldAccess { receiver, .. } => walk_names_ref(receiver, on_name),
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            walk_names_ref(receiver, on_name);
+            for a in arguments {
+                walk_names_ref(a, on_name);
+            }
+        }
+        Expression::Block(block) => {
+            for p in &block.parameters {
+                on_name(&p.name, NameKind::Binding);
+            }
+            for stmt in &block.body {
+                walk_names_ref(&stmt.expression, on_name);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            if let Expression::Identifier(id) = target.as_ref() {
+                on_name(&id.name, NameKind::Binding);
+            } else {
+                walk_names_ref(target, on_name);
+            }
+            walk_names_ref(value, on_name);
+        }
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            walk_pattern_names_ref(pattern, on_name);
+            walk_names_ref(value, on_name);
+        }
+        Expression::Return { value, .. } => walk_names_ref(value, on_name),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            walk_names_ref(receiver, on_name);
+            for m in messages {
+                for a in &m.arguments {
+                    walk_names_ref(a, on_name);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => walk_names_ref(expression, on_name),
+        Expression::Match { value, arms, .. } => {
+            walk_names_ref(value, on_name);
+            for arm in arms {
+                walk_pattern_names_ref(&arm.pattern, on_name);
+                if let Some(guard) = &arm.guard {
+                    walk_names_ref(guard, on_name);
+                }
+                walk_names_ref(&arm.body, on_name);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                walk_names_ref(&pair.key, on_name);
+                walk_names_ref(&pair.value, on_name);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for e in elements {
+                walk_names_ref(e, on_name);
+            }
+            if let Some(t) = tail {
+                walk_names_ref(t, on_name);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for e in elements {
+                walk_names_ref(e, on_name);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let StringSegment::Interpolation(e) = seg {
+                    walk_names_ref(e, on_name);
+                }
+            }
+        }
+    }
+}
+
+fn walk_pattern_names_ref(pattern: &Pattern, on_name: &mut dyn FnMut(&EcoString, NameKind)) {
+    match pattern {
+        Pattern::Wildcard(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Nil(_)
+        | Pattern::Binary { .. } => {}
+        Pattern::Variable(id) => on_name(&id.name, NameKind::Binding),
+        Pattern::Type { binding, .. } => on_name(&binding.name, NameKind::Binding),
+        Pattern::Tuple { elements, .. } => {
+            for e in elements {
+                walk_pattern_names_ref(e, on_name);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for e in elements {
+                walk_pattern_names_ref(e, on_name);
+            }
+            if let Some(r) = rest {
+                walk_pattern_names_ref(r, on_name);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for e in elements {
+                walk_pattern_names_ref(e, on_name);
+            }
+            if let Some(t) = tail {
+                walk_pattern_names_ref(t, on_name);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                walk_pattern_names_ref(&pair.value, on_name);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_, p) in keywords {
+                walk_pattern_names_ref(p, on_name);
+            }
+        }
+    }
+}
+
+fn rename_names_mut(expr: &mut Expression, mapping: &HashMap<EcoString, EcoString>) {
+    match expr {
+        Expression::Literal(_, _)
+        | Expression::ClassReference { .. }
+        | Expression::Super(_)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. }
+        | Expression::Error { .. } => {}
+        Expression::Identifier(id) => rename_if_mapped(&mut id.name, mapping),
+        Expression::FieldAccess { receiver, .. } => rename_names_mut(receiver, mapping),
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            rename_names_mut(receiver, mapping);
+            for a in arguments {
+                rename_names_mut(a, mapping);
+            }
+        }
+        Expression::Block(block) => {
+            for p in &mut block.parameters {
+                rename_if_mapped(&mut p.name, mapping);
+            }
+            for stmt in &mut block.body {
+                rename_names_mut(&mut stmt.expression, mapping);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            if let Expression::Identifier(id) = target.as_mut() {
+                rename_if_mapped(&mut id.name, mapping);
+            } else {
+                rename_names_mut(target, mapping);
+            }
+            rename_names_mut(value, mapping);
+        }
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            rename_pattern_names_mut(pattern, mapping);
+            rename_names_mut(value, mapping);
+        }
+        Expression::Return { value, .. } => rename_names_mut(value, mapping),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            rename_names_mut(receiver, mapping);
+            for m in messages {
+                for a in &mut m.arguments {
+                    rename_names_mut(a, mapping);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => rename_names_mut(expression, mapping),
+        Expression::Match { value, arms, .. } => {
+            rename_names_mut(value, mapping);
+            for arm in arms {
+                rename_pattern_names_mut(&mut arm.pattern, mapping);
+                if let Some(guard) = &mut arm.guard {
+                    rename_names_mut(guard, mapping);
+                }
+                rename_names_mut(&mut arm.body, mapping);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                rename_names_mut(&mut pair.key, mapping);
+                rename_names_mut(&mut pair.value, mapping);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for e in elements {
+                rename_names_mut(e, mapping);
+            }
+            if let Some(t) = tail {
+                rename_names_mut(t, mapping);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for e in elements {
+                rename_names_mut(e, mapping);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let StringSegment::Interpolation(e) = seg {
+                    rename_names_mut(e, mapping);
+                }
+            }
+        }
+    }
+}
+
+fn rename_pattern_names_mut(pattern: &mut Pattern, mapping: &HashMap<EcoString, EcoString>) {
+    match pattern {
+        Pattern::Wildcard(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Nil(_)
+        | Pattern::Binary { .. } => {}
+        Pattern::Variable(id) => rename_if_mapped(&mut id.name, mapping),
+        Pattern::Type { binding, .. } => rename_if_mapped(&mut binding.name, mapping),
+        Pattern::Tuple { elements, .. } => {
+            for e in elements {
+                rename_pattern_names_mut(e, mapping);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for e in elements {
+                rename_pattern_names_mut(e, mapping);
+            }
+            if let Some(r) = rest {
+                rename_pattern_names_mut(r, mapping);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for e in elements {
+                rename_pattern_names_mut(e, mapping);
+            }
+            if let Some(t) = tail {
+                rename_pattern_names_mut(t, mapping);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                rename_pattern_names_mut(&mut pair.value, mapping);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_, p) in keywords {
+                rename_pattern_names_mut(p, mapping);
+            }
+        }
+    }
+}
+
+fn rename_if_mapped(name: &mut EcoString, mapping: &HashMap<EcoString, EcoString>) {
+    if let Some(new_name) = mapping.get(name) {
+        *name = new_name.clone();
+    }
+}
+
+// ============================================================================
+// Building transformed test cases
+// ============================================================================
+
+/// `true` if `expr` is (unwrapping any parens) a bare `Identifier := value`
+/// assignment -- the exact shape `test_stdlib::extract_assignment_var`
+/// pattern-matches to detect a `.btscript` unit that establishes a
+/// cross-unit REPL-turn binding. See [`build_transformed_case`]'s doc for
+/// why these are never transformed.
+fn is_repl_turn_binding(expr: &Expression) -> bool {
+    matches!(
+        expr.unwrap_parens(),
+        Expression::Assignment { target, .. } if matches!(target.unwrap_parens(), Expression::Identifier(_))
+    )
+}
+
+/// Applies `transform` to `case.expression`, unparses and re-parses the
+/// result, and returns a new [`TestCase`](test_stdlib::TestCase) with the
+/// transformed source text (same `expected`/`line` as the original --
+/// applying a semantics-preserving transform must not change the value a
+/// unit evaluates to).
+///
+/// Returns `None` if the transform doesn't apply to this expression shape
+/// (see [`Transform::apply`]), if the unit is a top-level REPL-turn binding
+/// (see below), or if the transformed text doesn't re-parse cleanly --
+/// either way, this unit is skipped for this transform rather than fed
+/// into the compiler.
+///
+/// **Top-level bindings are passed through unchanged, never transformed.**
+/// `.btscript`'s cross-unit "REPL turn" semantics (module doc / architecture
+/// note in `test_stdlib::extract_assignment_var`) are a text-pattern match
+/// on each case's *source text*: a case shaped exactly `name := value` has
+/// `name` threaded into the shared `Bindings` map later cases in the same
+/// file can reference. Every transform here changes the unit's outer shape
+/// (wraps it in `[... ] value`) or its bound names (rename-locals) -- either
+/// would defeat that text match for a case that itself establishes a
+/// binding, silently breaking every later case in the file that depends on
+/// it. That is a `.btscript`-format artifact, not a real semantics change in
+/// compiled Beamtalk, so cases of this exact shape are carried into the
+/// transformed module verbatim -- still asserted (against their own
+/// original `// =>` value, same as `test_stdlib`), just not themselves a
+/// transform-under-test -- so later cases that reference the binding keep
+/// seeing it.
+fn build_transformed_case(
+    case: &test_stdlib::TestCase,
+    transform: Transform,
+) -> Option<test_stdlib::TestCase> {
+    let tokens = lex_with_eof(&case.expression);
+    let (module, diagnostics) = parse(tokens);
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        // Shouldn't happen: test_stdlib already compiled this expression
+        // successfully as part of the corpus it was parsed from.
+        return None;
+    }
+    let orig_expr = &module.expressions.first()?.expression;
+
+    if is_repl_turn_binding(orig_expr) {
+        return Some(test_stdlib::TestCase {
+            expression: case.expression.clone(),
+            expected: case.expected.clone(),
+            line: case.line,
+        });
+    }
+
+    let transformed_expr = transform.apply(orig_expr)?;
+
+    let synthetic = Module::new(
+        vec![ExpressionStatement::bare(transformed_expr)],
+        orig_expr.span(),
+    );
+    let expr_text = unparse_module(&synthetic).trim().to_string();
+
+    // Round-trip check, mirroring unparse's own
+    // unparse_roundtrip_preserves_structure property test: the transform
+    // must produce text that re-parses cleanly.
+    let reparsed_tokens = lex_with_eof(&expr_text);
+    let (_reparsed_module, reparsed_diagnostics) = parse(reparsed_tokens);
+    if reparsed_diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
+        return None;
+    }
+
+    Some(test_stdlib::TestCase {
+        expression: expr_text,
+        expected: case.expected.clone(),
+        line: case.line,
+    })
+}
+
+// ============================================================================
+// Per-(file, transform) compilation
+// ============================================================================
+
+/// Everything `run_tests` needs to fold one successfully-compiled
+/// (file, transform) variant into its running accumulators.
+struct TransformVariant {
+    core_files: Vec<Utf8PathBuf>,
+    erl_file: Utf8PathBuf,
+    compiled: CompiledTestFile,
+    label: String,
+}
+
+/// Builds and compiles every case in `parsed_cases` under `transform` for
+/// one source file, writing the resulting `.core`/`.erl` files into
+/// `build_dir`. Returns `(skipped_count, None)` if every case was skipped
+/// (nothing to compile for this transform), or `(skipped_count,
+/// Some(variant))` with the compiled artifacts otherwise.
+fn compile_transform_variant(
+    test_file: &camino::Utf8Path,
+    file_stem: &str,
+    safe_stem: &str,
+    parsed_cases: &[test_stdlib::TestCase],
+    transform: Transform,
+    build_dir: &camino::Utf8Path,
+) -> Result<(usize, Option<TransformVariant>)> {
+    let mut originals: Vec<&test_stdlib::TestCase> = Vec::new();
+    let mut transformed_cases: Vec<test_stdlib::TestCase> = Vec::new();
+    let mut skipped = 0usize;
+    for case in parsed_cases {
+        match build_transformed_case(case, transform) {
+            Some(new_case) => {
+                originals.push(case);
+                transformed_cases.push(new_case);
+            }
+            None => skipped += 1,
+        }
+    }
+    if transformed_cases.is_empty() {
+        return Ok((skipped, None));
+    }
+
+    let mut eval_module_names = Vec::new();
+    let mut core_files = Vec::new();
+    for (i, case) in transformed_cases.iter().enumerate() {
+        let module_name = format!("mt_{safe_stem}_{}_{i}", transform.tag());
+        match compile_expression_to_core(&case.expression, &module_name) {
+            Ok(core_erlang) => {
+                let core_file = build_dir.join(format!("{module_name}.core"));
+                fs::write(&core_file, core_erlang)
+                    .into_diagnostic()
+                    .wrap_err_with(|| {
+                        format!(
+                            "Failed to write Core Erlang for {}:{} [{}]",
+                            test_file,
+                            originals[i].line,
+                            transform.tag()
+                        )
+                    })?;
+                core_files.push(core_file);
+                eval_module_names.push(module_name);
+            }
+            Err(err) => {
+                // A transformed unit that unparsed/re-parsed cleanly
+                // (checked in build_transformed_case) but still fails to
+                // codegen is itself a real finding: it means the transform
+                // produced a shape codegen can't yet handle. Surface it as
+                // a hard failure rather than silently skipping.
+                miette::bail!(
+                    "Failed to compile metamorphic [{}] variant of {}:{}: {}\n  \
+                     Original:    {}\n  Transformed: {}",
+                    transform.tag(),
+                    test_file,
+                    originals[i].line,
+                    err,
+                    originals[i].expression,
+                    case.expression
+                );
+            }
+        }
+    }
+
+    let assertion_cases: Vec<AssertionCase<'_>> = transformed_cases
+        .iter()
+        .map(|c| AssertionCase {
+            expression: &c.expression,
+            expected: &c.expected,
+            line: c.line,
+        })
+        .collect();
+
+    let test_module_name = format!("mt_{safe_stem}_{}_tests", transform.tag());
+    let source_path = format!("{test_file} [{}]", transform.tag());
+    let eunit_source = generate_eunit_wrapper_for(
+        &test_module_name,
+        &format!("{test_module_name}_test_"),
+        &format!(
+            "%% Generated metamorphic [{}] variant of {}",
+            transform.tag(),
+            test_file
+        ),
+        &source_path,
+        &assertion_cases,
+        &eval_module_names,
+    );
+    let erl_file = build_dir.join(format!("{test_module_name}.erl"));
+    fs::write(&erl_file, &eunit_source)
+        .into_diagnostic()
+        .wrap_err("Failed to write EUnit wrapper")?;
+
+    Ok((
+        skipped,
+        Some(TransformVariant {
+            core_files,
+            erl_file,
+            compiled: CompiledTestFile {
+                source_file: test_file.to_owned(),
+                module_name: test_module_name,
+                assertion_count: assertion_cases.len(),
+            },
+            label: format!("{file_stem} [{}]", transform.tag()),
+        }),
+    ))
+}
+
+/// Compiles every `@load` fixture referenced by `parsed`, returning the
+/// resulting `bt@...` module names.
+fn compile_load_fixtures(
+    parsed: &test_stdlib::ParsedTestFile,
+    test_file: &camino::Utf8Path,
+    build_dir: &camino::Utf8Path,
+    opts: &TestRunOptions,
+) -> Result<Vec<String>> {
+    let mut fixture_modules = Vec::new();
+    for load_path in &parsed.load_files {
+        let fixture_path = Utf8PathBuf::from(load_path);
+        if !fixture_path.exists() {
+            miette::bail!(
+                "Fixture file '{}' referenced by @load in '{}' not found",
+                load_path,
+                test_file
+            );
+        }
+        let module_name = compile_fixture(
+            &fixture_path,
+            build_dir,
+            opts.no_warnings,
+            opts.warnings_as_errors,
+        )?;
+        fixture_modules.push(module_name);
+    }
+    Ok(fixture_modules)
+}
+
+/// Everything one source file contributes to `run_tests`'s running
+/// accumulators, across all of `Transform::ALL`.
+struct FileVariants {
+    fixture_modules: Vec<String>,
+    core_files: Vec<Utf8PathBuf>,
+    erl_files: Vec<Utf8PathBuf>,
+    compiled: Vec<CompiledTestFile>,
+    labels: Vec<String>,
+    skipped: usize,
+}
+
+/// Parses one `.btscript` file, compiles its `@load` fixtures, and builds +
+/// compiles every transform variant of its cases.
+fn process_test_file(
+    test_file: &camino::Utf8Path,
+    build_dir: &camino::Utf8Path,
+    opts: &TestRunOptions,
+) -> Result<FileVariants> {
+    let content = fs::read_to_string(test_file)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{test_file}'"))?;
+    let parsed = parse_test_file(&content);
+
+    // Same enforcement as test_stdlib: a corpus file with expressions
+    // missing assertions is a corpus regression, not something this
+    // harness should silently work around (BT-3117).
+    if !parsed.warnings.is_empty() {
+        for warning in &parsed.warnings {
+            eprintln!("⚠️  {test_file}: {warning}");
+        }
+        miette::bail!(
+            "{} has {} expression(s) without assertions",
+            test_file,
+            parsed.warnings.len()
+        );
+    }
+
+    let fixture_modules = compile_load_fixtures(&parsed, test_file, build_dir, opts)?;
+
+    let file_stem = test_file
+        .file_stem()
+        .ok_or_else(|| miette::miette!("Test file has no name: {}", test_file))?;
+    let safe_stem: String = file_stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    let mut result = FileVariants {
+        fixture_modules,
+        core_files: Vec::new(),
+        erl_files: Vec::new(),
+        compiled: Vec::new(),
+        labels: Vec::new(),
+        skipped: 0,
+    };
+    for transform in Transform::ALL {
+        let (skipped, variant) = compile_transform_variant(
+            test_file,
+            file_stem,
+            &safe_stem,
+            &parsed.cases,
+            transform,
+            build_dir,
+        )?;
+        result.skipped += skipped;
+        if let Some(variant) = variant {
+            result.core_files.extend(variant.core_files);
+            result.erl_files.push(variant.erl_file);
+            result.compiled.push(variant.compiled);
+            result.labels.push(variant.label);
+        }
+    }
+    Ok(result)
+}
+
+// ============================================================================
+// Main entry point
+// ============================================================================
+
+/// Run the metamorphic testing harness (BT-3117).
+///
+/// Finds all `.btscript` files in the given path, applies each transform in
+/// [`Transform::ALL`] to every `// =>` expression, and asserts each
+/// transformed variant evaluates to the same expected result as the
+/// original -- via the same compile-to-Core-Erlang + `EUnit` pipeline
+/// `test_stdlib` uses for the originals.
+pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
+    let test_path = Utf8PathBuf::from(path);
+    if !test_path.exists() {
+        miette::bail!("Test path '{}' not found", test_path);
+    }
+
+    let test_files = util::find_files(&test_path, &["btscript"])?;
+    if test_files.is_empty() {
+        println!("No .btscript test files found in '{test_path}'");
+        return Ok(());
+    }
+
+    if !opts.quiet {
+        println!(
+            "Generating metamorphic variants ({} transforms) for {} test file(s)...",
+            Transform::ALL.len(),
+            test_files.len()
+        );
+    }
+
+    let temp_dir = tempfile::tempdir()
+        .into_diagnostic()
+        .wrap_err("Failed to create temporary directory")?;
+    let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
+        .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
+
+    let mut compiled_files: Vec<CompiledTestFile> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    let mut all_core_files = Vec::new();
+    let mut all_erl_files = Vec::new();
+    let mut all_fixture_modules = Vec::new();
+    let mut skipped_units = 0usize;
+
+    for test_file in &test_files {
+        let variants = process_test_file(test_file, &build_dir, opts)?;
+        all_fixture_modules.extend(variants.fixture_modules);
+        all_core_files.extend(variants.core_files);
+        all_erl_files.extend(variants.erl_files);
+        compiled_files.extend(variants.compiled);
+        labels.extend(variants.labels);
+        skipped_units += variants.skipped;
+    }
+
+    all_fixture_modules.sort();
+    all_fixture_modules.dedup();
+
+    if !all_core_files.is_empty() {
+        let compiler = BeamCompiler::new(build_dir.clone());
+        compiler
+            .compile_batch(&all_core_files)
+            .wrap_err("Failed to batch-compile metamorphic expression modules to BEAM")?;
+    }
+
+    compile_erl_files(&all_erl_files, &build_dir)?;
+
+    let test_module_names: Vec<&str> = compiled_files
+        .iter()
+        .map(|f| f.module_name.as_str())
+        .collect();
+    let total_tests: usize = compiled_files.iter().map(|f| f.assertion_count).sum();
+
+    if test_module_names.is_empty() {
+        println!(
+            "No metamorphic-testable expressions found ({skipped_units} expression/transform \
+             combination(s) skipped -- transform not applicable or didn't round-trip cleanly)."
+        );
+        return Ok(());
+    }
+
+    let eunit_result = run_all_eunit_tests(
+        &test_module_names,
+        &all_fixture_modules,
+        &build_dir,
+        opts.verbose,
+    )?;
+
+    report_metamorphic_results(
+        &compiled_files,
+        &labels,
+        &eunit_result,
+        test_files.len(),
+        total_tests,
+        skipped_units,
+        opts.quiet,
+    )
+}
+
+/// Print per-(file, transform) results and final summary. Mirrors
+/// `test_stdlib::report_results`, but each row is labelled with its
+/// transform (since one source file now produces up to
+/// `Transform::ALL.len()` result rows) and the summary also surfaces how
+/// many expression/transform combinations were skipped.
+fn report_metamorphic_results(
+    compiled_files: &[CompiledTestFile],
+    labels: &[String],
+    eunit_result: &EunitBatchResult,
+    file_count: usize,
+    total_tests: usize,
+    skipped_units: usize,
+    quiet: bool,
+) -> Result<()> {
+    let mut total_passed = 0;
+    let mut total_failed = 0;
+    let mut failed_details = Vec::new();
+
+    for (compiled, label) in compiled_files.iter().zip(labels.iter()) {
+        if let Some(result) = eunit_result.module_results.get(&compiled.module_name) {
+            total_passed += result.passed;
+            total_failed += result.failed;
+            if result.failed > 0 {
+                println!(
+                    "  {label}: {} tests, {} passed, {} failed ✗",
+                    result.passed + result.failed,
+                    result.passed,
+                    result.failed,
+                );
+                for failure in &result.failures {
+                    failed_details.push(failure.clone());
+                }
+            } else if !quiet {
+                println!(
+                    "  {label}: {} tests, {} passed ✓",
+                    result.passed, result.passed
+                );
+            }
+        } else if let Some(failure) = eunit_result.failed_modules.get(&compiled.module_name) {
+            total_failed += compiled.assertion_count;
+            println!("  {label}: {} tests, 0 passed ✗", compiled.assertion_count);
+            failed_details.push(format!("FAIL {label}:\n  {failure}"));
+        } else {
+            total_passed += compiled.assertion_count;
+            if !quiet {
+                println!(
+                    "  {label}: {} tests, {} passed ✓",
+                    compiled.assertion_count, compiled.assertion_count
+                );
+            }
+        }
+    }
+
+    println!();
+    if skipped_units > 0 && !quiet {
+        println!(
+            "({skipped_units} expression/transform combination(s) skipped -- transform not \
+             applicable or didn't round-trip cleanly)"
+        );
+    }
+    if total_failed == 0 {
+        println!(
+            "{file_count} file(s), {total_tests} metamorphic assertions, {total_passed} passed, 0 failed"
+        );
+        Ok(())
+    } else {
+        for detail in &failed_details {
+            eprintln!("{detail}");
+        }
+        eprintln!();
+        eprintln!(
+            "{file_count} file(s), {total_tests} metamorphic assertions, {total_passed} passed, {total_failed} failed"
+        );
+        miette::bail!(
+            "{total_failed} metamorphic test(s) failed -- a semantics-preserving transform changed the result"
+        );
+    }
+}

@@ -868,9 +868,9 @@ dialyzer-specs:
 # Testing
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run fast tests (Rust unit/integration + stdlib + BUnit + Erlang runtime, skip slow E2E)
-# Typical time: ~4:30 (test-rust ~45s, test-stdlib ~20s, test-bunit ~97s, test-runtime ~1:40)
-test: test-rust test-stdlib test-bunit test-runtime
+# Run fast tests (Rust unit/integration + stdlib + BUnit + Erlang runtime + metamorphic, skip slow E2E)
+# Typical time: ~4:35 (test-rust ~45s, test-stdlib ~20s, test-bunit ~97s, test-runtime ~1:40, test-metamorphic ~5s)
+test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 
 # Run Rust tests (unit + integration, skip slow E2E)
 # Output: summary lines + failures only (reduces ~74 lines to ~10)
@@ -1025,6 +1025,17 @@ test-learn: build-stdlib
     @echo "📚 Running learning guide doctests..."
     @cargo run --bin beamtalk --quiet -- test-docs --warnings-as-errors --quiet docs/learning/
     @echo "✅ Learning guide tests complete"
+
+# Run the metamorphic testing harness (BT-3117): apply semantics-preserving
+# AST transforms (block-wrap, rename-locals, redundant-temp) to every
+# bootstrap-test `// =>` expression and assert the transformed variant still
+# evaluates to the same expected result. ~5s over the full corpus.
+# Accepts optional path: just test-metamorphic bootstrap-test/blocks.btscript
+[working-directory: 'stdlib']
+test-metamorphic *ARGS: build-stdlib
+    @echo "🧬 Running metamorphic tests..."
+    @cargo run --bin beamtalk --quiet -- test-metamorphic --warnings-as-errors --quiet {{ ARGS }}
+    @echo "✅ Metamorphic tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests

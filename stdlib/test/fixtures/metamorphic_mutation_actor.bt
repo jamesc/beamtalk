@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3117: fixture for the metamorphic testing harness's `.btscript`
+// corpus -- exercises the BT-1226 bug shape (multi-statement `do:` block
+// bodies with actor field mutations) so block-wrap/rename-locals/
+// redundant-temp have a real actor state-threading call site to probe.
+//
+// Mirrors stdlib/test/fixtures/bt1226_multi_state_actor.bt's pattern
+// (two field mutations per do: iteration) at a smaller scale.
+
+Actor subclass: MetamorphicMutationActor
+  state: total = 0
+  state: seen = #()
+
+  addAll: entries =>
+    entries
+      do: [:n |
+        self.total := self.total + n
+        self.seen := self.seen add: n
+      ]
+    #{#total => self.total, #seen => self.seen}

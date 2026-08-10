@@ -967,6 +967,68 @@ ls -la ~/.beamtalk/daemon.sock
 
 ---
 
+## Metamorphic Testing (Semantics-Preserving Transforms)
+
+Hand-written `// =>` assertions can only catch bugs someone thought to write
+a literal for. The bug classes that escape them are the *silently wrong*
+ones: the ADR 0110 NLR-relay bug returned the correct value while losing a
+class-var mutation; state-threading bugs produce wrong values only under
+specific mutation-in-control-flow shapes (BT-1226). Metamorphic testing
+catches these without a reference implementation: apply a transformation
+that must not change semantics, then assert the transformed program
+evaluates to the same result as the original (BT-3117).
+
+**Location:** `crates/beamtalk-cli/src/commands/test_metamorphic.rs`
+(hidden dev command `beamtalk test-metamorphic`)
+
+**Corpus:** every `// =>` expression in `stdlib/bootstrap-test/*.btscript` —
+reuses `test_stdlib`'s exact parse → compile-to-Core-Erlang → `EUnit`
+execution pipeline for both the original and the transformed variant, so
+both run through the real compiler rather than a second hand-rolled
+evaluator.
+
+**Transforms** (each a probe into closure conversion, variable scoping, and
+state threading):
+
+| Transform | `expr` becomes |
+|---|---|
+| Block-wrap | `[expr] value` |
+| Rename-locals | consistent alpha-rename of every name *bound* inside `expr` (block params, `:=` targets, match-pattern bindings) — free variables are left alone |
+| Redundant-temp | `[tmp := expr. tmp] value` |
+
+Each transform's output is unparsed and re-parsed before use (mirroring
+`unparse`'s own `unparse_roundtrip_preserves_structure` property test) — a
+transform that doesn't round-trip cleanly is skipped for that unit rather
+than fed into the compiler. A unit shaped exactly `name := value` (a
+`.btscript`-format cross-unit REPL-turn binding, detected by
+`test_stdlib::extract_assignment_var`) is carried through unchanged instead
+of transformed, so later units in the same file that reference `name` keep
+seeing it — transforming that unit's outer shape would defeat the text-match
+`extract_assignment_var` uses, which is a corpus-format artifact, not a real
+semantics change.
+
+### Running locally
+
+```bash
+just test-metamorphic                                  # full bootstrap-test corpus, ~5s
+just test-metamorphic bootstrap-test/blocks.btscript    # single file
+```
+
+Runs in CI as part of the `test` job (`just test-bunit` → `just
+test-metamorphic` → `just test-examples`) — cheap enough (~5s over the full
+corpus) to run on every PR rather than nightly-only.
+
+### Interpreting a failure
+
+A failure means a semantics-preserving transform changed a unit's result —
+report includes the transformed source, the transform name (in the file
+label, e.g. `blocks [rename_locals]`), and both the expected and actual
+values (`beamtalk_stdlib_test`'s usual `FAIL <location>` / `expected: ...` /
+`got: ...` block). Treat it exactly like a `core_lint`/fuzz finding: it means
+codegen or analysis is doing something shape-dependent that it shouldn't.
+
+---
+
 ## Fuzzing (Parser & Compile Pipeline Crash Safety)
 
 Fuzzing tests the compiler's robustness by feeding it random or mutated input to detect crashes, infinite loops, and excessive memory use. Two targets, at different pipeline depths (BT-3124):

@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3117: metamorphic-testing probe for the BT-1226 bug class -- multi-
+// statement `do:` block bodies with actor field mutations. The metamorphic
+// harness's block-wrap ([expr] value) and redundant-temp
+// (tmp := expr. tmp, block-wrapped) transforms route this file's call
+// sites through an extra block/value indirection; this file gives that
+// probe a real actor state-threading call site to run against (per
+// BT-3117's acceptance criterion: hand-check that block-wrap over an actor
+// field mutation exercises the BT-1226 shapes).
+
+// @load test/fixtures/metamorphic_mutation_actor.bt
+
+actor := MetamorphicMutationActor spawn
+// => Actor(MetamorphicMutationActor, _)
+
+actor addAll: #(1, 2, 3)
+// => #{#seen => #(1, 2, 3), #total => 6}

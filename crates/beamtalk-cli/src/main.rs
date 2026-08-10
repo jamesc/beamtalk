@@ -272,6 +272,32 @@ enum Command {
         show_output: bool,
     },
 
+    /// Run the metamorphic testing harness: apply semantics-preserving AST
+    /// transforms to `.btscript` `// =>` expressions and assert the
+    /// transformed variant still evaluates to the same expected result (BT-3117)
+    #[command(hide = true)]
+    TestMetamorphic {
+        /// File or directory containing .btscript test files
+        #[arg(default_value = "bootstrap-test")]
+        path: String,
+
+        /// Suppress warning diagnostics when compiling test fixtures
+        #[arg(long)]
+        no_warnings: bool,
+
+        /// Treat warnings and hints as errors — fail if any are emitted
+        #[arg(long, conflicts_with = "no_warnings")]
+        warnings_as_errors: bool,
+
+        /// Suppress per-file output, show only summary
+        #[arg(long, short)]
+        quiet: bool,
+
+        /// Show detailed test output including `EUnit` verbose mode
+        #[arg(long = "show-output")]
+        show_output: bool,
+    },
+
     /// Run doctests extracted from Markdown files (` ```beamtalk ` blocks with `// =>` assertions)
     #[command(hide = true)]
     TestDocs {
@@ -635,6 +661,21 @@ fn run() -> Result<()> {
                 verbose: show_output,
             };
             commands::test_docs::run_tests(&path, &opts)
+        }
+        Command::TestMetamorphic {
+            path,
+            no_warnings,
+            warnings_as_errors,
+            quiet,
+            show_output,
+        } => {
+            let opts = commands::test_stdlib::TestRunOptions {
+                no_warnings,
+                warnings_as_errors,
+                quiet,
+                verbose: show_output,
+            };
+            commands::test_metamorphic::run_tests(&path, &opts)
         }
         Command::Test {
             path,
