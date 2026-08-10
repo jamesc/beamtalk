@@ -85,6 +85,40 @@ to_stdlib_module_atom_acronym_test() ->
     ).
 
 %%% ============================================================================
+%%% to_qualified_module_atom/2 (BT-3108)
+%%% ============================================================================
+
+to_qualified_module_atom_found_test() ->
+    %% 'bt@bt3081test@counter' must already exist as an atom for the
+    %% existing-atom-only lookup to find it -- create it via to_module_atom-
+    %% style construction (never through to_qualified_module_atom itself,
+    %% which must not be what creates the atom under test).
+    % elp:fixme W0023 intentional atom creation
+    _ = list_to_atom("bt@bt3081test@counter"),
+    ?assertEqual(
+        'bt@bt3081test@counter',
+        beamtalk_module_name:to_qualified_module_atom("counter", <<"bt3081test">>)
+    ).
+
+to_qualified_module_atom_binary_and_string_package_agree_test() ->
+    % elp:fixme W0023 intentional atom creation
+    _ = list_to_atom("bt@bt3081agree@widget"),
+    ?assertEqual(
+        beamtalk_module_name:to_qualified_module_atom("widget", <<"bt3081agree">>),
+        beamtalk_module_name:to_qualified_module_atom("widget", "bt3081agree")
+    ).
+
+to_qualified_module_atom_never_creates_atom_test() ->
+    %% A snake/package combo that has never been turned into an atom in this
+    %% VM must resolve to undefined, not silently mint a new atom.
+    Unique = erlang:unique_integer([positive]),
+    Snake = "bt3108_never_created_" ++ integer_to_list(Unique),
+    ?assertEqual(
+        undefined,
+        beamtalk_module_name:to_qualified_module_atom(Snake, <<"nopkg">>)
+    ).
+
+%%% ============================================================================
 %%% is_stdlib_module/1
 %%% ============================================================================
 

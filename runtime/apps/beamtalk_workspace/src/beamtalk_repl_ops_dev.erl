@@ -2255,17 +2255,17 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
             PkgBin = binary:part(ClassBin, 0, Pos),
             ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
             %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
-            %% BT-3081: delegates to beamtalk_module_name, the single Erlang-side
-            %% authority for the ClassName ⇄ bt@[pkg@]snake_case convention.
+            %% BT-3081 / BT-3108: delegates to beamtalk_module_name, the single
+            %% Erlang-side authority for the ClassName ⇄ bt@[pkg@]snake_case
+            %% convention. Never creates an atom for the untrusted ClassBin —
+            %% to_qualified_module_atom/2 only checks list_to_existing_atom.
             SnakeCase = beamtalk_module_name:camel_to_snake(binary_to_list(ClassNameBin)),
-            ModNameStr = "bt@" ++ binary_to_list(PkgBin) ++ "@" ++ SnakeCase,
-            try list_to_existing_atom(ModNameStr) of
+            case beamtalk_module_name:to_qualified_module_atom(SnakeCase, PkgBin) of
+                undefined ->
+                    {error, badarg};
                 _ModAtom ->
                     %% Module name atom exists — now resolve the class name atom
                     beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin)
-            catch
-                error:badarg ->
-                    {error, badarg}
             end
     end.
 

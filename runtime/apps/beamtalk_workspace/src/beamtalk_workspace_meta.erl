@@ -1029,20 +1029,18 @@ class_module_loaded(ClassNameBin, ValidatedModules, PackageName) ->
 -doc """
 Package-qualified module atom (`bt@{PackageName}@{snake_case}`) for
 `ClassAtom`, or `undefined` when `PackageName` is unknown or no such atom has
-ever been created in this VM (`list_to_existing_atom` — see
-`class_module_loaded/3`'s doc for why this never creates one).
+ever been created in this VM. Delegates to
+`beamtalk_module_name:to_qualified_module_atom/2` (BT-3108 review follow-up:
+extracted there so this isn't a second independent copy of the
+`bt@{pkg}@{snake}` assembly alongside
+`beamtalk_repl_ops_dev:resolve_qualified_class_name/1`'s).
 """.
 -spec qualified_module_atom(atom(), binary() | undefined) -> atom() | undefined.
 qualified_module_atom(_ClassAtom, undefined) ->
     undefined;
 qualified_module_atom(ClassAtom, PackageName) when is_binary(PackageName) ->
     Snake = beamtalk_module_name:camel_to_snake(atom_to_list(ClassAtom)),
-    ModNameStr = "bt@" ++ binary_to_list(PackageName) ++ "@" ++ Snake,
-    try list_to_existing_atom(ModNameStr) of
-        Atom -> Atom
-    catch
-        error:badarg -> undefined
-    end.
+    beamtalk_module_name:to_qualified_module_atom(Snake, PackageName).
 
 -doc """
 Whether `SourcePath`'s current on-disk mtime is strictly newer than
