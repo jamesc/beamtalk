@@ -1175,6 +1175,22 @@ Use shorter duration for quick checks:
 just fuzz 5  # 5 seconds
 ```
 
+**"sanitizer is incompatible with statically linked libc":**
+`cargo fuzz` defaults to `--target x86_64-unknown-linux-musl` (a fully static
+binary) with AddressSanitizer enabled, and ASan can't instrument a
+statically-linked libc. This has been confirmed to build and run fine on the
+nightly CI runners (`.github/workflows/fuzz.yml`), so it's environment-specific
+-- some sandboxed/restricted dev containers hit it locally. Work around it by
+building against the dynamically-linked glibc target instead:
+```bash
+cargo +nightly fuzz run compile_pipeline --target x86_64-unknown-linux-gnu \
+  fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -max_total_time=60
+```
+Or use `--sanitizer none` to keep the default musl target without ASan
+instrumentation (still real coverage-guided libFuzzer mutation, just without
+memory-sanitizer checks -- less relevant here since these targets are pure
+safe Rust).
+
 ### References
 
 - [Rust Fuzz Book](https://rust-fuzz.github.io/book/) - cargo-fuzz guide
