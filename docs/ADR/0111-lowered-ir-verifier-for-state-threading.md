@@ -1,11 +1,7 @@
 # ADR 0111: Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return
 
 ## Status
-Proposed (2026-08-09; revised same day after `/review-adr` adversarial pass —
-the revision corrected the verifier's claimed relationship to ADR 0110's bug,
-brought the `Bind`-emission sites into scope, added frame identity to the IR
-design, and replaced the snapshot-parity gate with an expanded-corpus gate.
-See §Verifier honesty and §Phase A0.)
+Proposed (2026-08-09)
 
 ## Context
 
@@ -70,8 +66,7 @@ numbers:
 | "~16 scattered `debug_assert!`s" | **6 in the named in-scope files** (29 repo-wide in `codegen/core_erlang/`, but 23 are arity/argument-count checks in `intrinsics.rs`/`erlang_types.rs` — expression/primitive codegen, explicitly out of scope per BT-3122's own "that's not where the failures are") | Full 6: `while_loops.rs:317`, `while_loops.rs:454`, `control_flow/mod.rs:2522`, `control_flow/mod.rs:2651` (all four assert an *optimized threading mode implies no `StateAcc` unpack code* — the same invariant, independently asserted at four call sites instead of centralized once); `gen_server/methods.rs:1258`, `gen_server/methods.rs:1450` (both assert that `classify_body_expr`'s upfront classification and `threaded_expr.rs`'s downstream recognizer *agree* on whether a construct routes through the Actor threaded emitter) |
 | "`CoreErlangGenerator` ~90 fields" | **36 fields** on `CoreErlangGenerator` (`mod.rs:1288-1481`), ≈39 including its two state-carrying sub-structs (`VariableContext`, `StateThreading`) | Still large enough to be the "coordinates everything" bottleneck the issue describes — just not 90 |
 
-Two honesty notes on the `debug_assert!` situation, both from the
-adversarial review pass:
+Two honesty notes on the `debug_assert!` situation:
 
 - **The six assertions are not the last line of defense.** In release
   builds, a violation of any of the six degrades into malformed Core
@@ -148,7 +143,7 @@ positional index with no relation to mutation-version threading at all.)
   running a separate verification pass over it. There is no existing
   verifier-pattern precedent in this codebase; this ADR introduces one.
 - **The codegen snapshot corpus is currently too thin to gate this
-  migration** — measured during review: of the 318 snapshots under
+  migration** — measured: of the 318 snapshots under
   `test-package-compiler/tests/snapshots/`, exactly **1** contains a
   `letrec` loop, **1** contains `$bt_nlr`, **1** contains `ClassVars1`,
   **1** contains `class_vars_shadow`, and **4** contain `StateAcc`. A
@@ -161,12 +156,11 @@ positional index with no relation to mutation-version threading at all.)
 
 ### Constraints
 
-- **Narrow scope, as specified by BT-3122 — with one correction.** The
+- **Narrow scope, as specified by BT-3122 — with one addition.** The
   lowered form covers the control-flow + state-threading core: the
   `control_flow/` cluster, `threaded_expr.rs`, the state-versioning subset
   of `gen_server/methods.rs` (measured at roughly 1900–2400 of its 5805
-  lines), **and — a scope correction found in review — the
-  version-`Bind`-emitting slices of `expressions.rs` and
+  lines), **and the version-`Bind`-emitting slices of `expressions.rs` and
   `dispatch_codegen.rs`**: `generate_field_assignment`
   (`expressions.rs:552` calls `next_class_var()`; the analogous field
   paths drive `next_self_var()`/`next_state_var()`) and
@@ -346,10 +340,9 @@ refusal to compile valid code.
 
 ### Verifier honesty — what this catches and what it cannot
 
-This section exists because the first draft of this ADR overclaimed, and
-the adversarial review caught it (verified against
-`wrap_body_with_nlr_catch`, `mod.rs:2480-2549`, and `NlrCatchVars`,
-`mod.rs:880-890`):
+These limits are structural, not incidental — they follow directly from how
+the generator emits NLR scaffolding (`wrap_body_with_nlr_catch`,
+`mod.rs:2480-2549`, and `NlrCatchVars`, `mod.rs:880-890`):
 
 - **The verifier checks what the lowering pass said, not what it meant.**
   The lowering pass and the emitter share their source of truth
@@ -452,12 +445,11 @@ corpus, Phase A3, at the end of each migration phase.)
 
 ### Option B: Verifier without IR
 
-Two forms, split per the adversarial review because they have opposite verdicts:
+Two forms, split because they have opposite verdicts:
 
 **B1 — re-derive post-hoc (from Document/text or generator state after the
-fact).** Rejected for the reason the first draft gave, which survives
-review: the needed structure (version provenance, frame identity, mode
-membership) doesn't exist post-emission and re-deriving it means
+fact).** Rejected: the needed structure (version provenance, frame
+identity, mode membership) doesn't exist post-emission and re-deriving it means
 re-implementing `classify_body_expr`/`ThreadingPlan` a second time — the
 §6 duplication anti-pattern.
 
@@ -470,11 +462,11 @@ gets the mode/unpack and classifier/emitter checks always-on at a fraction
 of the cost.
 
 - 🧑‍💻 **Newcomer**: "No new pipeline stage to learn — the codegen I read is still the codegen that runs."
-- ⚙️ **BEAM veteran**: "This is the 90/10 point. The checks that survive the honesty analysis are exactly the ones this gets."
+- ⚙️ **BEAM veteran**: "This is the 90/10 point. The checks that are actually sound (§Verifier honesty) are exactly the ones this gets."
 - 🏭 **Operator**: "No migration freeze on 11K LOC of actively-developed files."
-- 🎨 **Language designer (sharpest form)**: "After the honesty corrections, the verifier's *checks* don't require the IR — they require the *decisions*, which already exist as data. The IR's remaining unique contribution is single-sourcing (one node, one emitter) and the counter unification. Is that worth the migration?"
+- 🎨 **Language designer (sharpest form)**: "On §Verifier honesty's own accounting, the verifier's *checks* don't require the IR — they require the *decisions*, which already exist as data. The IR's remaining unique contribution is single-sourcing (one node, one emitter) and the counter unification. Is that worth the migration?"
 
-**Why A still wins, on the corrected claims — narrowly.** B2 checks that
+**Why A still wins — narrowly.** B2 checks that
 two independently-computed decisions agree; A removes the second
 computation. B2's recorder must itself be maintained at every decision
 site (a site that forgets to record is invisible to the validator — the
@@ -494,8 +486,7 @@ transfers to B2 directly.
 - 🏭 **Operator**: "Zero cost, zero risk, zero freeze."
 - 🎨 **Language designer**: "One shipped bug in the codebase's lifetime for this class; is any of this proportionate?"
 
-**Why A wins despite this steelman.** The corrected version of the
-argument, since the first draft overstated it: the six assertions *do*
+**Why A wins despite this steelman.** The six assertions *do*
 have a release-mode backstop (`core_lint`), but it fires far from the
 cause with an Erlang-level message about generated code, and it covers
 only the failures that happen to produce malformed output — a
@@ -522,7 +513,7 @@ to any black-box oracle. This ADR's Phase A runs in parallel with
 BT-3112's early children, and the A0 gate provides the explicit
 reconsideration point if the harness's early results change the calculus.
 What this ADR does *not* claim is that the verifier substitutes for the
-harness — the first draft's error, corrected in §Verifier honesty.
+harness (§Verifier honesty).
 
 ### Tension Points
 
@@ -555,19 +546,20 @@ snapshot corpus. That outcome is explicitly acceptable and pre-planned,
 not a failure mode.
 
 ### 2. Status quo
-See Steelman Option C. **Rejected** — on the corrected argument (no
+See Steelman Option C. **Rejected** (no
 protection for the silent-wrong class; poor diagnosis for the loud class;
 `self_version` hole and shadow-write forgettability unaddressed).
 
 ### 3. Unify the three version counters only
-**Absorbed rather than rejected.** This is now precisely Phase A2, and it
-is independently justified — the review established it must be done as
-*naming-only* unification with per-prefix discipline preserved and pinned
-by tests, plus the typestate hardening of Alternative 5. What the full ADR
-adds beyond it is the single-sourcing of classifier/emitter decisions and
-the shadow-write contract check; the first draft's claim that the six
-`debug_assert!`s were "the actual mechanism behind ADR 0110's bug class"
-was wrong (none of the six is on 0110's path) and is withdrawn.
+**Absorbed rather than rejected.** This is precisely Phase A2, and it is
+independently justified — done as *naming-only* unification with
+per-prefix discipline preserved and pinned by tests, plus the typestate
+hardening of Alternative 5. What the full ADR adds beyond it is the
+single-sourcing of classifier/emitter decisions and the shadow-write
+contract check. (Note the six `debug_assert!`s are *not* an argument
+against this alternative: none of the six is on ADR 0110's path — they
+guard the mode/unpack and classifier/emitter invariants, which counter
+unification alone indeed does not address.)
 
 ### 4. Full-pipeline typed Core Erlang IR
 **Rejected** — per ADR 0018's still-valid reasoning and BT-3122's explicit
@@ -619,7 +611,7 @@ substitute.
 
 ### Negative
 - **New internal API surface** for contributors to the in-scope files.
-- **A real test-migration cost the first draft omitted:** ~1,484 `#[test]`s
+- **A real test-migration cost:** ~1,484 `#[test]`s
   and 231 `to_pretty_string()` assertion sites live under `codegen/`
   (`tests/control_flow.rs` alone is 2,591 lines; `list_ops/tests.rs`
   2,660). Functions returning `ThreadedIr` instead of `Document` would
@@ -704,10 +696,9 @@ building a to-be-deleted re-derivation). Deletes the four unpack
 `debug_assert!`s.
 
 ### Phase C — `list_ops/` (L)
-Migrate the foldl list-op family — re-scoped **L** (the first draft's
-"mechanical follow-on, no new invariant classes" was wrong). New invariant
-classes Phase B never exercises, each needing IR modeling and verifier
-coverage: (1) the flat `{FoldAcc, Var1..VarN}` positional-unpack
+Migrate the foldl list-op family — sized **L**, not a mechanical
+follow-on to Phase B: it introduces invariant classes Phase B never
+exercises, each needing IR modeling and verifier coverage: (1) the flat `{FoldAcc, Var1..VarN}` positional-unpack
 accumulator discipline (distinct from parameter threading); (2)
 `select_tuple_acc`'s ValueType-context exclusion (`control_flow/mod.rs:448-466`);
 (3) the recursive inter-construct `list_op_needs_stateacc_fallback`
@@ -720,8 +711,8 @@ point. May split fold-shaped vs. early-exit-shaped in `/plan-adr`.
 Migrate the state-versioning slice of `gen_server/methods.rs`
 (`BodyExprKind`, `generate_body_exprs_with_reply`, tier-2 helpers), the
 `ClassVars` threading path **including its `Bind`-emission sites in
-`expressions.rs:552` and `dispatch_codegen.rs:463`** (the scope correction
-— these are the producers of everything the verifier checks),
+`expressions.rs:552` and `dispatch_codegen.rs:463`** (these are the
+producers of everything the verifier checks),
 `conditionals.rs`, `exception_handling.rs`, and `threaded_expr.rs`'s
 boundary adapter. Lands `ShadowWriteMissing` plus the **cross-boundary
 conformance fixture** pinning codegen's shadow-write emission against
@@ -749,8 +740,8 @@ extended.
 
 ### Verification
 - **Expanded snapshot corpus (A3) byte-parity** after every phase — the
-  real gate, replacing the first draft's reliance on a corpus measured at
-  1–4 relevant cases per phase.
+  real gate; the pre-expansion corpus covers the in-scope constructs in
+  only 1–4 of 318 snapshots and cannot serve as one.
 - **Ordered diagnostic-stream equality** (`BEAMTALK_CODEGEN_DIAGNOSTICS`
   output as a sequence, not a set) after every phase.
 - **Verifier green** on all `stdlib/test/*.bt` +
@@ -806,7 +797,7 @@ extended.
   - `control_flow/` (13 files, 16,329 LOC), `threaded_expr.rs` (416),
     `gen_server/methods.rs` (5805; ≈1900–2400 in scope) — in scope
   - `expressions.rs:552`, `dispatch_codegen.rs:463` — the
-    version-`Bind`/shadow-write emission sites (scope correction)
+    version-`Bind`/shadow-write emission sites (in scope)
   - `mod.rs` — `NlrBoundary` (:902), `NlrCatchVars` (:880),
     `wrap_body_with_nlr_catch` (:2480), `with_branch_context` (:2064),
     counters (:1132, :1211, :2088, :2104)
