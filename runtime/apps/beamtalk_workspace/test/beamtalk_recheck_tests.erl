@@ -1279,10 +1279,11 @@ trigger_pending_finds_stale_dependent_without_installing_test_() ->
                     ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
                     ?assertEqual(signature_change, maps:get(classification, Finding)),
 
-                    %% Never installed: the ambient class cache is restored to
-                    %% the real, still-live signature afterward — a pending
-                    %% edit that never saved must not leave the compiler's
-                    %% shared class cache holding a hypothetical signature.
+                    %% Never installed: the pending signature travels only as
+                    %% a per-request overlay (BT-3109) — the ambient class
+                    %% cache in `beamtalk_compiler_server` is never written to
+                    %% by a pre-save advisory, so it still holds exactly the
+                    %% real, still-live signature untouched.
                     #{'ReCheckCounter' := RestoredMeta} = beamtalk_compiler_server:get_classes(),
                     #{method_info := #{size := RestoredEntry}} = RestoredMeta,
                     ?assertEqual('Integer', maps:get(return_type, RestoredEntry))
@@ -1317,6 +1318,69 @@ trigger_pending_no_ambient_meta_is_empty_result_test_() ->
                         },
                         Result
                     )
+                end)
+            ]
+        end}}.
+
+%% BT-3109 / BT-2806: a pre-save advisory must never clobber a genuinely
+%% concurrent `register_class/2` commit (e.g. a real save from another
+%% session) that lands while the advisory is in flight. Under the previous
+%% ambient-cache-swap mechanism, `do_trigger_pending/5` snapshotted the
+%% pre-advisory generation and unconditionally restored that stale snapshot
+%% in an `after` block once its (possibly slow, port-round-tripping)
+%% diagnostics calls finished — reverting any real commit that happened to
+%% land in that window. The fix (a per-request `class_hierarchy` overlay,
+%% never written to `beamtalk_compiler_server` state) makes this impossible
+%% by construction: there is no snapshot and no restore, so a concurrent
+%% commit is never at risk regardless of exactly when it lands relative to
+%% the advisory's diagnostics calls.
+trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Pre-advisory (installed) generation: size -> Integer.
+                    beamtalk_compiler_server:register_class(
+                        'ReCheckCounter',
+                        counter_hierarchy(#{
+                            size => #{arity => 0, param_types => [], return_type => 'Integer'}
+                        })
+                    ),
+                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckDashboard">>, dashboard_source()
+                    ),
+
+                    %% A distinct, independently-installed generation — models
+                    %% a real `compile:source:`/reload commit from a different
+                    %% session, landing shortly after the advisory below has
+                    %% already read the pre-advisory generation.
+                    ConcurrentGeneration = counter_hierarchy(#{
+                        size => #{arity => 0, param_types => [], return_type => 'Boolean'}
+                    }),
+                    _ = spawn(fun() ->
+                        timer:sleep(1),
+                        ok = beamtalk_compiler_server:register_class(
+                            'ReCheckCounter', ConcurrentGeneration
+                        )
+                    end),
+
+                    PendingSignature = #{return_type => <<"String">>, param_types => []},
+                    _ = beamtalk_recheck:trigger_pending(
+                        <<"ReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        signature_change,
+                        PendingSignature
+                    ),
+
+                    %% Let the concurrent cast land if it somehow has not yet,
+                    %% then assert ambient state shows the concurrent commit —
+                    %% never reverted to the pre-advisory snapshot.
+                    timer:sleep(50),
+                    #{'ReCheckCounter' := FinalMeta} = beamtalk_compiler_server:get_classes(),
+                    #{method_info := #{size := FinalEntry}} = FinalMeta,
+                    ?assertEqual('Boolean', maps:get(return_type, FinalEntry))
                 end)
             ]
         end}}.

@@ -544,7 +544,9 @@ server_api_test_() ->
         {"find_field_readers_in_source/2", fun api_find_field_readers/0},
         {"find_field_writers_in_source/2", fun api_find_field_writers/0},
         {"find_ffi_sites_in_source/4", fun api_find_ffi_sites/0},
-        {"resolve_method_span/4", fun api_resolve_method_span/0}
+        {"resolve_method_span/4", fun api_resolve_method_span/0},
+        {"diagnostics/3 class_hierarchy overlay map is per-request only (BT-3109)",
+            fun api_diagnostics_class_hierarchy_overlay_does_not_touch_ambient_cache/0}
     ]}.
 
 api_compile_expression() ->
@@ -580,6 +582,30 @@ api_diagnostics() ->
 api_version() ->
     Result = beamtalk_compiler_server:version(),
     ?assertMatch({ok, _}, Result).
+
+%% BT-3109: passing a map() as `class_hierarchy` threads it as this one
+%% request's class-hierarchy context, verbatim, without ever writing it into
+%% `beamtalk_compiler_server`'s ambient `classes` cache — the overlay the
+%% request actually saw (`#{'ApiOverlayCounter' => ...}`, a class never
+%% registered ambiently at all) must remain invisible to `get_classes/0`
+%% both before and after the call.
+api_diagnostics_class_hierarchy_overlay_does_not_touch_ambient_cache() ->
+    ok = beamtalk_compiler_server:clear_classes(),
+    AmbientBefore = beamtalk_compiler_server:get_classes(),
+    ?assertEqual(error, maps:find('ApiOverlayCounter', AmbientBefore)),
+    Overlay = #{
+        'ApiOverlayCounter' => #{
+            superclass => 'Object',
+            method_info => #{size => #{arity => 0, param_types => [], return_type => 'String'}}
+        }
+    },
+    {ok, _Diagnostics} =
+        beamtalk_compiler_server:diagnostics(<<"1 + 2">>, <<"expression">>, #{
+            class_hierarchy => Overlay
+        }),
+    AmbientAfter = beamtalk_compiler_server:get_classes(),
+    ?assertEqual(AmbientBefore, AmbientAfter),
+    ?assertEqual(error, maps:find('ApiOverlayCounter', AmbientAfter)).
 
 api_resolve_completion_type() ->
     Result = beamtalk_compiler_server:resolve_completion_type(<<"42">>),
