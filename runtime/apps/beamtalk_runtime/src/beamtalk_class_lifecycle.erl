@@ -82,18 +82,14 @@ class_removed(ClassName, Module) ->
 
 -doc """
 Purge `ClassName`'s rows from `beamtalk_xref` — both instance- and
-class-side method entries, and its sends/references. Guarded on
-`whereis/1` (not a try/catch), matching `beamtalk_object_class:refresh_xref/2`'s
-existing guard style for the same call.
+class-side method entries, and its sends/references. Run best-effort via
+`beamtalk_extensions:safe_xref/1` (BT-2301's existing helper) so a dead or
+restarting `beamtalk_xref` cannot raise out of this stage and skip the
+other four purges below it.
 """.
 -spec purge_xref(atom()) -> ok.
 purge_xref(ClassName) ->
-    case erlang:whereis(beamtalk_xref) of
-        undefined ->
-            ok;
-        _Pid ->
-            ok = beamtalk_xref:purge_class(ClassName)
-    end.
+    beamtalk_extensions:safe_xref(fun() -> beamtalk_xref:purge_class(ClassName) end).
 
 -doc """
 Purge every extension registered on `ClassName` — instance-side (keyed by

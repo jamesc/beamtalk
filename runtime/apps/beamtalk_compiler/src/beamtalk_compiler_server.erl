@@ -570,6 +570,14 @@ overwrites via `register_class/2`, but until now there was no removal path,
 so the compiler kept type-checking against classes long gone from the
 runtime. Fire-and-forget cast, silently dropped if the server is not
 running, mirroring `register_class/2`'s degrade-silently contract.
+
+Not called from production code: `beamtalk_class_lifecycle:purge_compiler_cache/1`
+(the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
+with a raw `gen_server:cast(beamtalk_compiler_server, {remove_class, ClassName})`
+to avoid a compile-time dependency in the wrong direction (`beamtalk_runtime`
+must not depend on `beamtalk_compiler` — see that module's doc). This
+exported function exists for same-app callers and is exercised directly by
+its own tests.
 """.
 -spec remove_class(atom()) -> ok.
 remove_class(ClassName) ->

@@ -81,7 +81,8 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     listAllWithSource/0,
     getSource/2,
     conflicts/0,
-    has/2
+    has/2,
+    safe_xref/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
