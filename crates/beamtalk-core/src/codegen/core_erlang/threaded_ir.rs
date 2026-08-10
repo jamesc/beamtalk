@@ -90,21 +90,24 @@ impl FrameId {
 /// One of the three (formerly independent) version counters, unified in
 /// NAMING AND IDENTITY ONLY — plus [`VersionPrefix::Local`] (see module docs
 /// §Deviations). Per-prefix scope discipline (state: reset+restore per
-/// branch; `class_vars`: restore-only, mutated-flag sticky; self: currently
-/// neither — see ADR Phase A2) remains explicit per-prefix policy, preserved
-/// exactly by the generator; this type only unifies the *shape*.
+/// branch; `class_vars`: restore-only, mutated-flag sticky; self: reset+
+/// restore, BT-3131's fix for the prior "neither" landmine — see
+/// `with_branch_context`'s doc comment in `mod.rs`) remains explicit
+/// per-prefix policy, enforced by the generator's `BranchContextGuard`; this
+/// type only unifies the *shape*.
 ///
-/// BT-3129: several variants below (and sibling types further down this
-/// file) are constructed only by unit tests today, not by any production or
-/// prototype call site — expected and by design for this issue (ADR 0111
-/// Phase A1: "nothing consumes the IR yet — genuinely zero-behavioral-risk").
-/// The Phase A0 prototype (`prototype_direct_params_ir`) exercises only
-/// `Local`/`DirectParams`/`Direct`; `State`/`ClassVars`/`SelfVt`,
-/// `TupleAcc`/`Hybrid`/`StateAcc`, `Put`/`Unpack`, `NlrCatch`/`Return`, and
-/// `ValueRef::Version`/`Literal` get their first production call site as each
-/// later migration issue (BT-3131 onward) lands. `#[allow(dead_code)]` here
-/// documents that expectation instead of forcing artificial non-test
-/// construction sites.
+/// BT-3131: `State`/`ClassVars`/`SelfVt` get their first production call
+/// site here — [`VersionCounter`] is the single implementation behind
+/// `CoreErlangGenerator`'s three (formerly independently implemented)
+/// counters (`StateThreading`, `ClassContext::class_var_version`,
+/// `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc`,
+/// `Put`/`Unpack`, `NlrCatch`/`Return`, and `ValueRef::Version`/`Literal`
+/// remain unit-test-only until a control-flow generator migrates onto the
+/// full `ThreadedIr`/`verify()` pipeline (later issues — this issue is
+/// naming/identity unification only, not IR construction). `Local` stays
+/// exercised only by the Phase A0 measurement prototype
+/// (`prototype_direct_params_ir`). `#[allow(dead_code)]` here documents that
+/// expectation instead of forcing artificial non-test construction sites.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum VersionPrefix {
@@ -156,7 +159,13 @@ impl VersionedVar {
     /// capitalization every other Core Erlang variable name goes through —
     /// so callers may pass the raw Beamtalk identifier (`"sum"`) as it comes
     /// out of `ThreadingPlan::threaded_locals`.
-    fn render_name(&self) -> String {
+    ///
+    /// BT-3131: `pub(super)` (widened from private) so [`VersionCounter`]'s
+    /// emitter-facing accessors — and `CoreErlangGenerator`'s `StateAcc*`
+    /// rendering, which stays outside the IR (see [`VersionPrefix::State`]'s
+    /// doc comment) — can render through this single canonical namer instead
+    /// of duplicating it.
+    pub(super) fn render_name(&self) -> String {
         match &self.prefix {
             VersionPrefix::State => super::util::versioned_var("State", self.version),
             VersionPrefix::ClassVars => super::util::versioned_var("ClassVars", self.version),
@@ -166,6 +175,78 @@ impl VersionedVar {
                 super::util::versioned_var(&core_name, self.version)
             }
         }
+    }
+}
+
+// ─── VersionCounter (BT-3131) ───────────────────────────────────────────────
+
+/// The single counter implementation behind `CoreErlangGenerator`'s three
+/// (formerly independently implemented) version counters — the pre-BT-3131
+/// `StateThreading` struct (`state_codegen.rs`), `ClassContext`'s raw
+/// `class_var_version: usize` arithmetic, and `ValueTypeContext`'s raw
+/// `self_version: usize` arithmetic. One implementation, reused per prefix.
+///
+/// **Constructor-only production**: [`Self::next_var`] is the only way to
+/// mint a version beyond the counter's current one — an unproduced version
+/// cannot be named. [`Self::current_var`] and [`Self::peek_next_var`] never
+/// mint; they only render the version already reached (or, for `peek`, the
+/// version *the next [`Self::next_var`] call would* reach, without
+/// advancing the counter — used where the caller needs the name before
+/// calling `expression_doc`, which may itself advance the counter).
+///
+/// **Emitter-facing accessors render through [`VersionedVar`]**: every
+/// method here goes through [`VersionedVar::new`] + [`VersionedVar::render_name`]
+/// rather than re-deriving the `prefix{version}` naming convention, so the
+/// naming logic lives in exactly one place (ADR 0111 §Phase A2).
+///
+/// **Frame identity**: always [`FrameId::ROOT`]. `CoreErlangGenerator` does
+/// not track frame identity today (that is the later `ThreadedIr`/`verify()`
+/// migration's job, BT-3132 onward) — this counter's own per-prefix
+/// save/reset/restore *policy* around branch entry/exit is enforced by the
+/// generator's `BranchContextGuard` (`mod.rs`), not by this type.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct VersionCounter(usize);
+
+impl VersionCounter {
+    pub(super) const fn new() -> Self {
+        Self(0)
+    }
+
+    /// The raw version number, for callers that need to snapshot/restore it
+    /// as a plain `usize` (e.g. `with_branch_context`'s save/restore, or the
+    /// scoped inline rollbacks in `dispatch_codegen.rs`/`expressions.rs` that
+    /// close an open let-chain from a class-method self-send).
+    pub(super) const fn version(self) -> usize {
+        self.0
+    }
+
+    /// Overwrites the raw version number (restore half of a save/restore
+    /// pair, or a branch-entry reset to a specific value).
+    pub(super) fn set_version(&mut self, version: usize) {
+        self.0 = version;
+    }
+
+    /// Resets to version 0 (the "State"/"Self" bare-prefix, frame-entry
+    /// parameter — never itself a [`Self::next_var`] product).
+    pub(super) fn reset(&mut self) {
+        self.0 = 0;
+    }
+
+    /// Names the version already reached — never mints.
+    pub(super) fn current_var(self, prefix: VersionPrefix) -> String {
+        VersionedVar::new(prefix, self.0, FrameId::ROOT).render_name()
+    }
+
+    /// Mints and names the next version — the only production path.
+    pub(super) fn next_var(&mut self, prefix: VersionPrefix) -> String {
+        self.0 += 1;
+        self.current_var(prefix)
+    }
+
+    /// Names the version [`Self::next_var`] would mint, without advancing
+    /// the counter.
+    pub(super) fn peek_next_var(self, prefix: VersionPrefix) -> String {
+        VersionedVar::new(prefix, self.0 + 1, FrameId::ROOT).render_name()
     }
 }
 
@@ -770,6 +851,70 @@ mod tests {
             "ClassVars2"
         );
         assert_eq!(local("Sum", 1, FrameId::ROOT).render_name(), "Sum1");
+    }
+
+    // ── VersionCounter (BT-3131) ─────────────────────────────────────────
+    // Pins the same semantics the pre-BT-3131 `StateThreading` struct
+    // (`state_codegen.rs`) pinned, now against the single shared
+    // implementation reused for all three prefixes.
+
+    #[test]
+    fn version_counter_starts_at_zero() {
+        let counter = VersionCounter::new();
+        assert_eq!(counter.version(), 0);
+        assert_eq!(counter.current_var(VersionPrefix::State), "State");
+    }
+
+    #[test]
+    fn version_counter_next_var_increments_and_persists() {
+        let mut counter = VersionCounter::new();
+        assert_eq!(counter.next_var(VersionPrefix::State), "State1");
+        assert_eq!(counter.version(), 1);
+        assert_eq!(counter.current_var(VersionPrefix::State), "State1");
+        assert_eq!(counter.next_var(VersionPrefix::State), "State2");
+        assert_eq!(counter.version(), 2);
+    }
+
+    #[test]
+    fn version_counter_peek_next_var_does_not_advance() {
+        let counter = VersionCounter::new();
+        assert_eq!(
+            counter.peek_next_var(VersionPrefix::ClassVars),
+            "ClassVars1"
+        );
+        // peek must not have minted — the counter is still at version 0.
+        assert_eq!(counter.version(), 0);
+        assert_eq!(counter.current_var(VersionPrefix::ClassVars), "ClassVars");
+    }
+
+    #[test]
+    fn version_counter_reset_returns_to_zero() {
+        let mut counter = VersionCounter::new();
+        counter.next_var(VersionPrefix::SelfVt);
+        counter.next_var(VersionPrefix::SelfVt);
+        assert_eq!(counter.version(), 2);
+        counter.reset();
+        assert_eq!(counter.version(), 0);
+        assert_eq!(counter.current_var(VersionPrefix::SelfVt), "Self");
+    }
+
+    #[test]
+    fn version_counter_set_version_overwrites_directly() {
+        let mut counter = VersionCounter::new();
+        counter.set_version(5);
+        assert_eq!(counter.version(), 5);
+        assert_eq!(counter.current_var(VersionPrefix::State), "State5");
+    }
+
+    #[test]
+    fn version_counter_is_reused_identically_across_prefixes() {
+        // Same counter value, three different prefixes — pins that naming is
+        // purely a function of (prefix, version), never counter identity.
+        let mut counter = VersionCounter::new();
+        counter.set_version(3);
+        assert_eq!(counter.current_var(VersionPrefix::State), "State3");
+        assert_eq!(counter.current_var(VersionPrefix::ClassVars), "ClassVars3");
+        assert_eq!(counter.current_var(VersionPrefix::SelfVt), "Self3");
     }
 
     // ── verify(): the clean/silent case ─────────────────────────────────

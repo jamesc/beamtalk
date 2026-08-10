@@ -9,6 +9,8 @@
 //! - [`control_flow`] — loops, stored closures, if-true/false conditionals
 //! - [`gen_server`] — module/class codegen, REPL modules, value subclasses
 //! - [`primitives`] — primitive selector and intrinsic codegen
+//! - [`branch_context`] — BT-3131: `with_branch_context`'s per-prefix
+//!   save/reset/restore discipline (state/`class_vars`/self)
 
 pub use super::*;
 pub use crate::ast::*;
@@ -90,6 +92,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
 }
 
 mod analysis_handoff;
+mod branch_context;
 mod control_flow;
 mod dispatch;
 mod expressions;

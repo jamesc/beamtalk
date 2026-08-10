@@ -70,7 +70,8 @@
 //! - [`control_flow`] - Control flow compilation (iteration, loops, mutation analysis)
 //! - [`dispatch_codegen`] - Message sending and dispatch (the core Beamtalk operation)
 //! - [`variable_context`] - Variable binding and scope management aggregate
-//! - [`state_codegen`] - State threading service for simulated mutation
+//! - [`threaded_ir`] - BT-3131: `VersionCounter`, the single implementation behind
+//!   the state/class-var/self-type-threaded version counters (formerly `state_codegen`)
 //!
 //! ## Supporting Modules
 //!
@@ -102,7 +103,6 @@ pub mod primitive_bindings;
 mod primitives;
 pub mod selector_mangler;
 mod spec_codegen;
-mod state_codegen;
 mod supervisor_codegen;
 mod threaded_expr;
 mod threaded_ir;
@@ -122,10 +122,10 @@ use document::leaf;
 use document::{Document, INDENT, line, nest};
 use ecow::EcoString;
 use primitive_bindings::PrimitiveBindingTable;
-use state_codegen::StateThreading;
 use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
+use threaded_ir::{VersionCounter, VersionPrefix};
 use variable_context::VariableContext;
 
 /// Display wrapper for `Option<Span>` in error messages.
@@ -1165,8 +1165,14 @@ pub(super) struct ClassContext {
     /// BT-412: Selector names of class methods in the current class.
     /// Used to route self-sends to class method functions vs module exports.
     pub class_method_selectors: std::collections::HashSet<String>,
-    /// BT-412: State version counter for class variable threading.
-    pub class_var_version: usize,
+    /// BT-412/BT-3131: State version counter for class variable threading.
+    ///
+    /// Not `pub` (unlike this struct's other fields) — [`VersionCounter`] is
+    /// `pub(super)` within `threaded_ir`, narrower than `ClassContext`'s own
+    /// `pub(super)` (= `pub(in crate::codegen)`); all access stays inside
+    /// `mod.rs` via the `class_var_version()`/`set_class_var_version()`
+    /// accessor methods, exactly as before.
+    class_var_version: VersionCounter,
     /// BT-412: Whether class variables were mutated in the current method.
     pub class_var_mutated: bool,
     /// Class name → compiled module name index for resolving cross-file class references.
@@ -1221,7 +1227,7 @@ impl ClassContext {
             class_identity: None,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
-            class_var_version: 0,
+            class_var_version: VersionCounter::new(),
             class_var_mutated: false,
             class_module_index: std::collections::HashMap::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
@@ -1240,12 +1246,18 @@ impl ClassContext {
 /// `Some` when compiling value type code, `None` otherwise.
 #[derive(Debug, Clone)]
 pub(super) struct ValueTypeContext {
-    /// BT-833: Self-threading version counter for value type field assignments.
+    /// BT-833/BT-3131: Self-threading version counter for value type field assignments.
     ///
     /// Mirrors `state_threading` for value types. Each field assignment increments
     /// this counter: `Self` → `Self1` → `Self2` → ... so that `self` in expression
     /// position always resolves to the latest immutable snapshot.
-    pub self_version: usize,
+    ///
+    /// Not `pub` (unlike `current_nlr_token`) — [`VersionCounter`] is
+    /// `pub(super)` within `threaded_ir`, narrower than `ValueTypeContext`'s
+    /// own `pub(super)`; all access stays inside `mod.rs` via the
+    /// `self_version()`/`set_self_version()` accessor methods, exactly as
+    /// before.
+    self_version: VersionCounter,
     /// BT-754: Core Erlang variable name holding the non-local return token for the current
     /// value type method, or `None` when no NLR infrastructure is active.
     ///
@@ -1259,7 +1271,7 @@ impl ValueTypeContext {
     /// Creates a new `ValueTypeContext` with default values.
     fn new() -> Self {
         Self {
-            self_version: 0,
+            self_version: VersionCounter::new(),
             current_nlr_token: None,
         }
     }
@@ -1300,6 +1312,59 @@ enum OpenScopeResult {
     NoValue,
 }
 
+/// BT-3131/BT-1449: RAII guard for [`CoreErlangGenerator::with_branch_context`]'s
+/// per-prefix save/reset/restore discipline (ADR 0111 §Phase A2). Replaces the
+/// previous manual save-before/restore-after sequencing with a `Drop` impl
+/// that restores unconditionally when the guard goes out of scope — including
+/// through an early return via `?` inside the branch closure, which the old
+/// manual-restore-after-the-call sequencing could not cover.
+///
+/// Per-prefix branch discipline, preserved exactly (state, `class_vars`) or
+/// decided (self) by BT-3131:
+/// - **state**: reset to 0 on entry, restored on exit.
+/// - **`class_vars`**: NOT reset on entry (the branch inherits the outer
+///   scope's current version) but restored on exit. `class_var_mutated` is
+///   intentionally NOT restored — BT-1550: it is a method-level flag that
+///   must stay sticky once set.
+/// - **self**: BT-3131 decision, revised during review — saved and restored
+///   on exit, but **NOT reset to 0 on entry**: the same discipline as
+///   `class_vars`, not `state`. `state`'s reset is safe because `state`
+///   inside a loop body renders as `StateAcc{N}` (a context-dependent
+///   rename, `in_loop_body`), so a reset only affects that local rendering
+///   convention. `Self{N}` has no such rename — `self.field` reads compile
+///   directly to `maps:get(field, Self{N})` — and `Self` (version 0, the
+///   bare method parameter) is always a syntactically valid Core Erlang
+///   variable, so resetting to 0 does not fail to compile: it silently
+///   reads the pre-mutation value. `generate_threaded_loop_body` calls
+///   `with_branch_context` unconditionally and is shared by `ValueType`
+///   contexts (confirmed empirically: a `self.field := ...` assignment
+///   followed by a `do:`/conditional body in the same method that reads
+///   `self.field` produced `maps:get(field, Self)` instead of
+///   `maps:get(field, Self1)` under a reset-on-entry policy). The original
+///   "no current call site enters `with_branch_context` while
+///   `self_version` is non-zero" claim was wrong. Before BT-3131,
+///   `self_version` was neither saved nor restored here at all — the "live
+///   landmine" the issue's ADR calls out; giving it `class_vars`' discipline
+///   (not `state`'s) closes that landmine without introducing this one.
+struct BranchContextGuard<'a> {
+    generator: &'a mut CoreErlangGenerator,
+    saved_in_loop: bool,
+    saved_state_version: usize,
+    saved_class_var_version: usize,
+    saved_self_version: usize,
+}
+
+impl Drop for BranchContextGuard<'_> {
+    fn drop(&mut self) {
+        self.generator.in_loop_body = self.saved_in_loop;
+        self.generator.set_state_version(self.saved_state_version);
+        self.generator
+            .set_class_var_version(self.saved_class_var_version);
+        self.generator.set_self_version(self.saved_self_version);
+        // class_var_mutated intentionally NOT restored — sticky (BT-1550).
+    }
+}
+
 /// The generator delegates to specialized submodules:
 /// - [`control_flow`] - Iteration and loop compilation
 /// - [`dispatch_codegen`] - Message sending and dispatch
@@ -1327,8 +1392,10 @@ pub(crate) struct CoreErlangGenerator {
     pub(crate) module_name: EcoString,
     /// Variable binding and scope management.
     var_context: VariableContext,
-    /// State threading for field assignments.
-    state_threading: StateThreading,
+    /// State threading for field assignments. BT-3131: `VersionCounter` is the
+    /// single implementation shared with `ClassContext::class_var_version` and
+    /// `ValueTypeContext::self_version` (formerly `StateThreading`).
+    state_threading: VersionCounter,
     /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
     in_loop_body: bool,
     /// BT-1326: Whether we're inside a hybrid-params loop body.
@@ -1523,7 +1590,7 @@ impl CoreErlangGenerator {
         Self {
             module_name: EcoString::from(module_name),
             var_context: VariableContext::new(),
-            state_threading: StateThreading::new(),
+            state_threading: VersionCounter::new(),
             in_loop_body: false,
             in_hybrid_loop: false,
             in_direct_params_loop: false,
@@ -1664,12 +1731,14 @@ impl CoreErlangGenerator {
     pub(super) fn class_var_version(&self) -> usize {
         self.class_context
             .as_ref()
-            .map_or(0, |ctx| ctx.class_var_version)
+            .map_or(0, |ctx| ctx.class_var_version.version())
     }
 
     /// Sets the class variable version counter.
     pub(super) fn set_class_var_version(&mut self, version: usize) {
-        self.class_context_mut().class_var_version = version;
+        self.class_context_mut()
+            .class_var_version
+            .set_version(version);
     }
 
     /// Returns whether class variables were mutated in the current method.
@@ -1758,6 +1827,13 @@ impl CoreErlangGenerator {
     /// (from the cascade's `classVars:` keys), and the builder class name used
     /// for runtime self/`super` dispatch. Safe whether or not an enclosing class
     /// is being compiled — a context created here is dropped on exit.
+    ///
+    /// BT-3131: `class_var_version`'s save-reset-restore here rides the same
+    /// unified `VersionCounter` mechanism as [`BranchContextGuard`] — a
+    /// distinct *reset* policy (this is a fresh method context, not a branch:
+    /// the counter resets to 0 here, whereas `with_branch_context` restores
+    /// without resetting), but through the identical counter implementation
+    /// and accessor methods (`class_var_version`/`set_class_var_version`).
     pub(super) fn enter_builder_class_method_context(
         &mut self,
         class_name: &str,
@@ -1967,12 +2043,14 @@ impl CoreErlangGenerator {
     pub(super) fn self_version(&self) -> usize {
         self.value_type_context
             .as_ref()
-            .map_or(0, |ctx| ctx.self_version)
+            .map_or(0, |ctx| ctx.self_version.version())
     }
 
     /// Sets the value type self-version counter.
     pub(super) fn set_self_version(&mut self, version: usize) {
-        self.value_type_context_mut().self_version = version;
+        self.value_type_context_mut()
+            .self_version
+            .set_version(version);
     }
 
     /// Returns the current NLR token variable name, if any.
@@ -2031,13 +2109,17 @@ impl CoreErlangGenerator {
     pub(crate) fn current_state_var(&self) -> String {
         if self.in_hybrid_loop {
             // Hybrid-params loop: use State* naming (State is an explicit fun parameter)
-            self.state_threading.current_var()
+            self.state_threading.current_var(VersionPrefix::State)
         } else if self.in_loop_body {
-            // Normal loop body: use StateAcc* nomenclature
+            // Normal loop body: use StateAcc* nomenclature. BT-3131: `StateAcc` is a
+            // render-time renaming of the SAME `state_threading` counter, a function of
+            // (counter, loop context) — not a distinct `VersionPrefix` — so this stays
+            // outside `VersionedVar` and calls `util::versioned_var` directly, exactly as
+            // before (see `threaded_ir.rs`'s `VersionPrefix::State` doc comment).
             util::versioned_var("StateAcc", self.state_threading.version())
         } else {
             // Normal context - use State nomenclature
-            self.state_threading.current_var()
+            self.state_threading.current_var(VersionPrefix::State)
         }
     }
 
@@ -2047,7 +2129,7 @@ impl CoreErlangGenerator {
     /// returns `State1`, `State2`, etc.
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc1`, etc.
     pub(crate) fn next_state_var(&mut self) -> String {
-        let next_var = self.state_threading.next_var();
+        let next_var = self.state_threading.next_var(VersionPrefix::State);
         if self.in_hybrid_loop || !self.in_loop_body {
             // Hybrid mode or normal context: use State* naming
             next_var
@@ -2077,7 +2159,7 @@ impl CoreErlangGenerator {
     /// Returns the name of the next state variable without advancing the
     /// version counter.  Context-aware: uses `StateAcc*` in loop bodies.
     pub(super) fn peek_next_state_var(&self) -> String {
-        let next_var = self.state_threading.peek_next_var();
+        let next_var = self.state_threading.peek_next_var(VersionPrefix::State);
         if self.in_hybrid_loop || !self.in_loop_body {
             next_var
         } else {
@@ -2090,43 +2172,77 @@ impl CoreErlangGenerator {
         self.state_threading.set_version(version);
     }
 
+    /// BT-3131: Enters a branch context, applying the per-prefix reset policy
+    /// documented on [`BranchContextGuard`] and returning a guard that
+    /// restores everything (per that same policy) when dropped.
+    fn enter_branch_context(&mut self) -> BranchContextGuard<'_> {
+        let saved_state_version = self.state_version();
+        let saved_in_loop = self.in_loop_body;
+        let saved_class_var_version = self.class_var_version();
+        let saved_self_version = self.self_version();
+        self.set_state_version(0);
+        self.in_loop_body = true;
+        // BT-3131 review fix: do NOT reset self_version to 0 here — unlike
+        // `state`, a `Self{N}` reference is always a syntactically valid
+        // Core Erlang variable (the bare `Self` parameter always exists), so
+        // resetting doesn't fail to compile, it silently reads the
+        // pre-mutation value. `generate_threaded_loop_body` calls this
+        // unconditionally and is shared with ValueType contexts (confirmed:
+        // resetting produces `maps:get(field, Self)` instead of
+        // `maps:get(field, Self1)` for a `self.field := ...` read inside a
+        // `do:`/conditional body that follows an earlier `self.field := ...`
+        // in the same method — see `BranchContextGuard`'s doc comment).
+        // `self` gets `class_vars`' restore-only discipline instead.
+        BranchContextGuard {
+            generator: self,
+            saved_in_loop,
+            saved_state_version,
+            saved_class_var_version,
+            saved_self_version,
+        }
+    }
+
     /// BT-1449: Executes `f` inside a branch context where `in_loop_body` is
     /// `true` and `state_version` is reset to 0.  The previous values are
-    /// unconditionally restored after `f` returns (even on `Err`).
+    /// unconditionally restored — via [`BranchContextGuard`]'s `Drop` impl —
+    /// once this function returns, including through an early return via
+    /// `?` inside `f`.
     ///
-    /// BT-1550: Also saves/restores `class_var_version` so that self-calls
-    /// inside a conditional branch don't leak `ClassVars{N}` bindings into
-    /// the outer scope.  `class_var_mutated` is intentionally NOT restored —
-    /// it is a method-level flag that must stay sticky once set.
+    /// BT-1550: Also saves/restores `class_var_version` (without resetting
+    /// it — the branch inherits the outer scope's current version) so that
+    /// self-calls inside a conditional branch don't leak `ClassVars{N}`
+    /// bindings into the outer scope.  `class_var_mutated` is intentionally
+    /// NOT restored — it is a method-level flag that must stay sticky once
+    /// set.
+    ///
+    /// BT-3131: Also saves/restores `self_version`, with the same
+    /// restore-only-no-reset discipline as `class_var_version` — see
+    /// [`BranchContextGuard`]'s doc comment for why a `state`-style reset is
+    /// unsafe for `self`.
     pub(super) fn with_branch_context<T>(
         &mut self,
         f: impl FnOnce(&mut CoreErlangGenerator) -> T,
     ) -> T {
-        let saved_state_version = self.state_version();
-        let saved_in_loop = self.in_loop_body;
-        let saved_class_var_version = self.class_var_version();
-        self.set_state_version(0);
-        self.in_loop_body = true;
-
-        let result = f(self);
-
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_state_version);
-        self.set_class_var_version(saved_class_var_version);
-        result
+        let guard = self.enter_branch_context();
+        f(guard.generator)
     }
 
     /// BT-412: Returns the current class variable state variable name.
     pub(super) fn current_class_var(&self) -> String {
-        util::versioned_var("ClassVars", self.class_var_version())
+        self.class_context
+            .as_ref()
+            .map_or(VersionCounter::new(), |ctx| ctx.class_var_version)
+            .current_var(VersionPrefix::ClassVars)
     }
 
     /// BT-412: Increments class var version and returns the new variable name.
     fn next_class_var(&mut self) -> String {
-        let new_version = self.class_var_version() + 1;
-        self.set_class_var_version(new_version);
+        let name = self
+            .class_context_mut()
+            .class_var_version
+            .next_var(VersionPrefix::ClassVars);
         self.set_class_var_mutated(true);
-        util::versioned_var("ClassVars", new_version)
+        name
     }
 
     /// BT-833: Returns the current Self variable name for value type Self-threading.
@@ -2134,14 +2250,17 @@ impl CoreErlangGenerator {
     /// Version 0 → `"Self"` (the original method parameter).
     /// Version N → `"Self{N}"` (after N field assignments have threaded a new snapshot).
     pub(super) fn current_self_var(&self) -> String {
-        util::versioned_var("Self", self.self_version())
+        self.value_type_context
+            .as_ref()
+            .map_or(VersionCounter::new(), |ctx| ctx.self_version)
+            .current_var(VersionPrefix::SelfVt)
     }
 
     /// BT-833: Increments the Self version and returns the new variable name.
     pub(super) fn next_self_var(&mut self) -> String {
-        let new_version = self.self_version() + 1;
-        self.set_self_version(new_version);
-        util::versioned_var("Self", new_version)
+        self.value_type_context_mut()
+            .self_version
+            .next_var(VersionPrefix::SelfVt)
     }
 
     /// BT-855: Records a structured diagnostic warning for the current module.
