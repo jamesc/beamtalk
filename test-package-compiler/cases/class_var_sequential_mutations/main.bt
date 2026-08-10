@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — class-variable
+// version threading (`ClassVars`, `ClassVars1`, `ClassVars2`, … — ADR 0110's
+// mechanism, `ClassContext.class_var_version`/`next_class_var()`).
+//
+// The pre-existing `class_methods` fixture (`class create`) covers a single
+// class-var mutation. This file adds a *sequential* mutation of the SAME
+// class var within one method: `ClassVars1` -> `ClassVars2`, pinning the
+// monotonic counter discipline the ADR 0111 `VersionedVar` unification must
+// preserve exactly (byte-for-byte) across the migration. Peers:
+// `class_var_multi_field_mutations` (interleaved fields),
+// `class_var_single_mutation` (minimal anchor),
+// `class_var_mutation_before_block_relay` (ADR 0110 relay shape).
+//
+// Every top-level (block_depth == 0) class-var write also emits the ADR
+// 0110 shadow-write (`$bt_class_vars_shadow`).
+
+Actor subclass: SeqClassVarCtr
+  classState: total = 0
+
+  class incrementTwice =>
+    self.total := self.total + 1
+    self.total := self.total + 1
+    self.total

@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — StateAcc-fallback
+// cell, letrec loops (whileTrue:/timesRepeat:), Actor context.
+//
+// Each method below is constructed to trip a distinct
+// `StateAccFallbackReason` variant (control_flow/mod.rs:55-78), confirmed
+// via `BEAMTALK_CODEGEN_DIAGNOSTICS=1`:
+//
+//   selfSendFallback           -> "self-send in loop body"
+//   conditionStateEffectsFallback -> "condition has state effects"
+//   controlFlowMutationsFallback  -> "control-flow sub-expression with mutations"
+//   nestedListOpCrossScopeFallback -> "nested list op with cross-scope mutation"
+
+Actor subclass: LetrecFallbackCtr
+  state: n = 0
+  state: total = 0
+
+  bump => self.n := self.n + 1
+
+  shouldContinue => self.n < 5
+
+  // SelfSendInBody: loop body sends a message to self (synchronous dispatch
+  // to the actor's own mailbox), which forces StateAcc — self-sends cannot
+  // be represented as a direct fun parameter.
+  selfSendFallback =>
+    x := 0
+    5 timesRepeat: [self bump. x := x + 1]
+    x
+
+  // ConditionStateEffects: the *condition* block (not the body) contains a
+  // self-send, so the guard evaluated on every iteration has state effects
+  // — direct-params has no State to re-read on each condition check.
+  conditionStateEffectsFallback =>
+    sum := 0
+    [self shouldContinue] whileTrue: [sum := sum + 1. self.n := self.n + 1]
+    sum
+
+  // ControlFlowMutations: an inline `ifTrue:` inside the loop body performs
+  // a field write — a control-flow sub-expression with mutations, which
+  // direct-params/hybrid selection excludes.
+  controlFlowMutationsFallback: limit =>
+    x := 0
+    1 to: limit do: [:i | x > 2 ifTrue: [self.total := self.total + 1]. x := x + 1]
+    x
+
+  // NestedListOpCrossScope (BT-1329): the loop body contains a nested list
+  // op (`do:`) that itself needs `StateAcc` (it writes the field
+  // `self.total`) AND captures an outer local (`count`) mutated across the
+  // scope boundary — that combination is incompatible with the outer
+  // loop's direct-params mode.
+  nestedListOpCrossScopeFallback: coll =>
+    x := 0
+    count := 0
+    [x < 3] whileTrue: [
+      coll do: [:each | self.total := self.total + each. count := count + 1]
+      x := x + 1
+    ]
+    count

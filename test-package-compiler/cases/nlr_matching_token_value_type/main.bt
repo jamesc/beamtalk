@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — non-local return
+// (NLR) through a block, "matching-token" shape, ValueType context (no
+// actor State to thread). Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to
+// emit "Non-local return: compiled via throw/catch". Peers:
+// `nlr_matching_token_actor`, `nlr_matching_token_class_method`.
+//
+// The pre-existing `stdlib_class_list` fixture (`indexOf:`) is the corpus's
+// only prior NLR example and happens to also be ValueType/matching-token;
+// this is an additional, explicit, minimal repro.
+
+Object subclass: NlrValue
+
+  findFirstOver: threshold in: coll =>
+    coll do: [:each | each > threshold ifTrue: [^each]]
+    0

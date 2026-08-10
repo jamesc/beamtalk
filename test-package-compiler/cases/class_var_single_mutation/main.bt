@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — a single class-var
+// mutation, read back immediately. The minimal byte-parity anchor for
+// `ClassVars`/`ClassVars1` + the ADR 0110 shadow-write, distinct from the
+// multi-mutation peers (`class_var_sequential_mutations`,
+// `class_var_multi_field_mutations`).
+
+Actor subclass: SingleClassVarCtr
+  classState: total = 0
+
+  class bump =>
+    self.total := self.total + 1
+    self.total

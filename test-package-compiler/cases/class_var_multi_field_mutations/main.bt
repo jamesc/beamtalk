@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — class-variable
+// version threading, interleaved across two different class vars in one
+// method. Peer of `class_var_sequential_mutations` (same class var mutated
+// twice); this exercises the counter advancing across *different* fields
+// rather than the same one.
+
+Actor subclass: MultiFieldClassVarCtr
+  classState: total = 0
+  classState: label = "start"
+
+  class resetAndBump =>
+    self.total := 0
+    self.label := "reset"
+    self.total := self.total + 1
+    self.total

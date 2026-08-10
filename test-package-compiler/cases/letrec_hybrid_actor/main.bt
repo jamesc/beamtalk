@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — Hybrid cell.
+//
+// `ThreadingPlan::select_hybrid_params` (control_flow/mod.rs) selects
+// full-extract direct-params + field threading (BT-1326/BT-1342) when a
+// letrec loop body has BOTH local-variable mutations AND actor field
+// mutations, but no self-sends — Actor context only (`ValueType` has no
+// actor State to thread; class methods route through the same fresh-map
+// pack prefix as ValueType — see `letrec_direct_params_value_and_class`).
+// Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS` to emit "using hybrid".
+
+Actor subclass: HybridCtr
+  state: n = 0
+  state: step :: Integer = 1
+
+  // to:do: — local `sum` and field `self.n` both mutated in the body.
+  sumTo: limit =>
+    sum := 0
+    1 to: limit do: [:i | sum := sum + i. self.n := self.n + 1]
+    sum
+
+  // whileTrue: — same shape via a condition-driven loop.
+  countWhile: limit =>
+    count := 0
+    [count < limit] whileTrue: [count := count + 1. self.n := self.n + 1]
+    count
+
+  // timesRepeat: — same shape again, plus a read-only field (`self.step`)
+  // that is never written: BT-1326 pre-extracts read-only fields as a
+  // separate direct param from mutated fields.
+  accumulateBy: times =>
+    total := 0
+    times timesRepeat: [total := total + self.step. self.n := self.n + 1]
+    total

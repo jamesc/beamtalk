@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — DirectParams cell.
+//
+// `ThreadingPlan::select_direct_params` (control_flow/mod.rs) has no context
+// restriction: any letrec loop (whileTrue:/whileFalse:/timesRepeat:/to:do:)
+// whose body mutates only local variables (no field writes, no self-sends,
+// no nested list ops incompatible with direct-params) selects direct fun
+// parameters instead of a `StateAcc` map. The Actor cell is already covered
+// by the pre-existing `while_true_simple` fixture; this file adds the
+// ValueType and ClassMethod cells, confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS`
+// to both emit "using direct-params".
+
+Object subclass: DirectParamsValue
+
+  // ValueType context: local-only whileTrue: loop.
+  countUpTo: limit =>
+    x := 0
+    [x < limit] whileTrue: [x := x + 1]
+    x
+
+  // ValueType context: local-only to:do: loop.
+  sumTo: limit =>
+    sum := 0
+    1 to: limit do: [:i | sum := sum + i]
+    sum
+
+Actor subclass: DirectParamsClassCtr
+  classState: spawnCount = 0
+
+  // ClassMethod context: local-only timesRepeat: loop. Does NOT touch the
+  // class var, so it never routes through ClassVars threading — purely
+  // exercises DirectParams selection with `context == Actor` and
+  // `in_class_method() == true` simultaneously (BT-3055: class methods start
+  // pack/unpack from a fresh map regardless of the enclosing class's Actor
+  // context).
+  class countDownFrom: n =>
+    count := 0
+    n timesRepeat: [count := count + 1]
+    count

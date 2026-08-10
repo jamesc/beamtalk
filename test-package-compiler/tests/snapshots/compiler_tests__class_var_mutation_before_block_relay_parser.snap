@@ -1,0 +1,543 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "RelayClassCtr",
+                span: Span {
+                    start: 835,
+                    end: 848,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 819,
+                        end: 824,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [],
+            class_methods: [
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "helper:",
+                                span: Span {
+                                    start: 882,
+                                    end: 889,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "aBlock",
+                                span: Span {
+                                    start: 890,
+                                    end: 896,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "aBlock",
+                                        span: Span {
+                                            start: 900,
+                                            end: 906,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "value",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 900,
+                                    end: 912,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: true,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 876,
+                        end: 912,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "mutateThenRelay",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1073,
+                                                end: 1077,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "total",
+                                        span: Span {
+                                            start: 1078,
+                                            end: 1083,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 1073,
+                                        end: 1083,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 1087,
+                                                    end: 1091,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "total",
+                                            span: Span {
+                                                start: 1092,
+                                                end: 1097,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 1087,
+                                            end: 1097,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 1100,
+                                                end: 1101,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1087,
+                                        end: 1101,
+                                    },
+                                },
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1073,
+                                    end: 1101,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1106,
+                                                end: 1110,
+                                            },
+                                        },
+                                    ),
+                                    selector: Unary(
+                                        "class",
+                                    ),
+                                    arguments: [],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1106,
+                                        end: 1116,
+                                    },
+                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "helper:",
+                                            span: Span {
+                                                start: 1117,
+                                                end: 1124,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Block(
+                                        Block {
+                                            parameters: [],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: Return {
+                                                        value: FieldAccess {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "self",
+                                                                    span: Span {
+                                                                        start: 1127,
+                                                                        end: 1131,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            field: Identifier {
+                                                                name: "total",
+                                                                span: Span {
+                                                                    start: 1132,
+                                                                    end: 1137,
+                                                                },
+                                                            },
+                                                            span: Span {
+                                                                start: 1127,
+                                                                end: 1137,
+                                                            },
+                                                        },
+                                                        span: Span {
+                                                            start: 1126,
+                                                            end: 1137,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 1125,
+                                                end: 1138,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 1106,
+                                    end: 1138,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 1143,
+                                            end: 1147,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "total",
+                                    span: Span {
+                                        start: 1148,
+                                        end: 1153,
+                                    },
+                                },
+                                span: Span {
+                                    start: 1143,
+                                    end: 1153,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: true,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Mutate the class var (shadow-write emitted at block_depth == 0), then",
+                                span: Span {
+                                    start: 1044,
+                                    end: 1049,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "hand a block with `^` to a helper class method.",
+                                span: Span {
+                                    start: 1044,
+                                    end: 1049,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1044,
+                        end: 1153,
+                    },
+                },
+            ],
+            class_variables: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "total",
+                        span: Span {
+                            start: 863,
+                            end: 868,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 871,
+                                end: 872,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 851,
+                        end: 872,
+                    },
+                },
+            ],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the ADR 0110 shape",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "this epic exists to protect against regression: a class-var mutation",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "immediately followed by a call that hands off a block whose `^` relays",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "out through that call. `generate_field_assignment`'s shadow-write",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "(expressions.rs:576-588, `block_depth == 0` gated) must fire for the",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "mutation, and the relay must still observe it via the",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`$bt_class_vars_shadow` process-dictionary read (`invoke_class_method/7`).",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit both a dynamic-",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "dispatch diagnostic for the relay call and",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "\"Non-local return: compiled via throw/catch\". Peer:",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`nlr_foreign_relay_actor` (the plain Actor variant with no class var).",
+                        span: Span {
+                            start: 819,
+                            end: 824,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
+            },
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 819,
+                end: 1153,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    type_aliases: [],
+    expressions: [],
+    span: Span {
+        start: 819,
+        end: 1153,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

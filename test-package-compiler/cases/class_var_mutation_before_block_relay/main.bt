@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the ADR 0110 shape
+// this epic exists to protect against regression: a class-var mutation
+// immediately followed by a call that hands off a block whose `^` relays
+// out through that call. `generate_field_assignment`'s shadow-write
+// (expressions.rs:576-588, `block_depth == 0` gated) must fire for the
+// mutation, and the relay must still observe it via the
+// `$bt_class_vars_shadow` process-dictionary read (`invoke_class_method/7`).
+// Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit both a dynamic-
+// dispatch diagnostic for the relay call and
+// "Non-local return: compiled via throw/catch". Peer:
+// `nlr_foreign_relay_actor` (the plain Actor variant with no class var).
+
+Actor subclass: RelayClassCtr
+  classState: total = 0
+
+  class helper: aBlock => aBlock value
+
+  // Mutate the class var (shadow-write emitted at block_depth == 0), then
+  // hand a block with `^` to a helper class method.
+  class mutateThenRelay =>
+    self.total := self.total + 1
+    self class helper: [^self.total]
+    self.total
