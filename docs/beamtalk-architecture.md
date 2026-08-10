@@ -145,15 +145,21 @@ queries; both are coarser, file-granularity caches:
   Editing a file reparses only that file and calls `ProjectIndex::update_file`
   (or `remove_file` on delete) to refresh the project-wide index —
   file-granularity invalidation, not whole-project reanalysis.
-- **Batch builds (`beamtalk build`):** a two-pass, mtime-keyed cache. Pass 1
-  (class indexing) persists per-file class/alias/extension metadata to
-  `.beamtalk-pass1-cache.json`, keyed by source mtime, so unchanged files skip
-  re-parsing (`crates/beamtalk-cli/src/commands/build_cache.rs`, BT-1683).
-  Pass 2 (codegen) compares each source file's mtime against its `.beam`
-  output's mtime and recompiles only files that changed
-  (`crates/beamtalk-cli/src/commands/build.rs`). A toolchain provenance stamp
-  (ADR 0098) gates both passes ahead of the mtime checks, so a compiler/OTP
-  version change forces a full rebuild regardless of mtime.
+- **Batch builds (`beamtalk build`):** a two-pass, content-hash-keyed cache
+  (BT-3120). Pass 1 (class indexing) persists per-file class/alias/extension
+  metadata to `.beamtalk-pass1-cache.json`, keyed by a SHA-256 hash of the
+  source file's contents, so unchanged files skip re-parsing
+  (`crates/beamtalk-cli/src/commands/build_cache.rs`, BT-1683). Pass 2
+  (codegen) compares each source file's content hash against the hash
+  recorded (in a sidecar, `.beamtalk-beam-hashes.json`) for the content that
+  produced its current `.beam` output, and recompiles only files whose hash
+  differs (`crates/beamtalk-cli/src/commands/build.rs`). Content hashing
+  replaced mtime comparison because mtime lies under git operations (a
+  branch switch restores old content under a fresh mtime) and under tools
+  that preserve or backdate mtimes on write — either of which could make an
+  mtime-keyed cache serve a stale `.beam`. A toolchain provenance stamp (ADR
+  0098) gates both passes ahead of the hash checks, so a compiler/OTP version
+  change forces a full rebuild regardless of source content.
 
 Query-based incrementality (a Salsa-style dependency graph of memoized
 queries) does not exist today — it's deliberately deferred until profiling
@@ -298,7 +304,7 @@ Protocol: JSON-RPC 2.0 (same as LSP)
 Illustrative sketch of the state a persistent compiler process would need to
 track — see "Incremental Compilation" above for what's actually implemented
 today (`SimpleLanguageService`'s per-file cache and `ProjectIndex`, plus the
-batch build's two-pass mtime cache; there is no query-graph database):
+batch build's two-pass content-hash cache; there is no query-graph database):
 
 ```rust
 struct CompilerState {

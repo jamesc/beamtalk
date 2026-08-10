@@ -76,6 +76,53 @@ fn build_force_recompiles_unchanged_sources() {
         .success();
 }
 
+/// BT-3120 acceptance criterion, exercised through the real `beamtalk build`
+/// subprocess rather than the internal `detect_changes`/`partition_files`
+/// unit tests: rewriting a source file with byte-for-byte identical content
+/// (e.g. `touch`, or an editor save-without-edit) bumps its mtime but must
+/// not trigger recompilation — only a genuine content change should. An
+/// mtime-keyed cache would recompile on the touch alone; a content-hash-keyed
+/// one must not.
+#[test]
+fn build_touch_without_content_change_is_not_recompiled() {
+    let project = cli_common::fixture_project();
+    let greeter = project.path().join("src/Greeter.bt");
+    let original = std::fs::read_to_string(&greeter).unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success();
+
+    // Rewrite the exact same bytes — this changes the file's mtime (most
+    // filesystems have at best millisecond, often only second, resolution,
+    // so sleep past that) but not its content.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&greeter, &original).unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("unchanged").or(contains("nothing to compile")));
+
+    // A genuine content change on the same file must still be recompiled.
+    std::fs::write(&greeter, format!("{original}\n  goodbye => \"goodbye\"\n")).unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        // Only `src/Greeter.bt` is a build source in this fixture (the test
+        // file under `test/` isn't part of `beamtalk build`'s source set),
+        // so a genuine change to it recompiles the project's one file —
+        // i.e. NOT the "all unchanged" no-op message from the touch above.
+        .stderr(contains("unchanged").not());
+}
+
 // ---------------------------------------------------------------------------
 // BT-2920: E0401/E0402 visibility checks must fire at build time
 // ---------------------------------------------------------------------------

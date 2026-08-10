@@ -21,6 +21,24 @@ use sha2::{Digest, Sha256};
 /// deregistration polling, registration lookup.
 pub mod epmd;
 
+/// Lowercase-hex-encode a byte slice.
+///
+/// The shared leaf under every hash-to-hex-string need in these tools —
+/// [`hash_workspace_path_string`] here and the source-content hashing in
+/// `beamtalk-cli`'s `commands::util::content_hash_of` both hex-encode a
+/// SHA-256 digest and must not each carry their own copy of this formatting
+/// loop (see `docs/development/architecture-principles.md` § Duplication &
+/// the Shared-Leaf-Module Pattern).
+#[must_use]
+pub fn hex_encode(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 /// SHA256-hash a path string down to a 12-hex-char workspace ID.
 ///
 /// The pure half of [`generate_workspace_id`] — no filesystem access, no
@@ -36,13 +54,7 @@ pub fn hash_workspace_path_string(path_str: &str) -> String {
     let result = hasher.finalize();
 
     // Use first 12 hex chars (6 bytes) for readability — take first 6 bytes
-    result
-        .iter()
-        .take(6)
-        .fold(String::with_capacity(12), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+    hex_encode(&result[..6])
 }
 
 /// Generate a workspace ID from a project path.

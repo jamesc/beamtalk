@@ -79,10 +79,10 @@ Every build runs through three sequential phases:
 
 ### Incremental Compilation
 
-Beamtalk uses mtime-based change detection to avoid redundant work:
+Beamtalk uses content-hash-based change detection to avoid redundant work (BT-3120):
 
-- Each `.bt` source file is compared against its corresponding `.beam` output. If the source is newer (or no `.beam` exists), the file is recompiled.
-- **Pass 1 caching** — The class-module index from Pass 1 is cached in `_build/dev/ebin/.beamtalk-pass1-cache.json`. On subsequent builds, only files whose source has changed since the cache was written are re-parsed. Unchanged files reuse their cached class metadata. If the `beamtalk.toml` manifest changes, the entire cache is invalidated and all files are re-parsed.
+- Each `.bt` source file's SHA-256 content hash is compared against the hash recorded for it in a `.beamtalk-beam-hashes.json` sidecar (the hash that produced its current `.beam`). If the hashes differ (or no `.beam` exists), the file is recompiled. mtime is deliberately not used for this decision — it lies under git operations (a branch switch restores old content under a fresh mtime) and under tools that preserve or backdate mtimes on write, either of which could make an mtime-keyed check serve a stale `.beam`.
+- **Pass 1 caching** — The class-module index from Pass 1 is cached in `_build/dev/ebin/.beamtalk-pass1-cache.json`, also keyed by each file's content hash. On subsequent builds, only files whose content hash has changed since the cache was written are re-parsed. Unchanged files reuse their cached class metadata. If the `beamtalk.toml` manifest changes (an mtime check — the manifest itself isn't content-hashed), the entire cache is invalidated and all files are re-parsed.
 - **Force rebuild** — `beamtalk build --force` ignores all caches and recompiles everything. Useful after toolchain upgrades or when build artifacts may be stale (e.g. switching git branches or worktrees).
 - **Orphan detection** — `.beam` files with no corresponding `.bt` source are reported as warnings (the source may have been deleted or renamed).
 
@@ -113,6 +113,7 @@ All build output goes under `_build/` in the project root. The `BuildLayout` str
     dev/
       ebin/                        — compiled .beam files from .bt sources
         .beamtalk-pass1-cache.json — Pass 1 incremental cache
+        .beamtalk-beam-hashes.json — Pass 2 .beam staleness sidecar (BT-3120)
       native/
         ebin/                      — compiled .beam files from native .erl sources
         include/                   — generated headers (e.g. beamtalk_classes.hrl)
