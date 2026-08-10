@@ -1094,6 +1094,7 @@ fuzz DURATION="60":
     @echo "   Seeds: stdlib/test/*.bt + tests/repl-protocol/cases/*.btscript (referenced live, not copied)"
     @echo "   Corpus: fuzz/corpus/compile_pipeline/ (fuzzer-grown findings only)"
     @echo "   Target: compile_pipeline (lex → parse → analyse → codegen, structural validity)"
+    @mkdir -p fuzz/corpus/compile_pipeline
     cargo +nightly fuzz run compile_pipeline fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
     @echo "✅ compile_pipeline completed without crashes!"
 

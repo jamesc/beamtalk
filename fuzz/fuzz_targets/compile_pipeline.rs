@@ -25,10 +25,14 @@
 //!
 //! # Corpus Seeding
 //!
-//! `fuzz/corpus/compile_pipeline/` is seeded from `stdlib/test/*.bt` and
-//! `tests/repl-protocol/cases/*.btscript` (richer, more semantically valid
-//! programs than `parse_arbitrary`'s corpus needs, since this target's
-//! interesting mutations start from code that gets *past* the parser).
+//! Seeded live from `stdlib/test/*.bt` and `tests/repl-protocol/cases/*.btscript`
+//! (richer, more semantically valid programs than `parse_arbitrary`'s corpus
+//! needs, since this target's interesting mutations start from code that gets
+//! *past* the parser) -- passed as extra `cargo fuzz run` corpus directories
+//! (see the `Justfile`'s `fuzz`/`fuzz-corpus-lint` recipes and
+//! `.github/workflows/fuzz.yml`), not copied into the repo.
+//! `fuzz/corpus/compile_pipeline/` itself is gitignored and holds only
+//! fuzzer-discovered growth.
 
 #![no_main]
 
