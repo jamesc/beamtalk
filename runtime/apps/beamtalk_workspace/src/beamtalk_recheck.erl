@@ -398,7 +398,13 @@ option's value directly, never touching `beamtalk_compiler_server`'s state:
    `diagnostics/3`'s `class_hierarchy => Overlay` option
    (`beamtalk_compiler_server`'s `handle_call({diagnostics, ...})` clause
    uses a caller-supplied map verbatim instead of reading `State#state.classes`
-   when one is given). Every other live class stays exactly as ambient —
+   when one is given). Every other live class stays as ambient as of this
+   trigger's start — `Overlay` is a single snapshot taken once via
+   `get_classes/0`, reused unchanged for every candidate's `recheck_owner/6`
+   call in the loop, not re-read per candidate. A concurrent `register_class/2`
+   for an *unrelated* class landing mid-loop is therefore invisible to later
+   candidates in this same round (a narrower staleness window than the old
+   mechanism, which read `State#state.classes` fresh per diagnostics call) —
    only the changed class's entry is hypothetical, and only for the
    diagnostics calls this one `trigger_pending/5` invocation makes.
 
