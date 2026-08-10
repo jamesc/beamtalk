@@ -112,6 +112,8 @@ instantiation_test_() ->
             %% Edge paths: uncovered branches (coverage improvement)
             {"is_module_loaded_with_new returns false for non-atom arg",
                 fun test_module_loaded_with_new_non_atom/0},
+            {"handle_new_generic rejects instantiation on a class_metadata miss",
+                fun test_generic_new_metadata_miss_rejects/0},
             {"handle_new_generic selects new: selector for abstract class with args",
                 fun test_generic_new_abstract_with_args/0},
             {"handle_new_compiled falls back to new/0 when new/1 not exported",
@@ -703,12 +705,35 @@ test_self_new_inherited_instance_method_dispatch() ->
 %% The function is internal; we reach it via handle_new/4 which calls it.
 %% When Module is not an atom (e.g. 42), the `when is_atom(Module)` guard
 %% fails → catch-all returns false → handle_new routes to generic path.
+%% BT-3106: the generic path's is_abstract lookup fails toward *rejecting*
+%% instantiation on a metadata miss (not toward permitting it), so this test
+%% registers real (non-abstract) metadata rather than relying on the old
+%% permissive fall-through — see test_generic_new_abstract_with_args below.
 test_module_loaded_with_new_non_atom() ->
-    %% 42 is an integer, so is_module_loaded_with_new(42) hits the catch-all.
-    %% Generic path for an unregistered class name yields a tagged map with
-    %% no fields (superclass chain empty → no inherited defaults).
-    Result = beamtalk_class_instantiation:handle_new([], 'BtciNonAtomMod', 42, undefined),
-    ?assertMatch({ok, #{'$beamtalk_class' := 'BtciNonAtomMod'}, _IsConstructible}, Result).
+    beamtalk_class_metadata:insert('BtciNonAtomMod', undefined, undefined, undefined, false),
+    try
+        %% 42 is an integer, so is_module_loaded_with_new(42) hits the catch-all.
+        %% Generic path yields a tagged map with no fields (superclass chain
+        %% empty → no inherited defaults).
+        Result = beamtalk_class_instantiation:handle_new([], 'BtciNonAtomMod', 42, undefined),
+        ?assertMatch({ok, #{'$beamtalk_class' := 'BtciNonAtomMod'}, _IsConstructible}, Result)
+    after
+        beamtalk_class_metadata:delete('BtciNonAtomMod')
+    end.
+
+%% BT-3106 review follow-up: a genuine beamtalk_class_metadata miss on the
+%% generic `new` path must fail toward *rejecting* instantiation (an
+%% internal_error), not toward silently treating the class as non-abstract.
+%% No beamtalk_class_metadata:insert/5 call here — 'BtciTrulyUnregistered'
+%% is never registered, so lookup_is_abstract/1 returns not_found.
+test_generic_new_metadata_miss_rejects() ->
+    Result = beamtalk_class_instantiation:handle_new(
+        [], 'BtciTrulyUnregistered', 42, undefined
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = internal_error, class = 'BtciTrulyUnregistered'}, false},
+        Result
+    ).
 
 %% Line 179: handle_new_generic chooses 'new:' selector when the abstract
 %% class is called with a non-empty args list (as opposed to [] → 'new').

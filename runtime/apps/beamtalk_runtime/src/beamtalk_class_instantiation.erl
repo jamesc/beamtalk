@@ -158,15 +158,16 @@ Unlike `resolve_is_abstract_or_raise/2`, this does not raise on a metadata
 miss: `handle_new_generic/2` is reached from the external `X new` gen_server
 handler too (via `handle_new/4`), which must keep returning `{error, ...}` /
 `{ok, ...}` tuples rather than crashing the class's gen_server. A miss is
-treated as "not abstract" — the same permissive default the process-dictionary
-read this replaces used to fall through to for an unset flag.
+reported as `not_found` so the caller can fail toward *rejecting*
+instantiation (via `class_metadata_missing_error/2`), not toward silently
+permitting it — the same "never guess `false` on a miss" rule
+`resolve_is_abstract_or_raise/2` and `lookup_is_abstract/1` document, just
+expressed via a return value instead of a raise since this call site cannot
+raise.
 """.
--spec class_is_abstract(class_name()) -> boolean().
+-spec class_is_abstract(class_name()) -> {ok, boolean()} | not_found.
 class_is_abstract(ClassName) ->
-    case beamtalk_class_metadata:lookup_is_abstract(ClassName) of
-        {ok, IsAbstract} -> IsAbstract;
-        not_found -> false
-    end.
+    beamtalk_class_metadata:lookup_is_abstract(ClassName).
 
 -doc """
 Build a generic, module-free instance for a class with no loaded module.
@@ -196,15 +197,17 @@ class method in the supervisor process). Both produce the same
 -spec handle_new_generic(list(), class_name()) ->
     {ok, map(), boolean()} | {error, term(), boolean()}.
 handle_new_generic(Args, ClassName) ->
+    Selector =
+        case Args of
+            [] -> 'new';
+            _ -> 'new:'
+        end,
     case class_is_abstract(ClassName) of
-        true ->
-            Selector =
-                case Args of
-                    [] -> 'new';
-                    _ -> 'new:'
-                end,
+        {ok, true} ->
             {error, abstract_class_error(ClassName, Selector), false};
-        false ->
+        not_found ->
+            {error, class_metadata_missing_error(ClassName, Selector), false};
+        {ok, false} ->
             Defaults = generic_field_defaults(ClassName),
             try
                 Result =
