@@ -37,9 +37,11 @@ State lives in this gen_server's process dictionary-free `#state{}` map —
 plain in-memory, no ETS, no disk. It is supervised under
 `beamtalk_workspace_sup` alongside `beamtalk_workspace_meta`, so a workspace
 restart (a fresh BEAM node) starts a fresh, empty store — exactly the ADR's
-"session state, never persisted to the artifact" requirement. `clear/0` gives
-callers (e.g. `Workspace changes revert:`) an explicit reset without a full
-restart.
+"session state, never persisted to the artifact" requirement. `Workspace
+changes revert:` does not call `clear/0` — a revert re-installs a method
+through the normal `capture/4`/`rollback/4` path, which already keeps this
+store's per-selector generations correct one selector at a time. `clear/0` is
+test-only: it gives tests an explicit full reset without a restart.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -134,9 +136,10 @@ rollback(ClassName, Selector, Side, PreviousSignature) when
     gen_server:call(?MODULE, {rollback, ClassName, Selector, Side, PreviousSignature}).
 
 -doc """
-Clear every recorded generation (`Workspace changes revert:`, tests). The next
-`capture/4` for any selector re-seeds from `__beamtalk_meta/0` as if this were
-a fresh workspace.
+Clear every recorded generation. Test-only (not called on the
+`Workspace changes revert:` path — see the moduledoc). The next `capture/4`
+for any selector re-seeds from `__beamtalk_meta/0` as if this were a fresh
+workspace.
 """.
 -spec clear() -> ok.
 clear() ->

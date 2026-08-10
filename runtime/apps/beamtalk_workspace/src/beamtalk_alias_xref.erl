@@ -86,9 +86,10 @@ every other ADR 0105/0108 hot-reload mechanism already documents and accepts.
 ## Session-only, never persisted
 
 Mirrors every other ADR 0105/0108 store: state lives in this gen_server's
-`#state{}`, supervised under `beamtalk_workspace_sup`. `clear/0` gives tests
-(and a future `Workspace changes revert:`) an explicit reset without a
-restart.
+`#state{}`, supervised under `beamtalk_workspace_sup`. `clear/0` is
+test-only for now: it gives tests an explicit reset without a restart. It is
+not called on the `Workspace changes revert:` path today; a future revert
+enhancement may wire it in, but that has not happened yet.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -201,7 +202,7 @@ dependents_of(AliasNameBin) when is_binary(AliasNameBin) ->
         exit:{timeout, _} -> []
     end.
 
--doc "Clear every recorded edge (tests; a future `Workspace changes revert:`).".
+-doc "Clear every recorded edge. Test-only for now (a future `Workspace changes revert:` may call it — not wired in yet).".
 -spec clear() -> ok.
 clear() ->
     try

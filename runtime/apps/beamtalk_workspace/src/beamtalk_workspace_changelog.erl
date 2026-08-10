@@ -258,6 +258,9 @@ Return all entries (including prior-epoch and orphan), oldest first.
 
 Returns `[]` when the ChangeLog server has not been started (the ETS table is
 absent), so callers on a node without a workspace do not crash.
+
+`?ETS_TABLE` is an `ordered_set` keyed by the monotonic `seq`, so table
+traversal already yields ascending key order — no per-call sort needed.
 """.
 -spec entries() -> [entry()].
 entries() ->
@@ -265,8 +268,7 @@ entries() ->
         undefined ->
             [];
         _ ->
-            Es = [E || {_Seq, E} <- ets:tab2list(?ETS_TABLE)],
-            lists:keysort(#entry.seq, Es)
+            [E || {_Seq, E} <- ets:tab2list(?ETS_TABLE)]
     end.
 
 -doc """
@@ -1385,7 +1387,7 @@ log_path(ChangesDir) -> filename:join(ChangesDir, "changes.jsonl").
 ensure_ets() ->
     case ets:whereis(?ETS_TABLE) of
         undefined ->
-            ets:new(?ETS_TABLE, [named_table, public, set, {read_concurrency, true}]);
+            ets:new(?ETS_TABLE, [named_table, public, ordered_set, {read_concurrency, true}]);
         _ ->
             ets:delete_all_objects(?ETS_TABLE)
     end,

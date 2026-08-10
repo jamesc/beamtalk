@@ -89,7 +89,10 @@ no disk — mirroring `beamtalk_workspace_signature_store` (BT-2777). It is
 supervised under `beamtalk_workspace_sup` alongside the signature store, so a
 workspace restart (a fresh BEAM node) starts a fresh, empty store — exactly
 the ADR's "workspace restart... session state, never persisted" clearing
-rule. `clear/0` gives callers (and tests) an explicit full reset without a
+rule. `Workspace changes revert:` does not call `clear/0` — a revert
+re-installs a method through the normal install path, which already calls
+`clear_owner/1` for the reverted class (see "Clearing-by-replacement" above).
+`clear/0` is test-only: it gives tests an explicit full reset without a
 restart.
 
 ## Known, accepted concurrency gaps (adversarial review, BT-2779)
@@ -229,8 +232,10 @@ all() ->
 
 -doc """
 Clear every recorded finding for every owner and origin (workspace restart
-is the natural clear via supervision; this is the explicit reset for
-`Workspace changes revert:` callers that want a full wipe, and for tests).
+is the natural clear via supervision; this is the explicit reset for tests
+that want a full wipe). Test-only — not called on the
+`Workspace changes revert:` path, which uses `clear_owner/1` instead (see the
+moduledoc).
 """.
 -spec clear() -> ok.
 clear() ->
