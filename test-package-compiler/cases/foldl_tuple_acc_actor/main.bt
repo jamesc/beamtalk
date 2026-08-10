@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — TupleAcc cell,
+// foldl-based list ops (`do:`, `collect:`, `select:`/`reject:`,
+// `inject:into:`), Actor context.
+//
+// `ThreadingPlan::select_tuple_acc` (control_flow/mod.rs:448-466) excludes
+// `ValueType` context outright (no `State` gen_server variable to fold
+// from) and — confirmed empirically via `BEAMTALK_CODEGEN_DIAGNOSTICS`,
+// see `foldl_value_type_and_class_method` — class methods also never reach
+// it: `do:`/`collect:`/etc. with mutations route class-method and
+// value-type bodies through the shared non-optimized
+// `generate_list_do_body_with_threading` shim
+// (`ThreadingPlan::new(self, body, None)`, control_flow/mod.rs:2813), which
+// hardcodes `allow_tuple_acc = false`. TupleAcc is therefore an
+// Actor-instance-method-only cell.
+//
+// Every method below mutates only local variables (no field writes, no
+// self-sends) inside the fold body, confirmed via
+// `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit "using tuple-acc".
+
+Actor subclass: FoldTupleAccCtr
+  state: n = 0
+
+  // do: — pure local accumulation.
+  sumDo: coll =>
+    sum := 0
+    coll do: [:each | sum := sum + each]
+    sum
+
+  // collect: — side-effecting local counter alongside the transform.
+  countedCollect: coll =>
+    count := 0
+    coll collect: [:each | count := count + 1. each * 2]
+
+  // select:/reject: — local counter alongside the predicate.
+  countedSelect: coll =>
+    count := 0
+    coll select: [:each | count := count + 1. each > 0]
+
+  countedReject: coll =>
+    count := 0
+    coll reject: [:each | count := count + 1. each > 0]
+
+  // inject:into: — the canonical foldl-shaped local accumulator.
+  totalInject: coll =>
+    coll inject: 0 into: [:acc :each | acc + each]
+
+  // Early-exit ops (detect:/anySatisfy:/takeWhile:) also route through
+  // new_for_foldl_list_op and select tuple-acc for pure-local mutation.
+  firstOver: threshold in: coll =>
+    count := 0
+    coll detect: [:each | count := count + 1. each > threshold] ifNone: [-1]
+
+  anyOver: threshold in: coll =>
+    count := 0
+    coll anySatisfy: [:each | count := count + 1. each > threshold]
+
+  takeUnder: threshold in: coll =>
+    count := 0
+    coll takeWhile: [:each | count := count + 1. each < threshold]

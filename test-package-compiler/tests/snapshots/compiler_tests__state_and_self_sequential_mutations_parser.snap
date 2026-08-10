@@ -1,0 +1,747 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "SeqStateCtr",
+                span: Span {
+                    start: 1036,
+                    end: 1047,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 1020,
+                        end: 1025,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "n",
+                        span: Span {
+                            start: 1057,
+                            end: 1058,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 1061,
+                                end: 1062,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1050,
+                        end: 1062,
+                    },
+                },
+                StateDeclaration {
+                    name: Identifier {
+                        name: "label",
+                        span: Span {
+                            start: 1072,
+                            end: 1077,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            String(
+                                "start",
+                            ),
+                            Span {
+                                start: 1080,
+                                end: 1087,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1065,
+                        end: 1087,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "incrementTwice",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1168,
+                                                end: 1172,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "n",
+                                        span: Span {
+                                            start: 1173,
+                                            end: 1174,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 1168,
+                                        end: 1174,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 1178,
+                                                    end: 1182,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 1183,
+                                                end: 1184,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 1178,
+                                            end: 1184,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 1187,
+                                                end: 1188,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1178,
+                                        end: 1188,
+                                    },
+                                },
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1168,
+                                    end: 1188,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1193,
+                                                end: 1197,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "n",
+                                        span: Span {
+                                            start: 1198,
+                                            end: 1199,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 1193,
+                                        end: 1199,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 1203,
+                                                    end: 1207,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 1208,
+                                                end: 1209,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 1203,
+                                            end: 1209,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 1212,
+                                                end: 1213,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1203,
+                                        end: 1213,
+                                    },
+                                },
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1193,
+                                    end: 1213,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 1218,
+                                            end: 1222,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "n",
+                                    span: Span {
+                                        start: 1223,
+                                        end: 1224,
+                                    },
+                                },
+                                span: Span {
+                                    start: 1218,
+                                    end: 1224,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Two sequential field mutations: State1 -> State2.",
+                                span: Span {
+                                    start: 1146,
+                                    end: 1160,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1146,
+                        end: 1224,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "resetAndBump",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1316,
+                                                end: 1320,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "n",
+                                        span: Span {
+                                            start: 1321,
+                                            end: 1322,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 1316,
+                                        end: 1322,
+                                    },
+                                },
+                                value: Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 1326,
+                                        end: 1327,
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1316,
+                                    end: 1327,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1332,
+                                                end: 1336,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "label",
+                                        span: Span {
+                                            start: 1337,
+                                            end: 1342,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 1332,
+                                        end: 1342,
+                                    },
+                                },
+                                value: Literal(
+                                    String(
+                                        "reset",
+                                    ),
+                                    Span {
+                                        start: 1346,
+                                        end: 1353,
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1332,
+                                    end: 1353,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 1358,
+                                                end: 1362,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "n",
+                                        span: Span {
+                                            start: 1363,
+                                            end: 1364,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 1358,
+                                        end: 1364,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 1368,
+                                                    end: 1372,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 1373,
+                                                end: 1374,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 1368,
+                                            end: 1374,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 1377,
+                                                end: 1378,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1368,
+                                        end: 1378,
+                                    },
+                                },
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1358,
+                                    end: 1378,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 1383,
+                                            end: 1387,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "n",
+                                    span: Span {
+                                        start: 1388,
+                                        end: 1389,
+                                    },
+                                },
+                                span: Span {
+                                    start: 1383,
+                                    end: 1389,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Three sequential mutations, interleaving two different fields.",
+                                span: Span {
+                                    start: 1296,
+                                    end: 1308,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1296,
+                        end: 1389,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3130 (ADR 0111 Phase A3): threading-mode matrix — actor/instance state",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "version threading (`State`, `State1`, `State2`, … — `StateThreading` in",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`state_codegen.rs`). One of the ADR's three independently-implemented",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "monotonic-version-counter services (the second, class vars, is covered by",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`class_var_sequential_mutations`; the third, value-type field threading",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "via `next_self_var()`/`Self`, `Self1`, … is NOT reachable through valid",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "user syntax — see the README's \"Excluded cells\" section: `Value subclass:`",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "field assignment is a compile error by design (immutability), and",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`Object subclass:` cannot declare instance data at all, so no legitimate",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`.bt` source can exercise `ValueTypeContext.self_version` field mutation).",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Multiple *sequential* mutations in one method (State1 -> State2) pin the",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "counter discipline this service must preserve exactly under the ADR 0111",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`VersionedVar` unification.",
+                        span: Span {
+                            start: 1020,
+                            end: 1025,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
+            },
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 1020,
+                end: 1389,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    type_aliases: [],
+    expressions: [],
+    span: Span {
+        start: 1020,
+        end: 1389,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

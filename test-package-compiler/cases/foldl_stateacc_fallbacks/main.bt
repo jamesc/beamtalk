@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — StateAcc-fallback
+// cell, foldl-based list ops (`do:`), Actor context.
+//
+// Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1`:
+//
+//   controlFlowMutationFallback -> "control-flow sub-expression with mutations"
+//   destructureLastExprFallback -> "destructure assignment as last expression"
+
+Actor subclass: FoldFallbackCtr
+  state: n = 0
+
+  // ControlFlowMutations: an inline `ifTrue:` inside the fold body performs
+  // a field write, excluding tuple-acc (BT-1276 requires no field writes
+  // anywhere in the body, including nested control flow).
+  controlFlowMutationFallback: coll =>
+    count := 0
+    coll do: [:each | each > 0 ifTrue: [self.n := self.n + 1]. count := count + 1]
+    count
+
+  // DestructureAsLastExpr (BT-1291-adjacent): a `{a, b} := expr` tuple
+  // destructure as the LAST statement of the fold body is incompatible
+  // with tuple-acc — `emit_destructure_last_expr` always emits the
+  // map-shaped StateAcc path.
+  destructureLastExprFallback: coll =>
+    sum := 0
+    coll do: [:each |
+      sum := sum + each
+      pair := Tuple withAll: #(each, sum)
+      {a, b} := pair
+    ]
+    sum
+
+  // BT-2356 shape (bonus coverage, not itself a fallback): a nested list
+  // op inside a conditional branch mutating an outer local. The branch's
+  // own block has no *direct* mutation (`analyze_block` doesn't propagate
+  // writes out of nested blocks), so this exercises
+  // `body_has_list_op_cross_scope_mutations`'s dedicated scan inside the
+  // conditional-selector path of `control_flow_has_mutations`. The inner
+  // `do:` itself is pure-local and independently selects tuple-acc
+  // (confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS`).
+  nestedListOpInConditional: flag with: coll =>
+    sum := 0
+    flag ifTrue: [coll do: [:each | sum := sum + each]]
+    sum

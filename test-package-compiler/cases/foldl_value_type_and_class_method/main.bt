@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the excluded TupleAcc
+// cells. ValueType and ClassMethod contexts both fall back to the
+// non-optimized map-shaped `StateAcc` accumulator for foldl list-ops with
+// mutations, confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1`
+// ("StateAcc fallback — not a letrec loop" — both route through the shared
+// `generate_list_do_body_with_threading` compat shim, control_flow/mod.rs:2808,
+// which calls `ThreadingPlan::new(self, body, None)` — `allow_tuple_acc` is
+// hardcoded `false` there, independent of `select_tuple_acc`'s own
+// `ValueType`-only exclusion at control_flow/mod.rs:448-466). This file
+// pins that behaviour for both contexts so a future migration cannot
+// silently start selecting tuple-acc for one of them without the snapshot
+// corpus catching the byte-level change.
+
+Object subclass: FoldValueCtr
+
+  // ValueType: `do:` with a captured local mutation.
+  sumDo: coll =>
+    sum := 0
+    coll do: [:each | sum := sum + each]
+    sum
+
+  // ValueType: `inject:into:` foldl shape.
+  totalInject: coll =>
+    coll inject: 0 into: [:acc :each | acc + each]
+
+Actor subclass: FoldClassMethodCtr
+  classState: total = 0
+
+  // ClassMethod: `do:` with a captured local mutation (class var untouched).
+  class sumDo: coll =>
+    sum := 0
+    coll do: [:each | sum := sum + each]
+    sum
+
+  // ClassMethod: `inject:into:` foldl shape.
+  class totalInject: coll =>
+    coll inject: 0 into: [:acc :each | acc + each]

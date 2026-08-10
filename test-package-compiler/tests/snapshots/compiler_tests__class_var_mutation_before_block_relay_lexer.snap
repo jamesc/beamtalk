@@ -1,0 +1,42 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 819, end: 824 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the ADR 0110 shape"), Whitespace("\n"), LineComment("// this epic exists to protect against regression: a class-var mutation"), Whitespace("\n"), LineComment("// immediately followed by a call that hands off a block whose `^` relays"), Whitespace("\n"), LineComment("// out through that call. `generate_field_assignment`'s shadow-write"), Whitespace("\n"), LineComment("// (expressions.rs:576-588, `block_depth == 0` gated) must fire for the"), Whitespace("\n"), LineComment("// mutation, and the relay must still observe it via the"), Whitespace("\n"), LineComment("// `$bt_class_vars_shadow` process-dictionary read (`invoke_class_method/7`)."), Whitespace("\n"), LineComment("// Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit both a dynamic-"), Whitespace("\n"), LineComment("// dispatch diagnostic for the relay call and"), Whitespace("\n"), LineComment("// \"Non-local return: compiled via throw/catch\". Peer:"), Whitespace("\n"), LineComment("// `nlr_foreign_relay_actor` (the plain Actor variant with no class var)."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 825, end: 834 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("RelayClassCtr"), span: Span { start: 835, end: 848 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("classState:"), span: Span { start: 851, end: 862 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("total"), span: Span { start: 863, end: 868 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 869, end: 870 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 871, end: 872 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 876, end: 881 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("helper:"), span: Span { start: 882, end: 889 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("aBlock"), span: Span { start: 890, end: 896 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 897, end: 899 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("aBlock"), span: Span { start: 900, end: 906 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 907, end: 912 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 1044, end: 1049 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Mutate the class var (shadow-write emitted at block_depth == 0), then"), Whitespace("\n  "), LineComment("// hand a block with `^` to a helper class method."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("mutateThenRelay"), span: Span { start: 1050, end: 1065 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1066, end: 1068 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1073, end: 1077 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1077, end: 1078 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1078, end: 1083 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1084, end: 1086 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1087, end: 1091 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1091, end: 1092 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1092, end: 1097 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1098, end: 1099 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 1100, end: 1101 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1106, end: 1110 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("class"), span: Span { start: 1111, end: 1116 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("helper:"), span: Span { start: 1117, end: 1124 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1125, end: 1126 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Caret, span: Span { start: 1126, end: 1127 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1127, end: 1131 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1131, end: 1132 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1132, end: 1137 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1137, end: 1138 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1143, end: 1147 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1147, end: 1148 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1148, end: 1153 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1154, end: 1154 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

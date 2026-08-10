@@ -1,0 +1,43 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 656, end: 661 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — non-local return"), Whitespace("\n"), LineComment("// (NLR) \"foreign-relay\" shape: a block carrying `^` is handed to a"), Whitespace("\n"), LineComment("// *different* method (potentially another class's frame, per ADR 0109), so"), Whitespace("\n"), LineComment("// the `^` token must relay out through that foreign frame rather than"), Whitespace("\n"), LineComment("// being caught by its immediate invoker. Confirmed via"), Whitespace("\n"), LineComment("// `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit"), Whitespace("\n"), LineComment("// \"Non-local return: compiled via throw/catch\" at the block's own call"), Whitespace("\n"), LineComment("// site. Peer: `class_var_mutation_before_block_relay` (the ClassMethod +"), Whitespace("\n"), LineComment("// ADR 0110 shadow-write variant of this shape)."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 662, end: 671 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("RelayCtr"), span: Span { start: 672, end: 680 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 683, end: 689 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("n"), span: Span { start: 690, end: 691 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 692, end: 693 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 694, end: 695 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("applyBlock:"), span: Span { start: 844, end: 855 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// The block is invoked from inside `applyBlock:`'s own frame, not"), Whitespace("\n  "), LineComment("// `findOver:in:`'s — the `^each` NLR relays out through `applyBlock:`."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("aBlock"), span: Span { start: 856, end: 862 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 863, end: 865 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("aBlock"), span: Span { start: 866, end: 872 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 873, end: 878 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("findOver:"), span: Span { start: 882, end: 891 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("threshold"), span: Span { start: 892, end: 901 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("in:"), span: Span { start: 902, end: 905 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("coll"), span: Span { start: 906, end: 910 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 911, end: 913 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 918, end: 922 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("applyBlock:"), span: Span { start: 923, end: 934 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 935, end: 936 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("coll"), span: Span { start: 936, end: 940 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("do:"), span: Span { start: 941, end: 944 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 945, end: 946 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 946, end: 947 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("each"), span: Span { start: 947, end: 951 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 952, end: 953 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("each"), span: Span { start: 954, end: 958 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector(">"), span: Span { start: 959, end: 960 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("threshold"), span: Span { start: 961, end: 970 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifTrue:"), span: Span { start: 971, end: 978 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 979, end: 980 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Caret, span: Span { start: 980, end: 981 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("each"), span: Span { start: 981, end: 985 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 985, end: 986 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 986, end: 987 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 987, end: 988 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("-1"), span: Span { start: 989, end: 991 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 991, end: 992 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 993, end: 993 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

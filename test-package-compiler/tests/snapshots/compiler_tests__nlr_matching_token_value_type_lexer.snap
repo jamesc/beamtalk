@@ -1,0 +1,29 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 628, end: 634 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — non-local return"), Whitespace("\n"), LineComment("// (NLR) through a block, \"matching-token\" shape, ValueType context (no"), Whitespace("\n"), LineComment("// actor State to thread). Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to"), Whitespace("\n"), LineComment("// emit \"Non-local return: compiled via throw/catch\". Peers:"), Whitespace("\n"), LineComment("// `nlr_matching_token_actor`, `nlr_matching_token_class_method`."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// The pre-existing `stdlib_class_list` fixture (`indexOf:`) is the corpus's"), Whitespace("\n"), LineComment("// only prior NLR example and happens to also be ValueType/matching-token;"), Whitespace("\n"), LineComment("// this is an additional, explicit, minimal repro."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 635, end: 644 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("NlrValue"), span: Span { start: 645, end: 653 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("findFirstOver:"), span: Span { start: 657, end: 671 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("threshold"), span: Span { start: 672, end: 681 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("in:"), span: Span { start: 682, end: 685 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("coll"), span: Span { start: 686, end: 690 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 691, end: 693 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("coll"), span: Span { start: 698, end: 702 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("do:"), span: Span { start: 703, end: 706 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 707, end: 708 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 708, end: 709 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("each"), span: Span { start: 709, end: 713 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 714, end: 715 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("each"), span: Span { start: 716, end: 720 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector(">"), span: Span { start: 721, end: 722 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("threshold"), span: Span { start: 723, end: 732 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifTrue:"), span: Span { start: 733, end: 740 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 741, end: 742 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Caret, span: Span { start: 742, end: 743 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("each"), span: Span { start: 743, end: 747 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 747, end: 748 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 748, end: 749 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("0"), span: Span { start: 754, end: 755 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 756, end: 756 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

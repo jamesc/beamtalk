@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — non-local return
+// (NLR) "foreign-relay" shape: a block carrying `^` is handed to a
+// *different* method (potentially another class's frame, per ADR 0109), so
+// the `^` token must relay out through that foreign frame rather than
+// being caught by its immediate invoker. Confirmed via
+// `BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit
+// "Non-local return: compiled via throw/catch" at the block's own call
+// site. Peer: `class_var_mutation_before_block_relay` (the ClassMethod +
+// ADR 0110 shadow-write variant of this shape).
+
+Actor subclass: RelayCtr
+  state: n = 0
+
+  // The block is invoked from inside `applyBlock:`'s own frame, not
+  // `findOver:in:`'s — the `^each` NLR relays out through `applyBlock:`.
+  applyBlock: aBlock => aBlock value
+
+  findOver: threshold in: coll =>
+    self applyBlock: [coll do: [:each | each > threshold ifTrue: [^each]]. -1]
