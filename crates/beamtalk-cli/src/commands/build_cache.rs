@@ -834,8 +834,12 @@ mod tests {
         // before — simulating a tool that preserves or backdates mtime on
         // write (or a same-second write on a coarse-grained filesystem).
         fs::write(&file, "counter := [1].").unwrap();
-        let file_handle = fs::File::open(&file).unwrap();
-        file_handle.set_modified(old_mtime).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(old_mtime)
+            .unwrap();
         assert_eq!(
             mtime_of(&file),
             Some(old_mtime),
