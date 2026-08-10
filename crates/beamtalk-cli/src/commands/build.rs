@@ -71,8 +71,14 @@ pub(crate) struct ChangeDetectionResult {
 /// hashed every source file's content this same build (BT-3120), so a hit
 /// here skips reading and hashing that file's content a second time. A miss
 /// (manifest-less builds, where Pass 1 never runs; or any file Pass 1
-/// couldn't read) falls back to hashing it directly here, same as before —
-/// `known_hashes` is purely an optimization, never a correctness dependency.
+/// couldn't read) falls back to hashing it directly here, same as before.
+/// `known_hashes` is mainly an optimization, but not purely one: a file
+/// edited in the window between Pass 1 hashing it and this call reuses the
+/// now-stale Pass-1-time hash for this build cycle. That's narrow and
+/// self-healing (Pass 1 always re-reads from disk on the next build), never
+/// a permanent stale skip, but it means a same-build edit isn't caught as
+/// immediately as the old mtime-based check (which re-read mtime fresh at
+/// this call site).
 pub(crate) fn detect_changes(
     source_files: &[Utf8PathBuf],
     build_dir: &Utf8Path,
