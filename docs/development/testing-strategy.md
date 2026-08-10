@@ -1252,6 +1252,52 @@ Proptest also persists failures in `proptest-regressions/` files, so they are au
 
 ---
 
+## Grammar-Driven Program Generator (BT-3116)
+
+`near_valid_beamtalk()` in `core_erlang_validity_tests.rs` builds inputs from
+a small hand-curated `FRAGMENTS` array plus truncation/concatenation —
+useful for "never panics" robustness, but shallow: it can't reach nested
+blocks with captures, `^` inside nested closures, or multi-statement bodies
+threading local state, and shrinking only ever truncates a string rather
+than simplifying a tree. `arb_program` generates *well-formed* programs as
+typed AST values instead — `Object subclass:` with a single `run` method
+whose body is built from a small grammar (literals, `true`/`false`/`nil`,
+local/parameter references, unary/binary/keyword sends, `ifTrue:ifFalse:`,
+self-invoking blocks, and a staged prelude-then-tail body that threads
+freshly bound locals into later statements and occasionally returns early
+via `^`). Because the values are real `ast::Module` trees, proptest's
+built-in shrinking simplifies the tree structurally (fewer statements,
+smaller sub-expressions) instead of chopping the string arbitrarily.
+
+**Location:** `crate::test_helpers::test_support::arb_program` (`crates/beamtalk-core/src/test_helpers.rs`)
+
+**Properties:** `crates/beamtalk-core/src/codegen/core_erlang_validity_tests.rs`, in a second `proptest!` block below the `FRAGMENTS`-based one (that block is kept as-is — it intentionally also covers ill-formed/truncated input this generator never produces):
+
+| Property | What it verifies |
+|---|---|
+| `program_gen_round_trip` | A generated program's `unparse_module` output re-parses with zero error diagnostics |
+| `program_gen_codegen_validity` | Whenever `generate_module` accepts a generated program, its output passes the same structural-validity checks (`core_erlang_structural_issues`) as the `FRAGMENTS`-based properties |
+
+### Running Locally
+
+```bash
+cargo test -p beamtalk-core --lib core_erlang_validity_tests
+# Extended run, matches nightly-style depth:
+PROPTEST_CASES=3000 cargo test -p beamtalk-core --lib core_erlang_validity_tests --release -- --nocapture
+```
+
+### Scope (Tier 1 only)
+
+The grammar currently covers expression-level shapes reachable from a single
+method body: literals, sends, conditionals, blocks, and local-variable
+threading. It does **not** generate class definitions with multiple methods,
+actor state (`state:` declarations), field mutation, `whileTrue:`, or
+collection literals — a second, feature-flagged tier covering those shapes
+was considered but deliberately deferred (per the originating issue: "don't
+gate on the generator issue; the bootstrap corpus is enough to start").
+Extend `arb_expr`/`arb_body` in `test_support` when a new shape needs
+generator coverage rather than adding a second generator elsewhere.
+
 ## Performance Testing (Future)
 
 From [AGENTS.md](../../AGENTS.md), targets for tooling responsiveness:

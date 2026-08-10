@@ -76,8 +76,8 @@ pub fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str) {
 #[cfg(any(test, feature = "test"))]
 pub mod test_support {
     use crate::ast::{
-        ClassDefinition, ClassModifiers, Expression, ExpressionStatement, Identifier,
-        MessageSelector, MethodDefinition, Module,
+        Block, BlockParameter, ClassDefinition, ClassModifiers, Expression, ExpressionStatement,
+        Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, Module,
     };
     use crate::semantic_analysis::class_hierarchy::DeclaredType;
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
@@ -239,6 +239,354 @@ pub mod test_support {
             ]
         })
     }
+
+    // ========================================================================
+    // Grammar-driven Beamtalk program generator (BT-3116)
+    // ========================================================================
+    //
+    // Every proptest in the compiler previously built inputs from a
+    // hardcoded FRAGMENTS array of near-valid snippets (see
+    // `core_erlang_validity_tests.rs`) or raw regex strategies -- "fuzz-
+    // adjacent robustness" that can't explore the semantic space where real
+    // bugs live: nested blocks with captures, `^` inside nested closures,
+    // multi-statement bodies threading local state. This generator builds
+    // well-formed Beamtalk **method bodies** directly as typed AST values
+    // (so proptest's shrinking works structurally on the tree, not by
+    // truncating strings), then renders them via `unparse`.
+    //
+    // Design: every generated program is a single `run` method on an
+    // `Object subclass: <NAME>` (see [`arb_program`]) -- wrapping the
+    // generated expression tree in a real method body, rather than a bare
+    // top-level script expression, is what makes `^` (non-local return) a
+    // *legal* construct to generate at all: `^` only means something
+    // relative to an enclosing method.
+    //
+    // Scoping: identifiers are only ever generated as references to a name
+    // *known to be in scope* -- either an outer scope entry threaded in by
+    // the caller (block/method parameters) or a `name := value` binding
+    // introduced earlier in the same body ([`arb_body`]'s staged
+    // prelude-then-tail shape). There is no free-variable generation, so a
+    // successfully-generated program never contains an undefined-variable
+    // reference by construction.
+    use proptest::prelude::*;
+
+    /// Depth budget for recursive expression generation. Matches the
+    /// `arb_declared_type` precedent above: small enough that generation
+    /// stays fast and shrinking stays fast, large enough to reach nested
+    /// blocks-within-blocks and `ifTrue:ifFalse:`-within-a-block shapes.
+    const PROGRAM_GEN_MAX_DEPTH: u32 = 3;
+
+    fn zero_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn ident(name: impl Into<ecow::EcoString>) -> Identifier {
+        Identifier::new(name, zero_span())
+    }
+
+    /// A leaf expression: an integer/string literal, or (once `scope` is
+    /// non-empty) a reference to one of its names -- including the
+    /// reserved-word identifiers `true`/`false`/`nil`, which Beamtalk parses
+    /// as plain identifiers rather than dedicated literal nodes.
+    fn arb_leaf_expr(scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        let literals = prop_oneof![
+            any::<i32>()
+                .prop_map(|n| Expression::Literal(Literal::Integer(i64::from(n)), zero_span())),
+            "[a-zA-Z0-9 ]{0,8}"
+                .prop_map(|s| Expression::Literal(Literal::String(s.into()), zero_span())),
+            Just(Expression::Identifier(ident("true"))),
+            Just(Expression::Identifier(ident("false"))),
+            Just(Expression::Identifier(ident("nil"))),
+        ];
+        if scope.is_empty() {
+            literals.boxed()
+        } else {
+            let scope_ref = prop::sample::select(scope)
+                .prop_map(|name| Expression::Identifier(ident(name.as_str())));
+            prop_oneof![3 => literals, 2 => scope_ref].boxed()
+        }
+    }
+
+    /// `receiver unarySelector` for a small representative set of unary
+    /// selectors. Codegen doesn't type-check message sends (an unrecognised
+    /// selector is a *runtime* `does_not_understand`, not a compile error —
+    /// see `docs/beamtalk-language-features.md` § DNU), so the exact
+    /// selector choice only needs to be syntactically valid, not
+    /// type-correct for whatever the receiver turns out to be.
+    fn arb_unary_send(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        (
+            arb_expr(depth - 1, scope),
+            prop_oneof![
+                Just(EcoStr::from("printString")),
+                Just(EcoStr::from("class")),
+                Just(EcoStr::from("isNil")),
+                Just(EcoStr::from("negated")),
+                Just(EcoStr::from("size")),
+            ],
+        )
+            .prop_map(|(receiver, selector)| Expression::MessageSend {
+                receiver: Box::new(receiver),
+                selector: MessageSelector::Unary(selector),
+                arguments: vec![],
+                is_cast: false,
+                span: zero_span(),
+            })
+            .boxed()
+    }
+
+    /// `left binOp right` for a small set of binary selectors.
+    fn arb_binary_send(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        (
+            arb_expr(depth - 1, scope.clone()),
+            prop_oneof![
+                Just(EcoStr::from("+")),
+                Just(EcoStr::from("-")),
+                Just(EcoStr::from("*")),
+                Just(EcoStr::from("=:=")),
+                Just(EcoStr::from("<")),
+            ],
+            arb_expr(depth - 1, scope),
+        )
+            .prop_map(|(left, selector, right)| Expression::MessageSend {
+                receiver: Box::new(left),
+                selector: MessageSelector::Binary(selector),
+                arguments: vec![right],
+                is_cast: false,
+                span: zero_span(),
+            })
+            .boxed()
+    }
+
+    /// `receiver at: arg` or `receiver at: arg1 put: arg2` -- representative
+    /// one- and two-part keyword sends.
+    fn arb_keyword_send(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        let one_part = (
+            arb_expr(depth - 1, scope.clone()),
+            arb_expr(depth - 1, scope.clone()),
+        )
+            .prop_map(|(receiver, arg)| Expression::MessageSend {
+                receiver: Box::new(receiver),
+                selector: MessageSelector::Keyword(vec![KeywordPart::new("at:", zero_span())]),
+                arguments: vec![arg],
+                is_cast: false,
+                span: zero_span(),
+            });
+        let two_part = (
+            arb_expr(depth - 1, scope.clone()),
+            arb_expr(depth - 1, scope.clone()),
+            arb_expr(depth - 1, scope),
+        )
+            .prop_map(|(receiver, arg1, arg2)| Expression::MessageSend {
+                receiver: Box::new(receiver),
+                selector: MessageSelector::Keyword(vec![
+                    KeywordPart::new("at:", zero_span()),
+                    KeywordPart::new("put:", zero_span()),
+                ]),
+                arguments: vec![arg1, arg2],
+                is_cast: false,
+                span: zero_span(),
+            });
+        prop_oneof![one_part, two_part].boxed()
+    }
+
+    /// `cond ifTrue: [thenBody] ifFalse: [elseBody]`. The two branch blocks
+    /// are zero-parameter (`ifTrue:ifFalse:` blocks never take arguments in
+    /// Beamtalk) and may themselves contain `^` -- non-local return through
+    /// a conditional's branch block is exactly the "fragile machinery"
+    /// (state threading + control flow) this generator exists to probe.
+    fn arb_if_true_if_false(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        (
+            arb_expr(depth - 1, scope.clone()),
+            arb_body(depth - 1, scope.clone(), true),
+            arb_body(depth - 1, scope, true),
+        )
+            .prop_map(|(cond, then_body, else_body)| Expression::MessageSend {
+                receiver: Box::new(cond),
+                selector: MessageSelector::Keyword(vec![
+                    KeywordPart::new("ifTrue:", zero_span()),
+                    KeywordPart::new("ifFalse:", zero_span()),
+                ]),
+                arguments: vec![
+                    Expression::Block(Block::new(vec![], then_body, zero_span())),
+                    Expression::Block(Block::new(vec![], else_body, zero_span())),
+                ],
+                is_cast: false,
+                span: zero_span(),
+            })
+            .boxed()
+    }
+
+    /// A block taking 0-2 parameters, immediately invoked via
+    /// `value`/`value:`/`value:value:` -- the block body can reference both
+    /// its own parameters and everything already in `scope`, so this is the
+    /// generator's primary source of **captured** variables (a closure
+    /// reading/mutating a name bound outside itself).
+    fn arb_block_value_call(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        (0usize..=2)
+            .prop_flat_map(move |arity| {
+                let param_names: Vec<EcoStr> =
+                    (0..arity).map(|i| EcoStr::from(format!("p{i}"))).collect();
+                let params: Vec<BlockParameter> = param_names
+                    .iter()
+                    .map(|n| BlockParameter::new(n.as_str(), zero_span()))
+                    .collect();
+                let block_scope: Vec<EcoStr> =
+                    scope.iter().cloned().chain(param_names.clone()).collect();
+                let args_scope = scope.clone();
+                (
+                    arb_body(depth - 1, block_scope, true),
+                    prop::collection::vec(arb_expr(depth - 1, args_scope), arity),
+                )
+                    .prop_map(move |(body, call_args)| {
+                        let block =
+                            Expression::Block(Block::new(params.clone(), body, zero_span()));
+                        let selector = match arity {
+                            0 => MessageSelector::Unary("value".into()),
+                            1 => MessageSelector::Keyword(vec![KeywordPart::new(
+                                "value:",
+                                zero_span(),
+                            )]),
+                            _ => MessageSelector::Keyword(vec![
+                                KeywordPart::new("value:", zero_span()),
+                                KeywordPart::new("value:", zero_span()),
+                            ]),
+                        };
+                        Expression::MessageSend {
+                            receiver: Box::new(block),
+                            selector,
+                            arguments: call_args,
+                            is_cast: false,
+                            span: zero_span(),
+                        }
+                    })
+            })
+            .boxed()
+    }
+
+    /// The core expression grammar (BT-3116 tier 1): literals/identifiers,
+    /// unary/binary/keyword sends, `ifTrue:ifFalse:`, and self-invoking
+    /// blocks -- recursing with a shrinking `depth` budget so generation
+    /// always terminates.
+    fn arb_expr(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        if depth == 0 {
+            return arb_leaf_expr(scope);
+        }
+        prop_oneof![
+            3 => arb_leaf_expr(scope.clone()),
+            2 => arb_unary_send(depth, scope.clone()),
+            2 => arb_binary_send(depth, scope.clone()),
+            2 => arb_keyword_send(depth, scope.clone()),
+            1 => arb_if_true_if_false(depth, scope.clone()),
+            1 => arb_block_value_call(depth, scope),
+        ]
+        .boxed()
+    }
+
+    /// The final statement of a body: usually a plain expression, but
+    /// (when `allow_return`) sometimes `^expr` -- legal here because every
+    /// generated body ultimately lives inside [`arb_program`]'s method.
+    fn arb_tail_statement(
+        depth: u32,
+        scope: Vec<EcoStr>,
+        allow_return: bool,
+    ) -> BoxedStrategy<ExpressionStatement> {
+        let plain = arb_expr(depth, scope.clone()).prop_map(ExpressionStatement::bare);
+        if !allow_return {
+            return plain.boxed();
+        }
+        let ret = arb_expr(depth, scope).prop_map(|value| {
+            ExpressionStatement::bare(Expression::Return {
+                value: Box::new(value),
+                span: zero_span(),
+            })
+        });
+        prop_oneof![4 => plain, 1 => ret].boxed()
+    }
+
+    /// A statement sequence (block/method body): 0-2 `locN := value`
+    /// prelude assignments (each using only the scope from *before* this
+    /// body started, so they can be generated independently/in parallel —
+    /// no prelude statement can reference another prelude statement's
+    /// binding), followed by one tail statement that sees the full
+    /// prelude-extended scope. This is the generator's primary source of
+    /// **state threading** (a local introduced by one statement, read or
+    /// mutated by a later one) without needing fully general sequential
+    /// dependent generation.
+    fn arb_body(
+        depth: u32,
+        scope: Vec<EcoStr>,
+        allow_return: bool,
+    ) -> BoxedStrategy<Vec<ExpressionStatement>> {
+        if depth == 0 {
+            return arb_tail_statement(0, scope, allow_return)
+                .prop_map(|stmt| vec![stmt])
+                .boxed();
+        }
+        let prelude_scope = scope.clone();
+        prop::collection::vec(arb_expr(depth - 1, prelude_scope), 0..=2)
+            .prop_flat_map(move |prelude_values| {
+                let scope = scope.clone();
+                let prelude_names: Vec<EcoStr> = (0..prelude_values.len())
+                    .map(|i| EcoStr::from(format!("loc{i}")))
+                    .collect();
+                let prelude_stmts: Vec<ExpressionStatement> = prelude_names
+                    .iter()
+                    .zip(prelude_values)
+                    .map(|(name, value)| {
+                        ExpressionStatement::bare(Expression::Assignment {
+                            target: Box::new(Expression::Identifier(ident(name.as_str()))),
+                            value: Box::new(value),
+                            type_annotation: None,
+                            span: zero_span(),
+                        })
+                    })
+                    .collect();
+                let extended_scope: Vec<EcoStr> = scope.into_iter().chain(prelude_names).collect();
+                arb_tail_statement(depth - 1, extended_scope, allow_return).prop_map(move |tail| {
+                    let mut stmts = prelude_stmts.clone();
+                    stmts.push(tail);
+                    stmts
+                })
+            })
+            .boxed()
+    }
+
+    /// Generates a complete, well-formed Beamtalk **program**: an
+    /// `Object subclass: <name>` with a single unary `run` method whose
+    /// body is a grammar-driven statement sequence (BT-3116).
+    ///
+    /// Render with [`crate::unparse::unparse_module`] to get source text
+    /// guaranteed to parse back with zero diagnostics — see
+    /// `core_erlang_validity_tests.rs`'s `program_gen_round_trip` /
+    /// `program_gen_codegen_validity` properties for the properties this
+    /// guarantee is checked against.
+    pub fn arb_program(class_name: &'static str) -> impl Strategy<Value = Module> {
+        arb_body(PROGRAM_GEN_MAX_DEPTH, Vec::new(), true).prop_map(move |body| {
+            let method = MethodDefinition::new(
+                MessageSelector::Unary("run".into()),
+                vec![],
+                body,
+                zero_span(),
+            );
+            let class = ClassDefinition::new(
+                ident(class_name),
+                ident("Object"),
+                vec![],
+                vec![method],
+                zero_span(),
+            );
+            let mut module = Module::new(vec![], zero_span());
+            module.classes.push(class);
+            module
+        })
+    }
+
+    /// `EcoString` alias local to this generator: proptest's `Strategy`
+    /// trait needs `Clone + Debug` values threaded through closures a lot
+    /// here, and the crate's `ecow::EcoString` already satisfies that
+    /// cheaply (cheap `.clone()`, small-string-optimised) -- reused rather
+    /// than plain `String` to match every other identifier field in the AST.
+    type EcoStr = ecow::EcoString;
 
     /// Patterns that should never appear in valid Core Erlang output — Rust
     /// Debug/Display leaks (BT-875).
