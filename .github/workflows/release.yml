@@ -82,7 +82,7 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Build distribution
         run: just dist
@@ -155,7 +155,7 @@ jobs:
             ${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Build and install distribution
         run: just install dist
@@ -228,7 +228,7 @@ jobs:
             ${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Build and install distribution
         run: just install dist
@@ -300,7 +300,7 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Build Rust (release)
         run: cargo build --all-targets --release --quiet
