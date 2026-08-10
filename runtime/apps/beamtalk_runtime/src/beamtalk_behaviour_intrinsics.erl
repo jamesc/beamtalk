@@ -22,7 +22,7 @@ that the Behaviour/Class libraries can rely on.
 
 | Erlang function             | Backing data source / derivation                          |
 |-----------------------------|------------------------------------------------------------|
-| classSuperclass/1           | Direct superclass from class gen_server state             |
+| classSuperclass/1           | Direct superclass from unified class metadata (ETS, BT-3107) |
 | classAllSuperclasses/1      | Recursively walks the superclass chain from classSuperclass/1 |
 | classSubclasses/1           | Direct subclasses from class registry                     |
 | classAllSubclasses/1        | All subclasses from class registry                        |
@@ -108,8 +108,11 @@ ADR 0032: Returns a proper #beamtalk_object{} instead of a bare atom,
 fixing the inconsistency where `Counter class` returned an object but
 `Counter superclass` returned an atom.
 
-BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
-for dynamic classes created via beamtalk_class_builder.
+BT-942: Uses __beamtalk_meta/0 when available; falls back to the
+deadlock-safe metadata lookup (`beamtalk_object_class:superclass_safe/1`,
+BT-3107) for dynamic classes created via beamtalk_class_builder — the same
+ETS source `beamtalk_class_dispatch` reads, instead of a separate
+`gen_server:call` that could disagree with it mid-reload.
 """.
 -spec classSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 classSuperclass(Self) ->
@@ -120,7 +123,7 @@ classSuperclass(Self) ->
             {ok, Meta} ->
                 maps:get(superclass, Meta);
             not_available ->
-                case gen_server:call(ClassPid, superclass) of
+                case beamtalk_object_class:superclass_safe(ClassPid) of
                     none -> nil;
                     Name -> Name
                 end
@@ -211,7 +214,8 @@ the same Class/Behaviour/Object protocol).
 -spec classAllSuperclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     %% BT-2194: walk the parallel metaclass hierarchy (returns metaclass objects).
-    SuperName = gen_server:call(ClassPid, superclass),
+    %% BT-3107: deadlock-safe metadata lookup, same source dispatch reads.
+    SuperName = beamtalk_object_class:superclass_safe(ClassPid),
     MetaSupers = walk_hierarchy(
         SuperName,
         fun(_CN, CPid, Acc) ->
@@ -239,7 +243,8 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     lists:reverse(MetaSupers) ++ lists:reverse(InstanceSupers);
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
-    SuperName = gen_server:call(ClassPid, superclass),
+    %% BT-3107: deadlock-safe metadata lookup, same source dispatch reads.
+    SuperName = beamtalk_object_class:superclass_safe(ClassPid),
     Supers = walk_hierarchy(
         SuperName,
         fun(CN, CPid, Acc) ->
@@ -1046,12 +1051,16 @@ ADR 0036: Backs `@primitive "metaclassSuperclass"` in Metaclass.bt.
 The superclass of Counter's metaclass is the metaclass of Counter's superclass.
 Example: `Counter class superclass == Actor class`.
 
-BT-1186: Now uses gen_server:call(Pid, superclass) directly. BT-1185 fixed
-apply_class_info/2 to update the gen_server superclass from __beamtalk_meta/0,
-so the gen_server always holds the correct superclass.
+BT-1186: Previously used gen_server:call(Pid, superclass) directly (BT-1185
+fixed apply_class_info/2 to update the gen_server superclass from
+__beamtalk_meta/0, so the gen_server always held the correct superclass).
+
+BT-3107: Now uses `beamtalk_object_class:superclass_safe/1` — the same
+unified-metadata ETS source `beamtalk_class_dispatch` reads — instead of a
+separate `gen_server:call`, so this and dispatch can never disagree mid-reload.
 
 BT-2217: Grounds the parallel chain at `ProtoObject class superclass == Class`
-(ADR 0036). When the gen_server reports no superclass, return the instance-side
+(ADR 0036). When the lookup reports no superclass, return the instance-side
 `Class` class object. From there, subsequent `superclass` sends route through
 the regular instance-side dispatch (`classSuperclass`), unfolding
 `Class → Behaviour → Object → ProtoObject` via the standard walker. `Class`
@@ -1061,7 +1070,7 @@ in that case, preserving the pre-grounding behaviour.
 -spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassSuperclass(Self) ->
     Pid = erlang:element(4, Self),
-    case gen_server:call(Pid, superclass) of
+    case beamtalk_object_class:superclass_safe(Pid) of
         none ->
             atom_to_class_object('Class');
         SuperName ->
@@ -1237,7 +1246,9 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                     {halt, Result} ->
                         {found, {result, Result}};
                     {cont, NewAcc} ->
-                        case gen_server:call(ClassPid, superclass) of
+                        %% BT-3107: deadlock-safe metadata lookup, same source
+                        %% dispatch reads, instead of a separate gen_server:call.
+                        case beamtalk_object_class:superclass_safe(ClassPid) of
                             none -> {found, {result, NewAcc}};
                             Super -> {next, {Super, NewAcc}}
                         end

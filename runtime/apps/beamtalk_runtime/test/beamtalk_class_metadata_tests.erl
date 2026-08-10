@@ -339,6 +339,124 @@ delete_row_purges_funs_test() ->
     end).
 
 %%====================================================================
+%% merge_identity/5 + reset_runtime_class_methods/1 (BT-3107)
+%%====================================================================
+
+%% merge_identity/5 updates the identity fields exactly like insert/5 would.
+merge_identity_updates_identity_fields_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Reload', old_mod, [a], 'Object', undefined),
+        ok = beamtalk_class_metadata:merge_identity('Reload', new_mod, [a, b], 'Value', true),
+        ?assertEqual({ok, new_mod}, beamtalk_class_metadata:lookup_module('Reload')),
+        ?assertEqual({ok, new_mod, [a, b]}, beamtalk_class_metadata:lookup_methods('Reload')),
+        ?assertEqual({ok, 'Value'}, beamtalk_class_metadata:lookup_superclass('Reload')),
+        ?assertEqual({ok, true}, beamtalk_class_metadata:lookup_is_abstract('Reload'))
+    end).
+
+%% Unlike insert/5, merge_identity/5 never resets has_runtime_class_methods —
+%% this is the core BT-3107 guarantee: a reload that goes through
+%% merge_identity/5 cannot silently drop runtime class methods just because it
+%% forgot to re-seed them afterward.
+merge_identity_preserves_runtime_class_methods_gate_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Preserved', m, [], 'Object', undefined),
+        Info = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('Preserved', bump, Info),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Preserved', [bump]),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('Preserved')),
+        %% Update identity fields only — no re-seed call at all.
+        ok = beamtalk_class_metadata:merge_identity('Preserved', m2, [bump], 'Value', false),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('Preserved')),
+        ?assertEqual(
+            {ok, Info}, beamtalk_class_metadata:lookup_class_method_fun('Preserved', bump)
+        ),
+        ?assertEqual({ok, m2}, beamtalk_class_metadata:lookup_module('Preserved')),
+        ?assertEqual({ok, 'Value'}, beamtalk_class_metadata:lookup_superclass('Preserved'))
+    end).
+
+%% merge_identity/5 falls back to a full-row create when no row exists yet.
+merge_identity_creates_row_when_absent_test() ->
+    with_clean_tables(fun() ->
+        ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Fresh')),
+        ok = beamtalk_class_metadata:merge_identity('Fresh', m, [a], 'Object', false),
+        ?assertEqual({ok, m}, beamtalk_class_metadata:lookup_module('Fresh')),
+        ?assertEqual({ok, m, [a]}, beamtalk_class_metadata:lookup_methods('Fresh')),
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Fresh'))
+    end).
+
+%% reset_runtime_class_methods/1 explicitly clears the gate without touching
+%% the other identity fields.
+reset_runtime_class_methods_clears_gate_only_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Reset', m, [], 'Object', true),
+        Info = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('Reset', bump, Info),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Reset', [bump]),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('Reset')),
+        ok = beamtalk_class_metadata:reset_runtime_class_methods('Reset'),
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Reset')),
+        %% Other fields are untouched by the reset.
+        ?assertEqual({ok, m}, beamtalk_class_metadata:lookup_module('Reset')),
+        ?assertEqual({ok, 'Object'}, beamtalk_class_metadata:lookup_superclass('Reset')),
+        ?assertEqual({ok, true}, beamtalk_class_metadata:lookup_is_abstract('Reset'))
+    end).
+
+%% reset_runtime_class_methods/1 is a no-op when the row is absent.
+reset_runtime_class_methods_when_row_absent_test() ->
+    with_clean_tables(fun() ->
+        ?assertEqual(ok, beamtalk_class_metadata:reset_runtime_class_methods('NeverSeen'))
+    end).
+
+%% The reload sequence this issue was written for: purge funs, explicitly
+%% reset the gate, merge in new identity, re-seed from the new class methods —
+%% mirrors beamtalk_object_class:apply_class_info/2's actual call order.
+%% Verifies the reload path preserves runtime class methods without relying on
+%% any particular ordering between the merge and the re-seed (BT-3107 AC).
+reload_sequence_preserves_and_replaces_runtime_class_methods_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('Live', m, [bump], 'Object', undefined),
+        OldInfo = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('Live', bump, OldInfo),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Live', [bump]),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('Live')),
+
+        %% Reload with a *new* runtime fun for the same selector (as
+        %% seed_runtime_class_methods/2 would do from beamtalk_object_class).
+        NewInfo = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:delete_class_method_funs('Live'),
+        ok = beamtalk_class_metadata:reset_runtime_class_methods('Live'),
+        ok = beamtalk_class_metadata:merge_identity('Live', m2, [bump], 'Object', false),
+        ok = beamtalk_class_metadata:put_class_method_fun('Live', bump, NewInfo),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('Live', [bump]),
+
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('Live')),
+        ?assertEqual({ok, NewInfo}, beamtalk_class_metadata:lookup_class_method_fun('Live', bump)),
+        ?assertEqual({ok, m2}, beamtalk_class_metadata:lookup_module('Live'))
+    end).
+
+%% A reload with no runtime funs in the new definition correctly drops the
+%% gate (the explicit reset_runtime_class_methods/1 call does this — no
+%% seed_runtime_class_methods/2 call follows since there are no funs to seed).
+reload_sequence_drops_gate_when_no_new_funs_test() ->
+    with_clean_tables(fun() ->
+        ok = beamtalk_class_metadata:insert('WasRuntime', m, [bump], 'Object', undefined),
+        OldInfo = #{block => fun(_, CV) -> CV end, arity => 2},
+        ok = beamtalk_class_metadata:put_class_method_fun('WasRuntime', bump, OldInfo),
+        ok = beamtalk_class_metadata:set_runtime_class_methods('WasRuntime', [bump]),
+        ?assert(beamtalk_class_metadata:has_runtime_class_methods('WasRuntime')),
+
+        %% Reload with a pure compiled class method (no `block` — not a
+        %% runtime fun), so nothing re-seeds the gate.
+        ok = beamtalk_class_metadata:delete_class_method_funs('WasRuntime'),
+        ok = beamtalk_class_metadata:reset_runtime_class_methods('WasRuntime'),
+        ok = beamtalk_class_metadata:merge_identity('WasRuntime', m2, [bump], 'Object', false),
+
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('WasRuntime')),
+        ?assertEqual(error, beamtalk_class_metadata:lookup_class_method_fun('WasRuntime', bump)),
+        ?assertEqual({ok, m2}, beamtalk_class_metadata:lookup_module('WasRuntime'))
+    end).
+
+%%====================================================================
 %% all_builtins
 %%====================================================================
 

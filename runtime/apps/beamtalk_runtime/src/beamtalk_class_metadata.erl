@@ -60,6 +60,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
 -export([
     new/0,
     insert/5,
+    merge_identity/5,
     delete/1,
     lookup_module/1,
     lookup_methods/1,
@@ -74,7 +75,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_class_method_fun/2,
     delete_class_method_funs/1,
     has_runtime_class_methods/1,
-    set_runtime_class_methods/2
+    set_runtime_class_methods/2,
+    reset_runtime_class_methods/1
 ]).
 
 -define(TABLE, beamtalk_class_metadata).
@@ -159,15 +161,23 @@ ensure_table(Table, Opts) ->
 %%====================================================================
 
 -doc """
-Insert or overwrite the **entire** metadata row for a class.
+Insert or overwrite the **entire** metadata row for a class — row *creation*.
 
 This is a full-row write, not a per-field merge: every call replaces all of
-`module`, `selectors`, `superclass`, and `is_abstract`. The class gen_server
-always supplies all four together (`init`/`update_class`), so the write is
-atomic for readers. Do NOT call this to update a single field — the others
-would be wiped. Pass `undefined` only to leave a field genuinely unset (used by
-tests that exercise one field in isolation, and by callers that don't know
-`is_abstract` — BT-3047 / ADR 0109 amendment).
+`module`, `selectors`, `superclass`, `is_abstract`, **and resets
+`has_runtime_class_methods` to `false`**. The class gen_server calls this only
+from `init/1`, where the row is genuinely new (or being recreated after
+teardown), so resetting the gate is correct — a brand-new row has no runtime
+funs installed yet. Pass `undefined` only to leave a field genuinely unset
+(used by tests that exercise one field in isolation, and by callers that don't
+know `is_abstract` — BT-3047 / ADR 0109 amendment).
+
+BT-3107: do NOT call this to update an **existing** row — besides wiping any
+field you don't pass explicitly, it silently drops
+`has_runtime_class_methods`, discarding every runtime class method unless the
+caller remembers a follow-up `seed_runtime_class_methods/2` (the documented
+footgun this issue closed). Use `merge_identity/5` for updating an existing
+row instead; it never touches the gate.
 """.
 -spec insert(
     class_name(),
@@ -195,6 +205,58 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
             new(),
             ets:insert(?TABLE, Row),
             ok
+    end.
+
+-doc """
+Merge identity fields into an **existing** metadata row — row *update*.
+
+BT-3107: per-field update of `module`, `selectors`, `superclass`, and
+`is_abstract` via `ets:update_element/3`; unlike `insert/5` it never touches
+`has_runtime_class_methods`, so a caller that reloads a class's identity
+cannot accidentally wipe its runtime class methods by forgetting a follow-up
+`seed_runtime_class_methods/2` call. A caller that genuinely needs to drop the
+gate (e.g. because it just purged the funs table via
+`delete_class_method_funs/1`) must say so explicitly via
+`reset_runtime_class_methods/1` — the two are never an implicit side effect of
+each other.
+
+Falls back to a full `insert/5` (gate defaults to `false`) if no row exists
+yet for `Name` — the reload path this backs (`beamtalk_object_class:
+apply_class_info/2`) always has a row already (the class went through
+`init/1`), but this keeps the function correct standalone and in tests.
+""".
+-spec merge_identity(
+    class_name(),
+    module() | undefined,
+    [selector()] | undefined,
+    superclass() | undefined,
+    boolean() | undefined
+) ->
+    ok.
+merge_identity(Name, Module, Selectors, Superclass, IsAbstract) ->
+    new(),
+    %% ets:update_element/3 does NOT raise on a missing key — it returns
+    %% `false` (only a missing/unwritable *table* raises badarg) — so the
+    %% fallback to row creation must branch on the boolean return, not on a
+    %% caught exception.
+    try
+        ets:update_element(?TABLE, Name, [
+            {#class_metadata.module, Module},
+            {#class_metadata.selectors, Selectors},
+            {#class_metadata.superclass, Superclass},
+            {#class_metadata.is_abstract, IsAbstract}
+        ])
+    of
+        true ->
+            ok;
+        false ->
+            %% No existing row — fall back to row creation. A brand-new row
+            %% has no funs to preserve, so insert/5's gate reset is correct.
+            insert(Name, Module, Selectors, Superclass, IsAbstract)
+    catch
+        error:badarg ->
+            %% Table vanished between new/0 and the update — recreate via insert/5.
+            insert(Name, Module, Selectors, Superclass, IsAbstract)
     end.
 
 -doc """
@@ -489,6 +551,28 @@ set_runtime_class_methods(Name, Selectors) ->
         ets:update_element(?TABLE, Name, [
             {#class_metadata.selectors, Selectors},
             {#class_metadata.has_runtime_class_methods, true}
+        ]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Explicitly clear the "has runtime class methods" gate, independent of any
+other field.
+
+BT-3107: pairs with `delete_class_method_funs/1` when purging a class's funs
+table ahead of a reload — together they are the reload path's explicit,
+self-documenting substitute for `insert/5`'s old implicit reset via full-row
+overwrite (see `merge_identity/5`, which deliberately leaves the gate alone).
+A no-op if the row is absent.
+""".
+-spec reset_runtime_class_methods(class_name()) -> ok.
+reset_runtime_class_methods(Name) ->
+    new(),
+    try
+        ets:update_element(?TABLE, Name, [
+            {#class_metadata.has_runtime_class_methods, false}
         ]),
         ok
     catch

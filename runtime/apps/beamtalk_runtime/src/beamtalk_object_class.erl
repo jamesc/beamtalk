@@ -49,6 +49,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     class_name/1,
     module_name/1,
     module_name_safe/1,
+    superclass_safe/1,
     class_send/3,
     local_call/3,
     set_class_var/3,
@@ -277,6 +278,36 @@ module_name_safe(ClassPid) ->
     end.
 
 -doc """
+Get the superclass, preferring a deadlock-safe metadata lookup (BT-3107).
+
+Mirrors `module_name_safe/1` (BT-3054): resolves via
+`beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse lookup, no
+message send) followed by `beamtalk_class_metadata:lookup_superclass/1` — the
+same ETS row `beamtalk_class_dispatch` reads on the dispatch hot path, kept in
+sync with the process dictionary by `sync_identity/6` at every `init/1` and
+`apply_class_info/2`. Falls back to `superclass/1`'s `gen_server:call` only if
+either lookup misses.
+
+Before BT-3107, `beamtalk_behaviour_intrinsics` read the superclass via
+`gen_server:call(ClassPid, superclass)` — a second, independent source from
+the one dispatch uses, which could disagree with it mid-reload (ADR 0057).
+Prefer this function at any reflection/hierarchy-walk call site instead.
+""".
+-spec superclass_safe(pid()) -> class_name() | none.
+superclass_safe(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_superclass);
+superclass_safe(ClassPid) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_superclass(ClassName) of
+                {ok, Super} -> Super;
+                not_found -> superclass(ClassPid)
+            end;
+        not_found ->
+            superclass(ClassPid)
+    end.
+
+-doc """
 Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 
 Delegates to beamtalk_class_dispatch (BT-704).
@@ -497,15 +528,27 @@ init({ClassName, ClassInfo}) ->
         maps:get(class_methods, ClassInfo, #{})
     ),
 
-    %% BT-2222: One unified metadata row carries hierarchy + module + class-method
-    %% selectors. The module name enables deadlock-free lookup during supervisor
-    %% init (BT-1285); the selector set lets the inherited class-method chain walk
-    %% in beamtalk_class_dispatch avoid gen_server hops (BT-2008). BT-3047 / ADR
-    %% 0109 amendment: is_abstract rides along so instantiation intrinsics can
-    %% look it up by class name too, without a gen_server hop.
-    beamtalk_class_metadata:insert(
-        ClassName, Module, maps:keys(ClassMethods), Superclass, IsAbstract
-    ),
+    %% BT-893: Store class metadata in process dictionary so class_send can
+    %% bypass gen_server for self-calls (new/spawn from within class methods).
+    put(beamtalk_class_name, ClassName),
+    %% BT-2222 / BT-3107: One unified metadata row carries hierarchy + module +
+    %% class-method selectors, written together with the matching PD caches by
+    %% sync_identity/6. The module name enables deadlock-free lookup during
+    %% supervisor init (BT-1285); the selector set lets the inherited
+    %% class-method chain walk in beamtalk_class_dispatch avoid gen_server hops
+    %% (BT-2008). BT-3047 / ADR 0109 amendment: is_abstract rides along so
+    %% instantiation intrinsics can look it up by class name too, without a
+    %% gen_server hop.
+    sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
+
+    %% BT-3107: Clear any runtime class-method funs left behind by a *hard*
+    %% crash of the previous incarnation of this class process — a hard crash
+    %% skips terminate/2 (see module_name_safe/1's doc), so the funs table rows
+    %% from before the crash can otherwise survive into the restarted process
+    %% even though sync_identity/6 above just created a fresh row with the gate
+    %% off. Mirrors the reload path in apply_class_info/2. A no-op for a class
+    %% that never crashed (nothing to clear).
+    beamtalk_class_metadata:delete_class_method_funs(ClassName),
 
     %% ADR 0084 / BT-2266: Seed the runtime class-method fun retrieval store for
     %% any builder-supplied class methods that arrived as funs (#{block, arity}).
@@ -513,25 +556,20 @@ init({ClassName, ClassInfo}) ->
     %% their dispatch never reads the funs table.
     seed_runtime_class_methods(ClassName, ClassMethods),
 
-    %% BT-893: Store class metadata in process dictionary so class_send can
-    %% bypass gen_server for self-calls (new/spawn from within class methods).
-    put(beamtalk_class_name, ClassName),
-    put(beamtalk_class_module, Module),
-    put(beamtalk_class_is_abstract, IsAbstract),
     %% BT-2275: Cache field defaults in the process dictionary so the `self new`
     %% self-instantiation path (which runs inside this gen_server) can build a
     %% generic instance for a module-less class without a gen_server:call to self.
     FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
     put(beamtalk_class_field_defaults, FieldDefaults),
-    %% BT-2277: Cache the local instance-method map and superclass so fun-backed
-    %% instance dispatch that happens *inside* this gen_server (e.g. a class method
-    %% does `Inst := self new` then `Inst someMethod`) can resolve the block fun
-    %% without a deadlocking `gen_server:call(self(), ...)`. The cache is the local
-    %% (non-inherited) methods only; inherited methods live in ancestor processes
-    %% and are reachable without deadlock. Kept in sync by the {put_method, ...}
-    %% handler so hot-patched methods stay visible to self-dispatch.
+    %% BT-2277: Cache the local instance-method map so fun-backed instance
+    %% dispatch that happens *inside* this gen_server (e.g. a class method does
+    %% `Inst := self new` then `Inst someMethod`) can resolve the block fun
+    %% without a deadlocking `gen_server:call(self(), ...)`. The cache is the
+    %% local (non-inherited) methods only; inherited methods live in ancestor
+    %% processes and are reachable without deadlock. Kept in sync by the
+    %% {put_method, ...} handler so hot-patched methods stay visible to
+    %% self-dispatch.
     put(beamtalk_class_instance_methods, InstanceMethods),
-    put(beamtalk_class_superclass, Superclass),
 
     %% BT-1768: Record pid→classname mapping for crash recovery.
     %% This entry survives process death, allowing class_send to identify
@@ -1517,6 +1555,51 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
     {MetaMethodInfo, ReturnTypes}.
 
 -doc """
+Write a class's identity facts — module, superclass, is_abstract, and local
+class-method selectors — to the process-dictionary caches and the unified
+`beamtalk_class_metadata` ETS row in one place (BT-3107).
+
+`init/1` and `apply_class_info/2` used to each perform these writes via
+several separate `put/2` calls plus a trailing
+`beamtalk_class_metadata:insert/5`, spread across many lines with unrelated
+code in between — a mid-function reader (dispatch, reflection, a hot-patch
+racing the same class process) could observe the PD and ETS copies
+disagreeing. Routing both call sites through this one function collapses that
+window to this call's own internal ordering (PD first — the self-view used by
+self-dispatch inside this gen_server — ETS last, published for other
+processes), so a future edit cannot silently reintroduce "module written
+here, superclass written 40 lines later" drift.
+
+`Mode` selects the ETS write:
+
+* `create` — `beamtalk_class_metadata:insert/5`, a full fresh row. Used by
+  `init/1`; `has_runtime_class_methods` starts `false` (a brand-new row has
+  no funs yet — the caller's own `seed_runtime_class_methods/2` call raises
+  the gate afterward if needed).
+* `merge` — `beamtalk_class_metadata:merge_identity/5`, a per-field update
+  that leaves `has_runtime_class_methods` untouched. Used by
+  `apply_class_info/2`'s reload path; a caller that needs to drop the gate
+  (e.g. because it just purged the funs table) must call
+  `beamtalk_class_metadata:reset_runtime_class_methods/1` explicitly rather
+  than relying on this call's side effect.
+""".
+-spec sync_identity(
+    class_name(), atom(), class_name() | none, boolean(), [selector()], create | merge
+) -> ok.
+sync_identity(ClassName, Module, Superclass, IsAbstract, Selectors, Mode) ->
+    put(beamtalk_class_module, Module),
+    put(beamtalk_class_is_abstract, IsAbstract),
+    put(beamtalk_class_superclass, Superclass),
+    case Mode of
+        create ->
+            beamtalk_class_metadata:insert(ClassName, Module, Selectors, Superclass, IsAbstract);
+        merge ->
+            beamtalk_class_metadata:merge_identity(
+                ClassName, Module, Selectors, Superclass, IsAbstract
+            )
+    end.
+
+-doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
 
 ADR 0084 / BT-2266: picks out the entries that carry a `block` (runtime/builder
@@ -1621,9 +1704,10 @@ ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
 """.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
-    %% BT-893: Keep process dictionary in sync with state for self-instantiation.
+    %% BT-893: NewModule/NewIsAbstract/NewSuperclass are written to the process
+    %% dictionary together with the ETS metadata row, in one place, by
+    %% sync_identity/6 below (BT-3107) — not here.
     NewModule = maps:get(module, ClassInfo, State#class_state.module),
-    put(beamtalk_class_module, NewModule),
 
     %% ADR 0050 Phase 5: Prefer meta from ClassInfo when available (same reason as init/1:
     %% erlang:function_exported/3 returns false during on_load, so read_meta/1 returns #{}).
@@ -1638,7 +1722,6 @@ apply_class_info(State, ClassInfo) ->
         Meta,
         maps:get(is_abstract, ClassInfo, State#class_state.is_abstract)
     ),
-    put(beamtalk_class_is_abstract, NewIsAbstract),
 
     %% BT-2275: Reconcile field defaults on reload (ADR 0082 "disk wins").
     %% A compiled reload supplies no field_defaults (defaults are baked into the
@@ -1686,27 +1769,33 @@ apply_class_info(State, ClassInfo) ->
             %% corrected value from compiled module
             {ok, S} -> S
         end,
-    %% BT-2277: Reconcile the self-dispatch caches on reload, mirroring the
-    %% field-defaults handling above so fun-backed instance dispatch from inside
-    %% the class process resolves against the current method set / hierarchy.
+    %% BT-2277: Reconcile the self-dispatch instance-method cache on reload,
+    %% mirroring the field-defaults handling above so fun-backed instance
+    %% dispatch from inside the class process resolves against the current
+    %% method set. (Superclass/module/is_abstract PD caches are written by
+    %% sync_identity/6 below, together with the ETS row.)
     put(beamtalk_class_instance_methods, NewInstanceMethods),
-    put(beamtalk_class_superclass, NewSuperclass),
-    %% BT-2222: Single metadata-row update keeps hierarchy + module + selectors in
-    %% sync on hot reload (all three may change: new superclass, recompiled module,
-    %% added class methods).
+    %% BT-2222 / BT-3107: One call writes module + superclass + is_abstract +
+    %% selectors to both the process dictionary and the unified metadata row,
+    %% so dispatch/reflection never observe them at different points mid-reload
+    %% (all four may change: new superclass, recompiled module, added class
+    %% methods).
     %%
     %% ADR 0084 / BT-2266: reload is memory-vs-disk reconciliation (ADR 0082) —
-    %% disk wins. Purge stale runtime class-method funs, then insert (which resets
-    %% the gate flag to false), then re-seed from the incoming class methods. A
-    %% pure compiled reload thus drops runtime funs; a builder re-register that
-    %% supplies funs re-installs them.
+    %% disk wins. Purge stale runtime class-method funs and explicitly reset the
+    %% gate (BT-3107: no longer an implicit side effect of a full-row
+    %% overwrite — merge_identity/5 below leaves it alone), then re-seed from
+    %% the incoming class methods. A pure compiled reload thus drops runtime
+    %% funs; a builder re-register that supplies funs re-installs them.
     beamtalk_class_metadata:delete_class_method_funs(State#class_state.name),
-    beamtalk_class_metadata:insert(
+    beamtalk_class_metadata:reset_runtime_class_methods(State#class_state.name),
+    sync_identity(
         State#class_state.name,
         NewModule,
-        maps:keys(NewClassMethods),
         NewSuperclass,
-        NewIsAbstract
+        NewIsAbstract,
+        maps:keys(NewClassMethods),
+        merge
     ),
     seed_runtime_class_methods(State#class_state.name, NewClassMethods),
 

@@ -21,7 +21,7 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
 - Class hierarchy ETS table management
 - Inheritance queries (inherits_from/2)
 - Class object identity checks (is_class_object/1, is_class_name/1)
-- Flattened method table invalidation broadcasts
+- Class-redefinition collision-warning tracking (record/drain)
 """.
 
 -include("beamtalk.hrl").
@@ -293,6 +293,14 @@ BT-737: Called by the REPL load handler after loading a file, to collect
 warnings and surface them to the client. Removes entries from the table.
 BT-742: Drains ALL packages for each class name. Use
 drain_class_warnings_by_qualified_names/1 for per-package precision.
+
+BT-3107: Non-atomic (`match_object` then `delete_object`) — a concurrent
+insert landing between the two survives, unlike
+`drain_class_warnings_by_qualified_names/1`'s atomic `ets:take/2`. Acceptable
+here because "ALL packages for a class name" is inherently a wider,
+best-effort sweep (the caller already can't pin down which package's warning
+it wants); a warning added mid-drain is picked up by the next drain instead of
+being dropped.
 """.
 -spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
 drain_class_warnings_by_names(ClassNames) ->
@@ -325,6 +333,11 @@ Drain collision warnings for the given {Package, ClassName} pairs.
 BT-742: Package-aware drain that only removes warnings for the specified
 package, leaving other packages' warnings intact. Use this from reload
 handlers where the package context is known.
+
+BT-3107: Atomic (`ets:take/2`) — stronger than
+`drain_class_warnings_by_names/1`'s match-then-delete, since the package
+context here is precise enough that a concurrent insert for the same
+{Package, ClassName} key should not silently survive the drain.
 """.
 -spec drain_class_warnings_by_qualified_names([{atom() | undefined, atom()}]) ->
     [{atom(), atom(), atom()}].
