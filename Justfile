@@ -1091,18 +1091,20 @@ fuzz DURATION="60":
     cargo +nightly fuzz run parse_arbitrary -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
     @echo "✅ parse_arbitrary completed without crashes!"
     @echo "🔀 Fuzzing compile pipeline for {{DURATION}} seconds..."
-    @echo "   Corpus: fuzz/corpus/compile_pipeline/ (383 seed files)"
+    @echo "   Seeds: stdlib/test/*.bt + tests/repl-protocol/cases/*.btscript (referenced live, not copied)"
+    @echo "   Corpus: fuzz/corpus/compile_pipeline/ (fuzzer-grown findings only)"
     @echo "   Target: compile_pipeline (lex → parse → analyse → codegen, structural validity)"
-    cargo +nightly fuzz run compile_pipeline -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
+    cargo +nightly fuzz run compile_pipeline fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
     @echo "✅ compile_pipeline completed without crashes!"
 
 # Corpus-through-BEAM lint (BT-3124): generate .core text for every corpus
-# file (seed corpus by default, or override CORPUS_DIRS with a
-# space-separated list to also cover fuzzer-grown corpus dirs) and
-# batch-compile with erlc + core_lint -- the check that catches "beamtalk's
-# own codegen thinks this is valid, but erlc/core_lint rejects it" without
-# needing a full libFuzzer run.
-fuzz-corpus-lint CORPUS_DIRS="fuzz/corpus/compile_pipeline":
+# file (stdlib/test + tests/repl-protocol/cases by default -- the same
+# live-referenced dirs compile_pipeline fuzzes from, not a copied snapshot
+# -- or override CORPUS_DIRS with a space-separated list to also cover a
+# fuzzer-grown corpus dir) and batch-compile with erlc + core_lint -- the
+# check that catches "beamtalk's own codegen thinks this is valid, but
+# erlc/core_lint rejects it" without needing a full libFuzzer run.
+fuzz-corpus-lint CORPUS_DIRS="stdlib/test tests/repl-protocol/cases":
     @echo "🔬 Generating .core corpus from: {{CORPUS_DIRS}}"
     cargo run --release --example compile_pipeline_corpus -p beamtalk-core -- \
         target/compile-pipeline-corpus {{CORPUS_DIRS}}

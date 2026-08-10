@@ -228,9 +228,16 @@ jobs:
         id: fuzz
         continue-on-error: true
         run: |
+          # Seeds live in stdlib/test/ and tests/repl-protocol/cases/ directly
+          # (passed as extra corpus dirs, not copied into fuzz/corpus/) --
+          # fuzz/corpus/compile_pipeline/ only accumulates fuzzer-discovered
+          # growth and is the first (writable) corpus dir; it's fully
+          # gitignored now, so a fresh checkout needs it created up front.
+          mkdir -p fuzz/corpus/compile_pipeline
           # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
           # -max_total_time=300: Run for exactly 5 minutes
-          cargo +nightly fuzz run compile_pipeline -- \
+          cargo +nightly fuzz run compile_pipeline \
+            fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- \
             -rss_limit_mb=4096 \
             -max_total_time=300 \
             -print_final_stats=1
@@ -377,7 +384,9 @@ jobs:
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Corpus size:** $(ls -1 fuzz/corpus/compile_pipeline/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
+          SEED_COUNT=$(ls -1 stdlib/test/*.bt tests/repl-protocol/cases/*.btscript 2>/dev/null | wc -l)
+          GROWN_COUNT=$(ls -1 fuzz/corpus/compile_pipeline/ 2>/dev/null | wc -l)
+          echo "**Corpus size:** $SEED_COUNT live seed(s) (stdlib/test + tests/repl-protocol/cases) + $GROWN_COUNT fuzzer-grown" >> $GITHUB_STEP_SUMMARY
           echo "**Duration:** 5 minutes" >> $GITHUB_STEP_SUMMARY
 
   # BT-3124: corpus-through-BEAM lint. Generates .core text for the seed
@@ -411,7 +420,7 @@ jobs:
       - name: Generate .core corpus
         run: |
           cargo run --release --example compile_pipeline_corpus -p beamtalk-core -- \
-            target/compile-pipeline-corpus fuzz/corpus/compile_pipeline
+            target/compile-pipeline-corpus stdlib/test tests/repl-protocol/cases
 
       - name: Batch-compile with erlc + core_lint
         id: corpus_lint
@@ -430,7 +439,8 @@ jobs:
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Corpus size:** $(ls -1 fuzz/corpus/compile_pipeline/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
+          SEED_COUNT=$(ls -1 stdlib/test/*.bt tests/repl-protocol/cases/*.btscript 2>/dev/null | wc -l)
+          echo "**Corpus size:** $SEED_COUNT files (stdlib/test + tests/repl-protocol/cases, live)" >> $GITHUB_STEP_SUMMARY
 
   extended-proptest:
     runs-on: ubuntu-latest

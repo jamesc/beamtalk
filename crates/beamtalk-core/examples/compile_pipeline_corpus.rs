@@ -46,7 +46,10 @@ fn main() {
     );
     let input_dirs: Vec<PathBuf> = args.map(PathBuf::from).collect();
     let input_dirs = if input_dirs.is_empty() {
-        vec![PathBuf::from("fuzz/corpus/compile_pipeline")]
+        vec![
+            PathBuf::from("stdlib/test"),
+            PathBuf::from("tests/repl-protocol/cases"),
+        ]
     } else {
         input_dirs
     };

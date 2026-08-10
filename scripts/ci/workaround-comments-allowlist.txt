@@ -10,9 +10,6 @@ crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs	3460558164
 crates/beamtalk-core/src/source_analysis/parser/tests/class_tests.rs	3846721765
 crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs	1027809464
 crates/beamtalk-desktop-broker/src/spawn.rs	4037638191
-fuzz/corpus/compile_pipeline/stdlib_test_class_builder_method_source_test.bt	4143809079
-fuzz/corpus/compile_pipeline/stdlib_test_class_method_conditional_self_call_test.bt	2205655045
-fuzz/corpus/compile_pipeline/stdlib_test_object_protocol_test.bt	2532884543
 fuzz/corpus/parse_arbitrary/011_class_reflection.bt	2213515280
 stdlib/test/class_builder_method_source_test.bt	4143809079
 stdlib/test/class_method_conditional_self_call_test.bt	2205655045

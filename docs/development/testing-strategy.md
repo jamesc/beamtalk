@@ -1035,8 +1035,10 @@ Fuzzing tests the compiler's robustness by feeding it random or mutated input to
 
 | Target | Pipeline depth | Corpus |
 |---|---|---|
-| `parse_arbitrary` | lex → parse | `fuzz/corpus/parse_arbitrary/` (35 seed files from `examples/` and `tests/repl-protocol/cases/`) |
-| `compile_pipeline` | lex → parse → analyse → codegen | `fuzz/corpus/compile_pipeline/` (383 seed files from `stdlib/test/*.bt` and `tests/repl-protocol/cases/*.btscript`) |
+| `parse_arbitrary` | lex → parse | `fuzz/corpus/parse_arbitrary/` (35 seed files, copied from `examples/` and `tests/repl-protocol/cases/`) |
+| `compile_pipeline` | lex → parse → analyse → codegen | `stdlib/test/*.bt` + `tests/repl-protocol/cases/*.btscript`, referenced live as extra `cargo fuzz run` corpus dirs, plus `fuzz/corpus/compile_pipeline/` for fuzzer-discovered growth |
+
+`compile_pipeline`'s seeds are *not* copied into the repo: `cargo fuzz run <target> [corpus_dir]...` accepts any number of corpus directories, so it points straight at `stdlib/test` and `tests/repl-protocol/cases` (see `Justfile`'s `fuzz`/`fuzz-corpus-lint` recipes and `.github/workflows/fuzz.yml`). Seeds this way always match the current test suite — no separate copy step to remember, no snapshot to go stale. `fuzz/corpus/compile_pipeline/` is fully gitignored and holds only what the fuzzer itself discovers (it's the first/writable dir in the list). `parse_arbitrary` predates this convention and still uses a committed snapshot; `compile_pipeline` (BT-3124) is the newer pattern and is the one to follow for any future fuzz target.
 
 **Technology:** cargo-fuzz (libFuzzer)
 
@@ -1053,7 +1055,7 @@ just fuzz 300  # 5 minutes per target
 
 # Or use cargo directly, one target at a time
 cargo +nightly fuzz run parse_arbitrary -- -max_total_time=60
-cargo +nightly fuzz run compile_pipeline -- -max_total_time=60
+cargo +nightly fuzz run compile_pipeline fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -max_total_time=60
 ```
 
 **Requirements:**
@@ -1092,7 +1094,7 @@ Run both locally in one step:
 ```bash
 just fuzz-corpus-lint
 # Or against additional corpus dirs (e.g. fuzzer-grown corpus from a CI artifact):
-just fuzz-corpus-lint "fuzz/corpus/compile_pipeline fuzz/artifacts/compile_pipeline"
+just fuzz-corpus-lint "stdlib/test tests/repl-protocol/cases fuzz/corpus/compile_pipeline fuzz/artifacts/compile_pipeline"
 ```
 
 ### Interpreting Results
