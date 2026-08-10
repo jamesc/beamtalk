@@ -235,7 +235,16 @@ pub(super) enum ValueRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum BindOp {
     /// A field/class-var mutation: `call 'maps':'put'(field, value, source)`.
-    Put { field: String, value: ValueRef },
+    /// `class_tag` is the dynamic class-identity value the shadow write (when
+    /// `shadow_write` is set) is keyed on — ADR 0110's BT-3039 amendment:
+    /// `{'$bt_class_vars_shadow', element(2, class_tag)}`, never a bare atom,
+    /// so two classes relaying through the same process don't clobber each
+    /// other's shadow (see `generate_field_assignment`, `expressions.rs:576-588`).
+    Put {
+        field: String,
+        value: ValueRef,
+        class_tag: ValueRef,
+    },
     /// Unpacks a threaded local from the incoming `StateAcc` map at
     /// loop-iteration start (`generate_unpack_at_iteration_start`) — legal
     /// only inside a [`ThreadingMode::StateAcc`] body; see
@@ -589,7 +598,11 @@ fn render_bind(
     let target_name = target.render_name();
     let source_name = source.render_name();
     match op {
-        BindOp::Put { field, value } => {
+        BindOp::Put {
+            field,
+            value,
+            class_tag,
+        } => {
             let put_doc = docvec![
                 "let ",
                 leaf::var(target_name.clone()),
@@ -606,7 +619,9 @@ fn render_bind(
                     put_doc,
                     "let _ = call 'erlang':'put'({",
                     leaf::atom("$bt_class_vars_shadow"),
-                    "}, ",
+                    ", call 'erlang':'element'(2, ",
+                    render_value(class_tag),
+                    ")}, ",
                     leaf::var(target_name),
                     ") in ",
                 ]
@@ -777,6 +792,7 @@ mod tests {
             op: BindOp::Put {
                 field: "runs".to_string(),
                 value: ValueRef::Var("_Val0".to_string()),
+                class_tag: ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write: false,
             span: span(),
@@ -799,6 +815,7 @@ mod tests {
             op: BindOp::Put {
                 field: "runs".to_string(),
                 value: ValueRef::Var("_Val0".to_string()),
+                class_tag: ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write: true,
             span: span(),
@@ -1106,6 +1123,7 @@ mod tests {
                 op: BindOp::Put {
                     field: "runs".to_string(),
                     value: ValueRef::Var("_Val0".to_string()),
+                    class_tag: ValueRef::Var("ClassSelf".to_string()),
                 },
                 shadow_write: false, // BUG: forgot the shadow write
                 span: span(),
@@ -1140,6 +1158,7 @@ mod tests {
                 op: BindOp::Put {
                     field: "runs".to_string(),
                     value: ValueRef::Var("_Val0".to_string()),
+                    class_tag: ValueRef::Var("ClassSelf".to_string()),
                 },
                 shadow_write: true,
                 span: span(),
@@ -1168,6 +1187,7 @@ mod tests {
             op: BindOp::Put {
                 field: "runs".to_string(),
                 value: ValueRef::Var("_Val0".to_string()),
+                class_tag: ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write: false,
             span: span(),
@@ -1193,6 +1213,7 @@ mod tests {
                     op: BindOp::Put {
                         field: "runs".to_string(),
                         value: ValueRef::Var("_Val0".to_string()),
+                        class_tag: ValueRef::Var("ClassSelf".to_string()),
                     },
                     shadow_write: false,
                     span: span(),
@@ -1223,6 +1244,7 @@ mod tests {
             op: BindOp::Put {
                 field: "runs".to_string(),
                 value: ValueRef::Var("_Val0".to_string()),
+                class_tag: ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write: false,
             span: span(),
@@ -1243,13 +1265,16 @@ mod tests {
             op: BindOp::Put {
                 field: "runs".to_string(),
                 value: ValueRef::Var("_Val0".to_string()),
+                class_tag: ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write: true,
             span: span(),
         }];
         let rendered = lower_and_render(&ir).to_pretty_string();
         assert!(
-            rendered.contains("call 'erlang':'put'({'$bt_class_vars_shadow'}, ClassVars1) in"),
+            rendered.contains(
+                "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1) in"
+            ),
             "got: {rendered}"
         );
     }
