@@ -830,7 +830,7 @@ pub(crate) fn compile_source_with_bindings(
 
     // BT-1544: Reuse pre-parsed source + AST from Pass 1 when available,
     // otherwise read and parse from disk (single-file mode, REPL, etc.).
-    let (source, module, mut diagnostics) = if let Some(cached) = cached_ast {
+    let (source, mut module, mut diagnostics) = if let Some(cached) = cached_ast {
         debug!("Using cached AST from Pass 1 for '{}'", source_path);
         // Reuse parse diagnostics from Pass 1 so syntax errors are still reported.
         (cached.source, cached.module, cached.diagnostics)
@@ -1000,6 +1000,19 @@ pub(crate) fn compile_source_with_bindings(
         pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
         ..ClassHierarchyContext::default()
     };
+    // BT-3125: prepare the AST (inferred return types, supervisor_kind,
+    // class_kind) at the driver boundary, using the same `AnalysisResult`
+    // handed off to codegen below via `Some(analysis_result)` — nothing
+    // mutates `module` between `compute_project_diagnostics_with_analysis`
+    // above and here, so `analysis_result` is always trustworthy (mirrors
+    // the "guaranteed no-op" reasoning in the `with_analysis` comment below).
+    // Codegen no longer schedules this writeback itself for a handed-off,
+    // still-trustworthy analysis — see `generate_module_with_warnings`.
+    beamtalk_core::semantic_analysis::lower_module_for_codegen(
+        &mut module,
+        &analysis_result.class_hierarchy,
+        &analysis_result.method_return_types,
+    );
     write_core_erlang_with_bindings(
         &module,
         module_name,
