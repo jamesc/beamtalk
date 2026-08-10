@@ -333,7 +333,12 @@ impl CoreErlangGenerator {
         self.push_scope();
         // Register var bindings — no unpack docs in direct-params mode.
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
-        debug_assert!(unpack_docs.is_empty());
+        self.check_loop_unpack_invariant(
+            super::super::threaded_ir::ThreadingMode::DirectParams,
+            &plan.threaded_locals,
+            !unpack_docs.is_empty(),
+            body.span,
+        );
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
@@ -470,9 +475,11 @@ impl CoreErlangGenerator {
 
         self.push_scope();
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
-        debug_assert!(
-            unpack_docs.is_empty(),
-            "hybrid while: unpack should emit no code"
+        self.check_loop_unpack_invariant(
+            super::super::threaded_ir::ThreadingMode::Hybrid,
+            &plan.threaded_locals,
+            !unpack_docs.is_empty(),
+            body.span,
         );
 
         docs.push(docvec![

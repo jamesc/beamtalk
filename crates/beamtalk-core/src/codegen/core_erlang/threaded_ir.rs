@@ -6,19 +6,25 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! ## Status (BT-3129 — ADR 0111 Phase A0 + A1)
+//! ## Status (BT-3132 — ADR 0111 Phase B, first production migration)
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
-//! [`lower_and_render`] test shim. **Nothing in production codegen constructs
-//! a [`ThreadedIr`] yet** — this is intentional and load-bearing for the
-//! Phase A0 measurement gate (see `docs/ADR/0111-lowered-ir-verifier-for-state-threading.md`
-//! §Phase A0/A1): the only call site that builds one is the flagged
-//! `whileTrue:`/`whileFalse:` direct-params prototype in
-//! `control_flow/while_loops.rs` (behind `BEAMTALK_THREADED_IR_WHILE=1`),
-//! whose output is deliberately discarded (via [`std::hint::black_box`]) —
-//! it exists purely to measure IR-construction/verification cost, never to
-//! change generated output. Migrating real call sites onto this IR is later
-//! work (BT-3131 onward).
+//! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
+//! `VersionCounter` production path (BT-3131), and — as of BT-3132 —
+//! `while_loops.rs`'s and `counted_loops.rs`'s (via `control_flow/mod.rs`)
+//! direct-params/hybrid loop generators construct and [`verify`] a real
+//! [`ThreadedIr`] fragment for their per-iteration "optimized mode implies
+//! no `StateAcc` unpack" invariant, via [`verify_loop_unpack_invariant`] —
+//! this replaces the four `debug_assert!`s the pre-BT-3132 code used for the
+//! same check with [`VerifyError::ThreadingModeUnpackMismatch`]. The Phase
+//! A0 measurement prototype ([`prototype_direct_params_ir`], gated behind
+//! `BEAMTALK_THREADED_IR_WHILE=1`) remains alongside it — it measures a
+//! different, larger fixture (one `Bind` per threaded local's full
+//! per-iteration rebind) and its output is still discarded, unlike the
+//! unpack-invariant check's `Vec<VerifyError>`, which drives real
+//! debug-fail/release-diagnostic behavior. The rest of the four production
+//! generators' state (field mutations, NLR, shadow writes) does not yet
+//! construct `ThreadedIr` — later phases (BT-3133 onward) extend coverage.
 //!
 //! ## Scope
 //!
@@ -761,6 +767,71 @@ impl TokenId {
     fn render_name(self) -> String {
         super::util::versioned_var("CatchTok", self.0 as usize)
     }
+}
+
+// ─── Loop unpack-invariant check (BT-3132) ─────────────────────────────────
+
+/// Builds a minimal `ThreadedIr` fixture for one loop's per-iteration unpack
+/// step under `mode` (whichever of [`ThreadingMode::DirectParams`] /
+/// [`ThreadingMode::Hybrid`] the loop's `ThreadingPlan` resolved) and
+/// verifies it.
+///
+/// `unpack_emitted` must be exactly what
+/// `ThreadingPlan::generate_unpack_at_iteration_start` actually returned for
+/// this loop (non-empty iff every threaded local produced a `maps:get`
+/// unpack `Bind`) — this function checks the OBSERVED emission against the
+/// already-resolved mode, not a re-derivation of `ThreadingPlan`'s own
+/// `use_direct_params`/`use_hybrid_params` flags, so it stays a structural
+/// check on what was actually emitted rather than "the generator agreeing
+/// with itself" (ADR 0111 §Verifier honesty).
+///
+/// Replaces the four "unpack should emit no code" `debug_assert!`s
+/// (`while_loops.rs`'s direct-params/hybrid call sites, `counted_loops.rs`'s
+/// via `control_flow/mod.rs`'s direct/hybrid call sites) — their invariant
+/// is now [`VerifyError::ThreadingModeUnpackMismatch`].
+pub(super) fn verify_loop_unpack_invariant(
+    mode: ThreadingMode,
+    threaded_locals: &[String],
+    unpack_emitted: bool,
+    span: Span,
+) -> Vec<VerifyError> {
+    let frame = FrameId::new(1);
+    let body: Vec<ThreadedStmt> = if unpack_emitted {
+        threaded_locals
+            .iter()
+            .map(|local| {
+                let source = VersionedVar::new(VersionPrefix::Local(local.clone()), 0, frame);
+                let target = VersionedVar::new(VersionPrefix::Local(local.clone()), 1, frame);
+                ThreadedStmt::Bind {
+                    target,
+                    source,
+                    op: BindOp::Unpack {
+                        field: local.clone(),
+                    },
+                    shadow_write: false,
+                    span,
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let produces = body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ThreadedStmt::Bind { target, .. } => Some(target.clone()),
+            ThreadedStmt::Threaded { .. }
+            | ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Return(..) => None,
+        })
+        .collect();
+    verify(&[ThreadedStmt::Threaded {
+        mode,
+        frame,
+        body,
+        produces,
+        span,
+    }])
 }
 
 // ─── Phase A0 measurement prototype ────────────────────────────────────────
@@ -1515,5 +1586,101 @@ mod tests {
         unsafe {
             std::env::remove_var(PROTOTYPE_ENV_VAR);
         }
+    }
+
+    // ── verify_loop_unpack_invariant (BT-3132) ───────────────────────────
+    // Pins the production replacement for the four deleted
+    // "unpack should emit no code" `debug_assert!`s in `while_loops.rs` /
+    // `control_flow/mod.rs` (counted loops).
+
+    #[test]
+    fn verify_loop_unpack_invariant_silent_when_no_unpack_emitted_direct_params() {
+        // The expected, common case: direct-params mode with no unpack docs.
+        let errors = verify_loop_unpack_invariant(
+            ThreadingMode::DirectParams,
+            &["sum".to_string(), "count".to_string()],
+            false,
+            span(),
+        );
+        assert_eq!(errors, Vec::new());
+    }
+
+    #[test]
+    fn verify_loop_unpack_invariant_silent_when_no_unpack_emitted_hybrid() {
+        let errors =
+            verify_loop_unpack_invariant(ThreadingMode::Hybrid, &["n".to_string()], false, span());
+        assert_eq!(errors, Vec::new());
+    }
+
+    #[test]
+    fn verify_loop_unpack_invariant_fires_when_unpack_emitted_under_direct_params() {
+        // Simulates the regression the deleted debug_assert! guarded against:
+        // `generate_unpack_at_iteration_start` emitted unpack code even though
+        // the loop resolved to DirectParams mode. Asserts the exact error set
+        // (not just "contains a match") — pins that a single mismatched local
+        // produces exactly one finding, with no spurious UnboundVersion/
+        // NonLinearVersion noise from how the fixture is built.
+        let errors = verify_loop_unpack_invariant(
+            ThreadingMode::DirectParams,
+            &["sum".to_string()],
+            true,
+            span(),
+        );
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        assert!(
+            matches!(
+                &errors[0],
+                VerifyError::ThreadingModeUnpackMismatch {
+                    mode: ThreadingMode::DirectParams,
+                    ..
+                }
+            ),
+            "expected ThreadingModeUnpackMismatch, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_loop_unpack_invariant_fires_when_unpack_emitted_under_hybrid() {
+        // Two threaded locals: pins that each gets its own
+        // ThreadingModeUnpackMismatch finding, with no cross-local
+        // interference (e.g. NonLinearVersion from misattributed versions).
+        let errors = verify_loop_unpack_invariant(
+            ThreadingMode::Hybrid,
+            &["n".to_string(), "sum".to_string()],
+            true,
+            span(),
+        );
+        assert_eq!(
+            errors.len(),
+            2,
+            "expected exactly two errors, got: {errors:?}"
+        );
+        assert!(
+            errors.iter().all(|e| matches!(
+                e,
+                VerifyError::ThreadingModeUnpackMismatch {
+                    mode: ThreadingMode::Hybrid,
+                    ..
+                }
+            )),
+            "expected only ThreadingModeUnpackMismatch findings, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_loop_unpack_invariant_silent_under_stateacc_with_unpack() {
+        // Sanity check: StateAcc mode legitimately emits unpack code, so this
+        // must stay silent — mirrors `verify_unpack_silent_inside_stateacc_mode`.
+        let errors = verify_loop_unpack_invariant(
+            ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
+            &["sum".to_string()],
+            true,
+            span(),
+        );
+        assert_eq!(errors, Vec::new());
     }
 }
