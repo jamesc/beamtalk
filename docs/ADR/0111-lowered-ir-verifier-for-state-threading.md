@@ -1,7 +1,7 @@
 # ADR 0111: Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return
 
 ## Status
-Proposed (2026-08-09)
+Accepted (2026-08-10)
 
 ## Context
 
