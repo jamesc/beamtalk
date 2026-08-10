@@ -23,11 +23,14 @@
 //! - **Block-wrap**: `expr` -> `[expr] value`
 //! - **Rename-locals**: consistent alpha-renaming of every name *bound*
 //!   inside the expression (block parameters, `:=` assignment targets,
-//!   match-pattern bindings). Free variables -- names referenced but never
-//!   bound inside this expression, which may resolve to an earlier `// =>`
-//!   unit's shared REPL-turn binding in the same file -- are left
-//!   untouched, since renaming those would break correctness rather than
-//!   test it.
+//!   match-pattern bindings), scope- and shadowing-aware: an occurrence is
+//!   only renamed if it lexically resolves to a binder introduced inside
+//!   this expression. A name that's referenced but never bound *at that
+//!   occurrence's scope* -- e.g. it may resolve to an earlier `// =>`
+//!   unit's shared REPL-turn binding in the same file, even if some other,
+//!   unrelated, non-enclosing part of this same expression happens to bind
+//!   a block parameter with the identical name -- is left untouched, since
+//!   renaming those would break correctness rather than test it.
 //! - **Redundant-temp**: `expr` -> `[tmp := expr. tmp] value`, block-wrapped
 //!   so the whole transform stays a single top-level expression (every
 //!   other `.btscript` unit is exactly one `Expression`).
@@ -45,7 +48,7 @@ use crate::commands::test_stdlib::{
 };
 use crate::commands::util;
 use beamtalk_core::ast::{
-    Block, Expression, ExpressionStatement, Identifier, MessageSelector, Module, Pattern,
+    Block, Expression, ExpressionStatement, Identifier, MatchArm, MessageSelector, Module, Pattern,
     StringSegment,
 };
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
@@ -139,11 +142,12 @@ fn redundant_temp(expr: &Expression) -> Expression {
 }
 
 /// Consistently alpha-renames every name *bound* somewhere inside `expr`
-/// (block parameters, `:=` assignment targets, match-pattern bindings),
-/// including all of that name's occurrences within `expr`. Names that are
-/// only ever referenced, never bound, inside this expression are left
-/// alone -- see the module doc for why (they may be free variables
-/// resolving to an earlier `// =>` unit's shared binding).
+/// (block parameters, `:=` assignment targets, match-pattern bindings).
+/// Renaming itself is scope-aware (see [`rename_names_mut`]): only
+/// occurrences that lexically resolve to an in-tree binder are touched, so
+/// a free reference is left alone even when some unrelated, non-enclosing
+/// part of `expr` happens to bind a same-named local (e.g. a block
+/// parameter that shadows an outer name only within its own body).
 ///
 /// Returns `None` if `expr` binds nothing (nothing to rename).
 fn rename_locals(expr: &Expression) -> Option<Expression> {
@@ -163,7 +167,8 @@ fn rename_locals(expr: &Expression) -> Option<Expression> {
     }
 
     let mut renamed = expr.clone();
-    rename_names_mut(&mut renamed, &mapping);
+    let mut scope: ScopeStack = vec![BTreeSet::new()];
+    rename_names_mut(&mut renamed, &mapping, &mut scope);
     Some(renamed)
 }
 
@@ -188,14 +193,43 @@ fn fresh_name(base: &str, used: &BTreeSet<EcoString>) -> String {
 //
 // Two parallel tree walks over the same set of Expression/Pattern shapes:
 // walk_names_ref (read-only, tags each name as a Binding or a Reference,
-// used to collect the "what's bound"/"what's used at all" sets) and
-// rename_names_mut (in-place, renames every occurrence -- binding or
-// reference -- of any name present in the supplied mapping). They are kept
-// as two direct recursive functions rather than one generic visitor: the
-// two have genuinely different signatures (fold vs. mutate) and this
-// module's AST surface is small enough that a shared-abstraction visitor
-// would cost more than it saves here.
+// used to collect the "what's bound"/"what's used at all" sets -- these are
+// deliberately name-level and NOT scope-aware, since they only decide which
+// names need a fresh replacement and what replacements are collision-free,
+// not which occurrences get touched) and rename_names_mut (in-place,
+// scope-aware: renames a binder occurrence unconditionally, but a reference
+// occurrence only if it lexically resolves, respecting shadowing, to a
+// binder introduced somewhere inside this same expression tree). They are
+// kept as two direct recursive functions rather than one generic visitor:
+// the two have genuinely different signatures (fold vs. scoped mutate) and
+// this module's AST surface is small enough that a shared-abstraction
+// visitor would cost more than it saves here.
+//
+// Scope tracking: a `ScopeStack` is a stack of "names bound directly in
+// this lexical scope" sets, innermost last. `Block` and `Match` arms push a
+// fresh scope on entry and pop it on exit (matching Beamtalk's actual
+// lexical scoping, including block-parameter shadowing of an outer name);
+// an `:=`/destructure target adds to the *current* (innermost) scope. A
+// plain `Identifier` reference is only renamed if its name resolves in the
+// scope stack (searched innermost-first) -- i.e. some binder for that exact
+// name is currently in effect at this point in the tree -- which is exactly
+// what distinguishes "shadows an in-tree binder" from "free reference that
+// happens to share a name with an unrelated, non-enclosing in-tree binder".
 // ============================================================================
+
+/// Stack of "names bound directly in this scope", innermost (most deeply
+/// nested `Block`/`Match`-arm) last.
+type ScopeStack = Vec<BTreeSet<EcoString>>;
+
+fn is_in_scope(scope: &ScopeStack, name: &str) -> bool {
+    scope.iter().rev().any(|frame| frame.contains(name))
+}
+
+fn bind_in_current_scope(scope: &mut ScopeStack, name: EcoString) {
+    if let Some(innermost) = scope.last_mut() {
+        innermost.insert(name);
+    }
+}
 
 #[derive(Clone, Copy)]
 enum NameKind {
@@ -351,7 +385,11 @@ fn walk_pattern_names_ref(pattern: &Pattern, on_name: &mut dyn FnMut(&EcoString,
     }
 }
 
-fn rename_names_mut(expr: &mut Expression, mapping: &HashMap<EcoString, EcoString>) {
+fn rename_names_mut(
+    expr: &mut Expression,
+    mapping: &HashMap<EcoString, EcoString>,
+    scope: &mut ScopeStack,
+) {
     match expr {
         Expression::Literal(_, _)
         | Expression::ClassReference { .. }
@@ -360,126 +398,189 @@ fn rename_names_mut(expr: &mut Expression, mapping: &HashMap<EcoString, EcoStrin
         | Expression::ExpectDirective { .. }
         | Expression::Spread { .. }
         | Expression::Error { .. } => {}
-        Expression::Identifier(id) => rename_if_mapped(&mut id.name, mapping),
-        Expression::FieldAccess { receiver, .. } => rename_names_mut(receiver, mapping),
+        Expression::Identifier(id) => {
+            // A read reference is only renamed if it currently resolves to
+            // an in-tree binder -- otherwise it's free (may be an outer
+            // REPL-turn binding) and must be left untouched even if the
+            // same name is mapped because it's bound elsewhere, in an
+            // unrelated non-enclosing scope.
+            if is_in_scope(scope, &id.name) {
+                rename_if_mapped(&mut id.name, mapping);
+            }
+        }
+        Expression::FieldAccess { receiver, .. } => rename_names_mut(receiver, mapping, scope),
         Expression::MessageSend {
             receiver,
             arguments,
             ..
         } => {
-            rename_names_mut(receiver, mapping);
+            rename_names_mut(receiver, mapping, scope);
             for a in arguments {
-                rename_names_mut(a, mapping);
+                rename_names_mut(a, mapping, scope);
             }
         }
-        Expression::Block(block) => {
-            for p in &mut block.parameters {
-                rename_if_mapped(&mut p.name, mapping);
-            }
-            for stmt in &mut block.body {
-                rename_names_mut(&mut stmt.expression, mapping);
-            }
-        }
+        Expression::Block(block) => rename_block_mut(block, mapping, scope),
         Expression::Assignment { target, value, .. } => {
-            if let Expression::Identifier(id) = target.as_mut() {
-                rename_if_mapped(&mut id.name, mapping);
-            } else {
-                rename_names_mut(target, mapping);
-            }
-            rename_names_mut(value, mapping);
+            rename_assignment_mut(target, value, mapping, scope);
         }
         Expression::DestructureAssignment { pattern, value, .. } => {
-            rename_pattern_names_mut(pattern, mapping);
-            rename_names_mut(value, mapping);
+            rename_names_mut(value, mapping, scope);
+            rename_pattern_names_mut(pattern, mapping, scope);
         }
-        Expression::Return { value, .. } => rename_names_mut(value, mapping),
+        Expression::Return { value, .. } => rename_names_mut(value, mapping, scope),
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            rename_names_mut(receiver, mapping);
+            rename_names_mut(receiver, mapping, scope);
             for m in messages {
                 for a in &mut m.arguments {
-                    rename_names_mut(a, mapping);
+                    rename_names_mut(a, mapping, scope);
                 }
             }
         }
-        Expression::Parenthesized { expression, .. } => rename_names_mut(expression, mapping),
+        Expression::Parenthesized { expression, .. } => {
+            rename_names_mut(expression, mapping, scope);
+        }
         Expression::Match { value, arms, .. } => {
-            rename_names_mut(value, mapping);
+            rename_names_mut(value, mapping, scope);
             for arm in arms {
-                rename_pattern_names_mut(&mut arm.pattern, mapping);
-                if let Some(guard) = &mut arm.guard {
-                    rename_names_mut(guard, mapping);
-                }
-                rename_names_mut(&mut arm.body, mapping);
+                rename_match_arm_mut(arm, mapping, scope);
             }
         }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                rename_names_mut(&mut pair.key, mapping);
-                rename_names_mut(&mut pair.value, mapping);
+                rename_names_mut(&mut pair.key, mapping, scope);
+                rename_names_mut(&mut pair.value, mapping, scope);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
             for e in elements {
-                rename_names_mut(e, mapping);
+                rename_names_mut(e, mapping, scope);
             }
             if let Some(t) = tail {
-                rename_names_mut(t, mapping);
+                rename_names_mut(t, mapping, scope);
             }
         }
         Expression::ArrayLiteral { elements, .. } => {
             for e in elements {
-                rename_names_mut(e, mapping);
+                rename_names_mut(e, mapping, scope);
             }
         }
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let StringSegment::Interpolation(e) = seg {
-                    rename_names_mut(e, mapping);
+                    rename_names_mut(e, mapping, scope);
                 }
             }
         }
     }
 }
 
-fn rename_pattern_names_mut(pattern: &mut Pattern, mapping: &HashMap<EcoString, EcoString>) {
+/// Renames a `Block`'s parameters (always in-tree binders) and threads a
+/// fresh scope frame through its body so shadowed/free references inside
+/// resolve correctly.
+fn rename_block_mut(
+    block: &mut Block,
+    mapping: &HashMap<EcoString, EcoString>,
+    scope: &mut ScopeStack,
+) {
+    scope.push(BTreeSet::new());
+    for p in &mut block.parameters {
+        bind_in_current_scope(scope, p.name.clone());
+        rename_if_mapped(&mut p.name, mapping);
+    }
+    for stmt in &mut block.body {
+        rename_names_mut(&mut stmt.expression, mapping, scope);
+    }
+    scope.pop();
+}
+
+/// Renames an `Assignment`'s target/value. The RHS is walked against the
+/// scope as it stood *before* this assignment -- a brand-new implicit
+/// local isn't visible to its own initializer -- then the target is
+/// classified as a reference to an existing in-tree binder or a fresh
+/// implicit local declared in the current scope.
+fn rename_assignment_mut(
+    target: &mut Expression,
+    value: &mut Expression,
+    mapping: &HashMap<EcoString, EcoString>,
+    scope: &mut ScopeStack,
+) {
+    rename_names_mut(value, mapping, scope);
+    if let Expression::Identifier(id) = target {
+        let already_bound = is_in_scope(scope, &id.name);
+        if !already_bound {
+            bind_in_current_scope(scope, id.name.clone());
+        }
+        rename_if_mapped(&mut id.name, mapping);
+    } else {
+        rename_names_mut(target, mapping, scope);
+    }
+}
+
+/// Renames one `Match` arm. Its pattern bindings are scoped to just this
+/// arm (pattern + guard + body), not visible to sibling arms.
+fn rename_match_arm_mut(
+    arm: &mut MatchArm,
+    mapping: &HashMap<EcoString, EcoString>,
+    scope: &mut ScopeStack,
+) {
+    scope.push(BTreeSet::new());
+    rename_pattern_names_mut(&mut arm.pattern, mapping, scope);
+    if let Some(guard) = &mut arm.guard {
+        rename_names_mut(guard, mapping, scope);
+    }
+    rename_names_mut(&mut arm.body, mapping, scope);
+    scope.pop();
+}
+
+fn rename_pattern_names_mut(
+    pattern: &mut Pattern,
+    mapping: &HashMap<EcoString, EcoString>,
+    scope: &mut ScopeStack,
+) {
     match pattern {
         Pattern::Wildcard(_)
         | Pattern::Literal(_, _)
         | Pattern::Nil(_)
         | Pattern::Binary { .. } => {}
-        Pattern::Variable(id) => rename_if_mapped(&mut id.name, mapping),
-        Pattern::Type { binding, .. } => rename_if_mapped(&mut binding.name, mapping),
+        Pattern::Variable(id) => {
+            bind_in_current_scope(scope, id.name.clone());
+            rename_if_mapped(&mut id.name, mapping);
+        }
+        Pattern::Type { binding, .. } => {
+            bind_in_current_scope(scope, binding.name.clone());
+            rename_if_mapped(&mut binding.name, mapping);
+        }
         Pattern::Tuple { elements, .. } => {
             for e in elements {
-                rename_pattern_names_mut(e, mapping);
+                rename_pattern_names_mut(e, mapping, scope);
             }
         }
         Pattern::Array { elements, rest, .. } => {
             for e in elements {
-                rename_pattern_names_mut(e, mapping);
+                rename_pattern_names_mut(e, mapping, scope);
             }
             if let Some(r) = rest {
-                rename_pattern_names_mut(r, mapping);
+                rename_pattern_names_mut(r, mapping, scope);
             }
         }
         Pattern::List { elements, tail, .. } => {
             for e in elements {
-                rename_pattern_names_mut(e, mapping);
+                rename_pattern_names_mut(e, mapping, scope);
             }
             if let Some(t) = tail {
-                rename_pattern_names_mut(t, mapping);
+                rename_pattern_names_mut(t, mapping, scope);
             }
         }
         Pattern::Map { pairs, .. } => {
             for pair in pairs {
-                rename_pattern_names_mut(&mut pair.value, mapping);
+                rename_pattern_names_mut(&mut pair.value, mapping, scope);
             }
         }
         Pattern::Constructor { keywords, .. } => {
             for (_, p) in keywords {
-                rename_pattern_names_mut(p, mapping);
+                rename_pattern_names_mut(p, mapping, scope);
             }
         }
     }
@@ -991,5 +1092,118 @@ fn report_metamorphic_results(
         miette::bail!(
             "{total_failed} metamorphic test(s) failed -- a semantics-preserving transform changed the result"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_expr(source: &str) -> Expression {
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.iter().all(|d| d.severity != Severity::Error),
+            "test fixture failed to parse: {source:?}\n{diagnostics:?}",
+        );
+        module.expressions.first().unwrap().expression.clone()
+    }
+
+    /// Regression test (PR #3308 review): a name that's free at one point
+    /// in the expression (referring to an earlier `// =>` unit's
+    /// REPL-turn binding) but also happens to be bound as a block
+    /// parameter elsewhere in the *same* expression must only have its
+    /// bound occurrences renamed -- the free occurrence has to survive
+    /// untouched, or the transformed unit ends up referencing a name
+    /// nothing defines.
+    #[test]
+    fn rename_locals_leaves_shadowed_free_reference_untouched() {
+        let expr = parse_expr("(1 to: 3) inject: n into: [:acc :n | acc + n]");
+        let renamed = rename_locals(&expr).expect("block parameters are bound, should rename");
+
+        let Expression::MessageSend { arguments, .. } = &renamed else {
+            panic!("expected a keyword MessageSend, got {renamed:?}");
+        };
+        let [seed_arg, block_arg] = arguments.as_slice() else {
+            panic!("expected exactly 2 arguments (inject:into:), got {arguments:?}");
+        };
+
+        // The free `n` (the inject: seed argument, referring to an outer
+        // REPL-turn binding) must be untouched.
+        let Expression::Identifier(seed_id) = seed_arg else {
+            panic!("expected seed argument to remain a plain identifier, got {seed_arg:?}");
+        };
+        assert_eq!(
+            seed_id.name.as_str(),
+            "n",
+            "free `n` argument must survive renaming unchanged"
+        );
+
+        // The block's own bound `n` must have been renamed to something
+        // else, consistently, for both the parameter and its body
+        // reference.
+        let Expression::Block(block) = block_arg else {
+            panic!("expected block argument, got {block_arg:?}");
+        };
+        // Both block parameters are bound only within this block (no free
+        // counterpart), so -- like the purely-bound-name sanity check
+        // below -- both get renamed; `acc`'s fresh name is just not the
+        // one under test here.
+        let renamed_acc = block.parameters[0].name.clone();
+        let renamed_n = &block.parameters[1].name;
+        assert_ne!(renamed_n.as_str(), "n", "block-bound `n` must be renamed");
+
+        let Expression::MessageSend {
+            receiver: body_receiver,
+            arguments: body_args,
+            ..
+        } = &block.body[0].expression
+        else {
+            panic!(
+                "expected `acc + n` body, got {:?}",
+                block.body[0].expression
+            );
+        };
+        assert!(
+            matches!(body_receiver.as_ref(), Expression::Identifier(id) if id.name == renamed_acc)
+        );
+        let Expression::Identifier(body_ref) = &body_args[0] else {
+            panic!("expected identifier reference in block body");
+        };
+        assert_eq!(
+            body_ref.name, *renamed_n,
+            "block body's reference to its own parameter must use the same fresh name"
+        );
+    }
+
+    /// Sanity check: when a bound name has no unrelated free counterpart,
+    /// every occurrence is still renamed together (basic case the old,
+    /// non-scope-aware implementation also handled correctly).
+    #[test]
+    fn rename_locals_renames_all_occurrences_of_a_purely_bound_name() {
+        let expr = parse_expr("[:x | x + x] value: 1");
+        let renamed = rename_locals(&expr).expect("block parameter is bound, should rename");
+
+        let Expression::MessageSend { receiver, .. } = &renamed else {
+            panic!("expected `[...] value: 1`, got {renamed:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let renamed_param = &block.parameters[0].name;
+        assert_ne!(renamed_param.as_str(), "x");
+
+        let Expression::MessageSend {
+            receiver: body_receiver,
+            arguments: body_args,
+            ..
+        } = &block.body[0].expression
+        else {
+            panic!("expected `x + x` body, got {:?}", block.body[0].expression);
+        };
+        assert!(
+            matches!(body_receiver.as_ref(), Expression::Identifier(id) if id.name == *renamed_param)
+        );
+        assert!(matches!(&body_args[0], Expression::Identifier(id) if id.name == *renamed_param));
     }
 }
