@@ -65,11 +65,16 @@ fn with_branch_context_class_var_mutated_is_sticky_across_exit() {
     );
 }
 
-/// self: BT-3131 decision — reset to 0 on entry, restored to the outer
-/// version on exit, the same discipline as `state` (fixing the prior "live
-/// landmine" of neither save nor restore).
+/// self: BT-3131 decision, revised during review — NOT reset on entry (the
+/// branch inherits the outer scope's current version, same as
+/// `class_vars`), restored to it on exit. Fixes the prior "live landmine"
+/// of neither save nor restore without introducing a stale-read regression:
+/// unlike `state`, `Self{N}` has no loop-body rename, so a reset-on-entry
+/// policy would silently read the pre-mutation value on a `self.field`
+/// read inside a branch/loop that follows an earlier `self.field :=` in
+/// the same method.
 #[test]
-fn with_branch_context_self_resets_on_entry_and_restores_on_exit() {
+fn with_branch_context_self_inherits_on_entry_and_restores_on_exit() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_self_version(4);
     let entry_version = generator.with_branch_context(|g| {
@@ -78,8 +83,8 @@ fn with_branch_context_self_resets_on_entry_and_restores_on_exit() {
         entry
     });
     assert_eq!(
-        entry_version, 0,
-        "self resets to 0 on branch entry (BT-3131)"
+        entry_version, 4,
+        "self inherits the outer version on branch entry (no reset, BT-3131)"
     );
     assert_eq!(
         generator.self_version(),

@@ -1326,19 +1326,26 @@ enum OpenScopeResult {
 ///   scope's current version) but restored on exit. `class_var_mutated` is
 ///   intentionally NOT restored — BT-1550: it is a method-level flag that
 ///   must stay sticky once set.
-/// - **self**: BT-3131 decision — reset to 0 on entry, restored on exit, the
-///   same discipline as `state` (its closest structural analog: `Self{N}` is
-///   to value-type methods what `State{N}` is to actor methods). Before this
-///   issue, `self_version` was neither saved nor restored here — the "live
-///   landmine" the issue's ADR calls out. No current call site enters
-///   `with_branch_context` while `self_version` is non-zero: value-type
-///   field mutations thread through `self_version` via a completely separate
-///   code path (`value_type_codegen.rs`) that never calls
-///   `with_branch_context` — only Actor/REPL/class-method-context
-///   conditionals, loops, and exception handlers do. This fix is therefore
-///   zero-behavioral-risk against the current call graph (confirmed by the
-///   snapshot corpus staying byte-identical) and closes the landmine for any
-///   future caller that combines the two.
+/// - **self**: BT-3131 decision, revised during review — saved and restored
+///   on exit, but **NOT reset to 0 on entry**: the same discipline as
+///   `class_vars`, not `state`. `state`'s reset is safe because `state`
+///   inside a loop body renders as `StateAcc{N}` (a context-dependent
+///   rename, `in_loop_body`), so a reset only affects that local rendering
+///   convention. `Self{N}` has no such rename — `self.field` reads compile
+///   directly to `maps:get(field, Self{N})` — and `Self` (version 0, the
+///   bare method parameter) is always a syntactically valid Core Erlang
+///   variable, so resetting to 0 does not fail to compile: it silently
+///   reads the pre-mutation value. `generate_threaded_loop_body` calls
+///   `with_branch_context` unconditionally and is shared by `ValueType`
+///   contexts (confirmed empirically: a `self.field := ...` assignment
+///   followed by a `do:`/conditional body in the same method that reads
+///   `self.field` produced `maps:get(field, Self)` instead of
+///   `maps:get(field, Self1)` under a reset-on-entry policy). The original
+///   "no current call site enters `with_branch_context` while
+///   `self_version` is non-zero" claim was wrong. Before BT-3131,
+///   `self_version` was neither saved nor restored here at all — the "live
+///   landmine" the issue's ADR calls out; giving it `class_vars`' discipline
+///   (not `state`'s) closes that landmine without introducing this one.
 struct BranchContextGuard<'a> {
     generator: &'a mut CoreErlangGenerator,
     saved_in_loop: bool,
@@ -2175,7 +2182,17 @@ impl CoreErlangGenerator {
         let saved_self_version = self.self_version();
         self.set_state_version(0);
         self.in_loop_body = true;
-        self.set_self_version(0);
+        // BT-3131 review fix: do NOT reset self_version to 0 here — unlike
+        // `state`, a `Self{N}` reference is always a syntactically valid
+        // Core Erlang variable (the bare `Self` parameter always exists), so
+        // resetting doesn't fail to compile, it silently reads the
+        // pre-mutation value. `generate_threaded_loop_body` calls this
+        // unconditionally and is shared with ValueType contexts (confirmed:
+        // resetting produces `maps:get(field, Self)` instead of
+        // `maps:get(field, Self1)` for a `self.field := ...` read inside a
+        // `do:`/conditional body that follows an earlier `self.field := ...`
+        // in the same method — see `BranchContextGuard`'s doc comment).
+        // `self` gets `class_vars`' restore-only discipline instead.
         BranchContextGuard {
             generator: self,
             saved_in_loop,
@@ -2186,10 +2203,10 @@ impl CoreErlangGenerator {
     }
 
     /// BT-1449: Executes `f` inside a branch context where `in_loop_body` is
-    /// `true` and `state_version`/`self_version` are reset to 0.  The
-    /// previous values are unconditionally restored — via
-    /// [`BranchContextGuard`]'s `Drop` impl — once this function returns,
-    /// including through an early return via `?` inside `f`.
+    /// `true` and `state_version` is reset to 0.  The previous values are
+    /// unconditionally restored — via [`BranchContextGuard`]'s `Drop` impl —
+    /// once this function returns, including through an early return via
+    /// `?` inside `f`.
     ///
     /// BT-1550: Also saves/restores `class_var_version` (without resetting
     /// it — the branch inherits the outer scope's current version) so that
@@ -2198,9 +2215,10 @@ impl CoreErlangGenerator {
     /// NOT restored — it is a method-level flag that must stay sticky once
     /// set.
     ///
-    /// BT-3131: Also resets/restores `self_version` — see
-    /// [`BranchContextGuard`]'s doc comment for the discipline decision and
-    /// why it is zero-behavioral-risk against the current call graph.
+    /// BT-3131: Also saves/restores `self_version`, with the same
+    /// restore-only-no-reset discipline as `class_var_version` — see
+    /// [`BranchContextGuard`]'s doc comment for why a `state`-style reset is
+    /// unsafe for `self`.
     pub(super) fn with_branch_context<T>(
         &mut self,
         f: impl FnOnce(&mut CoreErlangGenerator) -> T,
