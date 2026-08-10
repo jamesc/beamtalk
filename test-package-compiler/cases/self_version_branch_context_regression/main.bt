@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3131 regression: with_branch_context must NOT reset self_version to 0
+// on entry. Before the fix, a self.field := ... assignment followed by a
+// do:/conditional body in the same method that reads self.field emitted
+// maps:get(field, Self) — the pre-mutation, version-0 value — instead of
+// maps:get(field, Self1). TestCase is exempt from the ordinary "no
+// self.slot := in a Value subclass:" check (BT-1533), so this is reachable
+// in real BUnit test methods.
+TestCase subclass: SelfVersionBranchContextRegressionTest
+  field: total = 0
+
+  testSelfFieldReadInsideLoopAfterPriorMutation =>
+    self.total := 1
+    y := 0
+    #(1, 2, 3) do: [:x | x > 0 ifTrue: [y := self.total] ifFalse: [y := 0]]
+    self assert: y equals: 1
