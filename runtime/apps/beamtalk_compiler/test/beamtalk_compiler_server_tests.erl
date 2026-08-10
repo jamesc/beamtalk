@@ -186,7 +186,11 @@ class_cache_test_() ->
         {"register twice → overwrites", fun register_class_overwrites/0},
         {"clear_classes → cache emptied", fun clear_classes_empties/0},
         {"crash recovery → no builtins in cache", fun crash_recovery_populates/0},
-        {"register_class when server down → no crash", fun register_when_down/0}
+        {"register_class when server down → no crash", fun register_when_down/0},
+        {"remove_class → class no longer in cache", fun remove_class_removes/0},
+        {"remove_class leaves other classes untouched", fun remove_class_leaves_others/0},
+        {"remove_class of unregistered class is a no-op", fun remove_class_unknown_is_noop/0},
+        {"remove_class when server down → no crash", fun remove_class_when_down/0}
     ]}.
 
 register_class_visible() ->
@@ -238,6 +242,43 @@ register_when_down() ->
     %% Calling register_class/2 when the server is not running must not crash.
     application:stop(beamtalk_compiler),
     ?assertEqual(ok, beamtalk_compiler_server:register_class('TestDown', #{class => 'TestDown'})),
+    application:start(beamtalk_compiler).
+
+%% BT-3105: remove_class/1 drops a class from the ambient cache.
+remove_class_removes() ->
+    beamtalk_compiler_server:clear_classes(),
+    Meta = #{class => 'TestBT3105', superclass => 'Object', fields => []},
+    beamtalk_compiler_server:register_class('TestBT3105', Meta),
+    ?assert(maps:is_key('TestBT3105', beamtalk_compiler_server:get_classes())),
+
+    ok = beamtalk_compiler_server:remove_class('TestBT3105'),
+
+    ?assertNot(maps:is_key('TestBT3105', beamtalk_compiler_server:get_classes())).
+
+remove_class_leaves_others() ->
+    beamtalk_compiler_server:clear_classes(),
+    beamtalk_compiler_server:register_class(
+        'TestBT3105A', #{class => 'TestBT3105A', superclass => 'Object', fields => []}
+    ),
+    beamtalk_compiler_server:register_class(
+        'TestBT3105B', #{class => 'TestBT3105B', superclass => 'Object', fields => []}
+    ),
+
+    ok = beamtalk_compiler_server:remove_class('TestBT3105A'),
+
+    Classes = beamtalk_compiler_server:get_classes(),
+    ?assertNot(maps:is_key('TestBT3105A', Classes)),
+    ?assert(maps:is_key('TestBT3105B', Classes)).
+
+remove_class_unknown_is_noop() ->
+    beamtalk_compiler_server:clear_classes(),
+    ?assertEqual(ok, beamtalk_compiler_server:remove_class('TestBT3105NeverRegistered')),
+    ?assertEqual(#{}, beamtalk_compiler_server:get_classes()).
+
+remove_class_when_down() ->
+    %% Calling remove_class/1 when the server is not running must not crash.
+    application:stop(beamtalk_compiler),
+    ?assertEqual(ok, beamtalk_compiler_server:remove_class('TestBT3105Down')),
     application:start(beamtalk_compiler).
 
 %%% ---------------------------------------------------------------

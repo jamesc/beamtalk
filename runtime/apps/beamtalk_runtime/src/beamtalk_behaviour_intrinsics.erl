@@ -558,6 +558,10 @@ Cleanup sequence:
   1. Stop all live actors of this class (via beamtalk_actor_registry)
   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
   3. Purge the BEAM module (code:soft_purge + code:delete)
+  4. Purge derived registries — xref, extensions, protocol registry,
+     compiler cache, workspace class_sources (BT-3105, via
+     beamtalk_class_lifecycle:class_removed/2)
+  5. Notify the workspace layer / REPL sessions (publish_class_removed/2)
 """.
 -spec classRemoveFromSystemByName(atom()) -> 'nil'.
 classRemoveFromSystemByName(ClassName) ->
@@ -625,6 +629,12 @@ classRemoveFromSystemByName(ClassName) ->
                                 soft_purge_after_delete,
                                 code:soft_purge(Module)
                             ),
+                            %% BT-3105: Purge every derived registry (xref,
+                            %% extensions, protocol registry, compiler cache,
+                            %% workspace class_sources) — the single teardown
+                            %% path, run before the workspace/REPL notification
+                            %% below.
+                            ok = beamtalk_class_lifecycle:class_removed(ClassName, Module),
                             publish_class_removed(ClassName, Module),
                             nil;
                         Subclasses ->

@@ -416,3 +416,75 @@ protocol_info_before_init_test() ->
 all_protocol_names_empty_test() ->
     setup(),
     ?assertEqual([], beamtalk_protocol_registry:all_protocol_names()).
+
+%%% ============================================================================
+%%% BT-3105: unregister_protocol/1 — purge on defining-module removal
+%%% ============================================================================
+
+unregister_protocol_removes_matching_module_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3105Proto',
+        module => 'bt3105_proto_mod',
+        required_methods => [#{selector => 'asString', arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ?assert(beamtalk_protocol_registry:is_protocol('BT3105Proto')),
+
+    ok = beamtalk_protocol_registry:unregister_protocol('bt3105_proto_mod'),
+
+    ?assertNot(beamtalk_protocol_registry:is_protocol('BT3105Proto')),
+    ?assertEqual(undefined, beamtalk_protocol_registry:protocol_info('BT3105Proto')).
+
+%% Two protocols share nothing but the table; unregistering one module's
+%% protocol must not disturb a protocol defined by a different module.
+unregister_protocol_leaves_other_modules_protocols_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3105ProtoA',
+        module => 'bt3105_mod_a',
+        required_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3105ProtoB',
+        module => 'bt3105_mod_b',
+        required_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+
+    ok = beamtalk_protocol_registry:unregister_protocol('bt3105_mod_a'),
+
+    ?assertNot(beamtalk_protocol_registry:is_protocol('BT3105ProtoA')),
+    ?assert(beamtalk_protocol_registry:is_protocol('BT3105ProtoB')).
+
+%% A protocol registered without a `module` field (pre-BT-2615 shape) is
+%% never matched — unregistering by module name is a harmless no-op.
+unregister_protocol_skips_protocol_without_module_field_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3105NoModule',
+        required_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+
+    ok = beamtalk_protocol_registry:unregister_protocol('bt3105_unrelated_mod'),
+
+    ?assert(beamtalk_protocol_registry:is_protocol('BT3105NoModule')).
+
+unregister_protocol_unknown_module_is_noop_test() ->
+    setup(),
+    ?assertEqual(ok, beamtalk_protocol_registry:unregister_protocol('bt3105_never_registered')).
+
+unregister_protocol_before_init_test() ->
+    case ets:info(beamtalk_protocol_registry) of
+        undefined ->
+            ?assertEqual(ok, beamtalk_protocol_registry:unregister_protocol('bt3105_any_mod')),
+            beamtalk_protocol_registry:init();
+        _ ->
+            ?assertEqual(ok, beamtalk_protocol_registry:unregister_protocol('bt3105_any_mod'))
+    end.
