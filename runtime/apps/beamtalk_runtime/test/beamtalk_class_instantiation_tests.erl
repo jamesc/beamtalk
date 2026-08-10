@@ -712,10 +712,15 @@ test_module_loaded_with_new_non_atom() ->
 
 %% Line 179: handle_new_generic chooses 'new:' selector when the abstract
 %% class is called with a non-empty args list (as opposed to [] → 'new').
-%% The beamtalk_class_is_abstract process-dict flag is set by the class
-%% gen_server's init/1; we replicate it here for a direct unit test.
+%% BT-3106: is_abstract is resolved by class name via
+%% `beamtalk_class_metadata:lookup_is_abstract/1`, not the
+%% `beamtalk_class_is_abstract` process-dictionary flag (which resolved
+%% against the wrong class when `self new` runs somewhere other than the
+%% owning class's own gen_server — see `beamtalk_supervisor_tests`'s
+%% `start_child_via_class_method_rejects_abstract_class_test`) — so we
+%% register real metadata here instead of seeding the process dictionary.
 test_generic_new_abstract_with_args() ->
-    put(beamtalk_class_is_abstract, true),
+    beamtalk_class_metadata:insert('AbstractShape', nonexistent_module_xyz, undefined, undefined, true),
     try
         %% nonexistent_module_xyz has no BEAM file → is_module_loaded_with_new → false
         %% → handle_new_generic is called with Args = [#{}] (non-empty)
@@ -733,7 +738,7 @@ test_generic_new_abstract_with_args() ->
             Result
         )
     after
-        erase(beamtalk_class_is_abstract)
+        beamtalk_class_metadata:delete('AbstractShape')
     end.
 
 %% Line 363: handle_new_compiled falls back to new/0 when the caller

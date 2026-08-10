@@ -41,6 +41,8 @@ Tests cover:
 - startChild/1,2 returns {ok, ...} / {error, #beamtalk_error{}} (BT-1997)
 - with_live_supervisor/3 returns {error, ...} on stale handle (BT-1997)
 - class_dispatch hook: initialize: runs only on fresh start, not already_started or error (BT-1996)
+- start_child_via_class_method/4 rejects an abstract class's `self new`,
+  resolved by class name rather than a fabricated process-dictionary flag (BT-3106)
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -63,6 +65,10 @@ Tests cover:
     class_returnSupervisor/2,
     start_link_fake_child/0
 ]).
+
+%% BT-3106: Fake class method that self-sends `new`, mirroring the codegen
+%% shape of `self new` inside a compiled class method body (BT-893).
+-export([class_selfNew/2]).
 
 %% BT-1960: Fake class methods for dynamic_init and hierarchy tests.
 -export([class_childClass/2]).
@@ -853,11 +859,30 @@ class_returnSupervisor(_ClassSelf, _ClassVars) ->
     {ok, Pid} = start_link_fake_child(),
     {beamtalk_supervisor, 'FakeSupervisorChild', ?MODULE, Pid}.
 
+%% BT-3106: Fake class method: self-sends `new`, exactly as codegen's
+%% `try_instantiation_intrinsic` lowers `self new` inside a class method body —
+%% `beamtalk_class_instantiation:class_self_new(ClassName, Module, Args)` with
+%% `ClassName` taken from `ClassSelf`. Used to prove the abstract-instantiation
+%% guard is enforced when this runs in the supervisor process (via
+%% `start_child_via_class_method/4`), not just in the class's own gen_server.
+class_selfNew(ClassSelf, _ClassVars) ->
+    ClassTag = element(2, ClassSelf),
+    ClassName = beamtalk_primitive:class_name_from_tag(ClassTag),
+    beamtalk_class_instantiation:class_self_new(ClassName, ?MODULE, []).
+
 -doc """
 Set up ETS tables and register a fake class for start_child_via_class_method.
 Returns the fake class pid (a dummy process) that should be cleaned up after the test.
 """.
 setup_fake_class(ClassName) ->
+    setup_fake_class(ClassName, undefined).
+
+-doc """
+Same as `setup_fake_class/1`, with an explicit `is_abstract` metadata value
+(BT-3106) — used to build classes that must be rejected by the
+abstract-instantiation guard regardless of which process resolves them.
+""".
+setup_fake_class(ClassName, IsAbstract) ->
     beamtalk_class_metadata:new(),
     %% Register a dummy process as the class gen_server so whereis_class resolves.
     FakeClassPid = spawn(fun() ->
@@ -868,7 +893,7 @@ setup_fake_class(ClassName) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
     register(RegName, FakeClassPid),
     %% Register module mapping so call_class_method_direct can find our fake methods.
-    beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, undefined),
+    beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, IsAbstract),
     FakeClassPid.
 
 -doc "Clean up after a fake class test.".
@@ -1043,6 +1068,29 @@ start_child_via_class_method_returns_supervisor_tuple_test() ->
         gen_server:stop(ChildPid)
     after
         cleanup_fake_class('BT1960SupReturn', FakeClassPid)
+    end.
+
+start_child_via_class_method_rejects_abstract_class_test() ->
+    %% BT-3106: an abstract class's `self new` — dispatched, via a class method
+    %% run through start_child_via_class_method/4, in the SUPERVISOR process
+    %% rather than the class's own gen_server — must still raise the
+    %% abstract-instantiation error. Before the fix, start_child_via_class_method
+    %% seeded a hard-coded `beamtalk_class_is_abstract = false` into the
+    %% supervisor's process dictionary, and the generic `new` path
+    %% (`handle_new_generic/2`) trusted that PD flag, so a genuinely abstract
+    %% class would have instantiated successfully instead of raising.
+    FakeClassPid = setup_fake_class('BT3106Abstract', true),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
+            beamtalk_supervisor:start_child_via_class_method(
+                'BT3106Abstract', ?MODULE, class_selfNew, []
+            )
+        ),
+        %% The fabricated PD entry must not linger either way (BT-3106).
+        ?assertEqual(undefined, get(beamtalk_class_is_abstract))
+    after
+        cleanup_fake_class('BT3106Abstract', FakeClassPid)
     end.
 
 %%====================================================================

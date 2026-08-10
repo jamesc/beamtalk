@@ -785,9 +785,23 @@ the supervisor process — not the class gen_server. Running via `class_send`
 would execute inside the class gen_server, linking the child there instead,
 breaking OTP supervision semantics (supervisor would not detect child exits).
 
-Process dictionary entries (`beamtalk_class_name`, `beamtalk_class_module`,
-`beamtalk_class_is_abstract`) are set temporarily so that `self spawnWith:`
-in the class method body can resolve class metadata via `class_self_spawn/4`.
+Process dictionary entries `beamtalk_class_name` / `beamtalk_class_module` are
+set temporarily as a defensive fallback for call sites that still read class
+identity from the process dictionary (e.g. `handle_class_self_call/1`'s
+deadlock-diagnostic hint) when the class method runs correctly in the
+supervisor process instead of the class's own gen_server.
+
+BT-3106: `beamtalk_class_is_abstract` is deliberately **not** seeded here.
+`self spawnWith:`/`self spawnAs:`/`self spawnWith:as:` in a compiled class
+method resolve `is_abstract` by class name via
+`beamtalk_class_instantiation:resolve_is_abstract_or_raise/2` (BT-3047 / ADR
+0109 amendment), and `self new`/`self new:` resolve it via a name-keyed
+`beamtalk_class_metadata:lookup_is_abstract/1` lookup inside
+`beamtalk_class_instantiation:handle_new_generic/2` — neither reads this PD
+entry. Seeding a hard-coded `false` here previously fabricated a cache value
+that could let an abstract class bypass the abstract-instantiation guard on
+any PD-reading path added in the future; name-keyed metadata is the single
+source of truth instead.
 
 The MFA stored in the OTP child spec is:
   {beamtalk_supervisor, start_child_via_class_method, [ClassName, Module, Selector, Args]}
@@ -797,13 +811,13 @@ Selector is in compiled form (e.g., `class_create:value:`).
 -spec start_child_via_class_method(atom(), module(), atom(), [term()]) ->
     {ok, pid()} | {error, term()}.
 start_child_via_class_method(ClassName, Module, Selector, Args) ->
-    %% Set process dictionary entries needed by class_self_spawn/4.
+    %% Set process dictionary entries needed by legacy PD-reading fallbacks.
     %% These are normally set by the class gen_server during init;
     %% we replicate them here so the class method runs correctly
-    %% in the supervisor process.
+    %% in the supervisor process. `beamtalk_class_is_abstract` is intentionally
+    %% excluded — see the doc comment above (BT-3106).
     put(beamtalk_class_name, ClassName),
     put(beamtalk_class_module, Module),
-    put(beamtalk_class_is_abstract, false),
     try
         ClassSelf = make_init_class_self(ClassName, Module),
         ClassVars = #{},
@@ -837,8 +851,7 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
         end
     after
         erase(beamtalk_class_name),
-        erase(beamtalk_class_module),
-        erase(beamtalk_class_is_abstract)
+        erase(beamtalk_class_module)
     end.
 
 -doc """

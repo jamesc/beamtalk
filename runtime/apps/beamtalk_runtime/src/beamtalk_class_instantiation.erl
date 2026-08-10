@@ -151,6 +151,24 @@ is_module_loaded_with_new(_) ->
     false.
 
 -doc """
+Look up a class's `is_abstract` flag by name for the generic `new` path
+(BT-3106).
+
+Unlike `resolve_is_abstract_or_raise/2`, this does not raise on a metadata
+miss: `handle_new_generic/2` is reached from the external `X new` gen_server
+handler too (via `handle_new/4`), which must keep returning `{error, ...}` /
+`{ok, ...}` tuples rather than crashing the class's gen_server. A miss is
+treated as "not abstract" — the same permissive default the process-dictionary
+read this replaces used to fall through to for an unset flag.
+""".
+-spec class_is_abstract(class_name()) -> boolean().
+class_is_abstract(ClassName) ->
+    case beamtalk_class_metadata:lookup_is_abstract(ClassName) of
+        {ok, IsAbstract} -> IsAbstract;
+        not_found -> false
+    end.
+
+-doc """
 Build a generic, module-free instance for a class with no loaded module.
 
 The instance is a tagged map carrying `$beamtalk_class` plus every declared
@@ -166,14 +184,19 @@ probe for the legacy non-constructible pattern.
 
 Abstract classes are screened twice: the external `X new` path is rejected by
 the gen_server `{new, _}` handler before reaching here, and the `self new` path
-(`class_self_new`, which does not pre-screen) is caught here via the
-`beamtalk_class_is_abstract` process-dictionary flag set in
-`beamtalk_object_class:init/1`. Both produce the same `instantiation_error`.
+(`class_self_new`, which does not pre-screen) is caught here via a name-keyed
+`beamtalk_class_metadata:lookup_is_abstract/1` lookup (BT-3106) — not the
+`beamtalk_class_is_abstract` process-dictionary flag, which only reflects the
+*executing process's* class identity and resolves against the wrong class when
+`class_self_new` runs somewhere other than the owning class's own gen_server
+(e.g. `beamtalk_supervisor:start_child_via_class_method/4`, which runs the
+class method in the supervisor process). Both produce the same
+`instantiation_error`.
 """.
 -spec handle_new_generic(list(), class_name()) ->
     {ok, map(), boolean()} | {error, term(), boolean()}.
 handle_new_generic(Args, ClassName) ->
-    case get(beamtalk_class_is_abstract) of
+    case class_is_abstract(ClassName) of
         true ->
             Selector =
                 case Args of
@@ -181,7 +204,7 @@ handle_new_generic(Args, ClassName) ->
                     _ -> 'new:'
                 end,
             {error, abstract_class_error(ClassName, Selector), false};
-        _ ->
+        false ->
             Defaults = generic_field_defaults(ClassName),
             try
                 Result =
