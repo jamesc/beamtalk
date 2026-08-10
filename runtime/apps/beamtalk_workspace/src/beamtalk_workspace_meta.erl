@@ -659,9 +659,12 @@ load_metadata_from_disk(State) ->
     %% snapshot" moment — the last time class_sources/loaded_modules were
     %% written to disk. A .bt source file whose own mtime is newer than this
     %% was edited after that snapshot (e.g. externally, while the workspace
-    %% was down) and is therefore stale relative to it. `0` (file missing —
-    %% shouldn't happen, we're mid-read of it) sorts below every real
-    %% calendar:datetime(), so the newer-than check below degrades to "keep".
+    %% was down) and is therefore stale relative to it. Read just before
+    %% `file:read_file/1` below, so the only way this is `0` (file missing)
+    %% is a race where the file is deleted between the two calls — in which
+    %% case `file:read_file/1` itself hits `enoent` and this value goes
+    %% unused. `0` sorts below every real `calendar:datetime()` regardless,
+    %% so the newer-than check would degrade to "keep" even then.
     SnapshotMtime = filelib:last_modified(Path),
     case file:read_file(Path) of
         {ok, Binary} ->
@@ -757,6 +760,7 @@ load_metadata_from_disk(State) ->
                                                 K,
                                                 binary_to_list(V),
                                                 ValidatedModules,
+                                                State#state.package_name,
                                                 SnapshotMtime,
                                                 Acc
                                             );
@@ -948,19 +952,20 @@ loaded module (per `ValidatedModules`, itself already filtered to
 `code:is_loaded`) and — when that module has a known on-disk source path —
 that file's mtime is not newer than `SnapshotMtime` (the metadata.json
 snapshot the text was captured into). A class name that never became an atom
-in this VM, or whose module resolves outside the static `bt@{snake}`
-convention (e.g. a package-qualified class), fails the loaded-module check
-and is conservatively dropped rather than risk serving stale text.
+in this VM, or whose module resolves to neither naming convention
+`class_module_loaded/3` checks, fails the loaded-module check and is
+conservatively dropped rather than risk serving stale text.
 """.
 -spec keep_if_class_source_fresh(
     binary(),
     string(),
     #{atom() => string() | undefined},
+    binary() | undefined,
     calendar:datetime() | 0,
     #{binary() => string()}
 ) -> #{binary() => string()}.
-keep_if_class_source_fresh(ClassNameBin, Source, ValidatedModules, SnapshotMtime, Acc) ->
-    case class_module_loaded(ClassNameBin, ValidatedModules) of
+keep_if_class_source_fresh(ClassNameBin, Source, ValidatedModules, PackageName, SnapshotMtime, Acc) ->
+    case class_module_loaded(ClassNameBin, ValidatedModules, PackageName) of
         {true, SourcePath} ->
             case source_file_newer_than(SourcePath, SnapshotMtime) of
                 true -> Acc;
@@ -971,31 +976,79 @@ keep_if_class_source_fresh(ClassNameBin, Source, ValidatedModules, SnapshotMtime
     end.
 
 -doc """
-Whether `ClassNameBin` currently resolves (via the static `bt@{snake_case}`
-naming convention, ADR 0016) to a module present in `ValidatedModules` — i.e.
-a module `code:is_loaded/1` confirmed loaded during this same restore pass.
+Whether `ClassNameBin` currently resolves to a module present in
+`ValidatedModules` — i.e. a module `code:is_loaded/1` confirmed loaded during
+this same restore pass. Tries, in order:
+
+1. The unqualified static `bt@{snake_case}` convention (ADR 0016) —
+   `beamtalk_module_name:to_module_atom/1`.
+2. When `PackageName` is known (this project has a `[package] name = ...` in
+   `beamtalk.toml`): the package-qualified `bt@{package}@{snake_case}`
+   convention a `src/`-located file compiles under
+   (`beamtalk_repl_loader:resolve_package_module/4`'s common case — a class
+   directly in `src/` whose file basename matches the class name). Built via
+   `list_to_existing_atom` (never creates an atom): if this module was never
+   loaded this session, no atom for it exists, so the lookup fails cleanly
+   rather than fabricating a fresh atom that can't be in `ValidatedModules`
+   anyway.
+
+Does **not** cover every module-naming shape `resolve_package_module/4` can
+produce (e.g. a class under a `src/` subdirectory, or a file basename that
+doesn't match its class name both use extra `@`-segments derived from the
+file path, which this class-name-only check has no way to reconstruct) —
+those fail both checks and are conservatively dropped, same as before this
+fix, not silently misclassified as fresh.
+
 Returns `{true, SourcePath}` (SourcePath possibly `undefined`, e.g. a
 REPL-typed class with no backing file) on success.
 """.
--spec class_module_loaded(binary(), #{atom() => string() | undefined}) ->
+-spec class_module_loaded(binary(), #{atom() => string() | undefined}, binary() | undefined) ->
     {true, string() | undefined} | false.
-class_module_loaded(ClassNameBin, ValidatedModules) ->
+class_module_loaded(ClassNameBin, ValidatedModules, PackageName) ->
     case safe_existing_atom(ClassNameBin) of
         undefined ->
             false;
         ClassAtom ->
-            ModuleAtom = beamtalk_module_name:to_module_atom(ClassAtom),
-            case maps:find(ModuleAtom, ValidatedModules) of
-                {ok, SourcePath} -> {true, SourcePath};
-                error -> false
+            UnqualifiedAtom = beamtalk_module_name:to_module_atom(ClassAtom),
+            case maps:find(UnqualifiedAtom, ValidatedModules) of
+                {ok, SourcePath} ->
+                    {true, SourcePath};
+                error ->
+                    case qualified_module_atom(ClassAtom, PackageName) of
+                        undefined ->
+                            false;
+                        QualifiedAtom ->
+                            case maps:find(QualifiedAtom, ValidatedModules) of
+                                {ok, SourcePath} -> {true, SourcePath};
+                                error -> false
+                            end
+                    end
             end
+    end.
+
+-doc """
+Package-qualified module atom (`bt@{PackageName}@{snake_case}`) for
+`ClassAtom`, or `undefined` when `PackageName` is unknown or no such atom has
+ever been created in this VM (`list_to_existing_atom` — see
+`class_module_loaded/3`'s doc for why this never creates one).
+""".
+-spec qualified_module_atom(atom(), binary() | undefined) -> atom() | undefined.
+qualified_module_atom(_ClassAtom, undefined) ->
+    undefined;
+qualified_module_atom(ClassAtom, PackageName) when is_binary(PackageName) ->
+    Snake = beamtalk_module_name:camel_to_snake(atom_to_list(ClassAtom)),
+    ModNameStr = "bt@" ++ binary_to_list(PackageName) ++ "@" ++ Snake,
+    try list_to_existing_atom(ModNameStr) of
+        Atom -> Atom
+    catch
+        error:badarg -> undefined
     end.
 
 -doc """
 Whether `SourcePath`'s current on-disk mtime is strictly newer than
 `SnapshotMtime`. No signal (`SourcePath` undefined, or the file no longer
 exists on disk) is treated as "not stale" — there is nothing to compare
-against, so `class_module_loaded/2` is the only gate in that case.
+against, so `class_module_loaded/3` is the only gate in that case.
 """.
 -spec source_file_newer_than(string() | undefined, calendar:datetime() | 0) -> boolean().
 source_file_newer_than(undefined, _SnapshotMtime) ->

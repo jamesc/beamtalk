@@ -52,6 +52,27 @@ load_fake_class_module(ClassNameAtom) ->
     {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
     Mod.
 
+%% BT-3108: like load_fake_class_module/1, but under the package-qualified
+%% bt@{PackageName}@{snake_case} module name a src/-located file in a
+%% packaged project actually compiles under
+%% (beamtalk_repl_loader:resolve_package_module/4's common case) — used to
+%% cover class_module_loaded/3's package-qualified branch.
+load_fake_class_module_qualified(ClassNameAtom, PackageName) ->
+    Snake = beamtalk_module_name:camel_to_snake(atom_to_list(ClassNameAtom)),
+    ModNameStr = "bt@" ++ binary_to_list(PackageName) ++ "@" ++ Snake,
+    % elp:fixme W0023 intentional atom creation
+    ModuleAtom = list_to_atom(ModNameStr),
+    Forms = [
+        {attribute, 1, module, ModuleAtom},
+        {attribute, 2, export, [{noop, 0}]},
+        {function, 3, noop, 0, [
+            {clause, 3, [], [], [{atom, 3, ok}]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
+    Mod.
+
 %% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
 %% the same file the module would write to.
 metadata_path_for(WsId) ->
@@ -1039,6 +1060,49 @@ class_source_survives_restart_when_module_loaded_test() ->
         gen_server:stop(Pid2)
     after
         _ = file:delete(MetaFile),
+        _ = code:purge(ModuleAtom),
+        _ = code:delete(ModuleAtom)
+    end.
+
+%% BT-3108 review follow-up: a class_sources entry for a class in a
+%% *packaged* project — the common case, not an edge case — survives restore.
+%% Its module is registered under the package-qualified bt@{pkg}@{snake} name
+%% (resolve_package_module/4's shape for a src/-located file), not the
+%% unqualified bt@{snake} name class_module_loaded/3 originally only checked.
+class_source_survives_restart_for_packaged_project_test() ->
+    stop_if_running(),
+    ProjectDir = filename:join(
+        temp_dir_meta(),
+        "bt-meta-pkg-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_path(ProjectDir),
+    ok = file:write_file(
+        filename:join(ProjectDir, "beamtalk.toml"),
+        <<"[package]\nname = \"bt3108pkg\"\n">>
+    ),
+    ProjectPath = list_to_binary(ProjectDir),
+    WsId = <<"clssrc_pkg_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    ModuleAtom = load_fake_class_module_qualified('Bt3108Pkg', <<"bt3108pkg">>),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => ProjectPath,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        Source = "Object subclass: Bt3108Pkg [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:register_module(ModuleAtom),
+        ok = beamtalk_workspace_meta:set_class_source(<<"Bt3108Pkg">>, Source),
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Bt3108Pkg">>)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir_r(ProjectDir),
         _ = code:purge(ModuleAtom),
         _ = code:delete(ModuleAtom)
     end.
