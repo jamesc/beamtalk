@@ -51,7 +51,11 @@ pub(super) enum KeyStyle {
 }
 
 /// BT-1343: Reason why a loop fell back to `StateAcc` threading instead of an optimized mode.
-#[derive(Clone, Debug)]
+///
+/// BT-3129: `PartialEq`/`Eq` added so `threaded_ir::ThreadingMode` (which wraps
+/// this in its `StateAcc` variant) can derive them too — needed for verifier
+/// unit-test assertions comparing `VerifyError`s.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum StateAccFallbackReason {
     /// No fallback — an optimized convention was selected.
     None,

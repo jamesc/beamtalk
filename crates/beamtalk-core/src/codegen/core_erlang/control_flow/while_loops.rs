@@ -284,6 +284,25 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
         negate: bool,
     ) -> Result<Document<'static>> {
+        // BT-3129 (ADR 0111 Phase A0 measurement gate): when
+        // `BEAMTALK_THREADED_IR_WHILE=1`, also build/verify/render a
+        // `ThreadedIr` fixture mirroring this loop's direct-params threading,
+        // then discard the result. This never touches `self`'s var-naming
+        // counters (the fixture uses `plan.threaded_locals`' own names, not
+        // `fresh_temp_var`) and never affects the `Document` this function
+        // returns — see `threaded_ir`'s module docs §Status. It exists solely
+        // so the gate can measure the marginal cost of IR construction +
+        // verification + rendering against a fixed fixture set.
+        if super::super::threaded_ir::prototype_enabled() {
+            let ir = super::super::threaded_ir::prototype_direct_params_ir(
+                &plan.threaded_locals,
+                body.span,
+            );
+            let errors = super::super::threaded_ir::verify(&ir);
+            let rendered = super::super::threaded_ir::lower_and_render(&ir);
+            std::hint::black_box((errors, rendered));
+        }
+
         // Collect initial arg values from the outer scope (before push_scope).
         let initial_direct_args = plan.initial_direct_args(self);
 

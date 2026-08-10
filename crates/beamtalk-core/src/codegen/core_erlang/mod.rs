@@ -105,6 +105,7 @@ mod spec_codegen;
 mod state_codegen;
 mod supervisor_codegen;
 mod threaded_expr;
+mod threaded_ir;
 mod util;
 mod value_type_codegen;
 mod variable_context;
