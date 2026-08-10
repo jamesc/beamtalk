@@ -96,11 +96,17 @@ signature, read from the compiler port's ambient class-hierarchy cache
 (`beamtalk_compiler_server`'s `classes` map). A pre-save advisory needs the
 same dependent re-check run against a *pending* edit that has not installed
 — so the cache still holds the old generation. `trigger_pending/5` bridges
-this by temporarily overwriting the changed class's ambient entry with the
-pending signature spliced in, running the unmodified `do_trigger/3` used by
-`trigger/4`, then restoring the original entry — see `trigger_pending/5`'s
-own doc for the exact mechanism and its accepted concurrency tradeoff. Never
-installs anything and never touches `beamtalk_workspace_findings_store`
+this by building a **local overlay** of the ambient classes with the pending
+signature spliced into the changed class's entry, and threading that overlay
+map through `do_trigger/4`/`recheck_owner/6` as each candidate's
+`class_hierarchy` request option (ADR 0105 Phase 3, BT-3109) — the compiler
+port sees the hypothetical signature for the duration of that one request
+only. `beamtalk_compiler_server`'s shared `classes` state is never written
+to, so there is nothing to restore and no window in which a concurrent
+`register_class/2` from another session could be clobbered (BT-2806's
+restore-clobbers-commit race is closed by construction, not mitigated) — see
+`trigger_pending/5`'s own doc for the exact mechanism. Never installs
+anything and never touches `beamtalk_workspace_findings_store`
 (BT-2779) — there is nothing to publish or clear until an actual install
 happens; the caller (`beamtalk_repl_eval:precheck_method/5`) returns the
 `result()` directly to whichever surface asked.
@@ -125,7 +131,7 @@ notification / workspace UI) and persisting/clearing them across reloads is
 pure "what changed" computation. `result()`'s `checked_owners` field exists
 specifically for that consumer: it is the exact set of caller classes a
 diagnostics round-trip *completed* for this trigger (`ok` status in
-`recheck_owner/5`, regardless of whether that class turned out clean or
+`recheck_owner/6`, regardless of whether that class turned out clean or
 stale), which is what BT-2779 needs to know which owners' stored findings to
 replace — a clean re-check still has to `put_owner(Owner, [])` its way past
 a stale generation-A finding (`checked` alone can't answer "which classes",
@@ -148,7 +154,7 @@ looking freshly-verified (the BT-2802 bug).
 
 **`not_verified_owners` (BT-2828)** widens that same treatment to two more
 ways a `Kept` candidate can end up with nothing to show for it:
-`recheck_owner/5` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
+`recheck_owner/6` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
 when `beamtalk_workspace_meta:get_class_source/1` has no live source for the
 owner, and `{failed, []}` when the `diagnostics/3` round-trip itself errors
 out or the compiler port call fails/times out. Both outcomes fall through
@@ -368,64 +374,55 @@ computed by compiling the pending edit (e.g.
 `beamtalk_repl_compiler:compile_method_reload/2`) without calling
 `code:load_binary/3`.
 
-## Mechanism: a scoped, temporary ambient-cache swap
+## Mechanism: a per-request class-hierarchy overlay (BT-3109)
 
-`recheck_owner/5` (reused unchanged via `do_trigger/3`) sees the changed
-class's signature through the compiler port's ambient class-hierarchy cache
-(`beamtalk_compiler_server`'s `classes` map, injected by `diagnostics/3`'s
-`class_hierarchy => true`). That cache reflects whatever last *installed* —
-for a pending edit, nothing has, so it still holds the old generation. This
-function:
+`recheck_owner/6` sees the changed class's signature
+through the compiler port's class-hierarchy context, injected by
+`diagnostics/3`'s `class_hierarchy` option
+(`beamtalk_compiler_server:diagnostics/3`). Passed `true`, that option
+threads the *ambient* `classes` cache — which reflects whatever last
+*installed*, so for a pending edit it still holds the old generation. This
+function instead builds a **local overlay map** and passes it as the
+option's value directly, never touching `beamtalk_compiler_server`'s state:
 
 1. Reads the changed class's current ambient meta
    (`beamtalk_compiler_server:get_classes/0`).
 2. Splices `PendingSignature` into that meta's `method_info` (or
    `class_method_info` for `Side =:= class`) entry for `SelectorBin`,
-   preserving every other field (arity, other methods, fields, superclass).
-3. Casts the spliced meta into the ambient cache
-   (`beamtalk_compiler_server:register_class/2`), runs the *exact* same
-   `do_trigger/3` `trigger/4` uses, then restores the original meta —
-   `after` guarantees the restore runs even if `do_trigger/3` raises (caught
-   one level up by `trigger_pending/5`'s own try/catch, which still needs the
-   real generation back in place for the next request).
+   preserving every other field (arity, other methods, fields, superclass) —
+   `override_method_signature/4`, unchanged from before this fix.
+3. Builds `Overlay = AmbientClasses#{ClassAtom => PendingMeta}` — the whole
+   ambient class map with just the changed class's entry replaced — and
+   passes `Overlay` as `do_trigger/4`'s `ClassHierarchy` argument, which
+   threads it through to every `recheck_owner/6` call this trigger makes as
+   `diagnostics/3`'s `class_hierarchy => Overlay` option
+   (`beamtalk_compiler_server`'s `handle_call({diagnostics, ...})` clause
+   uses a caller-supplied map verbatim instead of reading `State#state.classes`
+   when one is given). Every other live class stays as ambient as of this
+   trigger's start — `Overlay` is a single snapshot taken once via
+   `get_classes/0`, reused unchanged for every candidate's `recheck_owner/6`
+   call in the loop, not re-read per candidate. A concurrent `register_class/2`
+   for an *unrelated* class landing mid-loop is therefore invisible to later
+   candidates in this same round (a narrower staleness window than the old
+   mechanism, which read `State#state.classes` fresh per diagnostics call) —
+   only the changed class's entry is hypothetical, and only for the
+   diagnostics calls this one `trigger_pending/5` invocation makes.
 
-**Ordering invariant this relies on** (same shape as
-`beamtalk_repl_loader:load_recompiled_method/8`'s documented invariant): the
-cast in step 3 and every `diagnostics/3` call `do_trigger/3` subsequently
-makes go to the *same* `beamtalk_compiler_server` process from this *same*
-calling process — Erlang's per-sender mailbox ordering guarantees the cast
-is processed before any of those calls, so every candidate's diagnostics
-round-trip sees the spliced (pending) meta, never a race against the cast
-itself. This would break only if `register_class/2` or `diagnostics/3` ever
-routed through a different process/mailbox than a direct `gen_server`
-send to `beamtalk_compiler_server`.
+Because the overlay is an ordinary function argument threaded through
+ordinary `gen_server:call/3` requests — never a `register_class/2` cast,
+never `beamtalk_compiler_server` state — there is no window in which the
+hypothetical signature is visible to any other request, and nothing to
+restore afterward. This closes both hazards BT-2806 recorded against the
+previous ambient-cache-swap mechanism *by construction*: a process kill
+mid-request leaves no residual global state (there was never a global write
+to begin with), and a concurrent `register_class/2` commit from another
+session can never be clobbered by a restore, because no restore exists.
 
 No ambient meta at all for the changed class (never registered this
 session — brand new class, or the workspace just restarted) means there is
 no baseline to splice into and no `class_hierarchy` context for the
 checker to resolve receivers against either; this degrades to
 `empty_result()` rather than guess.
-
-**Accepted race (advisory-only, same risk tolerance as the rest of ADR
-0105):** the swap is not synchronised against `beamtalk_compiler_server`'s
-other callers. A concurrent compile/diagnostics request that lands inside
-the swap window sees the hypothetical pending signature instead of the real
-live one — a wrong-but-momentary result on an advisory-only surface, not a
-build/runtime failure. Not fixed here; mirrors
-`beamtalk_workspace_findings_store`'s and
-`beamtalk_workspace_signature_store`'s own documented concurrency gaps.
-
-A sharper variant of the same gap: the `after`-block restore always writes
-back the *snapshot* taken in step 1, not "whatever is ambient now". If a
-real `compile:source:`/`reload` for this same class commits a genuine
-`register_class/2` from a different process while this swap window is open,
-the restore overwrites that real commit with the stale pre-swap snapshot —
-unlike the read-only race above, this one is not self-healing (the next
-real compile/diagnostics call sees the reverted, stale generation until
-something re-registers it). Accepted for the same reason: both classes of
-race require a concurrent write to this *specific* class landing in a
-narrow, single-request window, on an advisory surface where the ADR's own
-risk tolerance is "momentary noise, not corruption" — not fixed here.
 
 Never installs anything and never touches `beamtalk_workspace_findings_store`
 — nothing has changed on the live image yet, so there is nothing to publish
@@ -466,7 +463,7 @@ recheckImage` / `:recheck image` — the "complete but unbounded" path ADR
 0105's Alternatives section keeps out of the default per-reload trigger.
 Re-checks every live class the workspace has a recorded source for
 (`beamtalk_workspace_meta:all_class_sources/0`) against the **current**
-ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/5`
+ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/6`
 makes for one candidate, just applied to every live class rather than an
 xref-filtered subset, and against the class's own already-installed
 signature (unlike `trigger_pending/5`, there is nothing pending here).
@@ -666,7 +663,7 @@ already accepts for every other selector-fan-out trigger (see
 ## Re-check re-runs `resolve_type_annotation` from scratch (AC3)
 
 Each candidate's re-check is the ordinary `beamtalk_compiler:diagnostics/3`
-round trip (`recheck_owner/5`-shaped: read the live source, compile it
+round trip (`recheck_owner/6`-shaped: read the live source, compile it
 fresh). Because `class_hierarchy => true` now also threads the *ambient
 session alias cache* (`beamtalk_compiler_server:get_aliases/0` — see
 `do_diagnostics/5`'s doc), and that cache reflects the alias's *just-
@@ -736,7 +733,7 @@ empty_result() ->
     beamtalk_workspace_signature_store:signature()
 ) -> result().
 do_trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSignature) ->
-    %% Same existing-atom-only conversion `do_trigger/3` uses — by the time a
+    %% Same existing-atom-only conversion `do_trigger/4` uses — by the time a
     %% pending edit reaches here it has already compiled successfully, so its
     %% class/selector atoms already exist.
     ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
@@ -753,16 +750,13 @@ do_trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSigna
             PendingMeta = override_method_signature(
                 AmbientMeta, Side, SelectorAtom, PendingSignature
             ),
-            ok = beamtalk_compiler_server:register_class(ClassAtom, PendingMeta),
-            try
-                do_trigger(ClassNameBin, SelectorBin, Classification)
-            after
-                %% Restore the real (installed) generation regardless of
-                %% whether do_trigger/3 succeeded or raised — the ambient
-                %% cache is shared workspace-wide state and must never be
-                %% left holding a hypothetical, never-installed signature.
-                ok = beamtalk_compiler_server:register_class(ClassAtom, AmbientMeta)
-            end
+            %% BT-3109: the overlay is a plain local map, never written to
+            %% `beamtalk_compiler_server` state — every other ambient class
+            %% stays exactly as installed; only this one request's view of
+            %% `ClassAtom` is hypothetical. Threaded through do_trigger/4 as
+            %% each candidate's `diagnostics/3` `class_hierarchy` option.
+            Overlay = AmbientClasses#{ClassAtom => PendingMeta},
+            do_trigger(ClassNameBin, SelectorBin, Classification, Overlay)
     end.
 
 -doc """
@@ -832,7 +826,7 @@ do_trigger_image() ->
 
 -doc """
 Re-check one live class's own current source against the ambient class
-hierarchy (mirrors `recheck_owner/5`'s compiler call, minus the xref
+hierarchy (mirrors `recheck_owner/6`'s compiler call, minus the xref
 site-cap/attribution machinery a single changed selector needs). Returns
 `{Status, Findings}` — `Status` is `ok` only when the diagnostics round-trip
 completed, so `do_trigger_image/0` can count `checked` accurately; a
@@ -907,6 +901,22 @@ image_finding(
 
 -spec do_trigger(binary(), binary(), classification()) -> result().
 do_trigger(ClassNameBin, SelectorBin, Classification) ->
+    %% `trigger/4`'s path: no pending overlay, so each candidate's
+    %% `diagnostics/3` call opts into the *ambient* class-hierarchy cache
+    %% (`class_hierarchy => true`), exactly as before BT-3109.
+    do_trigger(ClassNameBin, SelectorBin, Classification, true).
+
+-doc """
+`do_trigger/3` generalised to accept `ClassHierarchy` — the `class_hierarchy`
+option value (`beamtalk_compiler_server:diagnostics/3`) each candidate's
+diagnostics round-trip is run with. `true` (the `do_trigger/3`/`trigger/4`
+path) opts into the ambient cache; a map (`do_trigger_pending/5`'s path, BT-
+3109) threads that exact map as a per-request overlay instead — see
+`trigger_pending/5`'s moduledoc for why this replaces the previous
+ambient-cache mutate-then-restore mechanism.
+""".
+-spec do_trigger(binary(), binary(), classification(), true | #{atom() => map()}) -> result().
+do_trigger(ClassNameBin, SelectorBin, Classification, ClassHierarchy) ->
     %% `binary_to_existing_atom/2`, not `binary_to_atom/2`: by the time a
     %% reload reaches this trigger the selector was just compiled into a live
     %% class, so its atom already exists — using the existing-only conversion
@@ -920,7 +930,10 @@ do_trigger(ClassNameBin, SelectorBin, Classification) ->
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
     Outcomes = [
-        {Owner, recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification)}
+        {Owner,
+            recheck_owner(
+                Owner, OwnerSites, ClassNameBin, SelectorBin, Classification, ClassHierarchy
+            )}
      || {Owner, OwnerSites} <- Kept
     ],
     Findings = lists:flatmap(
@@ -994,7 +1007,7 @@ not_checked_owners(Candidates, Kept) ->
 
 -doc """
 `NotCheckedOwners` (the cap-dropped candidates) unioned with every `Kept`
-candidate whose `recheck_owner/5`/`recheck_owner_for_shape/4` outcome status
+candidate whose `recheck_owner/6`/`recheck_owner_for_shape/4` outcome status
 was not `ok` — i.e. `skipped` (no live source recorded) or `failed` (the
 diagnostics round-trip errored or the compiler port call itself failed).
 Both groups share the same defining property `result()`'s moduledoc
@@ -1160,10 +1173,17 @@ installed through `beamtalk_repl_loader`, e.g. a stdlib/dependency class) is
 compiler-port failure for this one candidate is `failed` — both degrade to
 "no findings for this caller" rather than failing the whole reload's
 orchestration, but neither counts as a completed check.
+Accepts `ClassHierarchy` (BT-3109) — the `class_hierarchy` option value
+passed straight through to `beamtalk_compiler:diagnostics/3`: `true` opts
+into the ambient class cache (`trigger/4`'s path), or a map threads a
+caller-built overlay for this one request only (`trigger_pending/5`'s path)
+without ever writing to `beamtalk_compiler_server` state.
 """.
--spec recheck_owner(atom(), [map()], binary(), binary(), classification()) ->
+-spec recheck_owner(
+    atom(), [map()], binary(), binary(), classification(), true | #{atom() => map()}
+) ->
     {ok | skipped | failed, [finding()]}.
-recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification) ->
+recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification, ClassHierarchy) ->
     OwnerBin = atom_to_binary(Owner, utf8),
     case beamtalk_workspace_meta:get_class_source(OwnerBin) of
         undefined ->
@@ -1174,13 +1194,13 @@ recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification) ->
             {skipped, []};
         Source ->
             SourceBin = unicode:characters_to_binary(Source),
-            %% `class_hierarchy => true` opts into the ambient class cache
+            %% `class_hierarchy => ClassHierarchy` opts into class context
             %% (beamtalk_compiler_server:diagnostics/3) — this re-check is
             %% the one caller that needs it; the keystroke-driven cockpit
             %% editor path (BT-2556) stays on the class-context-free default.
             case
                 beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
-                    class_hierarchy => true
+                    class_hierarchy => ClassHierarchy
                 })
             of
                 {ok, Diagnostics} ->
@@ -1272,7 +1292,7 @@ base_finding(
 
 -doc """
 Re-check one candidate caller class against a shape change — structurally
-identical to `recheck_owner/5` (same live-source read, same
+identical to `recheck_owner/6` (same live-source read, same
 `class_hierarchy => true` diagnostics round-trip, same `{Status, Findings}`
 contract) but filters/attributes via `relevant_diagnostic_shape/3` instead
 of `relevant_diagnostic/4`.
@@ -1737,7 +1757,7 @@ not_verified_owners_alias_change(NotCheckedOwners, Outcomes) ->
 
 -doc """
 Re-check one candidate caller class for diagnostics attributable to a
-redefinition of any alias in `AliasNameBins` — mirrors `recheck_owner/5`'s
+redefinition of any alias in `AliasNameBins` — mirrors `recheck_owner/6`'s
 live-source read and `class_hierarchy => true` diagnostics round trip (see
 `trigger_alias_change/1`'s doc for why that round trip now also resolves
 against the *current* ambient alias cache), but filters via

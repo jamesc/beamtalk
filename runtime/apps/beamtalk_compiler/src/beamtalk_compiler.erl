@@ -167,11 +167,13 @@ generation).
     no class context here, so semantic checks (which would false-positive on
     field/`self' references) are deferred to Compile.
 
-`Options`: `class_hierarchy => boolean()` (ADR 0105 Phase 1, BT-2778,
-default `false`) — thread the ambient class cache into the check, so a
-receiver resolving to an already-loaded class is checked against its
-*current* interface. See `beamtalk_compiler_server:diagnostics/3` for why
-this is opt-in rather than the `diagnostics/2` default.
+`Options`: `class_hierarchy => boolean() | #{atom() => map()}` (ADR 0105
+Phase 1, BT-2778, default `false`) — thread the ambient class cache (`true`)
+or a caller-built overlay map (ADR 0105 Phase 3, BT-3109) into the check, so
+a receiver resolving to an already-loaded class is checked against its
+*current* (or hypothetical, for an overlay) interface. See
+`beamtalk_compiler_server:diagnostics/3` for why this is opt-in rather than
+the `diagnostics/2` default, and for the overlay's per-request-only scope.
 """.
 -spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
