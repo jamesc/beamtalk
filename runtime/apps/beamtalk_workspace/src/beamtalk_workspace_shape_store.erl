@@ -63,8 +63,11 @@ before the failed attempt — there is nothing to undo.
 
 Mirrors `beamtalk_workspace_signature_store`: state lives in this
 gen_server's `#state{}` map, supervised under `beamtalk_workspace_sup`, so a
-workspace restart starts fresh. `clear/0` gives callers (`Workspace changes
-revert:`, tests) an explicit reset without a restart.
+workspace restart starts fresh. `Workspace changes revert:` does not call
+`clear/0` — a revert re-installs a method/class through the normal
+`prime/1`/`capture/1` path, which already keeps this store's per-class
+generations correct one class at a time. `clear/0` is test-only: it gives
+tests an explicit full reset without a restart.
 
 ## Known, accepted concurrency gap (adversarial review, BT-2780)
 
@@ -154,7 +157,7 @@ meta. Exposed for the shape re-check trigger and for tests.
 previous(ClassNameBin) when is_binary(ClassNameBin) ->
     gen_server:call(?MODULE, {previous, ClassNameBin}).
 
--doc "Clear every recorded generation (`Workspace changes revert:`, tests).".
+-doc "Clear every recorded generation. Test-only (see the moduledoc).".
 -spec clear() -> ok.
 clear() ->
     gen_server:call(?MODULE, clear).
