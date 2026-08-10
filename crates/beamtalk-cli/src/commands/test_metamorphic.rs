@@ -43,8 +43,8 @@
 use crate::beam_compiler::BeamCompiler;
 use crate::commands::test_stdlib::{
     self, AssertionCase, CompiledTestFile, EunitBatchResult, TestRunOptions, compile_erl_files,
-    compile_expression_to_core, compile_fixture, generate_eunit_wrapper_for, parse_test_file,
-    run_all_eunit_tests,
+    compile_expression_to_core, compile_fixture, extract_assignment_var,
+    generate_eunit_wrapper_for, parse_test_file, run_all_eunit_tests,
 };
 use crate::commands::util;
 use beamtalk_core::ast::{
@@ -606,18 +606,6 @@ fn rename_if_mapped(name: &mut EcoString, mapping: &HashMap<EcoString, EcoString
 // Building transformed test cases
 // ============================================================================
 
-/// `true` if `expr` is (unwrapping any parens) a bare `Identifier := value`
-/// assignment -- the exact shape `test_stdlib::extract_assignment_var`
-/// pattern-matches to detect a `.btscript` unit that establishes a
-/// cross-unit REPL-turn binding. See [`build_transformed_case`]'s doc for
-/// why these are never transformed.
-fn is_repl_turn_binding(expr: &Expression) -> bool {
-    matches!(
-        expr.unwrap_parens(),
-        Expression::Assignment { target, .. } if matches!(target.unwrap_parens(), Expression::Identifier(_))
-    )
-}
-
 /// Applies `transform` to `case.expression`, unparses and re-parses the
 /// result, and returns a new [`TestCase`](test_stdlib::TestCase) with the
 /// transformed source text (same `expected`/`line` as the original --
@@ -644,11 +632,21 @@ fn is_repl_turn_binding(expr: &Expression) -> bool {
 /// transformed module verbatim -- still asserted (against their own
 /// original `// =>` value, same as `test_stdlib`), just not themselves a
 /// transform-under-test -- so later cases that reference the binding keep
-/// seeing it.
+/// seeing it. Detected by calling `test_stdlib::extract_assignment_var`
+/// directly (rather than re-deriving the same fact from the parsed AST) so
+/// the two can never disagree on what counts as a REPL-turn binding.
 fn build_transformed_case(
     case: &test_stdlib::TestCase,
     transform: Transform,
 ) -> Option<test_stdlib::TestCase> {
+    if extract_assignment_var(&case.expression).is_some() {
+        return Some(test_stdlib::TestCase {
+            expression: case.expression.clone(),
+            expected: case.expected.clone(),
+            line: case.line,
+        });
+    }
+
     let tokens = lex_with_eof(&case.expression);
     let (module, diagnostics) = parse(tokens);
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
@@ -657,14 +655,6 @@ fn build_transformed_case(
         return None;
     }
     let orig_expr = &module.expressions.first()?.expression;
-
-    if is_repl_turn_binding(orig_expr) {
-        return Some(test_stdlib::TestCase {
-            expression: case.expression.clone(),
-            expected: case.expected.clone(),
-            line: case.line,
-        });
-    }
 
     let transformed_expr = transform.apply(orig_expr)?;
 
