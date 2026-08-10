@@ -720,7 +720,9 @@ test_module_loaded_with_new_non_atom() ->
 %% `start_child_via_class_method_rejects_abstract_class_test`) — so we
 %% register real metadata here instead of seeding the process dictionary.
 test_generic_new_abstract_with_args() ->
-    beamtalk_class_metadata:insert('AbstractShape', nonexistent_module_xyz, undefined, undefined, true),
+    beamtalk_class_metadata:insert(
+        'AbstractShape', nonexistent_module_xyz, undefined, undefined, true
+    ),
     try
         %% nonexistent_module_xyz has no BEAM file → is_module_loaded_with_new → false
         %% → handle_new_generic is called with Args = [#{}] (non-empty)
