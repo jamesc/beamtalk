@@ -131,7 +131,7 @@ notification / workspace UI) and persisting/clearing them across reloads is
 pure "what changed" computation. `result()`'s `checked_owners` field exists
 specifically for that consumer: it is the exact set of caller classes a
 diagnostics round-trip *completed* for this trigger (`ok` status in
-`recheck_owner/5`, regardless of whether that class turned out clean or
+`recheck_owner/6`, regardless of whether that class turned out clean or
 stale), which is what BT-2779 needs to know which owners' stored findings to
 replace — a clean re-check still has to `put_owner(Owner, [])` its way past
 a stale generation-A finding (`checked` alone can't answer "which classes",
@@ -154,7 +154,7 @@ looking freshly-verified (the BT-2802 bug).
 
 **`not_verified_owners` (BT-2828)** widens that same treatment to two more
 ways a `Kept` candidate can end up with nothing to show for it:
-`recheck_owner/5` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
+`recheck_owner/6` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
 when `beamtalk_workspace_meta:get_class_source/1` has no live source for the
 owner, and `{failed, []}` when the `diagnostics/3` round-trip itself errors
 out or the compiler port call fails/times out. Both outcomes fall through
@@ -376,7 +376,7 @@ computed by compiling the pending edit (e.g.
 
 ## Mechanism: a per-request class-hierarchy overlay (BT-3109)
 
-`recheck_owner/5`/`recheck_owner/6` sees the changed class's signature
+`recheck_owner/6` sees the changed class's signature
 through the compiler port's class-hierarchy context, injected by
 `diagnostics/3`'s `class_hierarchy` option
 (`beamtalk_compiler_server:diagnostics/3`). Passed `true`, that option
@@ -463,7 +463,7 @@ recheckImage` / `:recheck image` — the "complete but unbounded" path ADR
 0105's Alternatives section keeps out of the default per-reload trigger.
 Re-checks every live class the workspace has a recorded source for
 (`beamtalk_workspace_meta:all_class_sources/0`) against the **current**
-ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/5`
+ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/6`
 makes for one candidate, just applied to every live class rather than an
 xref-filtered subset, and against the class's own already-installed
 signature (unlike `trigger_pending/5`, there is nothing pending here).
@@ -663,7 +663,7 @@ already accepts for every other selector-fan-out trigger (see
 ## Re-check re-runs `resolve_type_annotation` from scratch (AC3)
 
 Each candidate's re-check is the ordinary `beamtalk_compiler:diagnostics/3`
-round trip (`recheck_owner/5`-shaped: read the live source, compile it
+round trip (`recheck_owner/6`-shaped: read the live source, compile it
 fresh). Because `class_hierarchy => true` now also threads the *ambient
 session alias cache* (`beamtalk_compiler_server:get_aliases/0` — see
 `do_diagnostics/5`'s doc), and that cache reflects the alias's *just-
@@ -826,7 +826,7 @@ do_trigger_image() ->
 
 -doc """
 Re-check one live class's own current source against the ambient class
-hierarchy (mirrors `recheck_owner/5`'s compiler call, minus the xref
+hierarchy (mirrors `recheck_owner/6`'s compiler call, minus the xref
 site-cap/attribution machinery a single changed selector needs). Returns
 `{Status, Findings}` — `Status` is `ok` only when the diagnostics round-trip
 completed, so `do_trigger_image/0` can count `checked` accurately; a
@@ -1007,7 +1007,7 @@ not_checked_owners(Candidates, Kept) ->
 
 -doc """
 `NotCheckedOwners` (the cap-dropped candidates) unioned with every `Kept`
-candidate whose `recheck_owner/5`/`recheck_owner_for_shape/4` outcome status
+candidate whose `recheck_owner/6`/`recheck_owner_for_shape/4` outcome status
 was not `ok` — i.e. `skipped` (no live source recorded) or `failed` (the
 diagnostics round-trip errored or the compiler port call itself failed).
 Both groups share the same defining property `result()`'s moduledoc
@@ -1292,7 +1292,7 @@ base_finding(
 
 -doc """
 Re-check one candidate caller class against a shape change — structurally
-identical to `recheck_owner/5` (same live-source read, same
+identical to `recheck_owner/6` (same live-source read, same
 `class_hierarchy => true` diagnostics round-trip, same `{Status, Findings}`
 contract) but filters/attributes via `relevant_diagnostic_shape/3` instead
 of `relevant_diagnostic/4`.
@@ -1757,7 +1757,7 @@ not_verified_owners_alias_change(NotCheckedOwners, Outcomes) ->
 
 -doc """
 Re-check one candidate caller class for diagnostics attributable to a
-redefinition of any alias in `AliasNameBins` — mirrors `recheck_owner/5`'s
+redefinition of any alias in `AliasNameBins` — mirrors `recheck_owner/6`'s
 live-source read and `class_hierarchy => true` diagnostics round trip (see
 `trigger_alias_change/1`'s doc for why that round trip now also resolves
 against the *current* ambient alias cache), but filters via
