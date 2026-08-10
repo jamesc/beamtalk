@@ -443,6 +443,52 @@ get_class_source_when_not_started_test() ->
     %% Should return undefined gracefully
     ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Foo">>)).
 
+%%% Class source removal tests (BT-3105)
+
+remove_class_source_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    Source = "Object subclass: BT3105Removed [\n  x := 0\n]\n",
+    ok = beamtalk_workspace_meta:set_class_source(<<"BT3105Removed">>, Source),
+    ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"BT3105Removed">>)),
+
+    ok = beamtalk_workspace_meta:remove_class_source(<<"BT3105Removed">>),
+    timer:sleep(50),
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"BT3105Removed">>)),
+
+    gen_server:stop(Pid).
+
+%% Removing one class's source leaves a sibling class's source untouched.
+remove_class_source_leaves_others_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    ok = beamtalk_workspace_meta:set_class_source(<<"BT3105A">>, "source A"),
+    ok = beamtalk_workspace_meta:set_class_source(<<"BT3105B">>, "source B"),
+
+    ok = beamtalk_workspace_meta:remove_class_source(<<"BT3105A">>),
+    timer:sleep(50),
+
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"BT3105A">>)),
+    ?assertEqual("source B", beamtalk_workspace_meta:get_class_source(<<"BT3105B">>)),
+
+    gen_server:stop(Pid).
+
+remove_class_source_nonexistent_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    %% Removing a class source that was never set should not crash.
+    ?assertEqual(ok, beamtalk_workspace_meta:remove_class_source(<<"NeverSet">>)),
+    timer:sleep(50),
+
+    gen_server:stop(Pid).
+
+remove_class_source_when_not_started_test() ->
+    stop_if_running(),
+    %% Should not crash when server is not running.
+    ?assertEqual(ok, beamtalk_workspace_meta:remove_class_source(<<"Foo">>)).
+
 %%% Debounce coalescing test
 
 debounce_coalesces_rapid_changes_test() ->

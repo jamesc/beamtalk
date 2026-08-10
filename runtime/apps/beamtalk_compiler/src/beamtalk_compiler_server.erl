@@ -33,6 +33,7 @@ to avoid temp files on disk (BT-48).
     version/0,
     compile_core_erlang/1,
     register_class/2,
+    remove_class/1,
     get_classes/0,
     register_aliases/1,
     get_aliases/0,
@@ -561,6 +562,33 @@ register_class(ClassName, MetaMap) ->
     ok.
 
 -doc """
+Remove a class from the compiler server's ambient class cache (BT-3105).
+
+Called when a class is removed from the system, closing the class-removal
+gap in the `classes` accumulator documented in BT-2916: redefinition already
+overwrites via `register_class/2`, but until now there was no removal path,
+so the compiler kept type-checking against classes long gone from the
+runtime. Fire-and-forget cast, silently dropped if the server is not
+running, mirroring `register_class/2`'s degrade-silently contract.
+
+Not called from production code: `beamtalk_class_lifecycle:purge_compiler_cache/1`
+(the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
+with a raw `gen_server:cast(beamtalk_compiler_server, {remove_class, ClassName})`
+to avoid a compile-time dependency in the wrong direction (`beamtalk_runtime`
+must not depend on `beamtalk_compiler` — see that module's doc). This
+exported function exists for same-app callers and is exercised directly by
+its own tests.
+""".
+-spec remove_class(atom()) -> ok.
+remove_class(ClassName) ->
+    try
+        gen_server:cast(?MODULE, {remove_class, ClassName})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
 Return the current ambient class cache map (`register_class/2`'s
 accumulator).
 
@@ -901,6 +929,10 @@ handle_call(_Request, _From, State) ->
 handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
+    {noreply, State#state{classes = NewClasses}};
+handle_cast({remove_class, ClassName}, State) ->
+    %% BT-3105: Drop a removed class from the ambient cache.
+    NewClasses = maps:remove(ClassName, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
 handle_cast(_Msg, State) ->
     {noreply, State}.

@@ -73,6 +73,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     register/4,
     register/5,
     unregister/2,
+    purge_class/1,
     lookup/2,
     list/1,
     extenders_of/1,
@@ -80,7 +81,8 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     listAllWithSource/0,
     getSource/2,
     conflicts/0,
-    has/2
+    has/2,
+    safe_xref/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -103,13 +105,22 @@ Creates three tables:
 - beamtalk_extension_conflicts: History of conflicting registrations
 
 This should be called once during application startup.
+
+BT-3105: All three tables carry `beamtalk_class_registry:heir_option/0` (the
+runtime supervisor, once it is alive) so an owner crash hands the tables off
+instead of destroying every registered extension — the same survival pattern
+`beamtalk_class_metadata`/`beamtalk_class_registry` already use.
 """.
 -spec init() -> ok.
 init() ->
+    HeirOpts = beamtalk_class_registry:heir_option(),
+
     %% Create main registry table
     case ets:info(?EXTENSIONS_TABLE) of
         undefined ->
-            ets:new(?EXTENSIONS_TABLE, [set, public, named_table, {read_concurrency, true}]);
+            ets:new(?EXTENSIONS_TABLE, [
+                set, public, named_table, {read_concurrency, true} | HeirOpts
+            ]);
         _ ->
             % Already exists
             ok
@@ -118,7 +129,9 @@ init() ->
     %% Create sources table (BT-2196)
     case ets:info(?SOURCES_TABLE) of
         undefined ->
-            ets:new(?SOURCES_TABLE, [set, public, named_table, {read_concurrency, true}]);
+            ets:new(?SOURCES_TABLE, [
+                set, public, named_table, {read_concurrency, true} | HeirOpts
+            ]);
         _ ->
             % Already exists
             ok
@@ -127,7 +140,9 @@ init() ->
     %% Create conflicts tracking table
     case ets:info(?CONFLICTS_TABLE) of
         undefined ->
-            ets:new(?CONFLICTS_TABLE, [bag, public, named_table, {read_concurrency, true}]);
+            ets:new(?CONFLICTS_TABLE, [
+                bag, public, named_table, {read_concurrency, true} | HeirOpts
+            ]);
         _ ->
             % Already exists
             ok
@@ -242,6 +257,46 @@ unregister(Class, Selector) when is_atom(Class), is_atom(Selector) ->
     %% no-op if the xref gen_server is unavailable (BT-2301).
     safe_xref(fun() -> beamtalk_xref:purge_method(Class, false, Selector) end),
     ok.
+
+-doc """
+Purge every extension registered under the class key `Class` (BT-3105).
+
+Called from `beamtalk_class_lifecycle:class_removed/2` when a class is
+removed from the system, so its extensions stop being dispatchable and do
+not resurrect if a class of the same name is later re-created (extensions
+are keyed by class *name* atom, not by the class's pid/module, so a stale
+row would otherwise silently reattach to the new class). Deletes every
+`{Class, Selector}` row via `unregister/2` (dispatch, source, xref), plus
+any conflict history recorded under `Class` in the conflicts table.
+
+`Class` is the literal ETS key: pass the class name atom to purge instance
+extensions, or `beamtalk_class_registry:class_object_tag/1`'s result to
+purge class-side extensions — the two are stored under separate keys
+(mirrors `class_has_class_method/2`'s lookup convention). Idempotent — a
+class with no extensions is a no-op.
+
+Guards against the tables not existing yet (early bootstrap, or a minimal
+embedded runtime that never calls `init/0`) — a caller during class removal
+must not crash the whole `classRemoveFromSystemByName/1` because this
+tooling registry was never initialised, mirroring `getSource/2`'s /
+`listAllWithSource/0`'s existing `badarg` guard in this module.
+""".
+-spec purge_class(atom()) -> ok.
+purge_class(Class) when is_atom(Class) ->
+    try
+        lists:foreach(
+            fun({Selector, _Owner}) -> unregister(Class, Selector) end,
+            list(Class)
+        ),
+        %% Best-effort: also drop conflict history for this class so
+        %% conflicts/0 doesn't keep surfacing methods that no longer exist.
+        _ = ets:match_delete(?CONFLICTS_TABLE, {{Class, '_'}, '_', '_'}),
+        ok
+    catch
+        error:badarg ->
+            %% Extensions table(s) not initialised yet (early bootstrap).
+            ok
+    end.
 
 -doc """
 Lookup an extension method.

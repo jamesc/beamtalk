@@ -2124,6 +2124,70 @@ bt1982_class_remove_success_when_registry_absent_test_() ->
         ]
     end}.
 
+%%% ============================================================================
+%%% BT-3105: classRemoveFromSystemByName purges derived registries
+%%% ============================================================================
+
+%% The observable bug this issue fixes: an extension registered on a class
+%% must stop being dispatchable once the class is removed, and must not
+%% resurrect if a class of the same name is later re-created (extensions are
+%% keyed by class *name* atom, not by the class's pid/module, so a stale row
+%% would otherwise silently reattach to the new class).
+bt3105_removed_class_extension_not_dispatchable_and_does_not_resurrect_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ModAtom = bt3105_ext_removable_mod,
+                Forms = [
+                    {attribute, 1, module, ModAtom},
+                    {attribute, 2, export, []}
+                ],
+                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+                {module, ModAtom} = code:load_binary(
+                    ModAtom, "bt3105_ext_removable_mod.erl", Bin
+                ),
+                ClassName = 'BT3105ExtRemovable',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => ModAtom,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+
+                %% Register an extension on the class and confirm it is live.
+                ExtFun = fun(_Args, _Self) -> greeted end,
+                ok = beamtalk_extensions:register(ClassName, 'greet', ExtFun, bt3105_test),
+                ?assert(beamtalk_extensions:has(ClassName, 'greet')),
+
+                %% Remove the class: exercises the full teardown path.
+                ?assertEqual(
+                    nil, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                ),
+
+                %% The extension is gone — no longer dispatchable.
+                ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
+                ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet')),
+
+                %% Redefine a class under the same name: the old extension
+                %% must not resurrect.
+                {ok, Pid2} = beamtalk_object_class:start(ClassName, ClassInfo),
+                try
+                    ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
+                    ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet'))
+                after
+                    try
+                        gen_server:stop(Pid2, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
 %% metaclassAllMethods returns the combined method set (class-side + Behaviour
 %% protocol). Even for a dynamic class without the stdlib Class hierarchy
 %% loaded, the function should at least return a list.
