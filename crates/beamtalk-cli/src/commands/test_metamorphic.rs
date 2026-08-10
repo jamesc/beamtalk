@@ -991,11 +991,22 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     let total_tests: usize = compiled_files.iter().map(|f| f.assertion_count).sum();
 
     if test_module_names.is_empty() {
-        println!(
-            "No metamorphic-testable expressions found ({skipped_units} expression/transform \
-             combination(s) skipped -- transform not applicable or didn't round-trip cleanly)."
+        // Every expression/transform combination across every file was
+        // skipped (transform inapplicable, or didn't round-trip through
+        // unparse/reparse -- see build_transformed_case). `test_files` is
+        // non-empty here (checked above), so this means zero actual
+        // verification would run for a required CI check that would
+        // otherwise report success -- e.g. a regression that broke
+        // unparse/reparse round-tripping across the whole corpus. Fail
+        // loudly instead of silently passing at 0 assertions, matching
+        // the "no silent caps" posture the corpus-lint job already takes.
+        miette::bail!(
+            "No metamorphic-testable expressions found across {} file(s) -- \
+             {skipped_units} expression/transform combination(s) were all skipped \
+             (transform not applicable or didn't round-trip cleanly). This would \
+             otherwise report success while verifying nothing.",
+            test_files.len(),
         );
-        return Ok(());
     }
 
     let eunit_result = run_all_eunit_tests(
