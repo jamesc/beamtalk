@@ -711,7 +711,7 @@ number that goes stale. Shape and relative speed are stable and shown below:
 | Layer | Count (derive with) | Speed | What it tests |
 |-------|----------------------|-------|----------------|
 | Rust unit tests | `grep -r '#\[test\]' crates --include='*.rs' \| wc -l` | ~5s | Parser, AST, codegen |
-| Erlang unit tests | `grep -rE '_test\(\)\s*->\|_test_\(\)\s*->' runtime/apps --include='*_tests.erl' \| wc -l` | ~3s | Runtime, primitives, object system |
+| Erlang unit tests | `grep -rE '_test\(\)\s*->\|_test_\(\)\s*->' runtime/apps --include='*_tests.erl' \| wc -l` (all 4 apps; "Erlang Runtime Unit Tests" below covers `beamtalk_runtime` only) | ~3s | Runtime, primitives, object system |
 | Compiler snapshots | `find test-package-compiler/cases -mindepth 1 -maxdepth 1 -type d \| wc -l` cases (×4 generated tests each) | ~2s | Codegen output stability |
 | **Stdlib tests** | **`find stdlib/bootstrap-test -name '*.btscript' \| wc -l` (~11 files, fixed by design)** | **~14s** | **Bootstrap primitives (expression tests)** |
 | **BUnit tests** | **`find stdlib/test -maxdepth 1 -name '*.bt' \| wc -l`** | **—** | **Language features (TestCase classes)** |
