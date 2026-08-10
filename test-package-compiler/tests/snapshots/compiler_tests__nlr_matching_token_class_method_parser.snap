@@ -1,0 +1,402 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "NlrClassCtr",
+                span: Span {
+                    start: 455,
+                    end: 466,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 439,
+                        end: 444,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [],
+            class_methods: [
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "findFirstOver:",
+                                span: Span {
+                                    start: 500,
+                                    end: 514,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "in:",
+                                span: Span {
+                                    start: 525,
+                                    end: 528,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "threshold",
+                                span: Span {
+                                    start: 515,
+                                    end: 524,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "coll",
+                                span: Span {
+                                    start: 529,
+                                    end: 533,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "coll",
+                                        span: Span {
+                                            start: 541,
+                                            end: 545,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "do:",
+                                            span: Span {
+                                                start: 546,
+                                                end: 549,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Block(
+                                        Block {
+                                            parameters: [
+                                                BlockParameter {
+                                                    name: "each",
+                                                    span: Span {
+                                                        start: 552,
+                                                        end: 556,
+                                                    },
+                                                },
+                                            ],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: MessageSend {
+                                                        receiver: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "each",
+                                                                    span: Span {
+                                                                        start: 559,
+                                                                        end: 563,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "threshold",
+                                                                        span: Span {
+                                                                            start: 566,
+                                                                            end: 575,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 559,
+                                                                end: 575,
+                                                            },
+                                                        },
+                                                        selector: Keyword(
+                                                            [
+                                                                KeywordPart {
+                                                                    keyword: "ifTrue:",
+                                                                    span: Span {
+                                                                        start: 576,
+                                                                        end: 583,
+                                                                    },
+                                                                },
+                                                            ],
+                                                        ),
+                                                        arguments: [
+                                                            Block(
+                                                                Block {
+                                                                    parameters: [],
+                                                                    body: [
+                                                                        ExpressionStatement {
+                                                                            comments: CommentAttachment {
+                                                                                leading: [],
+                                                                                trailing: None,
+                                                                                leading_blank_line: false,
+                                                                                blank_line_after_comments: false,
+                                                                            },
+                                                                            expression: Return {
+                                                                                value: Identifier(
+                                                                                    Identifier {
+                                                                                        name: "each",
+                                                                                        span: Span {
+                                                                                            start: 586,
+                                                                                            end: 590,
+                                                                                        },
+                                                                                    },
+                                                                                ),
+                                                                                span: Span {
+                                                                                    start: 585,
+                                                                                    end: 590,
+                                                                                },
+                                                                            },
+                                                                            preceding_blank_line: false,
+                                                                        },
+                                                                    ],
+                                                                    span: Span {
+                                                                        start: 584,
+                                                                        end: 591,
+                                                                    },
+                                                                },
+                                                            ),
+                                                        ],
+                                                        is_cast: false,
+                                                        span: Span {
+                                                            start: 559,
+                                                            end: 591,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 550,
+                                                end: 592,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 541,
+                                    end: 592,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Literal(
+                                Integer(
+                                    0,
+                                ),
+                                Span {
+                                    start: 597,
+                                    end: 598,
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: true,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 494,
+                        end: 598,
+                    },
+                },
+            ],
+            class_variables: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "total",
+                        span: Span {
+                            start: 481,
+                            end: 486,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 489,
+                                end: 490,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 469,
+                        end: 490,
+                    },
+                },
+            ],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3130 (ADR 0111 Phase A3): threading-mode matrix — non-local return",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "(NLR) through a block, \"matching-token\" shape, ClassMethod context (`^`",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "exits the class method's own frame). Confirmed via",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`BEAMTALK_CODEGEN_DIAGNOSTICS=1` to emit",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "\"Non-local return: compiled via throw/catch\". Peers:",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`nlr_matching_token_actor`, `nlr_matching_token_value_type`.",
+                        span: Span {
+                            start: 439,
+                            end: 444,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
+            },
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 439,
+                end: 598,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    type_aliases: [],
+    expressions: [],
+    span: Span {
+        start: 439,
+        end: 598,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

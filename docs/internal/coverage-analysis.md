@@ -1,10 +1,18 @@
 # Core Erlang Compilation Verification Coverage Analysis
 
-**Status:** Current as of 39 test cases - Updated regularly
+**Status:** Test case count grows continuously — derive it rather than trust a
+baked-in number (see below).
 
 ## Test Case Count
-- **Total test cases**: 39
-- **Total tests**: 156 (39 cases × 4 tests each: lexer, parser, codegen, compiles)
+
+Each case generates 4 tests (lexer, parser, codegen, compiles — see the
+"Compiler Snapshot Tests" section of
+[testing-strategy.md](../development/testing-strategy.md)). Get the current
+totals with:
+```bash
+cases=$(find test-package-compiler/cases -mindepth 1 -maxdepth 1 -type d | wc -l)
+echo "cases=$cases tests=$((cases * 4))"
+```
 - **All compilation tests passing**: ✓
 
 ## Expression Types Coverage
@@ -12,20 +20,20 @@
 ### Literals
 | Type | Covered | Test Cases |
 |------|---------|------------|
-| Integer | ✓ | hello_world, stdlib_integer, binary_operators, many others |
+| Integer | ✓ | hello_world, ws_stdlib_integer, binary_operators, many others |
 | Float | ✓ | Implicitly tested in arithmetic |
-| String | ✓ | hello_world, string_operations, stdlib_string |
-| Symbol | ✓ | map_literals, stdlib_dictionary |
+| String | ✓ | hello_world, string_operations, ws_stdlib_string |
+| Symbol | ✓ | map_literals, ws_stdlib_dictionary |
 | Character | ✓ | Literal type exists, tested via stdlib |
-| Array | ✓ | stdlib_array |
+| Array | ✓ | ws_stdlib_array |
 
 ### Expressions
 | Type | Covered | Test Cases |
 |------|---------|------------|
 | Identifier | ✓ | All test cases |
-| Block | ✓ | blocks_no_args, empty_blocks, nested_blocks, stdlib_block |
+| Block | ✓ | blocks_no_args, empty_blocks, nested_blocks, ws_stdlib_block |
 | MessageSend (Unary) | ✓ | async_unary_message, unary_operators, cascades |
-| MessageSend (Binary) | ✓ | binary_operators, stdlib_integer |
+| MessageSend (Binary) | ✓ | binary_operators, ws_stdlib_integer |
 | MessageSend (Keyword) | ✓ | async_keyword_message, nested_keyword_messages, multi_keyword_complex_args |
 | Assignment | ✓ | actor_state_mutation, all test cases |
 | FieldAccess | ✓ | actor_state_mutation |
@@ -41,9 +49,9 @@
 | + | erlang:'+' | actor_spawn, binary_operators | ✓ |
 | - | erlang:'-' | blocks_no_args, binary_operators | ✓ |
 | * | erlang:'*' | cascade_complex, binary_operators | ✓ |
-| / | erlang:'/' | stdlib_integer, binary_operators | ✓ |
-| % | erlang:'rem' | stdlib_integer, binary_operators | ✓ |
-| =:= | erlang:'=:=' | stdlib_integer, binary_operators | ✓ |
+| / | erlang:'/' | ws_stdlib_integer, binary_operators | ✓ |
+| % | erlang:'rem' | ws_stdlib_integer, binary_operators | ✓ |
+| =:= | erlang:'=:=' | ws_stdlib_integer, binary_operators | ✓ |
 | == | erlang:'==' | binary_operators | ✓ |
 | /= | erlang:'/=' | binary_operators | ✓ |
 | =/= | erlang:'=/=' | binary_operators | ✓ |
@@ -52,7 +60,7 @@
 | <= | erlang:'=<' | binary_operators | ✓ |
 | >= | erlang:'>=' | binary_operators | ✓ |
 | ** | math:pow + round | binary_operators | ✓ |
-| ++ | iolist_to_binary | stdlib_string, binary_operators | ✓ |
+| ++ | iolist_to_binary | ws_stdlib_string, binary_operators | ✓ |
 
 **Coverage**: 15/15 operators (100%)
 - All documented operators are fully implemented and tested
@@ -65,12 +73,12 @@
 |---------|------|-----------|
 | negated | Integer | unary_operators |
 | abs | Integer | unary_operators |
-| isZero | Integer | stdlib_integer, unary_operators |
-| isEven | Integer | stdlib_integer, unary_operators |
-| isOdd | Integer | stdlib_integer, unary_operators |
-| not | Boolean | stdlib_boolean, unary_operators |
-| value | Block evaluation | stdlib_block, unary_operators |
-| repeat | Block loop | stdlib_block |
+| isZero | Integer | ws_stdlib_integer, unary_operators |
+| isEven | Integer | ws_stdlib_integer, unary_operators |
+| isOdd | Integer | ws_stdlib_integer, unary_operators |
+| not | Boolean | ws_stdlib_boolean, unary_operators |
+| value | Block evaluation | ws_stdlib_block, unary_operators |
+| repeat | Block loop | ws_stdlib_block |
 | spawn | Actor creation | actor_spawn |
 | await | Future resolution | async_with_await |
 
@@ -80,12 +88,12 @@
 
 | Message | Parameters | Test Case |
 |---------|------------|-----------|
-| value | 0 args | stdlib_block |
-| value: | 1 arg | stdlib_block |
-| value:value: | 2 args | stdlib_block |
-| whileTrue: | 1 arg | stdlib_block |
-| whileFalse: | 1 arg | stdlib_block |
-| repeat | 0 args | stdlib_block |
+| value | 0 args | ws_stdlib_block |
+| value: | 1 arg | ws_stdlib_block |
+| value:value: | 2 args | ws_stdlib_block |
+| whileTrue: | 1 arg | ws_stdlib_block |
+| whileFalse: | 1 arg | ws_stdlib_block |
+| repeat | 0 args | ws_stdlib_block |
 
 **Coverage**: All block evaluation patterns tested
 
@@ -93,12 +101,12 @@
 
 | Message | Test Case |
 |---------|-----------|
-| ifTrue:ifFalse: | stdlib_boolean |
-| ifTrue: | stdlib_boolean |
-| ifFalse: | stdlib_boolean |
-| and: | stdlib_boolean |
-| or: | stdlib_boolean |
-| not | stdlib_boolean, unary_operators |
+| ifTrue:ifFalse: | ws_stdlib_boolean |
+| ifTrue: | ws_stdlib_boolean |
+| ifFalse: | ws_stdlib_boolean |
+| and: | ws_stdlib_boolean |
+| or: | ws_stdlib_boolean |
+| not | ws_stdlib_boolean, unary_operators |
 
 **Coverage**: Complete boolean control flow
 
@@ -106,28 +114,32 @@
 
 | Message | Test Case |
 |---------|-----------|
-| at: | map_literals, stdlib_dictionary |
-| at:put: | map_literals, stdlib_dictionary |
-| at:ifAbsent: | stdlib_dictionary |
-| includesKey: | stdlib_dictionary |
-| keys | stdlib_dictionary |
-| values | stdlib_dictionary |
-| size | stdlib_dictionary |
+| at: | map_literals, ws_stdlib_dictionary |
+| at:put: | map_literals, ws_stdlib_dictionary |
+| at:ifAbsent: | ws_stdlib_dictionary |
+| includesKey: | ws_stdlib_dictionary |
+| keys | ws_stdlib_dictionary |
+| values | ws_stdlib_dictionary |
+| size | ws_stdlib_dictionary |
 
 **Coverage**: Core map operations tested
 
 ## Gen_Server Callbacks Coverage
 
-All gen_server callbacks are automatically generated for every actor module:
+All gen_server callbacks are automatically generated for every actor module.
+Get the current count of cases that declare `Actor subclass:` with:
+```bash
+grep -l 'Actor subclass:' test-package-compiler/cases/*/main.bt | wc -l
+```
 
 | Callback | Generated | Test Coverage |
 |----------|-----------|---------------|
-| init/1 | ✓ | Every actor test (37 cases) |
-| handle_cast/2 | ✓ | Every actor test (37 cases) |
-| handle_call/3 | ✓ | Every actor test (37 cases) |
-| code_change/3 | ✓ | Every actor test (37 cases) |
-| terminate/2 | ✓ | Every actor test (37 cases) |
-| spawn/0 | ✓ | actor_spawn + 36 others |
+| init/1 | ✓ | Every actor test |
+| handle_cast/2 | ✓ | Every actor test |
+| handle_call/3 | ✓ | Every actor test |
+| code_change/3 | ✓ | Every actor test |
+| terminate/2 | ✓ | Every actor test |
+| spawn/0 | ✓ | actor_spawn + others |
 | spawnWith:/1 | ✓ | actor_spawn_with_args |
 
 **Coverage**: 100% - All callbacks generated and compile-tested
@@ -164,7 +176,14 @@ Based on the analysis:
 
 ### Code Generation Functions
 
-Out of 37 generate_* functions:
+Codegen has since been split from a single `mod.rs` into many files under
+`crates/beamtalk-core/src/codegen/core_erlang/` (e.g. `dispatch_codegen.rs`,
+`expressions.rs`, `gen_server/callbacks.rs`, `gen_server/dispatch.rs`,
+`gen_server/methods.rs`, `operators.rs`, `value_type_codegen.rs`), so a single
+file-local function count no longer applies. Get the current total with:
+```bash
+grep -rc 'fn generate_' crates/beamtalk-core/src/codegen | awk -F: '{sum+=$2} END {print sum}'
+```
 - Module structure: generate_module, generate_repl_module (✓)
 - Actor lifecycle: generate_spawn*, generate_init, generate_start_link (✓)
 - Gen_server callbacks: generate_handle_*, generate_code_change, generate_terminate (✓)
@@ -194,7 +213,7 @@ The test suite provides comprehensive coverage of Core Erlang code generation:
 - **All literal types**: Covered
 - **Special messages**: Block, Boolean, Dictionary, Integer - all covered
 
-**Note on operator coverage**: The codegen module has implementations for `**`, `==`, and `!=` operators, but these cannot currently be parsed (see `generate_binary_op()` in `mod.rs` lines 2469-2511). These represent dead code paths until parser support is added (tracked in BT-128).
+**Note on operator coverage**: The codegen module has implementations for `**`, `==`, and `!=` operators, but these cannot currently be parsed (see `generate_binary_op()` in `crates/beamtalk-core/src/codegen/core_erlang/operators.rs`). These represent dead code paths until parser support is added (tracked in BT-128).
 
 Every test case includes a compilation verification test that runs `erlc +from_core` to ensure the generated Core Erlang is syntactically valid and compiles to BEAM bytecode.
 

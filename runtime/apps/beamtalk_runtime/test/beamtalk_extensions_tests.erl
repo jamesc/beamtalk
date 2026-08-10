@@ -955,3 +955,74 @@ unregister_unknown_is_noop_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% BT-3105: purge_class/1 — full purge on class removal
+%%% ============================================================================
+
+purge_class_removes_every_extension_and_xref_row_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                Fun = fun(_Args, _Self) -> ok end,
+                %% Two extensions on the target class, plus a sibling class's
+                %% extension that must survive the purge untouched.
+                ok = beamtalk_extensions:register(
+                    'BT3105Target', 'shout', Fun, mylib, <<"shout => self asUppercase">>
+                ),
+                ok = beamtalk_extensions:register('BT3105Target', 'whisper', Fun, mylib),
+                ok = beamtalk_extensions:register('BT3105Sibling', 'greet', Fun, mylib),
+
+                ?assert(beamtalk_extensions:has('BT3105Target', 'shout')),
+                ?assert(beamtalk_extensions:has('BT3105Target', 'whisper')),
+                ?assertEqual(
+                    [{'BT3105Target', false}], beamtalk_xref:implementors_of('shout')
+                ),
+
+                ok = beamtalk_extensions:purge_class('BT3105Target'),
+
+                %% Both extensions on the target are gone from every table.
+                ?assertNot(beamtalk_extensions:has('BT3105Target', 'shout')),
+                ?assertNot(beamtalk_extensions:has('BT3105Target', 'whisper')),
+                ?assertEqual(not_found, beamtalk_extensions:lookup('BT3105Target', 'shout')),
+                ?assertEqual(not_found, beamtalk_extensions:getSource('BT3105Target', 'shout')),
+                ?assertEqual([], beamtalk_xref:implementors_of('shout')),
+                ?assertEqual([], beamtalk_extensions:list('BT3105Target')),
+
+                %% Sibling class untouched.
+                ?assert(beamtalk_extensions:has('BT3105Sibling', 'greet'))
+            end)
+        ]
+    end}.
+
+purge_class_is_noop_for_class_with_no_extensions_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                ?assertEqual(ok, beamtalk_extensions:purge_class('BT3105NeverRegistered'))
+            end)
+        ]
+    end}.
+
+purge_class_purges_class_side_extensions_separately_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                Fun = fun(_Args, _Self) -> ok end,
+                InstanceClass = 'BT3105Meta',
+                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+                ok = beamtalk_extensions:register(InstanceClass, 'greet', Fun, mylib),
+                ok = beamtalk_extensions:register(ClassSideTag, 'make', Fun, mylib),
+
+                %% Purging only the instance-side key leaves the class-side
+                %% extension untouched — the two are stored under separate
+                %% ETS keys.
+                ok = beamtalk_extensions:purge_class(InstanceClass),
+                ?assertNot(beamtalk_extensions:has(InstanceClass, 'greet')),
+                ?assert(beamtalk_extensions:has(ClassSideTag, 'make')),
+
+                ok = beamtalk_extensions:purge_class(ClassSideTag),
+                ?assertNot(beamtalk_extensions:has(ClassSideTag, 'make'))
+            end)
+        ]
+    end}.

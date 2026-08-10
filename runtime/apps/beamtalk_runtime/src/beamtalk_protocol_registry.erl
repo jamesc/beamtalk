@@ -55,6 +55,7 @@ See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
 -export([
     init/0,
     register_protocol/1,
+    unregister_protocol/1,
     conforms_to/2,
     protocols_for_class/1,
     required_methods/1,
@@ -75,6 +76,10 @@ Initialize the protocol registry ETS table.
 
 Called during application startup (beamtalk_runtime_app:start/2) before
 any compiled modules load their protocol definitions.
+
+BT-3105: Carries `beamtalk_class_registry:heir_option/0` (the runtime
+supervisor, once it is alive) so an owner crash hands the table off instead
+of destroying every registered protocol.
 """.
 -spec init() -> ok.
 init() ->
@@ -85,6 +90,7 @@ init() ->
                 set,
                 public,
                 {read_concurrency, true}
+                | beamtalk_class_registry:heir_option()
             ]),
             ok;
         _ ->
@@ -129,6 +135,35 @@ register_protocol(BadInfo) ->
         #{domain => [beamtalk, runtime]}
     ),
     ok.
+
+-doc """
+Unregister every protocol whose `module` metadata field matches `Module`
+(BT-3105).
+
+Called from `beamtalk_class_lifecycle:class_removed/2` when the class
+defining a protocol is removed from the system — until now there was no
+unregister path at all, so a protocol whose defining module was purged
+stayed registered (and conformance-checkable) forever. A no-op when the
+table has not been initialised, or when no registered protocol carries a
+`module` field matching `Module` (protocols registered before BT-2615 have
+no `module` field and are never matched).
+
+Does not tear down the protocol's own sealed class object (created by
+`maybe_create_protocol_class/2`) — that is a separate class removal, out of
+scope here; this only purges the registry row so `is_protocol/1` and
+`conforms_to/2` stop seeing it.
+""".
+-spec unregister_protocol(atom()) -> ok.
+unregister_protocol(Module) when is_atom(Module) ->
+    case ets:info(?PROTOCOL_TABLE) of
+        undefined ->
+            ok;
+        _ ->
+            _ = ets:select_delete(?PROTOCOL_TABLE, [
+                {{'_', #{module => '$1'}}, [{'=:=', '$1', {const, Module}}], [true]}
+            ]),
+            ok
+    end.
 
 %%% ============================================================================
 %%% Query API

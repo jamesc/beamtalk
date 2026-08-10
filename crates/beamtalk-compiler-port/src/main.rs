@@ -1610,6 +1610,14 @@ fn handle_inline_class_definition(
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases);
     if let Some(analysis) = analysis {
+        // BT-3125: prepare the AST at the driver boundary using the same
+        // analysis handed off to codegen just below — codegen no longer
+        // schedules this writeback itself for a trustworthy hand-off.
+        beamtalk_core::semantic_analysis::lower_module_for_codegen(
+            &mut module,
+            &analysis.class_hierarchy,
+            &analysis.method_return_types,
+        );
         codegen_options = codegen_options.with_analysis(analysis);
     }
     match beamtalk_core::erlang::generate_module(&module, codegen_options) {
@@ -1680,6 +1688,10 @@ fn handle_inline_protocol_definition(
         .with_class_module_index(class_module_index)
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases);
+    // BT-3125: no `lower_module_for_codegen` call needed here — both callers
+    // only reach this function once `module.classes` is confirmed empty (a
+    // protocol-only compile), and the writeback trio only ever touches
+    // `module.classes`/`module.method_definitions`, so it would be a no-op.
     if let Some(analysis) = analysis {
         codegen_options = codegen_options.with_analysis(analysis);
     }
@@ -1934,6 +1946,14 @@ fn handle_compile(request: &Map) -> Term {
     // merged into `module` afterward — see `had_standalone_method_definitions`'s
     // doc above.
     if !had_standalone_method_definitions {
+        // BT-3125: prepare the AST at the driver boundary using the same
+        // still-trustworthy analysis handed off to codegen just below —
+        // codegen no longer schedules this writeback itself in that case.
+        beamtalk_core::semantic_analysis::lower_module_for_codegen(
+            &mut module,
+            &analysis.class_hierarchy,
+            &analysis.method_return_types,
+        );
         codegen_options = codegen_options.with_analysis(analysis);
     }
     match beamtalk_core::erlang::generate_module(&module, codegen_options) {
@@ -2053,7 +2073,8 @@ fn handle_compile_method(request: &Map) -> Term {
     // routing. `unparse_module` round-trips a valid module, so the re-parse is
     // clean; a non-empty diag list here means an unparser regression.
     let merged_tokens = beamtalk_core::source_analysis::lex_with_eof(&merged_class_source);
-    let (merged_module, merged_parse_diags) = beamtalk_core::source_analysis::parse(merged_tokens);
+    let (mut merged_module, merged_parse_diags) =
+        beamtalk_core::source_analysis::parse(merged_tokens);
     // `unparse_module` round-trips a valid module, so a non-empty diag list here is
     // an unparser regression, not user error. Fail loudly in debug (CI/tests); in
     // release, surface an internal error rather than leaking parse diagnostics —
@@ -2164,6 +2185,15 @@ fn handle_compile_method(request: &Map) -> Term {
         .collect();
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
 
+    // BT-3125: prepare the AST at the driver boundary using the same
+    // still-trustworthy analysis (computed on `merged_module` with no
+    // mutation since) handed off to codegen just below — codegen no longer
+    // schedules this writeback itself in that case.
+    beamtalk_core::semantic_analysis::lower_module_for_codegen(
+        &mut merged_module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+    );
     let codegen_options = beamtalk_core::erlang::CodegenOptions::new(&module_name)
         .with_workspace_mode(workspace_mode)
         .with_source(&merged_class_source)

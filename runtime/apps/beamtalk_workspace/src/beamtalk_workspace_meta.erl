@@ -25,7 +25,7 @@ and can be queried by other components (e.g., idle monitor).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
--export([set_class_source/2, get_class_source/1, all_class_sources/0]).
+-export([set_class_source/2, get_class_source/1, all_class_sources/0, remove_class_source/1]).
 %% BT-1685: File mtime tracking for incremental load-project.
 -export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
@@ -257,6 +257,26 @@ get_class_source(ClassName) when is_binary(ClassName) ->
     catch
         exit:{noproc, _} ->
             undefined
+    end.
+
+-doc """
+Remove stored source text for a class (BT-3105).
+
+Called when a class is removed from the system (`removeFromSystem` /
+`classRemoveFromSystemByName/1`), so a stale `class_sources` entry for a
+removed class does not survive — including in the persisted
+`metadata.json` — the way it did before this existed (only `set_class_source/2`
+was available). Mirrors `unregister_module/1`'s BT-1239 precedent: a
+fire-and-forget cast that degrades silently (returns `ok`) if the server is
+not running. Idempotent — removing a class with no stored source is a no-op.
+""".
+-spec remove_class_source(binary()) -> ok.
+remove_class_source(ClassName) when is_binary(ClassName) ->
+    try
+        gen_server:cast(?MODULE, {remove_class_source, ClassName})
+    catch
+        exit:{noproc, _} ->
+            ok
     end.
 
 -doc """
@@ -561,6 +581,12 @@ handle_cast({unregister_module, Module}, State) ->
     %% BT-1239: Remove a module when removeFromSystem is called.
     Modules = State#state.loaded_modules,
     State2 = State#state{loaded_modules = maps:remove(Module, Modules)},
+    store_state_in_ets(State2),
+    {noreply, schedule_persist(State2)};
+handle_cast({remove_class_source, ClassName}, State) ->
+    %% BT-3105: Remove a class's stored source when removeFromSystem is called.
+    Sources = State#state.class_sources,
+    State2 = State#state{class_sources = maps:remove(ClassName, Sources)},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({set_file_mtime, FilePath, Mtime}, State) ->

@@ -33,6 +33,7 @@ to avoid temp files on disk (BT-48).
     version/0,
     compile_core_erlang/1,
     register_class/2,
+    remove_class/1,
     get_classes/0,
     register_aliases/1,
     get_aliases/0,
@@ -232,17 +233,26 @@ diagnostics(Source, Mode) ->
 Get diagnostics for source code under a parse `Mode', with options.
 
 Options:
-  class_hierarchy => boolean() — when `true' (ADR 0105 Phase 1, BT-2778),
-  threads the ambient class cache (the same `register_class' accumulation
-  `compile_expression'/`compile_method' already get, ADR 0050 Phase 4) into
-  the request, so a receiver resolving to an already-loaded class is checked
-  against that class's *current* interface. Defaults to `false' —
-  deliberately opt-in, not the default for `diagnostics/1,2', because this
-  command also backs the LiveView cockpit's keystroke-driven editor
-  diagnostics (BT-2556, `beamtalk_repl_ops_dev:diagnostics_for/2'), and
-  changing what fires on every keystroke for every existing caller is a
-  bigger behavioural change than this option's one new caller (BT-2778's
-  re-check orchestration) needs.
+  class_hierarchy => boolean() | #{atom() => map()} — when `true' (ADR 0105
+  Phase 1, BT-2778), threads the ambient class cache (the same
+  `register_class' accumulation `compile_expression'/`compile_method' already
+  get, ADR 0050 Phase 4) into the request, so a receiver resolving to an
+  already-loaded class is checked against that class's *current* interface.
+  Defaults to `false' — deliberately opt-in, not the default for
+  `diagnostics/1,2', because this command also backs the LiveView cockpit's
+  keystroke-driven editor diagnostics (BT-2556,
+  `beamtalk_repl_ops_dev:diagnostics_for/2'), and changing what fires on
+  every keystroke for every existing caller is a bigger behavioural change
+  than this option's one new caller (BT-2778's re-check orchestration)
+  needs.
+
+  Passing a map() instead of `true' (ADR 0105 Phase 3, BT-3109) threads that
+  map verbatim as the request's class hierarchy *instead of* the ambient
+  cache — a caller-built overlay (e.g. the ambient classes with one
+  not-yet-installed signature spliced in) is checked against without ever
+  writing to `beamtalk_compiler_server' state, so a hypothetical signature
+  never becomes visible to any other request. See
+  `beamtalk_recheck:trigger_pending/5', the one caller that needs this.
 """.
 -spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
@@ -561,6 +571,33 @@ register_class(ClassName, MetaMap) ->
     ok.
 
 -doc """
+Remove a class from the compiler server's ambient class cache (BT-3105).
+
+Called when a class is removed from the system, closing the class-removal
+gap in the `classes` accumulator documented in BT-2916: redefinition already
+overwrites via `register_class/2`, but until now there was no removal path,
+so the compiler kept type-checking against classes long gone from the
+runtime. Fire-and-forget cast, silently dropped if the server is not
+running, mirroring `register_class/2`'s degrade-silently contract.
+
+Not called from production code: `beamtalk_class_lifecycle:purge_compiler_cache/1`
+(the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
+with a raw `gen_server:cast(beamtalk_compiler_server, {remove_class, ClassName})`
+to avoid a compile-time dependency in the wrong direction (`beamtalk_runtime`
+must not depend on `beamtalk_compiler` — see that module's doc). This
+exported function exists for same-app callers and is exercised directly by
+its own tests.
+""".
+-spec remove_class(atom()) -> ok.
+remove_class(ClassName) ->
+    try
+        gen_server:cast(?MODULE, {remove_class, ClassName})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
 Return the current ambient class cache map (`register_class/2`'s
 accumulator).
 
@@ -833,10 +870,16 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% context (a re-check round trip) needs ambient alias context for
     %% exactly the same reason, so this reuses `class_hierarchy => true`
     %% rather than adding a second, overlapping flag.
+    %%
+    %% ADR 0105 Phase 3 (BT-3109): a map() overlay is threaded verbatim as
+    %% this request's class hierarchy instead of `State#state.classes` — the
+    %% overlay never gets written into `State`, so it is visible to this one
+    %% request only, never to any other caller of this gen_server.
     {Classes, Aliases} =
         case maps:get(class_hierarchy, Options, false) of
             true -> {State#state.classes, alias_source_list(State#state.aliases)};
-            false -> {#{}, []}
+            false -> {#{}, []};
+            Overlay when is_map(Overlay) -> {Overlay, alias_source_list(State#state.aliases)}
         end,
     Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases),
     {reply, Result, State};
@@ -917,6 +960,10 @@ handle_call(_Request, _From, State) ->
 handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
+    {noreply, State#state{classes = NewClasses}};
+handle_cast({remove_class, ClassName}, State) ->
+    %% BT-3105: Drop a removed class from the ambient cache.
+    NewClasses = maps:remove(ClassName, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
 handle_cast(_Msg, State) ->
     {noreply, State}.

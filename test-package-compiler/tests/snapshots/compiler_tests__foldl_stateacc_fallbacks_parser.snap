@@ -1,0 +1,1296 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "FoldFallbackCtr",
+                span: Span {
+                    start: 435,
+                    end: 450,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 419,
+                        end: 424,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "n",
+                        span: Span {
+                            start: 460,
+                            end: 461,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 464,
+                                end: 465,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 453,
+                        end: 465,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "controlFlowMutationFallback:",
+                                span: Span {
+                                    start: 679,
+                                    end: 707,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "coll",
+                                span: Span {
+                                    start: 708,
+                                    end: 712,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "count",
+                                        span: Span {
+                                            start: 720,
+                                            end: 725,
+                                        },
+                                    },
+                                ),
+                                value: Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 729,
+                                        end: 730,
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 720,
+                                    end: 730,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "coll",
+                                        span: Span {
+                                            start: 735,
+                                            end: 739,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "do:",
+                                            span: Span {
+                                                start: 740,
+                                                end: 743,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Block(
+                                        Block {
+                                            parameters: [
+                                                BlockParameter {
+                                                    name: "each",
+                                                    span: Span {
+                                                        start: 746,
+                                                        end: 750,
+                                                    },
+                                                },
+                                            ],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: MessageSend {
+                                                        receiver: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "each",
+                                                                    span: Span {
+                                                                        start: 753,
+                                                                        end: 757,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        0,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 760,
+                                                                        end: 761,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 753,
+                                                                end: 761,
+                                                            },
+                                                        },
+                                                        selector: Keyword(
+                                                            [
+                                                                KeywordPart {
+                                                                    keyword: "ifTrue:",
+                                                                    span: Span {
+                                                                        start: 762,
+                                                                        end: 769,
+                                                                    },
+                                                                },
+                                                            ],
+                                                        ),
+                                                        arguments: [
+                                                            Block(
+                                                                Block {
+                                                                    parameters: [],
+                                                                    body: [
+                                                                        ExpressionStatement {
+                                                                            comments: CommentAttachment {
+                                                                                leading: [],
+                                                                                trailing: None,
+                                                                                leading_blank_line: false,
+                                                                                blank_line_after_comments: false,
+                                                                            },
+                                                                            expression: Assignment {
+                                                                                target: FieldAccess {
+                                                                                    receiver: Identifier(
+                                                                                        Identifier {
+                                                                                            name: "self",
+                                                                                            span: Span {
+                                                                                                start: 771,
+                                                                                                end: 775,
+                                                                                            },
+                                                                                        },
+                                                                                    ),
+                                                                                    field: Identifier {
+                                                                                        name: "n",
+                                                                                        span: Span {
+                                                                                            start: 776,
+                                                                                            end: 777,
+                                                                                        },
+                                                                                    },
+                                                                                    span: Span {
+                                                                                        start: 771,
+                                                                                        end: 777,
+                                                                                    },
+                                                                                },
+                                                                                value: MessageSend {
+                                                                                    receiver: FieldAccess {
+                                                                                        receiver: Identifier(
+                                                                                            Identifier {
+                                                                                                name: "self",
+                                                                                                span: Span {
+                                                                                                    start: 781,
+                                                                                                    end: 785,
+                                                                                                },
+                                                                                            },
+                                                                                        ),
+                                                                                        field: Identifier {
+                                                                                            name: "n",
+                                                                                            span: Span {
+                                                                                                start: 786,
+                                                                                                end: 787,
+                                                                                            },
+                                                                                        },
+                                                                                        span: Span {
+                                                                                            start: 781,
+                                                                                            end: 787,
+                                                                                        },
+                                                                                    },
+                                                                                    selector: Binary(
+                                                                                        "+",
+                                                                                    ),
+                                                                                    arguments: [
+                                                                                        Literal(
+                                                                                            Integer(
+                                                                                                1,
+                                                                                            ),
+                                                                                            Span {
+                                                                                                start: 790,
+                                                                                                end: 791,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    is_cast: false,
+                                                                                    span: Span {
+                                                                                        start: 781,
+                                                                                        end: 791,
+                                                                                    },
+                                                                                },
+                                                                                type_annotation: None,
+                                                                                span: Span {
+                                                                                    start: 771,
+                                                                                    end: 791,
+                                                                                },
+                                                                            },
+                                                                            preceding_blank_line: false,
+                                                                        },
+                                                                    ],
+                                                                    span: Span {
+                                                                        start: 770,
+                                                                        end: 792,
+                                                                    },
+                                                                },
+                                                            ),
+                                                        ],
+                                                        is_cast: false,
+                                                        span: Span {
+                                                            start: 753,
+                                                            end: 792,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: Assignment {
+                                                        target: Identifier(
+                                                            Identifier {
+                                                                name: "count",
+                                                                span: Span {
+                                                                    start: 794,
+                                                                    end: 799,
+                                                                },
+                                                            },
+                                                        ),
+                                                        value: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "count",
+                                                                    span: Span {
+                                                                        start: 803,
+                                                                        end: 808,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        1,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 811,
+                                                                        end: 812,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 803,
+                                                                end: 812,
+                                                            },
+                                                        },
+                                                        type_annotation: None,
+                                                        span: Span {
+                                                            start: 794,
+                                                            end: 812,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 744,
+                                                end: 813,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 735,
+                                    end: 813,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "count",
+                                    span: Span {
+                                        start: 818,
+                                        end: 823,
+                                    },
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "ControlFlowMutations: an inline `ifTrue:` inside the fold body performs",
+                                span: Span {
+                                    start: 679,
+                                    end: 707,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "a field write, excluding tuple-acc (BT-1276 requires no field writes",
+                                span: Span {
+                                    start: 679,
+                                    end: 707,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "anywhere in the body, including nested control flow).",
+                                span: Span {
+                                    start: 679,
+                                    end: 707,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 679,
+                        end: 823,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "destructureLastExprFallback:",
+                                span: Span {
+                                    start: 1072,
+                                    end: 1100,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "coll",
+                                span: Span {
+                                    start: 1101,
+                                    end: 1105,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "sum",
+                                        span: Span {
+                                            start: 1113,
+                                            end: 1116,
+                                        },
+                                    },
+                                ),
+                                value: Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 1120,
+                                        end: 1121,
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1113,
+                                    end: 1121,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "coll",
+                                        span: Span {
+                                            start: 1126,
+                                            end: 1130,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "do:",
+                                            span: Span {
+                                                start: 1131,
+                                                end: 1134,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Block(
+                                        Block {
+                                            parameters: [
+                                                BlockParameter {
+                                                    name: "each",
+                                                    span: Span {
+                                                        start: 1137,
+                                                        end: 1141,
+                                                    },
+                                                },
+                                            ],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: Assignment {
+                                                        target: Identifier(
+                                                            Identifier {
+                                                                name: "sum",
+                                                                span: Span {
+                                                                    start: 1150,
+                                                                    end: 1153,
+                                                                },
+                                                            },
+                                                        ),
+                                                        value: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "sum",
+                                                                    span: Span {
+                                                                        start: 1157,
+                                                                        end: 1160,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "each",
+                                                                        span: Span {
+                                                                            start: 1163,
+                                                                            end: 1167,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1157,
+                                                                end: 1167,
+                                                            },
+                                                        },
+                                                        type_annotation: None,
+                                                        span: Span {
+                                                            start: 1150,
+                                                            end: 1167,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: Assignment {
+                                                        target: Identifier(
+                                                            Identifier {
+                                                                name: "pair",
+                                                                span: Span {
+                                                                    start: 1174,
+                                                                    end: 1178,
+                                                                },
+                                                            },
+                                                        ),
+                                                        value: MessageSend {
+                                                            receiver: ClassReference {
+                                                                name: Identifier {
+                                                                    name: "Tuple",
+                                                                    span: Span {
+                                                                        start: 1182,
+                                                                        end: 1187,
+                                                                    },
+                                                                },
+                                                                package: None,
+                                                                span: Span {
+                                                                    start: 1182,
+                                                                    end: 1187,
+                                                                },
+                                                            },
+                                                            selector: Keyword(
+                                                                [
+                                                                    KeywordPart {
+                                                                        keyword: "withAll:",
+                                                                        span: Span {
+                                                                            start: 1188,
+                                                                            end: 1196,
+                                                                        },
+                                                                    },
+                                                                ],
+                                                            ),
+                                                            arguments: [
+                                                                ListLiteral {
+                                                                    elements: [
+                                                                        Identifier(
+                                                                            Identifier {
+                                                                                name: "each",
+                                                                                span: Span {
+                                                                                    start: 1199,
+                                                                                    end: 1203,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        Identifier(
+                                                                            Identifier {
+                                                                                name: "sum",
+                                                                                span: Span {
+                                                                                    start: 1205,
+                                                                                    end: 1208,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                    ],
+                                                                    tail: None,
+                                                                    span: Span {
+                                                                        start: 1197,
+                                                                        end: 1209,
+                                                                    },
+                                                                },
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1182,
+                                                                end: 1209,
+                                                            },
+                                                        },
+                                                        type_annotation: None,
+                                                        span: Span {
+                                                            start: 1174,
+                                                            end: 1209,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: DestructureAssignment {
+                                                        pattern: Tuple {
+                                                            elements: [
+                                                                Variable(
+                                                                    Identifier {
+                                                                        name: "a",
+                                                                        span: Span {
+                                                                            start: 1217,
+                                                                            end: 1218,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                Variable(
+                                                                    Identifier {
+                                                                        name: "b",
+                                                                        span: Span {
+                                                                            start: 1220,
+                                                                            end: 1221,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            span: Span {
+                                                                start: 1216,
+                                                                end: 1222,
+                                                            },
+                                                        },
+                                                        value: Identifier(
+                                                            Identifier {
+                                                                name: "pair",
+                                                                span: Span {
+                                                                    start: 1226,
+                                                                    end: 1230,
+                                                                },
+                                                            },
+                                                        ),
+                                                        span: Span {
+                                                            start: 1216,
+                                                            end: 1230,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 1135,
+                                                end: 1236,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 1126,
+                                    end: 1236,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "sum",
+                                    span: Span {
+                                        start: 1241,
+                                        end: 1244,
+                                    },
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "DestructureAsLastExpr (BT-1291-adjacent): a `{a, b} := expr` tuple",
+                                span: Span {
+                                    start: 1072,
+                                    end: 1100,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "destructure as the LAST statement of the fold body is incompatible",
+                                span: Span {
+                                    start: 1072,
+                                    end: 1100,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "with tuple-acc — `emit_destructure_last_expr` always emits the",
+                                span: Span {
+                                    start: 1072,
+                                    end: 1100,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "map-shaped StateAcc path.",
+                                span: Span {
+                                    start: 1072,
+                                    end: 1100,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1072,
+                        end: 1244,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "nestedListOpInConditional:",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "with:",
+                                span: Span {
+                                    start: 1825,
+                                    end: 1830,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "flag",
+                                span: Span {
+                                    start: 1820,
+                                    end: 1824,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "coll",
+                                span: Span {
+                                    start: 1831,
+                                    end: 1835,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "sum",
+                                        span: Span {
+                                            start: 1843,
+                                            end: 1846,
+                                        },
+                                    },
+                                ),
+                                value: Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 1850,
+                                        end: 1851,
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 1843,
+                                    end: 1851,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "flag",
+                                        span: Span {
+                                            start: 1856,
+                                            end: 1860,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "ifTrue:",
+                                            span: Span {
+                                                start: 1861,
+                                                end: 1868,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Block(
+                                        Block {
+                                            parameters: [],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                        leading_blank_line: false,
+                                                        blank_line_after_comments: false,
+                                                    },
+                                                    expression: MessageSend {
+                                                        receiver: Identifier(
+                                                            Identifier {
+                                                                name: "coll",
+                                                                span: Span {
+                                                                    start: 1870,
+                                                                    end: 1874,
+                                                                },
+                                                            },
+                                                        ),
+                                                        selector: Keyword(
+                                                            [
+                                                                KeywordPart {
+                                                                    keyword: "do:",
+                                                                    span: Span {
+                                                                        start: 1875,
+                                                                        end: 1878,
+                                                                    },
+                                                                },
+                                                            ],
+                                                        ),
+                                                        arguments: [
+                                                            Block(
+                                                                Block {
+                                                                    parameters: [
+                                                                        BlockParameter {
+                                                                            name: "each",
+                                                                            span: Span {
+                                                                                start: 1881,
+                                                                                end: 1885,
+                                                                            },
+                                                                        },
+                                                                    ],
+                                                                    body: [
+                                                                        ExpressionStatement {
+                                                                            comments: CommentAttachment {
+                                                                                leading: [],
+                                                                                trailing: None,
+                                                                                leading_blank_line: false,
+                                                                                blank_line_after_comments: false,
+                                                                            },
+                                                                            expression: Assignment {
+                                                                                target: Identifier(
+                                                                                    Identifier {
+                                                                                        name: "sum",
+                                                                                        span: Span {
+                                                                                            start: 1888,
+                                                                                            end: 1891,
+                                                                                        },
+                                                                                    },
+                                                                                ),
+                                                                                value: MessageSend {
+                                                                                    receiver: Identifier(
+                                                                                        Identifier {
+                                                                                            name: "sum",
+                                                                                            span: Span {
+                                                                                                start: 1895,
+                                                                                                end: 1898,
+                                                                                            },
+                                                                                        },
+                                                                                    ),
+                                                                                    selector: Binary(
+                                                                                        "+",
+                                                                                    ),
+                                                                                    arguments: [
+                                                                                        Identifier(
+                                                                                            Identifier {
+                                                                                                name: "each",
+                                                                                                span: Span {
+                                                                                                    start: 1901,
+                                                                                                    end: 1905,
+                                                                                                },
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    is_cast: false,
+                                                                                    span: Span {
+                                                                                        start: 1895,
+                                                                                        end: 1905,
+                                                                                    },
+                                                                                },
+                                                                                type_annotation: None,
+                                                                                span: Span {
+                                                                                    start: 1888,
+                                                                                    end: 1905,
+                                                                                },
+                                                                            },
+                                                                            preceding_blank_line: false,
+                                                                        },
+                                                                    ],
+                                                                    span: Span {
+                                                                        start: 1879,
+                                                                        end: 1906,
+                                                                    },
+                                                                },
+                                                            ),
+                                                        ],
+                                                        is_cast: false,
+                                                        span: Span {
+                                                            start: 1870,
+                                                            end: 1906,
+                                                        },
+                                                    },
+                                                    preceding_blank_line: false,
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 1869,
+                                                end: 1907,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 1856,
+                                    end: 1907,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "sum",
+                                    span: Span {
+                                        start: 1912,
+                                        end: 1915,
+                                    },
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "BT-2356 shape (bonus coverage, not itself a fallback): a nested list",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "op inside a conditional branch mutating an outer local. The branch's",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "own block has no *direct* mutation (`analyze_block` doesn't propagate",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "writes out of nested blocks), so this exercises",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "`body_has_list_op_cross_scope_mutations`'s dedicated scan inside the",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "conditional-selector path of `control_flow_has_mutations`. The inner",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "`do:` itself is pure-local and independently selects tuple-acc",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "(confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS`).",
+                                span: Span {
+                                    start: 1793,
+                                    end: 1819,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1793,
+                        end: 1915,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3130 (ADR 0111 Phase A3): threading-mode matrix — StateAcc-fallback",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "cell, foldl-based list ops (`do:`), Actor context.",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1`:",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  controlFlowMutationFallback -> \"control-flow sub-expression with mutations\"",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  destructureLastExprFallback -> \"destructure assignment as last expression\"",
+                        span: Span {
+                            start: 419,
+                            end: 424,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
+            },
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 419,
+                end: 1915,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    type_aliases: [],
+    expressions: [],
+    span: Span {
+        start: 419,
+        end: 1915,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

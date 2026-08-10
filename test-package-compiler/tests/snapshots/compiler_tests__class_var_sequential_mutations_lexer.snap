@@ -1,0 +1,36 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 963, end: 968 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — class-variable"), Whitespace("\n"), LineComment("// version threading (`ClassVars`, `ClassVars1`, `ClassVars2`, … — ADR 0110's"), Whitespace("\n"), LineComment("// mechanism, `ClassContext.class_var_version`/`next_class_var()`)."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// The pre-existing `class_methods` fixture (`class create`) covers a single"), Whitespace("\n"), LineComment("// class-var mutation. This file adds a *sequential* mutation of the SAME"), Whitespace("\n"), LineComment("// class var within one method: `ClassVars1` -> `ClassVars2`, pinning the"), Whitespace("\n"), LineComment("// monotonic counter discipline the ADR 0111 `VersionedVar` unification must"), Whitespace("\n"), LineComment("// preserve exactly (byte-for-byte) across the migration. Peers:"), Whitespace("\n"), LineComment("// `class_var_multi_field_mutations` (interleaved fields),"), Whitespace("\n"), LineComment("// `class_var_single_mutation` (minimal anchor),"), Whitespace("\n"), LineComment("// `class_var_mutation_before_block_relay` (ADR 0110 relay shape)."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Every top-level (block_depth == 0) class-var write also emits the ADR"), Whitespace("\n"), LineComment("// 0110 shadow-write (`$bt_class_vars_shadow`)."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 969, end: 978 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("SeqClassVarCtr"), span: Span { start: 979, end: 993 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("classState:"), span: Span { start: 996, end: 1007 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("total"), span: Span { start: 1008, end: 1013 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 1014, end: 1015 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 1016, end: 1017 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 1021, end: 1026 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("incrementTwice"), span: Span { start: 1027, end: 1041 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1042, end: 1044 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1049, end: 1053 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1053, end: 1054 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1054, end: 1059 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1060, end: 1062 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1063, end: 1067 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1067, end: 1068 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1068, end: 1073 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1074, end: 1075 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 1076, end: 1077 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1082, end: 1086 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1086, end: 1087 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1087, end: 1092 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1093, end: 1095 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1096, end: 1100 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1100, end: 1101 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1101, end: 1106 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1107, end: 1108 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 1109, end: 1110 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1115, end: 1119 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1119, end: 1120 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1120, end: 1125 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1126, end: 1126 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

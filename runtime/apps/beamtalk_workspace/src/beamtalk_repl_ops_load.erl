@@ -242,6 +242,11 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
                     code:delete(ModName),
                     code:purge(ModName)
             end,
+            %% BT-3110: erase the compile-time mtime persistent_term entry along
+            %% with the module — otherwise it outlives the module forever (one
+            %% entry per ever-deleted native module, each `put` also scanning
+            %% every scheduler for global GC).
+            erase_native_compile_mtime(ModName),
             beamtalk_workspace_meta:remove_file_mtime(P)
         end,
         DeletedErl
@@ -1742,6 +1747,21 @@ get_native_compile_mtime(ModAtom) ->
         error:badarg ->
             {{0, 0, 0}, {0, 0, 0}}
     end.
+
+-doc """
+Erase the recorded compile-time mtime for `ModAtom`, if any.
+
+Called when a native module's .erl source is deleted (the module is unloaded
+from the VM and its mtime tracking should go with it) so the
+`{beamtalk_native_mtime, ModAtom}` `persistent_term` entry does not linger
+forever — a missing entry already degrades safely to `get_native_compile_mtime/1`
+returning the epoch (forced recompile), so this is purely hygiene, not a
+correctness fix. A no-op if nothing was recorded for `ModAtom`.
+""".
+-spec erase_native_compile_mtime(atom()) -> ok.
+erase_native_compile_mtime(ModAtom) ->
+    _ = persistent_term:erase({beamtalk_native_mtime, ModAtom}),
+    ok.
 
 %%% ===================================================================
 %%% BT-1685: Incremental load-project helpers

@@ -134,11 +134,30 @@ For Beamtalk, self-hosting would delay shipping by 1+ years with no user-facing 
 
 ### Incremental Compilation
 
-The compiler daemon maintains state between compilations:
+Incremental compilation works differently for the editor-facing language
+service than for batch builds — neither is a Salsa-style graph of memoized
+queries; both are coarser, file-granularity caches:
 
-- **File cache**: Only reparse changed files
-- **Dependency graph**: Only recompile affected modules
-- **Query cache**: Salsa-style incremental computation
+- **Language service (`SimpleLanguageService`, used by the LSP):** caches
+  each file's source text, parsed AST, and diagnostics in a per-file
+  `FileData` map (`crates/beamtalk-core/src/language_service/mod.rs`), and
+  merges cross-file class/alias/protocol/extension info into a `ProjectIndex`.
+  Editing a file reparses only that file and calls `ProjectIndex::update_file`
+  (or `remove_file` on delete) to refresh the project-wide index —
+  file-granularity invalidation, not whole-project reanalysis.
+- **Batch builds (`beamtalk build`):** a two-pass, mtime-keyed cache. Pass 1
+  (class indexing) persists per-file class/alias/extension metadata to
+  `.beamtalk-pass1-cache.json`, keyed by source mtime, so unchanged files skip
+  re-parsing (`crates/beamtalk-cli/src/commands/build_cache.rs`, BT-1683).
+  Pass 2 (codegen) compares each source file's mtime against its `.beam`
+  output's mtime and recompiles only files that changed
+  (`crates/beamtalk-cli/src/commands/build.rs`). A toolchain provenance stamp
+  (ADR 0098) gates both passes ahead of the mtime checks, so a compiler/OTP
+  version change forces a full rebuild regardless of mtime.
+
+Query-based incrementality (a Salsa-style dependency graph of memoized
+queries) does not exist today — it's deliberately deferred until profiling
+shows these file-granularity caches aren't enough at scale.
 
 Target: **<50ms** for single-file change to loaded code.
 
@@ -276,7 +295,10 @@ Protocol: JSON-RPC 2.0 (same as LSP)
 
 ### Compiler State
 
-The daemon maintains:
+Illustrative sketch of the state a persistent compiler process would need to
+track — see "Incremental Compilation" above for what's actually implemented
+today (`SimpleLanguageService`'s per-file cache and `ProjectIndex`, plus the
+batch build's two-pass mtime cache; there is no query-graph database):
 
 ```rust
 struct CompilerState {
@@ -285,9 +307,6 @@ struct CompilerState {
 
     // Module dependency graph
     deps: DependencyGraph,
-
-    // Salsa-style incremental queries
-    db: CompilerDatabase,
 
     // Connected BEAM nodes for hot reload
     nodes: Vec<NodeConnection>,

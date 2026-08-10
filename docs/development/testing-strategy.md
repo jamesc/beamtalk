@@ -34,7 +34,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo test --all-targets
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
-just test-bunit          # BUnit TestCase tests (~85 files)
+just test-bunit          # BUnit TestCase tests (grows continuously — see "BUnit Tests" below for a count command)
 just test-parity         # Cross-surface parity tests (BT-2077, ~30s)
 just test-repl-protocol  # REPL TCP-protocol tests (slower, ~50s)
 ```
@@ -186,7 +186,10 @@ Standard Rust `#[test]` functions colocated with the code they test.
 
 **Location:** `crates/*/src/*.rs` (in `#[cfg(test)] mod tests { ... }`)
 
-**Count:** ~200 tests
+**Count:** grows continuously (thousands, the large majority in `beamtalk-core`) — get the current total with:
+```bash
+grep -r '#\[test\]' crates --include='*.rs' | wc -l
+```
 
 **Example** ([erlang.rs](../../crates/beamtalk-core/src/erlang.rs)):
 ```rust
@@ -314,10 +317,7 @@ Counter spawn
 ```
 
 **Bootstrap files (DO NOT migrate to BUnit):**
-`arithmetic.bt`, `booleans.bt`, `equality.bt`, `errors.bt`, `exceptions.bt`, `custom_exceptions.bt`, `erlang_exceptions.bt`, `integer_test.bt`, `float.bt`, `string_methods.bt`, `string_ops.bt`, `symbol.bt`, `literals.bt`, `value_types.bt`
-
-Also kept as expression tests due to compile-time type check constraints:
-`stack_frames.bt`, `class_hierarchy.bt`
+`arithmetic.btscript`, `blocks.btscript`, `booleans.btscript`, `equality.btscript`, `erlang_exceptions.btscript`, `errors.btscript`, `exceptions.btscript`, `float.btscript`, `literals.btscript`, `string_methods.btscript`, `symbol.btscript`
 
 **When to use stdlib expression tests:**
 | Test needs... | Use stdlib test? |
@@ -328,7 +328,7 @@ Also kept as expression tests due to compile-time type check constraints:
 | All other language feature tests | ❌ No — use BUnit tests |
 
 **Adding a new stdlib test:**
-1. Create `stdlib/bootstrap-test/my_feature.bt`
+1. Create `stdlib/bootstrap-test/my_feature.btscript`
 2. Add expressions with `// => expected_result` annotations
 3. Run `just test-stdlib`
 
@@ -342,7 +342,10 @@ SUnit-style test classes that subclass `TestCase`. The primary home for language
 
 **Location:** `stdlib/test/*.bt` (project test directory)
 
-**Count:** ~85 test files
+**Count:** grows continuously (hundreds of files) — get the current total with:
+```bash
+find stdlib/test -maxdepth 1 -name '*.bt' | wc -l
+```
 
 **Command:** `just test-bunit` or `beamtalk test`
 
@@ -523,7 +526,10 @@ REPL TCP-protocol integration tests that require a running REPL daemon. (Previou
 
 **Location:** `tests/repl-protocol/`
 
-**Test cases:** `tests/repl-protocol/cases/*.btscript` (~23 files)
+**Test cases:** `tests/repl-protocol/cases/*.btscript` — grows continuously; get the current total with:
+```bash
+find tests/repl-protocol/cases -name '*.btscript' | wc -l
+```
 
 **Test harness:** `crates/beamtalk-cli/tests/repl_protocol.rs`
 
@@ -675,38 +681,41 @@ just ci
 #   just lint            # Clippy + fmt-check + dialyzer
 #   just test            # Rust unit tests + runtime EUnit
 #   just test-stdlib     # Bootstrap expression tests (~14s)
-#   just test-bunit      # BUnit TestCase tests (~85 files)
+#   just test-bunit      # BUnit TestCase tests (grows continuously — see "BUnit Tests" above for a count command)
 #   just test-repl-protocol  # REPL TCP-protocol tests (~50s)
 ```
 
 ### Testing Pyramid
 
-The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-beamtalk-test-framework.md):
+The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-beamtalk-test-framework.md).
+Layer counts grow continuously as the language and stdlib grow — each layer's
+section above gives a command to derive its current count rather than a
+number that goes stale. Shape and relative speed are stable and shown below:
 
 ```
             ╱╲
-           ╱  ╲        E2E Tests (~36 files)
+           ╱  ╲        E2E Tests (many files)
           ╱    ╲       REPL/workspace integration — slow (~50s)
          ╱──────╲
-        ╱        ╲     BUnit Tests (~85 files)
+        ╱        ╲     BUnit Tests (most files, growing fastest)
        ╱          ╲    Language feature tests — fast (`just test-bunit`)
       ╱────────────╲
-     ╱              ╲  Stdlib Tests (~11 files)
+     ╱              ╲  Stdlib Tests (~11 files, fixed by design)
     ╱                ╲ Bootstrap expression tests — fast (~14s)
    ╱──────────────────╲
-  ╱                    ╲ Rust + Erlang Unit Tests (~600+ tests)
+  ╱                    ╲ Rust + Erlang Unit Tests (most tests overall)
  ╱                      ╲ Parser, codegen, runtime modules — fast (~10s)
 ╱────────────────────────╲
 ```
 
-| Layer | Count | Speed | What it tests |
-|-------|-------|-------|---------------|
-| Rust unit tests | ~600 tests | ~5s | Parser, AST, codegen |
-| Erlang unit tests | ~100 tests | ~3s | Runtime, primitives, object system |
-| Compiler snapshots | ~51 cases | ~2s | Codegen output stability |
-| **Stdlib tests** | **~11 files** | **~14s** | **Bootstrap primitives (expression tests)** |
-| **BUnit tests** | **~85 files** | **—** | **Language features (TestCase classes)** |
-| E2E tests | ~36 files | ~50s | REPL/workspace integration |
+| Layer | Count (derive with) | Speed | What it tests |
+|-------|----------------------|-------|----------------|
+| Rust unit tests | `grep -r '#\[test\]' crates --include='*.rs' \| wc -l` | ~5s | Parser, AST, codegen |
+| Erlang unit tests | `grep -rE '_test\(\)\s*->\|_test_\(\)\s*->' runtime/apps --include='*_tests.erl' \| wc -l` (all 4 apps; "Erlang Runtime Unit Tests" below covers `beamtalk_runtime` only) | ~3s | Runtime, primitives, object system |
+| Compiler snapshots | `find test-package-compiler/cases -mindepth 1 -maxdepth 1 -type d \| wc -l` cases (×4 generated tests each) | ~2s | Codegen output stability |
+| **Stdlib tests** | **`find stdlib/bootstrap-test -name '*.btscript' \| wc -l` (~11 files, fixed by design)** | **~14s** | **Bootstrap primitives (expression tests)** |
+| **BUnit tests** | **`find stdlib/test -maxdepth 1 -name '*.bt' \| wc -l`** | **—** | **Language features (TestCase classes)** |
+| E2E tests | `find tests/repl-protocol/cases -name '*.btscript' \| wc -l` | ~50s | REPL/workspace integration |
 
 ### Cross-Repo Package Tests
 
@@ -808,7 +817,7 @@ stdlib/test/fixtures/
 ├── typed_counter.bt      # Typed actor with Integer state
 ├── typed_account.bt      # Typed actor with Integer + String state
 ├── math_helper.bt        # Value type with recursion helpers
-└── ...                   # ~46 fixture files
+└── ...                   # grows continuously; `find stdlib/test/fixtures -maxdepth 1 -name '*.bt' | wc -l`
 ```
 
 **Erlang fixtures:** `test_*.erl` in `runtime/apps/beamtalk_runtime/test/` for reusable actors.
@@ -855,7 +864,7 @@ mod tests {
 
 ### Adding a Stdlib Test (Bootstrap Primitives)
 
-1. Create `stdlib/bootstrap-test/my_feature.bt`
+1. Create `stdlib/bootstrap-test/my_feature.btscript`
 2. Add expressions with `// => expected_result` annotations
 3. Optionally use `// @load path/to/fixture.bt` for fixtures
 4. Run `just test-stdlib`
@@ -1035,7 +1044,7 @@ Fuzzing tests the compiler's robustness by feeding it random or mutated input to
 
 | Target | Pipeline depth | Corpus |
 |---|---|---|
-| `parse_arbitrary` | lex → parse | `fuzz/corpus/parse_arbitrary/` (35 seed files, copied from `examples/` and `tests/repl-protocol/cases/`) |
+| `parse_arbitrary` | lex → parse | `fuzz/corpus/parse_arbitrary/` (seed files copied from `examples/` and `tests/repl-protocol/cases/` — `find fuzz/corpus/parse_arbitrary -maxdepth 1 -type f \| wc -l` for the current count) |
 | `compile_pipeline` | lex → parse → analyse → codegen | `stdlib/test/*.bt` + `tests/repl-protocol/cases/*.btscript`, referenced live as extra `cargo fuzz run` corpus dirs, plus `fuzz/corpus/compile_pipeline/` for fuzzer-discovered growth |
 
 `compile_pipeline`'s seeds are *not* copied into the repo: `cargo fuzz run <target> [corpus_dir]...` accepts any number of corpus directories, so it points straight at `stdlib/test` and `tests/repl-protocol/cases` (see `Justfile`'s `fuzz`/`fuzz-corpus-lint` recipes and `.github/workflows/fuzz.yml`). Seeds this way always match the current test suite — no separate copy step to remember, no snapshot to go stale. `fuzz/corpus/compile_pipeline/` is fully gitignored and holds only what the fuzzer itself discovers (it's the first/writable dir in the list). `parse_arbitrary` predates this convention and still uses a committed snapshot; `compile_pipeline` (BT-3124) is the newer pattern and is the one to follow for any future fuzz target.
