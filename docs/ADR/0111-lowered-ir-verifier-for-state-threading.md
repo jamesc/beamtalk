@@ -3,6 +3,24 @@
 ## Status
 Accepted (2026-08-10)
 
+## Implementation Tracking
+
+**Epic:** [BT-3128](https://linear.app/beamtalk/issue/BT-3128) — Lowered IR + Verifier for State Threading (ADR 0111)
+**Status:** Planned
+
+| Phase | Issue | Description | Size |
+|---|---|---|---|
+| 1 | [BT-3129](https://linear.app/beamtalk/issue/BT-3129) | ThreadedIr types + verifier + test shim, gated by Phase A0 measurement | M |
+| 1 | [BT-3130](https://linear.app/beamtalk/issue/BT-3130) | Expand codegen snapshot corpus over the threading-mode matrix | M |
+| 2 | [BT-3131](https://linear.app/beamtalk/issue/BT-3131) | Unify version counters behind typestate VersionedVar + RAII branch guard | M |
+| 3 | [BT-3132](https://linear.app/beamtalk/issue/BT-3132) | Migrate while_loops + counted_loops; delete the 4 unpack debug_asserts | M |
+| 4 | [BT-3133](https://linear.app/beamtalk/issue/BT-3133) | Migrate list_ops (fold-shaped + early-exit) | L |
+| 4 | [BT-3134](https://linear.app/beamtalk/issue/BT-3134) | Migrate conditionals + exception_handling | M |
+| 4 | [BT-3135](https://linear.app/beamtalk/issue/BT-3135) | Migrate gen_server state threading + NLR + ShadowWriteMissing contract; delete the 2 routing debug_asserts | L |
+| 5 | [BT-3136](https://linear.app/beamtalk/issue/BT-3136) | Close-out: verifier CI wiring, docs, status → Implemented | S |
+
+**Recommended start:** BT-3129 and BT-3130 (Phase 1, no dependencies, parallelizable). BT-3129 carries the Phase A0 measurement gate — if it fails, the epic descopes to Alternative 1b.
+
 ## Context
 
 ### Problem statement
