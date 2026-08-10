@@ -497,9 +497,21 @@ fn rename_block_mut(
 
 /// Renames an `Assignment`'s target/value. The RHS is walked against the
 /// scope as it stood *before* this assignment -- a brand-new implicit
-/// local isn't visible to its own initializer -- then the target is
-/// classified as a reference to an existing in-tree binder or a fresh
-/// implicit local declared in the current scope.
+/// local isn't visible to its own initializer.
+///
+/// The target is only renamed if it's already an in-tree binder (a true
+/// reassignment/mutation of a name bound earlier in this same expression,
+/// e.g. a shadowing block parameter). A target not currently in scope is
+/// deliberately left untouched -- and NOT newly bound -- rather than
+/// assumed to be a fresh implicit local: from this expression alone there
+/// is no way to distinguish "first assignment to a genuinely fresh local"
+/// from "mutation of an earlier `// =>` unit's REPL-turn binding" (e.g.
+/// `count := count + 1` inside a later unit's `whileTrue:` body, mutating
+/// an outer `count := 0` unit). Renaming the former is a missed
+/// opportunity; renaming the latter silently decouples the mutation from
+/// the binding it's meant to update. Since this transform's entire
+/// purpose is to preserve semantics, an unresolvable target is treated
+/// exactly like an unresolvable read: left alone.
 fn rename_assignment_mut(
     target: &mut Expression,
     value: &mut Expression,
@@ -508,11 +520,9 @@ fn rename_assignment_mut(
 ) {
     rename_names_mut(value, mapping, scope);
     if let Expression::Identifier(id) = target {
-        let already_bound = is_in_scope(scope, &id.name);
-        if !already_bound {
-            bind_in_current_scope(scope, id.name.clone());
+        if is_in_scope(scope, &id.name) {
+            rename_if_mapped(&mut id.name, mapping);
         }
-        rename_if_mapped(&mut id.name, mapping);
     } else {
         rename_names_mut(target, mapping, scope);
     }
@@ -1205,5 +1215,71 @@ mod tests {
             matches!(body_receiver.as_ref(), Expression::Identifier(id) if id.name == *renamed_param)
         );
         assert!(matches!(&body_args[0], Expression::Identifier(id) if id.name == *renamed_param));
+    }
+
+    /// Regression test (PR #3308 review, write side of the same hazard
+    /// class as the shadowed-free-reference test above): mirrors the
+    /// canonical `whileTrue:` mutation idiom
+    /// (`docs/beamtalk-language-features.md` § Local Variable Mutations).
+    /// `count` here is read once and assigned once, but never *bound*
+    /// anywhere inside this expression -- in the real `.btscript` corpus
+    /// it would be mutating an earlier unit's `count := 0` REPL-turn
+    /// binding. `rename_assignment_mut` must not invent a decoupled fresh
+    /// local for the assignment target: doing so would silently stop the
+    /// loop condition from ever changing.
+    #[test]
+    fn rename_locals_leaves_free_assignment_target_untouched() {
+        let expr = parse_expr("[count < 10] whileTrue: [count := count + 1]");
+        let renamed = rename_locals(&expr).unwrap_or_else(|| expr.clone());
+
+        let Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } = &renamed
+        else {
+            panic!("expected `[...] whileTrue: [...]`, got {renamed:?}");
+        };
+        let Expression::Block(cond_block) = receiver.as_ref() else {
+            panic!("expected condition block receiver, got {receiver:?}");
+        };
+        let Expression::MessageSend {
+            receiver: cond_recv,
+            ..
+        } = &cond_block.body[0].expression
+        else {
+            panic!(
+                "expected `count < 10`, got {:?}",
+                cond_block.body[0].expression
+            );
+        };
+        assert!(
+            matches!(cond_recv.as_ref(), Expression::Identifier(id) if id.name.as_str() == "count"),
+            "free read of `count` in the loop condition must survive unchanged"
+        );
+
+        let Expression::Block(body_block) = &arguments[0] else {
+            panic!("expected whileTrue: body block argument, got {arguments:?}");
+        };
+        let Expression::Assignment { target, value, .. } = &body_block.body[0].expression else {
+            panic!(
+                "expected `count := count + 1`, got {:?}",
+                body_block.body[0].expression
+            );
+        };
+        assert!(
+            matches!(target.as_ref(), Expression::Identifier(id) if id.name.as_str() == "count"),
+            "assignment target must stay `count`, not a decoupled fresh local: {target:?}"
+        );
+        let Expression::MessageSend {
+            receiver: rhs_recv, ..
+        } = value.as_ref()
+        else {
+            panic!("expected `count + 1`, got {value:?}");
+        };
+        assert!(
+            matches!(rhs_recv.as_ref(), Expression::Identifier(id) if id.name.as_str() == "count"),
+            "read of `count` on the assignment's RHS must survive unchanged"
+        );
     }
 }
