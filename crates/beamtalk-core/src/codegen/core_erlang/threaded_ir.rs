@@ -6,23 +6,34 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! ## Status (as of BT-3136 close-out — see ADR 0111 §Addendum)
+//! ## Status (as of BT-3144 — see ADR 0111 §Addendum)
 //!
-//! `ThreadedIr` today is a **verification-only side channel**, not the
-//! emission input the ADR's pipeline diagram (§Pipeline shape) describes:
-//! every production `verify_*` entry point below synthesizes a small,
-//! throwaway `ThreadedIr` fixture from the generator's already-made
-//! decisions, calls [`verify`], and discards the fixture — `Document`
-//! construction still happens directly from AST + generator state, on a
-//! separate, unconnected path. This is ADR 0111's own Alternative 1b (§B2)
-//! shape, delivered under Option A's name; the honest accounting (what
-//! shipped vs. what the ADR claimed, with line-level evidence) lives in the
-//! ADR's Addendum, not here. [BT-3141](https://linear.app/beamtalk/issue/BT-3141)
+//! `ThreadedIr` is still a **verification-only side channel** at every
+//! production `verify_*` call site — none of them route their fixture into
+//! `Document` construction; that remains directly from AST + generator
+//! state, on a separate, unconnected path (ADR 0111's own Alternative 1b
+//! (§B2) shape, delivered under Option A's name — the honest accounting
+//! lives in the ADR's Addendum, not here). [BT-3141](https://linear.app/beamtalk/issue/BT-3141)
 //! is the epic re-scoped to complete Option A (`ThreadedIr` as real emission
-//! input, single renderer, verifier on the true IR); this module's
-//! `lower_and_render` skeleton-fidelity shim and the `RenderCtx` design
-//! sketch in the ADR's Addendum are what that epic's renderer-foundation
-//! issue ([BT-3144](https://linear.app/beamtalk/issue/BT-3144)) builds on.
+//! input, single renderer, verifier on the true IR).
+//!
+//! BT-3144 (this issue) lands that epic's renderer *foundation*: [`render`]
+//! is a **full-fidelity** `&[ThreadedStmt] -> Document` function for the
+//! while-loop family's `DirectParams`/`Hybrid` `Threaded` modes and for
+//! `NlrCatch` — real `letrec` scaffolding, real try/catch scaffolding (the
+//! latter by directly reusing [`super::CoreErlangGenerator::wrap_body_with_nlr_catch`],
+//! not a re-derivation), via [`RenderCtx`] — the narrow borrow of generator
+//! rendering services the ADR's Addendum sketches. `TupleAcc` (list-ops) and
+//! the generic `StateAcc` fallback mode still render at the pre-BT-3144
+//! skeleton fidelity (flattened body, no letrec wrapper) — no production
+//! call site or dual-run proof needs them yet; a later migration issue
+//! extends `render` to them when it does (issue body point 3: "extend node
+//! types only where fidelity requires it"). **No production call site
+//! renders through this module yet** — `lower_and_render`, the pre-existing
+//! test-shim entry point, now delegates to [`render`] against a throwaway
+//! [`CoreErlangGenerator`], so this remains true of every caller today
+//! (BT-3145, the pilot migration, is what first points a real emission site
+//! at `render`).
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
@@ -101,9 +112,9 @@
 
 use std::collections::HashMap;
 
-use super::NlrBoundary;
 use super::control_flow::StateAccFallbackReason;
-use super::document::{Document, leaf};
+use super::document::{Document, join, leaf};
+use super::{CoreErlangGenerator, NlrBoundary};
 use crate::docvec;
 use crate::source_analysis::Span;
 
@@ -266,11 +277,12 @@ impl AccParam {
 ///
 /// **Constructor-only production**: [`Self::next_var`] is the only way to
 /// mint a version beyond the counter's current one — an unproduced version
-/// cannot be named. [`Self::current_var`] and [`Self::peek_next_var`] never
-/// mint; they only render the version already reached (or, for `peek`, the
-/// version *the next [`Self::next_var`] call would* reach, without
-/// advancing the counter — used where the caller needs the name before
-/// calling `expression_doc`, which may itself advance the counter).
+/// cannot be named. [`Self::current_var`] only renders the version already
+/// reached; a caller that needs to name the version *the next
+/// [`Self::next_var`] call would* reach, without advancing the counter,
+/// renders `self.0 + 1` directly (`mod.rs`'s `peek_next_state_var`, via
+/// `render_state_prefix`) rather than through a dedicated `VersionCounter`
+/// method.
 ///
 /// **Emitter-facing accessors render through [`VersionedVar`]**: every
 /// method here goes through [`VersionedVar::new`] + [`VersionedVar::render_name`]
@@ -319,12 +331,6 @@ impl VersionCounter {
     pub(super) fn next_var(&mut self, prefix: VersionPrefix) -> String {
         self.0 += 1;
         self.current_var(prefix)
-    }
-
-    /// Names the version [`Self::next_var`] would mint, without advancing
-    /// the counter.
-    pub(super) fn peek_next_var(self, prefix: VersionPrefix) -> String {
-        VersionedVar::new(prefix, self.0 + 1, FrameId::ROOT).render_name()
     }
 }
 
@@ -835,53 +841,329 @@ impl VerifyWalk<'_> {
     }
 }
 
-// ─── Test shim: lower_and_render ────────────────────────────────────────────
+// ─── RenderCtx (BT-3144, ADR 0111 §Addendum "Renderer design sketch") ──────
 
-/// Renders `ir` to a [`Document`], mirroring (at skeleton fidelity) the
-/// `let Target = <op> in ...` chains the real generator emits for the same
-/// decisions. This is the "existing `Document`-asserting tests survive
-/// verbatim" shim the ADR commits to for later migration issues (BT-3131
-/// onward): once a production call site's return type moves from `Document`
-/// to `ThreadedIr`, its tests migrate to `lower_and_render(&ir).to_pretty_string()`
-/// unchanged.
-///
-/// `Threaded` and `NlrCatch` render at **skeleton fidelity only** — full
-/// `letrec`/try-catch scaffolding requires fresh-variable allocation from
-/// `CoreErlangGenerator` (`fresh_temp_var`, `alloc_nlr_catch_vars`) that this
-/// pure `&[ThreadedStmt] -> Document` shim deliberately does not have access
-/// to (constructing that scaffolding is exactly what the later migration
-/// issues add, one call site at a time).
-pub(super) fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
-    Document::Vec(ir.iter().map(render_stmt).collect())
+/// Loop-context flags captured/restored around rendering a nested
+/// [`ThreadedStmt::Threaded`] body — see [`RenderCtx::with_loop_context`].
+/// Mirrors `CoreErlangGenerator::in_loop_body`/`in_hybrid_loop` exactly (a
+/// third, boolean-pair copy would be a duplication CLAUDE.md's
+/// no-duplicate-implementations rule forbids; this type only names the pair
+/// [`RenderCtx`] threads, it never becomes a second source of truth for
+/// their values — [`RenderCtx::with_loop_context`] always reads/writes them
+/// through the wrapped generator).
+#[derive(Debug, Clone, Copy)]
+struct LoopContextFlags {
+    in_loop_body: bool,
+    in_hybrid_loop: bool,
 }
 
-fn render_stmt(stmt: &ThreadedStmt) -> Document<'static> {
-    match stmt {
-        ThreadedStmt::Bind {
-            target,
-            source,
-            op,
-            shadow_write,
-            span: _,
-        } => render_bind(target, source, op, *shadow_write),
-        ThreadedStmt::Threaded { body, .. } => lower_and_render(body),
-        ThreadedStmt::NlrCatch {
-            boundary, token, ..
-        } => render_nlr_catch(*boundary, *token),
-        ThreadedStmt::Return(value, state, _) => render_return(value, state),
-        ThreadedStmt::TupleAccUnpack {
-            param,
-            gate_slots,
-            targets,
-            ..
-        } => render_tuple_acc_unpack(param, *gate_slots, targets),
+/// A narrow, purpose-built borrow of [`CoreErlangGenerator`]'s
+/// rendering-time facilities (ADR 0111 §Addendum, "Renderer design
+/// sketch") — deliberate god-object containment, NOT `&mut
+/// CoreErlangGenerator` used wholesale: [`render`] and its helpers only
+/// ever reach the generator through the three methods below, never through
+/// a raw field or an AST-directed emission path.
+///
+/// Wraps `&mut CoreErlangGenerator` directly rather than a narrow trait
+/// (the alternative the Addendum explicitly left open to this issue).
+/// Chosen because it lets NLR-catch rendering reuse
+/// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] verbatim — the exact
+/// function every real NLR try/catch in the codebase already goes through
+/// — instead of re-deriving its scaffolding a second time (CLAUDE.md: "A
+/// rule crossing the Rust/Erlang boundary needs a shared conformance
+/// fixture or code generation, not a comment"; the same logic applies
+/// within Rust here — reuse beats a parallel copy that could drift). The
+/// trade-off this accepts is the trait form's unit-testing convenience
+/// (constructing a `RenderCtx` without a full generator instance); since
+/// [`CoreErlangGenerator::new`] is cheap (no I/O, pure data-structure
+/// init), [`lower_and_render`] pays that cost directly instead.
+pub(super) struct RenderCtx<'g> {
+    generator: &'g mut CoreErlangGenerator,
+}
+
+impl<'g> RenderCtx<'g> {
+    pub(super) fn new(generator: &'g mut CoreErlangGenerator) -> Self {
+        Self { generator }
     }
+
+    /// Fresh-variable allocation for `letrec` loop-function names and NLR
+    /// token variables — delegates to
+    /// [`CoreErlangGenerator::fresh_temp_var`], the single canonical
+    /// allocator (BT-875: naming stays centralized, never re-derived).
+    fn fresh_temp_var(&mut self, base: &str) -> String {
+        self.generator.fresh_temp_var(base)
+    }
+
+    /// Resolves `var`'s render-time name, honoring loop context for
+    /// `VersionPrefix::State` (`StateN` vs `StateAccN`) exactly as
+    /// [`CoreErlangGenerator::current_state_var`]/`next_state_var` do — both
+    /// paths call the same [`super::render_state_prefix`] helper, so this
+    /// can never independently drift from live-generator rendering. Every
+    /// other prefix is context-independent and renders through
+    /// [`VersionedVar::render_name`] unchanged.
+    fn resolve_prefix(&self, var: &VersionedVar) -> String {
+        match &var.prefix {
+            VersionPrefix::State => super::render_state_prefix(
+                self.generator.in_hybrid_loop,
+                self.generator.in_loop_body,
+                var.version,
+            ),
+            VersionPrefix::ClassVars | VersionPrefix::SelfVt | VersionPrefix::Local(_) => {
+                var.render_name()
+            }
+        }
+    }
+
+    /// Runs `f` with `in_loop_body`/`in_hybrid_loop` set to `flags`,
+    /// unconditionally restoring the previous values afterward — the
+    /// render-time counterpart of
+    /// [`CoreErlangGenerator::enter_branch_context`]'s save/restore
+    /// discipline, narrowed to just the two loop-context flags
+    /// [`Self::resolve_prefix`] reads (ADR 0111 §Addendum: "loop-context
+    /// `StateAcc`/`State` prefix selection... decided at render time").
+    ///
+    /// RAII-restored via [`LoopContextGuard`]'s `Drop` impl — not a plain
+    /// save/set/call/restore sequence — so a panic inside `f` still leaves
+    /// `self.generator`'s flags correctly restored, matching
+    /// [`CoreErlangGenerator::enter_branch_context`]'s own panic-safety
+    /// guarantee (`BranchContextGuard`) rather than merely resembling it.
+    fn with_loop_context<T>(
+        &mut self,
+        flags: LoopContextFlags,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let guard = LoopContextGuard::enter(self, flags);
+        f(guard.ctx)
+    }
+}
+
+/// RAII guard restoring [`CoreErlangGenerator::in_loop_body`]/
+/// `in_hybrid_loop` to their pre-[`RenderCtx::with_loop_context`] values on
+/// drop — including on unwind, mirroring [`BranchContextGuard`]'s
+/// panic-safety discipline (this module's render path is currently
+/// infallible, but a guard costs nothing extra and keeps the two save/
+/// restore mechanisms in this file at parity instead of one silently being
+/// weaker than the other it's explicitly modeled after).
+struct LoopContextGuard<'a, 'g> {
+    ctx: &'a mut RenderCtx<'g>,
+    saved: LoopContextFlags,
+}
+
+impl<'a, 'g> LoopContextGuard<'a, 'g> {
+    fn enter(ctx: &'a mut RenderCtx<'g>, flags: LoopContextFlags) -> Self {
+        let saved = LoopContextFlags {
+            in_loop_body: ctx.generator.in_loop_body,
+            in_hybrid_loop: ctx.generator.in_hybrid_loop,
+        };
+        ctx.generator.in_loop_body = flags.in_loop_body;
+        ctx.generator.in_hybrid_loop = flags.in_hybrid_loop;
+        Self { ctx, saved }
+    }
+}
+
+impl Drop for LoopContextGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.ctx.generator.in_loop_body = self.saved.in_loop_body;
+        self.ctx.generator.in_hybrid_loop = self.saved.in_hybrid_loop;
+    }
+}
+
+// ─── render: full-fidelity ThreadedIr -> Document (BT-3144) ────────────────
+
+/// Renders `ir` to a [`Document`], full-fidelity for `Bind`, `Return`,
+/// `TupleAccUnpack`, `NlrCatch`, and `Threaded` under
+/// [`ThreadingMode::DirectParams`]/[`ThreadingMode::Hybrid`] — real
+/// `letrec`/try-catch scaffolding, not the pre-BT-3144 skeleton. See the
+/// module docs §Status for exactly which shapes are full-fidelity today and
+/// why (`TupleAcc`/`StateAcc` extend later, driven by a real migration's
+/// needs — issue body point 3).
+///
+/// An [`ThreadedStmt::NlrCatch`] node has no `body` field of its own by
+/// design (module docs on the variant): it models the true
+/// `wrap_body_with_nlr_catch` call site, whose `body_doc` is "everything
+/// that follows," so this function treats it as a boundary marker that
+/// consumes the REST of `ir` at its own list position as its try-body, then
+/// returns — nothing after an `NlrCatch` renders a second time outside the
+/// wrap.
+pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+    for (i, stmt) in ir.iter().enumerate() {
+        match stmt {
+            ThreadedStmt::Bind {
+                target,
+                source,
+                op,
+                shadow_write,
+                span: _,
+            } => docs.push(render_bind(target, source, op, *shadow_write, ctx)),
+            ThreadedStmt::Threaded {
+                mode,
+                frame,
+                body,
+                produces,
+                span: _,
+            } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
+            ThreadedStmt::NlrCatch { boundary, .. } => {
+                let body_doc = render(&ir[i + 1..], ctx);
+                docs.push(render_nlr_catch(*boundary, body_doc, ctx));
+                return Document::Vec(docs);
+            }
+            ThreadedStmt::Return(value, state, _) => docs.push(render_return(value, state, ctx)),
+            ThreadedStmt::TupleAccUnpack {
+                param,
+                gate_slots,
+                targets,
+                ..
+            } => docs.push(render_tuple_acc_unpack(param, *gate_slots, targets)),
+        }
+    }
+    Document::Vec(docs)
+}
+
+/// The pre-BT-3144 skeleton-fidelity test shim signature, kept working per
+/// the issue body's point 5: delegates to [`render`] against a throwaway
+/// [`CoreErlangGenerator`] (cheap — no I/O) so every existing
+/// `lower_and_render(&ir).to_pretty_string()` test call survives verbatim.
+/// Also the entry point `control_flow::while_loops`'s Phase A0 measurement
+/// prototype uses (discarded there — see that call site's own comment).
+pub(super) fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
+    let mut generator = CoreErlangGenerator::new("__threaded_ir_render_shim");
+    let mut ctx = RenderCtx::new(&mut generator);
+    render(ir, &mut ctx)
+}
+
+/// Full-fidelity rendering of a [`ThreadedStmt::Threaded`] node: real
+/// `letrec` scaffolding for [`ThreadingMode::DirectParams`]/
+/// [`ThreadingMode::Hybrid`] (the while-loop family modes this issue's
+/// dual-run harness proves parity for — see `render_tests` below);
+/// `TupleAcc`/`StateAcc` still flatten the body (module docs §Status).
+fn render_threaded(
+    mode: &ThreadingMode,
+    frame: FrameId,
+    body: &[ThreadedStmt],
+    produces: &[VersionedVar],
+    ctx: &mut RenderCtx,
+) -> Document<'static> {
+    match mode {
+        ThreadingMode::DirectParams => render_loop_letrec(frame, body, produces, ctx, None),
+        ThreadingMode::Hybrid => render_loop_letrec(
+            frame,
+            body,
+            produces,
+            ctx,
+            Some(LoopContextFlags {
+                in_loop_body: true,
+                in_hybrid_loop: true,
+            }),
+        ),
+        ThreadingMode::TupleAcc(_) | ThreadingMode::StateAcc(_) => render(body, ctx),
+    }
+}
+
+/// Builds `letrec 'FnName'/arity = fun (Param1, .., ParamN) -> <body> apply
+/// 'FnName'/arity (<produces>) in apply 'FnName'/arity (<OuterArg1, ..,
+/// OuterArgN>)` — the shared skeleton behind [`ThreadingMode::DirectParams`]
+/// (`loop_context: None`) and [`ThreadingMode::Hybrid`] (`loop_context:
+/// Some(..)`, flipping `in_loop_body`/`in_hybrid_loop` for the `fun`
+/// declaration/body/recursive-call render so any `VersionPrefix::State`
+/// reference among them resolves the same way `generate_hybrid_loop_body`
+/// makes it resolve live: `State`/`StateN`, not `StateAcc`/`StateAccN`).
+///
+/// `produces`' own (post-body) versions render as the `fun`'s declared
+/// parameters AND the recursive self-call's arguments — both textually
+/// inside the same `fun` block as `body_doc`, so both resolve under the
+/// loop's OWN context (`render_in_loop_body`, below). The OUTER initial
+/// call is different: it is the calling scope's own reference to
+/// `produces` at version 0, so it resolves under whatever context was
+/// already ambient *before* this `Threaded` node — never the loop's own.
+/// For a `Local`-prefixed var these two resolutions coincide
+/// ([`VersionedVar::render_name`] names it purely from `(name, version)`,
+/// context-independent — the common case, matching how the real
+/// direct-params/hybrid generators reuse `to_core_erlang_var`-derived names
+/// on both sides, `while_loops.rs`'s `initial_direct_args`/
+/// `param_list_doc`); for a `State`-prefixed var nested inside a
+/// differently-flagged ambient loop, they do NOT (the `fun`'s formal
+/// parameter and the outer call's argument are legitimately different
+/// names — a `fun`'s parameter name never has to match its caller's
+/// argument expression).
+fn render_loop_letrec(
+    frame: FrameId,
+    body: &[ThreadedStmt],
+    produces: &[VersionedVar],
+    ctx: &mut RenderCtx,
+    loop_context: Option<LoopContextFlags>,
+) -> Document<'static> {
+    let fn_name = ctx.fresh_temp_var("Loop");
+    let arity = produces.len();
+
+    // The OUTER initial call's arguments — this is the calling scope's own
+    // reference to `produces` at version 0, so it must resolve under
+    // whatever context was already ambient *before* this `Threaded` node,
+    // never the loop's own context (that would rename a var the caller
+    // never bound under).
+    let outer_args = join(
+        produces
+            .iter()
+            .map(|v| leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))),
+        &Document::Str(", "),
+    );
+
+    // BT-3144 review: `param_list` (the `fun (...)` declaration) and
+    // `final_args` (the recursive self-call's arguments) both sit textually
+    // inside the SAME `fun (...) -> <body_doc> apply ...` block as
+    // `body_doc`, so all three must resolve `produces`' prefixes under the
+    // identical loop-context flags — computing any of them under the
+    // pre-loop ambient context instead would pick a different
+    // `State`/`StateAcc` prefix than `body_doc` bound whenever a Hybrid loop
+    // is nested inside a differently-flagged ambient context (e.g. inside a
+    // `StateAcc`-mode loop), producing a reference to an unbound Core Erlang
+    // variable — the `fun`'s own declared parameter name must match every
+    // reference to it inside the `fun`'s body, including the recursive tail
+    // call.
+    let render_in_loop_body = |ctx: &mut RenderCtx| {
+        let param_list = join(
+            produces.iter().map(|v| {
+                leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))
+            }),
+            &Document::Str(", "),
+        );
+        let body_doc = render(body, ctx);
+        let final_args = join(
+            produces.iter().map(|v| leaf::var(ctx.resolve_prefix(v))),
+            &Document::Str(", "),
+        );
+        (param_list, body_doc, final_args)
+    };
+    let (param_list, body_doc, final_args) = match loop_context {
+        Some(flags) => ctx.with_loop_context(flags, render_in_loop_body),
+        None => render_in_loop_body(ctx),
+    };
+
+    docvec![
+        "letrec ",
+        leaf::fname(fn_name.clone(), arity),
+        " = fun (",
+        param_list,
+        ") -> ",
+        body_doc,
+        "apply ",
+        leaf::fname(fn_name.clone(), arity),
+        " (",
+        final_args,
+        ")",
+        " in apply ",
+        leaf::fname(fn_name, arity),
+        " (",
+        outer_args,
+        ")",
+    ]
 }
 
 /// Skeleton-fidelity rendering of [`ThreadedStmt::TupleAccUnpack`], mirroring
 /// `generate_tuple_unpack_docs`'s `let V = call 'erlang':'element'(idx, Param)
 /// in` chain — `idx` starts at `gate_slots + 1` (1-based, past the leading
-/// gate slots) for the first target.
+/// gate slots) for the first target. Already full-fidelity (no generator
+/// context needed): this shape was real before BT-3144, unchanged here.
 fn render_tuple_acc_unpack(
     param: &AccParam,
     gate_slots: usize,
@@ -903,9 +1185,9 @@ fn render_tuple_acc_unpack(
     Document::Vec(docs)
 }
 
-fn render_value(value: &ValueRef) -> Document<'static> {
+fn render_value(value: &ValueRef, ctx: &RenderCtx) -> Document<'static> {
     match value {
-        ValueRef::Version(v) => leaf::var(v.render_name()),
+        ValueRef::Version(v) => leaf::var(ctx.resolve_prefix(v)),
         ValueRef::Var(name) => leaf::var(name.clone()),
         ValueRef::Literal(lit) => Document::Str(lit),
     }
@@ -916,9 +1198,10 @@ fn render_bind(
     source: &VersionedVar,
     op: &BindOp,
     shadow_write: bool,
+    ctx: &RenderCtx,
 ) -> Document<'static> {
-    let target_name = target.render_name();
-    let source_name = source.render_name();
+    let target_name = ctx.resolve_prefix(target);
+    let source_name = ctx.resolve_prefix(source);
     match op {
         BindOp::Put {
             field,
@@ -931,7 +1214,7 @@ fn render_bind(
                 " = call 'maps':'put'(",
                 leaf::atom(field.clone()),
                 ", ",
-                render_value(value),
+                render_value(value, ctx),
                 ", ",
                 leaf::var(source_name),
                 ") in ",
@@ -942,7 +1225,7 @@ fn render_bind(
                     "let _ = call 'erlang':'put'({",
                     leaf::atom("$bt_class_vars_shadow"),
                     ", call 'erlang':'element'(2, ",
-                    render_value(class_tag),
+                    render_value(class_tag, ctx),
                     ")}, ",
                     leaf::var(target_name),
                     ") in ",
@@ -964,44 +1247,38 @@ fn render_bind(
             "let ",
             leaf::var(target_name),
             " = ",
-            render_value(value),
+            render_value(value, ctx),
             " in ",
         ],
     }
 }
 
-/// Skeleton-fidelity placeholder — see [`lower_and_render`]'s doc comment.
-fn render_nlr_catch(boundary: NlrBoundary, token: TokenId) -> Document<'static> {
-    let tag = match boundary {
-        NlrBoundary::ActorReply => "actor_reply",
-        NlrBoundary::ClassMethod { .. } => "class_method",
-        NlrBoundary::ValueType => "value_type",
-    };
-    docvec![
-        "% nlr_catch(",
-        tag,
-        ", token=",
-        leaf::var(token.render_name()),
-        ")\n"
-    ]
+/// Full-fidelity NLR try/catch scaffolding: allocates a fresh token var
+/// (matching every real call site — `self.fresh_temp_var("NlrToken")`,
+/// e.g. `actor_codegen.rs:544`, `gen_server/methods.rs:306`) and reuses
+/// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] verbatim — the exact
+/// function every real NLR try/catch in the codebase already goes through
+/// (module docs on [`ThreadedStmt::NlrCatch`]: "the true call site
+/// `ThreadedStmt::NlrCatch` faithfully models"). Zero re-derivation, so
+/// this can never drift from production's try/catch shape.
+fn render_nlr_catch(
+    boundary: NlrBoundary,
+    body_doc: Document<'static>,
+    ctx: &mut RenderCtx,
+) -> Document<'static> {
+    let token_var = ctx.fresh_temp_var("NlrToken");
+    ctx.generator
+        .wrap_body_with_nlr_catch(body_doc, &token_var, boundary)
 }
 
-fn render_return(value: &ValueRef, state: &VersionedVar) -> Document<'static> {
+fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Document<'static> {
     docvec![
         "{",
-        render_value(value),
+        render_value(value, ctx),
         ", ",
-        leaf::var(state.render_name()),
+        leaf::var(ctx.resolve_prefix(state)),
         "}"
     ]
-}
-
-impl TokenId {
-    /// Renders a placeholder variable name for skeleton-fidelity NLR
-    /// rendering (see [`render_nlr_catch`]).
-    fn render_name(self) -> String {
-        super::util::versioned_var("CatchTok", self.0 as usize)
-    }
 }
 
 // ─── Loop unpack-invariant check (BT-3132) ─────────────────────────────────
@@ -1542,18 +1819,6 @@ mod tests {
         assert_eq!(counter.current_var(VersionPrefix::State), "State1");
         assert_eq!(counter.next_var(VersionPrefix::State), "State2");
         assert_eq!(counter.version(), 2);
-    }
-
-    #[test]
-    fn version_counter_peek_next_var_does_not_advance() {
-        let counter = VersionCounter::new();
-        assert_eq!(
-            counter.peek_next_var(VersionPrefix::ClassVars),
-            "ClassVars1"
-        );
-        // peek must not have minted — the counter is still at version 0.
-        assert_eq!(counter.version(), 0);
-        assert_eq!(counter.current_var(VersionPrefix::ClassVars), "ClassVars");
     }
 
     #[test]
@@ -2139,12 +2404,18 @@ mod tests {
     }
 
     #[test]
-    fn lower_and_render_threaded_flattens_body() {
-        let frame = FrameId::new(1);
+    fn lower_and_render_threaded_direct_params_emits_real_letrec() {
+        // BT-3144: `Threaded { mode: DirectParams, .. }` now renders a real
+        // `letrec` (fresh-named via `fresh_temp_var("Loop")`, hence the
+        // `_Loop1` — see `VariableContext::fresh_var`), not a flattened body
+        // — the pre-BT-3144 skeleton behavior this test used to pin.
         let ir = prototype_direct_params_ir(&["sum".to_string()], span());
         let rendered = lower_and_render(&ir).to_pretty_string();
-        assert_eq!(rendered, "let Sum1 = Sum in ");
-        let _ = frame; // used only to document scope of the fixture above
+        assert_eq!(
+            rendered,
+            "letrec '_Loop1'/1 = fun (Sum) -> let Sum1 = Sum in \
+             apply '_Loop1'/1 (Sum1) in apply '_Loop1'/1 (Sum)"
+        );
     }
 
     // ── Phase A0 prototype plumbing ──────────────────────────────────────
@@ -2838,5 +3109,300 @@ mod tests {
             shadow_write: false,
             span,
         }]
+    }
+
+    // ── Dual-run byte-parity harness (BT-3144) ───────────────────────────
+    //
+    // The issue's acceptance criterion: "Dual-run harness proves byte
+    // parity for at least direct-params and hybrid while loops against the
+    // legacy path." `ThreadedStmt::Threaded` does not model a loop's
+    // condition/exit-case (that stays AST-directed — ADR 0111 §Constraints,
+    // "everything else in codegen stays AST-directed and unaffected"), so
+    // there is no single production function today that emits *only* the
+    // letrec skeleton these tests check — `while_loops.rs`'s
+    // `generate_while_loop_direct`/`generate_while_loop_hybrid` interleave
+    // it with condition codegen. Each test below therefore hand-authors
+    // that skeleton directly against a real `CoreErlangGenerator` — via the
+    // SAME generator accessors `render`/`RenderCtx` themselves call
+    // (`fresh_temp_var`, `current_state_var`/`next_state_var`) wherever a
+    // production twin exists, never a re-derivation of the decision itself
+    // — and asserts `render(lower(..))`'s output against it byte-for-byte
+    // on a separately-constructed but identically-seeded generator. This is
+    // the harness's own proof that its rendering mechanism reproduces
+    // hand-authored `docvec!` output exactly; BT-3145 (the pilot migration)
+    // is what first runs it against a real, refactored-to-be-swappable
+    // legacy call site.
+
+    #[test]
+    fn dual_run_direct_params_letrec_byte_parity() {
+        // "Legacy" side: hand-authored letrec skeleton for a two-local
+        // direct-params loop, written independently of `render_loop_letrec`.
+        let mut legacy_gen = CoreErlangGenerator::new("dual_run_direct_params");
+        let fn_name = legacy_gen.fresh_temp_var("Loop");
+        let params = vec![leaf::var("Sum"), leaf::var("Count")];
+        let param_list = join(params.clone(), &Document::Str(", "));
+        let body = docvec![
+            "let ",
+            leaf::var("Sum1"),
+            " = ",
+            leaf::var("Sum"),
+            " in ",
+            "let ",
+            leaf::var("Count1"),
+            " = ",
+            leaf::var("Count"),
+            " in ",
+        ];
+        let final_args = join(
+            vec![leaf::var("Sum1"), leaf::var("Count1")],
+            &Document::Str(", "),
+        );
+        let legacy_doc = docvec![
+            "letrec ",
+            leaf::fname(fn_name.clone(), 2),
+            " = fun (",
+            param_list,
+            ") -> ",
+            body,
+            "apply ",
+            leaf::fname(fn_name.clone(), 2),
+            " (",
+            final_args,
+            ")",
+            " in apply ",
+            leaf::fname(fn_name, 2),
+            " (",
+            join(params, &Document::Str(", ")),
+            ")",
+        ]
+        .to_pretty_string();
+
+        // `render(lower(..))` side: the equivalent `ThreadedIr` fixture, on
+        // a freshly-constructed generator seeded identically to
+        // `legacy_gen` (same module name, so `fresh_temp_var`'s counter
+        // starts at the same place).
+        let frame = FrameId::new(1);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::DirectParams,
+            frame,
+            body: vec![
+                ThreadedStmt::Bind {
+                    target: local("sum", 1, frame),
+                    source: local("sum", 0, frame),
+                    op: BindOp::Direct(ValueRef::Version(local("sum", 0, frame))),
+                    shadow_write: false,
+                    span: span(),
+                },
+                ThreadedStmt::Bind {
+                    target: local("count", 1, frame),
+                    source: local("count", 0, frame),
+                    op: BindOp::Direct(ValueRef::Version(local("count", 0, frame))),
+                    shadow_write: false,
+                    span: span(),
+                },
+            ],
+            produces: vec![local("sum", 1, frame), local("count", 1, frame)],
+            span: span(),
+        }];
+        let mut render_gen = CoreErlangGenerator::new("dual_run_direct_params");
+        let mut ctx = RenderCtx::new(&mut render_gen);
+        let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
+
+        assert_eq!(
+            rendered_doc, legacy_doc,
+            "render(lower(..)) must reproduce the hand-authored direct-params \
+             letrec byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn dual_run_hybrid_letrec_state_prefix_matches_live_generator() {
+        // "Legacy" side: hand-authored letrec skeleton for a hybrid loop
+        // whose body also mutates a `State`-prefixed var (e.g. a nested
+        // construct's field mutation running inside the hybrid loop body) —
+        // its rendered name is resolved through the REAL production
+        // accessors `current_state_var`/`next_state_var` under hybrid loop
+        // context, not a hand-copy of their logic, so this proves
+        // `RenderCtx::resolve_prefix` (via the shared `render_state_prefix`
+        // helper both paths call) matches live generator behavior
+        // bit-for-bit.
+        let mut legacy_gen = CoreErlangGenerator::new("dual_run_hybrid");
+        let fn_name = legacy_gen.fresh_temp_var("Loop");
+        let entry_param = leaf::var("Sum");
+        legacy_gen.in_hybrid_loop = true;
+        legacy_gen.in_loop_body = true;
+        let source_name = legacy_gen.current_state_var();
+        let target_name = legacy_gen.next_state_var();
+        legacy_gen.in_hybrid_loop = false;
+        legacy_gen.in_loop_body = false;
+        let body = docvec![
+            "let ",
+            leaf::var("Sum1"),
+            " = ",
+            leaf::var("Sum"),
+            " in ",
+            "let ",
+            leaf::var(target_name),
+            " = ",
+            leaf::var(source_name),
+            " in ",
+        ];
+        let final_args = join(vec![leaf::var("Sum1")], &Document::Str(", "));
+        let legacy_doc = docvec![
+            "letrec ",
+            leaf::fname(fn_name.clone(), 1),
+            " = fun (",
+            entry_param.clone(),
+            ") -> ",
+            body,
+            "apply ",
+            leaf::fname(fn_name.clone(), 1),
+            " (",
+            final_args,
+            ")",
+            " in apply ",
+            leaf::fname(fn_name, 1),
+            " (",
+            entry_param,
+            ")",
+        ]
+        .to_pretty_string();
+
+        let frame = FrameId::new(1);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::Hybrid,
+            frame,
+            body: vec![
+                ThreadedStmt::Bind {
+                    target: local("sum", 1, frame),
+                    source: local("sum", 0, frame),
+                    op: BindOp::Direct(ValueRef::Version(local("sum", 0, frame))),
+                    shadow_write: false,
+                    span: span(),
+                },
+                ThreadedStmt::Bind {
+                    target: VersionedVar::new(VersionPrefix::State, 1, frame),
+                    source: VersionedVar::new(VersionPrefix::State, 0, frame),
+                    op: BindOp::Direct(ValueRef::Version(VersionedVar::new(
+                        VersionPrefix::State,
+                        0,
+                        frame,
+                    ))),
+                    shadow_write: false,
+                    span: span(),
+                },
+            ],
+            produces: vec![local("sum", 1, frame)],
+            span: span(),
+        }];
+        let mut render_gen = CoreErlangGenerator::new("dual_run_hybrid");
+        let mut ctx = RenderCtx::new(&mut render_gen);
+        let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
+
+        assert_eq!(
+            rendered_doc, legacy_doc,
+            "render(lower(..)) must reproduce the hand-authored hybrid letrec \
+             byte-for-byte, including the loop-context-aware State prefix"
+        );
+    }
+
+    #[test]
+    fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nested_in_stateacc_ambient()
+     {
+        // Regression test for `render_loop_letrec`'s loop-context ordering:
+        // the `fun (<param_list>) -> <body_doc> apply 'FnName'/N (<final_args>)`
+        // declaration, its body, and its recursive tail call are all the
+        // SAME `fun` block, so `param_list` and `final_args` must resolve
+        // `VersionPrefix::State` under the identical Hybrid context
+        // `body_doc` renders under — computing either of them under the
+        // pre-loop ambient context instead would name the `fun`'s declared
+        // parameter differently from what the body/recursive-call actually
+        // reference, producing invalid Core Erlang (a reference to a
+        // variable the `fun` never bound). The OUTER initial call remains
+        // the one place `produces` correctly resolves under ambient context
+        // — it's the calling scope's own reference, not the `fun`'s.
+        //
+        // Simulates a Hybrid loop nested inside an outer `StateAcc`-mode
+        // loop body (`in_loop_body = true, in_hybrid_loop = false` ambient —
+        // the exact shape that would trip this bug) to prove the `fun`
+        // declaration/body/recursive-call all agree on `State`/`State1`
+        // (the Hybrid loop's own context), while only the outer call uses
+        // `StateAcc` (the ambient it's actually invoked from).
+        let frame = FrameId::new(1);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::Hybrid,
+            frame,
+            body: vec![ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, frame),
+                source: VersionedVar::new(VersionPrefix::State, 0, frame),
+                op: BindOp::Direct(ValueRef::Version(VersionedVar::new(
+                    VersionPrefix::State,
+                    0,
+                    frame,
+                ))),
+                shadow_write: false,
+                span: span(),
+            }],
+            produces: vec![VersionedVar::new(VersionPrefix::State, 1, frame)],
+            span: span(),
+        }];
+        let mut render_gen = CoreErlangGenerator::new("dual_run_hybrid_nested");
+        // Ambient context as if this `Threaded` node sits inside an outer
+        // StateAcc-mode loop body — the pre-existing, pre-fix bug would have
+        // computed `param_list`/`final_args` under exactly this (wrong)
+        // ambient.
+        render_gen.in_loop_body = true;
+        render_gen.in_hybrid_loop = false;
+        let mut ctx = RenderCtx::new(&mut render_gen);
+        let rendered = render(&ir, &mut ctx).to_pretty_string();
+
+        assert_eq!(
+            rendered,
+            "letrec '_Loop1'/1 = fun (State) -> let State1 = State in \
+             apply '_Loop1'/1 (State1) in apply '_Loop1'/1 (StateAcc)",
+            "the fun declaration, body, and recursive tail call must all \
+             agree on State/State1 (the Hybrid loop's own context) — only \
+             the outer initial call should reference StateAcc (the outer \
+             StateAcc ambient) — got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim() {
+        // NLR-catch rendering doesn't re-derive `wrap_body_with_nlr_catch`'s
+        // scaffolding — it calls the exact same function real NLR call
+        // sites use, so this test's "legacy" and `render(lower(..))` sides
+        // are provably byte-identical by construction, not by luck. Kept as
+        // an explicit dual-run test (rather than relying on that reasoning
+        // alone) so a future refactor that breaks the direct-reuse
+        // invariant fails loudly here instead of silently drifting.
+        let mut legacy_gen = CoreErlangGenerator::new("dual_run_nlr");
+        let legacy_token = legacy_gen.fresh_temp_var("NlrToken");
+        let inner_body = docvec!["let ", leaf::var("Sum1"), " = ", leaf::var("Sum"), " in "];
+        let legacy_doc = legacy_gen
+            .wrap_body_with_nlr_catch(inner_body, &legacy_token, NlrBoundary::ActorReply)
+            .to_pretty_string();
+
+        let frame = FrameId::new(1);
+        let ir = vec![
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ActorReply,
+                token: TokenId::new(0),
+                frame,
+                span: span(),
+            },
+            ThreadedStmt::Bind {
+                target: local("sum", 1, frame),
+                source: local("sum", 0, frame),
+                op: BindOp::Direct(ValueRef::Version(local("sum", 0, frame))),
+                shadow_write: false,
+                span: span(),
+            },
+        ];
+        let mut render_gen = CoreErlangGenerator::new("dual_run_nlr");
+        let mut ctx = RenderCtx::new(&mut render_gen);
+        let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
+
+        assert_eq!(rendered_doc, legacy_doc);
     }
 }
