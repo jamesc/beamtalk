@@ -350,8 +350,9 @@ reproduces a hand-written reference, not that it reproduces production.
        /// Static per-construct function name — "while", "loop", "repeat"
        /// — never gensym'd in production (see Gap 2's "loop-fn-name"
        /// finding). Supplied by the caller, mirroring
-       /// `CountedLoopFrame::fn_name`.
-       fn_name: EcoString,
+       /// `CountedLoopFrame::fn_name`, whose field type this matches
+       /// (`control_flow/mod.rs:1116`).
+       fn_name: String,
        mode: ThreadingMode,
        frame: FrameId,
        /// Present only for counted loops. Not a VersionedVar — see
@@ -490,7 +491,7 @@ loop-function name is *also* gensym'd (`ctx.fresh_temp_var("Loop")`,
 never gensyms this name — `while_loops.rs:327` uses the static literal
 `"while"`, and `CountedLoopFrame::fn_name` (`control_flow/mod.rs:1116`)
 carries static literals (`"repeat"`, `"loop"`). This is folded into Gap
-1's `ConditionalLoop::fn_name: EcoString` field (supplied by the caller,
+1's `ConditionalLoop::fn_name: String` field (supplied by the caller,
 never minted by `render`) rather than treated as a third, separate gap.
 
 **Design options.**
