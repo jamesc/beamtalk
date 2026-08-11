@@ -921,21 +921,50 @@ impl<'g> RenderCtx<'g> {
     /// discipline, narrowed to just the two loop-context flags
     /// [`Self::resolve_prefix`] reads (ADR 0111 §Addendum: "loop-context
     /// `StateAcc`/`State` prefix selection... decided at render time").
+    ///
+    /// RAII-restored via [`LoopContextGuard`]'s `Drop` impl — not a plain
+    /// save/set/call/restore sequence — so a panic inside `f` still leaves
+    /// `self.generator`'s flags correctly restored, matching
+    /// [`CoreErlangGenerator::enter_branch_context`]'s own panic-safety
+    /// guarantee (`BranchContextGuard`) rather than merely resembling it.
     fn with_loop_context<T>(
         &mut self,
         flags: LoopContextFlags,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        let guard = LoopContextGuard::enter(self, flags);
+        f(guard.ctx)
+    }
+}
+
+/// RAII guard restoring [`CoreErlangGenerator::in_loop_body`]/
+/// `in_hybrid_loop` to their pre-[`RenderCtx::with_loop_context`] values on
+/// drop — including on unwind, mirroring [`BranchContextGuard`]'s
+/// panic-safety discipline (this module's render path is currently
+/// infallible, but a guard costs nothing extra and keeps the two save/
+/// restore mechanisms in this file at parity instead of one silently being
+/// weaker than the other it's explicitly modeled after).
+struct LoopContextGuard<'a, 'g> {
+    ctx: &'a mut RenderCtx<'g>,
+    saved: LoopContextFlags,
+}
+
+impl<'a, 'g> LoopContextGuard<'a, 'g> {
+    fn enter(ctx: &'a mut RenderCtx<'g>, flags: LoopContextFlags) -> Self {
         let saved = LoopContextFlags {
-            in_loop_body: self.generator.in_loop_body,
-            in_hybrid_loop: self.generator.in_hybrid_loop,
+            in_loop_body: ctx.generator.in_loop_body,
+            in_hybrid_loop: ctx.generator.in_hybrid_loop,
         };
-        self.generator.in_loop_body = flags.in_loop_body;
-        self.generator.in_hybrid_loop = flags.in_hybrid_loop;
-        let result = f(self);
-        self.generator.in_loop_body = saved.in_loop_body;
-        self.generator.in_hybrid_loop = saved.in_hybrid_loop;
-        result
+        ctx.generator.in_loop_body = flags.in_loop_body;
+        ctx.generator.in_hybrid_loop = flags.in_hybrid_loop;
+        Self { ctx, saved }
+    }
+}
+
+impl Drop for LoopContextGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.ctx.generator.in_loop_body = self.saved.in_loop_body;
+        self.ctx.generator.in_hybrid_loop = self.saved.in_hybrid_loop;
     }
 }
 
@@ -1032,23 +1061,31 @@ fn render_threaded(
 }
 
 /// Builds `letrec 'FnName'/arity = fun (Param1, .., ParamN) -> <body> apply
-/// 'FnName'/arity (<produces>) in apply 'FnName'/arity (<Param1, ..,
-/// ParamN>)` — the shared skeleton behind [`ThreadingMode::DirectParams`]
+/// 'FnName'/arity (<produces>) in apply 'FnName'/arity (<OuterArg1, ..,
+/// OuterArgN>)` — the shared skeleton behind [`ThreadingMode::DirectParams`]
 /// (`loop_context: None`) and [`ThreadingMode::Hybrid`] (`loop_context:
-/// Some(..)`, flipping `in_loop_body`/`in_hybrid_loop` for the body render
-/// so any `VersionPrefix::State` reference inside resolves the same way
-/// `generate_hybrid_loop_body` makes it resolve live: `State`/`StateN`, not
-/// `StateAcc`/`StateAccN`).
+/// Some(..)`, flipping `in_loop_body`/`in_hybrid_loop` for the `fun`
+/// declaration/body/recursive-call render so any `VersionPrefix::State`
+/// reference among them resolves the same way `generate_hybrid_loop_body`
+/// makes it resolve live: `State`/`StateN`, not `StateAcc`/`StateAccN`).
 ///
-/// `produces`' own (post-body) versions render as both the recursive call's
-/// arguments AND — at version 0 in `frame`, the construct's entry
-/// parameters — the fun's parameter list and the outer initial call's
-/// arguments: [`VersionedVar::render_name`] names a `Local` var purely from
-/// `(name, version)`, never `frame`, so a loop-threaded local's entry-param
-/// name and its enclosing scope's same-identity reference are the same
-/// text by construction — exactly how the real direct-params/hybrid
-/// generators reuse `to_core_erlang_var`-derived names on both sides
-/// (`while_loops.rs`'s `initial_direct_args`/`param_list_doc`).
+/// `produces`' own (post-body) versions render as the `fun`'s declared
+/// parameters AND the recursive self-call's arguments — both textually
+/// inside the same `fun` block as `body_doc`, so both resolve under the
+/// loop's OWN context (`render_in_loop_body`, below). The OUTER initial
+/// call is different: it is the calling scope's own reference to
+/// `produces` at version 0, so it resolves under whatever context was
+/// already ambient *before* this `Threaded` node — never the loop's own.
+/// For a `Local`-prefixed var these two resolutions coincide
+/// ([`VersionedVar::render_name`] names it purely from `(name, version)`,
+/// context-independent — the common case, matching how the real
+/// direct-params/hybrid generators reuse `to_core_erlang_var`-derived names
+/// on both sides, `while_loops.rs`'s `initial_direct_args`/
+/// `param_list_doc`); for a `State`-prefixed var nested inside a
+/// differently-flagged ambient loop, they do NOT (the `fun`'s formal
+/// parameter and the outer call's argument are legitimately different
+/// names — a `fun`'s parameter name never has to match its caller's
+/// argument expression).
 fn render_loop_letrec(
     frame: FrameId,
     body: &[ThreadedStmt],
@@ -1059,37 +1096,47 @@ fn render_loop_letrec(
     let fn_name = ctx.fresh_temp_var("Loop");
     let arity = produces.len();
 
-    let entry_params: Vec<Document<'static>> = produces
-        .iter()
-        .map(|v| leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame))))
-        .collect();
-    let param_list = join(entry_params.clone(), &Document::Str(", "));
+    // The OUTER initial call's arguments — this is the calling scope's own
+    // reference to `produces` at version 0, so it must resolve under
+    // whatever context was already ambient *before* this `Threaded` node,
+    // never the loop's own context (that would rename a var the caller
+    // never bound under).
+    let outer_args = join(
+        produces
+            .iter()
+            .map(|v| leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))),
+        &Document::Str(", "),
+    );
 
-    // BT-3144 review: `final_args` renders the tail of the same `letrec` fun
-    // body as `body_doc` (the recursive self-call sits textually inside the
-    // `fun (...) -> <body_doc> apply ...` block), so it must resolve prefixes
-    // under the identical loop-context flags — computing it after
-    // `with_loop_context` has already restored the pre-loop ambient context
-    // would pick a different `State`/`StateAcc` prefix than `body_doc` bound
-    // whenever a Hybrid loop is nested inside a differently-flagged ambient
-    // context (e.g. inside a `StateAcc`-mode loop), producing a reference to
-    // an unbound Core Erlang variable.
-    let render_final_args = |ctx: &mut RenderCtx| {
-        join(
+    // BT-3144 review: `param_list` (the `fun (...)` declaration) and
+    // `final_args` (the recursive self-call's arguments) both sit textually
+    // inside the SAME `fun (...) -> <body_doc> apply ...` block as
+    // `body_doc`, so all three must resolve `produces`' prefixes under the
+    // identical loop-context flags — computing any of them under the
+    // pre-loop ambient context instead would pick a different
+    // `State`/`StateAcc` prefix than `body_doc` bound whenever a Hybrid loop
+    // is nested inside a differently-flagged ambient context (e.g. inside a
+    // `StateAcc`-mode loop), producing a reference to an unbound Core Erlang
+    // variable — the `fun`'s own declared parameter name must match every
+    // reference to it inside the `fun`'s body, including the recursive tail
+    // call.
+    let render_in_loop_body = |ctx: &mut RenderCtx| {
+        let param_list = join(
+            produces.iter().map(|v| {
+                leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))
+            }),
+            &Document::Str(", "),
+        );
+        let body_doc = render(body, ctx);
+        let final_args = join(
             produces.iter().map(|v| leaf::var(ctx.resolve_prefix(v))),
             &Document::Str(", "),
-        )
+        );
+        (param_list, body_doc, final_args)
     };
-    let (body_doc, final_args) = if let Some(flags) = loop_context {
-        ctx.with_loop_context(flags, |ctx| {
-            let body_doc = render(body, ctx);
-            let final_args = render_final_args(ctx);
-            (body_doc, final_args)
-        })
-    } else {
-        let body_doc = render(body, ctx);
-        let final_args = render_final_args(ctx);
-        (body_doc, final_args)
+    let (param_list, body_doc, final_args) = match loop_context {
+        Some(flags) => ctx.with_loop_context(flags, render_in_loop_body),
+        None => render_in_loop_body(ctx),
     };
 
     docvec![
@@ -1107,7 +1154,7 @@ fn render_loop_letrec(
         " in apply ",
         leaf::fname(fn_name, arity),
         " (",
-        join(entry_params, &Document::Str(", ")),
+        outer_args,
         ")",
     ]
 }
@@ -3260,21 +3307,27 @@ mod tests {
     }
 
     #[test]
-    fn render_loop_letrec_final_args_use_hybrid_context_even_when_nested_in_stateacc_ambient() {
+    fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nested_in_stateacc_ambient()
+     {
         // Regression test for `render_loop_letrec`'s loop-context ordering:
-        // the recursive `apply 'FnName'/N (<final_args>)` call sits inside
-        // the SAME `fun (...) -> <body_doc> apply ...` block as `body_doc`,
-        // so `final_args` must resolve `VersionPrefix::State` under the
-        // identical Hybrid context `body_doc` renders under — computing it
-        // after `with_loop_context` has already restored the ambient
-        // ("ancestor") ambient flags would pick a different `State`/
-        // `StateAcc` prefix, producing a reference to an unbound Core Erlang
-        // variable. Simulates a Hybrid loop nested inside an outer
-        // `StateAcc`-mode loop body (`in_loop_body = true, in_hybrid_loop =
-        // false` ambient — the exact shape that would trip this bug) to
-        // prove `final_args` still resolves `State1`/`State` (the Hybrid
-        // loop's own context), not `StateAcc1`/`StateAcc` (the outer
-        // ambient).
+        // the `fun (<param_list>) -> <body_doc> apply 'FnName'/N (<final_args>)`
+        // declaration, its body, and its recursive tail call are all the
+        // SAME `fun` block, so `param_list` and `final_args` must resolve
+        // `VersionPrefix::State` under the identical Hybrid context
+        // `body_doc` renders under — computing either of them under the
+        // pre-loop ambient context instead would name the `fun`'s declared
+        // parameter differently from what the body/recursive-call actually
+        // reference, producing invalid Core Erlang (a reference to a
+        // variable the `fun` never bound). The OUTER initial call remains
+        // the one place `produces` correctly resolves under ambient context
+        // — it's the calling scope's own reference, not the `fun`'s.
+        //
+        // Simulates a Hybrid loop nested inside an outer `StateAcc`-mode
+        // loop body (`in_loop_body = true, in_hybrid_loop = false` ambient —
+        // the exact shape that would trip this bug) to prove the `fun`
+        // declaration/body/recursive-call all agree on `State`/`State1`
+        // (the Hybrid loop's own context), while only the outer call uses
+        // `StateAcc` (the ambient it's actually invoked from).
         let frame = FrameId::new(1);
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::Hybrid,
@@ -3296,7 +3349,8 @@ mod tests {
         let mut render_gen = CoreErlangGenerator::new("dual_run_hybrid_nested");
         // Ambient context as if this `Threaded` node sits inside an outer
         // StateAcc-mode loop body — the pre-existing, pre-fix bug would have
-        // computed `final_args` under exactly this (wrong) ambient.
+        // computed `param_list`/`final_args` under exactly this (wrong)
+        // ambient.
         render_gen.in_loop_body = true;
         render_gen.in_hybrid_loop = false;
         let mut ctx = RenderCtx::new(&mut render_gen);
@@ -3304,11 +3358,12 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "letrec '_Loop1'/1 = fun (StateAcc) -> let State1 = State in \
+            "letrec '_Loop1'/1 = fun (State) -> let State1 = State in \
              apply '_Loop1'/1 (State1) in apply '_Loop1'/1 (StateAcc)",
-            "the recursive tail call must reference State1 (the Hybrid \
-             loop's own context), not StateAcc1 (the outer StateAcc \
-             ambient) — got: {rendered}"
+            "the fun declaration, body, and recursive tail call must all \
+             agree on State/State1 (the Hybrid loop's own context) — only \
+             the outer initial call should reference StateAcc (the outer \
+             StateAcc ambient) — got: {rendered}"
         );
     }
 
