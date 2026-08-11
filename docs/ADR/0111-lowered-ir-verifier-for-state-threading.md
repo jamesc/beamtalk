@@ -17,7 +17,7 @@ Implemented (2026-08-11)
 | 4 | [BT-3133](https://linear.app/beamtalk/issue/BT-3133) | Migrate list_ops (fold-shaped + early-exit) | L | [#3327](https://github.com/jamesc/beamtalk/pull/3327) |
 | 4 | [BT-3134](https://linear.app/beamtalk/issue/BT-3134) | Migrate conditionals + exception_handling | M | [#3326](https://github.com/jamesc/beamtalk/pull/3326) |
 | 4 | [BT-3135](https://linear.app/beamtalk/issue/BT-3135) | Migrate gen_server state threading + NLR + ShadowWriteMissing contract; delete the 2 routing debug_asserts | L | [#3329](https://github.com/jamesc/beamtalk/pull/3329) |
-| 5 | [BT-3136](https://linear.app/beamtalk/issue/BT-3136) | Close-out: verifier CI wiring, docs, status → Implemented | S | (this PR) |
+| 5 | [BT-3136](https://linear.app/beamtalk/issue/BT-3136) | Close-out: verifier CI wiring, docs, status → Implemented | S | [#3335](https://github.com/jamesc/beamtalk/pull/3335) |
 
 All seven phases landed on `main`. `just verify-threaded-ir` (BT-3136) now runs
 `threaded_ir::verify()` over the full `stdlib/test/*.bt` +
