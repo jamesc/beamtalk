@@ -30,6 +30,7 @@
 //! | [`float_lit`]    | `3.14` / `5.0`             | the `Literal::Float` arm of codegen       |
 //! | [`fname`]        | `'escaped_name'/arity`     | `docvec!["'", Document::String(f), "'/", …]` |
 //! | [`binary_lit`]   | `#{#<…>(…), …}#`            | `Document::String(Self::binary_string_literal(s))` |
+//! | [`annotated`]    | `( Expr -\| [Line, {'file', F}] )` | hand-rolled `-\|` annotation docvecs |
 
 use super::Document;
 use crate::codegen::core_erlang::CoreErlangGenerator;
@@ -196,6 +197,60 @@ pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(CoreErlangGenerator::binary_byte_segments(s.as_ref()))
 }
 
+/// A `.bt` source position: the file it came from and its 1-based line number.
+///
+/// Built by generator code from a byte-offset `Span` (via
+/// `CoreErlangGenerator::span_to_line`) plus the compilation's source path,
+/// then passed to [`annotated`] to attach the position to a Core Erlang node.
+#[derive(Debug, Clone)]
+pub struct BtSpan {
+    /// The `.bt` source file path, as recorded by the compilation unit.
+    pub file: String,
+    /// 1-based source line number.
+    pub line: u32,
+}
+
+impl BtSpan {
+    /// Creates a new `BtSpan` from a file path and 1-based line number.
+    #[must_use]
+    pub fn new(file: impl Into<String>, line: u32) -> Self {
+        Self {
+            file: file.into(),
+            line,
+        }
+    }
+}
+
+/// `( Expr -| [Line, {'file', Filename}] )` — attach a `.bt` source position to
+/// a Core Erlang node so it survives `core_scan`/`core_parse` into the BEAM
+/// `Line` chunk and runtime stack traces (BT-3119 spike, BT-3127).
+///
+/// The annotation list shape is load-bearing: it must be a bare integer line
+/// number *first*, followed by a `{'file', Filename}` tuple — this is the
+/// exact shape `v3_core.erl` itself emits for real `.erl` source. The
+/// `[{'file',...},{'line',...}]` shape (atom-tagged tuples for both) also
+/// parses as valid Core Erlang but is *silently ignored* by the OTP compiler
+/// frontend: `sys_core_fold:get_line/1` and `beam_core_to_ssa:line_anno/1`
+/// only recognize a leading bare integer or `{Line,Column}` pair as the line
+/// number, so that shape carries no location meaning at all. The regression
+/// test below pins the correct shape so this can't silently regress.
+///
+/// ```text
+/// annotated(var("X"), &BtSpan::new("foo.bt", 42)) => ( X -| [42, {'file', "foo.bt"}] )
+/// ```
+#[must_use]
+pub fn annotated(expr: Document<'static>, span: &BtSpan) -> Document<'static> {
+    docvec![
+        "( ",
+        expr,
+        " -| [",
+        int_lit(i64::from(span.line)),
+        ", {'file', ",
+        string_lit(&span.file),
+        "}] )"
+    ]
+}
+
 /// `count` literal space characters — a run of pretty-printer indentation.
 ///
 /// No escaping is meaningful: spaces are always safe Core Erlang text. The
@@ -309,5 +364,30 @@ mod tests {
         assert_eq!(whitespace(4).to_pretty_string(), "    ");
         assert_eq!(whitespace(0).to_pretty_string(), "");
         assert_eq!(whitespace(1).to_pretty_string(), " ");
+    }
+
+    #[test]
+    fn annotated_renders_bare_line_then_file_tuple() {
+        // BT-3119 spike: the shape MUST be [Line, {'file', Filename}] — a bare
+        // integer first, then the file tuple. The [{'file',...},{'line',...}]
+        // shape (atom-tagged tuples for both) also parses as Core Erlang but is
+        // silently ignored by sys_core_fold:get_line/1 and
+        // beam_core_to_ssa:line_anno/1, which only recognize a leading bare
+        // integer or {Line,Column} pair. This test pins the working shape so
+        // that silent-inert-annotation regression can't reappear.
+        let doc = annotated(var("X"), &BtSpan::new("foo.bt", 42));
+        assert_eq!(
+            doc.to_pretty_string(),
+            "( X -| [42, {'file', \"foo.bt\"}] )"
+        );
+    }
+
+    #[test]
+    fn annotated_escapes_file_path() {
+        let doc = annotated(var("X"), &BtSpan::new("has\"quote.bt", 1));
+        assert_eq!(
+            doc.to_pretty_string(),
+            "( X -| [1, {'file', \"has\\\"quote.bt\"}] )"
+        );
     }
 }

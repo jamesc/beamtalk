@@ -43,7 +43,7 @@ typed Value subclass: StackFrame
   ///
   /// ## Examples
   /// ```beamtalk
-  /// frame sourceLocation   // => "counter.erl:42"
+  /// frame sourceLocation   // => "counter.bt:42"
   /// ```
   sourceLocation -> String | Nil => @primitive
 
@@ -65,9 +65,13 @@ typed Value subclass: StackFrame
 
   /// Return the source file path as a string, or nil if unavailable.
   ///
+  /// Reports the original `.bt` source path for function heads and
+  /// message-send call sites in compiled code (BT-3127), not the compiled
+  /// Erlang module's own name.
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// frame file   // => "counter.erl"
+  /// frame file   // => "counter.bt"
   /// ```
   file -> String | Nil => @primitive
 
@@ -75,6 +79,6 @@ typed Value subclass: StackFrame
   ///
   /// ## Examples
   /// ```beamtalk
-  /// frame printString   // => "Counter>>dispatch/4 (counter.erl:42)"
+  /// frame printString   // => "Counter>>dispatch/4 (counter.bt:42)"
   /// ```
   printString -> String => @primitive
