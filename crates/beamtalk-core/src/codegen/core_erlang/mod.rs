@@ -187,38 +187,36 @@ pub enum CodeGenError {
     Format(#[from] fmt::Error),
 
     /// BT-3150: A self-send to a same-class class method (`self someSelector`) used
-    /// as a statement inside a `whileTrue:`/`timesRepeat:` loop body in a class
-    /// method.
+    /// as a statement inside a threaded loop or list-op body in a class method —
+    /// `whileTrue:`/`timesRepeat:` (`BodyKind::Letrec`) or `do:`/`collect:`/
+    /// `select:`/`inject:into:`/... (`BodyKind::Foldl*`).
     ///
     /// Every same-class class-method self-send routes through
     /// `emit_class_var_result_unwrap`'s `{class_var_result, Result, ClassVarsN}`
     /// unwrap convention (BT-412) — regardless of whether the callee actually
-    /// mutates a class var, since the caller can't know that statically. Loop
-    /// bodies thread only the loop's own local-variable `StateAcc` through their
-    /// recursive tail call; `ClassVarsN` is never part of that thread, so any
+    /// mutates a class var, since the caller can't know that statically. Neither
+    /// loop family threads `ClassVarsN` through its own per-iteration
+    /// accumulator (`Letrec`'s `StateAcc` recursive tail call, or a `Foldl*`
+    /// fold's own accumulator — `ThreadingPlan` only packs/unpacks
+    /// `threaded_locals`, i.e. user `:=` locals, never `ClassVars`), so any
     /// class-var mutation the self-send makes is discarded at the end of every
     /// iteration, and the class method's own final return still hands back the
     /// original pre-loop `ClassVars` regardless — the self-send analog of
     /// BT-3140's finding for direct field writes (`generate_field_assignment_open`'s
-    /// State/StateAcc threading has no class-var branch either). Confirmed
-    /// empirically: after fixing the originally-reported `core_parse_error`
-    /// syntax bug (a doubled `in in` from the same open let-chain), a mutating
-    /// count stayed at `0` across 3 loop iterations instead of accumulating —
-    /// a compile-time rejection is safer than a silent runtime no-op.
+    /// State/StateAcc threading has no class-var branch either, and is rejected
+    /// the same body-kind-agnostic way via `is_class_var_assignment`). Confirmed
+    /// empirically for both a `whileTrue:` loop and a `do:` body: a mutating
+    /// count stayed at `0` across every iteration instead of accumulating — a
+    /// compile-time rejection is safer than a silent runtime no-op.
     #[error(
-        "Cannot send '{selector}' to self inside this loop body at {location}: \
+        "Cannot send '{selector}' to self inside this loop/list-op body at {location}: \
              a self-send to a class method can't thread class-variable mutations back \
-             through whileTrue:/timesRepeat: loop bodies — any mutation '{selector}' \
-             makes is silently discarded by the time the loop finishes.\n\n\
-             Fix: Accumulate what you need in a local variable inside the loop, then \
-             make the self-send once after the loop with the aggregated result:\n\
-             \x20 // Instead of:\n\
-             \x20 [cond] whileTrue: [self {selector}. ...].\n\
-             \x20 \n\
-             \x20 // Write:\n\
-             \x20 count := 0.\n\
-             \x20 [cond] whileTrue: [count := count + 1. ...].\n\
-             \x20 count timesRepeat: [self {selector}]."
+             through a threaded loop or list-op body (whileTrue:/timesRepeat:/do:/collect:/\
+             select:/...) — any mutation '{selector}' makes is silently discarded by the \
+             time the loop finishes.\n\n\
+             Fix: Accumulate what each call needs into a local variable (or collection) \
+             inside the loop, then make the self-send(s) once after the loop finishes, \
+             outside the threaded body."
     )]
     ClassMethodSelfSendInThreadedLoopBody {
         /// The selector being self-sent.

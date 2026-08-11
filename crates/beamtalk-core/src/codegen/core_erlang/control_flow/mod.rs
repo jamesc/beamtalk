@@ -1510,23 +1510,30 @@ impl CoreErlangGenerator {
                         &dispatch_var,
                     );
                 }
-            } else if matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send(expr) {
-                // BT-3150: a self-send to a same-class class method inside a
-                // whileTrue:/timesRepeat: loop body routes through
-                // `emit_class_var_result_unwrap`, which leaves an *open*
-                // let-chain ending in `... in ` and rebinds `ClassVarsN` from
-                // the callee's own `{class_var_result, Result, ClassVars}`
-                // reply. Letrec's recursive tail call threads only the loop's
-                // own local-variable `StateAcc` — `ClassVarsN` is never part
-                // of that thread — so any class-var mutation the self-send
-                // makes is silently discarded once the loop finishes (the
-                // self-send analog of BT-3140's finding for direct field
-                // writes, confirmed empirically after prototyping a fix that
-                // let this compile: a mutating count stayed at 0 across 3
-                // iterations instead of accumulating). Reject at compile time
-                // rather than emit code that's silently wrong — the same
-                // "can't thread this state shape back correctly here"
-                // category as BT-2792's `FieldAssignmentInUnsupportedBlock`.
+            } else if self.is_class_method_self_send(expr) {
+                // BT-3150: a self-send to a same-class class method inside any
+                // threaded loop body — `whileTrue:`/`timesRepeat:` (`Letrec`)
+                // *or* `do:`/`collect:`/`select:`/`inject:into:`/... (`Foldl*`)
+                // — routes through `emit_class_var_result_unwrap`, which
+                // leaves an *open* let-chain ending in `... in ` and rebinds
+                // `ClassVarsN` from the callee's own
+                // `{class_var_result, Result, ClassVars}` reply. Neither
+                // family threads `ClassVarsN` through its per-iteration
+                // accumulator the way it threads `StateAcc`/the fold's own
+                // list-op accumulator (`ThreadingPlan::generate_pack_prefix`/
+                // `generate_exit_stateacc` only pack/unpack `threaded_locals`
+                // — user `:=` locals — never `ClassVars`) — so any class-var
+                // mutation the self-send makes is silently discarded once the
+                // loop/fold finishes (the self-send analog of BT-3140's
+                // finding for direct field writes, confirmed empirically for
+                // both a `Letrec` loop and a `do:` body: a mutating count
+                // stayed at 0 across all iterations instead of accumulating).
+                // Reject at compile time rather than emit code that's
+                // silently wrong — the same "can't thread this state shape
+                // back correctly here" category as BT-2792's
+                // `FieldAssignmentInUnsupportedBlock`, and body-kind-agnostic
+                // like BT-3140's `is_class_var_assignment` guard in
+                // `generate_field_assignment_open` (`dispatch_codegen.rs`).
                 let selector = if let Expression::MessageSend { selector, .. } = expr {
                     selector.name().to_string()
                 } else {

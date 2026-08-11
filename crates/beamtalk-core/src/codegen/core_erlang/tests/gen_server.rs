@@ -3758,6 +3758,95 @@ fn test_class_method_self_send_after_loop_still_compiles() {
 }
 
 #[test]
+fn test_class_method_self_send_alongside_local_in_do_body_is_compile_error() {
+    // BT-3150 review follow-up: the `Letrec` (whileTrue:/timesRepeat:) guard alone
+    // left the identical gap open for `Foldl*` bodies (do:/collect:/select:/
+    // inject:into:/...) — `ThreadingPlan` threads only `threaded_locals` (user
+    // `:=` locals) through a fold's accumulator, never `ClassVars`, so a
+    // class-method self-send inside a `do:` block with a co-occurring local
+    // mutation (which is what actually routes it through
+    // `generate_threaded_loop_body_inner` in the first place) loses its
+    // class-var mutation exactly like the `whileTrue:` case — confirmed
+    // empirically: `runs` stayed at 0 across all 3 list elements instead of
+    // accumulating. The guard was widened from `Letrec`-only to all `BodyKind`s
+    // to close this.
+    let src = "Value subclass: DriverDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    total := 0\n    aList do: [:x | self bump. total := total + x]\n    total";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driverdo").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { selector, .. }) => {
+            assert_eq!(selector, "bump");
+        }
+        other => panic!(
+            "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method \
+             self-send inside a do: body with a co-occurring local mutation. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_class_method_self_send_alongside_local_in_select_body_is_compile_error() {
+    // BT-3150 review follow-up: same gap, reached via `select:`'s predicate
+    // position (the self-send's *return value* is used, not just a discarded
+    // statement) — confirming the widened guard fires regardless of whether
+    // the self-send is a bare statement or the block's final/predicate
+    // expression, once a co-occurring local mutation routes the body through
+    // `generate_threaded_loop_body_inner`.
+    let src = "Value subclass: DriverSelect2\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    seen := 0\n    result := aList select: [:x | seen := seen + 1. self check: x]\n    result";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driverselect2").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { .. })
+        ),
+        "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method self-send \
+         used as select:'s predicate value, alongside a co-occurring local mutation. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bare_class_method_self_send_in_select_body_skips_loop_threading() {
+    // BT-3150 review follow-up (contrast case): a `select:`/`collect:`/`do:`
+    // block with ONLY a class-method self-send and no other local-variable
+    // mutation never needs state threading — mirroring
+    // `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
+    // for `Letrec`, it compiles as an ordinary block (never reaching
+    // `generate_threaded_loop_body`). NOTE: this does NOT mean it's
+    // runtime-safe — confirmed empirically that this shape also silently
+    // loses the class-var mutation (`runs` stayed 0), the same way a bare
+    // class-var *field* write in a stored/passed block is caught by the
+    // pre-existing `FieldAssignmentInUnsupportedBlock`/`validate_stored_closure`
+    // guard (BT-1346/BT-2792) — except that guard only walks a block's field
+    // writes, not self-sends, so this self-send variant currently slips
+    // through uncaught. Tracked as a follow-up (BT-3151) rather than fixed
+    // here: it's a different code path (block-mutation analysis in
+    // `block_analysis.rs`, not `generate_threaded_loop_body_inner`) than the
+    // one this PR's guard covers.
+    let src = "Value subclass: DriverSelect\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList select: [:x | self check: x]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driverselect").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "A select: body with only a class-method self-send (no local var) should not \
+         reach the threaded-loop codegen path at all. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_class_var_mutation_emits_shadow_write() {
     // ADR 0110 (BT-3032/BT-3037): a top-frame class-var mutation in a class
     // method must write the just-updated ClassVars map into the
