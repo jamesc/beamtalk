@@ -530,6 +530,11 @@ impl CoreErlangGenerator {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
             }
+            // BT-3151: falling through to the stdlib's own tail-recursive
+            // `Integer>>timesRepeat:` — a same-process, in-process call, same
+            // as `select:`/`do:`. See
+            // `check_no_unsafe_class_method_self_sends`'s doc comment.
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
         }
         Ok(None)
     }
@@ -565,6 +570,8 @@ impl CoreErlangGenerator {
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
                 return Ok(Some(doc));
             }
+            // BT-3151: see the analogous check in `try_generate_times_repeat`.
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
         }
         Ok(None)
     }
@@ -604,6 +611,8 @@ impl CoreErlangGenerator {
                 )?;
                 return Ok(Some(doc));
             }
+            // BT-3151: see the analogous check in `try_generate_times_repeat`.
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
         }
         Ok(None)
     }

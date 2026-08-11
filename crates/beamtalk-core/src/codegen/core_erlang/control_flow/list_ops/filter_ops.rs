@@ -56,6 +56,8 @@ impl CoreErlangGenerator {
 
         // list reject: is opposite of filter - we need to negate the predicate
         // BT-416: Add runtime is_list guard for non-list receivers
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");

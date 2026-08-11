@@ -87,6 +87,26 @@ impl CoreErlangGenerator {
         None
     }
 
+    /// BT-3151 review follow-up: checks a bare (no-mutation-threading) list-op
+    /// block body for a class-var-mutating self-send. Call this after
+    /// `block_needs_mutation_threading` returns `None`, before falling
+    /// through to a plain/BIF dispatch that compiles the block via
+    /// `generate_block` (or `expression_doc`/`generate_erlang_interop_wrapper`
+    /// on top of it) — that fallback has no way to thread a classState
+    /// mutation back to the class method that owns it. See
+    /// `check_no_unsafe_class_method_self_sends`'s doc comment for the full
+    /// rationale.
+    pub(in crate::codegen::core_erlang) fn check_bare_list_op_block_self_sends(
+        &self,
+        body: &Expression,
+    ) -> Result<()> {
+        if let Some(block) = Self::extract_block_literal(body) {
+            let analysis = block_analysis::analyze_block(block);
+            self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
+        }
+        Ok(())
+    }
+
     pub(in crate::codegen::core_erlang) fn generate_simple_list_op(
         &mut self,
         receiver: &Expression,
@@ -100,6 +120,13 @@ impl CoreErlangGenerator {
             "filter" => "select:",
             _ => operation,
         };
+
+        // BT-3151: `do:`/`collect:`/`select:` all route through here — a
+        // same-class mutating self-send inside a bare block has no way to
+        // thread its class-var mutation back (this always runs in-process,
+        // never a genuine cross-class gen_server call). See
+        // `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
 
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;

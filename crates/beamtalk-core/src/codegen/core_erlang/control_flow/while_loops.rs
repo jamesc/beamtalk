@@ -226,6 +226,12 @@ impl CoreErlangGenerator {
         // Generate condition inside branch context
         let cond_doc = self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
+                // BT-3151: this condition block bypasses `generate_block`'s own
+                // self-send check by calling `generate_block_body` directly —
+                // see `check_no_unsafe_class_method_self_sends`'s doc comment.
+                let analysis =
+                    crate::codegen::core_erlang::block_analysis::analyze_block(cond_block);
+                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
                 this.generate_block_body(cond_block)
             } else {
                 this.generate_expression(condition)
@@ -277,6 +283,7 @@ impl CoreErlangGenerator {
     ///
     /// Uses `fun (Var1, ..., VarN)` instead of `fun (StateAcc)`.
     /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
+    #[allow(clippy::too_many_lines)] // direct-params state-threading codegen, BT-1275
     fn generate_while_loop_direct(
         &mut self,
         condition: &Expression,
@@ -352,6 +359,10 @@ impl CoreErlangGenerator {
 
         let cond_doc = self.with_branch_context(|this| {
             if let Expression::Block(cond_block) = condition {
+                // BT-3151: see the analogous check in `generate_while_loop`.
+                let analysis =
+                    crate::codegen::core_erlang::block_analysis::analyze_block(cond_block);
+                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
                 this.generate_block_body(cond_block)
             } else {
                 this.generate_expression(condition)
@@ -647,7 +658,11 @@ impl CoreErlangGenerator {
             let prev_hybrid = this.in_hybrid_loop;
             this.in_hybrid_loop = true;
             let result = if let Expression::Block(cond_block) = condition {
-                this.generate_block_body(cond_block)
+                // BT-3151: see the analogous check in `generate_while_loop`.
+                let analysis =
+                    crate::codegen::core_erlang::block_analysis::analyze_block(cond_block);
+                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)
+                    .and_then(|()| this.generate_block_body(cond_block))
             } else {
                 this.generate_expression(condition)
             };

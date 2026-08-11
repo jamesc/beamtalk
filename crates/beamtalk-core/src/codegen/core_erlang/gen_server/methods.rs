@@ -2915,6 +2915,17 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
+        // BT-3151: Populate the class-var-mutating selector set (transitive
+        // closure over same-class self-sends) — see
+        // `compute_class_var_mutating_selectors`'s doc comment. Depends on
+        // `class_var_names` above, so must run after it; independent of
+        // `class_method_selectors` above (recomputes its own local view).
+        *self.class_var_mutating_selectors_mut() =
+            crate::codegen::core_erlang::block_analysis::compute_class_var_mutating_selectors(
+                class,
+                self.class_var_names(),
+            );
+
         // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
         // This allows `ClassName slot: value` inside a class method to route to the correct
         // class-side constructor instead of falling through to the instance-side getter.

@@ -864,6 +864,84 @@ impl CoreErlangGenerator {
         None
     }
 
+    /// BT-3151: Rejects a same-class self-send inside a block whose target
+    /// selector isn't provably free of class-variable mutation (see
+    /// `ClassMethodSelfSendInUnthreadedBlock`'s doc comment for the full
+    /// rationale) — such a block has no way to thread a classState mutation
+    /// back to the class method that owns it, silently losing it otherwise.
+    ///
+    /// Scoped to class-method context only (this is a classState concern,
+    /// not an actor-state one), and gated on the class actually declaring
+    /// class variables: with none, there is no classState a self-send could
+    /// possibly lose, so the conservative "not defined locally" fallback
+    /// below (which can't see inherited methods — e.g. `Actor`'s
+    /// `spawnWith:` called from a native Actor subclass with no
+    /// `classState:` of its own, like `Subprocess`) would otherwise reject
+    /// sends to safe inherited methods it has no way to prove safe. See
+    /// `class_var_names`.
+    ///
+    /// Deliberately NOT called from `generate_block` itself — that function
+    /// is the universal block-to-closure compiler, reached from contexts
+    /// that are safe (a block passed to a *different* class's class-side
+    /// method always runs in that class's own `gen_server` process, so a
+    /// same-class self-send inside it is genuine cross-process messaging,
+    /// not the lossy in-process direct-call optimization — see ADR 0110
+    /// BT-3039 / `shadow_cross_class_owner.bt`) or merely unproven (an
+    /// `ifTrue:`/`ifFalse:` block reached via generic dynamic dispatch is a
+    /// long-documented ADR 0110 "known limitation" (BT-1550), not something
+    /// this guard introduces). `generate_block` has no way to tell those apart
+    /// from its own call site. Instead, called individually from each
+    /// call site *confirmed* unsafe (same-process, in-process self-send,
+    /// mutation empirically lost). Most list-op call sites share this via
+    /// `check_bare_list_op_block_self_sends` (`control_flow/list_ops/mod.rs`)
+    /// — `do:`/`collect:`/`select:`/`reject:`/`detect:`/`detect:ifNone:`/
+    /// `anySatisfy:`/`allSatisfy:`/`count:`/`flatMap:`/`takeWhile:`/
+    /// `dropWhile:`/`partition:`/`groupBy:`/`sort:`, plus the
+    /// `eachWithIndex:`/`do:separatedBy:` desugar fallbacks
+    /// (`enumeration_ops.rs`) — every one a bare, no-mutation-threading
+    /// block that falls through to a plain/BIF dispatch. Called directly
+    /// (not through that shared helper) at three shapes it doesn't cover:
+    /// `generate_list_inject`'s BT-1327 pure-block fast path (bypasses
+    /// `generate_block` entirely — calls `generate_block_body` directly to
+    /// avoid wrapper overhead), a `whileTrue:`/`whileFalse:` condition
+    /// block, a bare `timesRepeat:`/`to:do:`/`to:by:do:` body that falls
+    /// through to the stdlib's own `Integer`/value-type loop implementation,
+    /// and a block argument crossing the Erlang interop boundary in a
+    /// direct `(Erlang mod) fn: arg` call (`generate_direct_erlang_call`'s
+    /// keyword branch, `dispatch_codegen.rs`) — same
+    /// `generate_erlang_interop_wrapper` → `generate_block` mechanism as
+    /// the list-op call sites above.
+    pub(super) fn check_no_unsafe_class_method_self_sends(
+        &self,
+        analysis: &crate::codegen::core_erlang::block_analysis::BlockMutationAnalysis,
+        span: crate::source_analysis::Span,
+    ) -> Result<()> {
+        if !self.in_class_method() || self.class_var_names().is_empty() {
+            return Ok(());
+        }
+        let mut unsafe_selectors: Vec<&String> = analysis
+            .self_send_selectors
+            .iter()
+            .filter(|sel| {
+                self.class_var_mutating_selectors().contains(sel.as_str())
+                    || !self.class_method_selectors().contains(sel.as_str())
+            })
+            .collect();
+        if let Some(selector) = {
+            unsafe_selectors.sort_unstable();
+            unsafe_selectors.into_iter().next()
+        } {
+            return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
+                selector: selector.clone(),
+                location: self.span_to_line(span).map_or_else(
+                    || format!("offset {}", span.start()),
+                    |line| format!("line {line}"),
+                ),
+            });
+        }
+        Ok(())
+    }
+
     /// Generates code for a block (closure).
     ///
     /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
@@ -911,6 +989,29 @@ impl CoreErlangGenerator {
                 )
             })?;
         }
+
+        // BT-3151: deliberately NOT calling `check_no_unsafe_class_method_self_sends`
+        // here — `generate_block` is the universal block-to-closure compiler,
+        // reached both from genuinely unsafe bare-block call sites (a
+        // `select:`/`do:`/`inject:into:` argument, a `whileTrue:` condition —
+        // all same-process, in-process self-send contexts where the mutation
+        // is provably lost) AND from contexts that are safe or cannot be
+        // proven unsafe here: an `ifTrue:`/`ifFalse:` block reached via
+        // generic dynamic dispatch (a long-documented ADR 0110 "known
+        // limitation", not newly introduced by this guard), and a block
+        // passed to a message send whose receiver may be a *different*
+        // class's class-side method — which always executes in that class's
+        // own gen_server process (`docs/beamtalk-language-features.md` §
+        // Passing Blocks Through Class Methods), so a same-class self-send
+        // inside it is genuine cross-process messaging, not the in-process
+        // direct-call optimization, and correctly commits (confirmed by the
+        // pre-existing, passing `shadow_cross_class_owner.bt` fixture/
+        // `testCrossClassMutationDoesNotCorruptForeignProcessShadow`, ADR
+        // 0110 BT-3039). `generate_block` has no way to distinguish these
+        // from its own call site, so the check instead lives at each
+        // specific, individually-verified-unsafe call site: see
+        // `check_no_unsafe_class_method_self_sends`'s doc comment for the
+        // full list.
 
         let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
 
