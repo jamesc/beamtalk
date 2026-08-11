@@ -4163,6 +4163,81 @@ fn test_class_method_self_send_in_sort_block_is_compile_error() {
 }
 
 #[test]
+fn test_class_method_self_send_in_each_with_index_block_is_compile_error() {
+    // BT-3151 review follow-up: `eachWithIndex:` desugars to `inject:into:`
+    // (`try_generate_each_with_index`, `enumeration_ops.rs`) only when the
+    // user block needs mutation threading; a bare self-send-only block falls
+    // through to `Collection.bt`'s own self-hosted `eachWithIndex:` — a
+    // same-process, in-process call, same as every other list-op call site.
+    let src = "Value subclass: DriverEachWithIndex\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    aList eachWithIndex: [:item :i | self check: item]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@drivereachwithindex").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send inside an eachWithIndex: block must be caught by \
+         BT-3151's guard. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_in_do_separated_by_block_is_compile_error() {
+    // BT-3151 review follow-up: `do:separatedBy:`'s desugar
+    // (`try_generate_do_separated_by`, `enumeration_ops.rs`) has the same
+    // bare-block fallthrough shape as `eachWithIndex:` above — checks both
+    // the element and separator blocks.
+    let src = "Value subclass: DriverDoSeparatedBy\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    aList do: [:x | x] separatedBy: [self check: 0]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driverdoseparatedby").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send inside a do:separatedBy: separator block must be caught \
+         by BT-3151's guard. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_in_detect_if_none_block_alongside_mutating_predicate_is_compile_error()
+ {
+    // BT-3151 review follow-up: when `detect:ifNone:`'s predicate needs
+    // mutation threading (a co-occurring local-var mutation), execution
+    // routes through `generate_list_detect_if_none_with_mutations`, which
+    // compiles `if_none` independently via `expression_doc` →
+    // `generate_block` — a bare, unthreaded block regardless of what the
+    // predicate does. A mutating self-send hidden only in `if_none` (not
+    // the predicate) must still be caught.
+    let src = "Value subclass: DriverDetectIfNone\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    seen := 0\n    aList detect: [:x | seen := seen + 1. x > 1000] ifNone: [self check: 0]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driverdetectifnone").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send inside detect:ifNone:'s ifNone block must be caught by \
+         BT-3151's guard even when the predicate needs mutation threading. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_class_method_self_send_in_pure_inject_into_block_is_compile_error() {
     // BT-3151 follow-up: `generate_list_inject`'s BT-1327 pure-block fast
     // path calls `generate_block_body` directly (to emit an inline

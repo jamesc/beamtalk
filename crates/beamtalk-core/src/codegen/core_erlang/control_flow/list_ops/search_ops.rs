@@ -508,6 +508,11 @@ impl CoreErlangGenerator {
         let acc_state_var = self.fresh_temp_var("AccSt");
 
         // Compile the ifNone block upfront.
+        // BT-3151 review follow-up: `if_none` is compiled as an ordinary
+        // block via `expression_doc` → `generate_block`, independently of
+        // `body`'s own (accepted, documented) fold-threading gap — see
+        // `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(if_none)?;
         let none_code = self.expression_doc(if_none)?;
 
         if plan.use_tuple_acc {
