@@ -31,6 +31,7 @@ mod value_like_object;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
 use crate::ast::Module;
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Diagnostic;
 
 /// A single lint pass.
@@ -39,6 +40,22 @@ use crate::source_analysis::Diagnostic;
 /// [`Severity::Lint`] into `diagnostics`.
 pub(crate) trait LintPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>);
+}
+
+/// Build a [`ClassHierarchy`] for ancestor-aware class-kind resolution in lint passes.
+///
+/// `run_lint_passes` runs on the freshly-parsed module, before
+/// `apply_class_kind_writeback` (which only runs inside codegen). So
+/// `class.class_kind` is still `ClassKind::from_superclass_name`'s shallow,
+/// direct-superclass-only placeholder — it misses indirect Actor/Value
+/// subclasses (e.g. `class Foo extends Bar` where `Bar extends Actor`).
+/// Lint passes that need correct actor/value classification should build a
+/// hierarchy from this module and use `resolve_class_kind`, the single
+/// authority for actor/value classification (BT-3086), which walks the full
+/// ancestor chain (BT-3092, BT-3098).
+pub(crate) fn hierarchy_for_lint(module: &Module) -> ClassHierarchy {
+    let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
+    hierarchy_result.expect("ClassHierarchy::build is infallible")
 }
 
 /// Construct the ordered list of all active lint passes.

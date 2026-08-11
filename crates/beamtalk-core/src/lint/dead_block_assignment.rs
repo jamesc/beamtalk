@@ -39,8 +39,7 @@ use std::collections::HashSet;
 use crate::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
-use crate::lint::LintPass;
-use crate::semantic_analysis::ClassHierarchy;
+use crate::lint::{LintPass, hierarchy_for_lint};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Lint pass that warns about dead variable assignments inside blocks on value types.
@@ -52,16 +51,9 @@ impl LintPass for DeadBlockAssignmentPass {
         let mut scope = LintScope::new();
         walk_expr_seq(&module.expressions, &mut scope, None, diagnostics);
 
-        // BT-3092: `run_lint_passes` runs on the freshly-parsed module, before
-        // `apply_class_kind_writeback` (which only runs inside codegen). So
-        // `class.class_kind` here is still `ClassKind::from_superclass_name`'s
-        // shallow, direct-superclass-only placeholder — it misses indirect
-        // Actor subclasses (e.g. `class Foo extends Bar` where `Bar extends
-        // Actor`). Build a lightweight hierarchy from this module and use
-        // `resolve_class_kind`, the single authority for actor/value
-        // classification (BT-3086), which walks the full ancestor chain.
-        let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
-        let hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+        // BT-3092: see `hierarchy_for_lint` doc comment for why this is needed
+        // instead of `class.class_kind`.
+        let hierarchy = hierarchy_for_lint(module);
 
         for class in &module.classes {
             // Skip Actor subclasses (including indirect ones) — block
