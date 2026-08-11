@@ -37,19 +37,19 @@
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
-//! `VersionCounter` production path (BT-3131), and — as of BT-3132 —
-//! `while_loops.rs`'s and `counted_loops.rs`'s (via `control_flow/mod.rs`)
-//! direct-params/hybrid loop generators construct and [`verify`] a real
-//! [`ThreadedIr`] fragment for their per-iteration "optimized mode implies
-//! no `StateAcc` unpack" invariant, via [`verify_loop_unpack_invariant`] —
-//! this replaces the four `debug_assert!`s the pre-BT-3132 code used for the
-//! same check with [`VerifyError::ThreadingModeUnpackMismatch`]. The Phase
-//! A0 measurement prototype ([`prototype_direct_params_ir`], gated behind
-//! `BEAMTALK_THREADED_IR_WHILE=1`) remains alongside it — it measures a
-//! different, larger fixture (one `Bind` per threaded local's full
-//! per-iteration rebind) and its output is still discarded, unlike the
-//! unpack-invariant check's `Vec<VerifyError>`, which drives real
-//! debug-fail/release-diagnostic behavior.
+//! `VersionCounter` production path (BT-3131). BT-3132 originally added a
+//! per-loop [`ThreadedIr`]-fixture wrapper (`verify_loop_unpack_invariant`)
+//! checking `while_loops.rs`'s and `counted_loops.rs`'s (via
+//! `control_flow/mod.rs`) direct-params/hybrid loop generators' "optimized
+//! mode implies no `StateAcc` unpack" invariant, plus a Phase A0 measurement
+//! prototype (`prototype_direct_params_ir`, gated behind
+//! `BEAMTALK_THREADED_IR_WHILE=1`); BT-3154 deleted both, since the invariant
+//! both were checking already holds structurally —
+//! `ThreadingPlan::generate_unpack_at_iteration_start`'s own
+//! `if !use_direct_params && !use_hybrid_params` guard means an optimized
+//! mode can never reach the unpack-emitting branch in the first place.
+//! [`VerifyError::ThreadingModeUnpackMismatch`] and [`verify`]'s general
+//! check for it remain, exercised directly by hand-built-IR unit tests.
 //!
 //! As of BT-3133, every `list_ops/*.rs` and `dict_ops.rs` foldl call site —
 //! `do:`, `collect:`, `select:`/`reject:`, `inject:into:`, `anySatisfy:`/
@@ -166,10 +166,11 @@ impl FrameId {
 /// `Put`/`Unpack`, `NlrCatch`/`Return`, and `ValueRef::Version`/`Literal`
 /// remain unit-test-only until a control-flow generator migrates onto the
 /// full `ThreadedIr`/`verify()` pipeline (later issues — this issue is
-/// naming/identity unification only, not IR construction). `Local` stays
-/// exercised only by the Phase A0 measurement prototype
-/// (`prototype_direct_params_ir`). `#[allow(dead_code)]` here documents that
-/// expectation instead of forcing artificial non-test construction sites.
+/// naming/identity unification only, not IR construction). `Local` gets its
+/// own production call site as of BT-3133's
+/// [`verify_tuple_acc_unpack_invariant`]. `#[allow(dead_code)]` here
+/// documents that the remaining variants stay test-only for now, instead of
+/// forcing artificial non-test construction sites.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum VersionPrefix {
@@ -851,6 +852,12 @@ impl VerifyWalk<'_> {
 /// [`RenderCtx`] threads, it never becomes a second source of truth for
 /// their values — [`RenderCtx::with_loop_context`] always reads/writes them
 /// through the wrapped generator).
+///
+/// `#[allow(dead_code)]`: BT-3154 deleted the Phase A0 measurement
+/// prototype, the entire render pipeline's last production (non-test) call
+/// site — see [`render`]'s doc comment. Exercised only by unit tests until
+/// BT-3145's pilot migration points a real emission site at [`render`].
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct LoopContextFlags {
     in_loop_body: bool,
@@ -877,10 +884,15 @@ struct LoopContextFlags {
 /// (constructing a `RenderCtx` without a full generator instance); since
 /// [`CoreErlangGenerator::new`] is cheap (no I/O, pure data-structure
 /// init), [`lower_and_render`] pays that cost directly instead.
+///
+/// `#[allow(dead_code)]`: see [`LoopContextFlags`]'s doc comment — the whole
+/// render pipeline is exercised only by unit tests as of BT-3154.
+#[allow(dead_code)]
 pub(super) struct RenderCtx<'g> {
     generator: &'g mut CoreErlangGenerator,
 }
 
+#[allow(dead_code)]
 impl<'g> RenderCtx<'g> {
     pub(super) fn new(generator: &'g mut CoreErlangGenerator) -> Self {
         Self { generator }
@@ -944,11 +956,16 @@ impl<'g> RenderCtx<'g> {
 /// infallible, but a guard costs nothing extra and keeps the two save/
 /// restore mechanisms in this file at parity instead of one silently being
 /// weaker than the other it's explicitly modeled after).
+///
+/// `#[allow(dead_code)]`: see [`LoopContextFlags`]'s doc comment — the whole
+/// render pipeline is exercised only by unit tests as of BT-3154.
+#[allow(dead_code)]
 struct LoopContextGuard<'a, 'g> {
     ctx: &'a mut RenderCtx<'g>,
     saved: LoopContextFlags,
 }
 
+#[allow(dead_code)]
 impl<'a, 'g> LoopContextGuard<'a, 'g> {
     fn enter(ctx: &'a mut RenderCtx<'g>, flags: LoopContextFlags) -> Self {
         let saved = LoopContextFlags {
@@ -985,6 +1002,13 @@ impl Drop for LoopContextGuard<'_, '_> {
 /// consumes the REST of `ir` at its own list position as its try-body, then
 /// returns — nothing after an `NlrCatch` renders a second time outside the
 /// wrap.
+///
+/// `#[allow(dead_code)]`: BT-3154 deleted the Phase A0 measurement
+/// prototype (`control_flow::while_loops`'s `BEAMTALK_THREADED_IR_WHILE`
+/// gate), this function's last production (non-test) call site — see module
+/// docs §Status. Exercised only by unit tests until BT-3145's pilot
+/// migration points a real emission site here.
+#[allow(dead_code)]
 pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
     for (i, stmt) in ir.iter().enumerate() {
@@ -1024,8 +1048,10 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
 /// the issue body's point 5: delegates to [`render`] against a throwaway
 /// [`CoreErlangGenerator`] (cheap — no I/O) so every existing
 /// `lower_and_render(&ir).to_pretty_string()` test call survives verbatim.
-/// Also the entry point `control_flow::while_loops`'s Phase A0 measurement
-/// prototype uses (discarded there — see that call site's own comment).
+/// BT-3154 deleted `control_flow::while_loops`'s Phase A0 measurement
+/// prototype, this function's last production (non-test) caller — see
+/// [`render`]'s doc comment.
+#[allow(dead_code)]
 pub(super) fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
     let mut generator = CoreErlangGenerator::new("__threaded_ir_render_shim");
     let mut ctx = RenderCtx::new(&mut generator);
@@ -1037,6 +1063,9 @@ pub(super) fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
 /// [`ThreadingMode::Hybrid`] (the while-loop family modes this issue's
 /// dual-run harness proves parity for — see `render_tests` below);
 /// `TupleAcc`/`StateAcc` still flatten the body (module docs §Status).
+///
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_threaded(
     mode: &ThreadingMode,
     frame: FrameId,
@@ -1086,6 +1115,9 @@ fn render_threaded(
 /// parameter and the outer call's argument are legitimately different
 /// names — a `fun`'s parameter name never has to match its caller's
 /// argument expression).
+///
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_loop_letrec(
     frame: FrameId,
     body: &[ThreadedStmt],
@@ -1164,6 +1196,9 @@ fn render_loop_letrec(
 /// in` chain — `idx` starts at `gate_slots + 1` (1-based, past the leading
 /// gate slots) for the first target. Already full-fidelity (no generator
 /// context needed): this shape was real before BT-3144, unchanged here.
+///
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_tuple_acc_unpack(
     param: &AccParam,
     gate_slots: usize,
@@ -1185,6 +1220,8 @@ fn render_tuple_acc_unpack(
     Document::Vec(docs)
 }
 
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_value(value: &ValueRef, ctx: &RenderCtx) -> Document<'static> {
     match value {
         ValueRef::Version(v) => leaf::var(ctx.resolve_prefix(v)),
@@ -1193,6 +1230,8 @@ fn render_value(value: &ValueRef, ctx: &RenderCtx) -> Document<'static> {
     }
 }
 
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_bind(
     target: &VersionedVar,
     source: &VersionedVar,
@@ -1261,6 +1300,9 @@ fn render_bind(
 /// (module docs on [`ThreadedStmt::NlrCatch`]: "the true call site
 /// `ThreadedStmt::NlrCatch` faithfully models"). Zero re-derivation, so
 /// this can never drift from production's try/catch shape.
+///
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_nlr_catch(
     boundary: NlrBoundary,
     body_doc: Document<'static>,
@@ -1271,6 +1313,8 @@ fn render_nlr_catch(
         .wrap_body_with_nlr_catch(body_doc, &token_var, boundary)
 }
 
+/// `#[allow(dead_code)]`: see [`render`]'s doc comment (BT-3154).
+#[allow(dead_code)]
 fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Document<'static> {
     docvec![
         "{",
@@ -1279,72 +1323,6 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
         leaf::var(ctx.resolve_prefix(state)),
         "}"
     ]
-}
-
-// ─── Loop unpack-invariant check (BT-3132) ─────────────────────────────────
-
-/// Builds a minimal `ThreadedIr` fixture for one loop's per-iteration unpack
-/// step under `mode` (whichever of [`ThreadingMode::DirectParams`] /
-/// [`ThreadingMode::Hybrid`] the loop's `ThreadingPlan` resolved) and
-/// verifies it.
-///
-/// `unpack_emitted` must be exactly what
-/// `ThreadingPlan::generate_unpack_at_iteration_start` actually returned for
-/// this loop (non-empty iff every threaded local produced a `maps:get`
-/// unpack `Bind`) — this function checks the OBSERVED emission against the
-/// already-resolved mode, not a re-derivation of `ThreadingPlan`'s own
-/// `use_direct_params`/`use_hybrid_params` flags, so it stays a structural
-/// check on what was actually emitted rather than "the generator agreeing
-/// with itself" (ADR 0111 §Verifier honesty).
-///
-/// Replaces the four "unpack should emit no code" `debug_assert!`s
-/// (`while_loops.rs`'s direct-params/hybrid call sites, `counted_loops.rs`'s
-/// via `control_flow/mod.rs`'s direct/hybrid call sites) — their invariant
-/// is now [`VerifyError::ThreadingModeUnpackMismatch`].
-pub(super) fn verify_loop_unpack_invariant(
-    mode: ThreadingMode,
-    threaded_locals: &[String],
-    unpack_emitted: bool,
-    span: Span,
-) -> Vec<VerifyError> {
-    let frame = FrameId::new(1);
-    let body: Vec<ThreadedStmt> = if unpack_emitted {
-        threaded_locals
-            .iter()
-            .map(|local| {
-                let source = VersionedVar::new(VersionPrefix::Local(local.clone()), 0, frame);
-                let target = VersionedVar::new(VersionPrefix::Local(local.clone()), 1, frame);
-                ThreadedStmt::Bind {
-                    target,
-                    source,
-                    op: BindOp::Unpack {
-                        field: local.clone(),
-                    },
-                    shadow_write: false,
-                    span,
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let produces = body
-        .iter()
-        .filter_map(|stmt| match stmt {
-            ThreadedStmt::Bind { target, .. } => Some(target.clone()),
-            ThreadedStmt::Threaded { .. }
-            | ThreadedStmt::NlrCatch { .. }
-            | ThreadedStmt::Return(..)
-            | ThreadedStmt::TupleAccUnpack { .. } => None,
-        })
-        .collect();
-    verify(&[ThreadedStmt::Threaded {
-        mode,
-        frame,
-        body,
-        produces,
-        span,
-    }])
 }
 
 // ─── BT-3133 (ADR 0111 Phase C) invariant checks ───────────────────────────
@@ -1360,8 +1338,8 @@ pub(super) fn verify_loop_unpack_invariant(
 ///
 /// `use_tuple_acc` is the loop's already-resolved `ThreadingPlan::use_tuple_acc`
 /// decision; when `false`, this call site should never have been reached in
-/// `TupleAcc` mode at all — `fallback_reason` names why (mirrors
-/// `verify_loop_unpack_invariant`'s `mode` parameter, which is likewise the
+/// `TupleAcc` mode at all — `fallback_reason` names why (the same pattern
+/// `check_loop_unpack_invariant`'s deleted `mode` parameter used: the
 /// generator's own already-resolved decision, not a re-derivation). Class 1
 /// (`TupleAccUnpackModeMismatch`) has real teeth: `use_tuple_acc` is an
 /// externally-supplied bool that genuinely varies per call site, so this
@@ -1709,61 +1687,6 @@ pub(super) fn verify_simple_bind(
     verify(&ir)
 }
 
-// ─── Phase A0 measurement prototype ────────────────────────────────────────
-
-/// The env var gating the `whileTrue:`/`whileFalse:` direct-params
-/// `ThreadedIr` measurement prototype (ADR 0111 Phase A0). Mirrors the
-/// `BEAMTALK_CODEGEN_DIAGNOSTICS` pattern (`mod.rs`).
-const PROTOTYPE_ENV_VAR: &str = "BEAMTALK_THREADED_IR_WHILE";
-
-/// Whether the Phase A0 measurement prototype is enabled.
-pub(super) fn prototype_enabled() -> bool {
-    std::env::var(PROTOTYPE_ENV_VAR).is_ok_and(|v| v == "1")
-}
-
-/// Builds a representative (not production-consumed) `ThreadedIr` fixture for
-/// a direct-params `whileTrue:`/`whileFalse:` loop: one `Bind` per threaded
-/// local, modeling that local's per-iteration rebind, wrapped in a single
-/// `Threaded { mode: DirectParams, .. }` node. Proportional in size to the
-/// real loop (one `Bind` per threaded local) so the Phase A0 measurement
-/// reflects realistic construction cost.
-///
-/// Called only from the flagged prototype call site in
-/// `control_flow/while_loops.rs`; its result is verified and rendered, then
-/// discarded (see module docs §Status) — this function and its callers never
-/// affect generated output.
-pub(super) fn prototype_direct_params_ir(
-    threaded_locals: &[String],
-    span: Span,
-) -> Vec<ThreadedStmt> {
-    let frame = FrameId::new(1);
-    let body: Vec<ThreadedStmt> = threaded_locals
-        .iter()
-        .map(|local| {
-            let source = VersionedVar::new(VersionPrefix::Local(local.clone()), 0, frame);
-            let target = VersionedVar::new(VersionPrefix::Local(local.clone()), 1, frame);
-            ThreadedStmt::Bind {
-                target,
-                source: source.clone(),
-                op: BindOp::Direct(ValueRef::Version(source)),
-                shadow_write: false,
-                span,
-            }
-        })
-        .collect();
-    let produces = threaded_locals
-        .iter()
-        .map(|local| VersionedVar::new(VersionPrefix::Local(local.clone()), 1, frame))
-        .collect();
-    vec![ThreadedStmt::Threaded {
-        mode: ThreadingMode::DirectParams,
-        frame,
-        body,
-        produces,
-        span,
-    }]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1855,7 +1778,31 @@ mod tests {
 
     #[test]
     fn verify_silent_on_well_formed_direct_params_fixture() {
-        let ir = prototype_direct_params_ir(&["sum".to_string(), "count".to_string()], span());
+        let frame = FrameId::new(1);
+        let sum_source = local("sum", 0, frame);
+        let count_source = local("count", 0, frame);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::DirectParams,
+            frame,
+            body: vec![
+                ThreadedStmt::Bind {
+                    target: local("sum", 1, frame),
+                    source: sum_source.clone(),
+                    op: BindOp::Direct(ValueRef::Version(sum_source)),
+                    shadow_write: false,
+                    span: span(),
+                },
+                ThreadedStmt::Bind {
+                    target: local("count", 1, frame),
+                    source: count_source.clone(),
+                    op: BindOp::Direct(ValueRef::Version(count_source)),
+                    shadow_write: false,
+                    span: span(),
+                },
+            ],
+            produces: vec![local("sum", 1, frame), local("count", 1, frame)],
+            span: span(),
+        }];
         assert_eq!(verify(&ir), Vec::new());
     }
 
@@ -2409,148 +2356,27 @@ mod tests {
         // `letrec` (fresh-named via `fresh_temp_var("Loop")`, hence the
         // `_Loop1` — see `VariableContext::fresh_var`), not a flattened body
         // — the pre-BT-3144 skeleton behavior this test used to pin.
-        let ir = prototype_direct_params_ir(&["sum".to_string()], span());
+        let frame = FrameId::new(1);
+        let sum_source = local("sum", 0, frame);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::DirectParams,
+            frame,
+            body: vec![ThreadedStmt::Bind {
+                target: local("sum", 1, frame),
+                source: sum_source.clone(),
+                op: BindOp::Direct(ValueRef::Version(sum_source)),
+                shadow_write: false,
+                span: span(),
+            }],
+            produces: vec![local("sum", 1, frame)],
+            span: span(),
+        }];
         let rendered = lower_and_render(&ir).to_pretty_string();
         assert_eq!(
             rendered,
             "letrec '_Loop1'/1 = fun (Sum) -> let Sum1 = Sum in \
              apply '_Loop1'/1 (Sum1) in apply '_Loop1'/1 (Sum)"
         );
-    }
-
-    // ── Phase A0 prototype plumbing ──────────────────────────────────────
-
-    #[test]
-    fn prototype_direct_params_ir_produces_one_bind_per_local() {
-        let ir = prototype_direct_params_ir(&["sum".to_string(), "count".to_string()], span());
-        let ThreadedStmt::Threaded {
-            mode,
-            body,
-            produces,
-            ..
-        } = &ir[0]
-        else {
-            panic!("expected a single Threaded node, got: {ir:?}");
-        };
-        assert_eq!(*mode, ThreadingMode::DirectParams);
-        assert_eq!(body.len(), 2);
-        assert_eq!(produces.len(), 2);
-    }
-
-    #[test]
-    #[serial_test::serial(beamtalk_threaded_ir_env)]
-    fn prototype_enabled_reads_env_var() {
-        // SAFETY: serialised via #[serial]; the var is removed before this
-        // assertion so no other test's process-wide env state leaks in.
-        unsafe {
-            std::env::remove_var(PROTOTYPE_ENV_VAR);
-        }
-        assert!(!prototype_enabled());
-        // SAFETY: serialised via #[serial]; sets the var this test asserts on.
-        unsafe {
-            std::env::set_var(PROTOTYPE_ENV_VAR, "1");
-        }
-        assert!(prototype_enabled());
-        // SAFETY: serialised via #[serial]; restores the unset state.
-        unsafe {
-            std::env::remove_var(PROTOTYPE_ENV_VAR);
-        }
-    }
-
-    // ── verify_loop_unpack_invariant (BT-3132) ───────────────────────────
-    // Pins the production replacement for the four deleted
-    // "unpack should emit no code" `debug_assert!`s in `while_loops.rs` /
-    // `control_flow/mod.rs` (counted loops).
-
-    #[test]
-    fn verify_loop_unpack_invariant_silent_when_no_unpack_emitted_direct_params() {
-        // The expected, common case: direct-params mode with no unpack docs.
-        let errors = verify_loop_unpack_invariant(
-            ThreadingMode::DirectParams,
-            &["sum".to_string(), "count".to_string()],
-            false,
-            span(),
-        );
-        assert_eq!(errors, Vec::new());
-    }
-
-    #[test]
-    fn verify_loop_unpack_invariant_silent_when_no_unpack_emitted_hybrid() {
-        let errors =
-            verify_loop_unpack_invariant(ThreadingMode::Hybrid, &["n".to_string()], false, span());
-        assert_eq!(errors, Vec::new());
-    }
-
-    #[test]
-    fn verify_loop_unpack_invariant_fires_when_unpack_emitted_under_direct_params() {
-        // Simulates the regression the deleted debug_assert! guarded against:
-        // `generate_unpack_at_iteration_start` emitted unpack code even though
-        // the loop resolved to DirectParams mode. Asserts the exact error set
-        // (not just "contains a match") — pins that a single mismatched local
-        // produces exactly one finding, with no spurious UnboundVersion/
-        // NonLinearVersion noise from how the fixture is built.
-        let errors = verify_loop_unpack_invariant(
-            ThreadingMode::DirectParams,
-            &["sum".to_string()],
-            true,
-            span(),
-        );
-        assert_eq!(
-            errors.len(),
-            1,
-            "expected exactly one error, got: {errors:?}"
-        );
-        assert!(
-            matches!(
-                &errors[0],
-                VerifyError::ThreadingModeUnpackMismatch {
-                    mode: ThreadingMode::DirectParams,
-                    ..
-                }
-            ),
-            "expected ThreadingModeUnpackMismatch, got: {errors:?}"
-        );
-    }
-
-    #[test]
-    fn verify_loop_unpack_invariant_fires_when_unpack_emitted_under_hybrid() {
-        // Two threaded locals: pins that each gets its own
-        // ThreadingModeUnpackMismatch finding, with no cross-local
-        // interference (e.g. NonLinearVersion from misattributed versions).
-        let errors = verify_loop_unpack_invariant(
-            ThreadingMode::Hybrid,
-            &["n".to_string(), "sum".to_string()],
-            true,
-            span(),
-        );
-        assert_eq!(
-            errors.len(),
-            2,
-            "expected exactly two errors, got: {errors:?}"
-        );
-        assert!(
-            errors.iter().all(|e| matches!(
-                e,
-                VerifyError::ThreadingModeUnpackMismatch {
-                    mode: ThreadingMode::Hybrid,
-                    ..
-                }
-            )),
-            "expected only ThreadingModeUnpackMismatch findings, got: {errors:?}"
-        );
-    }
-
-    #[test]
-    fn verify_loop_unpack_invariant_silent_under_stateacc_with_unpack() {
-        // Sanity check: StateAcc mode legitimately emits unpack code, so this
-        // must stay silent — mirrors `verify_unpack_silent_inside_stateacc_mode`.
-        let errors = verify_loop_unpack_invariant(
-            ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
-            &["sum".to_string()],
-            true,
-            span(),
-        );
-        assert_eq!(errors, Vec::new());
     }
 
     // ── BT-3133 (ADR 0111 Phase C): invariant class 1 — flat
