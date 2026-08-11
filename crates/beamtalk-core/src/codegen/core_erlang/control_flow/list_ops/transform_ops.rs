@@ -36,6 +36,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:filter + erlang:length
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -264,6 +266,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:flatmap
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -828,6 +832,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:takewhile
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1081,6 +1087,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use lists:dropwhile
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1330,6 +1338,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:partition
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1631,6 +1641,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:group_by
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -1880,6 +1892,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: use beamtalk_list:sort_with
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");

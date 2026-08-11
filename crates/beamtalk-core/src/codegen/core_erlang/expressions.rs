@@ -892,18 +892,25 @@ impl CoreErlangGenerator {
     /// this guard introduces). `generate_block` has no way to tell those apart
     /// from its own call site. Instead, called individually from each
     /// call site *confirmed* unsafe (same-process, in-process self-send,
-    /// mutation empirically lost): `generate_simple_list_op`
-    /// (`do:`/`collect:`/`select:`), `generate_list_reject`,
-    /// `generate_list_detect`, `generate_list_inject`'s BT-1327 pure-block
-    /// fast path (which also bypasses `generate_block` — calls
-    /// `generate_block_body` directly to avoid wrapper overhead), a
-    /// `whileTrue:`/`whileFalse:` condition block, a bare (no local-var
-    /// mutation) `timesRepeat:`/`to:do:`/`to:by:do:` body that falls through
-    /// to the stdlib's own `Integer`/value-type loop implementation, and a
-    /// block argument crossing the Erlang interop boundary in a direct
-    /// `(Erlang mod) fn: arg` call (`generate_direct_erlang_call`'s keyword
-    /// branch, `dispatch_codegen.rs`) — same `generate_erlang_interop_wrapper`
-    /// → `generate_block` mechanism as the list-op call sites above.
+    /// mutation empirically lost). Most list-op call sites share this via
+    /// `check_bare_list_op_block_self_sends` (`control_flow/list_ops/mod.rs`)
+    /// — `do:`/`collect:`/`select:`/`reject:`/`detect:`/`detect:ifNone:`/
+    /// `anySatisfy:`/`allSatisfy:`/`count:`/`flatMap:`/`takeWhile:`/
+    /// `dropWhile:`/`partition:`/`groupBy:`/`sort:`, plus the
+    /// `eachWithIndex:`/`do:separatedBy:` desugar fallbacks
+    /// (`enumeration_ops.rs`) — every one a bare, no-mutation-threading
+    /// block that falls through to a plain/BIF dispatch. Called directly
+    /// (not through that shared helper) at three shapes it doesn't cover:
+    /// `generate_list_inject`'s BT-1327 pure-block fast path (bypasses
+    /// `generate_block` entirely — calls `generate_block_body` directly to
+    /// avoid wrapper overhead), a `whileTrue:`/`whileFalse:` condition
+    /// block, a bare `timesRepeat:`/`to:do:`/`to:by:do:` body that falls
+    /// through to the stdlib's own `Integer`/value-type loop implementation,
+    /// and a block argument crossing the Erlang interop boundary in a
+    /// direct `(Erlang mod) fn: arg` call (`generate_direct_erlang_call`'s
+    /// keyword branch, `dispatch_codegen.rs`) — same
+    /// `generate_erlang_interop_wrapper` → `generate_block` mechanism as
+    /// the list-op call sites above.
     pub(super) fn check_no_unsafe_class_method_self_sends(
         &self,
         analysis: &crate::codegen::core_erlang::block_analysis::BlockMutationAnalysis,

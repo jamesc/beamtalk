@@ -65,6 +65,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to simple BIF call (lists:any/2)
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -112,6 +114,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to simple BIF call (lists:all/2)
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -353,11 +357,8 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to BIF call (beamtalk_list:detect/2)
-        // BT-3151: see the analogous check in `generate_simple_list_op`.
-        if let Some(block) = Self::extract_block_literal(body) {
-            let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(block);
-            self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
-        }
+        // BT-3151: see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(body)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
@@ -427,6 +428,10 @@ impl CoreErlangGenerator {
         predicate: &Expression,
         if_none: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-3151: both blocks reach `generate_block` via `expression_doc`
+        // below — see `check_bare_list_op_block_self_sends`'s doc comment.
+        self.check_bare_list_op_block_self_sends(predicate)?;
+        self.check_bare_list_op_block_self_sends(if_none)?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let pred_var = self.fresh_temp_var("temp");

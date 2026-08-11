@@ -206,6 +206,11 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         if !self.enumeration_block_needs_threading(user_block) {
+            // BT-3151: falling through to `Collection.bt`'s own self-hosted
+            // `eachWithIndex:` (built on `do:`) — a same-process, in-process
+            // call, same as the other list-op call sites. See
+            // `check_bare_list_op_block_self_sends`'s doc comment.
+            self.check_bare_list_op_block_self_sends(block_arg)?;
             return Ok(None);
         }
 
@@ -257,6 +262,12 @@ impl CoreErlangGenerator {
         if !self.enumeration_block_needs_threading(element_block)
             && !self.enumeration_block_needs_threading(separator_block)
         {
+            // BT-3151: falling through to `Collection.bt`'s own self-hosted
+            // `do:separatedBy:` (built on `inject:into:`) — same-process,
+            // in-process call. See `check_bare_list_op_block_self_sends`'s
+            // doc comment.
+            self.check_bare_list_op_block_self_sends(element_arg)?;
+            self.check_bare_list_op_block_self_sends(separator_arg)?;
             return Ok(None);
         }
 

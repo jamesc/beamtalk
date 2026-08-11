@@ -4110,6 +4110,59 @@ fn test_class_method_self_send_in_erlang_interop_block_is_compile_error() {
 }
 
 #[test]
+fn test_class_method_self_send_in_any_satisfy_block_is_compile_error() {
+    // BT-3151 review follow-up: `anySatisfy:`/`allSatisfy:` (and every other
+    // sibling list-op in `control_flow/list_ops/` with the same
+    // `block_needs_mutation_threading`-gated "fall through to a bare/BIF
+    // call" shape — `detect:ifNone:`, `count:`, `flatMap:`, `takeWhile:`,
+    // `dropWhile:`, `partition:`, `groupBy:`, `sort:`, plus the
+    // `eachWithIndex:`/`do:separatedBy:` desugar fallbacks) were left
+    // unguarded by this PR's first push even though they're structurally
+    // identical to `select:`/`do:`/`collect:`. Now share the guard via
+    // `check_bare_list_op_block_self_sends`. This pins the exact repro from
+    // the review comment.
+    let src = "Value subclass: DriverAnySatisfy\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList anySatisfy: [:x | self check: x]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driveranysatisfy").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send inside an anySatisfy: block must be caught by \
+         BT-3151's guard, matching every other bare-block list-op call site. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_in_sort_block_is_compile_error() {
+    // BT-3151 review follow-up: pins `sort:` (a 2-arg comparator block) as
+    // another sibling covered by `check_bare_list_op_block_self_sends` — see
+    // `test_class_method_self_send_in_any_satisfy_block_is_compile_error`'s
+    // comment for the full list.
+    let src = "Value subclass: DriverSort\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class sorted: aList =>\n    aList sort: [:a :b | (self check: a) < (self check: b)]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driversort").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send inside a sort: comparator block must be caught by \
+         BT-3151's guard. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_class_method_self_send_in_pure_inject_into_block_is_compile_error() {
     // BT-3151 follow-up: `generate_list_inject`'s BT-1327 pure-block fast
     // path calls `generate_block_body` directly (to emit an inline
