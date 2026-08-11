@@ -2643,24 +2643,15 @@ impl CoreErlangGenerator {
         // `ThreadedStmt::NlrCatch` faithfully models (module docs on
         // `threaded_ir::ThreadedStmt::NlrCatch`) — every NLR try/catch this
         // generator ever emits (Actor/ClassMethod/ValueType alike) is built
-        // here. Constructing and verifying the node is a standalone
-        // structural check in isolation today (no version references to
-        // validate against); its `boundary` shape is also what
-        // `threaded_ir::verify_class_var_bind`'s `has_class_vars_nlr`
+        // here; its `boundary` shape is also what
+        // `threaded_ir::verify_class_var_bind`'s `at_method_top_frame`
         // fixtures reconstruct at the class-var Bind-emission sites
         // (`expressions.rs`, `dispatch_codegen.rs`) for the ADR 0110
-        // ShadowWriteMissing contract.
-        let nlr_catch_errors = threaded_ir::verify(&[threaded_ir::ThreadedStmt::NlrCatch {
-            boundary,
-            token: threaded_ir::TokenId::new(0),
-            frame: threaded_ir::FrameId::ROOT,
-            span: Span::default(),
-        }]);
-        self.report_threaded_ir_verify_errors(
-            &nlr_catch_errors,
-            "NLR catch boundary",
-            Span::default(),
-        );
+        // ShadowWriteMissing contract. No standalone `verify()` call here: a
+        // lone `NlrCatch` with no `Bind` can never trigger any
+        // `VerifyError` (`walk_stmt` treats it as a no-op), so constructing
+        // one on every NLR-catch wrap — a hot path — would pay a real
+        // allocation for a check that can't fire (caught in review).
 
         let vars = self.alloc_nlr_catch_vars();
         let nlr_arm_result = nlr_arm_result(&vars.val_var, &vars.state_var, boundary);
