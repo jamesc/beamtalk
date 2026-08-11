@@ -33,9 +33,15 @@ no later reload happens to re-check; from BT-2779), [BT-2805](https://linear.app
 retyped field, by list order, when a single reload retypes two or more
 fields; from BT-2780), and [BT-2806](https://linear.app/beamtalk/issue/BT-2806)
 (BT-2782's pre-save advisory: an untested compiler-port-exit degradation path
-in `recheck_image_class/2`, and a non-self-healing race where the precheck's
-ambient-cache restore can clobber a genuinely concurrent `register_class/2`
-commit). Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100
+in `recheck_image_class/2` and `recheck_owner_for_leaf_change/3`, and a
+non-self-healing race where the precheck's ambient-cache restore could
+clobber a genuinely concurrent `register_class/2` commit — both now resolved:
+the exit-catch path is covered by a regression test, and the restore race is
+closed by construction, not merely mitigated, by
+[BT-3109](https://linear.app/beamtalk/issue/BT-3109)'s per-request
+`class_hierarchy` overlay, which replaced the mutate-then-restore mechanism
+entirely so there is no shared state left to clobber; BT-2806 is Done).
+Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100
 (severity), 0022 (compiler port), 0104 (actor/`spawnWith:` checking).
 
 **Status:** Implemented — all five phases (BT-2776…BT-2783) landed: the
