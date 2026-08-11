@@ -1057,7 +1057,7 @@ pub(super) fn verify_loop_unpack_invariant(
 /// `TupleAccUnpack` node's own `gate_slots` are built from this single
 /// `gate_slots` argument below, so they cannot disagree at any real call
 /// site — only the hand-built-IR unit test
-/// (`verify_tuple_acc_unpack_invariant_fires_early_exit_gate_slot_mismatch`)
+/// (`verify_early_exit_gate_slot_mismatch_fires_when_node_disagrees_with_mode`)
 /// exercises the mismatch branch by deliberately diverging them. Unlike
 /// class 1, there is today no second, independently-derived source for
 /// `gate_slots` to disagree with (e.g. resolved from the op selector/kind
