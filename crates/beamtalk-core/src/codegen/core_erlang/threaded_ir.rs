@@ -6,8 +6,23 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! ## Status (BT-3133/BT-3134 — ADR 0111 Phase C list-op migration, Phase D
-//! `conditionals`/`exception_handling` slice)
+//! ## Status (as of BT-3136 close-out — see ADR 0111 §Addendum)
+//!
+//! `ThreadedIr` today is a **verification-only side channel**, not the
+//! emission input the ADR's pipeline diagram (§Pipeline shape) describes:
+//! every production `verify_*` entry point below synthesizes a small,
+//! throwaway `ThreadedIr` fixture from the generator's already-made
+//! decisions, calls [`verify`], and discards the fixture — `Document`
+//! construction still happens directly from AST + generator state, on a
+//! separate, unconnected path. This is ADR 0111's own Alternative 1b (§B2)
+//! shape, delivered under Option A's name; the honest accounting (what
+//! shipped vs. what the ADR claimed, with line-level evidence) lives in the
+//! ADR's Addendum, not here. [BT-3141](https://linear.app/beamtalk/issue/BT-3141)
+//! is the epic re-scoped to complete Option A (`ThreadedIr` as real emission
+//! input, single renderer, verifier on the true IR); this module's
+//! `lower_and_render` skeleton-fidelity shim and the `RenderCtx` design
+//! sketch in the ADR's Addendum are what that epic's renderer-foundation
+//! issue ([BT-3144](https://linear.app/beamtalk/issue/BT-3144)) builds on.
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/

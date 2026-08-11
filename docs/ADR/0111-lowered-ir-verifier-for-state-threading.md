@@ -26,6 +26,249 @@ routing/threading `debug_assert!`s this epic set out to replace are gone from
 source — see `docs/development/debugging.md` § ThreadedIr verifier for the
 `VerifyError` variant reference.
 
+## Addendum (2026-08-11): Delivered vs. designed
+
+This ADR's status stays **Implemented** — every phase in the table above
+shipped, is load-bearing, and stays. This addendum corrects the record on
+*what* shipped: BT-3128 delivered this ADR's own **Alternative 1b / Steelman
+Option B2** ("record decisions as they are made," §Alternatives Considered
+#1b) under Option A's name and pipeline diagram. `ThreadedIr` is a
+**verification-only side channel**, not the emission input the §Pipeline
+shape diagram commits to. `Document` construction still happens directly
+from AST + generator state, on a separate, unconnected path; the
+classifier/emitter dual computation the ADR's central argument for Option A
+over B2 says the IR should *remove by construction* (§Decision, "Why A
+still wins — narrowly") still exists — it is *checked*, not removed.
+[BT-3141](https://linear.app/beamtalk/issue/BT-3141) is the follow-up epic
+that completes Option A as originally designed; this section is the honest
+accounting that motivates it, plus the design commitments BT-3141's
+children build against.
+
+### What shipped (Option A's letter, not its substance)
+
+- **Counter unification (Phase A2 / BT-3131).** Real, in production.
+  `VersionedVar`/`VersionCounter` is the single implementation behind all
+  three of `CoreErlangGenerator`'s formerly-independent counters, with
+  frame identity and the `self_version` save/restore hole closed. This
+  piece never depended on the IR being the emission input — it is
+  typestate hardening (§Alternatives #5) that stands on its own.
+- **`debug_assert!` deletion.** All six of the originally-named
+  routing/threading `debug_assert!`s are gone from source, per the table
+  above (BT-3132's four unpack asserts, BT-3135's two routing asserts).
+- **Snapshot corpus expansion (Phase A3 / BT-3130)** and **CI wiring**
+  (`just verify-threaded-ir`, BT-3136) both landed as designed.
+- **The verifier itself runs, and finds real invariant violations** — but
+  only in the sense §Verifier honesty already scoped: it checks
+  *hand-assembled fixtures built from the generator's own already-made
+  decisions*, not the generator's actual `Document`-construction path.
+
+### What did not ship: single-sourcing ("one node, one emitter")
+
+The ADR's decisive argument for Option A over B2 (§Decision, "Why A still
+wins — narrowly") was that "B2 checks that two independently-computed
+decisions agree; A removes the second computation... A's IR is the decision
+record *and* the emission input, so an unrecorded decision cannot emit."
+None of the seven phases actually wired `ThreadedIr` into emission. The
+concrete evidence, all in
+`crates/beamtalk-core/src/codegen/core_erlang/threaded_ir.rs` unless noted:
+
+- **Every production `verify_*` entry point is a fixture-and-discard
+  wrapper**, not a lowering step. `verify_loop_unpack_invariant`,
+  `verify_tuple_acc_unpack_invariant`, `verify_tuple_acc_value_type_exclusion`,
+  `verify_nested_list_op_stateacc_compat`, and `verify_branch_frame_linearity`
+  each take the generator's *already-resolved* decision (a `bool`, a
+  `ThreadingMode`, a `usize` gate-slot count) as a parameter, build a
+  minimal `ThreadedIr` fragment that encodes that same decision, call
+  `verify()` on it, and return `Vec<VerifyError>` — the fragment is never
+  returned to the caller and never touches `Document` construction. The
+  real `Document` for the same construct is built separately, directly
+  from AST + generator state, by the unmigrated emitter code sitting right
+  next to the `verify_*` call.
+- **The `lower_and_render` test shim is explicitly not full-fidelity**
+  (`threaded_ir.rs`, doc comment on `lower_and_render`): "`Threaded` and
+  `NlrCatch` render at **skeleton fidelity only** — full `letrec`/try-catch
+  scaffolding requires fresh-variable allocation from `CoreErlangGenerator`
+  (`fresh_temp_var`, `alloc_nlr_catch_vars`) that this pure
+  `&[ThreadedStmt] -> Document` shim deliberately does not have access to."
+  A shim that cannot allocate fresh variables or NLR catch scaffolding
+  cannot be the real emitter for any construct that needs them — which is
+  most of what's in scope.
+- **`EarlyExitGateSlotMismatch` is a tautology today**
+  (`threaded_ir.rs:1097-1106`): the check compares the synthesized
+  `ThreadingMode::TupleAcc(gate_slots)` against the `TupleAccUnpack` node's
+  own `gate_slots` — but `verify_tuple_acc_unpack_invariant` builds *both*
+  from the single `gate_slots` argument it received, so they cannot
+  disagree at any real call site. Only a hand-built-IR unit test
+  (`verify_early_exit_gate_slot_mismatch_fires_when_node_disagrees_with_mode`)
+  exercises the mismatch branch. The check has no second, independently
+  derived source to disagree with — exactly the "two independently-computed
+  decisions" shape the ADR's own argument for A over B2 says the IR should
+  eliminate, still present here in a different guise: the fixture *encodes*
+  the single decision twice instead of computing it twice, so it can't
+  catch a real divergence either way.
+- **Branch-frame linearity is scaffolding, not a live regression guard**
+  (`threaded_ir.rs:1204-1214`, `verify_branch_frame_linearity`): the doc
+  comment states plainly that because the caller always allocates a fresh,
+  distinct `FrameId` per arm and the check only synthesizes a `Bind` chain
+  from a scalar `final_version` *count* (not the real per-arm mutation
+  sequence the generator produced), "no two arms can ever collide at any of
+  today's nine call sites... this smoke-tests the verifier's
+  `FrameId`/linearity plumbing... but cannot yet catch a real generator
+  bug." The comment attributes "giving it that teeth" to "BT-3135+ as it
+  migrates the mutation-`Bind` emission sites themselves onto
+  `ThreadedIr`" — but BT-3135 (Phase D, gen_server state threading + NLR +
+  `ShadowWriteMissing`) shipped as Done in the table above without doing
+  that migration; the promise landed on `main` unowned, attached to no
+  open issue, until this addendum names it via BT-3141.
+- **NLR relay is unmodeled at its one production emission site.**
+  `wrap_body_with_nlr_catch` (`mod.rs:2660`) is, per its own comment, "the
+  true call site `ThreadedStmt::NlrCatch` faithfully models" — but the
+  function builds its `try`/`catch` scaffolding directly with
+  `docvec!`/`leaf::*` and explicitly does *not* construct or verify a
+  `ThreadedIr` fragment: "No standalone `verify()` call here: a lone
+  `NlrCatch` with no `Bind` can never trigger any `VerifyError`... so
+  constructing one on every NLR-catch wrap — a hot path — would pay a real
+  allocation for a check that can't fire." That reasoning is sound *for the
+  check as designed*, but it also means the NLR boundary the ADR's IR was
+  meant to model (`ThreadedStmt::NlrCatch`, §The IR) has never been
+  constructed at a real call site — the `ShadowWriteMissing` contract
+  (§Worked example) is verified only via the class-var-`Bind` fixtures at
+  the mutation sites, never jointly with the NLR boundary it's stated
+  against.
+- **`ShadowWriteMissing`'s Erlang-side half is out of Rust-side reach by
+  design** (§Verifier honesty, unchanged by this addendum) — noted here
+  only because it means even a fully single-sourced Rust-side `ThreadedIr`
+  would still leave that cross-boundary conformance fixture as a separate
+  deliverable, not something single-sourcing subsumes.
+
+**Net effect:** the classifier/emitter dual computation the ADR set out to
+remove by construction is still a dual computation. What changed is that
+one side of it (the generator's decision) is now also *checked* against a
+purpose-built model of itself, via the counter-unification and verifier
+machinery — real diagnosis-quality value (§Consequences, Positive), but the
+B2 shape, not the A shape. Everything B2 was designed to deliver (§Steelman
+Option B2) is what actually shipped; the "IR's remaining unique
+contribution" the ADR's own language-designer steelman voice named —
+"single-sourcing (one node, one emitter) and the counter unification" — the
+counter-unification half shipped, the single-sourcing half did not.
+
+### Re-scope decision
+
+[BT-3141](https://linear.app/beamtalk/issue/BT-3141) ("Epic: ThreadedIr as
+emission input — complete ADR 0111 single-sourcing") is the re-scope that
+completes Option A as originally designed: lowering builds a real
+`ThreadedIr` from real generator state (not a fixture reconstructed from a
+decision already made), one renderer produces the `Document` from that real
+IR, and the verifier runs on the true emission input — closing the gap this
+addendum documents. This ADR's status stays **Implemented**; BT-3141 is
+**in progress** (this addendum's own issue is its first landed child) and
+tracked as a follow-up epic against this same architectural decision, not a
+new ADR, because it changes no decision recorded above — it finishes
+building what §Decision and §Pipeline shape already committed to.
+
+### Renderer design sketch
+
+The reason `lower_and_render` stops at skeleton fidelity is concrete, not
+incidental: rendering several `ThreadedStmt` shapes to real Core Erlang
+needs generator context a pure `&[ThreadedStmt] -> Document` function
+cannot have —
+
+- `fresh_temp_var` (`util.rs`) — fresh-variable allocation for `letrec`
+  loop scaffolding and intermediate binds;
+- `alloc_nlr_catch_vars` (`mod.rs:2587`) — the class/error/stack/token/
+  value/state variable set every NLR `try`/`catch` wrap allocates fresh,
+  per wrap;
+- loop-context `StateAcc`/`State` prefix selection — `in_loop_body`/
+  `in_hybrid_loop` (`mod.rs:1436`, `:1442`) decide at *render time* whether
+  a `State` counter's prefix renders as `StateN` or `StateAccN` for the
+  same `VersionedVar` (§The IR's `VersionedVar` note: "prefix rendering is
+  a function of (counter, loop context), decided at Document-construction
+  time, not stored in the IR" — a decision the renderer needs generator
+  state to make, by the ADR's own design).
+
+BT-3141's children share one renderer shape instead of each migration issue
+inventing its own generator-context threading:
+
+```rust
+/// A narrow, purpose-built borrow of CoreErlangGenerator's rendering-time
+/// facilities — NOT the god object. RenderCtx exposes exactly the methods
+/// the renderer needs (fresh-variable allocation, NLR scaffolding
+/// allocation, loop-context prefix selection) and nothing else generator
+/// state offers (no direct field access, no AST-directed emission paths).
+/// Constructed per top-level render call as `RenderCtx { gen: &mut
+/// CoreErlangGenerator }`(or an equivalent narrow-trait borrow — the
+/// exact mechanism is a BT-3144 implementation decision; the *shape* this
+/// ADR commits its migration issues to is "one render entry point per
+/// ThreadedStmt kind, taking &mut RenderCtx, no second decision path").
+struct RenderCtx<'gen> {
+    gen: &'gen mut CoreErlangGenerator,
+}
+
+impl RenderCtx<'_> {
+    fn fresh_temp_var(&mut self, base: &str) -> String { .. }
+    fn alloc_nlr_catch_vars(&mut self) -> NlrCatchVars { .. }
+    /// Resolves a VersionedVar's State/ClassVars/SelfVt prefix against
+    /// current loop context (in_loop_body / in_hybrid_loop) — the one
+    /// piece of "render depends on context, not just on the IR node"
+    /// the ADR's VersionedVar doc comment already calls out.
+    fn resolve_prefix(&self, var: &VersionedVar) -> RenderedPrefix { .. }
+}
+
+/// Replaces lower_and_render as the real emitter: full-fidelity, not
+/// skeleton-fidelity. Same &[ThreadedStmt] input shape so migration
+/// issues change their emitter's *body*, not its call sites' argument
+/// shape.
+fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'static>;
+```
+
+This is a sketch to align BT-3141's children on one shape, not an
+implementation — no production code changes in this addendum. Open
+questions left to BT-3144 (renderer foundation) rather than pre-decided
+here: whether `RenderCtx` wraps `&mut CoreErlangGenerator` directly or a
+narrow trait it implements (the trait form would let unit tests construct
+a `RenderCtx` without a full generator instance, which the god-object
+concern this ADR already raised — §Constraints, "`CoreErlangGenerator`
+~90 fields" — makes worth deciding deliberately rather than defaulting
+into); and whether `resolve_prefix` needs its own `VerifyError` variant for
+the case a `VersionedVar` reaches render time with no resolvable loop
+context (today that can't happen because rendering is fused with the
+decision that also picks the context; once render is a separate pass over
+a real IR, "unresolvable context" becomes a representable — and thus
+checkable — failure mode).
+
+### Measurement gate, restated
+
+Phase A0's prototype (§Implementation, "Phase A0 — Measurement gate")
+measured build/verify/render-and-discard: `prototype_direct_params_ir`
+constructs a `ThreadedIr` fragment, verifies it, and throws it away — cost
+measured was allocation + verification, with **no rendering of real output
+from it**, because none of the seven delivered phases render from the IR at
+all. BT-3141 changes that premise: IR construction and full-fidelity
+rendering go on the hot path for real, for every construct a migration
+issue converts. The original gate is re-affirmed against that harder
+target, not loosened:
+
+- **Threshold, unchanged:** end-to-end `beamtalk build` on the fixed
+  fixture set (§Implementation, Phase A0) regresses **≤ 3%**.
+- **Checked at the pilot-migration flag flip** —
+  [BT-3145](https://linear.app/beamtalk/issue/BT-3145) ("Pilot migration:
+  while_loops + counted_loops emit through ThreadedIr... gated on ≤3% build
+  measurement") is where this is first measured against real
+  construct-and-render cost, not fixture-and-discard cost.
+- **Checked cumulatively at each later phase** — every subsequent
+  migration issue re-measures against the same fixture set and the same
+  cumulative 3% budget (not a fresh 3% per phase), since each phase adds
+  its own construct-and-render cost on top of the prior phases'.
+- **Descope path, named:** if the cumulative measurement fails the gate at
+  any phase, the response is the same one this ADR always named for A0
+  failure (§Alternatives #1b): keep the side-channel verification exactly
+  as it exists today (real value, already shipped, already cited above),
+  abandon the emission-input migration for the remaining unconverted
+  constructs, and close BT-3141 documenting which constructs converted
+  before the gate tripped and which stay on the B2 shape permanently. A
+  partial conversion is an acceptable, explicitly pre-planned outcome, not
+  a failure requiring rollback of already-converted constructs.
+
 ## Context
 
 ### Problem statement
@@ -782,6 +1025,14 @@ extended.
 
 - Related issues:
   - [BT-3122](https://linear.app/beamtalk/issue/BT-3122) — this ADR
+  - [BT-3141](https://linear.app/beamtalk/issue/BT-3141) — follow-up epic
+    (§Addendum) completing Option A single-sourcing; in progress
+  - [BT-3142](https://linear.app/beamtalk/issue/BT-3142) — this addendum's
+    own issue
+  - [BT-3144](https://linear.app/beamtalk/issue/BT-3144) — renderer
+    foundation, consumes the `RenderCtx` sketch in §Addendum
+  - [BT-3145](https://linear.app/beamtalk/issue/BT-3145) — pilot migration,
+    first checkpoint for the restated ≤3% measurement gate
   - [BT-3111](https://linear.app/beamtalk/issue/BT-3111) /
     [BT-3125](https://linear.app/beamtalk/issue/BT-3125) — analysis→codegen
     handoff; BT-3125 is a soft prerequisite for Phase B onward
