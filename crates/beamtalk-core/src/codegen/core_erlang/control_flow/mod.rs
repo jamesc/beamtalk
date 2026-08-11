@@ -1333,6 +1333,54 @@ impl CoreErlangGenerator {
         );
     }
 
+    /// BT-3134 (ADR 0111 Phase D — `conditionals`/`exception_handling` slice):
+    /// verifies branch-frame version linearity across N sibling
+    /// `with_branch_context` arms via [`threaded_ir::verify_branch_frame_linearity`]
+    /// — `ifTrue:ifFalse:`'s two branches (`conditionals.rs`), `on:do:`'s
+    /// try/handler bodies, and `ensure:`'s try/success-cleanup/error-cleanup
+    /// bodies (`exception_handling.rs`).
+    ///
+    /// `final_versions` is each arm's already-observed `state_version()`
+    /// reached at the end of its own `with_branch_context` call, in the
+    /// order the arms were generated; a fresh [`threaded_ir::FrameId`] is
+    /// allocated per arm here so sibling arms that happen to reach the same
+    /// version (e.g. both `ifTrue:`/`ifFalse:` bodies perform exactly one
+    /// field mutation) are correctly modeled as distinct frames rather than
+    /// colliding as [`threaded_ir::VerifyError::NonLinearVersion`].
+    ///
+    /// **Failure behavior** (ADR 0111 §The verifier): hard-fails in
+    /// debug/CI via `debug_assert!`. In release builds, degrades to an
+    /// internal-error diagnostic on the compile result instead of a panic
+    /// or a refusal to compile, per CLAUDE.md's "never panic on user input"
+    /// / structured-error rule — this is a compiler-internal invariant, not
+    /// a user-facing one, so the compile still succeeds with the
+    /// generator's (unverified) output.
+    pub(super) fn check_branch_frame_linearity(&mut self, final_versions: &[usize], span: Span) {
+        let arms: Vec<(threaded_ir::FrameId, usize)> = final_versions
+            .iter()
+            .enumerate()
+            .map(|(i, &final_version)| {
+                let frame_id = u32::try_from(i + 1).unwrap_or(u32::MAX);
+                (threaded_ir::FrameId::new(frame_id), final_version)
+            })
+            .collect();
+        let errors = threaded_ir::verify_branch_frame_linearity(&arms, span);
+        if errors.is_empty() {
+            return;
+        }
+        debug_assert!(
+            false,
+            "ThreadedIr verify found a branch-frame linearity violation: {errors:?}"
+        );
+        self.add_codegen_warning(
+            Diagnostic::error(
+                format!("internal: branch-frame linearity violation: {errors:?}"),
+                span,
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
     /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
     pub(super) fn emit_self_send_in_loop_diagnostic(&mut self, expr: &Expression, span: Span) {
         if !self.codegen_diagnostics_enabled {

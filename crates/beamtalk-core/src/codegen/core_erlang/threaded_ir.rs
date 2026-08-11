@@ -6,7 +6,8 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! ## Status (BT-3133 — ADR 0111 Phase C, list-op migration)
+//! ## Status (BT-3133/BT-3134 — ADR 0111 Phase C list-op migration, Phase D
+//! `conditionals`/`exception_handling` slice)
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
@@ -37,9 +38,23 @@
 //! distinct from [`VersionedVar`]) and [`ThreadedStmt::TupleAccUnpack`] (the
 //! flat positional-unpack accumulator shape) to model them. No
 //! `debug_assert!`s existed in these files to delete (list-ops never had the
-//! loop-unpack duplication BT-3132 closed). The rest of the four production
-//! generators' state (field mutations, NLR, shadow writes) does not yet
-//! construct `ThreadedIr` — later phases (BT-3134/BT-3135) extend coverage.
+//! loop-unpack duplication BT-3132 closed).
+//!
+//! As of BT-3134, `conditionals.rs`'s mutation-carrying `ifTrue:`/
+//! `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:` inliners and
+//! `exception_handling.rs`'s `on:do:`/`ensure:` mutation-threading
+//! generators each construct and [`verify`] a
+//! [`verify_branch_frame_linearity`] `ThreadedIr` fixture — one [`FrameId`]
+//! per `with_branch_context` arm (branch bodies for conditionals; try/
+//! handler bodies for `on:do:`; try/success-cleanup/error-cleanup bodies
+//! for `ensure:`) — checking that sibling arms independently minting the
+//! same `StateAcc` version number in disjoint frames never trips
+//! [`VerifyError::NonLinearVersion`]. This is the first production call
+//! site to exercise [`FrameId`]'s sibling-frame discipline: BT-3132's loop
+//! migration never branches, so it never allocated more than one non-root
+//! frame per `verify()` call. The rest of these generators' state (field
+//! mutations, NLR relay, shadow writes) does not yet construct `ThreadedIr`
+//! — later phases (BT-3135 onward) extend coverage.
 //!
 //! ## Scope
 //!
@@ -133,9 +148,10 @@ impl FrameId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum VersionPrefix {
     /// Actor/instance state (`State`, `State1`, … — rendered as `StateAcc{N}`
-    /// inside non-hybrid loop bodies; that rendering choice is a function of
-    /// generator context and stays outside the IR, decided at
-    /// Document-construction time).
+    /// inside non-hybrid loop bodies, `with_branch_context` conditional
+    /// branches (BT-3134), and `on:do:`/`ensure:` bodies; that rendering
+    /// choice is a function of generator context and stays outside the IR,
+    /// decided at Document-construction time).
     State,
     /// Class variables (`ClassVars`, `ClassVars1`, … — ADR 0110's mechanism).
     ClassVars,
@@ -1132,6 +1148,67 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
     } else {
         Vec::new()
     }
+}
+
+// ─── Branch-frame linearity check (BT-3134) ────────────────────────────────
+
+/// Builds a minimal `ThreadedIr` fixture modeling N sibling
+/// `with_branch_context` arms — `ifTrue:ifFalse:`'s two branches,
+/// `on:do:`'s try/handler bodies, `ensure:`'s try/success-cleanup/
+/// error-cleanup bodies — each its own [`FrameId`], and [`verify`]s
+/// branch-frame version linearity across them.
+///
+/// Each arm mints a `StateAcc` `Bind` chain from version 0 (the frame's
+/// entry parameter — `StateAcc`, bound by the caller from the outer
+/// state before entering the arm) up to `final_version`
+/// (`state_version()` reached at the end of
+/// `generate_conditional_branch_inline`/
+/// `generate_exception_body_with_threading`'s `with_branch_context`
+/// call), mirroring the real generator's sequential per-mutation
+/// `StateAcc{N}` rebind. `arms` carries each arm's already-allocated
+/// `FrameId` alongside its `final_version` — distinct arms are distinct
+/// frames BY CONSTRUCTION, so two sibling arms that reach the SAME
+/// `final_version` (e.g. both `ifTrue:`/`ifFalse:` bodies perform exactly
+/// one field mutation, each independently producing `StateAcc1` in their
+/// own frame) must NOT trip [`VerifyError::NonLinearVersion`] — this is
+/// the ADR 0111 §The IR frame-identity requirement (see [`FrameId`]'s doc
+/// comment).
+pub(super) fn verify_branch_frame_linearity(
+    arms: &[(FrameId, usize)],
+    span: Span,
+) -> Vec<VerifyError> {
+    let mut ir = Vec::with_capacity(arms.len());
+    for &(frame, final_version) in arms {
+        let mut body = Vec::with_capacity(final_version);
+        for v in 1..=final_version {
+            let source = VersionedVar::new(VersionPrefix::State, v - 1, frame);
+            let target = VersionedVar::new(VersionPrefix::State, v, frame);
+            body.push(ThreadedStmt::Bind {
+                target,
+                source,
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            });
+        }
+        let produces = if final_version > 0 {
+            vec![VersionedVar::new(
+                VersionPrefix::State,
+                final_version,
+                frame,
+            )]
+        } else {
+            Vec::new()
+        };
+        ir.push(ThreadedStmt::Threaded {
+            mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+            frame,
+            body,
+            produces,
+            span,
+        });
+    }
+    verify(&ir)
 }
 
 // ─── Phase A0 measurement prototype ────────────────────────────────────────
@@ -2236,5 +2313,89 @@ mod tests {
         }];
         let rendered = lower_and_render(&ir).to_pretty_string();
         assert_eq!(rendered, "let N1 = call 'erlang':'element'(3, AccSt0) in ");
+    }
+
+    // ── verify_branch_frame_linearity (BT-3134) ──────────────────────────
+    // Pins the production check behind `ifTrue:ifFalse:`'s two branches,
+    // `on:do:`'s try/handler bodies, and `ensure:`'s try/success-cleanup/
+    // error-cleanup bodies.
+
+    #[test]
+    fn verify_branch_frame_linearity_silent_when_arms_are_empty() {
+        assert_eq!(verify_branch_frame_linearity(&[], span()), Vec::new());
+    }
+
+    #[test]
+    fn verify_branch_frame_linearity_silent_for_single_arm_with_mutations() {
+        // One arm, three mutations (final_version = 3) — a plain linear
+        // Bind chain within one frame, no sibling to interact with.
+        let arms = [(FrameId::new(1), 3)];
+        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
+    }
+
+    #[test]
+    fn verify_branch_frame_linearity_silent_for_arms_with_no_mutations() {
+        // Both branches of `ifTrue:ifFalse:` performed zero field mutations
+        // (final_version = 0 — nothing to bind, `produces` stays empty).
+        let arms = [(FrameId::new(1), 0), (FrameId::new(2), 0)];
+        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
+    }
+
+    #[test]
+    fn verify_branch_frame_linearity_sibling_arms_same_version_do_not_trip_non_linear() {
+        // THE acceptance-criteria case: `ifTrue:` and `ifFalse:` each
+        // perform exactly one field mutation, so BOTH sibling arms produce
+        // "State1" — but in disjoint frames. Frame identity must keep these
+        // from being counted as two producers of the same VersionedVar.
+        let true_arm = FrameId::new(1);
+        let false_arm = FrameId::new(2);
+        let arms = [(true_arm, 1), (false_arm, 1)];
+        assert_eq!(
+            verify_branch_frame_linearity(&arms, span()),
+            Vec::new(),
+            "sibling arms independently minting State1 in disjoint frames must not report \
+             NonLinearVersion"
+        );
+    }
+
+    #[test]
+    fn verify_branch_frame_linearity_three_sibling_arms_same_version() {
+        // `ensure:`'s shape: try body, success-path cleanup, error-path
+        // cleanup — three sibling arms (not just two), each reaching the
+        // same final_version.
+        let arms = [
+            (FrameId::new(1), 2),
+            (FrameId::new(2), 2),
+            (FrameId::new(3), 2),
+        ];
+        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
+    }
+
+    #[test]
+    fn verify_branch_frame_linearity_sibling_arms_different_versions_still_silent() {
+        // Sibling arms need not reach the same final_version at all — e.g.
+        // the try body does two mutations while the handler does none.
+        let arms = [(FrameId::new(1), 2), (FrameId::new(2), 0)];
+        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
+    }
+
+    #[test]
+    fn verify_branch_frame_linearity_detects_genuine_cross_frame_leak() {
+        // Negative control: if a hypothetical future bug had a "sibling" arm
+        // reuse an ANCESTOR frame's FrameId instead of allocating its own,
+        // the two arms' Bind chains would collide as the same VersionedVar
+        // sequence, in the same frame, and NonLinearVersion must fire. This
+        // pins that the check is not vacuously silent for every input.
+        let shared_frame = FrameId::new(1);
+        let arms = [(shared_frame, 1), (shared_frame, 1)];
+        let errors = verify_branch_frame_linearity(&arms, span());
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::NonLinearVersion { var, producers: 2, .. }
+                    if *var == VersionedVar::new(VersionPrefix::State, 1, shared_frame)
+            )),
+            "expected NonLinearVersion for the colliding shared-frame State1, got: {errors:?}"
+        );
     }
 }
