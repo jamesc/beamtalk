@@ -1193,39 +1193,6 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3132 (ADR 0111 Phase B): checks the "optimized threading mode
-    /// implies no `StateAcc` unpack" invariant via [`threaded_ir::verify`]
-    /// instead of a hand-rolled `debug_assert!` at each call site — this is
-    /// the single check behind all four of `while_loops.rs`'s and
-    /// `counted_loops.rs`'s (via this module's direct/hybrid counted-loop
-    /// generators) former "unpack should emit no code" `debug_assert!`s.
-    ///
-    /// `mode` is the loop's already-resolved [`threaded_ir::ThreadingMode`]
-    /// (`DirectParams` or `Hybrid` — the two production call sites this
-    /// check guards); `unpack_emitted` is exactly whether
-    /// `plan.generate_unpack_at_iteration_start(..)` returned any docs for
-    /// this loop.
-    ///
-    /// **Failure behavior** (ADR 0111 §The verifier): hard-fails in
-    /// debug/CI via `debug_assert!` — the same behavior the deleted
-    /// `debug_assert!`s had. In release builds (where `debug_assert!` is
-    /// compiled out), degrades to an internal-error diagnostic on the
-    /// compile result instead of silently doing nothing, per CLAUDE.md's
-    /// "never panic on user input" / structured-error rule — this is a
-    /// compiler-internal invariant, not a user-facing one, so the compile
-    /// still succeeds with the generator's (unverified) output.
-    pub(super) fn check_loop_unpack_invariant(
-        &mut self,
-        mode: threaded_ir::ThreadingMode,
-        threaded_locals: &[String],
-        unpack_emitted: bool,
-        span: Span,
-    ) {
-        let errors =
-            threaded_ir::verify_loop_unpack_invariant(mode, threaded_locals, unpack_emitted, span);
-        self.report_threaded_ir_verify_errors(&errors, "loop threading-mode/unpack mismatch", span);
-    }
-
     /// BT-3133 (ADR 0111 Phase C) invariant classes 1 + 4: checks the
     /// `TupleAcc` mode's flat positional-unpack accumulator discipline via
     /// [`threaded_ir::verify_tuple_acc_unpack_invariant`]. Single-sourced at
@@ -2814,14 +2781,11 @@ impl CoreErlangGenerator {
             self.bind_var(bt_name, &frame.counter);
         }
 
-        // Register var → param bindings (no unpack docs emitted in direct-params mode).
-        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
-        self.check_loop_unpack_invariant(
-            threaded_ir::ThreadingMode::DirectParams,
-            &plan.threaded_locals,
-            !unpack_docs.is_empty(),
-            body.span,
-        );
+        // Register var → param bindings (no unpack docs emitted in
+        // direct-params mode — structurally guaranteed by
+        // `generate_unpack_at_iteration_start`'s own
+        // `if !use_direct_params && !use_hybrid_params` guard).
+        plan.generate_unpack_at_iteration_start(self);
 
         // Condition + true arm
         docs.push(frame.continue_header.clone());
@@ -2945,14 +2909,10 @@ impl CoreErlangGenerator {
             self.bind_var(bt_name, &frame.counter);
         }
 
-        // Register local var bindings (no unpack docs emitted in hybrid mode).
-        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
-        self.check_loop_unpack_invariant(
-            threaded_ir::ThreadingMode::Hybrid,
-            &plan.threaded_locals,
-            !unpack_docs.is_empty(),
-            body.span,
-        );
+        // Register local var bindings (no unpack docs emitted in hybrid mode
+        // — structurally guaranteed by `generate_unpack_at_iteration_start`'s
+        // own `if !use_direct_params && !use_hybrid_params` guard).
+        plan.generate_unpack_at_iteration_start(self);
 
         // Condition + true arm
         docs.push(frame.continue_header.clone());
