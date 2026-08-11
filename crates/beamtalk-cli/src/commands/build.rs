@@ -19,12 +19,13 @@ use tracing::{debug, error, info, instrument, warn};
 use super::app_file;
 use super::manifest;
 use super::manifest::NativeDependencyMap;
-use super::util::mtime_of;
+use super::util::content_hash_of;
 
 /// Result of per-file change detection.
 ///
-/// Compares each `.bt` source file's modification time against its corresponding
-/// `.beam` output to determine which files need recompilation.
+/// Compares each `.bt` source file's content hash against the hash recorded
+/// for its corresponding `.beam` output (BT-3120) to determine which files
+/// need recompilation.
 #[derive(Debug)]
 #[allow(clippy::struct_field_names)] // `_files` postfix is clearer for this domain struct
 pub(crate) struct ChangeDetectionResult {
@@ -37,6 +38,11 @@ pub(crate) struct ChangeDetectionResult {
     /// These are reported as warnings but not deleted (users may have manually
     /// placed files or renamed sources intentionally).
     pub orphaned_beam_files: Vec<Utf8PathBuf>,
+    /// Content hash of every source file considered in this pass, keyed by
+    /// path string (BT-3120). Callers persist this via
+    /// `build_cache::save_beam_hash_cache` after a successful build, so the
+    /// next `detect_changes` call has something to compare against.
+    pub source_hashes: HashMap<String, String>,
 }
 
 /// Detect which source files have changed relative to their compiled `.beam` output.
@@ -45,18 +51,60 @@ pub(crate) struct ChangeDetectionResult {
 /// using the same module naming scheme as the build pipeline. A file is considered
 /// changed if:
 /// - Its `.beam` does not exist (new file or first build)
-/// - Its mtime is newer than the `.beam` mtime
+/// - Its content hash differs from the hash recorded for it in the beam-hash
+///   sidecar (BT-3120), including when no hash was recorded at all
+///
+/// mtime is deliberately not used for this decision: it lies under git
+/// operations (branch switches restore old content under a fresh mtime) and
+/// under tools that preserve or backdate mtimes on write, either of which can
+/// make an mtime-keyed check serve a stale `.beam`.
 ///
 /// Also detects orphaned `.beam` files (no corresponding `.bt` source) and reports
 /// them as warnings.
 ///
-/// When `force` is true, all source files are treated as changed regardless of mtime.
+/// When `force` is true, all source files are treated as changed regardless of
+/// their recorded hash.
+///
+/// `known_hashes` is an optional set of already-computed content hashes,
+/// keyed by path string — for a manifest-based package build, `build_rs`'s
+/// Pass 1 (`build_cache::incremental_build_class_module_index`) has already
+/// hashed every source file's content this same build (BT-3120), so a hit
+/// here skips reading and hashing that file's content a second time. A miss
+/// (manifest-less builds, where Pass 1 never runs; or any file Pass 1
+/// couldn't read) falls back to hashing it directly here, same as before.
+/// `known_hashes` is mainly an optimization, but not purely one: a file
+/// edited in the window between Pass 1 hashing it and this call reuses the
+/// now-stale Pass-1-time hash for this build cycle. That's narrow and
+/// self-healing (Pass 1 always re-reads from disk on the next build), never
+/// a permanent stale skip, but it means a same-build edit isn't caught as
+/// immediately as the old mtime-based check (which re-read mtime fresh at
+/// this call site).
 pub(crate) fn detect_changes(
     source_files: &[Utf8PathBuf],
     build_dir: &Utf8Path,
     file_module_pairs: &[(Utf8PathBuf, String, Utf8PathBuf)],
     force: bool,
+    known_hashes: &HashMap<String, String>,
 ) -> ChangeDetectionResult {
+    // BT-3120: content hash of each source file as of the last successful
+    // `.beam` build, keyed by path string.
+    let previous_hashes = super::build_cache::load_beam_hash_cache(build_dir);
+
+    // Hash every source file up front — both to decide staleness below and
+    // to hand back to the caller for persisting after a successful build.
+    // Reuse Pass 1's hash when we already have one (see `known_hashes`'s doc)
+    // rather than reading and hashing the file's content again.
+    let mut source_hashes: HashMap<String, String> = HashMap::new();
+    for (source_file, _module_name, _core_file) in file_module_pairs {
+        if let Some(hash) = known_hashes
+            .get(source_file.as_str())
+            .cloned()
+            .or_else(|| content_hash_of(source_file))
+        {
+            source_hashes.insert(source_file.as_str().to_string(), hash);
+        }
+    }
+
     if force {
         info!("Force build requested — all files will be recompiled");
         // Still detect orphaned .beam files so users get consistent warnings
@@ -69,6 +117,7 @@ pub(crate) fn detect_changes(
             changed_files: source_files.to_vec(),
             unchanged_files: Vec::new(),
             orphaned_beam_files,
+            source_hashes,
         };
     }
 
@@ -88,22 +137,21 @@ pub(crate) fn detect_changes(
             continue;
         }
 
-        // Compare mtimes: source newer than beam → needs recompilation
-        let source_mtime = mtime_of(source_file);
-        let beam_mtime = mtime_of(&beam_file);
-
-        match (source_mtime, beam_mtime) {
-            (Some(src_t), Some(beam_t)) if src_t > beam_t => {
-                debug!(file = %source_file, "Source newer than .beam — needs recompilation");
-                changed_files.push(source_file.clone());
-            }
-            (Some(_), Some(_)) => {
-                debug!(file = %source_file, "Up-to-date");
+        // Compare content hashes: no hash, or a hash mismatch, needs recompilation.
+        match source_hashes.get(source_file.as_str()) {
+            Some(current_hash)
+                if previous_hashes.get(source_file.as_str()) == Some(current_hash) =>
+            {
+                debug!(file = %source_file, "Up-to-date (content hash unchanged)");
                 unchanged_files.push(source_file.clone());
             }
-            _ => {
-                // If we can't read mtimes, err on the side of recompilation
-                debug!(file = %source_file, "Cannot read mtime — needs recompilation");
+            Some(_) => {
+                debug!(file = %source_file, "Content hash changed — needs recompilation");
+                changed_files.push(source_file.clone());
+            }
+            None => {
+                // If we can't read the source, err on the side of recompilation.
+                debug!(file = %source_file, "Cannot read source — needs recompilation");
                 changed_files.push(source_file.clone());
             }
         }
@@ -125,6 +173,7 @@ pub(crate) fn detect_changes(
         changed_files,
         unchanged_files,
         orphaned_beam_files,
+        source_hashes,
     }
 }
 
@@ -210,8 +259,9 @@ struct BuildPassesResult {
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
 ///
-/// When `force` is false, per-file change detection compares `.bt` source mtimes
-/// against `.beam` output mtimes and only recompiles changed files.
+/// When `force` is false, per-file change detection compares each `.bt`
+/// source's content hash against the hash recorded for its `.beam` output
+/// (BT-3120) and only recompiles changed files.
 #[instrument(skip_all, fields(path = %path))]
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
@@ -445,6 +495,11 @@ struct ClassIndexResult {
     cached_asts: HashMap<Utf8PathBuf, CachedAst>,
     /// Whether the manifest changed, forcing Pass 2 recompilation.
     force_pass2: bool,
+    /// Content hash of every Pass-1-scanned source file, keyed by path
+    /// string (BT-3120) — empty for manifest-less builds, where Pass 1 never
+    /// runs. Reused by `detect_changes` (Pass 2) so it doesn't re-hash a file
+    /// whose content Pass 1 already hashed this same build.
+    source_hashes: HashMap<String, String>,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -452,6 +507,7 @@ struct ClassIndexResult {
 /// Computes module names for all source files, builds the class-to-module and
 /// class-to-superclass indexes, merges dependency class indexes, and validates
 /// stdlib reservation violations.
+#[allow(clippy::too_many_lines)] // linear merge pipeline (source + N deps) — split adds indirection, not clarity
 fn build_class_index(
     env: &BuildEnvironment,
     dep_ctx: &DependencyContext,
@@ -477,6 +533,7 @@ fn build_class_index(
         extension_index,
         cached_asts,
         force_pass2,
+        source_hashes,
     ) = if let Some(pkg) = pkg_manifest {
         let result = super::build_cache::incremental_build_class_module_index(
             &env.source_files,
@@ -495,6 +552,7 @@ fn build_class_index(
             result.extension_index,
             result.cached_asts,
             result.manifest_invalidated,
+            result.source_hashes,
         )
     } else {
         (
@@ -504,6 +562,7 @@ fn build_class_index(
             beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             HashMap::new(),
             false,
+            HashMap::new(),
         )
     };
 
@@ -603,6 +662,7 @@ fn build_class_index(
         dep_registry,
         cached_asts,
         force_pass2,
+        source_hashes,
     })
 }
 
@@ -829,8 +889,16 @@ fn execute_build_passes(
     let file_module_pairs = compute_file_module_pairs(env)?;
 
     // BT-1682: Per-file change detection — only recompile files whose source
-    // is newer than the corresponding .beam output.
-    let changes = detect_changes(&env.source_files, &env.build_dir, &file_module_pairs, force);
+    // is newer than the corresponding .beam output. Pass 1's already-computed
+    // content hashes (`index.source_hashes`, BT-3120) let this skip re-hashing
+    // any file Pass 1 already hashed this build.
+    let changes = detect_changes(
+        &env.source_files,
+        &env.build_dir,
+        &file_module_pairs,
+        force,
+        &index.source_hashes,
+    );
 
     // Warn about orphaned .beam files (source deleted but .beam remains)
     for orphan in &changes.orphaned_beam_files {
@@ -908,6 +976,11 @@ fn execute_build_passes(
         changes.unchanged_files.len(),
         file_module_pairs.len(),
     )?;
+
+    // BT-3120: only persist the beam-hash sidecar once compilation has
+    // actually succeeded (the `?` above already returned on failure) — the
+    // saved hashes assert "this content produced the `.beam` now on disk".
+    super::build_cache::save_beam_hash_cache(&env.build_dir, &changes.source_hashes);
 
     let diagnostic_summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
         &all_build_diags,
@@ -4082,7 +4155,19 @@ mod tests {
         assert!(build_dir.join("beamtalk_myapp_app.erl").exists());
     }
 
-    // ── BT-1682: Change detection tests ──────────────────────────────
+    // ── BT-1682 / BT-3120: Change detection tests ────────────────────
+
+    /// Helper: seed the beam-hash sidecar as if `file` was last successfully
+    /// compiled at its *current* on-disk content — i.e. record today's hash
+    /// as "the content that produced the `.beam`". Simulates a prior
+    /// successful `detect_changes` + compile + `save_beam_hash_cache` cycle
+    /// without needing a real compiler.
+    fn seed_beam_hash(build_dir: &Utf8Path, file: &Utf8Path) {
+        let hash = content_hash_of(file).expect("test file must be readable");
+        let mut hashes = super::super::build_cache::load_beam_hash_cache(build_dir);
+        hashes.insert(file.as_str().to_string(), hash);
+        super::super::build_cache::save_beam_hash_cache(build_dir, &hashes);
+    }
 
     /// Helper: create `file_module_pairs` matching the format used by the build pipeline.
     fn make_pairs(
@@ -4113,7 +4198,7 @@ mod tests {
         let source_files = vec![src_dir.join("counter.bt")];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert_eq!(result.changed_files.len(), 1);
         assert!(result.unchanged_files.is_empty());
         assert!(result.orphaned_beam_files.is_empty());
@@ -4133,7 +4218,7 @@ mod tests {
         let source_files = vec![src_dir.join("counter.bt")];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert_eq!(
             result.changed_files.len(),
             1,
@@ -4151,17 +4236,18 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::create_dir_all(&build_dir).unwrap();
 
-        // Create source FIRST (older mtime)
-        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
-        // Small delay to ensure mtime differs
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        // Then create beam (newer mtime)
+        let source_file = src_dir.join("counter.bt");
+        write_test_file(&source_file, "counter := [0].");
         write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        // Record the current content hash as "what produced this .beam"
+        // (BT-3120) — without this the sidecar has no prior hash to compare
+        // against, and the file must be recompiled once regardless of mtime.
+        seed_beam_hash(&build_dir, &source_file);
 
-        let source_files = vec![src_dir.join("counter.bt")];
+        let source_files = vec![source_file.clone()];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert!(
             result.changed_files.is_empty(),
             "Up-to-date file should not be changed"
@@ -4178,20 +4264,139 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::create_dir_all(&build_dir).unwrap();
 
-        // Create beam FIRST (older mtime)
+        let source_file = src_dir.join("counter.bt");
+        write_test_file(&source_file, "counter := [0].");
         write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        // Then modify source (newer mtime)
-        write_test_file(&src_dir.join("counter.bt"), "counter := [1].");
+        seed_beam_hash(&build_dir, &source_file);
 
-        let source_files = vec![src_dir.join("counter.bt")];
+        // Modify the source after the .beam was built from it.
+        write_test_file(&source_file, "counter := [1].");
+
+        let source_files = vec![source_file];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert_eq!(
             result.changed_files.len(),
             1,
             "Modified source should be changed"
+        );
+        assert!(result.unchanged_files.is_empty());
+    }
+
+    /// BT-3120: a source rewritten with identical content but a backdated (or
+    /// preserved) mtime must still be treated as up-to-date — the hash, not
+    /// the mtime, is authoritative.
+    #[test]
+    fn test_detect_changes_touch_without_change_not_recompiled() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_file = src_dir.join("counter.bt");
+        write_test_file(&source_file, "counter := [0].");
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        seed_beam_hash(&build_dir, &source_file);
+
+        // Rewrite the exact same content (a `touch`, or an editor
+        // save-without-edit) — bumps mtime, leaves bytes unchanged.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        write_test_file(&source_file, "counter := [0].");
+
+        let source_files = vec![source_file];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+        assert!(
+            result.changed_files.is_empty(),
+            "touch-without-change must not trigger recompilation"
+        );
+        assert_eq!(result.unchanged_files.len(), 1);
+    }
+
+    /// BT-3120: `known_hashes` (Pass 1's already-computed content hashes) must
+    /// actually be consulted instead of always re-hashing from disk — proven
+    /// here by seeding a deliberately wrong hash for the file and observing
+    /// `detect_changes` trust it (report the file changed) even though its
+    /// real on-disk content is unchanged from what produced the `.beam`. A
+    /// no-op `known_hashes` (the `HashMap::new()` used by every other test in
+    /// this module) would instead fall back to hashing the file directly and
+    /// correctly report it unchanged — so this test also pins that the
+    /// fallback and fast paths are actually two different code paths, not
+    /// one being silently skipped.
+    #[test]
+    fn test_detect_changes_trusts_known_hashes_over_rereading() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_file = src_dir.join("counter.bt");
+        write_test_file(&source_file, "counter := [0].");
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        seed_beam_hash(&build_dir, &source_file);
+
+        let source_files = vec![source_file.clone()];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        // A "known" hash that does NOT match either the file's real content
+        // or the beam-hash sidecar's recorded hash — if `detect_changes`
+        // trusts it, the file is reported changed; if it were silently
+        // ignored in favour of re-reading the file, it would be unchanged.
+        let mut known_hashes = HashMap::new();
+        known_hashes.insert(
+            source_file.as_str().to_string(),
+            "not-the-real-hash".to_string(),
+        );
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &known_hashes);
+        assert_eq!(
+            result.changed_files,
+            vec![source_file],
+            "a precomputed hash from known_hashes must be trusted, not silently discarded"
+        );
+        assert!(result.unchanged_files.is_empty());
+    }
+
+    /// BT-3120 acceptance criterion: `git checkout` restoring older content
+    /// under a newer mtime must still be recompiled — mtime ordering must
+    /// not be trusted.
+    #[test]
+    fn test_detect_changes_branch_switch_scenario() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_file = src_dir.join("counter.bt");
+        write_test_file(&source_file, "counter := [0]. \"main branch\"");
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        seed_beam_hash(&build_dir, &source_file);
+
+        // `git checkout old-branch`: older content, but git always stamps
+        // the checkout with a fresh (newer) mtime — content is what changed,
+        // not recency.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        write_test_file(
+            &source_file,
+            "counter := [-1]. \"old branch, checked out later\"",
+        );
+
+        let source_files = vec![source_file.clone()];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+        assert_eq!(
+            result.changed_files.len(),
+            1,
+            "checked-out content differs from what produced the .beam — must rebuild"
         );
         assert!(result.unchanged_files.is_empty());
     }
@@ -4205,15 +4410,17 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::create_dir_all(&build_dir).unwrap();
 
-        // Source older than beam — normally unchanged
-        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let source_file = src_dir.join("counter.bt");
+        write_test_file(&source_file, "counter := [0].");
         write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        // Even though the recorded hash matches (normally unchanged), --force
+        // must still mark it changed.
+        seed_beam_hash(&build_dir, &source_file);
 
-        let source_files = vec![src_dir.join("counter.bt")];
+        let source_files = vec![source_file];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, true);
+        let result = detect_changes(&source_files, &build_dir, &pairs, true, &HashMap::new());
         assert_eq!(
             result.changed_files.len(),
             1,
@@ -4233,7 +4440,6 @@ mod tests {
 
         // Source file exists for counter but not for deleted_module
         write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
-        std::thread::sleep(std::time::Duration::from_millis(50));
         write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
         // Orphaned beam — no corresponding .bt
         write_test_file(&build_dir.join("bt@deleted_module.beam"), "BEAM");
@@ -4241,7 +4447,7 @@ mod tests {
         let source_files = vec![src_dir.join("counter.bt")];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert_eq!(
             result.orphaned_beam_files.len(),
             1,
@@ -4264,27 +4470,26 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::create_dir_all(&build_dir).unwrap();
 
-        // File 1: up-to-date (source older than beam)
-        write_test_file(&src_dir.join("stable.bt"), "stable := [1].");
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // File 1: up-to-date (hash matches what produced the .beam)
+        let stable_file = src_dir.join("stable.bt");
+        write_test_file(&stable_file, "stable := [1].");
         write_test_file(&build_dir.join("bt@stable.beam"), "BEAM");
+        seed_beam_hash(&build_dir, &stable_file);
 
-        // File 2: modified (beam older than source)
+        // File 2: modified after its .beam was recorded
+        let changed_file = src_dir.join("changed.bt");
+        write_test_file(&changed_file, "changed := [1].");
         write_test_file(&build_dir.join("bt@changed.beam"), "BEAM");
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        write_test_file(&src_dir.join("changed.bt"), "changed := [2].");
+        seed_beam_hash(&build_dir, &changed_file);
+        write_test_file(&changed_file, "changed := [2].");
 
         // File 3: new (no beam exists)
         write_test_file(&src_dir.join("new_file.bt"), "new_file := [3].");
 
-        let source_files = vec![
-            src_dir.join("changed.bt"),
-            src_dir.join("new_file.bt"),
-            src_dir.join("stable.bt"),
-        ];
+        let source_files = vec![changed_file, src_dir.join("new_file.bt"), stable_file];
         let pairs = make_pairs(&source_files, &build_dir);
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert_eq!(
             result.changed_files.len(),
             2,
@@ -4311,7 +4516,7 @@ mod tests {
         let source_files: Vec<Utf8PathBuf> = Vec::new();
         let pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
 
-        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
         assert!(
             result.orphaned_beam_files.is_empty(),
             "Non-bt@ beam files should not be flagged as orphaned"

@@ -5,11 +5,23 @@
 //!
 //! Serialises the class indexes and `ClassInfo` vectors that Pass 1 produces so
 //! that unchanged files can be skipped on the next build. The cache stores
-//! per-file metadata keyed by source path, together with the file's modification
-//! time so staleness can be detected cheaply.
+//! per-file metadata keyed by source path, together with a SHA-256 hash of the
+//! file's contents so staleness can be detected correctly (BT-3120) — mtime is
+//! not used for this decision because it lies under git operations (branch
+//! switches restore old content under a fresh mtime) and under tools that
+//! preserve or backdate mtimes on write, either of which can make an
+//! mtime-keyed cache serve stale (incorrect) results.
 //!
-//! The cache is invalidated entirely when `beamtalk.toml` changes (mtime check)
-//! or when `--force` is used.
+//! The cache is invalidated entirely when `beamtalk.toml` changes (mtime check
+//! — the manifest itself isn't content-hashed, only source files are) or when
+//! `--force` is used.
+//!
+//! This module also owns the sibling "beam hash" sidecar
+//! ([`load_beam_hash_cache`]/[`save_beam_hash_cache`]) that backs
+//! `build.rs`'s `detect_changes`: the content hash of each source file as of
+//! its last successful `.beam` compilation. It's a separate cache from
+//! [`Pass1Cache`] because `detect_changes` runs for every build — including
+//! manifest-less single-file builds, where `Pass1Cache` never applies.
 
 use beamtalk_core::compilation::extension_index::{
     ExtensionIndex, ExtensionKey, ExtensionLocation,
@@ -23,7 +35,9 @@ use std::fs;
 use std::time::SystemTime;
 use tracing::{debug, info, warn};
 
-use super::util::mtime_of;
+#[cfg(test)]
+use super::util::content_hash_of;
+use super::util::{content_hashes_of, mtime_of};
 
 /// Name of the cache file stored inside the build directory.
 const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
@@ -31,7 +45,9 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// Current cache format version. Bump when the serialised layout changes.
 /// v2: `ClassInfo` gained `surface_incomplete` (BT-2796); entries gained
 /// per-file extension definitions (BT-2795).
-const CACHE_VERSION: u32 = 2;
+/// v3: `CacheEntry.mtime` replaced by `CacheEntry.content_hash` — staleness
+/// is now keyed on file content, not filesystem mtime (BT-3120).
+const CACHE_VERSION: u32 = 3;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///
@@ -56,9 +72,10 @@ pub(crate) struct Pass1Cache {
 /// Cached metadata for a single source file.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct CacheEntry {
-    /// Source file modification time when this entry was recorded.
-    #[serde(with = "system_time_required_serde")]
-    mtime: SystemTime,
+    /// SHA-256 content hash of the source file when this entry was recorded
+    /// (BT-3120). The source of truth for staleness — see the module doc for
+    /// why mtime isn't used.
+    content_hash: String,
 
     /// Classes defined in this file, mapped to their compiled module name.
     /// E.g. `"Counter" → "bt@my_app@counter"`.
@@ -92,6 +109,11 @@ pub(crate) struct IncrementalPass1Result {
     /// Whether the manifest changed and forced a full cache invalidation.
     /// When true, Pass 2 should also force-recompile all files.
     pub manifest_invalidated: bool,
+    /// Content hash of every file in `source_files`, keyed by path string
+    /// (BT-3120) — computed once for this Pass 1 pass and handed back so
+    /// Pass 2's `detect_changes` can reuse them instead of re-hashing every
+    /// file's content a second time. See [`super::util::content_hashes_of`].
+    pub source_hashes: HashMap<String, String>,
 }
 
 /// Result of loading the cache — distinguishes "no cache" from "manifest invalidated".
@@ -204,6 +226,90 @@ pub(crate) fn discard_pass1_cache(build_dir: &Utf8Path) {
     }
 }
 
+/// Name of the sidecar file recording, for each source file, the content
+/// hash that produced its currently-compiled `.beam` (BT-3120).
+const BEAM_HASH_CACHE_FILENAME: &str = ".beamtalk-beam-hashes.json";
+
+/// Format version for the beam-hash sidecar. Bump when the layout changes.
+const BEAM_HASH_CACHE_VERSION: u32 = 1;
+
+/// On-disk representation of the beam-hash sidecar.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct BeamHashCache {
+    /// Format version — if this doesn't match `BEAM_HASH_CACHE_VERSION` the
+    /// cache is discarded silently (every file is then treated as changed
+    /// until the next successful build repopulates it).
+    version: u32,
+    /// Source path (as string) → content hash of the source that produced
+    /// the `.beam` currently on disk for it.
+    hashes: HashMap<String, String>,
+}
+
+/// Load the beam-hash sidecar for `build_dir`.
+///
+/// Returns an empty map on any miss — no file, corrupt JSON, or a version
+/// mismatch. `detect_changes` treats a file with no recorded hash as changed,
+/// so a miss just costs one extra rebuild per affected file, never a stale
+/// skip.
+pub(crate) fn load_beam_hash_cache(build_dir: &Utf8Path) -> HashMap<String, String> {
+    let cache_path = build_dir.join(BEAM_HASH_CACHE_FILENAME);
+    let Ok(data) = fs::read_to_string(&cache_path) else {
+        debug!("No beam-hash cache found at {cache_path}");
+        return HashMap::new();
+    };
+
+    let Ok(cache) = serde_json::from_str::<BeamHashCache>(&data) else {
+        warn!("Beam-hash cache is corrupt or unreadable — treating all files as changed");
+        return HashMap::new();
+    };
+
+    if cache.version != BEAM_HASH_CACHE_VERSION {
+        info!(
+            cached = cache.version,
+            current = BEAM_HASH_CACHE_VERSION,
+            "Beam-hash cache version mismatch — treating all files as changed"
+        );
+        return HashMap::new();
+    }
+
+    debug!(
+        entries = cache.hashes.len(),
+        "Loaded beam-hash cache from {cache_path}"
+    );
+    cache.hashes
+}
+
+/// Save the beam-hash sidecar to `build_dir`.
+///
+/// Call only after a successful `.beam` compile — the saved hashes assert
+/// "this content produced the `.beam` now on disk". Best-effort like
+/// [`save_cache`]: serialization or I/O failures are logged, never fatal.
+pub(crate) fn save_beam_hash_cache(build_dir: &Utf8Path, hashes: &HashMap<String, String>) {
+    let cache = BeamHashCache {
+        version: BEAM_HASH_CACHE_VERSION,
+        hashes: hashes.clone(),
+    };
+
+    let cache_path = build_dir.join(BEAM_HASH_CACHE_FILENAME);
+    let data = match serde_json::to_string(&cache) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!(error = %e, "Failed to serialise beam-hash cache");
+            return;
+        }
+    };
+
+    if let Err(e) = fs::write(&cache_path, &data) {
+        warn!(error = %e, "Failed to write beam-hash cache to {cache_path}");
+        return;
+    }
+
+    debug!(
+        entries = cache.hashes.len(),
+        "Saved beam-hash cache to {cache_path}"
+    );
+}
+
 /// Perform an incremental Pass 1 scan.
 ///
 /// Loads the existing cache (if any), determines which files are stale,
@@ -220,6 +326,15 @@ pub(crate) fn incremental_build_class_module_index(
     manifest_path: Option<&Utf8Path>,
     force: bool,
 ) -> Result<IncrementalPass1Result> {
+    // BT-3120: hash every source file's content exactly once for this Pass 1
+    // pass. `partition_files` (staleness) and `build_cache_entries` (the
+    // updated cache) both need every file's hash; computing it once here and
+    // passing it into both — instead of each calling `content_hash_of`
+    // independently — halves Pass 1's own content-hashing work, and the
+    // result is handed back to the caller so Pass 2 doesn't hash a third
+    // time. See `content_hashes_of`'s doc for why this matters.
+    let source_hashes = content_hashes_of(source_files);
+
     // If forced, skip cache entirely
     if force {
         info!("Force build — ignoring Pass 1 cache");
@@ -236,10 +351,13 @@ pub(crate) fn incremental_build_class_module_index(
             source_files,
             source_root,
             pkg_name,
-            &class_module_index,
-            &class_superclass_index,
-            &all_class_infos,
-            &extension_index,
+            &Pass1Indexes {
+                class_module_index: &class_module_index,
+                class_superclass_index: &class_superclass_index,
+                all_class_infos: &all_class_infos,
+                extension_index: &extension_index,
+            },
+            &source_hashes,
         );
         save_cache(build_dir, manifest_path, file_entries);
 
@@ -250,6 +368,7 @@ pub(crate) fn incremental_build_class_module_index(
             extension_index,
             cached_asts,
             manifest_invalidated: false,
+            source_hashes,
         });
     }
 
@@ -264,7 +383,7 @@ pub(crate) fn incremental_build_class_module_index(
 
     // Determine which files need re-scanning
     let (stale_files, fresh_files) = match &cache {
-        Some(c) => partition_files(source_files, c),
+        Some(c) => partition_files(source_files, c, &source_hashes),
         None => (source_files.to_vec(), Vec::new()),
     };
 
@@ -334,10 +453,13 @@ pub(crate) fn incremental_build_class_module_index(
         source_files,
         source_root,
         pkg_name,
-        &class_module_index,
-        &class_superclass_index,
-        &all_class_infos,
-        &extension_index,
+        &Pass1Indexes {
+            class_module_index: &class_module_index,
+            class_superclass_index: &class_superclass_index,
+            all_class_infos: &all_class_infos,
+            extension_index: &extension_index,
+        },
+        &source_hashes,
     );
     save_cache(build_dir, manifest_path, file_entries);
 
@@ -348,30 +470,40 @@ pub(crate) fn incremental_build_class_module_index(
         extension_index,
         cached_asts,
         manifest_invalidated,
+        source_hashes,
     })
 }
 
 /// Partition source files into stale (need re-scan) and fresh (cache hit).
 ///
+/// `hashes` is `source_files`' content hashes, keyed by path string —
+/// precomputed once by the caller via [`content_hashes_of`] rather than
+/// hashed again per file here (BT-3120).
+///
 /// A file is considered stale if:
 /// - It has no cache entry
-/// - Its mtime is different from the cached mtime
-/// - Its mtime cannot be read (err on the side of re-scanning)
+/// - Its content hash differs from the cached content hash (BT-3120)
+/// - Its content cannot be read (err on the side of re-scanning)
 fn partition_files(
     source_files: &[Utf8PathBuf],
     cache: &Pass1Cache,
+    hashes: &HashMap<String, String>,
 ) -> (Vec<Utf8PathBuf>, Vec<Utf8PathBuf>) {
     let mut stale = Vec::new();
     let mut fresh = Vec::new();
 
     for file in source_files {
         if let Some(entry) = cache.entries.get(file.as_str()) {
-            let current_mtime = mtime_of(file);
-            if current_mtime == Some(entry.mtime) {
-                fresh.push(file.clone());
-            } else {
-                debug!(file = %file, "Cache stale — mtime changed");
-                stale.push(file.clone());
+            match hashes.get(file.as_str()) {
+                Some(hash) if *hash == entry.content_hash => fresh.push(file.clone()),
+                Some(_) => {
+                    debug!(file = %file, "Cache stale — content changed");
+                    stale.push(file.clone());
+                }
+                None => {
+                    debug!(file = %file, "Cannot read file content — treating as stale");
+                    stale.push(file.clone());
+                }
             }
         } else {
             debug!(file = %file, "No cache entry — new file");
@@ -387,20 +519,37 @@ fn partition_files(
     (stale, fresh)
 }
 
+/// The merged Pass 1 indexes `build_cache_entries` reads from — bundled into
+/// one borrow so the function stays under clippy's argument-count limit
+/// (BT-3120 added the `hashes` parameter, which would otherwise push it over).
+/// Mirrors the corresponding fields of [`IncrementalPass1Result`].
+struct Pass1Indexes<'a> {
+    class_module_index: &'a HashMap<String, String>,
+    class_superclass_index: &'a HashMap<String, String>,
+    all_class_infos: &'a [ClassInfo],
+    extension_index: &'a ExtensionIndex,
+}
+
 /// Build cache entries from the current Pass 1 results.
 ///
-/// Each source file gets an entry with its current mtime and the subset of
-/// class/superclass indexes that belong to it (determined by module name
-/// prefix matching).
+/// Each source file gets an entry with its current content hash (BT-3120,
+/// taken from the precomputed `hashes` map — see [`content_hashes_of`] —
+/// rather than re-hashed here) and the subset of class/superclass indexes
+/// that belong to it (determined by module name prefix matching).
 fn build_cache_entries(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
-    all_class_infos: &[ClassInfo],
-    extension_index: &ExtensionIndex,
+    indexes: &Pass1Indexes<'_>,
+    hashes: &HashMap<String, String>,
 ) -> HashMap<String, CacheEntry> {
+    let Pass1Indexes {
+        class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        extension_index,
+    } = *indexes;
+
     // Build a reverse index: module_name → Vec<(class_name, module_name)>
     // This avoids O(files * classes) iteration in the loop below.
     let mut module_to_classes: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -420,7 +569,7 @@ fn build_cache_entries(
     let mut entries = HashMap::new();
 
     for file in source_files {
-        let Some(mtime) = mtime_of(file) else {
+        let Some(content_hash) = hashes.get(file.as_str()).cloned() else {
             continue;
         };
 
@@ -450,7 +599,7 @@ fn build_cache_entries(
         entries.insert(
             file.as_str().to_string(),
             CacheEntry {
-                mtime,
+                content_hash,
                 class_module_index: file_class_module_index,
                 class_superclass_index: file_superclass_index,
                 class_infos: file_class_infos,
@@ -460,33 +609,6 @@ fn build_cache_entries(
     }
 
     entries
-}
-
-/// Serde support for `SystemTime` (required field) via duration-since-epoch.
-mod system_time_required_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    #[derive(Serialize, Deserialize)]
-    struct Epoch {
-        secs: u64,
-        nanos: u32,
-    }
-
-    #[allow(clippy::trivially_copy_pass_by_ref)] // serde serialize_with requires &T
-    pub fn serialize<S: Serializer>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error> {
-        let dur = time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO);
-        let epoch = Epoch {
-            secs: dur.as_secs(),
-            nanos: dur.subsec_nanos(),
-        };
-        epoch.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemTime, D::Error> {
-        let epoch = Epoch::deserialize(deserializer)?;
-        Ok(UNIX_EPOCH + Duration::new(epoch.secs, epoch.nanos))
-    }
 }
 
 /// Serde support for `Option<SystemTime>` via duration-since-epoch.
@@ -549,7 +671,7 @@ mod tests {
             "/src/counter.bt".to_string(),
             CacheEntry {
                 extensions: Vec::new(),
-                mtime: SystemTime::now(),
+                content_hash: "deadbeef".to_string(),
                 class_module_index: cmi,
                 class_superclass_index: csi,
                 class_infos: Vec::new(),
@@ -638,8 +760,8 @@ mod tests {
         fs::write(&file_b, "b").unwrap();
         fs::write(&file_c, "c").unwrap();
 
-        let mtime_a = mtime_of(&file_a).unwrap();
-        let mtime_b = mtime_of(&file_b).unwrap();
+        let hash_a = content_hash_of(&file_a).unwrap();
+        let hash_b = content_hash_of(&file_b).unwrap();
 
         // Build a cache with a and b (but not c)
         let mut entries = HashMap::new();
@@ -647,7 +769,7 @@ mod tests {
             file_a.as_str().to_string(),
             CacheEntry {
                 extensions: Vec::new(),
-                mtime: mtime_a,
+                content_hash: hash_a,
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
@@ -657,7 +779,7 @@ mod tests {
             file_b.as_str().to_string(),
             CacheEntry {
                 extensions: Vec::new(),
-                mtime: mtime_b,
+                content_hash: hash_b,
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
@@ -672,9 +794,188 @@ mod tests {
 
         // file_a: fresh, file_b: fresh, file_c: new (stale)
         let source_files = vec![file_a.clone(), file_b.clone(), file_c.clone()];
-        let (stale, fresh) = partition_files(&source_files, &cache);
+        let hashes = content_hashes_of(&source_files);
+        let (stale, fresh) = partition_files(&source_files, &cache, &hashes);
         assert_eq!(fresh, vec![file_a, file_b]);
         assert_eq!(stale, vec![file_c]);
+    }
+
+    /// BT-3120: a file whose content changed but whose mtime was backdated
+    /// (or preserved) by the writing tool must still be detected as stale —
+    /// staleness comes from the content hash, never from mtime.
+    #[test]
+    fn test_partition_files_stale_on_content_change_with_backdated_mtime() {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("a.bt");
+
+        fs::write(&file, "counter := [0].").unwrap();
+        let old_hash = content_hash_of(&file).unwrap();
+        let old_mtime = mtime_of(&file).unwrap();
+
+        let mut entries = HashMap::new();
+        entries.insert(
+            file.as_str().to_string(),
+            CacheEntry {
+                extensions: Vec::new(),
+                content_hash: old_hash,
+                class_module_index: HashMap::new(),
+                class_superclass_index: HashMap::new(),
+                class_infos: Vec::new(),
+            },
+        );
+        let cache = Pass1Cache {
+            version: CACHE_VERSION,
+            manifest_mtime: None,
+            entries,
+        };
+
+        // Change the content, then force the mtime back to what it was
+        // before — simulating a tool that preserves or backdates mtime on
+        // write (or a same-second write on a coarse-grained filesystem).
+        fs::write(&file, "counter := [1].").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(old_mtime)
+            .unwrap();
+        assert_eq!(
+            mtime_of(&file),
+            Some(old_mtime),
+            "mtime must be back to its old value for this test to be meaningful"
+        );
+
+        let hashes = content_hashes_of(std::slice::from_ref(&file));
+        let (stale, fresh) = partition_files(std::slice::from_ref(&file), &cache, &hashes);
+        assert_eq!(
+            stale,
+            vec![file],
+            "content changed under an unchanged mtime must still be detected as stale"
+        );
+        assert!(fresh.is_empty());
+    }
+
+    /// BT-3120: rewriting identical content (e.g. a `touch`, or a build tool
+    /// that always rewrites its output) bumps mtime but must not be treated
+    /// as stale — only a content change should trigger re-scanning.
+    #[test]
+    fn test_partition_files_fresh_on_touch_without_content_change() {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("a.bt");
+
+        fs::write(&file, "counter := [0].").unwrap();
+        let hash = content_hash_of(&file).unwrap();
+
+        let mut entries = HashMap::new();
+        entries.insert(
+            file.as_str().to_string(),
+            CacheEntry {
+                extensions: Vec::new(),
+                content_hash: hash,
+                class_module_index: HashMap::new(),
+                class_superclass_index: HashMap::new(),
+                class_infos: Vec::new(),
+            },
+        );
+        let cache = Pass1Cache {
+            version: CACHE_VERSION,
+            manifest_mtime: None,
+            entries,
+        };
+
+        // Rewrite the exact same content — this changes mtime but not bytes.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&file, "counter := [0].").unwrap();
+
+        let hashes = content_hashes_of(std::slice::from_ref(&file));
+        let (stale, fresh) = partition_files(std::slice::from_ref(&file), &cache, &hashes);
+        assert_eq!(
+            fresh,
+            vec![file],
+            "touch-without-change must not be treated as stale"
+        );
+        assert!(stale.is_empty());
+    }
+
+    /// BT-3120 acceptance criterion: build with content A, then simulate a
+    /// `git checkout` that restores older content B under a *newer* mtime
+    /// (git always sets mtime to the checkout time, regardless of the
+    /// content's age) — the cache must still detect the content change and
+    /// mark the file stale. A subsequent touch-without-change (mtime bump,
+    /// same content) must not cause another rebuild.
+    #[test]
+    fn test_partition_files_branch_switch_scenario() {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("a.bt");
+
+        // "main" branch content, built once.
+        fs::write(&file, "counter := [0].").unwrap();
+        let hash_main = content_hash_of(&file).unwrap();
+        let mut entries = HashMap::new();
+        entries.insert(
+            file.as_str().to_string(),
+            CacheEntry {
+                extensions: Vec::new(),
+                content_hash: hash_main,
+                class_module_index: HashMap::new(),
+                class_superclass_index: HashMap::new(),
+                class_infos: Vec::new(),
+            },
+        );
+        let cache = Pass1Cache {
+            version: CACHE_VERSION,
+            manifest_mtime: None,
+            entries,
+        };
+
+        // `git checkout old-branch`: older (different) content, fresh mtime.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&file, "counter := [-1]. \"older branch content\"").unwrap();
+
+        let hashes = content_hashes_of(std::slice::from_ref(&file));
+        let (stale, fresh) = partition_files(std::slice::from_ref(&file), &cache, &hashes);
+        assert_eq!(
+            stale,
+            vec![file.clone()],
+            "checked-out content differs from the cached hash — must rebuild"
+        );
+        assert!(fresh.is_empty());
+
+        // Re-cache as if the rebuild happened, then touch without changing
+        // content (e.g. a second `git checkout` back to the same content, or
+        // an editor save-without-edit).
+        let hash_old_branch = content_hash_of(&file).unwrap();
+        let mut entries2 = HashMap::new();
+        entries2.insert(
+            file.as_str().to_string(),
+            CacheEntry {
+                extensions: Vec::new(),
+                content_hash: hash_old_branch,
+                class_module_index: HashMap::new(),
+                class_superclass_index: HashMap::new(),
+                class_infos: Vec::new(),
+            },
+        );
+        let cache2 = Pass1Cache {
+            version: CACHE_VERSION,
+            manifest_mtime: None,
+            entries: entries2,
+        };
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&file, "counter := [-1]. \"older branch content\"").unwrap();
+
+        let hashes2 = content_hashes_of(std::slice::from_ref(&file));
+        let (stale2, fresh2) = partition_files(std::slice::from_ref(&file), &cache2, &hashes2);
+        assert_eq!(
+            fresh2,
+            vec![file],
+            "touch-without-change after the rebuild must not recompile"
+        );
+        assert!(stale2.is_empty());
     }
 
     #[test]
@@ -752,6 +1053,18 @@ mod extension_cache_tests {
         )
         .unwrap();
         assert_eq!(first.extension_index.len(), 1, "extension scanned");
+        // BT-3120: Pass 1 hands back every scanned file's content hash so
+        // Pass 2 (`detect_changes`) can reuse it instead of re-hashing.
+        assert_eq!(
+            first.source_hashes.len(),
+            2,
+            "source_hashes covers every source file, not just stale ones"
+        );
+        assert_eq!(
+            first.source_hashes.get(ext_file.as_str()),
+            content_hash_of(&ext_file).as_ref(),
+            "returned hash must match the file's actual content hash"
+        );
 
         // Second build: all files fresh — extensions must come from the cache.
         let second = incremental_build_class_module_index(
@@ -777,6 +1090,14 @@ mod extension_cache_tests {
                 .len(),
             1,
             "cached extension regroups under its defining file"
+        );
+        // BT-3120: even on an all-fresh (cache-hit) build, every file is
+        // still hashed once so `source_hashes` stays complete for Pass 2 —
+        // the fresh/stale split only affects re-scanning, not hashing.
+        assert_eq!(
+            second.source_hashes.len(),
+            2,
+            "source_hashes stays complete on an all-fresh build"
         );
 
         // Third build: the defining file is deleted — its cached extensions
