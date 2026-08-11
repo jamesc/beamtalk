@@ -3689,6 +3689,46 @@ fn test_class_method_self_send_in_to_do_loop_body_is_compile_error() {
 }
 
 #[test]
+fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compiles() {
+    // BT-3150 review follow-up: the `ClassMethodSelfSendInThreadedLoopBody`
+    // guard only fires when a class-method self-send is itself the top-level
+    // statement expression (`self bump` as a bare statement) — it doesn't walk
+    // into `Expression::Assignment`, so `x := self bump` inside the same
+    // `whileTrue:` body skipped the guard entirely and fell into
+    // `try_generate_block_local_plain_let`, which used the non-open-scope-aware
+    // `expression_doc` and wrapped it in `let X = <open chain> in`, reproducing
+    // the exact doubled-`in` `core_parse_error` this PR exists to prevent (just
+    // reached via assignment instead of a bare statement).
+    //
+    // Deliberately NOT rejected the way a bare self-send statement is: unlike a
+    // discarded statement, `x`'s value here is genuinely captured and used
+    // within the same iteration (`result := result + x`) — the same
+    // "self-send return value matters" shape that made blanket-rejecting
+    // `Foldl*` bodies wrong (see `test_class_method_self_send_as_collect_transform_still_compiles`).
+    // So this is fixed as a compile bug (use `expression_doc_with_open_scope`,
+    // mirroring BT-1397's fix for the same shape inside blocks generally), not
+    // folded into the reject list. `self.runs` not accumulating across
+    // iterations is the same pre-existing, tracked `Letrec` limitation as
+    // always (this test only pins that it compiles and runs without crashing).
+    let src = "Value subclass: DriverAssign\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    i := 1\n    result := 0\n    [i <= aList size] whileTrue: [\n      x := self bump\n      result := result + x\n      i := i + 1\n    ]\n    result";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driverassign").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "x := self bump inside a whileTrue: body must compile. Got: {result:?}"
+    );
+    let code = result.unwrap();
+    assert!(
+        !code.contains("in  in"),
+        "Should not contain doubled `in` keyword. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_class_method_self_send_alongside_local_in_times_repeat_body_is_compile_error() {
     // BT-3150: the same gap reached via `timesRepeat:` instead of `whileTrue:`,
     // with a co-occurring local-variable mutation — a bare self-send-only

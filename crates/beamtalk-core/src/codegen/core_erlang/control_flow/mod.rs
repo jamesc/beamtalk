@@ -3301,15 +3301,34 @@ impl CoreErlangGenerator {
         let core_var = self
             .lookup_var(&id.name)
             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-        let val_doc = self.expression_doc(value)?;
+        // BT-3150 review follow-up: a class-method self-send on the RHS
+        // (`x := self bump`) produces an *open* let-chain via
+        // `emit_class_var_result_unwrap` (ending in `... in `, result value
+        // carried out-of-band). Using the plain `expression_doc` here and
+        // wrapping it in `let core_var = <val_doc> in` doubled the trailing
+        // `in` — the exact `core_parse_error` shape BT-3150 fixes for a bare
+        // self-send statement, just reached via assignment instead. Mirrors
+        // `generate_local_var_assignment_in_loop`'s BT-1397 fix: keep the
+        // open chain (and its `ClassVarsN` rebind) at this level, then bind
+        // `core_var` to the carried-out result as a separate, still-open
+        // `let`.
+        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
         self.bind_var(&id.name, &core_var);
-        Ok(Some(docvec![
-            "let ",
-            leaf::var(core_var),
-            " = ",
-            val_doc,
-            " in ",
-        ]))
+        let doc = match open_scope {
+            Some(OpenScopeResult::Value(result_var)) => docvec![
+                val_doc,
+                "let ",
+                leaf::var(core_var),
+                " = ",
+                leaf::var(result_var),
+                " in ",
+            ],
+            Some(OpenScopeResult::NoValue) => {
+                docvec!["let ", leaf::var(core_var), " = 'nil' in ",]
+            }
+            None => docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",],
+        };
+        Ok(Some(doc))
     }
 
     /// BT-1275: Generate a local variable assignment in a direct-params loop body.
@@ -3328,6 +3347,15 @@ impl CoreErlangGenerator {
     ///
     /// Returns `(doc, Some(new_var_name))` so callers (e.g. `emit_local_assign_last_expr`)
     /// can reference the newly-bound variable by name (e.g. for FoldlCollect/FoldlInject).
+    ///
+    /// BT-3150 review follow-up: unlike `try_generate_block_local_plain_let`, `value`
+    /// here never needs open-scope handling for a class-method self-send RHS
+    /// (`x := self bump`) — `use_direct_params`/`use_tuple_acc`/`use_hybrid_params`
+    /// (this function's only callers, see `generate_threaded_loop_body_inner`) are
+    /// all unconditionally disabled whenever the block has *any* self-send
+    /// (`BlockMutationAnalysis::has_state_effects`/`has_self_sends`, checked by
+    /// `select_direct_params`/`select_tuple_acc`/`select_hybrid_params`), so `value`
+    /// can never be, or contain at this level, one.
     pub(super) fn generate_direct_var_update_in_loop(
         &mut self,
         expr: &Expression,
