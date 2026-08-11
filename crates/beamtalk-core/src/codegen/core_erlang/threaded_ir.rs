@@ -3260,6 +3260,59 @@ mod tests {
     }
 
     #[test]
+    fn render_loop_letrec_final_args_use_hybrid_context_even_when_nested_in_stateacc_ambient() {
+        // Regression test for `render_loop_letrec`'s loop-context ordering:
+        // the recursive `apply 'FnName'/N (<final_args>)` call sits inside
+        // the SAME `fun (...) -> <body_doc> apply ...` block as `body_doc`,
+        // so `final_args` must resolve `VersionPrefix::State` under the
+        // identical Hybrid context `body_doc` renders under — computing it
+        // after `with_loop_context` has already restored the ambient
+        // ("ancestor") ambient flags would pick a different `State`/
+        // `StateAcc` prefix, producing a reference to an unbound Core Erlang
+        // variable. Simulates a Hybrid loop nested inside an outer
+        // `StateAcc`-mode loop body (`in_loop_body = true, in_hybrid_loop =
+        // false` ambient — the exact shape that would trip this bug) to
+        // prove `final_args` still resolves `State1`/`State` (the Hybrid
+        // loop's own context), not `StateAcc1`/`StateAcc` (the outer
+        // ambient).
+        let frame = FrameId::new(1);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::Hybrid,
+            frame,
+            body: vec![ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, frame),
+                source: VersionedVar::new(VersionPrefix::State, 0, frame),
+                op: BindOp::Direct(ValueRef::Version(VersionedVar::new(
+                    VersionPrefix::State,
+                    0,
+                    frame,
+                ))),
+                shadow_write: false,
+                span: span(),
+            }],
+            produces: vec![VersionedVar::new(VersionPrefix::State, 1, frame)],
+            span: span(),
+        }];
+        let mut render_gen = CoreErlangGenerator::new("dual_run_hybrid_nested");
+        // Ambient context as if this `Threaded` node sits inside an outer
+        // StateAcc-mode loop body — the pre-existing, pre-fix bug would have
+        // computed `final_args` under exactly this (wrong) ambient.
+        render_gen.in_loop_body = true;
+        render_gen.in_hybrid_loop = false;
+        let mut ctx = RenderCtx::new(&mut render_gen);
+        let rendered = render(&ir, &mut ctx).to_pretty_string();
+
+        assert_eq!(
+            rendered,
+            "letrec '_Loop1'/1 = fun (StateAcc) -> let State1 = State in \
+             apply '_Loop1'/1 (State1) in apply '_Loop1'/1 (StateAcc)",
+            "the recursive tail call must reference State1 (the Hybrid \
+             loop's own context), not StateAcc1 (the outer StateAcc \
+             ambient) — got: {rendered}"
+        );
+    }
+
+    #[test]
     fn dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim() {
         // NLR-catch rendering doesn't re-derive `wrap_body_with_nlr_catch`'s
         // scaffolding — it calls the exact same function real NLR call
