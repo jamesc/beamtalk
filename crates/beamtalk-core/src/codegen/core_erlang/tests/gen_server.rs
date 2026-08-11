@@ -3653,6 +3653,115 @@ fn test_class_var_mutation_emits_shadow_write() {
 }
 
 #[test]
+fn test_class_var_mutation_in_while_loop_body_is_compile_error() {
+    // BT-3140: a class-var mutation made directly inside a whileTrue: loop
+    // body can't thread through `generate_field_assignment_open`'s generic
+    // State/StateAcc mechanism — it silently wrote into the loop's own
+    // scratch StateAcc map instead of ClassVars, losing the mutation on
+    // both normal return and a foreign NLR escape (confirmed empirically
+    // via a throwaway BUnit driver/probe fixture, mirroring
+    // fixtures/collection_driver.bt/collection_probe.bt's shape with the
+    // mutation moved inside the loop — not committed, since the compile-time
+    // rejection below makes that runtime repro permanently uncompilable).
+    // Rejected at compile time instead, mirroring BT-2792's
+    // FieldAssignmentInUnsupportedBlock for the analogous "can't thread this
+    // state" shape.
+    let src = "Object subclass: LoopShadowCounter\n  classState: runs = 0\n\n  class countUpTo: n =>\n    i := 0\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1\n      i := i + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@loopshadowcounter").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarAssignmentInThreadedBody { field, .. }) => {
+            assert_eq!(field, "runs");
+        }
+        other => panic!(
+            "Expected ClassVarAssignmentInThreadedBody for a class-var mutation \
+             inside a whileTrue: body. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_bare_class_var_mutation_in_times_repeat_body_hits_existing_stored_closure_guard() {
+    // BT-3140: `needs_mutation_threading` (BT-1346) deliberately excludes bare
+    // field writes/self-sends from triggering StateAcc threading in a class
+    // method — a `timesRepeat:` body with ONLY a class-var write and no other
+    // mutation never reaches `generate_threaded_loop_body`/
+    // `generate_field_assignment_open` at all; it falls through to the
+    // generic block path and is already caught by BT-2792's
+    // `FieldAssignmentInUnsupportedBlock` (`validate_stored_closure`). Pinned
+    // here as the contrast case to the co-occurring-local-mutation shape
+    // below, which DOES reach the BT-3140 gap.
+    let src = "Object subclass: TimesRepeatShadowCounter\n  classState: runs = 0\n\n  class bumpN: n =>\n    n timesRepeat: [self.runs := self.runs + 1]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@timesrepeatshadowcounter").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "Expected the pre-existing FieldAssignmentInUnsupportedBlock guard for a \
+         bare class-var mutation (no co-occurring local/self-send mutation) inside \
+         a timesRepeat: body. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_var_mutation_alongside_local_in_times_repeat_body_is_compile_error() {
+    // BT-3140: once a `timesRepeat:` body ALSO has a local-variable mutation
+    // (or self-send), `needs_mutation_threading` fires for that reason and the
+    // body IS routed through `generate_threaded_loop_body` — reaching the same
+    // `generate_field_assignment_open` gap as whileTrue:. This is the shape
+    // that actually matters: a loop that legitimately needs local threading
+    // (an accumulator, a counter) with a class-var write alongside it.
+    let src = "Object subclass: TimesRepeatShadowCounter2\n  classState: runs = 0\n\n  class bumpN: n =>\n    seen := 0\n    n timesRepeat: [\n      self.runs := self.runs + 1\n      seen := seen + 1\n    ]\n    seen";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@timesrepeatshadowcounter2").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassVarAssignmentInThreadedBody { .. })
+        ),
+        "Expected ClassVarAssignmentInThreadedBody for a class-var mutation \
+         alongside a local-variable mutation inside a timesRepeat: body. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_var_mutation_before_loop_still_emits_shadow_write() {
+    // BT-3140 (contrast case): a class-var mutation BEFORE a whileTrue: loop
+    // (top frame, block_depth == 0, not inside the loop's threaded body) is
+    // the already-proven ADR 0110 shape and must keep compiling + emitting
+    // the shadow write — the BT-3140 rejection is scoped to mutations
+    // literally inside the loop body, not merely a method that also has one.
+    let src = "Object subclass: LoopShadowCounterOk\n  classState: runs = 0\n\n  class bumpThenLoop: n =>\n    self.runs := self.runs + 1\n    i := 0\n    [i < n] whileTrue: [i := i + 1]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@loopshadowcounterok").with_workspace_mode(true),
+    )
+    .expect("mutation before the loop, at top frame, must still compile");
+    assert!(
+        code.contains("$bt_class_vars_shadow"),
+        "top-frame class-var mutation before the loop must still emit the \
+         ADR 0110 shadow write. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_instance_field_mutation_does_not_emit_shadow_write() {
     // ADR 0110: the shadow write is scoped to class-var mutations in class
     // methods — ordinary actor state threading must not gain a pdict write.
