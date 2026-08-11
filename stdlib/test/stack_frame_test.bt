@@ -99,3 +99,16 @@ TestCase subclass: StackFrameTest
   testRespondsToNonExistentMethod =>
     frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
     self deny: (frame respondsTo: #totallyBogusMethod)
+
+  // BT-3127: the compiled Core Erlang carries a `-|` annotation with this
+  // file's real .bt source position, so the runtime stack trace's frame
+  // reports the exact line of the erroring message send below — not the
+  // enclosing .erl module or a nil placeholder. If a line above this comment
+  // shifts, update the expected line number below to match.
+  testStackFrameLineMatchesSourcePosition =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self assert: frame line equals: 109
+
+  testStackFrameFileMatchesSourcePosition =>
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self assert: (frame file endsWith: "stack_frame_test.bt")

@@ -2367,32 +2367,20 @@ impl CoreErlangGenerator {
         Some(span.line_number(source))
     }
 
-    /// BT-940: Wraps a Document with a Core Erlang line annotation.
+    /// BT-940/BT-3127: Wraps a Document with a Core Erlang line annotation.
     ///
-    /// Produces `( Doc -| [{Line, 1}, {'file', "path.bt"}] )` which the BEAM compiler
-    /// preserves into the Line chunk. The VM surfaces this as
-    /// `[{file, "path.bt"}, {line, N}]` in stacktrace frames.
-    ///
-    /// The annotation format must match what Erlang's own compiler produces
-    /// (`{Line, Column}` tuple + `{file, Path}`) — the `{'line', N}` format
-    /// is not propagated into the BEAM line table.
+    /// Delegates to [`leaf::annotated`] for the `[Line, {'file', Path}]` shape
+    /// (BT-3119 spike), which the BEAM compiler preserves into the Line chunk.
+    /// The VM surfaces this as `[{file, "path.bt"}, {line, N}]` in stacktrace
+    /// frames. Falls back to a bare `[Line]` annotation when no source path is
+    /// known (e.g. compiling from a string with no backing file).
     pub(super) fn annotate_with_line(
         &self,
         doc: Document<'static>,
         line_num: u32,
     ) -> Document<'static> {
         match &self.source_path {
-            Some(path) => {
-                docvec![
-                    "( ",
-                    doc,
-                    " -| [{",
-                    leaf::int_lit(i64::from(line_num)),
-                    ", 1}, {'file', ",
-                    leaf::string_lit(path),
-                    "}] )"
-                ]
-            }
+            Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
             None => {
                 // No source path — use bare line number annotation
                 docvec![

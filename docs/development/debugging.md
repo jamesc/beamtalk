@@ -32,6 +32,9 @@ cat build/module_name.core | less
 # - Function definitions ('functionName'/Arity)
 # - Pattern matches (case ... of)
 # - Error calls (call 'erlang':'error')
+# - `-|` source annotations on function heads and message sends
+#   (`( Expr -| [Line, {'file', "path.bt"}] )` — BT-3127), which carry
+#   the .bt file/line into the BEAM Line chunk and runtime stack traces
 
 # 2. Test generated BEAM in Erlang shell
 # Single-file build outputs to ./build with bt@ prefix
@@ -44,6 +47,14 @@ erl -pa build
 4> dbg:tpl('bt@module_name', '_', []).
 5> 'bt@module_name':function_name(Args).
 ```
+
+Stack traces from compiled `.bt` code (both raw Erlang `erlang:get_stacktrace/0`-style
+frames and Beamtalk's `StackFrame` objects, see `e stackTrace` in
+`stdlib/src/StackFrame.bt`) report the original `.bt` file and line number for
+function heads and message-send call sites — not the compiled module's own
+name or line 1 — as long as the compilation unit had a source path (any
+`.bt` file built via `beamtalk build`/`beamtalk test`; REPL-evaluated code
+with no backing file falls back to a bare line number, no file).
 
 ## Test Failures
 
