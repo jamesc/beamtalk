@@ -286,7 +286,9 @@ fallback, and gives a recommendation
 [BT-3153](https://linear.app/beamtalk/issue/BT-3153) (this section's own
 issue) can hand directly to a re-attempt at BT-3145. All line numbers below
 are against `crates/beamtalk-core/src/codegen/core_erlang/` unless noted,
-current as of the BT-3144 renderer landing (commit `e305be7`).
+current as of `main` at commit `89bb697` (BT-3151, the commit after the
+BT-3144 renderer landing — BT-3151 shifted line numbers in
+`while_loops.rs` and `mod.rs`, and the citations below reflect that).
 
 ### Gap 1 — no condition/case-split loop node
 
@@ -297,15 +299,15 @@ recursion, no condition, no `case`, no exit arm. Every real while/counted
 loop call site instead interleaves a condition test and a two-arm `case`
 around that same recursive skeleton:
 
-- `generate_while_loop_direct` (`control_flow/while_loops.rs:280-418`):
+- `generate_while_loop_direct` (`control_flow/while_loops.rs:287-429`):
   allocates a fresh `CondFun` closure (`cond_var = self.fresh_temp_var
-  ("CondFun")`, `:322`), builds `let CondFun = fun (Params) -> <cond_doc>
+  ("CondFun")`, `:329`), builds `let CondFun = fun (Params) -> <cond_doc>
   in case apply CondFun (Params) of <'true'|'false'> when 'true' -> `
-  (case header at `:369`), then the loop body, then a second arm —
-  `<'false'|'true'> when 'true' -> <exit_stateacc> end ` (`:392-401`) —
+  (case header at `:380`), then the loop body, then a second arm —
+  `<'false'|'true'> when 'true' -> <exit_stateacc> end ` (`:403-412`) —
   before the closing `in apply 'while'/N(initial_args)`. `negate` (the
   `whileFalse:` case) swaps which literal each arm tests, not the shape.
-  `generate_while_loop_hybrid` (`:428` onward) is the identical shape
+  `generate_while_loop_hybrid` (`:439` onward) is the identical shape
   under `Hybrid` mode.
 - `generate_counted_stateful_loop`/`_direct`/`_hybrid`
   (`control_flow/mod.rs:2702-2882`) use a *different* condition
@@ -365,7 +367,7 @@ reproduces a hand-written reference, not that it reproduces production.
        /// when 'true' -> " or "case call 'erlang':'=<'(I, N) of <'true'>
        /// when 'true' -> ". Built by the SAME condition-codegen call
        /// production already runs (`with_branch_context(|this| ..)`,
-       /// `while_loops.rs:353-359`) — the IR does not re-derive
+       /// `while_loops.rs:360-370`) — the IR does not re-derive
        /// condition semantics. Exactly the `NlrCatch` precedent: "a
        /// similar shape may fit" per the issue body, confirmed here.
        continue_header: Document<'static>,
@@ -468,7 +470,7 @@ through `fresh_temp_var` → `VariableContext::fresh_var`
 usize` (`variable_context.rs:36`) is a **single field on one
 `VariableContext`, itself a single field on one `CoreErlangGenerator`
 constructed once per *module* compile** (`CoreErlangGenerator::new`,
-`mod.rs:1698-1703`, doc comment: "Creates a new code generator for the
+`mod.rs:1750-1755`, doc comment: "Creates a new code generator for the
 given module name") — every `fresh_temp_var`/`fresh_var` call across
 *every method in that module* shares the one counter. This is even wider
 than BT-3145's investigation comment's "global counter shared across all
@@ -488,7 +490,7 @@ under-specified one.
 A related, smaller finding folds into the same fix: `render_loop_letrec`'s
 loop-function name is *also* gensym'd (`ctx.fresh_temp_var("Loop")`,
 `threaded_ir.rs:1096`, producing `_Loop3`-style names), but production
-never gensyms this name — `while_loops.rs:327` uses the static literal
+never gensyms this name — `while_loops.rs:334` uses the static literal
 `"while"`, and `CountedLoopFrame::fn_name` (`control_flow/mod.rs:1116`)
 carries static literals (`"repeat"`, `"loop"`). This is folded into Gap
 1's `ConditionalLoop::fn_name: String` field (supplied by the caller,
