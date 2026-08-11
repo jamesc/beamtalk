@@ -367,6 +367,25 @@ impl ThreadingPlan {
             &effects,
         );
 
+        // BT-3133 (ADR 0111 Phase C, invariant class 2): pins
+        // `select_tuple_acc`'s `ValueType`-context exclusion structurally —
+        // see `check_tuple_acc_value_type_invariant`'s doc comment.
+        generator.check_tuple_acc_value_type_invariant(
+            use_tuple_acc,
+            matches!(context, CodeGenContext::ValueType),
+            body.span,
+        );
+
+        // BT-3133 (ADR 0111 Phase C, invariant class 3): pins the recursive
+        // inter-construct `list_op_needs_stateacc_fallback_recursive`
+        // invariant structurally — see
+        // `check_nested_list_op_stateacc_invariant`'s doc comment.
+        generator.check_nested_list_op_stateacc_invariant(
+            use_direct_params,
+            effects.has_non_tuple_safe_list_op,
+            body.span,
+        );
+
         // BT-1326: Hybrid direct-params + State threading for letrec loops.
         let use_hybrid_params = Self::select_hybrid_params(
             allow_direct_params,
@@ -889,6 +908,22 @@ impl ThreadingPlan {
         source_var: &str,
         index_offset: usize,
     ) -> Vec<Document<'static>> {
+        // BT-3133 (ADR 0111 Phase C, invariant classes 1 + 4): this is the
+        // single production emitter of the `TupleAcc`-mode positional-unpack
+        // shape across every list-op and dict-op call site — see
+        // `check_tuple_acc_unpack_invariant`'s doc comment. No span is
+        // available at this call depth (`ThreadingPlan` carries none); this
+        // is a compiler-internal invariant, not user-facing, so
+        // `Span::default()` is an acceptable diagnostic-location gap here
+        // (mirrors `verify`'s own `produces` check, which does the same).
+        generator.check_tuple_acc_unpack_invariant(
+            self.use_tuple_acc,
+            self.fallback_reason.clone(),
+            &self.threaded_locals,
+            index_offset.saturating_sub(1),
+            Span::default(),
+        );
+
         let mut docs = Vec::new();
         for (i, var_name) in self.threaded_locals.iter().enumerate() {
             let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
@@ -1188,19 +1223,113 @@ impl CoreErlangGenerator {
     ) {
         let errors =
             threaded_ir::verify_loop_unpack_invariant(mode, threaded_locals, unpack_emitted, span);
+        self.report_threaded_ir_verify_errors(&errors, "loop threading-mode/unpack mismatch", span);
+    }
+
+    /// BT-3133 (ADR 0111 Phase C) invariant classes 1 + 4: checks the
+    /// `TupleAcc` mode's flat positional-unpack accumulator discipline via
+    /// [`threaded_ir::verify_tuple_acc_unpack_invariant`]. Single-sourced at
+    /// [`ThreadingPlan::generate_tuple_unpack_docs`] — the sole emitter of
+    /// this unpack shape across every list-op and dict-op call site — so one
+    /// call site here covers `do:`, `collect:`, `select:`/`reject:`,
+    /// `inject:into:`, `anySatisfy:`/`allSatisfy:`, `detect:`,
+    /// `takeWhile:`/`dropWhile:`, and dictionary `do:`.
+    ///
+    /// `gate_slots` is the caller's own already-computed `index_offset - 1`;
+    /// see [`threaded_ir::ThreadingMode::TupleAcc`]'s doc comment for what
+    /// each list-op family's `gate_slots` value means.
+    pub(super) fn check_tuple_acc_unpack_invariant(
+        &mut self,
+        use_tuple_acc: bool,
+        fallback_reason: StateAccFallbackReason,
+        threaded_locals: &[String],
+        gate_slots: usize,
+        span: Span,
+    ) {
+        let errors = threaded_ir::verify_tuple_acc_unpack_invariant(
+            use_tuple_acc,
+            fallback_reason,
+            threaded_locals,
+            gate_slots,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "tuple-acc positional-unpack mode/shape mismatch",
+            span,
+        );
+    }
+
+    /// BT-3133 (ADR 0111 Phase C) invariant class 2: pins `select_tuple_acc`'s
+    /// `ValueType`-context exclusion via
+    /// [`threaded_ir::verify_tuple_acc_value_type_exclusion`]. Called once
+    /// per loop, immediately after `use_tuple_acc` is resolved in
+    /// [`ThreadingPlan::new_impl`].
+    pub(super) fn check_tuple_acc_value_type_invariant(
+        &mut self,
+        use_tuple_acc: bool,
+        context_is_value_type: bool,
+        span: Span,
+    ) {
+        let errors = threaded_ir::verify_tuple_acc_value_type_exclusion(
+            use_tuple_acc,
+            context_is_value_type,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "tuple-acc selected in ValueType context",
+            span,
+        );
+    }
+
+    /// BT-3133 (ADR 0111 Phase C) invariant class 3: pins the recursive
+    /// inter-construct `list_op_needs_stateacc_fallback_recursive` invariant
+    /// via [`threaded_ir::verify_nested_list_op_stateacc_compat`]. Called
+    /// once per loop, immediately after `use_direct_params` is resolved in
+    /// [`ThreadingPlan::new_impl`].
+    pub(super) fn check_nested_list_op_stateacc_invariant(
+        &mut self,
+        direct_params_selected: bool,
+        inner_needs_stateacc_fallback: bool,
+        span: Span,
+    ) {
+        let errors = threaded_ir::verify_nested_list_op_stateacc_compat(
+            direct_params_selected,
+            inner_needs_stateacc_fallback,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "nested list-op StateAcc fallback under DirectParams",
+            span,
+        );
+    }
+
+    /// Shared failure-reporting path for every `ThreadedIr` production
+    /// invariant check in this module (ADR 0111 §The verifier /
+    /// CLAUDE.md's "never panic on user input" rule): hard-fails in debug/CI
+    /// via `debug_assert!`, exactly as the deleted `debug_assert!`s this
+    /// migration's checks replace did; in release builds (where
+    /// `debug_assert!` is compiled out), degrades to an internal-error
+    /// diagnostic on the compile result instead of silently doing nothing —
+    /// the compile still succeeds with the generator's (unverified) output.
+    fn report_threaded_ir_verify_errors(
+        &mut self,
+        errors: &[threaded_ir::VerifyError],
+        invariant_label: &str,
+        span: Span,
+    ) {
         if errors.is_empty() {
             return;
         }
         debug_assert!(
             false,
-            "ThreadedIr verify found a loop threading-mode/unpack mismatch: {errors:?}"
+            "ThreadedIr verify found a {invariant_label}: {errors:?}"
         );
         self.add_codegen_warning(
-            Diagnostic::error(
-                format!("internal: loop threading-mode/unpack mismatch: {errors:?}"),
-                span,
-            )
-            .with_category(DiagnosticCategory::Type),
+            Diagnostic::error(format!("internal: {invariant_label}: {errors:?}"), span)
+                .with_category(DiagnosticCategory::Type),
         );
     }
 
