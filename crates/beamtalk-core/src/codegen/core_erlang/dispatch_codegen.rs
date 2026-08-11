@@ -1106,6 +1106,16 @@ impl CoreErlangGenerator {
                         arg_parts.push(Document::Str(", "));
                     }
                     if let Some(block) = Self::extract_block_literal(arg) {
+                        // BT-3151 review follow-up: a block crossing the Erlang
+                        // interop boundary here goes through
+                        // `generate_erlang_interop_wrapper` → `generate_block`,
+                        // the same same-process, in-process closure mechanism as
+                        // a `select:`/`do:` argument — see
+                        // `check_no_unsafe_class_method_self_sends`'s doc
+                        // comment.
+                        let analysis =
+                            crate::codegen::core_erlang::block_analysis::analyze_block(block);
+                        self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
                         let (wrapped_doc, is_stateful) =
                             self.generate_erlang_interop_wrapper(block)?;
                         if is_stateful {

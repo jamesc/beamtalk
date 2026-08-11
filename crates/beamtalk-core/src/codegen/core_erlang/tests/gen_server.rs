@@ -4052,6 +4052,64 @@ fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() 
 }
 
 #[test]
+fn test_class_method_mutating_self_send_as_second_cascade_message_in_block_is_compile_error() {
+    // BT-3151 review follow-up: a cascade's 2nd+ message is sent to the same
+    // shared receiver as the first (cascade semantics evaluate the receiver
+    // once), but `analyze_expression`'s `Expression::Cascade` arm only ever
+    // checked later messages for `is_self_field_value_send` — it never
+    // recorded a self-send to `self_send_selectors`/`has_self_sends` for
+    // them, unlike the `MessageSend` arm's handling of the cascade's first
+    // message (folded into `receiver` by the parser). A mutating self-send
+    // hidden behind an earlier *pure* cascade message inside a bare block
+    // (`self pureLog: x; check: x`) was therefore invisible to
+    // `check_no_unsafe_class_method_self_sends`, silently compiling and
+    // losing the mutation — reproducing the exact bug this guard exists to
+    // close, just one cascade message later.
+    let src = "Value subclass: DriverCascade\n  classState: runs = 0\n  class pureLog: x => x\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList select: [:x | self pureLog: x; check: x]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@drivercascade").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send as the 2nd+ message of a cascade inside a bare block \
+         must be caught by BT-3151's guard just like a standalone self-send. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_in_erlang_interop_block_is_compile_error() {
+    // BT-3151 review follow-up: a block argument crossing the Erlang interop
+    // boundary in a direct `(Erlang mod) fn: arg` call
+    // (`generate_direct_erlang_call`'s keyword branch, `dispatch_codegen.rs`)
+    // routes through the same `generate_erlang_interop_wrapper` →
+    // `generate_block` mechanism as a `select:`/`do:` argument — same
+    // process, same lossy in-process self-send optimization. Must be caught
+    // the same way.
+    let src = "Value subclass: DriverErlangInterop\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class run: aList =>\n    (Erlang lists) foreach: [:x | self bump] over: aList\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@drivererlanginterop").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating self-send inside a block crossing the Erlang interop boundary \
+         must be caught by BT-3151's guard. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_class_method_self_send_in_pure_inject_into_block_is_compile_error() {
     // BT-3151 follow-up: `generate_list_inject`'s BT-1327 pure-block fast
     // path calls `generate_block_body` directly (to emit an inline

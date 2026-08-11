@@ -416,6 +416,20 @@ fn analyze_expression(
                 if is_self_field_value_send(cascade_receiver, &msg.selector) {
                     analysis.has_field_value_call = true;
                 }
+                // BT-3151 review follow-up: a cascade's 2nd+ message is sent to
+                // the same shared receiver as the first (see the comment above),
+                // so a self-send there needs the same `self_send_selectors`
+                // recording the `MessageSend` arm does for the first message —
+                // otherwise a mutating self-send hidden behind an earlier pure
+                // cascade message (`self pureLog: x; check: x`) is invisible to
+                // `check_no_unsafe_class_method_self_sends` and to
+                // `compute_class_var_mutating_selectors`'s purity closure.
+                if is_self_reference(cascade_receiver) {
+                    analysis.has_self_sends = true;
+                    analysis
+                        .self_send_selectors
+                        .insert(msg.selector.name().to_string());
+                }
                 for arg in &msg.arguments {
                     analyze_expression(arg, analysis, ctx);
                 }

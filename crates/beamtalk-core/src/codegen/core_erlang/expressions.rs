@@ -888,8 +888,8 @@ impl CoreErlangGenerator {
     /// not the lossy in-process direct-call optimization — see ADR 0110
     /// BT-3039 / `shadow_cross_class_owner.bt`) or merely unproven (an
     /// `ifTrue:`/`ifFalse:` block reached via generic dynamic dispatch is a
-    /// long-documented ADR 0110 "known limitation", not something this
-    /// guard introduces). `generate_block` has no way to tell those apart
+    /// long-documented ADR 0110 "known limitation" (BT-1550), not something
+    /// this guard introduces). `generate_block` has no way to tell those apart
     /// from its own call site. Instead, called individually from each
     /// call site *confirmed* unsafe (same-process, in-process self-send,
     /// mutation empirically lost): `generate_simple_list_op`
@@ -897,9 +897,13 @@ impl CoreErlangGenerator {
     /// `generate_list_detect`, `generate_list_inject`'s BT-1327 pure-block
     /// fast path (which also bypasses `generate_block` — calls
     /// `generate_block_body` directly to avoid wrapper overhead), a
-    /// `whileTrue:`/`whileFalse:` condition block, and a bare (no local-var
+    /// `whileTrue:`/`whileFalse:` condition block, a bare (no local-var
     /// mutation) `timesRepeat:`/`to:do:`/`to:by:do:` body that falls through
-    /// to the stdlib's own `Integer`/value-type loop implementation.
+    /// to the stdlib's own `Integer`/value-type loop implementation, and a
+    /// block argument crossing the Erlang interop boundary in a direct
+    /// `(Erlang mod) fn: arg` call (`generate_direct_erlang_call`'s keyword
+    /// branch, `dispatch_codegen.rs`) — same `generate_erlang_interop_wrapper`
+    /// → `generate_block` mechanism as the list-op call sites above.
     pub(super) fn check_no_unsafe_class_method_self_sends(
         &self,
         analysis: &crate::codegen::core_erlang::block_analysis::BlockMutationAnalysis,
