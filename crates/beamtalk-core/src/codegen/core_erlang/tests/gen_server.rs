@@ -3663,6 +3663,32 @@ fn test_class_method_self_send_in_while_loop_body_is_compile_error() {
 }
 
 #[test]
+fn test_class_method_self_send_in_to_do_loop_body_is_compile_error() {
+    // BT-3150 review nit: `to:do:`/`to:by:do:` compile through the same
+    // `generate_counted_stateful_loop`/`BodyKind::Letrec` path as
+    // `timesRepeat:` (see `control_flow/mod.rs`'s `generate_counted_stateful_loop`
+    // doc comment), so the guard — and its error message, which explicitly
+    // names `to:do:`/`to:by:do:` alongside `whileTrue:`/`timesRepeat:` — must
+    // cover this construct too, not just `whileTrue:`/`timesRepeat:`.
+    let src = "Value subclass: DriverToDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    1 to: n do: [:i | self bump. total := total + i]\n    total";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@drivertodo").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { selector, .. }) => {
+            assert_eq!(selector, "bump");
+        }
+        other => panic!(
+            "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method \
+             self-send inside a to:do: body. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
 fn test_class_method_self_send_alongside_local_in_times_repeat_body_is_compile_error() {
     // BT-3150: the same gap reached via `timesRepeat:` instead of `whileTrue:`,
     // with a co-occurring local-variable mutation — a bare self-send-only

@@ -187,8 +187,8 @@ pub enum CodeGenError {
     Format(#[from] fmt::Error),
 
     /// BT-3150: A self-send to a same-class class method (`self someSelector`) used
-    /// as a statement inside a `whileTrue:`/`timesRepeat:` (`BodyKind::Letrec`)
-    /// loop body in a class method.
+    /// as a statement inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:`
+    /// (`BodyKind::Letrec`) loop body in a class method.
     ///
     /// Every same-class class-method self-send routes through
     /// `emit_class_var_result_unwrap`'s `{class_var_result, Result, ClassVarsN}`
@@ -209,9 +209,10 @@ pub enum CodeGenError {
     /// (`do:`/`collect:`/`select:`/`inject:into:`/...): tried and reverted after
     /// two rounds of CI failure against `stdlib/test/fixtures/class_method_block.bt`.
     /// `Letrec`'s own body value is *always* discarded (a `whileTrue:`/
-    /// `timesRepeat:` loop unconditionally evaluates to `nil`), so a self-send
-    /// there can only ever be present for a side effect — no legitimate use
-    /// depends on its return value, which is what makes blanket rejection safe.
+    /// `timesRepeat:`/`to:do:`/`to:by:do:` loop unconditionally evaluates to
+    /// `nil`), so a self-send there can only ever be present for a side effect
+    /// — no legitimate use depends on its return value, which is what makes
+    /// blanket rejection safe.
     /// `Foldl*` bodies don't share that property: they routinely use a
     /// self-send's return value as the fold's own output, and even a
     /// *discarded*, non-last self-send statement is an intentionally-supported,
@@ -224,8 +225,8 @@ pub enum CodeGenError {
     #[error(
         "Cannot send '{selector}' to self inside this loop body at {location}: \
              a self-send to a class method can't thread class-variable mutations back \
-             through whileTrue:/timesRepeat: loop bodies — any mutation '{selector}' \
-             makes is silently discarded by the time the loop finishes.\n\n\
+             through a whileTrue:/timesRepeat:/to:do:/to:by:do: loop body — any mutation \
+             '{selector}' makes is silently discarded by the time the loop finishes.\n\n\
              Fix: Accumulate what each call needs into a local variable (or collection) \
              inside the loop, then make the self-send(s) once after the loop finishes, \
              outside the threaded body."

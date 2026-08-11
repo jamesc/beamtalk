@@ -1512,7 +1512,7 @@ impl CoreErlangGenerator {
                 }
             } else if matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send(expr) {
                 // BT-3150: a self-send to a same-class class method inside a
-                // whileTrue:/timesRepeat: loop body routes through
+                // whileTrue:/timesRepeat:/to:do:/to:by:do: loop body routes through
                 // `emit_class_var_result_unwrap`, which leaves an *open*
                 // let-chain ending in `... in ` and rebinds `ClassVarsN` from
                 // the callee's own `{class_var_result, Result, ClassVars}`
