@@ -1357,7 +1357,7 @@ impl CoreErlangGenerator {
     /// `FrameId` from its position here, and `verify_branch_frame_linearity`
     /// only ever synthesizes a `Bind` chain from `final_versions`' scalar
     /// counts (not the real per-arm mutation sequence the generator
-    /// produced), `NonLinearVersion` cannot fire from any of today's four
+    /// produced), `NonLinearVersion` cannot fire from any of today's six
     /// call sites — there is no way for two arms to collide when their
     /// frame ids are always distinct by construction. This exercises the
     /// verifier's `FrameId`/linearity plumbing correctly (the acceptance
