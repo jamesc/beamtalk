@@ -3758,18 +3758,31 @@ fn test_class_method_self_send_after_loop_still_compiles() {
 }
 
 #[test]
-fn test_class_method_self_send_alongside_local_in_do_body_is_compile_error() {
-    // BT-3150 review follow-up: the `Letrec` (whileTrue:/timesRepeat:) guard alone
-    // left the identical gap open for `Foldl*` bodies (do:/collect:/select:/
-    // inject:into:/...) — `ThreadingPlan` threads only `threaded_locals` (user
-    // `:=` locals) through a fold's accumulator, never `ClassVars`, so a
-    // class-method self-send inside a `do:` block with a co-occurring local
-    // mutation (which is what actually routes it through
+fn test_class_method_self_send_alongside_local_in_do_body_still_compiles_but_loses_mutation() {
+    // BT-3150 review follow-up: the `Letrec` (whileTrue:/timesRepeat:) guard
+    // leaves the identical class-var-mutation-loss gap open for `Foldl*`
+    // bodies (do:/collect:/select:/inject:into:/...) — `ThreadingPlan` threads
+    // only `threaded_locals` (user `:=` locals) through a fold's accumulator,
+    // never `ClassVars`, so a class-method self-send inside a `do:` block with
+    // a co-occurring local mutation (which is what actually routes it through
     // `generate_threaded_loop_body_inner` in the first place) loses its
     // class-var mutation exactly like the `whileTrue:` case — confirmed
     // empirically: `runs` stayed at 0 across all 3 list elements instead of
-    // accumulating. The guard was widened from `Letrec`-only to all `BodyKind`s
-    // to close this.
+    // accumulating.
+    //
+    // This is a REAL, confirmed, still-open bug (tracked under BT-3151) — but
+    // it is deliberately NOT rejected at compile time the way the `Letrec`
+    // case is. An attempt to reject it (first scoped to all `BodyKind`s, then
+    // narrowed to `Letrec`/`FoldlDo` "discarded statement" positions only)
+    // was reverted after two rounds of CI failure: `Foldl*` bodies —
+    // including bare, discarded `do:`/`inject:into:` statements — routinely
+    // and legitimately use pure (non-mutating) self-sends in these same
+    // positions (BT-2350, `stdlib/test/fixtures/class_method_block.bt`), and
+    // neither "is the return value used" nor "is the statement last"
+    // distinguishes that safe, common case from this unsafe one. So this
+    // pins the current, intentional (if unsatisfying) tradeoff: `do:`
+    // compiles, silently losing the mutation, until BT-3151 lands proper
+    // `ClassVars` fold-threading or callee purity analysis.
     let src = "Value subclass: DriverDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    total := 0\n    aList do: [:x | self bump. total := total + x]\n    total";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3777,26 +3790,33 @@ fn test_class_method_self_send_alongside_local_in_do_body_is_compile_error() {
         &module,
         CodegenOptions::new("bt@driverdo").with_workspace_mode(true),
     );
-    match result {
-        Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { selector, .. }) => {
-            assert_eq!(selector, "bump");
-        }
-        other => panic!(
-            "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method \
-             self-send inside a do: body with a co-occurring local mutation. Got: {other:?}"
-        ),
-    }
+    assert!(
+        result.is_ok(),
+        "A class-method self-send inside a do: body (BT-3150's guard is Letrec-only \
+         by design — see BT-3151 for the tracked Foldl* gap). Got: {result:?}"
+    );
 }
 
 #[test]
-fn test_class_method_self_send_alongside_local_in_select_body_is_compile_error() {
-    // BT-3150 review follow-up: same gap, reached via `select:`'s predicate
-    // position (the self-send's *return value* is used, not just a discarded
-    // statement) — confirming the widened guard fires regardless of whether
-    // the self-send is a bare statement or the block's final/predicate
-    // expression, once a co-occurring local mutation routes the body through
-    // `generate_threaded_loop_body_inner`.
-    let src = "Value subclass: DriverSelect2\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    seen := 0\n    result := aList select: [:x | seen := seen + 1. self check: x]\n    result";
+fn test_class_method_self_send_as_select_predicate_alongside_local_still_compiles() {
+    // BT-3150 review follow-up: an earlier version of this fix blanket-rejected
+    // a class-method self-send in ANY `BodyKind::Foldl*` body, including
+    // `select:`'s predicate position — but that broke a real, existing stdlib
+    // fixture (`test/fixtures/class_method_block.bt`) that uses pure
+    // (non-mutating) self-sends as the value feeding `collect:`/`sort:`/
+    // `inject:into:` (see `test_class_method_self_send_as_collect_transform_still_compiles`
+    // below). Unlike `Letrec`, `select:`'s predicate result is NOT discarded
+    // — it structurally IS the fold's output — so rejecting every self-send
+    // there has a real false-positive cost. The guard is scoped to `Letrec`
+    // only; a `select:` predicate self-send (even alongside a co-occurring
+    // local mutation) must keep compiling.
+    //
+    // NOTE: if `check:` here actually mutated a class var, that mutation
+    // would still be silently lost — this narrower guard doesn't catch that
+    // shape (tracked under BT-3151 as a known, documented residual gap:
+    // catching it without also rejecting the pure/common case needs static
+    // analysis of whether the callee provably mutates class state).
+    let src = "Value subclass: DriverSelect2\n  class check: x => x > 0\n  class positives: aList =>\n    seen := 0\n    result := aList select: [:x | seen := seen + 1. self check: x]\n    result";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
     let result = generate_module(
@@ -3804,13 +3824,32 @@ fn test_class_method_self_send_alongside_local_in_select_body_is_compile_error()
         CodegenOptions::new("bt@driverselect2").with_workspace_mode(true),
     );
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { .. })
-        ),
-        "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method self-send \
-         used as select:'s predicate value, alongside a co-occurring local mutation. \
-         Got: {result:?}"
+        result.is_ok(),
+        "A class-method self-send used as select:'s predicate value, alongside a \
+         co-occurring local mutation, must still compile (its return value is needed, \
+         unlike a bare Letrec/do: statement). Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_as_collect_transform_still_compiles() {
+    // BT-3150 review follow-up: pins the exact pattern from the real stdlib
+    // fixture (`test/fixtures/class_method_block.bt`) that an earlier,
+    // over-broad version of this fix accidentally broke in CI — a pure
+    // (non-mutating) self-send used as `collect:`'s per-item transform,
+    // alongside a co-occurring local mutation that routes the body through
+    // `generate_threaded_loop_body_inner`. Must keep compiling.
+    let src = "Object subclass: ClassMethodBlockLike\n  class double: x => x * 2\n  class doubleAllCounting: items =>\n    seen := 0\n    items collect: [:item | seen := seen + 1. self double: item]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@classmethodblocklike").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "A pure class-method self-send used as collect:'s transform, alongside a \
+         co-occurring local mutation, must still compile. Got: {result:?}"
     );
 }
 

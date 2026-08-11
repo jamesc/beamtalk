@@ -1510,30 +1510,51 @@ impl CoreErlangGenerator {
                         &dispatch_var,
                     );
                 }
-            } else if self.is_class_method_self_send(expr) {
-                // BT-3150: a self-send to a same-class class method inside any
-                // threaded loop body — `whileTrue:`/`timesRepeat:` (`Letrec`)
-                // *or* `do:`/`collect:`/`select:`/`inject:into:`/... (`Foldl*`)
-                // — routes through `emit_class_var_result_unwrap`, which
-                // leaves an *open* let-chain ending in `... in ` and rebinds
-                // `ClassVarsN` from the callee's own
-                // `{class_var_result, Result, ClassVars}` reply. Neither
-                // family threads `ClassVarsN` through its per-iteration
-                // accumulator the way it threads `StateAcc`/the fold's own
-                // list-op accumulator (`ThreadingPlan::generate_pack_prefix`/
-                // `generate_exit_stateacc` only pack/unpack `threaded_locals`
-                // — user `:=` locals — never `ClassVars`) — so any class-var
-                // mutation the self-send makes is silently discarded once the
-                // loop/fold finishes (the self-send analog of BT-3140's
-                // finding for direct field writes, confirmed empirically for
-                // both a `Letrec` loop and a `do:` body: a mutating count
-                // stayed at 0 across all iterations instead of accumulating).
-                // Reject at compile time rather than emit code that's
-                // silently wrong — the same "can't thread this state shape
-                // back correctly here" category as BT-2792's
-                // `FieldAssignmentInUnsupportedBlock`, and body-kind-agnostic
-                // like BT-3140's `is_class_var_assignment` guard in
-                // `generate_field_assignment_open` (`dispatch_codegen.rs`).
+            } else if matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send(expr) {
+                // BT-3150: a self-send to a same-class class method inside a
+                // whileTrue:/timesRepeat: loop body routes through
+                // `emit_class_var_result_unwrap`, which leaves an *open*
+                // let-chain ending in `... in ` and rebinds `ClassVarsN` from
+                // the callee's own `{class_var_result, Result, ClassVars}`
+                // reply. `Letrec`'s recursive tail call threads only the
+                // loop's own local-variable `StateAcc` — `ClassVarsN` is
+                // never part of that thread — so any class-var mutation the
+                // self-send makes is silently discarded once the loop
+                // finishes, AND (unlike every `Foldl*` construct) `Letrec`'s
+                // own body value is *always* discarded too — a `whileTrue:`/
+                // `timesRepeat:` loop unconditionally evaluates to `nil`
+                // regardless of its last statement — so a self-send here can
+                // only ever be present for a side effect, never for its
+                // return value. That's what makes "reject any self-send,
+                // since we can't know if it mutates" an acceptable
+                // conservative call with no legitimate collateral, unlike the
+                // `Foldl*` family (see below). Confirmed empirically: a
+                // mutating count stayed at 0 across 3 iterations instead of
+                // accumulating. Reject at compile time rather than emit code
+                // that's silently wrong — the same "can't thread this state
+                // shape back correctly here" category as BT-2792's
+                // `FieldAssignmentInUnsupportedBlock`.
+                //
+                // Deliberately scoped to `Letrec` only, NOT any `Foldl*`
+                // kind (`do:`/`collect:`/`select:`/`inject:into:`/...) —
+                // tried and reverted after two rounds of CI failure. The
+                // identical class-var-mutation-loss bug IS reachable via
+                // `Foldl*` bodies too (confirmed empirically for `do:`), but
+                // unlike `Letrec`, `Foldl*` bodies routinely use a
+                // self-send's return value as (or within) the fold's own
+                // output, AND — per a pre-existing, intentionally-supported
+                // BT-2350 pattern — even a *discarded*, non-last self-send
+                // statement inside `do:`/`inject:into:`/`collect:` is common
+                // and expected to compile (see
+                // `stdlib/test/fixtures/class_method_block.bt`, which uses
+                // pure self-sends like `self double:`/`self logIt:` in
+                // exactly these positions). Neither "is the return value
+                // used" nor "is the statement last" reliably distinguishes
+                // safe from unsafe there, so a position-based rejection
+                // breaks real code. Properly closing the `Foldl*` gap needs
+                // either real `ClassVars` threading through fold
+                // accumulators or static purity analysis of the callee —
+                // tracked as a follow-up under BT-3151.
                 let selector = if let Expression::MessageSend { selector, .. } = expr {
                     selector.name().to_string()
                 } else {
