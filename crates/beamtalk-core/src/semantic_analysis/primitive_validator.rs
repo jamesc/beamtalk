@@ -277,12 +277,7 @@ fn validate_intrinsic_name(name: &str, span: Span, diagnostics: &mut Vec<Diagnos
 mod tests {
     use super::*;
     use crate::source_analysis::{lex_with_eof, parse};
-
-    fn parse_module(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-        module
-    }
+    use crate::test_helpers::test_support::parse_bt;
 
     /// Wraps a `@primitive` expression in a class method body for parser acceptance.
     fn stdlib_method(primitive: &str) -> String {
@@ -291,7 +286,7 @@ mod tests {
 
     #[test]
     fn primitive_in_stdlib_mode_no_error() {
-        let module = parse_module(&stdlib_method("@primitive \"+\""));
+        let module = parse_bt(&stdlib_method("@primitive \"+\""));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -305,7 +300,7 @@ mod tests {
 
     #[test]
     fn primitive_in_user_code_error() {
-        let module = parse_module(&stdlib_method("@primitive \"+\""));
+        let module = parse_bt(&stdlib_method("@primitive \"+\""));
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
@@ -321,7 +316,7 @@ mod tests {
 
     #[test]
     fn primitive_with_allow_primitives_warning() {
-        let module = parse_module(&stdlib_method("@primitive \"+\""));
+        let module = parse_bt(&stdlib_method("@primitive \"+\""));
         let options = CompilerOptions {
             allow_primitives: true,
             ..Default::default()
@@ -334,7 +329,7 @@ mod tests {
 
     #[test]
     fn unknown_structural_intrinsic_error() {
-        let module = parse_module(&stdlib_method("@primitive unknownFoo"));
+        let module = parse_bt(&stdlib_method("@primitive unknownFoo"));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -347,7 +342,7 @@ mod tests {
 
     #[test]
     fn known_structural_intrinsic_no_error() {
-        let module = parse_module(&stdlib_method("@primitive basicNew"));
+        let module = parse_bt(&stdlib_method("@primitive basicNew"));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -362,7 +357,7 @@ mod tests {
     #[test]
     fn quoted_selector_always_accepted() {
         // Quoted selectors are runtime-dispatch, no intrinsic name validation
-        let module = parse_module(&stdlib_method("@primitive \"anyRandomName\""));
+        let module = parse_bt(&stdlib_method("@primitive \"anyRandomName\""));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -374,7 +369,7 @@ mod tests {
     #[test]
     fn primitive_in_class_method_validated() {
         let source = "Object subclass: MyInt\n  + other => @primitive \"+\"";
-        let module = parse_module(source);
+        let module = parse_bt(source);
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
@@ -384,7 +379,7 @@ mod tests {
     #[test]
     fn primitive_in_class_method_stdlib_ok() {
         let source = "Object subclass: MyInt\n  + other => @primitive \"+\"";
-        let module = parse_module(source);
+        let module = parse_bt(source);
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -396,7 +391,7 @@ mod tests {
     #[test]
     fn multiple_primitives_multiple_errors() {
         let source = "Object subclass: T\n  m => @primitive \"+\". @primitive unknownFoo";
-        let module = parse_module(source);
+        let module = parse_bt(source);
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         // At least 2 errors: one for stdlib restriction on '+', one for stdlib + unknown on unknownFoo

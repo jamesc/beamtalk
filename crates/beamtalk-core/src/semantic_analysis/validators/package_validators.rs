@@ -257,17 +257,12 @@ fn check_pattern_packages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
-
-    fn parse_module(src: &str) -> Module {
-        let tokens = lex_with_eof(src);
-        let (module, _diags) = parse(tokens);
-        module
-    }
+    use crate::source_analysis::Severity;
+    use crate::test_helpers::test_support::parse_bt;
 
     #[test]
     fn known_package_qualifier_no_error() {
-        let module = parse_module("json@Parser parse: input");
+        let module = parse_bt("json@Parser parse: input");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -282,7 +277,7 @@ mod tests {
 
     #[test]
     fn unknown_package_qualifier_produces_error() {
-        let module = parse_module("xml@Parser parse: input");
+        let module = parse_bt("xml@Parser parse: input");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -298,7 +293,7 @@ mod tests {
 
     #[test]
     fn empty_known_packages_skips_validation() {
-        let module = parse_module("xml@Parser parse: input");
+        let module = parse_bt("xml@Parser parse: input");
         let known = HashSet::new();
         let mut diags = Vec::new();
         check_package_qualifiers(&module, &known, &mut diags);
@@ -311,7 +306,7 @@ mod tests {
 
     #[test]
     fn unqualified_class_reference_no_error() {
-        let module = parse_module("Counter spawn");
+        let module = parse_bt("Counter spawn");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -325,7 +320,7 @@ mod tests {
 
     #[test]
     fn qualified_in_method_body_checked() {
-        let module = parse_module("Object subclass: Foo\n  bar => xml@Parser parse: \"test\"");
+        let module = parse_bt("Object subclass: Foo\n  bar => xml@Parser parse: \"test\"");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -341,7 +336,7 @@ mod tests {
 
     #[test]
     fn qualified_in_standalone_method_target() {
-        let module = parse_module("xml@Parser >> lenient => 42");
+        let module = parse_bt("xml@Parser >> lenient => 42");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -357,7 +352,7 @@ mod tests {
 
     #[test]
     fn qualified_in_standalone_method_target_known() {
-        let module = parse_module("json@Parser >> lenient => 42");
+        let module = parse_bt("json@Parser >> lenient => 42");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -375,7 +370,7 @@ mod tests {
 
     #[test]
     fn multiple_unknown_packages_multiple_errors() {
-        let module = parse_module("a := xml@Parser parse: \"x\".\nb := yaml@Loader load: \"y\"");
+        let module = parse_bt("a := xml@Parser parse: \"x\".\nb := yaml@Loader load: \"y\"");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -394,7 +389,7 @@ mod tests {
 
     #[test]
     fn qualified_in_block_body() {
-        let module = parse_module("[:x | xml@Parser parse: x]");
+        let module = parse_bt("[:x | xml@Parser parse: x]");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -410,7 +405,7 @@ mod tests {
 
     #[test]
     fn qualified_superclass_unknown_package() {
-        let module = parse_module("xml@Parser subclass: LenientParser\n  parse => 42");
+        let module = parse_bt("xml@Parser subclass: LenientParser\n  parse => 42");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();
@@ -427,7 +422,7 @@ mod tests {
 
     #[test]
     fn qualified_superclass_known_package() {
-        let module = parse_module("json@Parser subclass: LenientParser\n  parse => 42");
+        let module = parse_bt("json@Parser subclass: LenientParser\n  parse => 42");
         let mut known = HashSet::new();
         known.insert("json".to_string());
         let mut diags = Vec::new();

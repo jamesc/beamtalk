@@ -1113,15 +1113,10 @@ fn check_shadow_for_method_class_side(
 mod tests {
     use super::*;
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::source_analysis::Severity;
+    use crate::test_helpers::test_support::parse_bt;
     use ecow::EcoString;
     use std::collections::HashMap;
-
-    fn parse_module(src: &str) -> Module {
-        let tokens = lex_with_eof(src);
-        let (module, _diags) = parse(tokens);
-        module
-    }
 
     fn build_hierarchy_with_internal_class(
         module: &Module,
@@ -1162,7 +1157,7 @@ mod tests {
 
     #[test]
     fn e0401_cross_package_superclass_reference() {
-        let module = parse_module("ParserState subclass: MyParser\n  parse => 42");
+        let module = parse_bt("ParserState subclass: MyParser\n  parse => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1185,7 +1180,7 @@ mod tests {
 
     #[test]
     fn e0401_same_package_no_error() {
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: ParserState\n  reset => nil\n\nParserState subclass: ExtendedState\n  parse => 42",
         );
         let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
@@ -1209,7 +1204,7 @@ mod tests {
 
     #[test]
     fn e0401_public_class_cross_package_no_error() {
-        let module = parse_module("Object subclass: MyParser\n  parse => 42");
+        let module = parse_bt("Object subclass: MyParser\n  parse => 42");
         let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
             panic!("build should succeed");
         };
@@ -1258,7 +1253,7 @@ mod tests {
 
     #[test]
     fn e0401_type_annotation_cross_package() {
-        let module = parse_module("Object subclass: Foo\n  process: input :: ParserState => 42");
+        let module = parse_bt("Object subclass: Foo\n  process: input :: ParserState => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1279,7 +1274,7 @@ mod tests {
 
     #[test]
     fn e0401_return_type_cross_package() {
-        let module = parse_module("Object subclass: Foo\n  getState -> ParserState => nil");
+        let module = parse_bt("Object subclass: Foo\n  getState -> ParserState => nil");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1300,7 +1295,7 @@ mod tests {
 
     #[test]
     fn e0401_no_check_without_current_package() {
-        let module = parse_module("ParserState subclass: MyParser\n  parse => 42");
+        let module = parse_bt("ParserState subclass: MyParser\n  parse => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(&module, &h, &AliasRegistry::new(), None, &mut diags);
@@ -1313,7 +1308,7 @@ mod tests {
 
     #[test]
     fn e0401_state_type_annotation_cross_package() {
-        let module = parse_module("Object subclass: Foo\n  state: buf :: ParserState = nil");
+        let module = parse_bt("Object subclass: Foo\n  state: buf :: ParserState = nil");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1335,7 +1330,7 @@ mod tests {
     #[test]
     fn e0401_class_reference_in_expression() {
         // A class reference to an internal class in a method body expression
-        let module = parse_module("Object subclass: Foo\n  bar => ParserState new");
+        let module = parse_bt("Object subclass: Foo\n  bar => ParserState new");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1357,7 +1352,7 @@ mod tests {
     #[test]
     fn e0401_class_reference_in_top_level_expression() {
         // A class reference at the top level
-        let module = parse_module("ParserState new");
+        let module = parse_bt("ParserState new");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1381,7 +1376,7 @@ mod tests {
     #[test]
     fn e0402_internal_class_in_public_return_type() {
         // A public class with a public method returning an internal class from same package
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
@@ -1404,7 +1399,7 @@ mod tests {
 
     #[test]
     fn e0402_internal_class_in_public_param_type() {
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  process: buf :: TokenBuffer => nil",
         );
@@ -1427,7 +1422,7 @@ mod tests {
 
     #[test]
     fn e0402_internal_class_in_state_type_annotation() {
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  state: buf :: TokenBuffer = nil",
         );
@@ -1451,7 +1446,7 @@ mod tests {
     #[test]
     fn e0402_no_error_internal_class_on_internal_class() {
         // Internal class using internal class in signature — no leak
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              internal Object subclass: InternalParser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
@@ -1478,7 +1473,7 @@ mod tests {
     #[test]
     fn e0402_no_error_internal_method_on_public_class() {
         // Internal method on a public class can reference internal classes
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  internal tokenize: input :: String -> TokenBuffer => nil",
         );
@@ -1504,7 +1499,7 @@ mod tests {
 
     #[test]
     fn e0402_no_check_without_current_package() {
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
@@ -1546,7 +1541,7 @@ mod tests {
     fn e0402_public_signature_directly_referencing_internal_alias() {
         // A public method returning an internal alias directly — mirrors
         // ADR 0071's existing rule for internal classes.
-        let module = parse_module(
+        let module = parse_bt(
             "internal type ParserState = Integer\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> ParserState => nil",
         );
@@ -1566,7 +1561,7 @@ mod tests {
     fn e0402_no_error_internal_method_referencing_internal_alias() {
         // Internal-on-internal is fine — an internal method on a public
         // class can reference an internal alias without leaking it.
-        let module = parse_module(
+        let module = parse_bt(
             "internal type ParserState = Integer\n\n\
              Object subclass: Parser\n  internal tokenize: input :: String -> ParserState => nil",
         );
@@ -1587,7 +1582,7 @@ mod tests {
     #[test]
     fn alias_leak_public_alias_directly_exposes_internal_alias() {
         // `public type Pub = InternalAlias | String` — direct one-hop case.
-        let module = parse_module("internal type Priv = Integer\ntype Pub = Priv | String");
+        let module = parse_bt("internal type Priv = Integer\ntype Pub = Priv | String");
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
         check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
@@ -1604,7 +1599,7 @@ mod tests {
     fn alias_leak_multi_hop_through_intermediate_public_alias() {
         // `type Pub = Mid`, `type Mid = Priv` (internal) — the leak must be
         // found by following the chain, not just Pub's own written RHS.
-        let module = parse_module("internal type Priv = Integer\ntype Mid = Priv\ntype Pub = Mid");
+        let module = parse_bt("internal type Priv = Integer\ntype Mid = Priv\ntype Pub = Mid");
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
         check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
@@ -1624,7 +1619,7 @@ mod tests {
         // `type Pub = Aa | Bb`, `type Aa = Priv`, `type Bb = Priv` (internal)
         // — both branches of the diamond reach `Priv`; the leak must be
         // reported exactly once, not once per path.
-        let module = parse_module(
+        let module = parse_bt(
             "internal type Priv = Integer\ntype Aa = Priv\ntype Bb = Priv\ntype Pub = Aa | Bb",
         );
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
@@ -1649,7 +1644,7 @@ mod tests {
         // reported as the leak, recursing further into its own expansion to
         // separately flag `InternalClass` is redundant noise (both diagnostics
         // are "true", but the user only needs to fix the first boundary).
-        let module = parse_module(
+        let module = parse_bt(
             "internal Object subclass: InternalClass\n  reset => nil\n\n\
              internal type InternalMid = InternalClass\n\
              type Pub = InternalMid",
@@ -1682,7 +1677,7 @@ mod tests {
         // behavior (fixing the innermost boundary, 'Mid', makes both
         // diagnostics disappear) — pinned explicitly so the count doesn't
         // silently change in either direction.
-        let module = parse_module("internal type Priv = Integer\ntype Mid = Priv\ntype High = Mid");
+        let module = parse_bt("internal type Priv = Integer\ntype Mid = Priv\ntype High = Mid");
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
         check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
@@ -1713,7 +1708,7 @@ mod tests {
     fn alias_leak_through_generic_type_argument() {
         // `type Pub = List(Priv)` — the leak-check must recurse into a
         // Generic annotation's type arguments, not just its base name.
-        let module = parse_module("internal type Priv = Integer\ntype Pub = List(Priv)");
+        let module = parse_bt("internal type Priv = Integer\ntype Pub = List(Priv)");
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
         check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
@@ -1731,8 +1726,7 @@ mod tests {
     fn alias_leak_through_intersection_and_difference() {
         // `type Pub = (Priv & String) \ Symbol` — both the Intersection and
         // Difference recursion arms must be walked.
-        let module =
-            parse_module("internal type Priv = Integer\ntype Pub = (Priv & String) \\ Symbol");
+        let module = parse_bt("internal type Priv = Integer\ntype Pub = (Priv & String) \\ Symbol");
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
         check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
@@ -1751,7 +1745,7 @@ mod tests {
         // `type Pub = ParserState` where `ParserState` is an internal class
         // — the leakage check also walks through to internal classes, not
         // just internal aliases.
-        let module = parse_module("type Pub = ParserState");
+        let module = parse_bt("type Pub = ParserState");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let protocol_registry = ProtocolRegistry::new();
         let mut alias_registry = AliasRegistry::new();
@@ -1773,7 +1767,7 @@ mod tests {
     fn alias_leak_internal_alias_is_not_checked_itself() {
         // Internal-on-internal is fine: an internal alias's own RHS may
         // reference anything visible in its own package without leaking.
-        let module = parse_module("internal type Priv = ParserState");
+        let module = parse_bt("internal type Priv = ParserState");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let protocol_registry = ProtocolRegistry::new();
         let mut alias_registry = AliasRegistry::new();
@@ -1791,7 +1785,7 @@ mod tests {
 
     #[test]
     fn alias_leak_no_check_without_current_package() {
-        let module = parse_module("internal type Priv = Integer\ntype Pub = Priv | String");
+        let module = parse_bt("internal type Priv = Integer\ntype Pub = Priv | String");
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
         check_alias_leaked_visibility(&module, &h, &alias_registry, None, &mut diags);

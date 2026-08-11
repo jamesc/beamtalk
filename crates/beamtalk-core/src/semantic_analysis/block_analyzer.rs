@@ -357,26 +357,12 @@ impl Analyser {
 #[cfg(test)]
 mod tests {
     use crate::semantic_analysis::{BlockContext, analyse};
-    use crate::source_analysis::Severity;
-
-    fn parse_module(src: &str) -> crate::ast::Module {
-        let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, diagnostics) = crate::source_analysis::parse(tokens);
-        let parse_errors: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(
-            parse_errors.is_empty(),
-            "Test fixture failed to parse cleanly: {parse_errors:?}"
-        );
-        module
-    }
+    use crate::test_helpers::test_support::parse_bt;
 
     #[test]
     fn control_flow_block_has_control_flow_context() {
         let src = "Object subclass: Foo\n  bar => true ifTrue: [42]";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
             result
@@ -395,7 +381,7 @@ mod tests {
     #[test]
     fn stored_block_has_stored_context() {
         let src = "Object subclass: Foo\n  bar =>\n    f := [42].\n    f";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
             result
@@ -414,7 +400,7 @@ mod tests {
     #[test]
     fn outer_variable_captured_in_block() {
         let src = "Object subclass: Foo\n  bar =>\n    x := 42.\n    [:y | x + y]";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         let has_capture = result
             .block_info
@@ -434,7 +420,7 @@ mod tests {
     #[test]
     fn field_mutation_in_stored_block_produces_error() {
         let src = "Object subclass: Foo\n  state: x = 0\n  bar =>\n    f := [self.x := 1].\n    f";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
             result
@@ -453,7 +439,7 @@ mod tests {
         // different method whose State never seeded the captured variable's
         // '__local__' key, silently returning the stale definition-time value.
         let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    count := 0\n    self.callback := [:n | count := count + n]\n\n  process: n =>\n    self.callback value: n\n";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
             result
@@ -473,7 +459,7 @@ mod tests {
         // arm's own diagnostic is for the captured-local-ONLY case; firing both
         // for the same closure would be confusing, redundant double-reporting.
         let src = "Actor subclass: Ctr\n  state: total = 0\n\n  setup =>\n    count := 0\n    self.callback := [:n | self.total := n. count := count + n]\n";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert_eq!(
             result.diagnostics.len(),
@@ -498,7 +484,7 @@ mod tests {
         // codegen's prescan_tier2_local_vars proves per-method safety for this
         // shape (BT-2797), and it's the well-established BT-856 pattern.
         let src = "Object subclass: Foo\n  bar =>\n    count := 0\n    blk := [:n | count := count + n]\n    blk value: 5";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
             !result
@@ -513,7 +499,7 @@ mod tests {
     #[test]
     fn block_passed_as_message_arg_has_passed_context() {
         let src = "Object subclass: Foo\n  bar => self doWith: [42]";
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
             result
