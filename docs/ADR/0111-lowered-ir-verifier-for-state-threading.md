@@ -269,6 +269,406 @@ target, not loosened:
   partial conversion is an acceptable, explicitly pre-planned outcome, not
   a failure requiring rollback of already-converted constructs.
 
+## Addendum 2 (2026-08-11): Loop-family blockers for BT-3145 — condition/case-split node design + Bind naming reconciliation
+
+[BT-3145](https://linear.app/beamtalk/issue/BT-3145) (pilot migration:
+`while_loops.rs` + `counted_loops.rs` onto the BT-3144 renderer) attempted
+to point a real call site at [`render`](#renderer-design-sketch) and found
+two concrete, empirically-verified gaps that block it as scoped — not new
+invariant classes to check, but missing IR/renderer expressiveness the
+prior addendum's "Renderer design sketch" and BT-3144's
+`render`/`render_loop_letrec` did not anticipate. BT-3145's investigation
+comment (2026-08-11T19:02) has the full empirical trail, including
+compiled Core Erlang output; this section restates the evidence with
+source citations, proposes a concrete design for each gap, evaluates the
+descope alternative this ADR's own Alternative 1b names as the pre-planned
+fallback, and gives a recommendation
+[BT-3153](https://linear.app/beamtalk/issue/BT-3153) (this section's own
+issue) can hand directly to a re-attempt at BT-3145. All line numbers below
+are against `crates/beamtalk-core/src/codegen/core_erlang/` unless noted,
+current as of the BT-3144 renderer landing (commit `e305be7`).
+
+### Gap 1 — no condition/case-split loop node
+
+**Evidence.** `render_loop_letrec` (`threaded_ir.rs:1089-1160`) emits
+exactly one skeleton: `letrec Name/N = fun (Params) -> <body_doc> apply
+Name(final_args) in apply Name(outer_args)` — unconditional tail
+recursion, no condition, no `case`, no exit arm. Every real while/counted
+loop call site instead interleaves a condition test and a two-arm `case`
+around that same recursive skeleton:
+
+- `generate_while_loop_direct` (`control_flow/while_loops.rs:280-418`):
+  allocates a fresh `CondFun` closure (`cond_var = self.fresh_temp_var
+  ("CondFun")`, `:322`), builds `let CondFun = fun (Params) -> <cond_doc>
+  in case apply CondFun (Params) of <'true'|'false'> when 'true' -> `
+  (case header at `:369`), then the loop body, then a second arm —
+  `<'false'|'true'> when 'true' -> <exit_stateacc> end ` (`:392-401`) —
+  before the closing `in apply 'while'/N(initial_args)`. `negate` (the
+  `whileFalse:` case) swaps which literal each arm tests, not the shape.
+  `generate_while_loop_hybrid` (`:428` onward) is the identical shape
+  under `Hybrid` mode.
+- `generate_counted_stateful_loop`/`_direct`/`_hybrid`
+  (`control_flow/mod.rs:2702-2882`) use a *different* condition
+  mechanism — a direct comparison
+  (`case call 'erlang':'=<'(Counter, N) of`, `counted_loops.rs:74-79`)
+  rather than a `CondFun` closure — but the *same* overall
+  letrec-with-case-split-and-exit-arm skeleton, already factored out once
+  in production as `CountedLoopFrame`
+  (`control_flow/mod.rs:1112-1138`): `preamble`, `fn_name`,
+  `continue_header` (condition test up to and including the chosen arm's
+  `-> `), `next_counter`, `initial_counter`, `false_arm` — six
+  `Document<'static>`/`String` fields threaded uniformly through
+  `generate_counted_stateful_loop` and its direct/hybrid variants
+  (`:2702-2772`, `:2778-2882`). Counted loops also carry a gensym'd loop
+  *index* (`frame.counter`, `fresh_temp_var("loopidx")`,
+  `control_flow/mod.rs` `CountedLoopFrame::counter` doc, `:1129-1137`) as
+  an extra fun parameter that is never a `Bind` target or source — it is
+  threaded by a raw "next value" expression (`next_counter`, e.g. `call
+  'erlang':'+'(Counter, 1)`), structurally closer to `AccParam` (an
+  unversioned, generator-allocated identity outside `VersionedVar`'s
+  producer/consumer bookkeeping — see `threaded_ir.rs:244-268`) than to a
+  threaded local.
+
+No `ThreadedStmt` variant today can express any of this: `Threaded` only
+carries `mode`/`frame`/`body`/`produces`, all of which presuppose
+`render_loop_letrec`'s unconditional shape. This is exactly why BT-3144's
+own dual-run tests (`threaded_ir.rs:3114-3134`, the `dual_run_*` block's
+own comment) say outright that "there is no single production function
+today that emits *only* the letrec skeleton these tests check," and
+hand-author a condition-free skeleton to compare `render()` against
+instead of a real call site's actual output — the tests prove `render()`
+reproduces a hand-written reference, not that it reproduces production.
+
+**Design options.**
+
+1. **New `ThreadedStmt::ConditionalLoop` variant; condition and exit arm
+   stay opaque pre-rendered `Document`s (the `NlrCatch` precedent);
+   skeleton shape (frame/mode/body/produces) stays structural — Recommended.**
+
+   ```rust
+   ThreadedStmt::ConditionalLoop {
+       /// Static per-construct function name — "while", "loop", "repeat"
+       /// — never gensym'd in production (see Gap 2's "loop-fn-name"
+       /// finding). Supplied by the caller, mirroring
+       /// `CountedLoopFrame::fn_name`.
+       fn_name: EcoString,
+       mode: ThreadingMode,
+       frame: FrameId,
+       /// Present only for counted loops. Not a VersionedVar — see
+       /// AccParam's doc comment for why an unversioned, single-alloc
+       /// identity is modeled outside the Bind-linearity machinery.
+       counter: Option<LoopCounter>,
+       /// Opaque, AST-directed condition scrutinee + the case's chosen
+       /// continue-arm pattern, up to and including "-> " — e.g. "let
+       /// CondFun = <cond> in case apply CondFun (Params) of <'true'>
+       /// when 'true' -> " or "case call 'erlang':'=<'(I, N) of <'true'>
+       /// when 'true' -> ". Built by the SAME condition-codegen call
+       /// production already runs (`with_branch_context(|this| ..)`,
+       /// `while_loops.rs:353-359`) — the IR does not re-derive
+       /// condition semantics. Exactly the `NlrCatch` precedent: "a
+       /// similar shape may fit" per the issue body, confirmed here.
+       continue_header: Document<'static>,
+       body: Vec<ThreadedStmt>,
+       produces: Vec<VersionedVar>,
+       /// Opaque exit arm: pattern + exit value + "end " — e.g.
+       /// "<'false'> when 'true' -> {'nil', ExitSA3} end ".
+       exit_arm: Document<'static>,
+       span: Span,
+   }
+   ```
+
+   `verify()` treats this exactly like `Threaded` today: push `frame`,
+   push `mode`, walk `body`, `check_use` every `produces` entry, pop both
+   — no new `VerifyError` variant is required. `verify()` cannot, and is
+   not meant to, check that `continue_header`'s embedded polarity
+   actually agrees with which arm holds `body` vs. which holds
+   `exit_arm`'s value — that trust is exactly the limitation ADR 0111
+   already accepts for `NlrCatch`'s opaque body (§Verifier honesty; the
+   `NlrCatch` doc comment's own reasoning for why a lone `NlrCatch`
+   "can never trigger any `VerifyError`"). `ConditionalLoop` inherits the
+   same, pre-named limitation — not a new weakness.
+
+   Rendering: `render_loop_letrec`'s existing `param_list`/`final_args`/
+   `outer_args` plumbing (`:1104-1136`) is unchanged and reusable as a
+   shared helper — only the middle of the `fun` body (currently just
+   `body_doc` then `apply Name(final_args)`) needs `continue_header`
+   prepended and `exit_arm` appended around that same pair. Concretely:
+   factor `render_loop_letrec`'s three closures (`outer_args`,
+   `render_in_loop_body` building `param_list`/`body_doc`/`final_args`)
+   into a shared function taking an optional `(continue_header, exit_arm)`
+   pair, so the existing bare-`Threaded` shape (`DirectParams`/`Hybrid`
+   today, still exercised by BT-3144's own tests) and the new
+   `ConditionalLoop` shape share one implementation instead of two
+   near-duplicates (CLAUDE.md's no-duplicate-implementations rule applies
+   within this file, not just across the Rust/Erlang boundary). Once
+   `ConditionalLoop` is real, evaluate whether the bare unconditional
+   `Threaded`-for-loops shape has any remaining production caller — if
+   not (current evidence says it doesn't; it exists only for BT-3144's
+   own dual-run proof), delete it rather than keep two loop-rendering
+   paths alive.
+
+   BT-3144 dual-run test changes: the three `dual_run_*` tests
+   (`threaded_ir.rs:3136-3216`, `:3218-3300`ish, `:3371`+) need to
+   hand-author the REAL condition/case shape (mirroring
+   `generate_while_loop_direct`'s literal `docvec!` shape, not a
+   condition-free skeleton) as their "legacy" comparison side, and prove
+   `render()`'s new `ConditionalLoop` arm reproduces it byte-for-byte —
+   closing the exact gap the tests' own comment names today ("no single
+   production function... emits only the letrec skeleton"). This is
+   necessary regardless of which design option is chosen, since it is the
+   dual-run harness's own honesty issue, not specific to option 1.
+   **Effort: S** — one new enum variant, one new `render`/`verify` arm
+   pair, a shared-helper refactor of existing code, three test rewrites.
+
+2. **Extend `Threaded` itself with `Option` condition/exit fields instead
+   of a new variant.** Same runtime shape as option 1, expressed as
+   `Threaded { mode, frame, body, produces, span, condition:
+   Option<LoopCondition> }` where `LoopCondition` bundles
+   `fn_name`/`counter`/`continue_header`/`exit_arm`. **Rejected in favor
+   of option 1**: every non-loop `Threaded` use today (conditionals'
+   `with_branch_context` arms, `on:do:`/`ensure:` bodies — BT-3134,
+   `threaded_ir.rs` module docs) is condition-free by construction, so an
+   `Option` field would be `None` at every non-loop call site forever —
+   an enum variant makes "this construct's condition/exit shape" a type
+   distinction the compiler enforces (`match` exhaustiveness) rather than
+   an invariant every non-loop caller must remember to leave `None`,
+   consistent with this ADR's own repeated preference for "unrepresentable
+   invalid states" over runtime-checked optional fields (§Alternatives
+   #5, the `VersionedVar` typestate precedent).
+
+3. **Model the condition as a nested, fully-structural `ThreadedStmt`
+   sub-tree instead of an opaque `Document` (no `NlrCatch`-style
+   embedding at all).** Would require `ThreadedStmt` to represent
+   arbitrary Beamtalk boolean-expression codegen (block bodies,
+   comparisons, arbitrary sends) as IR nodes — exactly the "full-pipeline
+   IR covering all of Core Erlang codegen" ADR 0111 §Constraints already
+   names as an explicit non-goal, absorbing ADR 0018's rejected
+   "over-engineered... we don't transform or optimize the IR, we just
+   emit it" reasoning (§Alternatives #4). **Rejected** — the condition
+   body is ordinary AST-directed expression codegen with no
+   state-threading content of its own; modeling it structurally buys no
+   new `verify()` check (a condition's *result* is consumed structurally
+   the moment the case executes; nothing about its *internals* is
+   state-threading-relevant) at real IR-scope-creep cost.
+
+### Gap 2 — naming-scheme mismatch (`fresh_temp_var` vs. `VersionedVar`)
+
+**Evidence.** Real per-iteration variable rebinds go through
+`generate_direct_var_update_in_loop`
+(`control_flow/mod.rs:3359-3403`): `let new_var =
+self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name))`
+(`:3389-3390`) — producing names like `_Sum7`. The exit-`StateAcc`
+rebuild is the same story: `generate_exit_stateacc`/
+`_full_extract` (`control_flow/mod.rs:727-833`) call
+`generator.fresh_temp_var("ExitSA")` once per repacked field (`:741`,
+`:753`, `:798`, `:816`), producing `_ExitSA8`-style chains. Both go
+through `fresh_temp_var` → `VariableContext::fresh_var`
+(`util.rs:378-384` → `variable_context.rs:103-117`), whose `var_counter:
+usize` (`variable_context.rs:36`) is a **single field on one
+`VariableContext`, itself a single field on one `CoreErlangGenerator`
+constructed once per *module* compile** (`CoreErlangGenerator::new`,
+`mod.rs:1698-1703`, doc comment: "Creates a new code generator for the
+given module name") — every `fresh_temp_var`/`fresh_var` call across
+*every method in that module* shares the one counter. This is even wider
+than BT-3145's investigation comment's "global counter shared across all
+codegen in a method" framing: it is shared across the whole module's
+codegen, not reset per method.
+
+`VersionedVar::render_name` (`threaded_ir.rs:231-241`) instead names
+`Local`-prefixed vars via `super::util::versioned_var(&core_name,
+self.version)` — a bare-prefix, per-name sequential scheme (`Sum1`,
+`Sum2`, …) wholly independent of `fresh_temp_var`'s counter. BT-3144's own
+dual-run tests hard-code this literally as their "legacy" comparison
+fixture (`threaded_ir.rs:3142-3159`: `leaf::var("Sum1")`, `"Count1"`
+literals) — confirming the current tests assert `render()` against a
+naming scheme production never actually emits, not merely an
+under-specified one.
+
+A related, smaller finding folds into the same fix: `render_loop_letrec`'s
+loop-function name is *also* gensym'd (`ctx.fresh_temp_var("Loop")`,
+`threaded_ir.rs:1096`, producing `_Loop3`-style names), but production
+never gensyms this name — `while_loops.rs:327` uses the static literal
+`"while"`, and `CountedLoopFrame::fn_name` (`control_flow/mod.rs:1116`)
+carries static literals (`"repeat"`, `"loop"`). This is folded into Gap
+1's `ConditionalLoop::fn_name: EcoString` field (supplied by the caller,
+never minted by `render`) rather than treated as a third, separate gap.
+
+**Design options.**
+
+1. **Render-time memoizing gensym cache on `RenderCtx` — Recommended, no
+   `ThreadedStmt`/`VersionedVar`/`BindOp` type changes.** `RenderCtx`
+   gains a `gensym_names: HashMap<VersionedVar, String>` field (cleared
+   implicitly — a fresh `RenderCtx` is already constructed per real call
+   site today, per `RenderCtx::new`'s existing usage in
+   `lower_and_render`, `threaded_ir.rs:1029-1033`, so no explicit reset
+   logic is needed). `RenderCtx::resolve_prefix`
+   (`threaded_ir.rs:904-915`) gains a branch: for `VersionPrefix::Local
+   (name)` at `version > 0` (version 0 is always the loop's declared
+   `fun` parameter — never gensym'd in production, e.g. `while_loops.rs`'s
+   plain `param_names` — so it keeps rendering via the existing
+   `to_core_erlang_var` path unconditionally), look up `(var, name)` in
+   the cache; on miss, call `self.fresh_temp_var(&to_core_erlang_var
+   (name))`, insert, return. Every later reference to the *same*
+   `VersionedVar` value — as a later `Bind`'s `source`, as a `produces`
+   entry, as `Return`'s value — is a cache hit, reproducing the exact
+   "mint once, reuse via scope lookup thereafter" discipline
+   `generate_direct_var_update_in_loop`'s `self.bind_var(&id.name,
+   &new_var)` (`:3391`) already gives production, without needing the IR
+   itself to carry a literal string.
+
+   This is not a new naming strategy: `render_loop_letrec`'s `fn_name`
+   (`:1096`) and `render_nlr_catch`'s `token_var` (`:1269`) *already*
+   mint via `ctx.fresh_temp_var` at render time rather than storing a
+   literal in the IR — option 1 makes `Bind`-target naming consistent
+   with two mechanisms `render()` already uses, rather than introducing
+   a third. Correctness rests on one condition, worth stating explicitly:
+   `FrameId` uniqueness (a fresh, distinct frame per loop body/branch arm
+   — already a ADR 0111 design requirement, §The IR's `FrameId` doc
+   comment) means two unrelated `VersionedVar`s can never collide in the
+   cache even if they happen to share `(prefix, version)`, so no explicit
+   per-construct cache-scoping logic is needed beyond "one `RenderCtx`
+   per lowered-and-rendered construct region," which is already how every
+   current call site is shaped.
+   **Effort: S** — one `HashMap` field, one branch in `resolve_prefix`,
+   no `ThreadedStmt` type changes. Byte-identical *if and only if*
+   lowering-then-rendering for one construct is not interleaved with
+   *other* codegen that also calls `fresh_temp_var` in between — true
+   today (each `generate_*_direct`/`_hybrid` call is a single, contiguous
+   function body) and worth stating as an explicit implementation
+   constraint for BT-3145: lower and render each construct in one place,
+   where the legacy code used to sit, not as two separated passes over a
+   whole method.
+
+2. **Lowering-time pre-allocation: new `VersionPrefix::Gensym(String)`
+   variant, IR carries the literal rendered name.** The lowering pass
+   (which already needs `&mut CoreErlangGenerator` to call
+   `fresh_temp_var` at the same point production does today) calls it
+   once per rebind and stores the resulting string directly in the
+   `Bind`'s target `VersionedVar` via `VersionPrefix::Gensym(name)`;
+   `render_name()`/`resolve_prefix` for `Gensym` returns the stored
+   string verbatim, no allocation at render time. **Trade-offs against
+   option 1:** (+) the IR becomes self-describing — a `ThreadedIr`
+   fragment can be printed/debugged without a live generator, which
+   matters if a future consumer (LSP tooling, per this ADR's User Impact
+   table) wants to inspect lowered-but-not-yet-rendered IR; (+) no
+   render-time cache invariant to maintain. (−) widens `VersionPrefix`'s
+   contract — it stops being purely "a counter identity render derives a
+   name from" and gains a second mode "a name render must reproduce
+   verbatim," a real API-surface cost for every existing `match
+   prefix { .. }` site (`render_name`, `resolve_prefix`, and any future
+   consumer); (−) requires lowering itself (not just rendering) to run
+   with live generator access at exactly the right point in the AST
+   walk — a stronger coupling requirement than option 1's, which only
+   needs generator access at render time (already required for
+   `fresh_temp_var`/`alloc_nlr_catch_vars`/`resolve_prefix`'s loop-context
+   dependency per the original Addendum's "Renderer design sketch").
+   **Effort: S–M.** Viable, not rejected, but option 1 achieves the same
+   byte-identical guarantee with less type-surface churn and reuses
+   idioms `render()` already has; recommend option 1 unless a concrete
+   near-term consumer needs pre-render IR inspection.
+
+3. **Change production naming to match `VersionedVar::render_name()`'s
+   `Sum1`/`Sum2` scheme (i.e. stop using `fresh_temp_var` for loop
+   locals).** **Rejected outright** — this is a real behavior change
+   to compiled output, violating both ADR 0111 §Constraints' "No
+   behavior change — every phase must produce byte-identical output over
+   the expanded snapshot corpus" and this issue's own acceptance
+   criterion ("a naming-scheme reconciliation for `Bind` targets that
+   doesn't touch production output"). Named only for completeness, per
+   this ADR's practice of recording rejected alternatives rather than
+   omitting them.
+
+**BT-3144 dual-run test changes needed regardless of option chosen.** The
+hard-coded `"Sum1"`/`"Count1"` literals (`threaded_ir.rs:3142-3159`) need
+to become generator-seeded, mirroring the pattern
+`dual_run_hybrid_letrec_state_prefix_matches_live_generator`
+(`:3218-3237`) already uses for the `State`-prefix case — call the real
+accessor (`legacy_gen.fresh_temp_var(..)`, seeded identically to the
+`render()` side's generator) instead of hard-coding the string, so the
+tests assert `render()` against production's actual naming scheme instead
+of a fictional one. This closes a real, if quiet, correctness gap in
+BT-3144's own acceptance evidence, independent of which Gap 2 option is
+implemented.
+
+### Descope alternative, considered and rejected (scoped to BT-3145 only)
+
+Per this ADR's Alternative 1b and the prior addendum's "Re-scope
+decision," the pre-planned fallback whenever a migration phase's
+design/implementation cost outweighs its payoff is: keep `ThreadedIr`
+verification-only for the construct in question, and stop — not a
+failure, an explicitly pre-planned outcome (§Measurement gate, restated,
+"Descope path, named").
+
+Both gaps here turn out, on inspection, to be missing *renderer
+expressiveness* BT-3144 didn't build yet, not a fundamental mismatch
+between `ThreadedIr`'s shape and what while/counted loops need:
+
+- **Gap 1's fix reuses two patterns that already exist in this codebase.**
+  The condition/case-split shape is already factored out once in
+  production (`CountedLoopFrame`, `control_flow/mod.rs:1112-1138`), and
+  the "embed an opaque, AST-directed `Document` inside a `ThreadedStmt`
+  node" technique is already established by `NlrCatch` — the issue body's
+  own framing ("a similar shape may fit") is confirmed, not merely
+  hoped for, by this section's design.
+- **Gap 2's recommended fix reuses a pattern `render()` already uses
+  twice in the same file** — mint-on-render via `ctx.fresh_temp_var`
+  (`render_loop_letrec`'s `fn_name`, `render_nlr_catch`'s `token_var`) —
+  extended to a third call site (`Bind` targets) via a small render-time
+  cache, not a new naming strategy.
+
+Neither option touches `ThreadedStmt`'s existing verified shapes (`Bind`,
+`NlrCatch`, `TupleAccUnpack`, `Return`), extends `verify()`'s existing
+checks in a way that risks regressing BT-3132's/BT-3133's/BT-3134's
+already-shipped production call sites, or re-opens any of BT-3128's seven
+already-shipped phases. Both are estimated **S** effort (Gap 1: one new
+enum variant + its render/verify arms + a shared-helper refactor; Gap 2:
+one `HashMap` field + one branch in `resolve_prefix`) against BT-3145's
+own **M** size estimate — neither gap dominates the issue's existing
+budget, and BT-3145's investigation already spent the cost of finding
+them; a re-attempt starts from a concrete design, not from zero.
+
+**Recommendation: do not descope BT-3145.** Design and implement both
+fixes as part of a direct re-attempt at BT-3145, scoped exactly to the
+while/counted-loop family (Phase B). This recommendation is deliberately
+narrow — it says nothing about Phase C (`list_ops/`) or Phase D
+(actor/class-method threading + NLR + shadow-write contract), each of
+which this ADR's own §Implementation already flags as introducing
+invariant classes the prior phase never exercised ("Phase C... sized L,
+not a mechanical follow-on to Phase B... introduces invariant classes
+Phase B never exercises"). Each later phase needs its own gap analysis
+before a similar "continue" recommendation could be made honestly; this
+section's descope evaluation is not a blanket endorsement of continuing
+all of BT-3141, only of finishing the loop family specifically, on the
+concrete evidence above. If a real re-attempt at implementing these two
+designs surfaces a third, materially larger gap, that is the point to
+re-open the descope question for the loop family — not now, while both
+known gaps are S-sized, directly buildable from precedent already in the
+codebase, and smaller than the phase's own size estimate.
+
+### What a BT-3145 re-attempt should do, concretely
+
+1. Add `ThreadedStmt::ConditionalLoop` (Gap 1, option 1) and its
+   `verify`/`render` arms; refactor `render_loop_letrec`'s
+   `param_list`/`final_args`/`outer_args` closures into a shared helper
+   used by both the existing bare-loop `Threaded` shape and the new
+   variant.
+   Add `LoopCounter` (a thin, unversioned, single-alloc identity for the
+   counted-loop index, mirroring `AccParam`'s existing precedent).
+2. Add the `gensym_names` cache to `RenderCtx` and the `Local`-at-version
+   `> 0` branch in `resolve_prefix` (Gap 2, option 1). Fix
+   `ConditionalLoop::fn_name` to be caller-supplied, never minted by
+   `render`, closing the related loop-fn-name finding.
+3. Rewrite the three existing `dual_run_*` tests to hand-author the real
+   condition/case shape (not the condition-free skeleton) and to seed
+   `Local`-prefix names via a real `fresh_temp_var` call on a
+   same-seeded generator (mirroring the existing `State`-prefix test's
+   pattern) rather than hard-coded literals.
+4. Only then wire one real call site (`generate_while_loop_direct` is the
+   smallest — no hybrid pre-extraction, no counted-loop counter) to
+   lower, verify, and render through `ThreadedIr`, gated behind the
+   existing measurement flag, and re-run the ≤3% gate (§Measurement gate,
+   restated) against real construct-and-render cost for the first time.
+
 ## Context
 
 ### Problem statement
@@ -1032,7 +1432,12 @@ extended.
   - [BT-3144](https://linear.app/beamtalk/issue/BT-3144) — renderer
     foundation, consumes the `RenderCtx` sketch in §Addendum
   - [BT-3145](https://linear.app/beamtalk/issue/BT-3145) — pilot migration,
-    first checkpoint for the restated ≤3% measurement gate
+    first checkpoint for the restated ≤3% measurement gate; blocked as
+    scoped until the designs in Addendum 2 land (its own investigation
+    comment, 2026-08-11T19:02, is Addendum 2's evidence source)
+  - [BT-3153](https://linear.app/beamtalk/issue/BT-3153) — Addendum 2's own
+    issue: condition/case-split loop node design + Bind naming
+    reconciliation, unblocking BT-3145
   - [BT-3111](https://linear.app/beamtalk/issue/BT-3111) /
     [BT-3125](https://linear.app/beamtalk/issue/BT-3125) — analysis→codegen
     handoff; BT-3125 is a soft prerequisite for Phase B onward
