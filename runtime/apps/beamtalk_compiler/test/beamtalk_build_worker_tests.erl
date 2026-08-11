@@ -101,6 +101,24 @@ compile_core_erlang_unbound_var_test() ->
     ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
     ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
 
+%% BT-3126: Core Erlang that compiles *successfully* but produces a
+%% compile:forms warning (sys_core_fold's "ignored result of a call"
+%% warning, triggered by a `do' whose first expression's value is
+%% discarded). Before the fix, `compile_core_forms/1' passed
+%% `report_warnings' — which prints via `io:fwrite' to the compiling
+%% process's default group leader (stdout), not stderr — so this warning
+%% was silently dropped. Demonstrates the batch build-worker backend now
+%% reaches stderr, matching compile.escript's `return_warnings' fix from
+%% BT-3115.
+compile_core_erlang_warning_reaches_stderr_test() ->
+    CoreErlang = warning_core_erlang_source(),
+    Captured = beamtalk_stderr_capture:capture(fun() ->
+        {ok, ModuleName, Binary} = beamtalk_build_worker:compile_core_erlang(CoreErlang),
+        ?assertEqual(bt_bw_warn_test, ModuleName),
+        ?assert(is_binary(Binary))
+    end),
+    ?assertNotEqual(nomatch, binary:match(Captured, <<"Warning:">>)).
+
 %% {cerl, Etf} path: cerl module that exports foo/0 but only defines bar/0.
 %% Covers the same compile_core_forms error arm via the ETF wire.
 compile_core_erlang_cerl_compile_error_test() ->
@@ -296,6 +314,21 @@ unbound_var_core_erlang_source() ->
         "  'foo'/1 = fun (X) ->\n"
         "    let Y = call 'erlang':'+' (X, State)\n"
         "    in Y\n"
+        "end\n"
+    >>.
+
+%% BT-3126: 'foo'/1 discards the result of `erlang:+/2' via a `do' sequence
+%% — a genuine `sys_core_fold' "ignored result of a call" warning, while
+%% still compiling successfully (the module returns X unchanged).
+warning_core_erlang_source() ->
+    <<
+        "module 'bt_bw_warn_test' ['foo'/1]\n"
+        "  attributes []\n"
+        "  'foo'/1 =\n"
+        "    fun (X) ->\n"
+        "        do\n"
+        "            call 'erlang':'+' (1, 2)\n"
+        "        X\n"
         "end\n"
     >>.
 

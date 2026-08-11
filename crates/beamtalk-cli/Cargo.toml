@@ -26,6 +26,10 @@ path = "src/main.rs"
 beamtalk-core = { workspace = true, features = ["serde"] }
 beamtalk-repl-protocol.workspace = true
 beamtalk-workspace.workspace = true
+# why: BT-3117 -- test_metamorphic's AST name-renaming transform keys its
+# rename map by beamtalk-core's identifier name type (EcoString) directly,
+# rather than converting to/from String at every AST field.
+ecow.workspace = true
 clap.workspace = true
 camino.workspace = true
 miette.workspace = true

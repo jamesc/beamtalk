@@ -12,10 +12,22 @@ libfuzzer-sys = "0.4"
 
 [dependencies.beamtalk-core]
 path = "../crates/beamtalk-core"
+# why: compile_pipeline needs core_erlang_structural_issues from
+# test_helpers::test_support (BT-3124) to share the same Core Erlang
+# validity checks core_erlang_validity_tests.rs's proptest suite uses,
+# instead of duplicating them in the fuzz crate.
+features = ["test"]
 
 [[bin]]
 name = "parse_arbitrary"
 path = "fuzz_targets/parse_arbitrary.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compile_pipeline"
+path = "fuzz_targets/compile_pipeline.rs"
 test = false
 doc = false
 bench = false

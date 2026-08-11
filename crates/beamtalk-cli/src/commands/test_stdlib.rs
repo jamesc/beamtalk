@@ -26,31 +26,39 @@ use tracing::{debug, info, instrument};
 use crate::commands::util::Expected;
 
 /// A single test assertion: expression + expected result.
+///
+/// `pub(crate)`: reused by `test_metamorphic` (BT-3117), which parses the
+/// same `.btscript` `// =>` units and generates transformed variants of
+/// each `expression` rather than duplicating this parser.
 #[derive(Debug)]
-struct TestCase {
+pub(crate) struct TestCase {
     /// The Beamtalk expression to evaluate.
-    expression: String,
+    pub(crate) expression: String,
     /// Expected outcome (value or error).
-    expected: Expected,
+    pub(crate) expected: Expected,
     /// Line number in the source file (1-based).
-    line: usize,
+    pub(crate) line: usize,
 }
 
 /// Parsed test file with metadata.
+///
+/// `pub(crate)`: see [`TestCase`].
 #[derive(Debug)]
-struct ParsedTestFile {
+pub(crate) struct ParsedTestFile {
     /// Files to load before running tests (from `// @load` directives).
-    load_files: Vec<String>,
+    pub(crate) load_files: Vec<String>,
     /// Test cases to run.
-    cases: Vec<TestCase>,
+    pub(crate) cases: Vec<TestCase>,
     /// Warnings about expressions without assertions.
-    warnings: Vec<String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 /// Parse test cases from a `.btscript` file.
 ///
 /// Extracts `// =>` assertion pairs and `// @load` directives.
-fn parse_test_file(content: &str) -> ParsedTestFile {
+///
+/// `pub(crate)`: see [`TestCase`].
+pub(crate) fn parse_test_file(content: &str) -> ParsedTestFile {
     let mut cases = Vec::new();
     let mut load_files = Vec::new();
     let mut warnings = Vec::new();
@@ -441,7 +449,10 @@ fn generate_eunit_wrapper(
 ///
 /// Returns the BEAM module name (e.g. `bt@counter`) so callers do not have
 /// to recompute it from the path stem.
-fn compile_fixture(
+///
+/// `pub(crate)`: reused by `test_metamorphic` (BT-3117) for `.btscript`
+/// files that reference fixtures via `@load`.
+pub(crate) fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
     suppress_warnings: bool,

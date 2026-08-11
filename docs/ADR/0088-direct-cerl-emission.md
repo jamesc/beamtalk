@@ -56,7 +56,11 @@ codegen + wire change + 58K LOC migration) is what's rejected.
   still a committed downstream consumer, but they do not require cerl
   on the wire — annotations can be carried in the typed-leaves
   approach via per-leaf metadata or a separate side-band channel.
-  Plan as part of the typed-leaves rollout ADR.
+  Plan as part of the typed-leaves rollout ADR. Confirmed viable: see
+  `docs/research/core-erlang-annotations-spike.md` (BT-3119) — Core
+  Erlang text annotations (`-| [Line, {file, Name}]`) survive
+  `core_parse` → `compile:forms` → the BEAM `Line` chunk into runtime
+  stack traces today, no cerl wire required.
 
 **Downstream replacement ADR:** [ADR 0089](0089-typed-document-leaves.md)
 turns the Phase 0c recommendation into a buildable plan — the

@@ -89,49 +89,15 @@ fn parse_source(source: &str) -> crate::ast::Module {
     module
 }
 
-/// Check that parentheses, brackets, and braces are balanced in Core Erlang output.
-fn has_balanced_delimiters(s: &str) -> bool {
-    let mut stack = Vec::new();
-    // Skip string literals (single-quoted atoms and double-quoted strings)
-    let mut chars = s.chars().peekable();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            '\\' if in_single_quote || in_double_quote => {
-                // Skip escaped character
-                chars.next();
-            }
-            _ if in_single_quote || in_double_quote => {}
-            '(' => stack.push(')'),
-            '[' => stack.push(']'),
-            '{' => stack.push('}'),
-            ')' | ']' | '}' => {
-                if stack.pop() != Some(ch) {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    stack.is_empty() && !in_single_quote && !in_double_quote
-}
-
-/// Patterns that should never appear in valid Core Erlang output.
-/// These indicate Rust Debug/Display format leaks (BT-875).
-const FORMAT_ARTIFACT_PATTERNS: &[&str] = &[
-    "{:?}",
-    "Document::",
-    "BinaryOp(",
-    "Expression::",
-    "Literal::",
-    "MessageSelector::",
-    "Pattern::",
-    "TokenKind::",
-];
+// `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` moved to
+// `crate::test_helpers::test_support` (BT-3124) so the `compile_pipeline`
+// fuzz target can share the same structural-validity checks instead of
+// duplicating them.
+use crate::test_helpers::test_support::{
+    CORE_ERLANG_FORMAT_ARTIFACT_PATTERNS as FORMAT_ARTIFACT_PATTERNS, arb_program,
+    core_erlang_has_balanced_delimiters as has_balanced_delimiters, core_erlang_structural_issues,
+};
+use crate::unparse::unparse_module;
 
 // ============================================================================
 // Property tests
@@ -208,6 +174,66 @@ proptest! {
                     &output[..output.floor_char_boundary(500)],
                 );
             }
+        }
+    }
+}
+
+// ============================================================================
+// Grammar-driven program generator properties (BT-3116)
+//
+// `near_valid_beamtalk()` above builds inputs from a small hand-curated
+// FRAGMENTS array plus truncation/concatenation -- useful for "never
+// panics" robustness, but shallow: it can't reach nested blocks with
+// captures, `^` inside nested closures, or multi-statement bodies
+// threading local state. `arb_program` (test_helpers::test_support)
+// generates well-formed programs as typed AST values instead, so
+// shrinking works structurally on the tree rather than by truncating
+// strings. These properties are *additional* coverage -- the FRAGMENTS-
+// based properties above stay, since they intentionally also cover
+// ill-formed/truncated input this generator never produces.
+// ============================================================================
+
+proptest! {
+    #![proptest_config(proptest_config())]
+
+    /// Round-trip: a generated program renders via `unparse` to source text
+    /// that parses back with zero diagnostics (BT-3116 acceptance
+    /// criterion). Mirrors `unparse::property_tests::
+    /// unparse_roundtrip_preserves_structure`'s guarantee, specialised to
+    /// this generator's shape space.
+    #[test]
+    fn program_gen_round_trip(module in arb_program("GenRoundTrip")) {
+        let source = unparse_module(&module);
+        let tokens = lex_with_eof(&source);
+        let (_reparsed, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == crate::source_analysis::Severity::Error)
+            .collect();
+        prop_assert!(
+            errors.is_empty(),
+            "generated program did not round-trip cleanly: {:?}\n\nSource:\n{}",
+            errors,
+            source,
+        );
+    }
+
+    /// Codegen validity: whenever `generate_module` accepts a generated
+    /// program, its output passes the same structural-validity checks
+    /// (balanced delimiters, `module`/`end` framing, no Rust format-artifact
+    /// leaks) as `successful_codegen_produces_parseable_core_erlang` above
+    /// (BT-3116 acceptance criterion).
+    #[test]
+    fn program_gen_codegen_validity(module in arb_program("GenCodegenValidity")) {
+        let options = CodegenOptions::new("prop_program_gen_test");
+        if let Ok(output) = generate_module(&module, options) {
+            let issues = core_erlang_structural_issues(&output);
+            prop_assert!(
+                issues.is_empty(),
+                "generated program produced structurally invalid Core Erlang:\n{}\n\nSource:\n{}",
+                issues.join("\n"),
+                unparse_module(&module),
+            );
         }
     }
 }

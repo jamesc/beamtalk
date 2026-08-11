@@ -868,9 +868,9 @@ dialyzer-specs:
 # Testing
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run fast tests (Rust unit/integration + stdlib + BUnit + Erlang runtime, skip slow E2E)
-# Typical time: ~4:30 (test-rust ~45s, test-stdlib ~20s, test-bunit ~97s, test-runtime ~1:40)
-test: test-rust test-stdlib test-bunit test-runtime
+# Run fast tests (Rust unit/integration + stdlib + BUnit + Erlang runtime + metamorphic, skip slow E2E)
+# Typical time: ~4:35 (test-rust ~45s, test-stdlib ~20s, test-bunit ~97s, test-runtime ~1:40, test-metamorphic ~5s)
+test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 
 # Run Rust tests (unit + integration, skip slow E2E)
 # Output: summary lines + failures only (reduces ~74 lines to ~10)
@@ -1026,6 +1026,17 @@ test-learn: build-stdlib
     @cargo run --bin beamtalk --quiet -- test-docs --warnings-as-errors --quiet docs/learning/
     @echo "✅ Learning guide tests complete"
 
+# Run the metamorphic testing harness (BT-3117): apply semantics-preserving
+# AST transforms (block-wrap, rename-locals, redundant-temp) to every
+# bootstrap-test `// =>` expression and assert the transformed variant still
+# evaluates to the same expected result. ~5s over the full corpus.
+# Accepts optional path: just test-metamorphic bootstrap-test/blocks.btscript
+[working-directory: 'stdlib']
+test-metamorphic *ARGS: build-stdlib
+    @echo "🧬 Running metamorphic tests..."
+    @cargo run --bin beamtalk --quiet -- test-metamorphic --warnings-as-errors --quiet {{ ARGS }}
+    @echo "✅ Metamorphic tests complete"
+
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
 # Output: summary only on success, full output on failure
@@ -1069,13 +1080,37 @@ test-one TEST:
     @echo "🧪 Running test: {{TEST}}"
     cargo test --all-targets {{TEST}}
 
-# Run fuzz testing on the parser for a configurable duration (default: 60 seconds)
+# Run fuzz testing for a configurable duration per target (default: 60 seconds each).
+# Runs both targets: parse_arbitrary (lexer + parser crash safety) and
+# compile_pipeline (full lex/parse/analyse/codegen pipeline + Core Erlang
+# structural validity, BT-3124).
 fuzz DURATION="60":
     @echo "🔀 Fuzzing parser for {{DURATION}} seconds..."
-    @echo "   Corpus: fuzz/corpus/parse_arbitrary/ (32 seed files)"
+    @echo "   Corpus: fuzz/corpus/parse_arbitrary/ (35 seed files)"
     @echo "   Target: parse_arbitrary (lexer + parser crash safety)"
     cargo +nightly fuzz run parse_arbitrary -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
-    @echo "✅ Fuzzing completed without crashes!"
+    @echo "✅ parse_arbitrary completed without crashes!"
+    @echo "🔀 Fuzzing compile pipeline for {{DURATION}} seconds..."
+    @echo "   Seeds: stdlib/test/*.bt + tests/repl-protocol/cases/*.btscript (referenced live, not copied)"
+    @echo "   Corpus: fuzz/corpus/compile_pipeline/ (fuzzer-grown findings only)"
+    @echo "   Target: compile_pipeline (lex → parse → analyse → codegen, structural validity)"
+    @mkdir -p fuzz/corpus/compile_pipeline
+    cargo +nightly fuzz run compile_pipeline fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
+    @echo "✅ compile_pipeline completed without crashes!"
+
+# Corpus-through-BEAM lint (BT-3124): generate .core text for every corpus
+# file (stdlib/test + tests/repl-protocol/cases by default -- the same
+# live-referenced dirs compile_pipeline fuzzes from, not a copied snapshot
+# -- or override CORPUS_DIRS with a space-separated list to also cover a
+# fuzzer-grown corpus dir) and batch-compile with erlc + core_lint -- the
+# check that catches "beamtalk's own codegen thinks this is valid, but
+# erlc/core_lint rejects it" without needing a full libFuzzer run.
+fuzz-corpus-lint CORPUS_DIRS="stdlib/test tests/repl-protocol/cases":
+    @echo "🔬 Generating .core corpus from: {{CORPUS_DIRS}}"
+    cargo run --release --example compile_pipeline_corpus -p beamtalk-core -- \
+        target/compile-pipeline-corpus {{CORPUS_DIRS}}
+    @echo "🔬 Batch-compiling with erlc + core_lint..."
+    escript scripts/compile-pipeline-corpus-lint.escript target/compile-pipeline-corpus
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Coverage

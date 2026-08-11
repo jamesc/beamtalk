@@ -976,27 +976,95 @@ ls -la ~/.beamtalk/daemon.sock
 
 ---
 
-## Fuzzing (Parser Crash Safety)
+## Metamorphic Testing (Semantics-Preserving Transforms)
 
-Fuzzing tests the parser's robustness by feeding it random or mutated input to detect crashes, infinite loops, and excessive memory use.
+Hand-written `// =>` assertions can only catch bugs someone thought to write
+a literal for. The bug classes that escape them are the *silently wrong*
+ones: the ADR 0110 NLR-relay bug returned the correct value while losing a
+class-var mutation; state-threading bugs produce wrong values only under
+specific mutation-in-control-flow shapes (BT-1226). Metamorphic testing
+catches these without a reference implementation: apply a transformation
+that must not change semantics, then assert the transformed program
+evaluates to the same result as the original (BT-3117).
+
+**Location:** `crates/beamtalk-cli/src/commands/test_metamorphic.rs`
+(hidden dev command `beamtalk test-metamorphic`)
+
+**Corpus:** every `// =>` expression in `stdlib/bootstrap-test/*.btscript` —
+reuses `test_stdlib`'s exact parse → compile-to-Core-Erlang → `EUnit`
+execution pipeline for both the original and the transformed variant, so
+both run through the real compiler rather than a second hand-rolled
+evaluator.
+
+**Transforms** (each a probe into closure conversion, variable scoping, and
+state threading):
+
+| Transform | `expr` becomes |
+|---|---|
+| Block-wrap | `[expr] value` |
+| Rename-locals | consistent alpha-rename of every name *bound* inside `expr` (block params, `:=` targets, match-pattern bindings) — free variables are left alone |
+| Redundant-temp | `[tmp := expr. tmp] value` |
+
+Each transform's output is unparsed and re-parsed before use (mirroring
+`unparse`'s own `unparse_roundtrip_preserves_structure` property test) — a
+transform that doesn't round-trip cleanly is skipped for that unit rather
+than fed into the compiler. A unit shaped exactly `name := value` (a
+`.btscript`-format cross-unit REPL-turn binding, detected by
+`test_stdlib::extract_assignment_var`) is carried through unchanged instead
+of transformed, so later units in the same file that reference `name` keep
+seeing it — transforming that unit's outer shape would defeat the text-match
+`extract_assignment_var` uses, which is a corpus-format artifact, not a real
+semantics change.
+
+### Running locally
+
+```bash
+just test-metamorphic                                  # full bootstrap-test corpus, ~5s
+just test-metamorphic bootstrap-test/blocks.btscript    # single file
+```
+
+Runs in CI as part of the `test` job (`just test-bunit` → `just
+test-metamorphic` → `just test-examples`) — cheap enough (~5s over the full
+corpus) to run on every PR rather than nightly-only.
+
+### Interpreting a failure
+
+A failure means a semantics-preserving transform changed a unit's result —
+report includes the transformed source, the transform name (in the file
+label, e.g. `blocks [rename_locals]`), and both the expected and actual
+values (`beamtalk_stdlib_test`'s usual `FAIL <location>` / `expected: ...` /
+`got: ...` block). Treat it exactly like a `core_lint`/fuzz finding: it means
+codegen or analysis is doing something shape-dependent that it shouldn't.
+
+---
+
+## Fuzzing (Parser & Compile Pipeline Crash Safety)
+
+Fuzzing tests the compiler's robustness by feeding it random or mutated input to detect crashes, infinite loops, and excessive memory use. Two targets, at different pipeline depths (BT-3124):
+
+| Target | Pipeline depth | Corpus |
+|---|---|---|
+| `parse_arbitrary` | lex → parse | `fuzz/corpus/parse_arbitrary/` (seed files copied from `examples/` and `tests/repl-protocol/cases/` — `find fuzz/corpus/parse_arbitrary -maxdepth 1 -type f \| wc -l` for the current count) |
+| `compile_pipeline` | lex → parse → analyse → codegen | `stdlib/test/*.bt` + `tests/repl-protocol/cases/*.btscript`, referenced live as extra `cargo fuzz run` corpus dirs, plus `fuzz/corpus/compile_pipeline/` for fuzzer-discovered growth |
+
+`compile_pipeline`'s seeds are *not* copied into the repo: `cargo fuzz run <target> [corpus_dir]...` accepts any number of corpus directories, so it points straight at `stdlib/test` and `tests/repl-protocol/cases` (see `Justfile`'s `fuzz`/`fuzz-corpus-lint` recipes and `.github/workflows/fuzz.yml`). Seeds this way always match the current test suite — no separate copy step to remember, no snapshot to go stale. `fuzz/corpus/compile_pipeline/` is fully gitignored and holds only what the fuzzer itself discovers (it's the first/writable dir in the list). `parse_arbitrary` predates this convention and still uses a committed snapshot; `compile_pipeline` (BT-3124) is the newer pattern and is the one to follow for any future fuzz target.
 
 **Technology:** cargo-fuzz (libFuzzer)
 
-**Location:** `fuzz/fuzz_targets/parse_arbitrary.rs`
-
-**Corpus:** `fuzz/corpus/parse_arbitrary/` (seed files from examples/ and tests/repl-protocol/cases/ — `find fuzz/corpus/parse_arbitrary -maxdepth 1 -type f | wc -l` for the current count)
+`compile_pipeline` additionally asserts, whenever `generate_module` returns `Ok`, that the output is structurally valid Core Erlang — the same checks `core_erlang_validity_tests.rs`'s proptest suite runs, shared via `beamtalk_core::test_helpers::test_support::core_erlang_structural_issues` so the two never drift.
 
 ### Running Locally
 
 ```bash
-# Fuzz for 60 seconds (default)
+# Fuzz both targets for 60 seconds each (default)
 just fuzz
 
-# Fuzz for a specific duration
-just fuzz 300  # 5 minutes
+# Fuzz both targets for a specific duration each
+just fuzz 300  # 5 minutes per target
 
-# Or use cargo directly
+# Or use cargo directly, one target at a time
 cargo +nightly fuzz run parse_arbitrary -- -max_total_time=60
+cargo +nightly fuzz run compile_pipeline fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -max_total_time=60
 ```
 
 **Requirements:**
@@ -1015,13 +1083,28 @@ cargo +nightly fuzz run parse_arbitrary -- -max_total_time=60
 
 ### CI Integration
 
-Fuzzing runs nightly (not per-PR) via `.github/workflows/fuzz.yml`:
-- Duration: 10 minutes per run
+Fuzzing runs nightly (not per-PR) via `.github/workflows/fuzz.yml`, one job per target:
+- Duration: 5 minutes per target per run (split from a single 10-minute `parse_arbitrary`-only run when `compile_pipeline` was added, BT-3124)
 - Memory limit: 4GB RSS
 - Artifacts uploaded on failure
 - Auto-creates GitHub issues for crashes
 
 **Why nightly?** Fuzzing is too slow for per-PR CI (minutes to hours). Nightly runs catch regressions without blocking development.
+
+### Corpus-Through-BEAM Lint (`compile_pipeline` only)
+
+`compile_pipeline`'s structural-validity check catches Core Erlang that's broken in ways beamtalk's own codegen can detect (unbalanced delimiters, missing `module`/`end`, Rust format-artifact leaks) — but not "codegen thinks this is fine, and it parses, but `erlc`/`core_lint` still rejects it" (e.g. an unbound variable — the BT-3115 bug class). Putting a real `erlc` compile in the libFuzzer hot loop would be far too slow, so this check runs as a separate nightly job instead:
+
+1. `cargo run --release --example compile_pipeline_corpus -p beamtalk-core -- <out_dir> <corpus_dir>...` — runs every corpus file through the same lex/parse/analyse/codegen pipeline and writes each successful `Ok` output as a `.core` file.
+2. `escript scripts/compile-pipeline-corpus-lint.escript <out_dir>` — batch-compiles every `.core` file with `compile:file/2` (`from_core`, `return_errors`, `return_warnings`, `clint`), the same options `beamtalk_build_worker.erl`/`beamtalk_compiler_server.erl` use in production. Prints an actionable per-file report (generated `.core` path, `erlc`/`core_lint` message) and exits non-zero on any failure.
+
+Run both locally in one step:
+
+```bash
+just fuzz-corpus-lint
+# Or against additional corpus dirs (e.g. fuzzer-grown corpus from a CI artifact):
+just fuzz-corpus-lint "stdlib/test tests/repl-protocol/cases fuzz/corpus/compile_pipeline fuzz/artifacts/compile_pipeline"
+```
 
 ### Interpreting Results
 
@@ -1101,6 +1184,22 @@ Use shorter duration for quick checks:
 just fuzz 5  # 5 seconds
 ```
 
+**"sanitizer is incompatible with statically linked libc":**
+`cargo fuzz` defaults to `--target x86_64-unknown-linux-musl` (a fully static
+binary) with AddressSanitizer enabled, and ASan can't instrument a
+statically-linked libc. This has been confirmed to build and run fine on the
+nightly CI runners (`.github/workflows/fuzz.yml`), so it's environment-specific
+-- some sandboxed/restricted dev containers hit it locally. Work around it by
+building against the dynamically-linked glibc target instead:
+```bash
+cargo +nightly fuzz run compile_pipeline --target x86_64-unknown-linux-gnu \
+  fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- -max_total_time=60
+```
+Or use `--sanitizer none` to keep the default musl target without ASan
+instrumentation (still real coverage-guided libFuzzer mutation, just without
+memory-sanitizer checks -- less relevant here since these targets are pure
+safe Rust).
+
 ### References
 
 - [Rust Fuzz Book](https://rust-fuzz.github.io/book/) - cargo-fuzz guide
@@ -1179,6 +1278,52 @@ Proptest also persists failures in `proptest-regressions/` files, so they are au
 - Epic: BT-362
 
 ---
+
+## Grammar-Driven Program Generator (BT-3116)
+
+`near_valid_beamtalk()` in `core_erlang_validity_tests.rs` builds inputs from
+a small hand-curated `FRAGMENTS` array plus truncation/concatenation —
+useful for "never panics" robustness, but shallow: it can't reach nested
+blocks with captures, `^` inside nested closures, or multi-statement bodies
+threading local state, and shrinking only ever truncates a string rather
+than simplifying a tree. `arb_program` generates *well-formed* programs as
+typed AST values instead — `Object subclass:` with a single `run` method
+whose body is built from a small grammar (literals, `true`/`false`/`nil`,
+local/parameter references, unary/binary/keyword sends, `ifTrue:ifFalse:`,
+self-invoking blocks, and a staged prelude-then-tail body that threads
+freshly bound locals into later statements and occasionally returns early
+via `^`). Because the values are real `ast::Module` trees, proptest's
+built-in shrinking simplifies the tree structurally (fewer statements,
+smaller sub-expressions) instead of chopping the string arbitrarily.
+
+**Location:** `crate::test_helpers::test_support::arb_program` (`crates/beamtalk-core/src/test_helpers.rs`)
+
+**Properties:** `crates/beamtalk-core/src/codegen/core_erlang_validity_tests.rs`, in a second `proptest!` block below the `FRAGMENTS`-based one (that block is kept as-is — it intentionally also covers ill-formed/truncated input this generator never produces):
+
+| Property | What it verifies |
+|---|---|
+| `program_gen_round_trip` | A generated program's `unparse_module` output re-parses with zero error diagnostics |
+| `program_gen_codegen_validity` | Whenever `generate_module` accepts a generated program, its output passes the same structural-validity checks (`core_erlang_structural_issues`) as the `FRAGMENTS`-based properties |
+
+### Running Locally
+
+```bash
+cargo test -p beamtalk-core --lib core_erlang_validity_tests
+# Extended run, matches nightly-style depth:
+PROPTEST_CASES=3000 cargo test -p beamtalk-core --lib core_erlang_validity_tests --release -- --nocapture
+```
+
+### Scope (Tier 1 only)
+
+The grammar currently covers expression-level shapes reachable from a single
+method body: literals, sends, conditionals, blocks, and local-variable
+threading. It does **not** generate class definitions with multiple methods,
+actor state (`state:` declarations), field mutation, `whileTrue:`, or
+collection literals — a second, feature-flagged tier covering those shapes
+was considered but deliberately deferred (per the originating issue: "don't
+gate on the generator issue; the bootstrap corpus is enough to start").
+Extend `arb_expr`/`arb_body` in `test_support` when a new shape needs
+generator coverage rather than adding a second generator elsewhere.
 
 ## Performance Testing (Future)
 
