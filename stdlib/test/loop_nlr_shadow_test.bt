@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3136 (ADR 0111 close-out): one end-to-end BUnit test exercising a
+// stateful counted loop (whileTrue: mutating an Actor `state:` field), a
+// foreign non-local return, and a class-var (`classState:`) mutation
+// together, compiled and run through the real BUnit/EUnit surface — not
+// only a Rust unit test deep in the compiler.
+//
+// Each piece individually mirrors an already-proven pattern:
+// - fixtures/loop_nlr_shadow_counter.bt: whileTrue: state-threading, the
+//   same shape while_loops.rs's
+//   test_while_true_with_field_mutation_threads_actor_state pins at the
+//   codegen-unit level (ADR 0111 Phase B / BT-3132).
+// - fixtures/loop_nlr_shadow_driver.bt + fixtures/loop_nlr_shadow_probe.bt:
+//   the ADR 0110 class-var + foreign-NLR shadow-write contract, the same
+//   shape class_var_nlr_shadow_test.bt pins against
+//   fixtures/collection_driver.bt / fixtures/collection_probe.bt (ADR 0111
+//   Phase D / BT-3135).
+//
+// This test is the first to compile and run all three together in one flow.
+
+TestCase subclass: LoopNlrShadowTest
+
+  setUp =>
+    LoopNlrShadowDriver resetRunCount
+    self
+
+  testLoopAndClassVarMutationSurviveForeignNlrEscape =>
+    counter := LoopNlrShadowCounter spawn
+    result := LoopNlrShadowProbe escapeAfterLoopAndCountedRun: #(1, 2, 3) with: counter
+    // The `^` fires on the second list item (2 > 1), so the block only ever
+    // runs for x = 1 and x = 2 before the escape — the third item is never
+    // reached.
+    self assert: result equals: 2
+    // The class-var increment happens once, before the do: loop starts, and
+    // must survive the foreign NLR relay (ADR 0110 shadow write).
+    self assert: LoopNlrShadowDriver runCount equals: 1
+    // The actor's stateful whileTrue: loop ran to completion for both
+    // pre-escape items: total climbs from 0 -> 1 (x=1) -> 2 (x=2).
+    self assert: counter total equals: 2

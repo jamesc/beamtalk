@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3136 (ADR 0111 close-out): the `^` here is foreign to
+// LoopNlrShadowDriver countedRun:over:'s frame (same shape as
+// fixtures/collection_probe.bt's escapeAfterCountedRun:), but the block
+// first drives aCounter's stateful whileTrue: loop (loop_nlr_shadow_counter.bt)
+// — so the escape happens after both a loop-threaded actor-state mutation
+// and the driver's own class-var mutation have already committed, in the
+// same flow.
+
+Value subclass: LoopNlrShadowProbe
+
+  class escapeAfterLoopAndCountedRun: aList :: List with: aCounter :: LoopNlrShadowCounter -> Integer =>
+    LoopNlrShadowDriver
+      countedRun: [:x |
+        aCounter runTo: x
+        x > 1 ifTrue: [^x]
+      ]
+      over: aList
+    0

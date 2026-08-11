@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3136 (ADR 0111 close-out): mirrors fixtures/collection_driver.bt's
+// class-var + foreign-NLR shadow-write pattern (ADR 0110) exactly, so the
+// e2e test built around this driver (loop_nlr_shadow_test.bt) exercises
+// the same proven `classState:` + NLR-relay contract that
+// class_var_nlr_shadow_test.bt already pins — combined there with
+// fixtures/loop_nlr_shadow_counter.bt's stateful whileTrue: loop and
+// fixtures/loop_nlr_shadow_probe.bt's foreign `^`, all in one flow.
+
+Value subclass: LoopNlrShadowDriver
+  // BT-3032 / ADR 0110: class-side run counter, mutated before the driver
+  // invokes the caller's block — the mutation must survive a foreign `^`
+  // escaping through the block (shadow write-through).
+  classState: runs = 0
+
+  class countedRun: aBlock :: Block over: aList :: List -> Nil =>
+    self.runs := self.runs + 1
+    aList do: [:x | aBlock value: x]
+    nil
+
+  class runCount -> Integer => self.runs
+
+  class resetRunCount => self.runs := 0

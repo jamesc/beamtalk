@@ -676,6 +676,10 @@ Practical rule: a `Collection` subclass may implement `do:` via a class-side hel
 
 All Core Erlang codegen MUST use `Document` / `docvec!` API. Never use `format!()` or string concatenation. If you see existing string-based patterns, convert them.
 
+### State-Threading Codegen — ThreadedIr + Verifier (ADR 0111)
+
+State threading — actor/instance `State`, class-var `ClassVars`, value-type `Self`, loop-local threading, and non-local-return (NLR) relay across loops, conditionals, exception handling, list-op accumulators, gen_server actor-state routing, and class-var shadow-writes (ADR 0110) — now lowers through `crates/beamtalk-core/src/codegen/core_erlang/threaded_ir.rs`'s `ThreadedIr` type alongside the normal `Document` emission, and is checked by its `verify()` pass. General expression codegen stays AST-directed and unaffected. When touching any of these constructs, build the matching `ThreadedIr` fragment and call `verify()` (via the shared `report_threaded_ir_verify_errors` helper in `control_flow/mod.rs`) rather than adding a new ad-hoc `debug_assert!` — see [docs/development/debugging.md](../development/debugging.md#threadedir-verifier-adr-0111-bt-3129-bt-3136) for the `VerifyError` variants and `just verify-threaded-ir` for the CI gate that runs `verify()` over the full stdlib/bootstrap-test corpus.
+
 ### Clippy Discipline
 
 Never suppress clippy warnings without a comment explaining why. Split long functions, remove dead code, fix return types. Goal: under 30 suppressions codebase-wide.
