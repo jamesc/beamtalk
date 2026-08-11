@@ -696,23 +696,10 @@ impl Default for NameResolver {
 mod tests {
     use super::*;
     use crate::source_analysis::{Severity, Span};
-
-    fn parse_module(src: &str) -> crate::ast::Module {
-        let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, diagnostics) = crate::source_analysis::parse(tokens);
-        let parse_errors: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(
-            parse_errors.is_empty(),
-            "Test fixture failed to parse cleanly: {parse_errors:?}"
-        );
-        module
-    }
+    use crate::test_helpers::test_support::parse_bt;
 
     fn run(src: &str) -> NameResolver {
-        let module = parse_module(src);
+        let module = parse_bt(src);
         let mut resolver = NameResolver::new();
         resolver.resolve_module(&module);
         resolver
@@ -906,7 +893,7 @@ mod tests {
 
     #[test]
     fn define_known_vars_prevents_undefined_error() {
-        let module = parse_module("sessionVar");
+        let module = parse_bt("sessionVar");
         let mut resolver = NameResolver::new();
         resolver.define_known_vars(&["sessionVar"], Span::new(0, 0));
         resolver.resolve_module(&module);

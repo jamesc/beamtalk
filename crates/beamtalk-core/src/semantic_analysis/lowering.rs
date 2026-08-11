@@ -78,20 +78,7 @@ pub fn lower_module_for_codegen(
 mod tests {
     use super::*;
     use crate::ast::{ClassKind, SupervisorKind};
-
-    fn parse_module(src: &str) -> Module {
-        let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, diagnostics) = crate::source_analysis::parse(tokens);
-        let parse_errors: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity == crate::source_analysis::Severity::Error)
-            .collect();
-        assert!(
-            parse_errors.is_empty(),
-            "Test fixture failed to parse cleanly: {parse_errors:?}"
-        );
-        module
-    }
+    use crate::test_helpers::test_support::parse_bt;
 
     fn build_hierarchy(module: &Module) -> ClassHierarchy {
         let (result, diagnostics) = ClassHierarchy::build(module);
@@ -114,7 +101,7 @@ mod tests {
     fn applies_all_three_writebacks() {
         let src =
             "Supervisor subclass: WebApp\n  bar => 42\n\nTestCase subclass: MyTest\n  baz => 1";
-        let mut module = parse_module(src);
+        let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
         let method_return_types = crate::semantic_analysis::type_checker::infer_method_return_types(
             &module, &hierarchy, None,
@@ -146,7 +133,7 @@ mod tests {
     #[test]
     fn does_not_infer_when_map_is_empty() {
         let src = "Object subclass: Foo\n  bar => 42";
-        let mut module = parse_module(src);
+        let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
         lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new());
         assert!(

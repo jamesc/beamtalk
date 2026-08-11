@@ -203,20 +203,7 @@ pub fn clear_return_type_writeback_for_keys(
 mod tests {
     use super::*;
     use crate::semantic_analysis::ClassHierarchy;
-
-    fn parse_module(src: &str) -> Module {
-        let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, diagnostics) = crate::source_analysis::parse(tokens);
-        let parse_errors: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity == crate::source_analysis::Severity::Error)
-            .collect();
-        assert!(
-            parse_errors.is_empty(),
-            "Test fixture failed to parse cleanly: {parse_errors:?}"
-        );
-        module
-    }
+    use crate::test_helpers::test_support::parse_bt;
 
     fn build_hierarchy(module: &Module) -> ClassHierarchy {
         let (result, diagnostics) = ClassHierarchy::build(module);
@@ -232,7 +219,7 @@ mod tests {
     #[test]
     fn writeback_sets_return_type_for_integer_method() {
         let src = "Object subclass: Foo\n  bar => 42";
-        let mut module = parse_module(src);
+        let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
         apply_return_type_writeback(&mut module, &hierarchy, None);
         let return_type = &module.classes[0].methods[0].return_type;
@@ -245,7 +232,7 @@ mod tests {
     #[test]
     fn writeback_preserves_explicit_annotation() {
         let src = "Object subclass: Foo\n  bar -> Integer => 42";
-        let mut module = parse_module(src);
+        let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
         let original = module.classes[0].methods[0].return_type.clone();
         assert!(
@@ -263,7 +250,7 @@ mod tests {
     fn writeback_does_not_set_type_for_dynamic_method() {
         // A method whose body type cannot be statically resolved stays None
         let src = "Object subclass: Foo\n  bar: x => x doSomething";
-        let mut module = parse_module(src);
+        let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
         apply_return_type_writeback(&mut module, &hierarchy, None);
         let return_type = &module.classes[0].methods[0].return_type;
@@ -283,7 +270,7 @@ mod tests {
         };
 
         let src = "Object subclass: Foo\n  bar: x => Erlang lists reverse: x";
-        let mut module = parse_module(src);
+        let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
 
         let mut registry = NativeTypeRegistry::new();
@@ -310,7 +297,7 @@ mod tests {
         );
 
         // Registry-blind default (None) preserves the previous behaviour.
-        let mut module_without_registry = parse_module(src);
+        let mut module_without_registry = parse_bt(src);
         apply_return_type_writeback(&mut module_without_registry, &hierarchy, None);
         assert!(
             module_without_registry.classes[0].methods[0]

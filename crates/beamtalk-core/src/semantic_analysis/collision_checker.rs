@@ -423,20 +423,7 @@ fn check_transitive_reference(
 mod tests {
     use super::*;
     use crate::source_analysis::Severity;
-
-    fn parse_module(src: &str) -> Module {
-        let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, diagnostics) = crate::source_analysis::parse(tokens);
-        let parse_errors: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(
-            parse_errors.is_empty(),
-            "Test fixture failed to parse cleanly: {parse_errors:?}"
-        );
-        module
-    }
+    use crate::test_helpers::test_support::parse_bt;
 
     fn make_registry(entries: &[(&str, &str, &str)]) -> DependencyRegistry {
         let mut registry = DependencyRegistry::new();
@@ -545,7 +532,7 @@ mod tests {
         ]);
 
         // Source uses unqualified Parser
-        let module = parse_module("Parser new");
+        let module = parse_bt("Parser new");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -576,7 +563,7 @@ mod tests {
         ]);
 
         // Source does not use Parser at all
-        let module = parse_module("42 + 1");
+        let module = parse_bt("42 + 1");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -590,7 +577,7 @@ mod tests {
     fn no_collision_for_single_export() {
         let registry = make_registry(&[("Helper", "utils", "bt@utils@helper")]);
 
-        let module = parse_module("Helper new");
+        let module = parse_bt("Helper new");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -607,7 +594,7 @@ mod tests {
             ("Base", "pkg_b", "bt@pkg_b@base"),
         ]);
 
-        let module = parse_module("Base subclass: Derived\n  value => 1");
+        let module = parse_bt("Base subclass: Derived\n  value => 1");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -633,7 +620,7 @@ mod tests {
         ]);
 
         // Source uses qualified json@Parser — no collision
-        let module = parse_module("json@Parser new");
+        let module = parse_bt("json@Parser new");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -651,7 +638,7 @@ mod tests {
         ]);
 
         // Standalone method on ambiguous class name
-        let module = parse_module("Parser >> customParse: input => input");
+        let module = parse_bt("Parser >> customParse: input => input");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -675,7 +662,7 @@ mod tests {
         ]);
 
         // Qualified standalone method — no collision
-        let module = parse_module("json@Parser >> customParse: input => input");
+        let module = parse_bt("json@Parser >> customParse: input => input");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
 
@@ -688,7 +675,7 @@ mod tests {
     #[test]
     fn collision_with_empty_registry_is_noop() {
         let registry = DependencyRegistry::new();
-        let module = parse_module("Parser new");
+        let module = parse_bt("Parser new");
         let mut diagnostics = Vec::new();
         check_collision_at_use_sites(&module, &registry, &mut diagnostics);
         assert!(diagnostics.is_empty());
@@ -717,7 +704,7 @@ mod tests {
             vec!["json".to_string()],
         )]);
 
-        let module = parse_module("StringUtils new");
+        let module = parse_bt("StringUtils new");
         let mut diagnostics = Vec::new();
         check_transitive_dep_usage(&module, &registry, false, &mut diagnostics);
 
@@ -755,7 +742,7 @@ mod tests {
             vec!["json".to_string()],
         )]);
 
-        let module = parse_module("StringUtils new");
+        let module = parse_bt("StringUtils new");
         let mut diagnostics = Vec::new();
         check_transitive_dep_usage(&module, &registry, true, &mut diagnostics);
 
@@ -778,7 +765,7 @@ mod tests {
             Vec::new(),
         )]);
 
-        let module = parse_module("Helper new");
+        let module = parse_bt("Helper new");
         let mut diagnostics = Vec::new();
         check_transitive_dep_usage(&module, &registry, false, &mut diagnostics);
 
@@ -798,7 +785,7 @@ mod tests {
             vec!["json".to_string()],
         )]);
 
-        let module = parse_module("42 + 1");
+        let module = parse_bt("42 + 1");
         let mut diagnostics = Vec::new();
         check_transitive_dep_usage(&module, &registry, false, &mut diagnostics);
 
@@ -818,7 +805,7 @@ mod tests {
             vec!["framework".to_string()],
         )]);
 
-        let module = parse_module("Base subclass: MyClass\n  value => 1");
+        let module = parse_bt("Base subclass: MyClass\n  value => 1");
         let mut diagnostics = Vec::new();
         check_transitive_dep_usage(&module, &registry, false, &mut diagnostics);
 
