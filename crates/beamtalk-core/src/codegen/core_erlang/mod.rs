@@ -237,6 +237,46 @@ pub enum CodeGenError {
         location: String,
     },
 
+    /// BT-3151: A self-send to a same-class class method, inside a block that
+    /// compiles through `generate_block`'s generic "plain fun"/Tier 2 fallback
+    /// (`select:`/`collect:`/`do:`/etc. arguments, a block stored in a local var
+    /// then invoked, or any other bare/passed block) in a class method — the
+    /// sibling gap BT-3150 left open (see that error's doc comment and ADR
+    /// 0110's BT-3150 amendment): unlike a `Letrec`/`FoldlDo` threaded loop
+    /// body, this shape has no legitimate "unconditionally discard the
+    /// self-send's return value" reading to justify rejecting *every*
+    /// self-send here the way BT-3150 does — `select:`/`collect:`/etc. bodies
+    /// routinely and correctly use a self-send's return value (confirmed by a
+    /// real stdlib fixture, `stdlib/test/fixtures/class_method_block.bt`,
+    /// BT-2350), so a blanket rejection would break real code exactly as it
+    /// did when first tried for BT-3150's own `Foldl*` widening attempt.
+    ///
+    /// Resolved instead with `block_analysis::compute_class_var_mutating_selectors`:
+    /// a same-class self-send is only rejected here when its target selector is
+    /// *not provably free* of class-variable mutation — it (or something it
+    /// calls, transitively) writes a class variable directly, or it isn't a
+    /// locally defined class method at all (inherited/unresolvable, where
+    /// purity can't be checked — conservatively assumed unsafe, the same
+    /// "can't know statically" call BT-3150 makes). A self-send to a provably
+    /// pure class method (the common case — `self double:`-style helpers)
+    /// keeps compiling.
+    #[error(
+        "Cannot send '{selector}' to self inside this block at {location}: this self-send \
+             cannot be proven free of class-variable mutation ('{selector}' either writes a \
+             class variable itself, calls another method that might, or isn't defined locally \
+             in this class where that could be checked) — and unlike a threaded loop body, this \
+             block has no way to thread such a mutation back to the class method that owns it.\n\n\
+             Fix: Call '{selector}' directly from the class method's own body instead of from \
+             inside this block, or extract whatever the block needs into a helper method \
+             that's provably free of class-variable mutation."
+    )]
+    ClassMethodSelfSendInUnthreadedBlock {
+        /// The selector being self-sent.
+        selector: String,
+        /// Source location.
+        location: String,
+    },
+
     /// BT-3140: A class-var assignment (`self.field := ...`) inside a loop, conditional,
     /// exception handler, or list-op body (or any other context reached via
     /// `generate_field_assignment_open`) in a class method.
@@ -1252,6 +1292,14 @@ pub(super) struct ClassContext {
     /// BT-412: Selector names of class methods in the current class.
     /// Used to route self-sends to class method functions vs module exports.
     pub class_method_selectors: std::collections::HashSet<String>,
+    /// BT-3151: Selector names of class methods (in the current class) that are
+    /// known or suspected to mutate a class variable, directly or transitively
+    /// — see `block_analysis::compute_class_var_mutating_selectors`. Used to
+    /// let a self-send to a provably pure class method compile inside a bare,
+    /// unthreaded block (`select:`/`collect:`/`do:`/etc.) while rejecting one
+    /// that may mutate class state there, where BT-3150's `Letrec`-only guard
+    /// doesn't reach.
+    pub class_var_mutating_selectors: std::collections::HashSet<String>,
     /// BT-412/BT-3131: State version counter for class variable threading.
     ///
     /// Not `pub` (unlike this struct's other fields) — [`VersionCounter`] is
@@ -1301,6 +1349,7 @@ pub(super) struct SavedClassMethodCtx {
     in_class_method: bool,
     class_var_names: std::collections::HashSet<String>,
     class_method_selectors: std::collections::HashSet<String>,
+    class_var_mutating_selectors: std::collections::HashSet<String>,
     class_var_version: usize,
     class_var_mutated: bool,
     class_slot_constructor_selector: Option<String>,
@@ -1314,6 +1363,7 @@ impl ClassContext {
             class_identity: None,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
+            class_var_mutating_selectors: std::collections::HashSet::new(),
             class_var_version: VersionCounter::new(),
             class_var_mutated: false,
             class_module_index: std::collections::HashMap::new(),
@@ -1814,6 +1864,22 @@ impl CoreErlangGenerator {
         &mut self.class_context_mut().class_method_selectors
     }
 
+    /// BT-3151: Returns a reference to the class-var-mutating selectors set.
+    pub(super) fn class_var_mutating_selectors(&self) -> &std::collections::HashSet<String> {
+        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
+            std::sync::LazyLock::new(std::collections::HashSet::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.class_var_mutating_selectors)
+    }
+
+    /// BT-3151: Returns a mutable reference to the class-var-mutating selectors set.
+    pub(super) fn class_var_mutating_selectors_mut(
+        &mut self,
+    ) -> &mut std::collections::HashSet<String> {
+        &mut self.class_context_mut().class_var_mutating_selectors
+    }
+
     /// Returns the class variable version counter.
     pub(super) fn class_var_version(&self) -> usize {
         self.class_context
@@ -1931,6 +1997,7 @@ impl CoreErlangGenerator {
             in_class_method: self.in_class_method(),
             class_var_names: self.class_var_names().clone(),
             class_method_selectors: self.class_method_selectors().clone(),
+            class_var_mutating_selectors: self.class_var_mutating_selectors().clone(),
             class_var_version: self.class_var_version(),
             class_var_mutated: self.class_var_mutated(),
             class_slot_constructor_selector: self.class_slot_constructor_selector().cloned(),
@@ -1945,6 +2012,16 @@ impl CoreErlangGenerator {
         // threading across such self-sends rides on the open scope that
         // `emit_class_var_result_unwrap` always produces, not on this set.
         self.class_method_selectors_mut().clear();
+        // BT-3151: also cleared, for the same reason plus one more — an empty
+        // `class_method_selectors` already makes `generate_block`'s bare-block
+        // self-send check treat every self-send here as unresolvable (so
+        // conservatively unsafe) regardless of this set's contents, since a
+        // programmatic `ClassBuilder` cascade has no static `ClassDefinition`
+        // to run `compute_class_var_mutating_selectors` over in the first
+        // place. Clearing just avoids leaking the enclosing class's own
+        // mutating-selector set into an unrelated builder class's selector
+        // namespace.
+        self.class_var_mutating_selectors_mut().clear();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
         self.set_class_slot_constructor_selector(None);
@@ -1959,6 +2036,7 @@ impl CoreErlangGenerator {
             self.set_in_class_method(saved.in_class_method);
             *self.class_var_names_mut() = saved.class_var_names;
             *self.class_method_selectors_mut() = saved.class_method_selectors;
+            *self.class_var_mutating_selectors_mut() = saved.class_var_mutating_selectors;
             self.set_class_var_version(saved.class_var_version);
             self.set_class_var_mutated(saved.class_var_mutated);
             self.set_class_slot_constructor_selector(saved.class_slot_constructor_selector);

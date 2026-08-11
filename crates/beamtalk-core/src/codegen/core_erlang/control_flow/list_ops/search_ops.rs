@@ -353,6 +353,11 @@ impl CoreErlangGenerator {
         }
 
         // No mutations: fall through to BIF call (beamtalk_list:detect/2)
+        // BT-3151: see the analogous check in `generate_simple_list_op`.
+        if let Some(block) = Self::extract_block_literal(body) {
+            let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(block);
+            self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
+        }
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");

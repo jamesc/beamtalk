@@ -110,6 +110,13 @@ impl CoreErlangGenerator {
         // Mutations inside the block are dropped (Erlang cannot propagate NewStateAcc).
         // BT-855 follow-up: Also unwrap parenthesized block literals (e.g. `([:x | ...])`).
         let body_code = if let Some(block) = Self::extract_block_literal(body) {
+            // BT-3151: `do:`/`collect:`/`select:` all route through here — a
+            // same-class mutating self-send inside this block has no way to
+            // thread its class-var mutation back (this always runs in-process,
+            // never a genuine cross-class gen_server call). See
+            // `check_no_unsafe_class_method_self_sends`'s doc comment.
+            let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(block);
+            self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
             let (wrapped_doc, is_stateful) = self.generate_erlang_interop_wrapper(block)?;
             if is_stateful {
                 self.warn_stateful_block_at_erlang_boundary(

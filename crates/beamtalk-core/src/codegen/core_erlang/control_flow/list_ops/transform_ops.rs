@@ -534,6 +534,13 @@ impl CoreErlangGenerator {
         // Generate the foldl fun: for literal blocks, compile body with swapped
         // parameter order; for non-literal, use runtime arg-swap wrapper.
         let foldl_fun_doc = if let Expression::Block(body_block) = body {
+            // BT-3151: this pure-block fast path calls `generate_block_body`
+            // directly below, bypassing `generate_block`'s own self-send
+            // check — so it needs the same guard here. See
+            // `check_no_unsafe_class_method_self_sends`'s doc comment.
+            let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(body_block);
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
+
             // Literal block: compile directly with foldl parameter order (Elem, Acc).
             // Block params: [0] = acc, [1] = elem (Beamtalk convention)
             // Foldl fun params: (Elem, Acc) (Erlang convention)

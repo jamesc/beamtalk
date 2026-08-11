@@ -8,4 +8,6 @@
 //! Re-exports from `semantic_analysis::block_facts`. The analysis logic
 //! now lives in the semantic analysis layer (BT-1288).
 
-pub use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
+pub use crate::semantic_analysis::block_facts::{
+    BlockMutationAnalysis, analyze_block, compute_class_var_mutating_selectors,
+};

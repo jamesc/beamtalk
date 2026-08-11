@@ -9,7 +9,10 @@
 //! read/written, enabling proper state threading in tail-recursive loops.
 
 use crate::ast::well_known::WellKnownSelector;
-use crate::ast::{Block, Expression, MessageSelector};
+use crate::ast::{
+    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
+    ParameterDefinition,
+};
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -27,6 +30,11 @@ pub struct BlockMutationAnalysis {
     pub field_writes: HashSet<String>,
     /// BT-245: Whether the block contains self-sends (which may mutate actor state).
     pub has_self_sends: bool,
+    /// BT-3151: Selectors sent to `self` anywhere in the block, including inside
+    /// nested blocks (e.g. a `do:`/`collect:` argument) — unlike `has_self_sends`,
+    /// tracked by name so a caller can distinguish a self-send to a provably
+    /// non-mutating class method from one that is (or might be) mutating.
+    pub self_send_selectors: HashSet<String>,
     /// BT-2807: Whether the block contains a `self.field value(:...)` send — invoking
     /// a block stored in a field. The stored block's body isn't visible here (it may
     /// be assigned anywhere), so this is conservative: any such call is treated as a
@@ -65,19 +73,112 @@ impl BlockMutationAnalysis {
 
 /// Analyzes a block to detect variable and field mutations.
 pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
-    let mut analysis = BlockMutationAnalysis::new();
     let mut ctx = AnalysisContext::new();
-
-    // Block parameters are local bindings
     for param in &block.parameters {
         ctx.local_bindings.insert(param.name.to_string());
     }
+    analyze_statements(&block.body, &mut ctx)
+}
 
-    // Analyze all expressions in the block body
-    for stmt in &block.body {
-        analyze_expression(&stmt.expression, &mut analysis, &mut ctx);
+/// BT-3151: Analyzes a method body (top-level statements, not wrapped in a
+/// `Block`) the same way [`analyze_block`] analyzes a block body — used by
+/// the class-var-mutating-selector purity check (`compute_class_var_mutating_selectors`)
+/// to inspect each class method's own body directly, since `MethodDefinition`
+/// isn't a `Block`.
+pub fn analyze_method_body(
+    parameters: &[ParameterDefinition],
+    body: &[ExpressionStatement],
+) -> BlockMutationAnalysis {
+    let mut ctx = AnalysisContext::new();
+    for param in parameters {
+        ctx.local_bindings.insert(param.name.name.to_string());
+    }
+    analyze_statements(body, &mut ctx)
+}
+
+/// BT-3151: Computes the set of this class's own class-method selectors that
+/// are *known or suspected* to mutate a class variable — directly (`self.cv
+/// := ...` for `cv` in `class_var_names`) or transitively (a self-send,
+/// anywhere in the method body including inside nested blocks, to another
+/// selector already in this set).
+///
+/// A self-send to a selector NOT defined in this class's own `class_methods`
+/// (inherited from a superclass, or otherwise unresolvable at this class's
+/// compile time) is conservatively treated as mutating too — the same "can't
+/// know statically, so assume the worst" call BT-3150 makes for self-sends in
+/// threaded loop bodies. This keeps the analysis sound without needing
+/// cross-class information codegen doesn't have at this point: a self-send is
+/// only ever excluded from the mutating set when its target is a *locally
+/// defined* method that this same pass has proven pure.
+///
+/// Used to let a self-send to a provably pure class method (the common case —
+/// see `stdlib/test/fixtures/class_method_block.bt`'s `self double:`-style
+/// helpers) keep compiling in a bare, unthreaded block passed to
+/// `select:`/`collect:`/`do:`/etc., while rejecting one whose target may
+/// mutate class state, where BT-3150's `Letrec`-only guard doesn't reach.
+#[allow(clippy::implicit_hasher)] // concrete HashSet (matches ClassContext::class_var_names) is simpler for callers
+pub fn compute_class_var_mutating_selectors(
+    class: &ClassDefinition,
+    class_var_names: &HashSet<String>,
+) -> HashSet<String> {
+    let methods: Vec<(String, BlockMutationAnalysis)> = class
+        .class_methods
+        .iter()
+        .filter(|m| m.kind == MethodKind::Primary)
+        .map(|m| {
+            (
+                m.selector.name().to_string(),
+                analyze_method_body(&m.parameters, &m.body),
+            )
+        })
+        .collect();
+    let local_selectors: HashSet<&str> = methods.iter().map(|(sel, _)| sel.as_str()).collect();
+
+    let mut mutating: HashSet<String> = methods
+        .iter()
+        .filter(|(_, analysis)| {
+            analysis
+                .field_writes
+                .iter()
+                .any(|f| class_var_names.contains(f))
+        })
+        .map(|(sel, _)| sel.clone())
+        .collect();
+
+    // Fixed-point closure over self-sends: a method becomes "mutating" if it
+    // self-sends a selector already known to mutate, or one this class
+    // doesn't itself define (unresolvable — assume the worst).
+    loop {
+        let mut changed = false;
+        for (sel, analysis) in &methods {
+            if mutating.contains(sel) {
+                continue;
+            }
+            let calls_unsafe = analysis.self_send_selectors.iter().any(|called| {
+                mutating.contains(called) || !local_selectors.contains(called.as_str())
+            });
+            if calls_unsafe {
+                mutating.insert(sel.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
     }
 
+    mutating
+}
+
+/// Shared statement-list walker behind [`analyze_block`] and [`analyze_method_body`].
+fn analyze_statements(
+    body: &[ExpressionStatement],
+    ctx: &mut AnalysisContext,
+) -> BlockMutationAnalysis {
+    let mut analysis = BlockMutationAnalysis::new();
+    for stmt in body {
+        analyze_expression(&stmt.expression, &mut analysis, ctx);
+    }
     analysis
 }
 
@@ -181,6 +282,10 @@ fn analyze_expression(
             // BT-245: Detect self-sends (may mutate actor state)
             if is_self_reference(receiver) {
                 analysis.has_self_sends = true;
+                // BT-3151: record the selector too (see `self_send_selectors` doc).
+                analysis
+                    .self_send_selectors
+                    .insert(selector.name().to_string());
             }
             // BT-2807: Detect `self.field value(:...)` — invoking a block stored in a
             // field. The field may hold a Tier 2 (state-mutating) block, so this is
@@ -224,6 +329,9 @@ fn analyze_expression(
                         if nested.has_self_sends {
                             analysis.has_self_sends = true;
                         }
+                        analysis
+                            .self_send_selectors
+                            .extend(nested.self_send_selectors.iter().cloned());
                         if nested.has_field_value_call {
                             analysis.has_field_value_call = true;
                         }
@@ -260,6 +368,18 @@ fn analyze_expression(
             if nested_analysis.has_field_value_call {
                 analysis.has_field_value_call = true;
             }
+            // BT-3151: propagate self-sends the same way — a self-send inside a
+            // block passed to select:/collect:/do:/etc. (this is exactly that
+            // shape: a `Block` argument that isn't an inline-conditional
+            // selector, handled above) is itself a potential mutation source,
+            // and callers like `analyze_method_body`'s purity check need to see
+            // it at any nesting depth, not just at this block's own top level.
+            if nested_analysis.has_self_sends {
+                analysis.has_self_sends = true;
+            }
+            analysis
+                .self_send_selectors
+                .extend(nested_analysis.self_send_selectors.iter().cloned());
         }
 
         Expression::Return { value, .. } => {
