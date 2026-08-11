@@ -289,6 +289,11 @@ are against `crates/beamtalk-core/src/codegen/core_erlang/` unless noted,
 current as of `main` at commit `89bb697` (BT-3151, the commit after the
 BT-3144 renderer landing — BT-3151 shifted line numbers in
 `while_loops.rs` and `mod.rs`, and the citations below reflect that).
+Citations anchor on **symbol names**; the line numbers are approximate
+hints as of that commit, expected to drift as adjacent work lands (e.g.
+BT-3154, in flight at the time of writing, deletes the A0 prototype block
+and the `check_loop_unpack_invariant` call sites from the exact regions
+Gap 1 cites) — resolve by symbol name first, treat `:NNN` as a hint.
 
 ### Gap 1 — no condition/case-split loop node
 
@@ -374,7 +379,12 @@ reproduces a hand-written reference, not that it reproduces production.
        body: Vec<ThreadedStmt>,
        produces: Vec<VersionedVar>,
        /// Opaque exit arm: pattern + exit value + "end " — e.g.
-       /// "<'false'> when 'true' -> {'nil', ExitSA3} end ".
+       /// "<'false'> when 'true' -> {'nil', _ExitSA8} end " (built by
+       /// `generate_exit_stateacc`). ORDERING CONSTRAINT: must be
+       /// constructed AFTER the body IR is lowered — its `ExitSA` temps
+       /// come from the same module-wide `fresh_temp_var` counter as the
+       /// body's rebind temps, and legacy mints body temps first (see
+       /// Gap 2's option analysis — mint order decides byte-identity).
        exit_arm: Document<'static>,
        span: Span,
    }
@@ -385,11 +395,35 @@ reproduces a hand-written reference, not that it reproduces production.
    — no new `VerifyError` variant is required. `verify()` cannot, and is
    not meant to, check that `continue_header`'s embedded polarity
    actually agrees with which arm holds `body` vs. which holds
-   `exit_arm`'s value — that trust is exactly the limitation ADR 0111
-   already accepts for `NlrCatch`'s opaque body (§Verifier honesty; the
-   `NlrCatch` doc comment's own reasoning for why a lone `NlrCatch`
-   "can never trigger any `VerifyError`"). `ConditionalLoop` inherits the
-   same, pre-named limitation — not a new weakness.
+   `exit_arm`'s value.
+
+   The two opaque arms deserve *separate* opacity justifications — they
+   are not the same case:
+
+   - **`continue_header`'s opacity is sound on option 3's own grounds:**
+     the condition body is ordinary AST-directed expression codegen with
+     no state-threading content of its own — the same class of opaque
+     embed as `NlrCatch`'s body (§Verifier honesty; the `NlrCatch` doc
+     comment's own reasoning for why a lone `NlrCatch` "can never trigger
+     any `VerifyError`"). Nothing state-threading-relevant is hidden.
+   - **`exit_arm`'s opacity hides genuine state-threading content, and
+     this is a named, deliberate pilot limitation.** `exit_arm` is
+     `generate_exit_stateacc`'s output: it repacks threaded locals and
+     mutated fields into the `StateAcc` map (`control_flow/mod.rs:741`,
+     `:753` — `maps:put` chains over fresh `ExitSA` temps). That is
+     state-threading work on the loop's *exit path* — exactly the
+     boundary class where BT-3140/BT-3150 lost class-var mutations. An
+     IR that models the body structurally but the exit repack opaquely
+     cannot see that boundary; BT-3145 accepts this as an explicit
+     §Verifier-honesty-class limitation: **the loop exit repack is
+     unverified by design in the pilot.** A future refinement can model
+     the repack structurally — a `Bind` chain of `BindOp::Put`s with
+     `Gensym`-prefixed targets (which Gap 2's recommended option 2 makes
+     directly expressible) — and is deferred, not rejected: the pilot's
+     hard gate is byte-identity, and a structural exit model adds no new
+     *check* until `ClassVars`/`State` `Bind`s flow through loop exits
+     jointly with NLR boundaries (Phase D territory); modeling it in the
+     pilot would grow scope without verification payoff yet.
 
    Rendering: `render_loop_letrec`'s existing `param_list`/`final_args`/
    `outer_args` plumbing (`:1104-1136`) is unchanged and reusable as a
@@ -498,8 +532,10 @@ never minted by `render`) rather than treated as a third, separate gap.
 
 **Design options.**
 
-1. **Render-time memoizing gensym cache on `RenderCtx` — Recommended, no
-   `ThreadedStmt`/`VersionedVar`/`BindOp` type changes.** `RenderCtx`
+1. **Render-time memoizing gensym cache on `RenderCtx` — REJECTED on
+   composition grounds: it inverts gensym mint order when combined with
+   Gap 1's recommended design (analysis at the end of this option; the
+   deciding argument for option 2 follows there).** `RenderCtx`
    gains a `gensym_names: HashMap<VersionedVar, String>` field (cleared
    implicitly — a fresh `RenderCtx` is already constructed per real call
    site today, per `RenderCtx::new`'s existing usage in
@@ -532,18 +568,31 @@ never minted by `render`) rather than treated as a third, separate gap.
    per-construct cache-scoping logic is needed beyond "one `RenderCtx`
    per lowered-and-rendered construct region," which is already how every
    current call site is shaped.
-   **Effort: S** — one `HashMap` field, one branch in `resolve_prefix`,
-   no `ThreadedStmt` type changes. Byte-identical *if and only if*
-   lowering-then-rendering for one construct is not interleaved with
-   *other* codegen that also calls `fresh_temp_var` in between — true
-   today (each `generate_*_direct`/`_hybrid` call is a single, contiguous
-   function body) and worth stating as an explicit implementation
-   constraint for BT-3145: lower and render each construct in one place,
-   where the legacy code used to sit, not as two separated passes over a
-   whole method.
+   **Why this fails when composed with Gap 1's recommended design** (the
+   reason it is rejected despite its smaller type surface):
+   `fresh_temp_var` draws from **one module-wide counter**, so
+   byte-identity depends on mint *order*, not just on which names are
+   minted. Legacy order inside `generate_while_loop_direct` is: (1)
+   `CondFun` (`:329`), (2) condition internals (`:360-370`), (3) **body
+   temps** via `generate_threaded_loop_body` (`:384`), (4) the **`ExitSA`
+   chain** via `generate_exit_stateacc` (`:391`). Gap 1's
+   `ConditionalLoop` carries `continue_header` and `exit_arm` as
+   pre-rendered `Document` *fields* — both fully built at
+   node-construction (lowering) time — while this option defers body-temp
+   minting to `render()` time, strictly after node construction. The
+   order becomes 1, 2, **4, 3**: steps 3 and 4 swap, every gensym number
+   after the swap shifts, and output is no longer byte-identical — the
+   epic's hard acceptance criterion. A "lower and render each construct
+   in one place" discipline does not cover this: the inversion is
+   *intra*-construct, not interleaving with other codegen. Rescuing
+   option 1 would require making `exit_arm` lazily rendered (a thunk
+   field or a two-phase render API) — extra API complexity that erases
+   this option's "less churn" advantage, so it is rejected rather than
+   patched.
 
 2. **Lowering-time pre-allocation: new `VersionPrefix::Gensym(String)`
-   variant, IR carries the literal rendered name.** The lowering pass
+   variant, IR carries the literal rendered name — Recommended.** The
+   lowering pass
    (which already needs `&mut CoreErlangGenerator` to call
    `fresh_temp_var` at the same point production does today) calls it
    once per rebind and stores the resulting string directly in the
@@ -561,14 +610,29 @@ never minted by `render`) rather than treated as a third, separate gap.
    prefix { .. }` site (`render_name`, `resolve_prefix`, and any future
    consumer); (−) requires lowering itself (not just rendering) to run
    with live generator access at exactly the right point in the AST
-   walk — a stronger coupling requirement than option 1's, which only
-   needs generator access at render time (already required for
-   `fresh_temp_var`/`alloc_nlr_catch_vars`/`resolve_prefix`'s loop-context
-   dependency per the original Addendum's "Renderer design sketch").
-   **Effort: S–M.** Viable, not rejected, but option 1 achieves the same
-   byte-identical guarantee with less type-surface churn and reuses
-   idioms `render()` already has; recommend option 1 unless a concrete
-   near-term consumer needs pre-render IR inspection.
+   walk — a coupling cost that turns out to be **already paid**: Gap 1's
+   own recommended design requires `&mut CoreErlangGenerator` at lowering
+   time regardless, to build the opaque `continue_header` (condition
+   codegen) and `exit_arm` (`generate_exit_stateacc`) `Document`s, so
+   option 2 adds no coupling Gap 1 hasn't already introduced.
+   **Effort: S–M. Recommended — the deciding argument is composition
+   with Gap 1's design.** Because option 2 mints during *lowering*, mint
+   order is controlled by lowering-code order alone: mint `CondFun`,
+   render the condition, lower the body's `Bind`s (minting each rebind
+   temp in encounter order, exactly where legacy
+   `generate_direct_var_update_in_loop` mints today), and only then build
+   `exit_arm` — reproducing legacy mint order (1)-(2)-(3)-(4) by
+   construction, where option 1 structurally inverts it (see option 1's
+   closing analysis). The lowering pass must still preserve that order —
+   **lower the body IR before constructing `exit_arm`** — but under
+   option 2 this is an ordinary code-ordering fact of one function,
+   enforced naturally by writing the lowering to mirror the legacy
+   function it replaces, not a cross-phase constraint spanning
+   node-construction and render time. The remaining cost is the
+   `VersionPrefix::Gensym` type-surface widening, which buys the
+   self-describing-IR benefit noted above — and makes a future
+   structural model of the exit repack (Gap 1's `exit_arm` limitation)
+   directly expressible as `Bind`s with `Gensym` targets.
 
 3. **Change production naming to match `VersionedVar::render_name()`'s
    `Sum1`/`Sum2` scheme (i.e. stop using `fresh_temp_var` for loop
@@ -613,22 +677,24 @@ between `ThreadedIr`'s shape and what while/counted loops need:
   node" technique is already established by `NlrCatch` — the issue body's
   own framing ("a similar shape may fit") is confirmed, not merely
   hoped for, by this section's design.
-- **Gap 2's recommended fix reuses a pattern `render()` already uses
-  twice in the same file** — mint-on-render via `ctx.fresh_temp_var`
-  (`render_loop_letrec`'s `fn_name`, `render_nlr_catch`'s `token_var`) —
-  extended to a third call site (`Bind` targets) via a small render-time
-  cache, not a new naming strategy.
+- **Gap 2's recommended fix reuses production's own allocator at
+  production's own call order** — the lowering pass calls the same
+  `fresh_temp_var` the legacy code calls today, at the same points in the
+  same order, storing the result in the IR via `VersionPrefix::Gensym`;
+  byte-identity is by-construction, not maintained by a cross-phase
+  constraint (see Gap 2 option 1's rejected composition analysis).
 
 Neither option touches `ThreadedStmt`'s existing verified shapes (`Bind`,
 `NlrCatch`, `TupleAccUnpack`, `Return`), extends `verify()`'s existing
 checks in a way that risks regressing BT-3132's/BT-3133's/BT-3134's
 already-shipped production call sites, or re-opens any of BT-3128's seven
-already-shipped phases. Both are estimated **S** effort (Gap 1: one new
-enum variant + its render/verify arms + a shared-helper refactor; Gap 2:
-one `HashMap` field + one branch in `resolve_prefix`) against BT-3145's
-own **M** size estimate — neither gap dominates the issue's existing
-budget, and BT-3145's investigation already spent the cost of finding
-them; a re-attempt starts from a concrete design, not from zero.
+already-shipped phases. Both are estimated **S**/**S–M** effort (Gap 1:
+one new enum variant + its render/verify arms + a shared-helper refactor;
+Gap 2: one `VersionPrefix` variant + its `render_name`/`resolve_prefix`
+arms + lowering-time mint calls mirroring legacy order) against
+BT-3145's own **M** size estimate — neither gap dominates the issue's
+existing budget, and BT-3145's investigation already spent the cost of
+finding them; a re-attempt starts from a concrete design, not from zero.
 
 **Recommendation: do not descope BT-3145.** Design and implement both
 fixes as part of a direct re-attempt at BT-3145, scoped exactly to the
@@ -657,15 +723,21 @@ codebase, and smaller than the phase's own size estimate.
    variant.
    Add `LoopCounter` (a thin, unversioned, single-alloc identity for the
    counted-loop index, mirroring `AccParam`'s existing precedent).
-2. Add the `gensym_names` cache to `RenderCtx` and the `Local`-at-version
-   `> 0` branch in `resolve_prefix` (Gap 2, option 1). Fix
+2. Add `VersionPrefix::Gensym(String)` and its `render_name`/
+   `resolve_prefix` arms (Gap 2, option 2). The lowering pass mints via
+   `fresh_temp_var` **in legacy order — `CondFun` + condition first, then
+   each body rebind as its `Bind` is lowered, and `exit_arm`'s `ExitSA`
+   chain LAST, i.e. lower the body IR before constructing `exit_arm`**
+   (the module-wide counter makes byte-identity order-sensitive; see Gap
+   2 option 1's rejected composition analysis). Fix
    `ConditionalLoop::fn_name` to be caller-supplied, never minted by
    `render`, closing the related loop-fn-name finding.
 3. Rewrite the three existing `dual_run_*` tests to hand-author the real
-   condition/case shape (not the condition-free skeleton) and to seed
-   `Local`-prefix names via a real `fresh_temp_var` call on a
-   same-seeded generator (mirroring the existing `State`-prefix test's
-   pattern) rather than hard-coded literals.
+   condition/case shape (not the condition-free skeleton) and to mint
+   rebind-temp names via a real `fresh_temp_var` call on a same-seeded
+   generator — carried in the IR as `VersionPrefix::Gensym` per Gap 2's
+   recommendation, mirroring the existing `State`-prefix test's
+   real-accessor pattern — rather than hard-coded literals.
 4. Only then wire one real call site (`generate_while_loop_direct` is the
    smallest — no hybrid pre-extraction, no counted-loop counter) to
    lower, verify, and render through `ThreadedIr`, gated behind the
