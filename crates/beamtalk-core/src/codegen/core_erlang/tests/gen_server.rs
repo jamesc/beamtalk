@@ -3630,6 +3630,134 @@ fn test_class_method_local_var_after_class_var_mutation() {
 }
 
 #[test]
+fn test_class_method_self_send_in_while_loop_body_is_compile_error() {
+    // BT-3150: a self-send to a same-class class method (`self bump`) used as
+    // a bare statement inside a `whileTrue:` loop body previously produced a
+    // `core_parse_error` — a doubled `in in` around the self-send's
+    // `class_var_result` tuple-unwrapping, from `emit_class_var_result_unwrap`'s
+    // open let-chain being re-wrapped by the loop body's naive
+    // `let _ = <expr> in` statement sequencing. Fixing only the syntax (so it
+    // compiles) was tried and rejected: the mutation is silently discarded by
+    // the time the loop finishes (confirmed empirically — a `bump`-based
+    // counter stayed at 0 across 3 iterations instead of accumulating),
+    // because `ClassVarsN` is never threaded through the loop's recursive
+    // tail call the way `StateAcc` is. Rejected at compile time instead —
+    // BT-3140 found and rejected the same underlying gap for the
+    // direct-field-write analog (`self.field := ...` inside a loop body).
+    let src = "Value subclass: Driver\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self bump\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driver").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { selector, .. }) => {
+            assert_eq!(selector, "bump");
+        }
+        other => panic!(
+            "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method \
+             self-send inside a whileTrue: body. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_class_method_self_send_alongside_local_in_times_repeat_body_is_compile_error() {
+    // BT-3150: the same gap reached via `timesRepeat:` instead of `whileTrue:`,
+    // with a co-occurring local-variable mutation — a bare self-send-only
+    // `timesRepeat:` body doesn't reach the state-threaded loop codegen path
+    // at all (see `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
+    // below), so this pins the shape that actually reaches it: a loop that
+    // legitimately needs local threading (an accumulator) with a class-method
+    // self-send alongside it.
+    let src = "Value subclass: Driver5\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    n timesRepeat: [\n      self bump\n      total := total + 1\n    ]\n    total";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driver5").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { .. })
+        ),
+        "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method self-send \
+         alongside a local-variable mutation inside a timesRepeat: body. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_non_mutating_class_method_self_send_in_loop_body_is_also_compile_error() {
+    // BT-3150: every same-class class-method self-send routes through the
+    // same `{class_var_result, ...}` unwrap convention regardless of whether
+    // the callee actually touches class state — the caller can't know that
+    // statically (the callee may be overridden, or defined later in the
+    // file). So the rejection is unconditional on any class-method self-send
+    // in a threaded loop body, not just ones provably mutating a class var.
+    let src = "Value subclass: Driver7\n  class helper: x => x * 2\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self helper: i\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driver7").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { .. })
+        ),
+        "Expected ClassMethodSelfSendInThreadedLoopBody even for a self-send whose \
+         callee doesn't touch class state. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading() {
+    // BT-3150 (contrast case): a `timesRepeat:` body with ONLY a class-method
+    // self-send and no other local-variable mutation never needs state
+    // threading (`needs_mutation_threading`, BT-1346) — it compiles as an
+    // ordinary block passed to the runtime `timesRepeat:` helper, never
+    // reaching `generate_threaded_loop_body`/the BT-3150 gap at all. Pinned
+    // here as the boundary of this fix's scope, mirroring BT-3140's analogous
+    // bare-field-write contrast test.
+    let src = "Value subclass: Driver4\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    n timesRepeat: [\n      self bump\n      self bump\n    ]\n    nil";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driver4").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "A timesRepeat: body with only self-sends (no local var) should not reach \
+         the threaded-loop codegen path at all. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_after_loop_still_compiles() {
+    // BT-3150 (contrast case): the workaround recommended by
+    // `ClassMethodSelfSendInThreadedLoopBody`'s error message — accumulate a
+    // local count inside the loop, then self-send the required number of
+    // times after the loop (a top-frame self-send per call, the already-
+    // proven ADR 0110/BT-412 shape) — must keep compiling.
+    let src = "Value subclass: Driver8\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    count := 0\n    [i <= aList size] whileTrue: [\n      count := count + 1\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    count timesRepeat: [self bump]\n    nil";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@driver8").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "A class-method self-send after (not inside) the loop body must still \
+         compile. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_class_var_mutation_emits_shadow_write() {
     // ADR 0110 (BT-3032/BT-3037): a top-frame class-var mutation in a class
     // method must write the just-updated ClassVars map into the

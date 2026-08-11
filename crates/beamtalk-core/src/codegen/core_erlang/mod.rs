@@ -186,6 +186,47 @@ pub enum CodeGenError {
     #[error("formatting error: {0}")]
     Format(#[from] fmt::Error),
 
+    /// BT-3150: A self-send to a same-class class method (`self someSelector`) used
+    /// as a statement inside a `whileTrue:`/`timesRepeat:` loop body in a class
+    /// method.
+    ///
+    /// Every same-class class-method self-send routes through
+    /// `emit_class_var_result_unwrap`'s `{class_var_result, Result, ClassVarsN}`
+    /// unwrap convention (BT-412) — regardless of whether the callee actually
+    /// mutates a class var, since the caller can't know that statically. Loop
+    /// bodies thread only the loop's own local-variable `StateAcc` through their
+    /// recursive tail call; `ClassVarsN` is never part of that thread, so any
+    /// class-var mutation the self-send makes is discarded at the end of every
+    /// iteration, and the class method's own final return still hands back the
+    /// original pre-loop `ClassVars` regardless — the self-send analog of
+    /// BT-3140's finding for direct field writes (`generate_field_assignment_open`'s
+    /// State/StateAcc threading has no class-var branch either). Confirmed
+    /// empirically: after fixing the originally-reported `core_parse_error`
+    /// syntax bug (a doubled `in in` from the same open let-chain), a mutating
+    /// count stayed at `0` across 3 loop iterations instead of accumulating —
+    /// a compile-time rejection is safer than a silent runtime no-op.
+    #[error(
+        "Cannot send '{selector}' to self inside this loop body at {location}: \
+             a self-send to a class method can't thread class-variable mutations back \
+             through whileTrue:/timesRepeat: loop bodies — any mutation '{selector}' \
+             makes is silently discarded by the time the loop finishes.\n\n\
+             Fix: Accumulate what you need in a local variable inside the loop, then \
+             make the self-send once after the loop with the aggregated result:\n\
+             \x20 // Instead of:\n\
+             \x20 [cond] whileTrue: [self {selector}. ...].\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 count := 0.\n\
+             \x20 [cond] whileTrue: [count := count + 1. ...].\n\
+             \x20 count timesRepeat: [self {selector}]."
+    )]
+    ClassMethodSelfSendInThreadedLoopBody {
+        /// The selector being self-sent.
+        selector: String,
+        /// Source location.
+        location: String,
+    },
+
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned (BT-2792).
     #[error(
