@@ -116,6 +116,28 @@
 %% this macro and both call sites move together.
 -define(PROTOCOL_VERSION, <<"2.0">>).
 
+%% @doc ADR 0110 class-var shadow write-through process-dictionary key atom
+%% (ADR 0111 Phase D / BT-3135).
+%%
+%% Single source of truth for the `'$bt_class_vars_shadow'` atom shared by
+%% `beamtalk_class_dispatch:invoke_class_method/7` (reads it back on the
+%% `{nlr_relay, ...}` path and erases it in `after` on every path) and this
+%% module's own EUnit conformance tests
+%% (`runtime/apps/beamtalk_runtime/test/beamtalk_class_dispatch_tests.erl`).
+%%
+%% The Rust codegen side (`crates/beamtalk-core/src/codegen/core_erlang/
+%% expressions.rs::generate_field_assignment`) cannot `-include` this file —
+%% it emits the identical atom as literal Core Erlang text
+%% (`leaf::atom("$bt_class_vars_shadow")`) into every compiled class method
+%% that mutates a class var. Per CLAUDE.md's cross-Rust/Erlang-boundary rule
+%% ("needs a shared conformance fixture or code generation, not a comment"),
+%% `crates/beamtalk-core/src/codegen/core_erlang/tests/class_var_shadow_contract.rs`
+%% reads *this exact file* at test time and asserts the atom text it emits
+%% appears in it verbatim — so the two sides cannot drift silently: change
+%% the atom here without updating the codegen literal (or vice versa) and
+%% that Rust test fails.
+-define(BT_CLASS_VARS_SHADOW_KEY_ATOM, '$bt_class_vars_shadow').
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

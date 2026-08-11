@@ -573,7 +573,14 @@ impl CoreErlangGenerator {
                 // `self.class_name()`) also keeps an inherited self-dispatch
                 // chain (`self otherClassMethod:`) tagged with the calling
                 // subclass's identity, not the defining ancestor's.
-                let shadow_doc = if self.block_depth == 0 {
+                let shadow_write = self.block_depth == 0;
+                self.check_class_var_shadow_write_invariant(
+                    field_name,
+                    &val_var,
+                    shadow_write,
+                    value.span(),
+                );
+                let shadow_doc = if shadow_write {
                     docvec![
                         "let _ = call 'erlang':'put'({",
                         leaf::atom("$bt_class_vars_shadow"),
@@ -675,22 +682,47 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates code for a block (closure).
+    /// BT-3135 (ADR 0111 Phase D): construct + verify the just-emitted class-var
+    /// `Bind`'s `ThreadedIr` shape — the ADR 0110 `ShadowWriteMissing` contract
+    /// check, against exactly what `generate_field_assignment`'s class-var
+    /// branch is about to emit.
     ///
-    /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
-    /// based on `BlockMutationAnalysis`:
-    ///
-    /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
-    ///   `fun(Params..., StateAcc) -> {Result, NewStateAcc}`
-    /// - **Plain fun:** pure blocks (no captured mutations) emit
-    ///   `fun(Params...) -> Result` — zero overhead for stateless blocks
-    ///
-    /// Captured mutations = variables written inside the block that were also
-    /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
-    /// Field writes (`self.x := ...`) and self-sends are handled separately:
-    /// - Field writes are threaded via `gen_server` State at the method level (BT-1140 for Tier 2).
-    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
-    ///
+    /// `at_method_top_frame` is re-derived from `self.block_depth` here
+    /// (the same live field `shadow_write`'s caller just read), independently
+    /// of whatever `shadow_write` value was actually computed — **not**
+    /// `self.current_nlr_token().is_some()`. The latter would silently exempt
+    /// the ADR 0110 repro shape itself: a class method that mutates a class
+    /// var and then invokes a *caller-supplied* block containing no literal
+    /// `^` of its own gets no local NLR try/catch (`current_nlr_token()` is
+    /// `None` throughout its body) — the shadow write still matters there
+    /// because the relay is caught one layer out, unconditionally, by
+    /// `apply_class_method_fun/6`. See `threaded_ir::verify_class_var_bind`'s
+    /// doc comment for the full reasoning.
+    fn check_class_var_shadow_write_invariant(
+        &mut self,
+        field_name: &str,
+        val_var: &str,
+        shadow_write: bool,
+        span: crate::source_analysis::Span,
+    ) {
+        let at_method_top_frame = self.block_depth == 0;
+        let shadow_bind_errors = super::threaded_ir::verify_class_var_bind(
+            super::threaded_ir::BindOp::Put {
+                field: field_name.to_string(),
+                value: super::threaded_ir::ValueRef::Var(val_var.to_string()),
+                class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
+            },
+            shadow_write,
+            at_method_top_frame,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &shadow_bind_errors,
+            "class-var mutation missing ADR 0110 shadow write",
+            span,
+        );
+    }
+
     /// Extracts a block literal from an expression, unwrapping parentheses.
     ///
     /// Returns `Some(&Block)` for `Expression::Block` and for
@@ -761,6 +793,21 @@ impl CoreErlangGenerator {
         None
     }
 
+    /// Generates code for a block (closure).
+    ///
+    /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
+    /// based on `BlockMutationAnalysis`:
+    ///
+    /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
+    ///   `fun(Params..., StateAcc) -> {Result, NewStateAcc}`
+    /// - **Plain fun:** pure blocks (no captured mutations) emit
+    ///   `fun(Params...) -> Result` — zero overhead for stateless blocks
+    ///
+    /// Captured mutations = variables written inside the block that were also
+    /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
+    /// Field writes (`self.x := ...`) and self-sends are handled separately:
+    /// - Field writes are threaded via `gen_server` State at the method level (BT-1140 for Tier 2).
+    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
         let analysis = analyze_block(block);

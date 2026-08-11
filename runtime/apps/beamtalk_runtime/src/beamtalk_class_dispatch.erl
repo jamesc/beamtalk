@@ -634,7 +634,8 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     %% invoked from a *different* class's process — which runs physically in
     %% *this* process but writes under its own foreign class's tag — can never
     %% be read back here. See the ADR's Codegen/Runtime change amendments.
-    ShadowKey = {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag(ClassName)},
+    ShadowKey =
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)},
     try
         case
             apply_class_method_in_context(
