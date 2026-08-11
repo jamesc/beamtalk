@@ -1027,10 +1027,16 @@ test-bunit *ARGS: build-stdlib
 # `debug_assert!` — live here because `cargo run` builds in the dev profile
 # (debug_assertions on), so any violation hard-panics the build instead of
 # only degrading to a diagnostic, as it would in a release build. This is a
-# thin alias over those existing corpus-compiling recipes (`just` dedupes
-# shared dependencies within one invocation, so wiring this into `ci`
-# alongside `test` doesn't recompile the corpus twice) — a named, explicit
+# thin alias over those existing corpus-compiling recipes — a named, explicit
 # CI gate for the verifier itself, not a new test harness.
+#
+# `just` dedupes shared dependencies within ONE invocation, so `just ci`
+# (which lists `verify-threaded-ir` alongside `test`) doesn't recompile the
+# corpus twice. That dedup does NOT apply across separate CI steps: ci.yml's
+# `test-beam` job deliberately does not add a standalone "run
+# verify-threaded-ir" step after its own `test-stdlib`/`test-bunit` steps,
+# since those already exercise this exact corpus under debug_assertions —
+# a third invocation there would recompile it for zero new detection.
 verify-threaded-ir: test-stdlib test-bunit
     @echo "✅ ThreadedIr verifier: no invariant violations across stdlib + bootstrap-test corpus"
 
