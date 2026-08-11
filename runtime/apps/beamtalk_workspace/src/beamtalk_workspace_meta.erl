@@ -50,10 +50,15 @@ and can be queried by other components (e.g., idle monitor).
 -define(WORKSPACE_META_TABLE, beamtalk_workspace_registry).
 % Debounce disk writes to every 2 seconds
 -define(PERSIST_DELAY_MS, 2000).
-%% BT-2621: ETS row key for the cached git repo toplevel. Stored as a separate
-%% small row (`{?GIT_TOPLEVEL_KEY, ProjectPath, Toplevel}`) rather than inside
-%% the mirrored #state{} so the git hot path reads only this tuple, not a copy
-%% of the whole state (which carries class sources and loaded modules).
+%% BT-2621: ETS row key for the cached git repo toplevel. Stored as its own
+%% small row (`{?GIT_TOPLEVEL_KEY, ProjectPath, Toplevel}`) so the git hot path
+%% reads only this tuple via `ets:lookup/2` without a gen_server round-trip.
+%% BT-3108: this used to sit alongside a `{metadata, #state{}}` row that
+%% mirrored the *entire* gen_server state (including class_sources and
+%% loaded_modules) into ETS after nearly every mutation — pure copy cost,
+%% since nothing in-tree ever read it (every public getter already goes
+%% through `gen_server:call`). That row is gone; this is now the table's only
+%% content.
 -define(GIT_TOPLEVEL_KEY, git_toplevel).
 
 -record(state, {
@@ -491,9 +496,6 @@ init(InitialMetadata) ->
         monitor_refs = #{}
     },
 
-    %% Store initial state in ETS
-    store_state_in_ets(State),
-
     %% Load persisted metadata if exists
     State2 = load_metadata_from_disk(State),
 
@@ -528,7 +530,6 @@ handle_call(all_class_sources, _From, State) ->
 handle_call({set_class_source, ClassName, Source}, _From, State) ->
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = Sources#{ClassName => Source}},
-    store_state_in_ets(State2),
     {reply, ok, schedule_persist(State2)};
 handle_call(get_file_mtimes, _From, State) ->
     {reply, {ok, State#state.file_mtimes}, State};
@@ -536,7 +537,6 @@ handle_call({get_setting, Key, Default}, _From, State) ->
     {reply, maps:get(Key, State#state.settings, Default), State};
 handle_call({set_setting, Key, Value}, _From, State) ->
     State2 = State#state{settings = (State#state.settings)#{Key => Value}},
-    store_state_in_ets(State2),
     {reply, ok, schedule_persist(State2)};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
@@ -544,7 +544,6 @@ handle_call(_Request, _From, State) ->
 handle_cast(update_activity, State) ->
     Now = erlang:system_time(second),
     State2 = State#state{last_activity = Now},
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({register_actor, Pid}, State) ->
     Actors = State#state.supervised_actors,
@@ -560,11 +559,9 @@ handle_cast({register_actor, Pid}, State) ->
                     monitor_refs = MonRefs#{Pid => Ref}
                 }
         end,
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({unregister_actor, Pid}, State) ->
     State2 = remove_actor(Pid, State),
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({register_module, Module, NewSource}, State) ->
     Modules = State#state.loaded_modules,
@@ -575,33 +572,27 @@ handle_cast({register_module, Module, NewSource}, State) ->
             _ -> NewSource
         end,
     State2 = State#state{loaded_modules = Modules#{Module => EffectiveSource}},
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({unregister_module, Module}, State) ->
     %% BT-1239: Remove a module when removeFromSystem is called.
     Modules = State#state.loaded_modules,
     State2 = State#state{loaded_modules = maps:remove(Module, Modules)},
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({remove_class_source, ClassName}, State) ->
     %% BT-3105: Remove a class's stored source when removeFromSystem is called.
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = maps:remove(ClassName, Sources)},
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({set_file_mtime, FilePath, Mtime}, State) ->
     Mtimes = State#state.file_mtimes,
     State2 = State#state{file_mtimes = Mtimes#{FilePath => Mtime}},
-    store_state_in_ets(State2),
     {noreply, State2};
 handle_cast(clear_file_mtimes, State) ->
     State2 = State#state{file_mtimes = #{}},
-    store_state_in_ets(State2),
     {noreply, State2};
 handle_cast({remove_file_mtime, FilePath}, State) ->
     Mtimes = State#state.file_mtimes,
     State2 = State#state{file_mtimes = maps:remove(FilePath, Mtimes)},
-    store_state_in_ets(State2),
     {noreply, State2};
 handle_cast({set_git_toplevel, ProjectPath, Toplevel}, State) ->
     %% BT-2621: cache the resolved toplevel in its own ETS row (single entry,
@@ -622,7 +613,6 @@ handle_info(persist_to_disk, State) ->
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Actor exited, remove from tracked list and monitor refs
     State2 = remove_actor(Pid, State),
-    store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -657,14 +647,6 @@ schedule_persist(#state{persist_timer = OldTimer} = State) ->
     NewRef = erlang:send_after(?PERSIST_DELAY_MS, self(), persist_to_disk),
     State#state{persist_timer = NewRef}.
 
--doc "Store state in ETS for fast read access".
-store_state_in_ets(State) ->
-    case ets:whereis(?WORKSPACE_META_TABLE) of
-        % Table doesn't exist yet, skip
-        undefined -> ok;
-        _Tid -> ets:insert(?WORKSPACE_META_TABLE, {metadata, State})
-    end.
-
 -doc """
 Load metadata from disk if available.
 Skipped in run mode (metadata_path = undefined).
@@ -673,6 +655,17 @@ load_metadata_from_disk(#state{metadata_path = undefined} = State) ->
     State;
 load_metadata_from_disk(State) ->
     Path = State#state.metadata_path,
+    %% BT-3108: the mtime of metadata.json itself stands in for "the persisted
+    %% snapshot" moment — the last time class_sources/loaded_modules were
+    %% written to disk. A .bt source file whose own mtime is newer than this
+    %% was edited after that snapshot (e.g. externally, while the workspace
+    %% was down) and is therefore stale relative to it. Read just before
+    %% `file:read_file/1` below, so the only way this is `0` (file missing)
+    %% is a race where the file is deleted between the two calls — in which
+    %% case `file:read_file/1` itself hits `enoent` and this value goes
+    %% unused. `0` sorts below every real `calendar:datetime()` regardless,
+    %% so the newer-than check would degrade to "keep" even then.
+    SnapshotMtime = filelib:last_modified(Path),
     case file:read_file(Path) of
         {ok, Binary} ->
             try json:decode(Binary) of
@@ -683,6 +676,16 @@ load_metadata_from_disk(State) ->
 
                     %% Restore loaded_modules with source paths (atoms persist across restarts).
                     %% Handles both old format ([binary()]) and new format ([#{name,source}]).
+                    %% BT-3108: an entry survives only if its module is
+                    %% *currently* loaded in the code server — an atom that
+                    %% merely still exists proves nothing (the module behind
+                    %% it may never load again this session, e.g. after a
+                    %% true VM restart rather than an in-process gen_server
+                    %% restart). Dropping it here is safe: load-project's
+                    %% separate file_mtimes reset (below) already forces a
+                    %% fresh mtime check for every file on the next load, so
+                    %% an under-restored entry just means "treat as unloaded",
+                    %% never "serve stale content".
                     ModulesRaw = maps:get(<<"loaded_modules">>, Map, []),
                     Modules =
                         case ModulesRaw of
@@ -695,7 +698,7 @@ load_metadata_from_disk(State) ->
                                 %% Old format: just the module name
                                 case safe_existing_atom(Bin) of
                                     undefined -> false;
-                                    Atom -> {true, {Atom, undefined}}
+                                    Atom -> keep_if_module_loaded(Atom, undefined)
                                 end;
                             (#{<<"name">> := NameBin} = Entry) ->
                                 %% New format: #{name, source}
@@ -709,13 +712,14 @@ load_metadata_from_disk(State) ->
                                                 null -> undefined;
                                                 _ -> normalize_source_path(RawSource)
                                             end,
-                                        {true, {Atom, Source}}
+                                        keep_if_module_loaded(Atom, Source)
                                 end;
                             (_) ->
                                 false
                         end,
                         Modules
                     ),
+                    ValidatedModules = maps:from_list(ModuleAtoms),
 
                     %% Restore timestamps and project path if present
                     CreatedAt =
@@ -735,6 +739,16 @@ load_metadata_from_disk(State) ->
                         end,
 
                     %% Restore class sources map (binary class name → source string).
+                    %% BT-3108: an entry survives only if (a) the class it
+                    %% names currently resolves to a *loaded* module — no live
+                    %% class means no `>>`-patch target and no guarantee the
+                    %% text describes what this VM actually compiled — and
+                    %% (b) that module's on-disk source file (if known) is not
+                    %% newer than SnapshotMtime, i.e. it wasn't edited after
+                    %% the source text was last persisted. Either failure
+                    %% mirrors the file_mtimes reset just below: drop rather
+                    %% than risk serving stale text to method patching or
+                    %% re-check compiles.
                     ClassSourcesRaw = maps:get(<<"class_sources">>, Map, #{}),
                     ClassSources =
                         case is_map(ClassSourcesRaw) of
@@ -742,7 +756,14 @@ load_metadata_from_disk(State) ->
                                 maps:fold(
                                     fun
                                         (K, V, Acc) when is_binary(K), is_binary(V) ->
-                                            Acc#{K => binary_to_list(V)};
+                                            keep_if_class_source_fresh(
+                                                K,
+                                                binary_to_list(V),
+                                                ValidatedModules,
+                                                State#state.package_name,
+                                                SnapshotMtime,
+                                                Acc
+                                            );
                                         (_, _, Acc) ->
                                             Acc
                                     end,
@@ -768,7 +789,7 @@ load_metadata_from_disk(State) ->
                         last_activity = LastActive,
                         % Always start fresh
                         supervised_actors = [],
-                        loaded_modules = maps:from_list(ModuleAtoms),
+                        loaded_modules = ValidatedModules,
                         class_sources = ClassSources,
                         %% BT-1685: File mtimes always start fresh — files may
                         %% have changed between sessions, so first load-project
@@ -909,6 +930,131 @@ safe_existing_atom(Binary) ->
         Atom -> Atom
     catch
         _:_ -> undefined
+    end.
+
+-doc """
+BT-3108: keep a restored `loaded_modules` entry only if `Atom`'s module is
+currently loaded in the code server. Returns the `lists:filtermap/2` shape
+directly so restore call sites stay a one-liner.
+""".
+-spec keep_if_module_loaded(atom(), string() | undefined) ->
+    {true, {atom(), string() | undefined}} | false.
+keep_if_module_loaded(Atom, Source) ->
+    case code:is_loaded(Atom) of
+        false -> false;
+        {file, _} -> {true, {Atom, Source}}
+    end.
+
+-doc """
+BT-3108: fold step for restoring a single `class_sources` entry. Adds
+`ClassNameBin => Source` to `Acc` only if the class is currently backed by a
+loaded module (per `ValidatedModules`, itself already filtered to
+`code:is_loaded`) and — when that module has a known on-disk source path —
+that file's mtime is not newer than `SnapshotMtime` (the metadata.json
+snapshot the text was captured into). A class name that never became an atom
+in this VM, or whose module resolves to neither naming convention
+`class_module_loaded/3` checks, fails the loaded-module check and is
+conservatively dropped rather than risk serving stale text.
+""".
+-spec keep_if_class_source_fresh(
+    binary(),
+    string(),
+    #{atom() => string() | undefined},
+    binary() | undefined,
+    calendar:datetime() | 0,
+    #{binary() => string()}
+) -> #{binary() => string()}.
+keep_if_class_source_fresh(ClassNameBin, Source, ValidatedModules, PackageName, SnapshotMtime, Acc) ->
+    case class_module_loaded(ClassNameBin, ValidatedModules, PackageName) of
+        {true, SourcePath} ->
+            case source_file_newer_than(SourcePath, SnapshotMtime) of
+                true -> Acc;
+                false -> Acc#{ClassNameBin => Source}
+            end;
+        false ->
+            Acc
+    end.
+
+-doc """
+Whether `ClassNameBin` currently resolves to a module present in
+`ValidatedModules` — i.e. a module `code:is_loaded/1` confirmed loaded during
+this same restore pass. Tries, in order:
+
+1. The unqualified static `bt@{snake_case}` convention (ADR 0016) —
+   `beamtalk_module_name:to_module_atom/1`.
+2. When `PackageName` is known (this project has a `[package] name = ...` in
+   `beamtalk.toml`): the package-qualified `bt@{package}@{snake_case}`
+   convention a `src/`-located file compiles under
+   (`beamtalk_repl_loader:resolve_package_module/4`'s common case — a class
+   directly in `src/` whose file basename matches the class name). Built via
+   `list_to_existing_atom` (never creates an atom): if this module was never
+   loaded this session, no atom for it exists, so the lookup fails cleanly
+   rather than fabricating a fresh atom that can't be in `ValidatedModules`
+   anyway.
+
+Does **not** cover every module-naming shape `resolve_package_module/4` can
+produce (e.g. a class under a `src/` subdirectory, or a file basename that
+doesn't match its class name both use extra `@`-segments derived from the
+file path, which this class-name-only check has no way to reconstruct) —
+those fail both checks and are conservatively dropped, same as before this
+fix, not silently misclassified as fresh.
+
+Returns `{true, SourcePath}` (SourcePath possibly `undefined`, e.g. a
+REPL-typed class with no backing file) on success.
+""".
+-spec class_module_loaded(binary(), #{atom() => string() | undefined}, binary() | undefined) ->
+    {true, string() | undefined} | false.
+class_module_loaded(ClassNameBin, ValidatedModules, PackageName) ->
+    case safe_existing_atom(ClassNameBin) of
+        undefined ->
+            false;
+        ClassAtom ->
+            UnqualifiedAtom = beamtalk_module_name:to_module_atom(ClassAtom),
+            case maps:find(UnqualifiedAtom, ValidatedModules) of
+                {ok, SourcePath} ->
+                    {true, SourcePath};
+                error ->
+                    case qualified_module_atom(ClassAtom, PackageName) of
+                        undefined ->
+                            false;
+                        QualifiedAtom ->
+                            case maps:find(QualifiedAtom, ValidatedModules) of
+                                {ok, SourcePath} -> {true, SourcePath};
+                                error -> false
+                            end
+                    end
+            end
+    end.
+
+-doc """
+Package-qualified module atom (`bt@{PackageName}@{snake_case}`) for
+`ClassAtom`, or `undefined` when `PackageName` is unknown or no such atom has
+ever been created in this VM. Delegates to
+`beamtalk_module_name:to_qualified_module_atom/2` (BT-3108 review follow-up:
+extracted there so this isn't a second independent copy of the
+`bt@{pkg}@{snake}` assembly alongside
+`beamtalk_repl_ops_dev:resolve_qualified_class_name/1`'s).
+""".
+-spec qualified_module_atom(atom(), binary() | undefined) -> atom() | undefined.
+qualified_module_atom(_ClassAtom, undefined) ->
+    undefined;
+qualified_module_atom(ClassAtom, PackageName) when is_binary(PackageName) ->
+    Snake = beamtalk_module_name:camel_to_snake(atom_to_list(ClassAtom)),
+    beamtalk_module_name:to_qualified_module_atom(Snake, PackageName).
+
+-doc """
+Whether `SourcePath`'s current on-disk mtime is strictly newer than
+`SnapshotMtime`. No signal (`SourcePath` undefined, or the file no longer
+exists on disk) is treated as "not stale" — there is nothing to compare
+against, so `class_module_loaded/3` is the only gate in that case.
+""".
+-spec source_file_newer_than(string() | undefined, calendar:datetime() | 0) -> boolean().
+source_file_newer_than(undefined, _SnapshotMtime) ->
+    false;
+source_file_newer_than(SourcePath, SnapshotMtime) when is_list(SourcePath) ->
+    case filelib:last_modified(SourcePath) of
+        0 -> false;
+        Mtime -> Mtime > SnapshotMtime
     end.
 
 -doc """

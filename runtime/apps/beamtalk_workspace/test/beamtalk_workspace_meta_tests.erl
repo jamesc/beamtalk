@@ -9,6 +9,7 @@ Unit tests for beamtalk_workspace_meta module
 Tests workspace metadata tracking and activity updates.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/file.hrl").
 
 %%====================================================================
 %% Tests
@@ -33,6 +34,44 @@ stop_if_running() ->
             gen_server:stop(Pid),
             timer:sleep(10)
     end.
+
+%% BT-3108: compile and load a trivial module named after ClassNameAtom's
+%% static bt@{snake_case} module (ADR 0016), so `code:is_loaded/1` reports it
+%% loaded the same way a real compiled .bt class would — without needing the
+%% full compiler pipeline in a unit test. Returns the module atom.
+load_fake_class_module(ClassNameAtom) ->
+    ModuleAtom = beamtalk_module_name:to_module_atom(ClassNameAtom),
+    Forms = [
+        {attribute, 1, module, ModuleAtom},
+        {attribute, 2, export, [{noop, 0}]},
+        {function, 3, noop, 0, [
+            {clause, 3, [], [], [{atom, 3, ok}]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
+    Mod.
+
+%% BT-3108: like load_fake_class_module/1, but under the package-qualified
+%% bt@{PackageName}@{snake_case} module name a src/-located file in a
+%% packaged project actually compiles under
+%% (beamtalk_repl_loader:resolve_package_module/4's common case) — used to
+%% cover class_module_loaded/3's package-qualified branch.
+load_fake_class_module_qualified(ClassNameAtom, PackageName) ->
+    Snake = beamtalk_module_name:camel_to_snake(atom_to_list(ClassNameAtom)),
+    ModNameStr = "bt@" ++ binary_to_list(PackageName) ++ "@" ++ Snake,
+    % elp:fixme W0023 intentional atom creation
+    ModuleAtom = list_to_atom(ModNameStr),
+    Forms = [
+        {attribute, 1, module, ModuleAtom},
+        {attribute, 2, export, [{noop, 0}]},
+        {function, 3, noop, 0, [
+            {clause, 3, [], [], [{atom, 3, ok}]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
+    Mod.
 
 %% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
 %% the same file the module would write to.
@@ -994,11 +1033,16 @@ set_git_toplevel_when_not_started_test() ->
 
 %%% Class source persistence round-trip (covers class_sources restore branch)
 
-class_source_survives_restart_test() ->
+%% BT-3108: a class_sources entry survives restore only when its class
+%% resolves to a currently-loaded module (here: an in-process gen_server
+%% restart, so the fake module stays loaded across it, same as a real .bt
+%% class would after a supervisor-restart rather than a full VM restart).
+class_source_survives_restart_when_module_loaded_test() ->
     stop_if_running(),
     WsId = <<"clssrc_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
+    ModuleAtom = load_fake_class_module('Bt3108Foo'),
     try
         Init = #{
             workspace_id => WsId,
@@ -1006,12 +1050,169 @@ class_source_survives_restart_test() ->
             created_at => erlang:system_time(second)
         },
         {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
-        Source = "Object subclass: Foo [\n  bar => 1\n]\n",
-        ok = beamtalk_workspace_meta:set_class_source(<<"Foo">>, Source),
+        Source = "Object subclass: Bt3108Foo [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:register_module(ModuleAtom),
+        ok = beamtalk_workspace_meta:set_class_source(<<"Bt3108Foo">>, Source),
         gen_server:stop(Pid1),
         timer:sleep(50),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
-        ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Foo">>)),
+        ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Bt3108Foo">>)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile),
+        _ = code:purge(ModuleAtom),
+        _ = code:delete(ModuleAtom)
+    end.
+
+%% BT-3108 review follow-up: a class_sources entry for a class in a
+%% *packaged* project — the common case, not an edge case — survives restore.
+%% Its module is registered under the package-qualified bt@{pkg}@{snake} name
+%% (resolve_package_module/4's shape for a src/-located file), not the
+%% unqualified bt@{snake} name class_module_loaded/3 originally only checked.
+class_source_survives_restart_for_packaged_project_test() ->
+    stop_if_running(),
+    ProjectDir = filename:join(
+        temp_dir_meta(),
+        "bt-meta-pkg-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_path(ProjectDir),
+    ok = file:write_file(
+        filename:join(ProjectDir, "beamtalk.toml"),
+        <<"[package]\nname = \"bt3108pkg\"\n">>
+    ),
+    ProjectPath = list_to_binary(ProjectDir),
+    WsId = <<"clssrc_pkg_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    ModuleAtom = load_fake_class_module_qualified('Bt3108Pkg', <<"bt3108pkg">>),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => ProjectPath,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        Source = "Object subclass: Bt3108Pkg [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:register_module(ModuleAtom),
+        ok = beamtalk_workspace_meta:set_class_source(<<"Bt3108Pkg">>, Source),
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Bt3108Pkg">>)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir_r(ProjectDir),
+        _ = code:purge(ModuleAtom),
+        _ = code:delete(ModuleAtom)
+    end.
+
+%% BT-3108: a class_sources entry whose class never resolves to a loaded
+%% module (no register_module call, module never compiled/loaded this
+%% session) is dropped on restore rather than served as if still current.
+class_source_dropped_when_module_not_loaded_test() ->
+    stop_if_running(),
+    WsId = <<"clssrc_gone_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    %% Ensure the class-name atom itself exists (so restore gets past
+    %% safe_existing_atom/1) without ever loading a module for it — isolates
+    %% "atom exists but module isn't loaded" from "atom never existed".
+    % elp:fixme W0023 intentional atom creation
+    ClassAtom = list_to_atom(
+        "Bt3108Gone" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ClassBin = atom_to_binary(ClassAtom, utf8),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/clssrc_gone">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        Source = "Object subclass: " ++ atom_to_list(ClassAtom) ++ " [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:set_class_source(ClassBin, Source),
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(ClassBin)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile)
+    end.
+
+%% BT-3108: a class_sources entry whose backing .bt file was edited (mtime
+%% bumped) after metadata.json's own last-write snapshot is discarded on
+%% restore, even though its module is still loaded — the persisted text can
+%% no longer be trusted to match what's on disk.
+class_source_dropped_when_source_file_newer_than_snapshot_test() ->
+    stop_if_running(),
+    WsId = <<"clssrc_stale_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    Tmp = filename:join(
+        temp_dir_meta(), "bt-meta-clssrc-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_path(Tmp),
+    SourceFile = filename:join(Tmp, "bt3108stale.bt"),
+    ModuleAtom = load_fake_class_module('Bt3108Stale'),
+    try
+        ok = file:write_file(SourceFile, <<"Object subclass: Bt3108Stale [\n  bar => 1\n]\n">>),
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/clssrc_stale">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        Source = "Object subclass: Bt3108Stale [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:register_module(ModuleAtom, SourceFile),
+        ok = beamtalk_workspace_meta:set_class_source(<<"Bt3108Stale">>, Source),
+        %% terminate/2 persists synchronously, so metadata.json's mtime is
+        %% pinned to "now" the moment gen_server:stop/1 returns.
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        %% Bump the source file's mtime strictly past metadata.json's.
+        {ok, MetaFileInfo} = file:read_file_info(MetaFile),
+        NewerMtime = calendar:gregorian_seconds_to_datetime(
+            calendar:datetime_to_gregorian_seconds(MetaFileInfo#file_info.mtime) + 10
+        ),
+        ok = file:write_file_info(SourceFile, MetaFileInfo#file_info{mtime = NewerMtime}),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Bt3108Stale">>)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir_r(Tmp),
+        _ = code:purge(ModuleAtom),
+        _ = code:delete(ModuleAtom)
+    end.
+
+%%% BT-3108: loaded_modules entries are also validated against code:is_loaded
+%%% on restore, not just restored on the strength of their atom still existing.
+
+loaded_modules_dropped_when_module_not_loaded_test() ->
+    stop_if_running(),
+    WsId = <<"ldmod_gone_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    % elp:fixme W0023 intentional atom creation
+    ModuleAtom = list_to_atom(
+        "bt3108_unloaded_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/ldmod_gone">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        %% Registered, but no module code was ever compiled/loaded for this atom.
+        ok = beamtalk_workspace_meta:register_module(ModuleAtom),
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
+        ?assertNot(lists:keymember(ModuleAtom, 1, Modules)),
         gen_server:stop(Pid2)
     after
         _ = file:delete(MetaFile)

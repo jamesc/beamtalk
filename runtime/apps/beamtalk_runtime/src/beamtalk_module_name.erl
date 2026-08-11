@@ -34,13 +34,19 @@ and other non-ASCII letters the same way both sides of the compiler agree on.
 `to_module_atom/1` and `to_stdlib_module_atom/1` build the two `bt@…`
 module-atom shapes the compiler and runtime use on trusted (already-atom)
 class names: unqualified static (`bt@{snake}`) and stdlib
-(`bt@stdlib@{snake}`). The package-qualified shape (`bt@{Package}@{snake}`)
-has one caller today — `beamtalk_repl_ops_dev:resolve_qualified_class_name/1`
-— which takes raw, unbounded REPL user input, so it deliberately builds the
-module name as a string and checks it with `list_to_existing_atom` (erroring
-rather than creating an atom) instead of going through an atom-returning
-helper here; adding one would either duplicate that safety check or invite
-misuse against untrusted input.
+(`bt@stdlib@{snake}`).
+
+The package-qualified shape (`bt@{Package}@{snake}`) is built by
+`to_qualified_module_atom/2` — takes the snake_case segment (already computed
+by the caller, so this makes no assumption about where it came from — a
+trusted atom via `camel_to_snake/1`, or raw REPL text) plus the package name,
+and never creates an atom: `list_to_existing_atom`, returning `undefined` on
+a miss rather than raising. BT-3108: previously had exactly one caller,
+`beamtalk_repl_ops_dev:resolve_qualified_class_name/1` (raw, unbounded REPL
+user input), which is why no atom-returning helper existed here before — a
+second caller (`beamtalk_workspace_meta`'s restore-time freshness check,
+trusted `ClassAtom` input) showed the `"bt@" ++ Package ++ "@" ++ Snake`
+assembly was the shared part, not the trust level of the input feeding it.
 
 ## Inverse (lossy — fallback only)
 
@@ -58,6 +64,7 @@ to this heuristic only when a module isn't a registered class.
     camel_to_snake/1,
     to_module_atom/1,
     to_stdlib_module_atom/1,
+    to_qualified_module_atom/2,
     is_stdlib_module/1,
     snake_to_class/1
 ]).
@@ -148,6 +155,30 @@ to_module_atom(ClassName) when is_atom(ClassName) ->
 -spec to_stdlib_module_atom(atom()) -> atom().
 to_stdlib_module_atom(ClassName) when is_atom(ClassName) ->
     to_atom("bt@stdlib@" ++ camel_to_snake(atom_to_list(ClassName))).
+
+-doc """
+Package-qualified module atom: `bt@{PackageName}@{Snake}`, or `undefined` if
+no such atom has ever been created in this VM.
+
+Unlike `to_module_atom/1`/`to_stdlib_module_atom/1`, never creates an atom
+(`list_to_existing_atom`, not `to_atom/1`'s create-on-miss fallback) — a
+package-qualified module only ever gets its atom from actually being
+compiled/loaded, never from a caller merely asking about it, so a miss here
+means "not loaded" and should resolve to that, not mint a fresh unused atom.
+`Snake` is the caller's already-computed snake_case class-name segment (e.g.
+via `camel_to_snake/1`), not a `ClassName` atom — this function makes no
+assumption about whether the caller's input was trusted.
+""".
+-spec to_qualified_module_atom(string(), binary() | string()) -> atom() | undefined.
+to_qualified_module_atom(Snake, PackageName) when is_binary(PackageName) ->
+    to_qualified_module_atom(Snake, binary_to_list(PackageName));
+to_qualified_module_atom(Snake, PackageName) when is_list(PackageName) ->
+    ModNameStr = "bt@" ++ PackageName ++ "@" ++ Snake,
+    try list_to_existing_atom(ModNameStr) of
+        Atom -> Atom
+    catch
+        error:badarg -> undefined
+    end.
 
 -spec to_atom(string()) -> atom().
 to_atom(Str) ->
