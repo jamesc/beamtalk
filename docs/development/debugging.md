@@ -201,6 +201,21 @@ narrow that corpus down: `just test-stdlib <file>` / `just test-bunit
 <file>` against the specific fixture, then `dbg!` the `ThreadedIr` fragment
 at the failing construct's emission site.
 
+**`ConditionalLoop` — the first real (non-test) emission-input call site
+(BT-3145, ADR 0111 Addendum 2/3).** Every other construct in this table is
+still verification-only: `ThreadedIr` is built as a side-channel fixture and
+checked, but `Document` emission happens separately, directly from AST +
+generator state (ADR 0111's own Addendum, "delivered vs. designed"). As of
+BT-3145, `while_loops.rs`'s `generate_while_loop_direct` — gated behind
+`BEAMTALK_THREADED_IR_WHILE_DIRECT=1`, off by default — is the first call
+site where the `ThreadedStmt` built (a `ConditionalLoop` node) IS the
+`Document` returned: `verify()` runs on the real fragment, and `render()`'s
+output is what the caller emits, not a discarded side-channel check. Only
+straight-line loop bodies (every statement a reassignment of a threaded
+local — see `while_direct_body_is_bind_representable`'s doc comment) route
+through this path; anything else silently falls back to the pre-existing
+AST-directed emission, unconditionally correct either way.
+
 ## Runtime/REPL Debugging
 
 ```bash

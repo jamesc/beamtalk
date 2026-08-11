@@ -10,10 +10,15 @@
 
 use super::super::document::{Document, join, leaf};
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::threaded_ir::{
+    self, BindOp, FrameId, RenderCtx, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
+    VersionedVar,
+};
+use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
+use std::collections::HashMap;
 
 /// Result of pre-extracting hybrid loop fields: pre-extraction docs, readonly params, mutated params.
 ///
@@ -279,6 +284,344 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
+    /// ADR 0111 Addendum 2 (BT-3145 pilot): the loop's condition body is
+    /// ordinary AST-directed expression codegen with no state-threading
+    /// content of its own (the same class of embed
+    /// `ThreadedStmt::ConditionalLoop`'s `continue_header` uses it as —
+    /// §Verifier honesty). Factored out of `generate_while_loop_direct` so
+    /// both the legacy path and `try_render_while_direct_via_threaded_ir`
+    /// call the SAME condition-codegen, never a re-derivation
+    /// (CLAUDE.md's no-duplicate-implementations rule).
+    fn generate_loop_condition_body(
+        &mut self,
+        condition: &Expression,
+    ) -> Result<Document<'static>> {
+        self.with_branch_context(|this| {
+            if let Expression::Block(cond_block) = condition {
+                // BT-3151: see the analogous check in `generate_while_loop`.
+                let analysis =
+                    crate::codegen::core_erlang::block_analysis::analyze_block(cond_block);
+                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
+                this.generate_block_body(cond_block)
+            } else {
+                this.generate_expression(condition)
+            }
+        })
+    }
+
+    /// ADR 0111 Addendum 2 pilot (BT-3145): env-flag measurement gate for
+    /// routing `generate_while_loop_direct` through `ThreadedIr`
+    /// (lower → verify → render) instead of the legacy Document-construction
+    /// path. Off by default — this pilot's coverage is deliberately narrow
+    /// (see `while_direct_body_is_bind_representable`'s doc comment), so the
+    /// default stays the always-correct legacy path until a follow-up
+    /// closes the discovered gap and the ≤3% measurement gate is re-run
+    /// against full coverage.
+    fn threaded_ir_while_direct_enabled() -> bool {
+        std::env::var("BEAMTALK_THREADED_IR_WHILE_DIRECT").is_ok_and(|v| v == "1")
+    }
+
+    /// ADR 0111 Addendum 2 pilot (BT-3145): a conservative, purely
+    /// AST-level (zero generator side effects) check for whether `body` is
+    /// representable as a `ThreadedStmt::ConditionalLoop` `Bind` chain —
+    /// every statement must be a straight-line reassignment of a threaded
+    /// local from a "simple" RHS (`is_simple_threaded_rhs`).
+    ///
+    /// This is intentionally narrower than everything `select_direct_params`
+    /// allows through a direct-params loop body: plain-let temporaries
+    /// (non-threaded locals, `try_generate_block_local_plain_let`),
+    /// destructuring, non-assignment statements, and any RHS that could
+    /// reach `direct_params_list_op_result`'s open-chain codegen path (a
+    /// tuple-safe nested list op, `list_ops/*.rs`) are NOT yet representable
+    /// in this pilot's IR shape — `ThreadedStmt` has no "opaque non-`Bind`
+    /// body statement" node, and `ValueRef` cannot represent an open-chain
+    /// fragment (two chained `let`s) as a single `Bind`'s value. Bailing
+    /// here falls back to the unmodified legacy path, unconditionally
+    /// correct, just not migrated onto `ThreadedIr` yet.
+    ///
+    /// This is a real, additional scope boundary discovered empirically
+    /// while implementing this call site (verified against real compiled
+    /// output, the same evidentiary standard as BT-3145's original
+    /// investigation), beyond ADR 0111 Addendum 2's own Gap 1/Gap 2 —
+    /// recorded on the BT-3145 Linear issue as a named follow-up, not
+    /// silently absorbed into "done."
+    fn while_direct_body_is_bind_representable(body: &Block, plan: &ThreadingPlan) -> bool {
+        !body.body.is_empty()
+            && body.body.iter().all(|stmt| match &stmt.expression {
+                Expression::Assignment { target, value, .. } => match target.as_ref() {
+                    Expression::Identifier(id) => {
+                        plan.threaded_locals.contains(&id.name.to_string())
+                            && Self::is_simple_threaded_rhs(value)
+                    }
+                    _ => false,
+                },
+                _ => false,
+            })
+    }
+
+    /// Conservative allowlist for a threaded-local rebind's RHS shape — see
+    /// `while_direct_body_is_bind_representable`'s doc comment for why this
+    /// is deliberately narrow: default-deny for anything not explicitly
+    /// listed, including any nested `Block` anywhere in the subtree — every
+    /// list-op selector (`collect:`/`select:`/`inject:into:`/…) requires a
+    /// block-literal argument, so excluding `Block` safely excludes
+    /// `direct_params_list_op_result`'s open-chain shape too, without
+    /// needing to duplicate `list_ops/*.rs`'s selector set here.
+    fn is_simple_threaded_rhs(expr: &Expression) -> bool {
+        match expr {
+            Expression::Literal(..) | Expression::Identifier(_) => true,
+            Expression::FieldAccess { receiver, .. }
+            | Expression::Parenthesized {
+                expression: receiver,
+                ..
+            } => Self::is_simple_threaded_rhs(receiver),
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                Self::is_simple_threaded_rhs(receiver)
+                    && arguments.iter().all(Self::is_simple_threaded_rhs)
+            }
+            _ => false,
+        }
+    }
+
+    /// ADR 0111 Addendum 2 pilot (BT-3145): attempts to lower, verify, and
+    /// render `generate_while_loop_direct`'s condition/case-split shape
+    /// through `ThreadedIr`. Returns `Ok(None)` (zero generator mutation)
+    /// when `body` isn't representable in this pilot's narrow `Bind`-chain
+    /// shape (`while_direct_body_is_bind_representable`) or when a threaded
+    /// local's outer-scope binding has already diverged from its plain
+    /// `to_core_erlang_var` form (see the `initial_direct_args` guard below)
+    /// — the caller falls back to the unmodified legacy path unconditionally
+    /// in either case.
+    ///
+    /// Mint order mirrors `generate_while_loop_direct` exactly (ADR 0111
+    /// Addendum 2, Gap 2's ordering contract, load-bearing for
+    /// byte-identity): `CondFun` + condition first, then each body rebind
+    /// as its `Bind` is lowered (in encounter order), and the exit arm's
+    /// `ExitSA` chain LAST — lowering mints via the SAME `fresh_temp_var`
+    /// calls production makes, never gensym'd by `render`.
+    #[allow(clippy::too_many_lines)] // ThreadedIr lowering mirroring generate_while_loop_direct's own shape, ADR 0111 Addendum 2 pilot (BT-3145)
+    fn try_render_while_direct_via_threaded_ir(
+        &mut self,
+        condition: &Expression,
+        body: &Block,
+        plan: &ThreadingPlan,
+        negate: bool,
+    ) -> Result<Option<Document<'static>>> {
+        if !Self::while_direct_body_is_bind_representable(body, plan) {
+            return Ok(None);
+        }
+
+        // Pure lookups (`&self`) — safe to check before committing to any
+        // mutation. `render_loop_skeleton`'s outer-call-args rendering
+        // (shared with the bare `Threaded` shape) derives each param's
+        // OUTER reference from its plain `to_core_erlang_var` form; if the
+        // outer scope already rebound a threaded local to a different Core
+        // Erlang name (e.g. an earlier construct gensym'd it), that
+        // rendering would silently diverge from `initial_direct_args`'s real
+        // value — bail rather than risk an unbound-variable reference.
+        let initial_direct_args = plan.initial_direct_args(self);
+        if plan
+            .threaded_locals
+            .iter()
+            .zip(initial_direct_args.iter())
+            .any(|(name, arg)| *arg != CoreErlangGenerator::to_core_erlang_var(name))
+        {
+            return Ok(None);
+        }
+
+        let param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let frame = FrameId::new(1);
+        let param_list_doc = || {
+            join(
+                param_names.iter().map(|v| leaf::var(v.clone())),
+                &Document::Str(", "),
+            )
+        };
+
+        let cond_var = self.fresh_temp_var("CondFun"); // mint #1: CondFun, matching `while_loops.rs`'s legacy order
+
+        self.push_scope();
+        plan.generate_unpack_at_iteration_start(self);
+
+        let cond_doc = self.generate_loop_condition_body(condition)?;
+        let case_arm = if negate {
+            "<'false'> when 'true' -> "
+        } else {
+            "<'true'> when 'true' -> "
+        };
+        let continue_header = docvec![
+            "let ",
+            leaf::var(cond_var.clone()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+            cond_doc,
+            " in case apply ",
+            leaf::var(cond_var),
+            " (",
+            param_list_doc(),
+            ") of ",
+            case_arm,
+        ];
+
+        // Lower the body: each statement is (per eligibility) a
+        // straight-line reassignment of a threaded local — mint each
+        // rebind's fresh name in ENCOUNTER order, exactly where
+        // `generate_direct_var_update_in_loop` mints today. Wrapped in
+        // `with_branch_context` exactly like `generate_threaded_loop_body`
+        // itself is (`in_loop_body = true`, `state_version` reset to 0) —
+        // required for a rebind RHS that reads a field (`self.step`) to
+        // resolve `StateAcc` (loop context) rather than `State` (ambient
+        // outer context), confirmed against real compiled output: without
+        // this wrap, `maps:get('step', State)` diverges from legacy's
+        // `maps:get('step', StateAcc)`.
+        let mut ir_body: Vec<ThreadedStmt> = Vec::with_capacity(body.body.len());
+        self.with_branch_context(|this| -> Result<()> {
+            let mut current: HashMap<String, VersionedVar> = plan
+                .threaded_locals
+                .iter()
+                .map(|name| {
+                    (
+                        name.clone(),
+                        VersionedVar::new(VersionPrefix::Local(name.clone()), 0, frame),
+                    )
+                })
+                .collect();
+            let mut rebind_counts: HashMap<String, usize> = plan
+                .threaded_locals
+                .iter()
+                .map(|n| (n.clone(), 0))
+                .collect();
+            for stmt in &body.body {
+                let Expression::Assignment { target, value, .. } = &stmt.expression else {
+                    unreachable!(
+                        "while_direct_body_is_bind_representable guarantees every \
+                         statement is an Assignment"
+                    );
+                };
+                let Expression::Identifier(id) = target.as_ref() else {
+                    unreachable!(
+                        "while_direct_body_is_bind_representable guarantees the \
+                         target is an Identifier"
+                    );
+                };
+                let name = id.name.to_string();
+                this.direct_params_list_op_result = None;
+                let value_doc = this.expression_doc(value)?; // mints inside expression codegen, same order as legacy
+                // Defense in depth: `is_simple_threaded_rhs` excludes any RHS
+                // containing a `Block` literal (every list-op selector needs
+                // one), which should make `direct_params_list_op_result`
+                // impossible here — EXCEPT a list-op called with a block
+                // held in a *variable* (`list collect: storedBlock`) has no
+                // `Block` literal in this expression's own AST at all, so the
+                // static check cannot rule it out by construction. Verified
+                // empirically that this specific flag cannot actually fire
+                // for `generate_while_loop_direct` today — the list-op
+                // codegen functions that set it all gate on
+                // `self.in_direct_params_loop`, which only
+                // `generate_counted_stateful_loop_direct`/
+                // `generate_hybrid_loop_body` ever set `true`, never this
+                // (pure, non-hybrid) while-direct call site — but that is a
+                // property of the CURRENT `in_direct_params_loop` wiring
+                // elsewhere in this file, not something this function
+                // controls or that `is_simple_threaded_rhs` proves, so this
+                // check stays as a real guard against future coupling
+                // (e.g. a while-direct loop nested inside a construct that
+                // sets `in_direct_params_loop` ambiently). Legacy's
+                // open-chain shape for that case (`value_code` ending in an
+                // open `"... in "`, not a self-contained expression) does
+                // not fit `BindOp::Direct(ValueRef::Doc(..))`'s "closed
+                // expression" contract — wrapping it in `"let TARGET = " +
+                // value_doc + " in "` would emit invalid Core Erlang. Fail
+                // loudly with a structured internal error instead of
+                // emitting that: by this point mints have already been
+                // consumed for this (and possibly earlier) statements, so
+                // silently falling back to the legacy path here would
+                // re-mint from scratch and diverge from what legacy alone
+                // would have produced — no longer safe once lowering has
+                // started (see this function's doc comment on why
+                // eligibility is checked BEFORE any mutation, never
+                // re-checked mid-lowering).
+                if this.direct_params_list_op_result.take().is_some() {
+                    return Err(CodeGenError::Internal(format!(
+                        "ThreadedIr while-direct pilot (BT-3145): rebind of `{name}` \
+                         resolved to a list-op open-chain RHS (a block held in a \
+                         variable, not a literal) — not representable as a single \
+                         Bind value; this shape must not reach ConditionalLoop \
+                         lowering. Retry without BEAMTALK_THREADED_IR_WHILE_DIRECT=1."
+                    )));
+                }
+                let source = current.get(&name).cloned().unwrap_or_else(|| {
+                    VersionedVar::new(VersionPrefix::Local(name.clone()), 0, frame)
+                });
+                let core_var = CoreErlangGenerator::to_core_erlang_var(&name);
+                let new_var = this.fresh_temp_var(&core_var); // mint: body rebind, matches `generate_direct_var_update_in_loop`'s own order
+                this.bind_var(&name, &new_var);
+                let count = rebind_counts.entry(name.clone()).or_insert(0);
+                *count += 1;
+                let target_var = VersionedVar::new(VersionPrefix::Gensym(new_var), *count, frame);
+                ir_body.push(ThreadedStmt::Bind {
+                    target: target_var.clone(),
+                    source,
+                    op: BindOp::Direct(ValueRef::Doc(value_doc)),
+                    shadow_write: false,
+                    span: stmt.expression.span(),
+                });
+                current.insert(name, target_var);
+            }
+            Ok(())
+        })?;
+
+        // Unlike legacy, `final_args` (the recursive tail call's arguments)
+        // is NOT collected here — `render` reconstructs it from the `Bind`
+        // chain via `final_loop_arg_identities` (see `ConditionalLoop`'s doc
+        // comment for why `produces` alone cannot supply it for a `Gensym`
+        // target).
+        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self); // mint: ExitSA chain, LAST — matches legacy order
+        let exit_case_arm = if negate {
+            "<'true'> when 'true' -> "
+        } else {
+            "<'false'> when 'true' -> "
+        };
+        let exit_arm = docvec![exit_case_arm, exit_stateacc, " end "];
+
+        self.pop_scope();
+
+        let produces: Vec<VersionedVar> = plan
+            .threaded_locals
+            .iter()
+            .map(|name| VersionedVar::new(VersionPrefix::Local(name.clone()), 0, frame))
+            .collect();
+
+        let node = ThreadedStmt::ConditionalLoop {
+            fn_name: "while".to_string(),
+            mode: ThreadingMode::DirectParams,
+            frame,
+            counter: None,
+            continue_header,
+            body: ir_body,
+            produces,
+            exit_arm,
+            span: body.span,
+        };
+
+        let errors = threaded_ir::verify(std::slice::from_ref(&node));
+        self.report_threaded_ir_verify_errors(&errors, "while-direct ConditionalLoop", body.span);
+
+        let mut ctx = RenderCtx::new(self);
+        let rendered = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
+
+        Ok(Some(rendered))
+    }
+
     /// BT-1275: Direct-params variant of `generate_while_loop_with_mutations`.
     ///
     /// Uses `fun (Var1, ..., VarN)` instead of `fun (StateAcc)`.
@@ -291,6 +634,13 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
         negate: bool,
     ) -> Result<Document<'static>> {
+        if Self::threaded_ir_while_direct_enabled()
+            && let Some(doc) =
+                self.try_render_while_direct_via_threaded_ir(condition, body, plan, negate)?
+        {
+            return Ok(doc);
+        }
+
         // Collect initial arg values from the outer scope (before push_scope).
         let initial_direct_args = plan.initial_direct_args(self);
 
@@ -334,17 +684,7 @@ impl CoreErlangGenerator {
             ") -> ",
         ]);
 
-        let cond_doc = self.with_branch_context(|this| {
-            if let Expression::Block(cond_block) = condition {
-                // BT-3151: see the analogous check in `generate_while_loop`.
-                let analysis =
-                    crate::codegen::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
-                this.generate_block_body(cond_block)
-            } else {
-                this.generate_expression(condition)
-            }
-        })?;
+        let cond_doc = self.generate_loop_condition_body(condition)?;
         docs.push(cond_doc);
 
         // Apply condition with current params.
@@ -1258,6 +1598,126 @@ mod tests {
         assert!(
             code.contains("element'(1,"),
             "last-expr whileTrue: should unwrap element 1 (nil). Got:\n{code}"
+        );
+    }
+
+    // ── ADR 0111 Addendum 2 pilot (BT-3145): ThreadedIr measurement gate ──
+
+    /// Runs `codegen(src)` with `BEAMTALK_THREADED_IR_WHILE_DIRECT` forced to
+    /// the given value for the duration of the call. Mutates process-global
+    /// state (`std::env`), so callers must not assume isolation from other
+    /// concurrently-running tests — acceptable here because the flag's own
+    /// contract is "identical output when representable, an untouched
+    /// legacy passthrough otherwise" (`try_render_while_direct_via_threaded_ir`'s
+    /// doc comment), so a concurrently-running test observing the flag
+    /// toggled cannot itself produce different output because of it.
+    fn codegen_with_threaded_ir_while_direct(src: &str, enabled: bool) -> String {
+        // SAFETY: single-process test env var toggle around a single
+        // synchronous `codegen` call, restored to unset immediately after —
+        // no other thread in this process reads/writes this specific
+        // variable concurrently with a way to observe a torn value (see
+        // this fn's caller-side doc comment for why a racy toggle is
+        // tolerable here regardless).
+        unsafe {
+            if enabled {
+                std::env::set_var("BEAMTALK_THREADED_IR_WHILE_DIRECT", "1");
+            } else {
+                std::env::remove_var("BEAMTALK_THREADED_IR_WHILE_DIRECT");
+            }
+        }
+        let code = codegen(src);
+        // SAFETY: same as above — restoring the env var to unset.
+        unsafe {
+            std::env::remove_var("BEAMTALK_THREADED_IR_WHILE_DIRECT");
+        }
+        code
+    }
+
+    #[test]
+    fn threaded_ir_while_direct_single_local_byte_identical_to_legacy() {
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1]\n    self.n := sum\n";
+        let legacy = codegen_with_threaded_ir_while_direct(src, false);
+        let via_ir = codegen_with_threaded_ir_while_direct(src, true);
+        assert_eq!(
+            legacy, via_ir,
+            "ThreadedIr-rendered while-direct output must be byte-identical \
+             to the legacy path for a single-local straight-line body"
+        );
+    }
+
+    #[test]
+    fn threaded_ir_while_direct_multi_local_byte_identical_to_legacy() {
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    count := 0\n    [sum < 10] whileTrue: [sum := sum + 1. count := count + 1]\n    self.n := sum + count\n";
+        let legacy = codegen_with_threaded_ir_while_direct(src, false);
+        let via_ir = codegen_with_threaded_ir_while_direct(src, true);
+        assert_eq!(
+            legacy, via_ir,
+            "ThreadedIr-rendered while-direct output must be byte-identical \
+             to the legacy path for a multi-local straight-line body"
+        );
+    }
+
+    #[test]
+    fn threaded_ir_while_direct_negated_condition_byte_identical_to_legacy() {
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum >= 10] whileFalse: [sum := sum + 1]\n    self.n := sum\n";
+        let legacy = codegen_with_threaded_ir_while_direct(src, false);
+        let via_ir = codegen_with_threaded_ir_while_direct(src, true);
+        assert_eq!(
+            legacy, via_ir,
+            "ThreadedIr-rendered whileFalse: (negated) output must be \
+             byte-identical to the legacy path"
+        );
+    }
+
+    #[test]
+    fn threaded_ir_while_direct_same_local_rebound_twice_in_one_iteration_byte_identical_to_legacy()
+    {
+        // `sum` is reassigned TWICE within a single loop iteration — exercises
+        // `try_render_while_direct_via_threaded_ir`'s `current`/`rebind_counts`
+        // chaining (the second rebind's `Bind::source` must be the first
+        // rebind's own fresh `Gensym` target, not the fun's version-0 param),
+        // a code path the single/multi-local tests above (one rebind per
+        // local) don't reach.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. sum := sum * 2]\n    self.n := sum\n";
+        let legacy = codegen_with_threaded_ir_while_direct(src, false);
+        let via_ir = codegen_with_threaded_ir_while_direct(src, true);
+        assert_eq!(
+            legacy, via_ir,
+            "ThreadedIr-rendered while-direct output must be byte-identical \
+             to the legacy path when the same local is rebound twice in one \
+             iteration"
+        );
+    }
+
+    #[test]
+    fn threaded_ir_while_direct_field_read_in_rhs_byte_identical_to_legacy() {
+        // A field READ (not a write) in the rebind's RHS — `select_direct_params`
+        // permits this (only WRITES/self-sends disqualify direct-params), and
+        // `is_simple_threaded_rhs` allows `FieldAccess` through, so this must
+        // still route through `ConditionalLoop` and match legacy exactly.
+        let src = "Actor subclass: Ctr\n  state: step = 1\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step]\n    self.n := sum\n";
+        let legacy = codegen_with_threaded_ir_while_direct(src, false);
+        let via_ir = codegen_with_threaded_ir_while_direct(src, true);
+        assert_eq!(
+            legacy, via_ir,
+            "ThreadedIr-rendered while-direct output must be byte-identical \
+             to the legacy path when the rebind RHS reads a field"
+        );
+    }
+
+    #[test]
+    fn threaded_ir_while_direct_falls_back_for_unrepresentable_body() {
+        // A plain-let temporary (`half`, never a threaded local) inside the
+        // loop body — outside this pilot's narrow `Bind`-chain coverage
+        // (`while_direct_body_is_bind_representable`'s doc comment) — must
+        // fall back to the legacy path untouched, not error or diverge.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [half := sum / 2. sum := sum + 1 + half - half]\n    self.n := sum\n";
+        let legacy = codegen_with_threaded_ir_while_direct(src, false);
+        let via_ir = codegen_with_threaded_ir_while_direct(src, true);
+        assert_eq!(
+            legacy, via_ir,
+            "an unrepresentable body must fall back to the legacy path \
+             byte-for-byte, flag on or off"
         );
     }
 }
