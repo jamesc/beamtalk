@@ -202,22 +202,26 @@ pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
 /// Built by generator code from a byte-offset `Span` (via
 /// `CoreErlangGenerator::span_to_line`) plus the compilation's source path,
 /// then passed to [`annotated`] to attach the position to a Core Erlang node.
-#[derive(Debug, Clone)]
-pub struct BtSpan {
+///
+/// Borrows the file path rather than owning it: `annotate_with_line` calls
+/// this once per function head *and* once per message send during codegen,
+/// so a large `.bt` file would otherwise clone the same source path string
+/// hundreds or thousands of times per compilation for no reason — `annotated`
+/// copies the bytes into the owned `Document` it returns, so the borrow only
+/// needs to outlive the `annotated` call itself.
+#[derive(Debug, Clone, Copy)]
+pub struct BtSpan<'a> {
     /// The `.bt` source file path, as recorded by the compilation unit.
-    pub file: String,
+    pub file: &'a str,
     /// 1-based source line number.
     pub line: u32,
 }
 
-impl BtSpan {
+impl<'a> BtSpan<'a> {
     /// Creates a new `BtSpan` from a file path and 1-based line number.
     #[must_use]
-    pub fn new(file: impl Into<String>, line: u32) -> Self {
-        Self {
-            file: file.into(),
-            line,
-        }
+    pub fn new(file: &'a str, line: u32) -> Self {
+        Self { file, line }
     }
 }
 
@@ -239,14 +243,14 @@ impl BtSpan {
 /// annotated(var("X"), &BtSpan::new("foo.bt", 42)) => ( X -| [42, {'file', "foo.bt"}] )
 /// ```
 #[must_use]
-pub fn annotated(expr: Document<'static>, span: &BtSpan) -> Document<'static> {
+pub fn annotated(expr: Document<'static>, span: &BtSpan<'_>) -> Document<'static> {
     docvec![
         "( ",
         expr,
         " -| [",
         int_lit(i64::from(span.line)),
         ", {'file', ",
-        string_lit(&span.file),
+        string_lit(span.file),
         "}] )"
     ]
 }

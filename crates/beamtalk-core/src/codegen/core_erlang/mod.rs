@@ -2380,7 +2380,7 @@ impl CoreErlangGenerator {
         line_num: u32,
     ) -> Document<'static> {
         match &self.source_path {
-            Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path.clone(), line_num)),
+            Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
             None => {
                 // No source path — use bare line number annotation
                 docvec![
