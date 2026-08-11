@@ -2310,6 +2310,22 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, String)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                // BT-3140: class-var writes can't thread through this function's
+                // generic State/StateAcc mechanism — see `CodeGenError::
+                // ClassVarAssignmentInThreadedBody`'s doc comment for why. Reject
+                // at compile time (mirroring BT-2792's `FieldAssignmentInUnsupportedBlock`
+                // for the analogous "can't thread this state" shape) instead of
+                // silently losing the mutation on both normal return and NLR escape.
+                if self.in_class_method() && self.class_var_names().contains(field.name.as_str()) {
+                    let location = self.span_to_line(expr.span()).map_or_else(
+                        || format!("offset {}", expr.span().start()),
+                        |line| format!("line {line}"),
+                    );
+                    return Err(CodeGenError::ClassVarAssignmentInThreadedBody {
+                        field: field.name.to_string(),
+                        location,
+                    });
+                }
                 // BT-1342: Full-extract mode — rebind field param instead of maps:put.
                 // When the field is in hybrid_mutated_fields, the field has been extracted
                 // to a direct fun parameter. We rebind it to a fresh variable and update

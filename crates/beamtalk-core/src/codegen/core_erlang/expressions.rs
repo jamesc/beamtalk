@@ -677,6 +677,16 @@ impl CoreErlangGenerator {
         // `self.class_name()`) also keeps an inherited self-dispatch
         // chain (`self otherClassMethod:`) tagged with the calling
         // subclass's identity, not the defining ancestor's.
+        //
+        // BT-3140: this function is NOT the only class-var write site —
+        // `whileTrue:`/`timesRepeat:` loop bodies (and other state-threaded
+        // constructs) never reach it; a class-var write there goes through
+        // `generate_field_assignment_open` (`dispatch_codegen.rs`), which
+        // threads via the generic State/StateAcc map and has no class-var
+        // branch at all, so `block_depth == 0` never even gets consulted for
+        // that shape. That gap is now a compile-time error
+        // (`CodeGenError::ClassVarAssignmentInThreadedBody`) rather than a
+        // silent runtime no-op — see ADR 0110's BT-3140 amendment.
         let shadow_write = self.block_depth == 0;
         self.check_class_var_shadow_write_invariant(
             field_name,
