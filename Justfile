@@ -30,10 +30,10 @@ doctor:
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift
+ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift
 
 [windows]
-ci: build clippy fmt-check-rust test test-integration test-mcp test-parity test-repl-protocol check-surface-drift
+ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
 # Run local CI checks, skipping the slow workspace/MCP/REPL-protocol/parity
 # suites when the diff (vs origin/main, plus uncommitted changes) doesn't touch
@@ -1018,6 +1018,21 @@ test-bunit *ARGS: build-stdlib
     @echo "🧪 Running BUnit tests..."
     @cargo run --bin beamtalk --quiet -- test --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ BUnit tests complete"
+
+# Verify ThreadedIr::verify() (ADR 0111) invariants hold across the full
+# stdlib/test/*.bt + stdlib/bootstrap-test/*.btscript corpus (BT-3136
+# close-out). Compiling that corpus via `test-stdlib`/`test-bunit` already
+# runs every state-threading codegen path where `report_threaded_ir_verify_errors`
+# (control_flow/mod.rs) checks each `threaded_ir::verify()` invariant via
+# `debug_assert!` — live here because `cargo run` builds in the dev profile
+# (debug_assertions on), so any violation hard-panics the build instead of
+# only degrading to a diagnostic, as it would in a release build. This is a
+# thin alias over those existing corpus-compiling recipes (`just` dedupes
+# shared dependencies within one invocation, so wiring this into `ci`
+# alongside `test` doesn't recompile the corpus twice) — a named, explicit
+# CI gate for the verifier itself, not a new test harness.
+verify-threaded-ir: test-stdlib test-bunit
+    @echo "✅ ThreadedIr verifier: no invariant violations across stdlib + bootstrap-test corpus"
 
 # Run learning guide doctests (docs/learning/ — separate from stdlib tests)
 # Extracts ```beamtalk blocks from Markdown chapters and runs them via test-docs

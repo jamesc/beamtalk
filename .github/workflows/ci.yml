@@ -272,6 +272,9 @@ jobs:
       - name: Test BUnit (TestCase tests)
         run: just test-bunit
 
+      - name: Verify ThreadedIr state-threading invariants (ADR 0111, BT-3136)
+        run: just verify-threaded-ir
+
       - name: Test metamorphic (BT-3117 — semantics-preserving transforms)
         run: just test-metamorphic
 

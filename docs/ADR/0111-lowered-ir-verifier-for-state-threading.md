@@ -1,25 +1,30 @@
 # ADR 0111: Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return
 
 ## Status
-Accepted (2026-08-10)
+Implemented (2026-08-11)
 
 ## Implementation Tracking
 
 **Epic:** [BT-3128](https://linear.app/beamtalk/issue/BT-3128) — Lowered IR + Verifier for State Threading (ADR 0111)
-**Status:** Planned
+**Status:** Done
 
-| Phase | Issue | Description | Size |
-|---|---|---|---|
-| 1 | [BT-3129](https://linear.app/beamtalk/issue/BT-3129) | ThreadedIr types + verifier + test shim, gated by Phase A0 measurement | M |
-| 1 | [BT-3130](https://linear.app/beamtalk/issue/BT-3130) | Expand codegen snapshot corpus over the threading-mode matrix | M |
-| 2 | [BT-3131](https://linear.app/beamtalk/issue/BT-3131) | Unify version counters behind typestate VersionedVar + RAII branch guard | M |
-| 3 | [BT-3132](https://linear.app/beamtalk/issue/BT-3132) | Migrate while_loops + counted_loops; delete the 4 unpack debug_asserts | M |
-| 4 | [BT-3133](https://linear.app/beamtalk/issue/BT-3133) | Migrate list_ops (fold-shaped + early-exit) | L |
-| 4 | [BT-3134](https://linear.app/beamtalk/issue/BT-3134) | Migrate conditionals + exception_handling | M |
-| 4 | [BT-3135](https://linear.app/beamtalk/issue/BT-3135) | Migrate gen_server state threading + NLR + ShadowWriteMissing contract; delete the 2 routing debug_asserts | L |
-| 5 | [BT-3136](https://linear.app/beamtalk/issue/BT-3136) | Close-out: verifier CI wiring, docs, status → Implemented | S |
+| Phase | Issue | Description | Size | PR |
+|---|---|---|---|---|
+| 1 | [BT-3129](https://linear.app/beamtalk/issue/BT-3129) | ThreadedIr types + verifier + test shim, gated by Phase A0 measurement | M | [#3319](https://github.com/jamesc/beamtalk/pull/3319) |
+| 1 | [BT-3130](https://linear.app/beamtalk/issue/BT-3130) | Expand codegen snapshot corpus over the threading-mode matrix | M | [#3318](https://github.com/jamesc/beamtalk/pull/3318) |
+| 2 | [BT-3131](https://linear.app/beamtalk/issue/BT-3131) | Unify version counters behind typestate VersionedVar + RAII branch guard | M | [#3322](https://github.com/jamesc/beamtalk/pull/3322) |
+| 3 | [BT-3132](https://linear.app/beamtalk/issue/BT-3132) | Migrate while_loops + counted_loops; delete the 4 unpack debug_asserts | M | [#3323](https://github.com/jamesc/beamtalk/pull/3323) |
+| 4 | [BT-3133](https://linear.app/beamtalk/issue/BT-3133) | Migrate list_ops (fold-shaped + early-exit) | L | [#3327](https://github.com/jamesc/beamtalk/pull/3327) |
+| 4 | [BT-3134](https://linear.app/beamtalk/issue/BT-3134) | Migrate conditionals + exception_handling | M | [#3326](https://github.com/jamesc/beamtalk/pull/3326) |
+| 4 | [BT-3135](https://linear.app/beamtalk/issue/BT-3135) | Migrate gen_server state threading + NLR + ShadowWriteMissing contract; delete the 2 routing debug_asserts | L | [#3329](https://github.com/jamesc/beamtalk/pull/3329) |
+| 5 | [BT-3136](https://linear.app/beamtalk/issue/BT-3136) | Close-out: verifier CI wiring, docs, status → Implemented | S | (this PR) |
 
-**Recommended start:** BT-3129 and BT-3130 (Phase 1, no dependencies, parallelizable). BT-3129 carries the Phase A0 measurement gate — if it fails, the epic descopes to Alternative 1b.
+All seven phases landed on `main`. `just verify-threaded-ir` (BT-3136) now runs
+`threaded_ir::verify()` over the full `stdlib/test/*.bt` +
+`stdlib/bootstrap-test/*.btscript` corpus in CI, and the six original
+routing/threading `debug_assert!`s this epic set out to replace are gone from
+source — see `docs/development/debugging.md` § ThreadedIr verifier for the
+`VerifyError` variant reference.
 
 ## Context
 
@@ -763,8 +768,8 @@ extended.
 - **Ordered diagnostic-stream equality** (`BEAMTALK_CODEGEN_DIAGNOSTICS`
   output as a sequence, not a set) after every phase.
 - **Verifier green** on all `stdlib/test/*.bt` +
-  `stdlib/bootstrap-test/*.btscript` fixtures in CI (`just` target named
-  in `/plan-adr`).
+  `stdlib/bootstrap-test/*.btscript` fixtures in CI — `just verify-threaded-ir`
+  (BT-3136), wired into `just ci`.
 - **Behavioral suite** (`just test-stdlib`/`test-bunit`/
   `test-repl-protocol`) green after every phase.
 - **0110 contract, both halves**: `ShadowWriteMissing` unit tests (fires

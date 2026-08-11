@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3136 (ADR 0111 close-out): an Actor whose instance `state:` field is
+// mutated inside a whileTrue: counted loop — the loop-threading path
+// migrated to ThreadedIr by BT-3132 (see while_loops.rs's
+// test_while_true_with_field_mutation_threads_actor_state for the same
+// shape at the codegen-unit level; fixtures/local_mutation_actor.bt is the
+// local-var sibling of this pattern — this one threads actor *state*, not
+// a local).
+
+Actor subclass: LoopNlrShadowCounter
+  state: total = 0
+
+  // Stateful loop: bumps self.total up to n, one whileTrue: iteration at a
+  // time, threading actor state through the loop body.
+  runTo: n :: Integer -> Integer =>
+    [self.total < n] whileTrue: [self.total := self.total + 1]
+    self.total
+
+  total => self.total
