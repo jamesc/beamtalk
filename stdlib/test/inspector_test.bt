@@ -58,8 +58,7 @@ TestCase subclass: InspectorTest
     self assert: (f printString includesSubstring: "x: 3")
 
   // === Construction: Inspector on: / inspect shorthand ===
-  testInspectorOnReturnsInspector =>
-    self assert: (self.i isKindOf: Inspector)
+  testInspectorOnReturnsInspector => self assert: (self.i isKindOf: Inspector)
 
   testValueKindClassifiedAsValue => self assert: self.i kind equals: #value
 
@@ -369,9 +368,7 @@ TestCase subclass: InspectorTest
     // Best-effort process_info: every field is tagged #processInfo, and there is
     // at least one (a live process always has a current_function / status).
     self assert: i fields isNotEmpty
-    self assert: (i fields allSatisfy: [:f |
-      f kind == #processInfo
-    ])
+    self assert: (i fields allSatisfy: [:f | f kind == #processInfo])
 
   // === evaluate: — value Result contract, actor_eval_unsupported (ADR 0095 §1, §7) ===
   //
