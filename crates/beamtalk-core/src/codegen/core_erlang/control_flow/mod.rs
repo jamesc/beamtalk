@@ -1510,6 +1510,64 @@ impl CoreErlangGenerator {
                         &dispatch_var,
                     );
                 }
+            } else if matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send(expr) {
+                // BT-3150: a self-send to a same-class class method inside a
+                // whileTrue:/timesRepeat:/to:do:/to:by:do: loop body routes through
+                // `emit_class_var_result_unwrap`, which leaves an *open*
+                // let-chain ending in `... in ` and rebinds `ClassVarsN` from
+                // the callee's own `{class_var_result, Result, ClassVars}`
+                // reply. `Letrec`'s recursive tail call threads only the
+                // loop's own local-variable `StateAcc` — `ClassVarsN` is
+                // never part of that thread — so any class-var mutation the
+                // self-send makes is silently discarded once the loop
+                // finishes, AND (unlike every `Foldl*` construct) `Letrec`'s
+                // own body value is *always* discarded too — a `whileTrue:`/
+                // `timesRepeat:` loop unconditionally evaluates to `nil`
+                // regardless of its last statement — so a self-send here can
+                // only ever be present for a side effect, never for its
+                // return value. That's what makes "reject any self-send,
+                // since we can't know if it mutates" an acceptable
+                // conservative call with no legitimate collateral, unlike the
+                // `Foldl*` family (see below). Confirmed empirically: a
+                // mutating count stayed at 0 across 3 iterations instead of
+                // accumulating. Reject at compile time rather than emit code
+                // that's silently wrong — the same "can't thread this state
+                // shape back correctly here" category as BT-2792's
+                // `FieldAssignmentInUnsupportedBlock`.
+                //
+                // Deliberately scoped to `Letrec` only, NOT any `Foldl*`
+                // kind (`do:`/`collect:`/`select:`/`inject:into:`/...) —
+                // tried and reverted after two rounds of CI failure. The
+                // identical class-var-mutation-loss bug IS reachable via
+                // `Foldl*` bodies too (confirmed empirically for `do:`), but
+                // unlike `Letrec`, `Foldl*` bodies routinely use a
+                // self-send's return value as (or within) the fold's own
+                // output, AND — per a pre-existing, intentionally-supported
+                // BT-2350 pattern — even a *discarded*, non-last self-send
+                // statement inside `do:`/`inject:into:`/`collect:` is common
+                // and expected to compile (see
+                // `stdlib/test/fixtures/class_method_block.bt`, which uses
+                // pure self-sends like `self double:`/`self logIt:` in
+                // exactly these positions). Neither "is the return value
+                // used" nor "is the statement last" reliably distinguishes
+                // safe from unsafe there, so a position-based rejection
+                // breaks real code. Properly closing the `Foldl*` gap needs
+                // either real `ClassVars` threading through fold
+                // accumulators or static purity analysis of the callee —
+                // tracked as a follow-up under BT-3151.
+                let selector = if let Expression::MessageSend { selector, .. } = expr {
+                    selector.name().to_string()
+                } else {
+                    unreachable!("is_class_method_self_send only matches MessageSend")
+                };
+                let location = self.span_to_line(expr.span()).map_or_else(
+                    || format!("offset {}", expr.span().start()),
+                    |line| format!("line {line}"),
+                );
+                return Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody {
+                    selector,
+                    location,
+                });
             } else if !matches!(kind, BodyKind::Letrec) && self.is_tier2_value_call(expr) {
                 // BT-2813: a bare (non-assigned) Tier 2 `value(:...)` statement
                 // (field-stored or local-var-stored block) inside a foldl-based
@@ -3243,15 +3301,34 @@ impl CoreErlangGenerator {
         let core_var = self
             .lookup_var(&id.name)
             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-        let val_doc = self.expression_doc(value)?;
+        // BT-3150 review follow-up: a class-method self-send on the RHS
+        // (`x := self bump`) produces an *open* let-chain via
+        // `emit_class_var_result_unwrap` (ending in `... in `, result value
+        // carried out-of-band). Using the plain `expression_doc` here and
+        // wrapping it in `let core_var = <val_doc> in` doubled the trailing
+        // `in` — the exact `core_parse_error` shape BT-3150 fixes for a bare
+        // self-send statement, just reached via assignment instead. Mirrors
+        // `generate_local_var_assignment_in_loop`'s BT-1397 fix: keep the
+        // open chain (and its `ClassVarsN` rebind) at this level, then bind
+        // `core_var` to the carried-out result as a separate, still-open
+        // `let`.
+        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
         self.bind_var(&id.name, &core_var);
-        Ok(Some(docvec![
-            "let ",
-            leaf::var(core_var),
-            " = ",
-            val_doc,
-            " in ",
-        ]))
+        let doc = match open_scope {
+            Some(OpenScopeResult::Value(result_var)) => docvec![
+                val_doc,
+                "let ",
+                leaf::var(core_var),
+                " = ",
+                leaf::var(result_var),
+                " in ",
+            ],
+            Some(OpenScopeResult::NoValue) => {
+                docvec![val_doc, "let ", leaf::var(core_var), " = 'nil' in ",]
+            }
+            None => docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",],
+        };
+        Ok(Some(doc))
     }
 
     /// BT-1275: Generate a local variable assignment in a direct-params loop body.
@@ -3270,6 +3347,15 @@ impl CoreErlangGenerator {
     ///
     /// Returns `(doc, Some(new_var_name))` so callers (e.g. `emit_local_assign_last_expr`)
     /// can reference the newly-bound variable by name (e.g. for FoldlCollect/FoldlInject).
+    ///
+    /// BT-3150 review follow-up: unlike `try_generate_block_local_plain_let`, `value`
+    /// here never needs open-scope handling for a class-method self-send RHS
+    /// (`x := self bump`) — `use_direct_params`/`use_tuple_acc`/`use_hybrid_params`
+    /// (this function's only callers, see `generate_threaded_loop_body_inner`) are
+    /// all unconditionally disabled whenever the block has *any* self-send
+    /// (`BlockMutationAnalysis::has_state_effects`/`has_self_sends`, checked by
+    /// `select_direct_params`/`select_tuple_acc`/`select_hybrid_params`), so `value`
+    /// can never be, or contain at this level, one.
     pub(super) fn generate_direct_var_update_in_loop(
         &mut self,
         expr: &Expression,

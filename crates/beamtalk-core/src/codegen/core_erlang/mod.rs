@@ -186,6 +186,58 @@ pub enum CodeGenError {
     #[error("formatting error: {0}")]
     Format(#[from] fmt::Error),
 
+    /// BT-3150: A self-send to a same-class class method (`self someSelector`) used
+    /// as a statement inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:`
+    /// (`BodyKind::Letrec`) loop body in a class method.
+    ///
+    /// Every same-class class-method self-send routes through
+    /// `emit_class_var_result_unwrap`'s `{class_var_result, Result, ClassVarsN}`
+    /// unwrap convention (BT-412) — regardless of whether the callee actually
+    /// mutates a class var, since the caller can't know that statically. `Letrec`
+    /// threads only the loop's own local-variable `StateAcc` through its
+    /// recursive tail call; `ClassVarsN` is never part of that thread, so any
+    /// class-var mutation the self-send makes is discarded at the end of every
+    /// iteration, and the class method's own final return still hands back the
+    /// original pre-loop `ClassVars` regardless — the self-send analog of
+    /// BT-3140's finding for direct field writes (`generate_field_assignment_open`'s
+    /// State/StateAcc threading has no class-var branch either). Confirmed
+    /// empirically: a mutating count stayed at `0` across 3 loop iterations
+    /// instead of accumulating — a compile-time rejection is safer than a
+    /// silent runtime no-op.
+    ///
+    /// Deliberately scoped to `Letrec` only, not any `BodyKind::Foldl*` variant
+    /// (`do:`/`collect:`/`select:`/`inject:into:`/...): tried and reverted after
+    /// two rounds of CI failure against `stdlib/test/fixtures/class_method_block.bt`.
+    /// `Letrec`'s own body value is *always* discarded (a `whileTrue:`/
+    /// `timesRepeat:`/`to:do:`/`to:by:do:` loop unconditionally evaluates to
+    /// `nil`), so a self-send there can only ever be present for a side effect
+    /// — no legitimate use depends on its return value, which is what makes
+    /// blanket rejection safe.
+    /// `Foldl*` bodies don't share that property: they routinely use a
+    /// self-send's return value as the fold's own output, and even a
+    /// *discarded*, non-last self-send statement is an intentionally-supported,
+    /// tested pattern there (BT-2350) with real pure (non-mutating) self-sends
+    /// in the fixture above. The identical class-var-mutation-loss bug is
+    /// reachable via `Foldl*` too (confirmed empirically for `do:`), but closing
+    /// it without also rejecting that legitimate pattern needs either real
+    /// `ClassVars` threading through fold accumulators or static purity
+    /// analysis of the callee — tracked as a follow-up under BT-3151.
+    #[error(
+        "Cannot send '{selector}' to self inside this loop body at {location}: \
+             a self-send to a class method can't thread class-variable mutations back \
+             through a whileTrue:/timesRepeat:/to:do:/to:by:do: loop body — any mutation \
+             '{selector}' makes is silently discarded by the time the loop finishes.\n\n\
+             Fix: Accumulate what each call needs into a local variable (or collection) \
+             inside the loop, then make the self-send(s) once after the loop finishes, \
+             outside the threaded body."
+    )]
+    ClassMethodSelfSendInThreadedLoopBody {
+        /// The selector being self-sent.
+        selector: String,
+        /// Source location.
+        location: String,
+    },
+
     /// BT-3140: A class-var assignment (`self.field := ...`) inside a loop, conditional,
     /// exception handler, or list-op body (or any other context reached via
     /// `generate_field_assignment_open`) in a class method.
