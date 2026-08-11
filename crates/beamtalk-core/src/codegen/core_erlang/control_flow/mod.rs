@@ -3324,7 +3324,7 @@ impl CoreErlangGenerator {
                 " in ",
             ],
             Some(OpenScopeResult::NoValue) => {
-                docvec!["let ", leaf::var(core_var), " = 'nil' in ",]
+                docvec![val_doc, "let ", leaf::var(core_var), " = 'nil' in ",]
             }
             None => docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",],
         };

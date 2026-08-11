@@ -3729,6 +3729,51 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
 }
 
 #[test]
+fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl() {
+    // BT-3150 review follow-up: `try_generate_block_local_plain_let`'s new
+    // open-scope-aware fix (above) initially discarded `val_doc` entirely in
+    // the `OpenScopeResult::NoValue` arm instead of emitting it first (unlike
+    // the `Value` arm right above it). `NoValue` is produced by a mutation-
+    // threaded `do:` nested inside a direct-params outer loop (BT-1329/
+    // BT-3053, see `test_do_nested_in_direct_params_loop` in
+    // `control_flow/list_ops/tests.rs` for the bare-statement variant this
+    // adapts) — there, `val_doc` isn't just "a value", it's the entire
+    // generated `lists:foldl` call. Assigning such a `do:`'s result to a
+    // discarded local var (`_y := items do: [...]`) inside a direct-params
+    // loop silently dropped the nested loop from the generated code — no
+    // crash, just the nested `do:` (and any mutation it made, like `seen`
+    // below) never executing. A regression from the prior behavior (a loud
+    // `core_parse_error` for this same shape) to silently wrong code, so this
+    // pins that the `lists:foldl` call — and the loop it drives — survives.
+    //
+    // Confirmed via manual `beamtalk build` toggling of the fix (not just
+    // reasoning about it) that this exact shape reproduces the drop with the
+    // bug present and is fixed by it — several other plausible-looking
+    // shapes (e.g. `_y := ...` as a `timesRepeat:` body's only/last
+    // statement, or as a `class` method's `timesRepeat:` rather than an
+    // `Actor` method's `to:do:`) turned out NOT to reach this code path at
+    // all, so this test's shape matters and shouldn't be casually
+    // "simplified".
+    let src = "Actor subclass: CtrNested\n  state: x = 0\n  run: items =>\n    count := 0\n    seen := 0\n    1 to: 3 do: [:i |\n      _y := items do: [:item | seen := seen + 1]\n      count := count + 1\n    ]\n    count";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@ctrnested").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "do: assigned to a discarded local var inside a direct-params loop must compile. \
+         Got: {result:?}"
+    );
+    let code = result.unwrap();
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "The nested do:'s lists:foldl call must not be dropped. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_class_method_self_send_alongside_local_in_times_repeat_body_is_compile_error() {
     // BT-3150: the same gap reached via `timesRepeat:` instead of `whileTrue:`,
     // with a co-occurring local-variable mutation — a bare self-send-only
