@@ -128,8 +128,13 @@ impl CoreErlangGenerator {
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        let (branch_doc, _) =
+        let (branch_doc, branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        // BT-3134: verify the single arm's ThreadedIr frame (the synthetic
+        // non-taken `{'nil', State}` branch never mutates, so it isn't a
+        // second arm here — see generate_if_true_if_false_with_mutations for
+        // the two-real-arm case this check is primarily for).
+        self.check_branch_frame_linearity(&[branch_final], receiver.span());
 
         Ok(docvec![
             cond_preamble,
@@ -175,8 +180,12 @@ impl CoreErlangGenerator {
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        let (branch_doc, _) =
+        let (branch_doc, branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+        // BT-3134: verify the single arm's ThreadedIr frame (the synthetic
+        // non-taken `{'nil', State}` branch never mutates, so it isn't a
+        // second arm here).
+        self.check_branch_frame_linearity(&[branch_final], receiver.span());
 
         Ok(docvec![
             cond_preamble,
@@ -224,12 +233,21 @@ impl CoreErlangGenerator {
             self.seed_conditional_locals(&[true_block, false_block], &outer_state);
 
         // True branch
-        let (true_branch_doc, _) =
+        let (true_branch_doc, true_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(true_block))?;
 
         // False branch (reset to same initial state)
-        let (false_branch_doc, _) =
+        let (false_branch_doc, false_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(false_block))?;
+
+        // BT-3134: the true/false arms are sibling with_branch_context
+        // frames — each mints its own StateAcc version chain, and either
+        // arm may independently reach the same version number as the other
+        // (e.g. both perform exactly one field mutation, both producing
+        // "StateAcc1" in their own frame). check_branch_frame_linearity
+        // allocates a fresh FrameId per arm so this is NOT a
+        // NonLinearVersion violation.
+        self.check_branch_frame_linearity(&[true_final, false_final], receiver.span());
 
         Ok(docvec![
             cond_preamble,
@@ -280,7 +298,7 @@ impl CoreErlangGenerator {
         // post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        let (branch_doc, _) = self.with_branch_context(|this| {
+        let (branch_doc, branch_final) = self.with_branch_context(|this| {
             // Push a scope so the block-parameter binding is cleaned up after generation
             this.push_scope();
             if let Some(param) = block.parameters.first() {
@@ -291,6 +309,10 @@ impl CoreErlangGenerator {
             this.pop_scope();
             result
         })?;
+        // BT-3134: verify the single arm's ThreadedIr frame (the synthetic
+        // non-taken `{'nil', State}` branch never mutates, so it isn't a
+        // second arm here).
+        self.check_branch_frame_linearity(&[branch_final], receiver.span());
 
         Ok(docvec![
             recv_preamble,

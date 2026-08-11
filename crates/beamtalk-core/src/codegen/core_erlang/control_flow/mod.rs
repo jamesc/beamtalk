@@ -1314,6 +1314,10 @@ impl CoreErlangGenerator {
     /// `debug_assert!` is compiled out), degrades to an internal-error
     /// diagnostic on the compile result instead of silently doing nothing —
     /// the compile still succeeds with the generator's (unverified) output.
+    /// Shared by every BT-3132/BT-3133/BT-3134 check in this module — BT-3134
+    /// deliberately dropped its own independently-added copy of this helper
+    /// (CLAUDE.md's no-duplicate-implementations rule) in favor of this one,
+    /// already on `main` from BT-3133.
     fn report_threaded_ir_verify_errors(
         &mut self,
         errors: &[threaded_ir::VerifyError],
@@ -1331,6 +1335,57 @@ impl CoreErlangGenerator {
             Diagnostic::error(format!("internal: {invariant_label}: {errors:?}"), span)
                 .with_category(DiagnosticCategory::Type),
         );
+    }
+
+    /// BT-3134 (ADR 0111 Phase D — `conditionals`/`exception_handling` slice):
+    /// verifies branch-frame version linearity across N sibling
+    /// `with_branch_context` arms via [`threaded_ir::verify_branch_frame_linearity`]
+    /// — `ifTrue:ifFalse:`'s two branches (`conditionals.rs`), `on:do:`'s
+    /// try/handler bodies, and `ensure:`'s try/success-cleanup/error-cleanup
+    /// bodies (`exception_handling.rs`).
+    ///
+    /// `final_versions` is each arm's already-observed `state_version()`
+    /// reached at the end of its own `with_branch_context` call, in the
+    /// order the arms were generated; a fresh [`threaded_ir::FrameId`] is
+    /// allocated per arm here so sibling arms that happen to reach the same
+    /// version (e.g. both `ifTrue:`/`ifFalse:` bodies perform exactly one
+    /// field mutation) are correctly modeled as distinct frames rather than
+    /// colliding as [`threaded_ir::VerifyError::NonLinearVersion`].
+    ///
+    /// **Current scope — this is scaffolding, not yet a live regression
+    /// guard**: because each arm is always assigned a *fresh*, distinct
+    /// `FrameId` from its position here, and `verify_branch_frame_linearity`
+    /// only ever synthesizes a `Bind` chain from `final_versions`' scalar
+    /// counts (not the real per-arm mutation sequence the generator
+    /// produced), `NonLinearVersion` cannot fire from any of today's six
+    /// call sites — there is no way for two arms to collide when their
+    /// frame ids are always distinct by construction. This exercises the
+    /// verifier's `FrameId`/linearity plumbing correctly (the acceptance
+    /// criterion: sibling arms minting the same version must not trip a
+    /// false positive) but does not yet catch a real generator bug (wrong
+    /// mutation count, wrong ordering, state leaking into a sibling arm).
+    /// Giving it that teeth requires threading the real per-arm `Bind`
+    /// producers through, which is BT-3135+'s job as it migrates the
+    /// mutation-`Bind` emission sites themselves onto `ThreadedIr`.
+    ///
+    /// **Failure behavior** (ADR 0111 §The verifier): hard-fails in
+    /// debug/CI via `debug_assert!`. In release builds, degrades to an
+    /// internal-error diagnostic on the compile result instead of a panic
+    /// or a refusal to compile, per CLAUDE.md's "never panic on user input"
+    /// / structured-error rule — this is a compiler-internal invariant, not
+    /// a user-facing one, so the compile still succeeds with the
+    /// generator's (unverified) output.
+    pub(super) fn check_branch_frame_linearity(&mut self, final_versions: &[usize], span: Span) {
+        let arms: Vec<(threaded_ir::FrameId, usize)> = final_versions
+            .iter()
+            .enumerate()
+            .map(|(i, &final_version)| {
+                let frame_id = u32::try_from(i + 1).unwrap_or(u32::MAX);
+                (threaded_ir::FrameId::new(frame_id), final_version)
+            })
+            .collect();
+        let errors = threaded_ir::verify_branch_frame_linearity(&arms, span);
+        self.report_threaded_ir_verify_errors(&errors, "branch-frame linearity violation", span);
     }
 
     /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.

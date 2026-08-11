@@ -437,6 +437,14 @@ impl CoreErlangGenerator {
         ]);
         self.pop_scope();
 
+        // BT-3134: the try body and the handler body are sibling
+        // with_branch_context frames (only one of them ever actually runs at
+        // a given call, but both are compiled) — either may independently
+        // reach the same StateAcc version number as the other. Verify a
+        // ThreadedIr fixture with one FrameId per arm so this is correctly
+        // modeled, not flagged as NonLinearVersion.
+        self.check_branch_frame_linearity(&[try_final, handler_final], receiver_block.span);
+
         // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
         docs.push(docvec![
             "<'false'> when 'true' -> ",
@@ -629,9 +637,19 @@ impl CoreErlangGenerator {
         ]);
 
         // Cleanup body generates state mutations that are discarded (re-raise follows)
-        let (cleanup_error_doc, _, _) =
+        let (cleanup_error_doc, _, cleanup_error_final) =
             self.generate_exception_body_with_threading(cleanup_block)?;
         docs.push(cleanup_error_doc);
+
+        // BT-3134: three sibling with_branch_context frames — the try body,
+        // the success-path cleanup run, and the error-path cleanup run
+        // (`cleanup_block` is compiled twice, once per path, each its own
+        // arm) — any two may independently reach the same StateAcc version
+        // number. Verify a ThreadedIr fixture with one FrameId per arm.
+        self.check_branch_frame_linearity(
+            &[try_final, cleanup_success_final, cleanup_error_final],
+            receiver_block.span,
+        );
 
         docs.push(docvec![
             " ",
