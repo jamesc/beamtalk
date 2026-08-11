@@ -227,6 +227,42 @@ pub enum CodeGenError {
         location: String,
     },
 
+    /// BT-3140: A class-var assignment (`self.field := ...`) inside a loop, conditional,
+    /// exception handler, or list-op body (or any other context reached via
+    /// `generate_field_assignment_open`) in a class method.
+    ///
+    /// `generate_field_assignment_open` threads field writes via the generic
+    /// `State`/`StateAcc` map used for Actor instance state and `ValueType` `Self`
+    /// threading — it has no class-var branch (unlike `generate_field_assignment`,
+    /// BT-412 / ADR 0110's `current_class_var`/`next_class_var`/shadow-write logic).
+    /// A class var written from inside one of these bodies therefore threads into
+    /// the construct's own scratch state map instead of `ClassVars`, and that map
+    /// is discarded once the construct finishes — losing the mutation identically
+    /// on both normal return and a foreign non-local-return escape (investigated in
+    /// BT-3140; see ADR 0110's Consequences > Negative section, 2026-08-11 amendment).
+    #[error(
+        "Cannot assign to class variable '{field}' inside this loop/conditional body at {location}.\n\n\
+             Class-variable assignments only thread state back to the class's ClassVars map at a \
+             class method's own top frame (ADR 0110) — not from inside whileTrue:/timesRepeat:/\
+             ifTrue:/do:/... bodies, where the mutation is silently lost on both normal return and \
+             a foreign non-local return (BT-3140).\n\n\
+             Fix: Accumulate into a local variable inside the loop, then assign the class variable \
+             once after the loop:\n\
+             \x20 // Instead of:\n\
+             \x20 [cond] whileTrue: [self.{field} := self.{field} + 1. ...].\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 delta := 0.\n\
+             \x20 [cond] whileTrue: [delta := delta + 1. ...].\n\
+             \x20 self.{field} := self.{field} + delta."
+    )]
+    ClassVarAssignmentInThreadedBody {
+        /// The class variable being assigned.
+        field: String,
+        /// Source location.
+        location: String,
+    },
+
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned (BT-2792).
     #[error(
