@@ -277,11 +277,12 @@ impl AccParam {
 ///
 /// **Constructor-only production**: [`Self::next_var`] is the only way to
 /// mint a version beyond the counter's current one — an unproduced version
-/// cannot be named. [`Self::current_var`] and [`Self::peek_next_var`] never
-/// mint; they only render the version already reached (or, for `peek`, the
-/// version *the next [`Self::next_var`] call would* reach, without
-/// advancing the counter — used where the caller needs the name before
-/// calling `expression_doc`, which may itself advance the counter).
+/// cannot be named. [`Self::current_var`] only renders the version already
+/// reached; a caller that needs to name the version *the next
+/// [`Self::next_var`] call would* reach, without advancing the counter,
+/// renders `self.0 + 1` directly (`mod.rs`'s `peek_next_state_var`, via
+/// `render_state_prefix`) rather than through a dedicated `VersionCounter`
+/// method.
 ///
 /// **Emitter-facing accessors render through [`VersionedVar`]**: every
 /// method here goes through [`VersionedVar::new`] + [`VersionedVar::render_name`]
@@ -330,12 +331,6 @@ impl VersionCounter {
     pub(super) fn next_var(&mut self, prefix: VersionPrefix) -> String {
         self.0 += 1;
         self.current_var(prefix)
-    }
-
-    /// Names the version [`Self::next_var`] would mint, without advancing
-    /// the counter.
-    pub(super) fn peek_next_var(self, prefix: VersionPrefix) -> String {
-        VersionedVar::new(prefix, self.0 + 1, FrameId::ROOT).render_name()
     }
 }
 
@@ -1070,15 +1065,32 @@ fn render_loop_letrec(
         .collect();
     let param_list = join(entry_params.clone(), &Document::Str(", "));
 
-    let body_doc = match loop_context {
-        Some(flags) => ctx.with_loop_context(flags, |ctx| render(body, ctx)),
-        None => render(body, ctx),
+    // BT-3144 review: `final_args` renders the tail of the same `letrec` fun
+    // body as `body_doc` (the recursive self-call sits textually inside the
+    // `fun (...) -> <body_doc> apply ...` block), so it must resolve prefixes
+    // under the identical loop-context flags — computing it after
+    // `with_loop_context` has already restored the pre-loop ambient context
+    // would pick a different `State`/`StateAcc` prefix than `body_doc` bound
+    // whenever a Hybrid loop is nested inside a differently-flagged ambient
+    // context (e.g. inside a `StateAcc`-mode loop), producing a reference to
+    // an unbound Core Erlang variable.
+    let render_final_args = |ctx: &mut RenderCtx| {
+        join(
+            produces.iter().map(|v| leaf::var(ctx.resolve_prefix(v))),
+            &Document::Str(", "),
+        )
     };
-
-    let final_args = join(
-        produces.iter().map(|v| leaf::var(ctx.resolve_prefix(v))),
-        &Document::Str(", "),
-    );
+    let (body_doc, final_args) = if let Some(flags) = loop_context {
+        ctx.with_loop_context(flags, |ctx| {
+            let body_doc = render(body, ctx);
+            let final_args = render_final_args(ctx);
+            (body_doc, final_args)
+        })
+    } else {
+        let body_doc = render(body, ctx);
+        let final_args = render_final_args(ctx);
+        (body_doc, final_args)
+    };
 
     docvec![
         "letrec ",
@@ -1760,18 +1772,6 @@ mod tests {
         assert_eq!(counter.current_var(VersionPrefix::State), "State1");
         assert_eq!(counter.next_var(VersionPrefix::State), "State2");
         assert_eq!(counter.version(), 2);
-    }
-
-    #[test]
-    fn version_counter_peek_next_var_does_not_advance() {
-        let counter = VersionCounter::new();
-        assert_eq!(
-            counter.peek_next_var(VersionPrefix::ClassVars),
-            "ClassVars1"
-        );
-        // peek must not have minted — the counter is still at version 0.
-        assert_eq!(counter.version(), 0);
-        assert_eq!(counter.current_var(VersionPrefix::ClassVars), "ClassVars");
     }
 
     #[test]
