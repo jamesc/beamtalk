@@ -1042,11 +1042,28 @@ pub(super) fn verify_loop_unpack_invariant(
 /// decision; when `false`, this call site should never have been reached in
 /// `TupleAcc` mode at all — `fallback_reason` names why (mirrors
 /// `verify_loop_unpack_invariant`'s `mode` parameter, which is likewise the
-/// generator's own already-resolved decision, not a re-derivation).
+/// generator's own already-resolved decision, not a re-derivation). Class 1
+/// (`TupleAccUnpackModeMismatch`) has real teeth: `use_tuple_acc` is an
+/// externally-supplied bool that genuinely varies per call site, so this
+/// guards against `generate_tuple_unpack_docs` being reached from a
+/// `StateAcc`-mode code path.
+///
 /// `gate_slots` is `index_offset - 1`, the caller's own already-computed
 /// tuple-shape parameter (`1` for `do:`/`dict do:`'s `index_offset: 1`, `2`
 /// for `collect:`/boolean-predicate ops' `index_offset: 2`, `3` for
-/// `takeWhile:`/`dropWhile:`/`detect:`-family's `index_offset: 3`).
+/// `takeWhile:`/`dropWhile:`/`detect:`-family's `index_offset: 3`). **Class 4
+/// (`EarlyExitGateSlotMismatch`) is currently a tautology, not a live check**:
+/// both the synthesized `ThreadingMode::TupleAcc(gate_slots)` and the
+/// `TupleAccUnpack` node's own `gate_slots` are built from this single
+/// `gate_slots` argument below, so they cannot disagree at any real call
+/// site — only the hand-built-IR unit test
+/// (`verify_tuple_acc_unpack_invariant_fires_early_exit_gate_slot_mismatch`)
+/// exercises the mismatch branch by deliberately diverging them. Unlike
+/// class 1, there is today no second, independently-derived source for
+/// `gate_slots` to disagree with (e.g. resolved from the op selector/kind
+/// rather than threaded through as the caller's `index_offset`), so this
+/// currently exists as structural scaffolding for a future independent
+/// derivation, not as a regression guard against an op-family miscopy.
 pub(super) fn verify_tuple_acc_unpack_invariant(
     use_tuple_acc: bool,
     fallback_reason: StateAccFallbackReason,
