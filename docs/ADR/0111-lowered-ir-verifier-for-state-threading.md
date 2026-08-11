@@ -94,7 +94,7 @@ concrete evidence, all in
   cannot be the real emitter for any construct that needs them — which is
   most of what's in scope.
 - **`EarlyExitGateSlotMismatch` is a tautology today**
-  (`threaded_ir.rs:1082-1094`): the check compares the synthesized
+  (`threaded_ir.rs:1097-1106`): the check compares the synthesized
   `ThreadingMode::TupleAcc(gate_slots)` against the `TupleAccUnpack` node's
   own `gate_slots` — but `verify_tuple_acc_unpack_invariant` builds *both*
   from the single `gate_slots` argument it received, so they cannot
@@ -107,7 +107,7 @@ concrete evidence, all in
   the single decision twice instead of computing it twice, so it can't
   catch a real divergence either way.
 - **Branch-frame linearity is scaffolding, not a live regression guard**
-  (`threaded_ir.rs:1189-1199`, `verify_branch_frame_linearity`): the doc
+  (`threaded_ir.rs:1204-1214`, `verify_branch_frame_linearity`): the doc
   comment states plainly that because the caller always allocates a fresh,
   distinct `FrameId` per arm and the check only synthesizes a `Bind` chain
   from a scalar `final_version` *count* (not the real per-arm mutation
