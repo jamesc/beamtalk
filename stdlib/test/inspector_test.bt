@@ -29,7 +29,7 @@ TestCase subclass: InspectorTest
     self assert: f label equals: "x"
     self assert: f value equals: 3
     self assert: f kind equals: #slot
-    self assert: f drillable equals: true
+    self assert: f drillable
 
   testInspectorFieldIsLeafIsNegationOfDrillable =>
     leaf := InspectorField
@@ -38,14 +38,14 @@ TestCase subclass: InspectorTest
       value: 7
       kind: #slot
       drillable: false
-    self assert: leaf isLeaf equals: true
+    self assert: leaf isLeaf
     drillable := InspectorField
       name: #n
       label: "n"
       value: 7
       kind: #slot
       drillable: true
-    self assert: drillable isLeaf equals: false
+    self deny: drillable isLeaf
 
   testInspectorFieldPrintStringShape =>
     f := InspectorField
@@ -54,12 +54,12 @@ TestCase subclass: InspectorTest
       value: 3
       kind: #slot
       drillable: false
-    self assert: (f printString startsWith: "#InspectorField<") equals: true
-    self assert: (f printString includesSubstring: "x: 3") equals: true
+    self assert: (f printString startsWith: "#InspectorField<")
+    self assert: (f printString includesSubstring: "x: 3")
 
   // === Construction: Inspector on: / inspect shorthand ===
   testInspectorOnReturnsInspector =>
-    self assert: (self.i isKindOf: Inspector) equals: true
+    self assert: (self.i isKindOf: Inspector)
 
   testValueKindClassifiedAsValue => self assert: self.i kind equals: #value
 
@@ -83,7 +83,7 @@ TestCase subclass: InspectorTest
   testScalarFieldIsNotDrillable =>
     // An Integer slot value is a leaf — not drillable.
     xField := self.i fields detect: [:f | f name == #x]
-    self assert: xField drillable equals: false
+    self deny: xField drillable
 
   testNestedValueFieldIsDrillable =>
     // A field holding another Value is drillable.
@@ -91,7 +91,7 @@ TestCase subclass: InspectorTest
     pair := InspectPair new: #{#left => inner, #right => 42}
     i := Inspector on: pair
     leftField := i fields detect: [:f | f name == #left]
-    self assert: leftField drillable equals: true
+    self assert: leftField drillable
 
   // === Navigation: at: drills into a child cursor ===
   testAtDrillsIntoChildValue =>
@@ -104,7 +104,7 @@ TestCase subclass: InspectorTest
 
   testAtMissReturnsNoSuchField =>
     result := self.i at: #nonesuch
-    self assert: result isError equals: true
+    self assert: result isError
 
   testAtMissErrorKindIsNoSuchField =>
     result := self.i at: #nonesuch
@@ -177,16 +177,16 @@ TestCase subclass: InspectorTest
     c stop
     i := Inspector on: c
     statusField := i fields detect: [:f | f name == #status]
-    self assert: statusField drillable equals: false
+    self deny: statusField drillable
 
   // === Rendering: printString depth-1 tree ===
   testPrintStringHeaderNamesClass =>
-    self assert: (self.i printString includesSubstring: "Inspector(ValuePoint)") equals: true
+    self assert: (self.i printString includesSubstring: "Inspector(ValuePoint)")
 
   testPrintStringIncludesImmediateFields =>
     str := self.i printString
-    self assert: (str includesSubstring: "x: 3") equals: true
-    self assert: (str includesSubstring: "y: 4") equals: true
+    self assert: (str includesSubstring: "x: 3")
+    self assert: (str includesSubstring: "y: 4")
 
   testPrintStringExpandedDepthAcceptsDepth =>
     self assert: (self.i printStringExpanded: 1) equals: self.i printString
@@ -201,7 +201,7 @@ TestCase subclass: InspectorTest
     a setPeer: b
     b setPeer: a
     str := (Inspector on: a) printStringExpanded: 5
-    self assert: (str includesSubstring: "↩ Actor") equals: true
+    self assert: (str includesSubstring: "↩ Actor")
 
   testActorCycleRenderTerminates =>
     // The expansion completes (does not hang) and names both actors once.
@@ -210,7 +210,7 @@ TestCase subclass: InspectorTest
     a setPeer: b
     b setPeer: a
     str := (Inspector on: a) printStringExpanded: 5
-    self assert: (str includesSubstring: "Inspector(CycleActorA)") equals: true
+    self assert: (str includesSubstring: "Inspector(CycleActorA)")
 
   testSharedActorReferenceIsNotMistakenForCycle =>
     // A diamond (shared, non-cyclic) reference: a value whose two fields both
@@ -229,7 +229,7 @@ TestCase subclass: InspectorTest
     inner := ValuePoint x: 1 y: 2
     pair := InspectPair new: #{#left => inner, #right => 42}
     str := (Inspector on: pair) printStringExpanded: 1
-    self assert: (str includesSubstring: "left: ValuePoint(x: 1, y: 2)") equals: true
+    self assert: (str includesSubstring: "left: ValuePoint(x: 1, y: 2)")
 
   testDepthTwoExpandsNestedValueSubTree =>
     // At depth 2 the nested ValuePoint expands into its own header + fields, so a
@@ -239,7 +239,7 @@ TestCase subclass: InspectorTest
     shallow := (Inspector on: pair) printStringExpanded: 1
     deep := (Inspector on: pair) printStringExpanded: 2
     self deny: (shallow includesSubstring: "Inspector(ValuePoint)")
-    self assert: (deep includesSubstring: "Inspector(ValuePoint)") equals: true
+    self assert: (deep includesSubstring: "Inspector(ValuePoint)")
 
   // === Edge case: a Value with no fields ===
   testEmptyValueHasNoFields =>
@@ -248,7 +248,7 @@ TestCase subclass: InspectorTest
 
   testEmptyValuePrintStringHasHeaderOnly =>
     i := Inspector on: EmptyValue new
-    self assert: (i printString includesSubstring: "Inspector(EmptyValue)") equals: true
+    self assert: (i printString includesSubstring: "Inspector(EmptyValue)")
 
   // === Edge case: drilling into a scalar yields a leaf cursor with no fields ===
   testDrilledScalarHasNoFields =>
@@ -265,7 +265,7 @@ TestCase subclass: InspectorTest
     // ADR 0095 Phase 3 (BT-2504): `anObject inspect` is the shorthand for
     // `Inspector on: anObject` — it returns an Inspector cursor, not a String.
     i := (ValuePoint x: 3 y: 4) inspect
-    self assert: (i isKindOf: Inspector) equals: true
+    self assert: (i isKindOf: Inspector)
     self assert: i kind equals: #value
     self assert: i fields size equals: 2
 
@@ -323,7 +323,7 @@ TestCase subclass: InspectorTest
 
   testPageOnNonCollectionIsError =>
     result := self.i page: 2
-    self assert: result isError equals: true
+    self assert: result isError
     self assert: result error kind equals: #not_a_collection
 
   testCollectionAtDirectIndexBeyondWindow =>
@@ -335,7 +335,7 @@ TestCase subclass: InspectorTest
   testCollectionAtOutOfRangeIsNoSuchField =>
     i := Inspector on: #(1, 2, 3)
     result := i at: 99
-    self assert: result isError equals: true
+    self assert: result isError
     self assert: result error kind equals: #no_such_field
 
   testDictionaryRendersAssociations =>
@@ -368,10 +368,10 @@ TestCase subclass: InspectorTest
     i := Inspector on: pid
     // Best-effort process_info: every field is tagged #processInfo, and there is
     // at least one (a live process always has a current_function / status).
-    self assert: i fields isNotEmpty equals: true
+    self assert: i fields isNotEmpty
     self assert: (i fields allSatisfy: [:f |
       f kind == #processInfo
-    ]) equals: true
+    ])
 
   // === evaluate: — value Result contract, actor_eval_unsupported (ADR 0095 §1, §7) ===
   //
@@ -384,7 +384,7 @@ TestCase subclass: InspectorTest
   testValueEvaluateReturnsResultNeverRaises =>
     // No compiler port in BUnit → an error Result, but never a raise.
     result := self.i evaluate: "self x + self y"
-    self assert: (result isKindOf: Result) equals: true
+    self assert: (result isKindOf: Result)
 
   testActorEvaluateIsUnsupported =>
     // Actor evaluate-in-context is deferred (ADR 0095 §7) — returns an error
@@ -392,7 +392,7 @@ TestCase subclass: InspectorTest
     c := Counter spawn
     i := Inspector on: c
     result := i evaluate: "self increment"
-    self assert: result isError equals: true
+    self assert: result isError
     self assert: result error kind equals: #actor_eval_unsupported
 
   // === asDictionaries / asDictionary — wire form (ADR 0095 §7) ===
