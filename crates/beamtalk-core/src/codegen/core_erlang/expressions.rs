@@ -542,83 +542,8 @@ impl CoreErlangGenerator {
         value: &Expression,
     ) -> Result<Document<'static>> {
         // BT-412: Class methods assign to class variables via ClassVars map threading.
-        // The generated code leaves `let ClassVarsN = ...` open — the caller (sequential
-        // expression handler) must provide the continuation.
         if self.in_class_method() {
-            if self.class_var_names().contains(field_name) {
-                let val_var = self.fresh_temp_var("Val");
-                let current_cv = self.current_class_var();
-                let val_doc = self.expression_doc(value)?;
-                let new_cv = self.next_class_var();
-                // ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign
-                // NLR (`^` belonging to another method's frame) relayed out of
-                // this class method does not lose the mutation —
-                // `invoke_class_method/7` reads the shadow back on the
-                // `{nlr_relay, ...}` path and erases it in `after` on every
-                // path. Gated on `block_depth == 0`: a block literal written in
-                // this method can execute in a *different* class's gen_server
-                // process (ADR 0109), where an unconditional write would corrupt
-                // that class's vars with this class's map. Top-frame-only also
-                // matches existing semantics — block-interior class-var
-                // mutations are already discarded on normal return (BT-1550).
-                //
-                // ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)`
-                // — this call's dynamic runtime class identity — not a single
-                // shared key. A mutating self-send inside a block invoked from a
-                // foreign class's process (block_depth resets to 0 on entering
-                // the self-sent method's own body) would otherwise write the
-                // *same* global key that process's own class method is using,
-                // clobbering it before that class's `invoke_class_method/7`
-                // reads it back. `element(2, ClassSelf)` (not the static
-                // `self.class_name()`) also keeps an inherited self-dispatch
-                // chain (`self otherClassMethod:`) tagged with the calling
-                // subclass's identity, not the defining ancestor's.
-                let shadow_write = self.block_depth == 0;
-                self.check_class_var_shadow_write_invariant(
-                    field_name,
-                    &val_var,
-                    shadow_write,
-                    value.span(),
-                );
-                let shadow_doc = if shadow_write {
-                    docvec![
-                        "let _ = call 'erlang':'put'({",
-                        leaf::atom("$bt_class_vars_shadow"),
-                        ", call 'erlang':'element'(2, ",
-                        leaf::var("ClassSelf"),
-                        ")}, ",
-                        leaf::var(new_cv.clone()),
-                        ") in ",
-                    ]
-                } else {
-                    Document::Str("")
-                };
-                let doc = docvec![
-                    "let ",
-                    leaf::var(val_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in let ",
-                    leaf::var(new_cv.clone()),
-                    " = call 'maps':'put'(",
-                    leaf::atom(field_name.to_string()),
-                    ", ",
-                    leaf::var(val_var.clone()),
-                    ", ",
-                    leaf::var(current_cv),
-                    ") in ",
-                    shadow_doc,
-                ];
-                // Store result var name for callers that need to reference it
-                self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
-                return Ok(doc);
-            }
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: format!(
-                    "cannot assign to instance field '{field_name}' in a class method"
-                ),
-                span: Some(value.span()),
-            });
+            return self.generate_class_var_field_assignment(field_name, value);
         }
         // BT-833: Value type field assignment — Self-threading (immutable update).
         //
@@ -630,8 +555,19 @@ impl CoreErlangGenerator {
             // Capture current Self BEFORE generating the value expression so that
             // RHS field reads (e.g., `self.x := self.x + 1`) see the current snapshot.
             let current_self = self.current_self_var();
+            let source_self_version = self.self_version();
             let val_doc = self.expression_doc(value)?;
             let new_self = self.next_self_var();
+            let target_self_version = self.self_version();
+            // BT-3139: previously uninstrumented — see
+            // check_simple_field_bind_invariant's doc comment.
+            self.check_simple_field_bind_invariant(
+                super::threaded_ir::VersionPrefix::SelfVt,
+                source_self_version,
+                target_self_version,
+                "value-type Self field-assignment version bind",
+                value.span(),
+            );
             let doc = docvec![
                 "let ",
                 leaf::var(val_var.clone()),
@@ -656,12 +592,22 @@ impl CoreErlangGenerator {
         // Capture current state BEFORE generating value expression,
         // because the value expression may reference state (e.g., self.value + 1)
         let current_state = self.current_state_var();
+        let source_state_version = self.state_version();
 
         // Capture value expression (preserves side effects on state)
         let val_doc = self.expression_doc(value)?;
 
         // Now increment state version for the new state after assignment
         let new_state = self.next_state_var();
+        let target_state_version = self.state_version();
+        // BT-3139: previously uninstrumented, like the Self branch above.
+        self.check_simple_field_bind_invariant(
+            super::threaded_ir::VersionPrefix::State,
+            source_state_version,
+            target_state_version,
+            "actor State field-assignment version bind",
+            value.span(),
+        );
 
         let doc = docvec![
             "let ",
@@ -679,6 +625,96 @@ impl CoreErlangGenerator {
             ") in ",
             leaf::var(val_var),
         ];
+        Ok(doc)
+    }
+
+    /// BT-412: The class-var branch of [`Self::generate_field_assignment`]
+    /// (`self.field := value` inside a class method) — extracted to its own
+    /// function so the caller stays under clippy's `too_many_lines` budget
+    /// alongside its two sibling branches (BT-3139 added `ThreadedIr`
+    /// instrumentation to those two, growing the combined function past the
+    /// limit).
+    ///
+    /// The generated code leaves `let ClassVarsN = ...` open — the caller
+    /// (sequential expression handler) must provide the continuation.
+    fn generate_class_var_field_assignment(
+        &mut self,
+        field_name: &str,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        if !self.class_var_names().contains(field_name) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot assign to instance field '{field_name}' in a class method"
+                ),
+                span: Some(value.span()),
+            });
+        }
+        let val_var = self.fresh_temp_var("Val");
+        let current_cv = self.current_class_var();
+        let val_doc = self.expression_doc(value)?;
+        let new_cv = self.next_class_var();
+        // ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign
+        // NLR (`^` belonging to another method's frame) relayed out of
+        // this class method does not lose the mutation —
+        // `invoke_class_method/7` reads the shadow back on the
+        // `{nlr_relay, ...}` path and erases it in `after` on every
+        // path. Gated on `block_depth == 0`: a block literal written in
+        // this method can execute in a *different* class's gen_server
+        // process (ADR 0109), where an unconditional write would corrupt
+        // that class's vars with this class's map. Top-frame-only also
+        // matches existing semantics — block-interior class-var
+        // mutations are already discarded on normal return (BT-1550).
+        //
+        // ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)`
+        // — this call's dynamic runtime class identity — not a single
+        // shared key. A mutating self-send inside a block invoked from a
+        // foreign class's process (block_depth resets to 0 on entering
+        // the self-sent method's own body) would otherwise write the
+        // *same* global key that process's own class method is using,
+        // clobbering it before that class's `invoke_class_method/7`
+        // reads it back. `element(2, ClassSelf)` (not the static
+        // `self.class_name()`) also keeps an inherited self-dispatch
+        // chain (`self otherClassMethod:`) tagged with the calling
+        // subclass's identity, not the defining ancestor's.
+        let shadow_write = self.block_depth == 0;
+        self.check_class_var_shadow_write_invariant(
+            field_name,
+            &val_var,
+            shadow_write,
+            value.span(),
+        );
+        let shadow_doc = if shadow_write {
+            docvec![
+                "let _ = call 'erlang':'put'({",
+                leaf::atom("$bt_class_vars_shadow"),
+                ", call 'erlang':'element'(2, ",
+                leaf::var("ClassSelf"),
+                ")}, ",
+                leaf::var(new_cv.clone()),
+                ") in ",
+            ]
+        } else {
+            Document::Str("")
+        };
+        let doc = docvec![
+            "let ",
+            leaf::var(val_var.clone()),
+            " = ",
+            val_doc,
+            " in let ",
+            leaf::var(new_cv.clone()),
+            " = call 'maps':'put'(",
+            leaf::atom(field_name.to_string()),
+            ", ",
+            leaf::var(val_var.clone()),
+            ", ",
+            leaf::var(current_cv),
+            ") in ",
+            shadow_doc,
+        ];
+        // Store result var name for callers that need to reference it
+        self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
         Ok(doc)
     }
 
@@ -721,6 +757,31 @@ impl CoreErlangGenerator {
             "class-var mutation missing ADR 0110 shadow write",
             span,
         );
+    }
+
+    /// BT-3139 (ADR 0111 coverage extension): construct + verify the
+    /// just-emitted `Self{N}`/`State{N}` `Bind`'s `ThreadedIr` shape via the
+    /// shared [`super::threaded_ir::verify_simple_bind`] helper — the two
+    /// `generate_field_assignment` sibling branches (value-type `Self` and
+    /// instance-actor `State`) that, unlike the class-var branch above
+    /// (BT-3135), constructed zero `ThreadedIr` fixture before this issue.
+    ///
+    /// `source_version`/`target_version` are the real `self_version()`/
+    /// `state_version()` counter reads taken immediately before and after
+    /// the caller's own `next_self_var()`/`next_state_var()` call — not
+    /// re-derived here, so this checks what the generator actually produced,
+    /// not a recomputation of it (ADR 0111 §Verifier honesty).
+    fn check_simple_field_bind_invariant(
+        &mut self,
+        prefix: super::threaded_ir::VersionPrefix,
+        source_version: usize,
+        target_version: usize,
+        invariant_label: &str,
+        span: crate::source_analysis::Span,
+    ) {
+        let errors =
+            super::threaded_ir::verify_simple_bind(prefix, source_version, target_version, span);
+        self.report_threaded_ir_verify_errors(&errors, invariant_label, span);
     }
 
     /// Extracts a block literal from an expression, unwrapping parentheses.
@@ -969,7 +1030,8 @@ impl CoreErlangGenerator {
 
             // Generate body expressions with state threading
             this.generate_block_stateful_body(block, &mut docs)?;
-            Ok::<_, crate::codegen::core_erlang::CodeGenError>(docs)
+            let branch_final = this.state_version();
+            Ok::<_, crate::codegen::core_erlang::CodeGenError>((docs, branch_final))
         });
         // BT-1475: Ensure block_depth and scope are restored even on error.
         self.block_depth -= 1;
@@ -979,7 +1041,14 @@ impl CoreErlangGenerator {
         // the outer context.
         self.last_open_scope_result = None;
 
-        Ok(docvec![header, Document::Vec(docs?)])
+        let (docs, branch_final) = docs?;
+        // BT-3139: this with_branch_context arm — the list-op/stateful-block
+        // StateAcc unpacking setup — previously never constructed a
+        // verify_branch_frame_linearity fixture, unlike conditionals.rs's/
+        // exception_handling.rs's arms (BT-3134). Single-arm, same helper.
+        self.check_branch_frame_linearity(&[branch_final], block.span);
+
+        Ok(docvec![header, Document::Vec(docs)])
     }
 
     /// BT-855: Generates an Erlang-compatible wrapper for a block at an Erlang call site.
@@ -2443,9 +2512,16 @@ impl CoreErlangGenerator {
         if self.is_tier2_value_call(body) {
             if let Expression::MessageSend { receiver, .. } = body {
                 if let Expression::Block(block) = receiver.as_ref() {
-                    let (branch_doc, _) = self.with_branch_context(|this| {
+                    let (branch_doc, branch_final) = self.with_branch_context(|this| {
                         this.generate_conditional_branch_inline(block)
                     })?;
+                    // BT-3139: tier2 conditional-branch inlining inside a
+                    // `match:` arm — the second of three with_branch_context
+                    // sites that never got a verify_branch_frame_linearity
+                    // fixture, unlike conditionals.rs's ifTrue:/ifFalse:
+                    // (BT-3134), despite going through the same
+                    // generate_conditional_branch_inline single-arm helper.
+                    self.check_branch_frame_linearity(&[branch_final], body.span());
                     return Ok(docvec![
                         "let StateAcc = ",
                         base_state_var,
