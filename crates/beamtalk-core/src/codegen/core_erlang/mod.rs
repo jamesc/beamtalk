@@ -198,7 +198,7 @@ pub enum CodeGenError {
     /// the construct's own scratch state map instead of `ClassVars`, and that map
     /// is discarded once the construct finishes — losing the mutation identically
     /// on both normal return and a foreign non-local-return escape (investigated in
-    /// BT-3140; see ADR 0110's "Known limitations" section).
+    /// BT-3140; see ADR 0110's Consequences > Negative section, 2026-08-11 amendment).
     #[error(
         "Cannot assign to class variable '{field}' inside this loop/conditional body at {location}.\n\n\
              Class-variable assignments only thread state back to the class's ClassVars map at a \

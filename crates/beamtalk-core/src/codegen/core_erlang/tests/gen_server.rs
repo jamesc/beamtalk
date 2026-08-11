@@ -3658,10 +3658,14 @@ fn test_class_var_mutation_in_while_loop_body_is_compile_error() {
     // body can't thread through `generate_field_assignment_open`'s generic
     // State/StateAcc mechanism — it silently wrote into the loop's own
     // scratch StateAcc map instead of ClassVars, losing the mutation on
-    // both normal return and a foreign NLR escape (confirmed empirically:
-    // see stdlib/test/loop_class_var_shadow_test.bt). Rejected at compile
-    // time instead, mirroring BT-2792's FieldAssignmentInUnsupportedBlock
-    // for the analogous "can't thread this state" shape.
+    // both normal return and a foreign NLR escape (confirmed empirically
+    // via a throwaway BUnit driver/probe fixture, mirroring
+    // fixtures/collection_driver.bt/collection_probe.bt's shape with the
+    // mutation moved inside the loop — not committed, since the compile-time
+    // rejection below makes that runtime repro permanently uncompilable).
+    // Rejected at compile time instead, mirroring BT-2792's
+    // FieldAssignmentInUnsupportedBlock for the analogous "can't thread this
+    // state" shape.
     let src = "Object subclass: LoopShadowCounter\n  classState: runs = 0\n\n  class countUpTo: n =>\n    i := 0\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1\n      i := i + 1\n    ]\n    self.runs";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);

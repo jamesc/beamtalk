@@ -2316,7 +2316,12 @@ impl CoreErlangGenerator {
                 // at compile time (mirroring BT-2792's `FieldAssignmentInUnsupportedBlock`
                 // for the analogous "can't thread this state" shape) instead of
                 // silently losing the mutation on both normal return and NLR escape.
-                if self.in_class_method() && self.class_var_names().contains(field.name.as_str()) {
+                // Reuses `is_class_var_assignment` (not a re-derived `in_class_method()
+                // && class_var_names().contains(...)` check) per CLAUDE.md's
+                // no-duplicate-implementations rule — that helper's `receiver == "self"`
+                // gate is the authoritative rule for what counts as a class-var
+                // assignment, not something this call site should re-decide.
+                if self.is_class_var_assignment(expr) {
                     let location = self.span_to_line(expr.span()).map_or_else(
                         || format!("offset {}", expr.span().start()),
                         |line| format!("line {line}"),
