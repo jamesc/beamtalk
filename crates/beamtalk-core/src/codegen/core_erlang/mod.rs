@@ -2639,6 +2639,29 @@ impl CoreErlangGenerator {
         token_var: &str,
         boundary: NlrBoundary,
     ) -> Document<'static> {
+        // BT-3135 (ADR 0111 Phase D): this is the true call site
+        // `ThreadedStmt::NlrCatch` faithfully models (module docs on
+        // `threaded_ir::ThreadedStmt::NlrCatch`) — every NLR try/catch this
+        // generator ever emits (Actor/ClassMethod/ValueType alike) is built
+        // here. Constructing and verifying the node is a standalone
+        // structural check in isolation today (no version references to
+        // validate against); its `boundary` shape is also what
+        // `threaded_ir::verify_class_var_bind`'s `has_class_vars_nlr`
+        // fixtures reconstruct at the class-var Bind-emission sites
+        // (`expressions.rs`, `dispatch_codegen.rs`) for the ADR 0110
+        // ShadowWriteMissing contract.
+        let nlr_catch_errors = threaded_ir::verify(&[threaded_ir::ThreadedStmt::NlrCatch {
+            boundary,
+            token: threaded_ir::TokenId::new(0),
+            frame: threaded_ir::FrameId::ROOT,
+            span: Span::default(),
+        }]);
+        self.report_threaded_ir_verify_errors(
+            &nlr_catch_errors,
+            "NLR catch boundary",
+            Span::default(),
+        );
+
         let vars = self.alloc_nlr_catch_vars();
         let nlr_arm_result = nlr_arm_result(&vars.val_var, &vars.state_var, boundary);
         let NlrCatchVars {

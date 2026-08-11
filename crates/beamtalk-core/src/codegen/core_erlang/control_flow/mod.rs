@@ -1314,11 +1314,14 @@ impl CoreErlangGenerator {
     /// `debug_assert!` is compiled out), degrades to an internal-error
     /// diagnostic on the compile result instead of silently doing nothing —
     /// the compile still succeeds with the generator's (unverified) output.
-    /// Shared by every BT-3132/BT-3133/BT-3134 check in this module — BT-3134
-    /// deliberately dropped its own independently-added copy of this helper
-    /// (CLAUDE.md's no-duplicate-implementations rule) in favor of this one,
-    /// already on `main` from BT-3133.
-    fn report_threaded_ir_verify_errors(
+    /// Shared by every BT-3132/BT-3133/BT-3134/BT-3135 check in this module
+    /// and in `expressions.rs`/`dispatch_codegen.rs`/`gen_server/methods.rs`/
+    /// `mod.rs` — BT-3134 and BT-3135 each deliberately dropped their own
+    /// independently-added copy of this helper (CLAUDE.md's
+    /// no-duplicate-implementations rule) in favor of this one, already on
+    /// `main` from BT-3133. `pub(super)` makes it visible to the rest of
+    /// `codegen::core_erlang`, not just this module.
+    pub(super) fn report_threaded_ir_verify_errors(
         &mut self,
         errors: &[threaded_ir::VerifyError],
         invariant_label: &str,

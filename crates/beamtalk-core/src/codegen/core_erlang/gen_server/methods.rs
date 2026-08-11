@@ -1255,9 +1255,19 @@ impl CoreErlangGenerator {
                                     &mut docs,
                                 )?
                                 .is_some();
-                            debug_assert!(
-                                routed,
-                                "LocalAssignControlFlow must route through the Actor threaded emitter"
+                            // BT-3135 (ADR 0111 Phase D): replaces the former
+                            // debug_assert! with the structural
+                            // ThreadedIr::verify() routing check — see
+                            // threaded_ir::verify_routing_invariant.
+                            let routing_errors =
+                                super::super::threaded_ir::verify_routing_invariant(
+                                    routed,
+                                    expr.span(),
+                                );
+                            self.report_threaded_ir_verify_errors(
+                                &routing_errors,
+                                "LocalAssignControlFlow must route through the Actor threaded emitter",
+                                expr.span(),
                             );
                         }
                     }
@@ -1447,9 +1457,17 @@ impl CoreErlangGenerator {
                             super::super::threaded_expr::ThreadingBoundary::Actor,
                             &mut docs,
                         )?;
-                        debug_assert!(
+                        // BT-3135 (ADR 0111 Phase D): replaces the former
+                        // debug_assert! with the structural ThreadedIr::verify()
+                        // routing check — see threaded_ir::verify_routing_invariant.
+                        let routing_errors = super::super::threaded_ir::verify_routing_invariant(
                             routed,
-                            "ControlFlowWithMutations must route through the Actor threaded emitter"
+                            expr.span(),
+                        );
+                        self.report_threaded_ir_verify_errors(
+                            &routing_errors,
+                            "ControlFlowWithMutations must route through the Actor threaded emitter",
+                            expr.span(),
                         );
                     } else {
                         let tuple_var = self.fresh_temp_var("Tuple");

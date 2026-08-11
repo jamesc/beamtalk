@@ -564,6 +564,18 @@ pub(super) enum VerifyError {
     /// `!effects.has_non_tuple_safe_list_op` guard is ever dropped or
     /// reordered past the point where `DirectParams` is selected.
     NestedStateAccFallbackUnderDirectParams { at: Span },
+
+    /// BT-3135: replaces the two `gen_server/methods.rs` routing
+    /// `debug_assert!`s (`:1258`/`:1450`, pre-BT-3135) as a structural
+    /// property: `classify_body_expr`'s upfront classification
+    /// (`BodyExprKind::LocalAssignControlFlow` /
+    /// `BodyExprKind::ControlFlowWithMutations`) commits a construct to
+    /// routing through the shared Actor `threaded_expr.rs` emitter: the
+    /// emitter's own downstream `control_flow_has_mutations` recheck MUST
+    /// also recognize it (`Ok(Some(_))`/`Ok(true)`), not decline
+    /// (`Ok(None)`/`Ok(false)`) and fall through to the generic path. See
+    /// [`verify_routing_invariant`].
+    RoutingMismatch { at: Span },
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -1221,6 +1233,113 @@ pub(super) fn verify_branch_frame_linearity(
         });
     }
     verify(&ir)
+}
+
+// ─── Routing invariant check (BT-3135) ─────────────────────────────────────
+
+/// Replaces the two "classifier and emitter agree on Actor-threaded routing"
+/// `debug_assert!`s (`gen_server/methods.rs:1258`/`:1450`, pre-BT-3135) as a
+/// structural check: `gen_server/methods.rs`'s upfront `classify_body_expr`
+/// commits to `BodyExprKind::LocalAssignControlFlow` /
+/// `BodyExprKind::ControlFlowWithMutations` — i.e. that this construct routes
+/// through the shared Actor [`super::threaded_expr`] emitter
+/// (`emit_threaded_assign_rhs`/`emit_threaded_last`) — for exactly the
+/// expressions where [`super::CoreErlangGenerator::control_flow_has_mutations`]
+/// returns `true`. The downstream emitter re-checks the same predicate
+/// (`threaded_expr.rs`'s `lower_actor_threaded_last`/
+/// `emit_actor_threaded_assign_rhs`) against generator state that may have
+/// advanced since classification ran (Phase 1 classifies the whole body
+/// upfront; Phase 2 emits statement-by-statement, mutating `self` as it
+/// goes) — a drift between the two is exactly the "two independently
+/// computed decisions must agree" shape ADR 0111 §Current state names for
+/// both routing asserts.
+///
+/// `routed` is the emitter's own `Ok(Some(_))`/`Ok(Some(true))` outcome —
+/// this function checks what was *actually observed*, not a re-derivation of
+/// `control_flow_has_mutations` (ADR 0111 §Verifier honesty: a check
+/// comparing the generator against itself is silent when both are
+/// consistently wrong).
+pub(super) fn verify_routing_invariant(routed: bool, span: Span) -> Vec<VerifyError> {
+    if routed {
+        Vec::new()
+    } else {
+        vec![VerifyError::RoutingMismatch { at: span }]
+    }
+}
+
+// ─── Class-var Bind construction (BT-3135, ADR 0110 contract) ─────────────
+
+/// Builds a minimal `ThreadedIr` fixture for a single class-var version
+/// `Bind`, exactly as actually emitted by one of the two producer sites
+/// named in ADR 0111 §Phase D: `expressions.rs::generate_field_assignment`'s
+/// class-var branch (a [`BindOp::Put`] field mutation, `shadow_write` set
+/// from the real `block_depth == 0` gate) or
+/// `dispatch_codegen.rs::emit_class_var_result_unwrap` (a [`BindOp::Direct`]
+/// rebind from an inherited self-dispatched call's returned
+/// `class_var_result` tuple — never itself a shadow-write producer, since
+/// self-dispatch runs in the same class `gen_server` process and any mutation
+/// it reflects was already shadow-written by the *callee's own*
+/// `generate_field_assignment` call under the same `ClassSelf`-tagged key;
+/// see ADR 0110 §Runtime change's "no per-nesting-level save/restore is
+/// needed" reasoning).
+///
+/// `at_method_top_frame` selects the `Bind`'s (and the always-included
+/// `NlrCatch { has_class_vars: true }` marker's) `FrameId`: [`FrameId::ROOT`]
+/// when `true`, a nested [`FrameId`] otherwise — mirroring
+/// [`VerifyError::ShadowWriteMissing`]'s own `target.frame == FrameId::ROOT`
+/// gate. **This is deliberately NOT `self.current_nlr_token().is_some()`**
+/// (whether *this* method's own body happens to contain a literal `^` inside
+/// one of its own block literals, gating `wrap_class_method_body_with_nlr_catch`)
+/// — that would silently exempt the *exact* ADR 0110 repro shape from this
+/// check: `CollectionDriver countedRun:over:` mutates a class var and then
+/// invokes a **caller-supplied** block (`aBlock value: x`, inside its own
+/// `[:x | aBlock value: x]` block, which contains no literal `^` of its
+/// own) — `has_block_nlr_or_walk` is `false` for that method, so it gets no
+/// local NLR try/catch at all, and the whole relay is caught one layer
+/// out, unconditionally, by `apply_class_method_fun/6`'s
+/// `throw:Nlr:NlrST when ?IS_NLR(Nlr)` clause. The shadow write in
+/// production code is correspondingly unconditional too — gated only on
+/// `block_depth == 0` (`generate_field_assignment`), never on local
+/// NLR-catch presence. Callers must therefore pass an *independently
+/// re-derived* top-frame signal (`self.block_depth == 0`, read fresh from
+/// live generator state — not reused from whatever `shadow_write` value a
+/// future regression might compute wrong), matching production's actual
+/// gate 1:1 (ADR 0111 §Verifier honesty: comparing the generator against
+/// itself is silent when both are consistently wrong).
+///
+/// The `dispatch_codegen.rs` rebind site passes `false` unconditionally —
+/// not a claim about its real block-depth, but a deliberate exemption: that
+/// `Bind` structurally never carries its own shadow-write obligation
+/// regardless of nesting (see its own call-site comment), so it is modeled
+/// as never sitting at the frame this check inspects.
+pub(super) fn verify_class_var_bind(
+    op: BindOp,
+    shadow_write: bool,
+    at_method_top_frame: bool,
+    span: Span,
+) -> Vec<VerifyError> {
+    let frame = if at_method_top_frame {
+        FrameId::ROOT
+    } else {
+        FrameId::new(1)
+    };
+    verify(&[
+        ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::ClassVars, 1, frame),
+            source: VersionedVar::new(VersionPrefix::ClassVars, 0, frame),
+            op,
+            shadow_write,
+            span,
+        },
+        ThreadedStmt::NlrCatch {
+            boundary: NlrBoundary::ClassMethod {
+                has_class_vars: true,
+            },
+            token: TokenId::new(0),
+            frame,
+            span,
+        },
+    ])
 }
 
 // ─── Phase A0 measurement prototype ────────────────────────────────────────
@@ -2409,5 +2528,107 @@ mod tests {
             )),
             "expected NonLinearVersion for the colliding shared-frame State1, got: {errors:?}"
         );
+    }
+    // ── verify_routing_invariant (BT-3135) ───────────────────────────────
+    // Pins the production replacement for `gen_server/methods.rs`'s two
+    // deleted routing `debug_assert!`s.
+
+    #[test]
+    fn verify_routing_invariant_silent_when_routed() {
+        assert_eq!(verify_routing_invariant(true, span()), Vec::new());
+    }
+
+    #[test]
+    fn verify_routing_invariant_fires_when_not_routed() {
+        let errors = verify_routing_invariant(false, span());
+        assert_eq!(
+            errors,
+            vec![VerifyError::RoutingMismatch { at: span() }],
+            "expected RoutingMismatch, got: {errors:?}"
+        );
+    }
+
+    // ── verify_class_var_bind (BT-3135, ADR 0110 contract) ───────────────
+    // Pins the production replacement/extension covering the two Bind-
+    // emission sites named in ADR 0111 §Phase D:
+    // `expressions.rs::generate_field_assignment` (Put) and
+    // `dispatch_codegen.rs::emit_class_var_result_unwrap` (Direct rebind).
+
+    fn put_op() -> BindOp {
+        BindOp::Put {
+            field: "runs".to_string(),
+            value: ValueRef::Var("_Val0".to_string()),
+            class_tag: ValueRef::Var("ClassSelf".to_string()),
+        }
+    }
+
+    #[test]
+    fn verify_class_var_bind_put_silent_with_shadow_write() {
+        // generate_field_assignment's real post-ADR-0110 shape: block_depth
+        // == 0 (shadow_write: true).
+        assert_eq!(
+            verify_class_var_bind(put_op(), true, true, span()),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn verify_class_var_bind_put_fires_when_shadow_write_missing_at_top_frame() {
+        // The regression this exists to catch: block_depth == 0 (a top-frame
+        // mutation) but the shadow write was forgotten.
+        let errors = verify_class_var_bind(put_op(), false, true, span());
+        assert_eq!(
+            errors,
+            vec![VerifyError::ShadowWriteMissing {
+                mutated: VersionedVar::new(VersionPrefix::ClassVars, 1, FrameId::ROOT),
+                at: span(),
+            }],
+            "expected ShadowWriteMissing, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_class_var_bind_put_fires_even_without_a_local_nlr_catch_in_this_method() {
+        // Pins the exact ADR 0110 repro shape, not just the ADR's abbreviated
+        // worked example: `CollectionDriver countedRun:over:` mutates a class
+        // var, then invokes a *caller-supplied* block (`aBlock value: x`)
+        // that contains no literal `^` of its own — `has_block_nlr_or_walk`
+        // is `false` for that method, so codegen allocates it NO local NLR
+        // try/catch at all (`self.current_nlr_token()` is `None` throughout
+        // its body). The foreign `^` still relays, caught one layer out by
+        // `apply_class_method_fun/6`'s unconditional `?IS_NLR` clause — so
+        // `at_method_top_frame` must be driven by `block_depth == 0` alone,
+        // NEVER by whether this method happens to have its own NLR catch:
+        // gating on the latter (an earlier version of this helper's bug)
+        // would silently exempt this exact shape from the check.
+        let errors = verify_class_var_bind(put_op(), false, true, span());
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, VerifyError::ShadowWriteMissing { .. })),
+            "expected ShadowWriteMissing even with no local NLR catch, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_class_var_bind_put_silent_below_top_frame() {
+        // A class-var mutation inside a nested block (block_depth > 0) is
+        // legitimately shadow_write: false — already discarded on normal
+        // return (BT-1550), not a regression. Matches
+        // `verify_shadow_write_missing_silent_below_top_frame`.
+        assert_eq!(
+            verify_class_var_bind(put_op(), false, false, span()),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn verify_class_var_bind_direct_rebind_silent_never_requires_shadow_write() {
+        // dispatch_codegen.rs's inherited-self-dispatch rebind: never itself
+        // a shadow-write producer (the callee's own Bind already wrote it
+        // under the same ClassSelf-tagged key) — its call site always passes
+        // at_method_top_frame: false, so this stays silent unconditionally.
+        let op = BindOp::Direct(ValueRef::Var("_CV0".to_string()));
+        assert_eq!(verify_class_var_bind(op, false, false, span()), Vec::new());
     }
 }

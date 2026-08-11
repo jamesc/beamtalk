@@ -1152,7 +1152,9 @@ invoke_class_method_errors_test_() ->
             {"genuine error ignores the shadow, reverts to pre-call class vars",
                 fun test_invoke_error_ignores_shadow/0},
             {"BT-3039: a foreign class's shadow entry in the same process is never read back",
-                fun test_invoke_nlr_relay_ignores_foreign_class_shadow/0}
+                fun test_invoke_nlr_relay_ignores_foreign_class_shadow/0},
+            {"BT-3135: ?BT_CLASS_VARS_SHADOW_KEY_ATOM matches the Rust codegen literal",
+                fun test_shadow_key_atom_matches_codegen_contract/0}
         ]
     end}.
 
@@ -1232,7 +1234,7 @@ test_invoke_nlr_relay_no_shadow() ->
     ?assertEqual(
         undefined,
         erlang:get(
-            {'$bt_class_vars_shadow',
+            {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
                 beamtalk_class_registry:class_object_tag('BT3036NlrNoShadowClass')}
         )
     ).
@@ -1245,7 +1247,8 @@ test_invoke_nlr_relay_no_shadow() ->
 test_invoke_nlr_relay_reads_shadow() ->
     LocalMethods = #{testNlrThrow => <<>>},
     ShadowKey =
-        {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag('BT3036NlrShadowClass')},
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
+            beamtalk_class_registry:class_object_tag('BT3036NlrShadowClass')},
     erlang:put(ShadowKey, #{count => 99}),
     try
         Result = beamtalk_class_dispatch:handle_class_method_call(
@@ -1271,7 +1274,7 @@ test_invoke_nlr_relay_reads_shadow() ->
 test_invoke_error_ignores_shadow() ->
     LocalMethods = #{testRaise => <<>>},
     ShadowKey =
-        {'$bt_class_vars_shadow',
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
             beamtalk_class_registry:class_object_tag('BT3036ErrorShadowClass')},
     erlang:put(ShadowKey, #{count => 99}),
     try
@@ -1299,9 +1302,11 @@ test_invoke_error_ignores_shadow() ->
 test_invoke_nlr_relay_ignores_foreign_class_shadow() ->
     LocalMethods = #{testNlrThrow => <<>>},
     OwnShadowKey =
-        {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag('BT3039OwnClass')},
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
+            beamtalk_class_registry:class_object_tag('BT3039OwnClass')},
     ForeignShadowKey =
-        {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag('BT3039ForeignClass')},
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM,
+            beamtalk_class_registry:class_object_tag('BT3039ForeignClass')},
     ForeignClassVars = #{count => 12345},
     erlang:put(ForeignShadowKey, ForeignClassVars),
     try
@@ -1329,6 +1334,18 @@ test_invoke_nlr_relay_ignores_foreign_class_shadow() ->
         erlang:erase(OwnShadowKey),
         erlang:erase(ForeignShadowKey)
     end.
+
+%% ADR 0111 Phase D (BT-3135): the Erlang half of the cross-boundary
+%% conformance fixture — CLAUDE.md's cross-Rust/Erlang-boundary rule ("needs
+%% a shared conformance fixture or code generation, not a comment"). The
+%% Rust side (`crates/beamtalk-core/src/codegen/core_erlang/tests/
+%% class_var_shadow_contract.rs`) reads this same ?BT_CLASS_VARS_SHADOW_KEY_ATOM
+%% macro's definition out of beamtalk.hrl and cross-checks it against actual
+%% compiled codegen output. This test pins the macro's *value* on the
+%% Erlang side, so a change to the atom here that isn't mirrored in the
+%% codegen emission site fails on both sides, not just one.
+test_shadow_key_atom_matches_codegen_contract() ->
+    ?assertEqual('$bt_class_vars_shadow', ?BT_CLASS_VARS_SHADOW_KEY_ATOM).
 
 %%% ============================================================================
 %%% 12. class_send instantiation variants (BT-1963)

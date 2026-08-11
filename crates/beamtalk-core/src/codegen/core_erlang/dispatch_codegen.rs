@@ -462,6 +462,29 @@ impl CoreErlangGenerator {
         let cv = self.current_class_var();
         let new_cv = self.next_class_var();
         let inner_cv = self.fresh_temp_var("CV");
+        // BT-3135 (ADR 0111 Phase D): construct + verify this Bind's
+        // ThreadedIr shape. This site never itself needs the ADR 0110
+        // shadow write — it rebinds `ClassVarsN` from an inherited
+        // self-dispatched call's own `class_var_result` return, and that
+        // call runs in this same class's gen_server process, so any
+        // mutation it made was already shadow-written by the *callee's own*
+        // `generate_field_assignment` under the identical `ClassSelf`-tagged
+        // key (see `verify_class_var_bind`'s doc comment / ADR 0110
+        // §Runtime change). `at_method_top_frame: false` is not a claim
+        // about this rebind's real nesting — it deliberately exempts this
+        // Bind from the check unconditionally, since it never carries a
+        // shadow-write obligation of its own regardless of block_depth.
+        let rebind_errors = super::threaded_ir::verify_class_var_bind(
+            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Var(inner_cv.clone())),
+            false,
+            false,
+            crate::source_analysis::Span::default(),
+        );
+        self.report_threaded_ir_verify_errors(
+            &rebind_errors,
+            "class-var rebind from inherited self-dispatch result",
+            crate::source_analysis::Span::default(),
+        );
         let inner_res = self.fresh_temp_var("MR");
         let plain_cv = self.fresh_temp_var("PCV");
         let result = self.fresh_temp_var("Unwrapped");
