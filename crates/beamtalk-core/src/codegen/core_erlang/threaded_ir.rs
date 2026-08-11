@@ -1173,6 +1173,18 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 /// own frame) must NOT trip [`VerifyError::NonLinearVersion`] — this is
 /// the ADR 0111 §The IR frame-identity requirement (see [`FrameId`]'s doc
 /// comment).
+///
+/// **Scaffolding, not yet a live regression guard**: because the caller
+/// ([`super::control_flow::CoreErlangGenerator::check_branch_frame_linearity`])
+/// always allocates a fresh, distinct `FrameId` per arm and this function
+/// only ever synthesizes a `Bind` chain from a scalar `final_version` count
+/// (not the real per-arm mutation sequence the generator produced), no two
+/// arms can ever collide at any of today's four call sites — this smoke-tests
+/// the verifier's `FrameId`/linearity plumbing (and pins the acceptance
+/// criterion above), but cannot yet catch a real generator bug. Giving it
+/// that teeth requires threading the real per-arm `Bind` producers through,
+/// left to BT-3135+ as it migrates the mutation-`Bind` emission sites
+/// themselves onto `ThreadedIr`.
 pub(super) fn verify_branch_frame_linearity(
     arms: &[(FrameId, usize)],
     span: Span,

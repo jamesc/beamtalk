@@ -1314,6 +1314,10 @@ impl CoreErlangGenerator {
     /// `debug_assert!` is compiled out), degrades to an internal-error
     /// diagnostic on the compile result instead of silently doing nothing —
     /// the compile still succeeds with the generator's (unverified) output.
+    /// Shared by every BT-3132/BT-3133/BT-3134 check in this module — BT-3134
+    /// deliberately dropped its own independently-added copy of this helper
+    /// (CLAUDE.md's no-duplicate-implementations rule) in favor of this one,
+    /// already on `main` from BT-3133.
     fn report_threaded_ir_verify_errors(
         &mut self,
         errors: &[threaded_ir::VerifyError],
@@ -1348,6 +1352,22 @@ impl CoreErlangGenerator {
     /// field mutation) are correctly modeled as distinct frames rather than
     /// colliding as [`threaded_ir::VerifyError::NonLinearVersion`].
     ///
+    /// **Current scope — this is scaffolding, not yet a live regression
+    /// guard**: because each arm is always assigned a *fresh*, distinct
+    /// `FrameId` from its position here, and `verify_branch_frame_linearity`
+    /// only ever synthesizes a `Bind` chain from `final_versions`' scalar
+    /// counts (not the real per-arm mutation sequence the generator
+    /// produced), `NonLinearVersion` cannot fire from any of today's four
+    /// call sites — there is no way for two arms to collide when their
+    /// frame ids are always distinct by construction. This exercises the
+    /// verifier's `FrameId`/linearity plumbing correctly (the acceptance
+    /// criterion: sibling arms minting the same version must not trip a
+    /// false positive) but does not yet catch a real generator bug (wrong
+    /// mutation count, wrong ordering, state leaking into a sibling arm).
+    /// Giving it that teeth requires threading the real per-arm `Bind`
+    /// producers through, which is BT-3135+'s job as it migrates the
+    /// mutation-`Bind` emission sites themselves onto `ThreadedIr`.
+    ///
     /// **Failure behavior** (ADR 0111 §The verifier): hard-fails in
     /// debug/CI via `debug_assert!`. In release builds, degrades to an
     /// internal-error diagnostic on the compile result instead of a panic
@@ -1365,20 +1385,7 @@ impl CoreErlangGenerator {
             })
             .collect();
         let errors = threaded_ir::verify_branch_frame_linearity(&arms, span);
-        if errors.is_empty() {
-            return;
-        }
-        debug_assert!(
-            false,
-            "ThreadedIr verify found a branch-frame linearity violation: {errors:?}"
-        );
-        self.add_codegen_warning(
-            Diagnostic::error(
-                format!("internal: branch-frame linearity violation: {errors:?}"),
-                span,
-            )
-            .with_category(DiagnosticCategory::Type),
-        );
+        self.report_threaded_ir_verify_errors(&errors, "branch-frame linearity violation", span);
     }
 
     /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
