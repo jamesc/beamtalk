@@ -1191,7 +1191,8 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 /// always allocates a fresh, distinct `FrameId` per arm and this function
 /// only ever synthesizes a `Bind` chain from a scalar `final_version` count
 /// (not the real per-arm mutation sequence the generator produced), no two
-/// arms can ever collide at any of today's six call sites — this smoke-tests
+/// arms can ever collide at any of today's nine call sites (BT-3134's
+/// original six plus BT-3139's three) — this smoke-tests
 /// the verifier's `FrameId`/linearity plumbing (and pins the acceptance
 /// criterion above), but cannot yet catch a real generator bug. Giving it
 /// that teeth requires threading the real per-arm `Bind` producers through,
@@ -1368,16 +1369,27 @@ pub(super) fn verify_class_var_bind(
 /// technique, generalized here to an arbitrary prefix and reused rather than
 /// re-implemented.
 ///
-/// This still catches a real structural bug class: if `target_version`
-/// collides with a version already reached by the backfilled chain (the
-/// counter re-minted a version instead of advancing past it — exactly the
-/// shape of the historical BT-3131 `self_version` "reset instead of inherit
-/// on branch entry" regression, see
-/// `verify_self_bind_would_have_caught_the_bt_3131_regression` below),
-/// `verify` reports [`VerifyError::NonLinearVersion`] (produced twice) —
-/// something no per-call-site `debug_assert!` could see, since a single
-/// mutation site has no notion of "this version number was already minted
-/// earlier in the method."
+/// **Scope, honestly stated (ADR 0111 §Verifier honesty):** each call is
+/// independently verified — `check_simple_field_bind_invariant`
+/// (`expressions.rs`) invokes this fresh per mutation site, with no
+/// generator field accumulating a method-wide `Bind` history across calls.
+/// So this catches a version going non-monotonic **within one call**
+/// (`target_version` colliding with a version the backfilled
+/// `1..=source_version` chain already reached — e.g. a broken
+/// `next_self_var()`/`next_state_var()` that returns a version `<=
+/// source_version`). It does **not** catch the historical BT-3131
+/// `self_version` "reset instead of inherit on branch entry" shape as it
+/// actually manifested: two *separate* mutation call sites each
+/// independently computing `source=0, target=1`, which are each
+/// individually valid in isolation and never compared against each other.
+/// `verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history`
+/// below demonstrates that `verify()` itself *would* catch that cross-call shape
+/// given an accumulated history — it is a test of `verify()`'s capability,
+/// not a claim about what today's isolated per-call wiring provides.
+/// Threading a real per-method `Bind` history through
+/// `check_simple_field_bind_invariant` so this call actually closes that
+/// gap is tracked as a follow-up, not attempted here (BT-3139 is scoped to
+/// coverage extension via the existing checks, not new generator state).
 pub(super) fn verify_simple_bind(
     prefix: VersionPrefix,
     source_version: usize,
@@ -2733,11 +2745,12 @@ mod tests {
 
     #[test]
     fn verify_simple_bind_fires_when_target_reuses_an_already_minted_version() {
-        // A counter bug that re-mints a version already reached earlier in
-        // the same method (instead of advancing past it) is a genuine
-        // NonLinearVersion collision — this is the shape the backfill chain
-        // exists to catch (see `verify_self_bind_would_have_caught_the_bt_3131_regression`
-        // for the historical BT-3131 instance of it).
+        // A counter bug that re-mints a version already reached earlier
+        // *within this single call's* backfilled history (instead of
+        // advancing past it) is a genuine NonLinearVersion collision — this
+        // is the within-call shape the backfill chain actually catches (see
+        // `verify_simple_bind`'s doc comment's "Scope, honestly stated"
+        // section for how this differs from the cross-call BT-3131 shape).
         let errors = verify_simple_bind(VersionPrefix::SelfVt, 2, 1, span());
         assert!(
             errors.iter().any(|e| matches!(
@@ -2749,26 +2762,29 @@ mod tests {
         );
     }
 
-    /// BT-3139 regression test: pins the historical BT-3131 `self_version`
-    /// bug shape (`with_branch_context` briefly reset `self_version` to 0 on
-    /// branch entry instead of inheriting the outer version — fixed in
-    /// commit `d436ad7`, "Fix `self_version` stale-read regression from
-    /// branch-entry reset"). Before that fix, a `self.field := ...` mutation
-    /// immediately preceding a branch (minting `Self1`) followed by another
-    /// `self.field := ...` mutation immediately *inside* the branch would —
-    /// under the reset-to-0 policy — also compute `source_version` = 0,
-    /// `target_version` = 1, re-minting the SAME `Self1` a second time. Two
-    /// `verify_simple_bind` calls, one per mutation site (exactly how
-    /// `generate_field_assignment`'s value-type branch invokes it, once per
-    /// call site, each contributing its own `Bind` to one accumulated
-    /// `verify()`-worthy history for the method), model precisely that:
-    /// `Self1` produced twice is a structural `NonLinearVersion` violation
-    /// `verify` now reports, which a bare per-call-site `debug_assert!`
-    /// (what existed instead of this fixture before BT-3139) could never
-    /// see, since it has no notion of a version already minted elsewhere in
-    /// the method.
+    /// Demonstrates that `verify()` itself *would* catch the historical
+    /// BT-3131 `self_version` bug shape (`with_branch_context` briefly reset
+    /// `self_version` to 0 on branch entry instead of inheriting the outer
+    /// version — fixed in commit `d436ad7`, "Fix `self_version` stale-read
+    /// regression from branch-entry reset") *if* the two mutation call
+    /// sites' `Bind`s were accumulated into one shared history before
+    /// verifying — a `self.field := ...` immediately preceding a branch
+    /// (minting `Self1`) followed by another `self.field := ...`
+    /// immediately *inside* the branch would, under the reset-to-0 policy,
+    /// also compute `source_version = 0, target_version = 1`, re-minting the
+    /// SAME `Self1` a second time, which `verify()` reports as
+    /// `NonLinearVersion`.
+    ///
+    /// **This is NOT a regression test for `check_simple_field_bind_invariant`
+    /// / `verify_simple_bind`'s real production wiring** — see
+    /// `verify_simple_bind`'s doc comment's "Scope, honestly stated" section.
+    /// That wiring verifies each mutation site in isolation with no
+    /// accumulated method-wide history, so it would NOT catch this exact
+    /// bug shape today; this test only proves the underlying `verify()`
+    /// primitive is capable of it, motivating the follow-up to thread real
+    /// history through.
     #[test]
-    fn verify_self_bind_would_have_caught_the_bt_3131_regression() {
+    fn verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history() {
         let span = span();
         // outer: self.x := 1, before the branch (correct: source 0, target 1).
         let mut ir = verify_bind_ir_for_test(VersionPrefix::SelfVt, 0, 1, span);
