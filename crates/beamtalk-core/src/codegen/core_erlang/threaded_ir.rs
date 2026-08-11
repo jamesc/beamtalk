@@ -1191,7 +1191,8 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 /// always allocates a fresh, distinct `FrameId` per arm and this function
 /// only ever synthesizes a `Bind` chain from a scalar `final_version` count
 /// (not the real per-arm mutation sequence the generator produced), no two
-/// arms can ever collide at any of today's six call sites — this smoke-tests
+/// arms can ever collide at any of today's nine call sites (BT-3134's
+/// original six plus BT-3139's three) — this smoke-tests
 /// the verifier's `FrameId`/linearity plumbing (and pins the acceptance
 /// criterion above), but cannot yet catch a real generator bug. Giving it
 /// that teeth requires threading the real per-arm `Bind` producers through,
@@ -1340,6 +1341,80 @@ pub(super) fn verify_class_var_bind(
             span,
         },
     ])
+}
+
+// ─── Simple version-bind construction (BT-3139) ────────────────────────────
+
+/// Builds and verifies a minimal `ThreadedIr` fixture for a single `Self{N}`
+/// or `State{N}` version `Bind`, given the real source/target version
+/// numbers already read off the live generator counter at the call site
+/// (BT-3139: `generate_field_assignment`'s value-type and instance-actor
+/// branches, `expressions.rs` around lines 634/664 — the two sibling
+/// branches of the class-var branch [`verify_class_var_bind`] already
+/// covers, BT-3135). Reused for both prefixes instead of copy-pasting
+/// [`verify_class_var_bind`]'s body three times (CLAUDE.md's
+/// no-duplicate-implementations rule).
+///
+/// Unlike [`verify_class_var_bind`] (which always checks a fixed `0 -> 1`
+/// step, since its only interesting invariant is `ShadowWriteMissing`, not
+/// version linearity — see its own doc comment), this helper is handed the
+/// *actual* version numbers, which may already be arbitrarily large after
+/// earlier mutations in the same method. [`VerifyWalk::check_use`]'s
+/// frame-flow rule requires every version `>0` referenced as a `Bind`'s
+/// source to have a producing `Bind` visible on the frame stack — so without
+/// backfilling that history, every mutation past a method's first would
+/// spuriously fail `UnboundVersion` (its `source_version` would have no
+/// producer in an isolated single-`Bind` fixture). The backfill chain
+/// (`1..=source_version`) is exactly [`verify_branch_frame_linearity`]'s own
+/// technique, generalized here to an arbitrary prefix and reused rather than
+/// re-implemented.
+///
+/// **Scope, honestly stated (ADR 0111 §Verifier honesty):** each call is
+/// independently verified — `check_simple_field_bind_invariant`
+/// (`expressions.rs`) invokes this fresh per mutation site, with no
+/// generator field accumulating a method-wide `Bind` history across calls.
+/// So this catches a version going non-monotonic **within one call**
+/// (`target_version` colliding with a version the backfilled
+/// `1..=source_version` chain already reached — e.g. a broken
+/// `next_self_var()`/`next_state_var()` that returns a version `<=
+/// source_version`). It does **not** catch the historical BT-3131
+/// `self_version` "reset instead of inherit on branch entry" shape as it
+/// actually manifested: two *separate* mutation call sites each
+/// independently computing `source=0, target=1`, which are each
+/// individually valid in isolation and never compared against each other.
+/// `verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history`
+/// below demonstrates that `verify()` itself *would* catch that cross-call shape
+/// given an accumulated history — it is a test of `verify()`'s capability,
+/// not a claim about what today's isolated per-call wiring provides.
+/// Threading a real per-method `Bind` history through
+/// `check_simple_field_bind_invariant` so this call actually closes that
+/// gap is tracked as a follow-up, not attempted here (BT-3139 is scoped to
+/// coverage extension via the existing checks, not new generator state).
+pub(super) fn verify_simple_bind(
+    prefix: VersionPrefix,
+    source_version: usize,
+    target_version: usize,
+    span: Span,
+) -> Vec<VerifyError> {
+    let frame = FrameId::ROOT;
+    let mut ir = Vec::with_capacity(source_version + 1);
+    for v in 1..=source_version {
+        ir.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(prefix.clone(), v, frame),
+            source: VersionedVar::new(prefix.clone(), v - 1, frame),
+            op: BindOp::Direct(ValueRef::Literal("'_'")),
+            shadow_write: false,
+            span,
+        });
+    }
+    ir.push(ThreadedStmt::Bind {
+        target: VersionedVar::new(prefix.clone(), target_version, frame),
+        source: VersionedVar::new(prefix, source_version, frame),
+        op: BindOp::Direct(ValueRef::Literal("'_'")),
+        shadow_write: false,
+        span,
+    });
+    verify(&ir)
 }
 
 // ─── Phase A0 measurement prototype ────────────────────────────────────────
@@ -2630,5 +2705,123 @@ mod tests {
         // at_method_top_frame: false, so this stays silent unconditionally.
         let op = BindOp::Direct(ValueRef::Var("_CV0".to_string()));
         assert_eq!(verify_class_var_bind(op, false, false, span()), Vec::new());
+    }
+
+    // ── verify_simple_bind (BT-3139) ──────────────────────────────────────
+    // Pins the new coverage for `generate_field_assignment`'s two previously
+    // uninstrumented sibling branches (`Self{N}`/`State{N}`), which — unlike
+    // the class-var branch — construct zero `ThreadedIr` fixture on `main`
+    // today.
+
+    #[test]
+    fn verify_simple_bind_silent_on_a_method_first_mutation() {
+        // The first `self.field := ...`/actor state mutation in a method:
+        // source_version == 0 (the bare `Self`/`State` parameter, always
+        // bound), target_version == 1.
+        assert_eq!(
+            verify_simple_bind(VersionPrefix::SelfVt, 0, 1, span()),
+            Vec::new()
+        );
+        assert_eq!(
+            verify_simple_bind(VersionPrefix::State, 0, 1, span()),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn verify_simple_bind_silent_after_several_prior_mutations() {
+        // A later mutation in the same method (source_version > 0) must not
+        // spuriously fire UnboundVersion — the whole point of this helper's
+        // backfill chain over `verify_class_var_bind`'s fixed `0 -> 1`.
+        assert_eq!(
+            verify_simple_bind(VersionPrefix::SelfVt, 4, 5, span()),
+            Vec::new()
+        );
+        assert_eq!(
+            verify_simple_bind(VersionPrefix::State, 7, 8, span()),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn verify_simple_bind_fires_when_target_reuses_an_already_minted_version() {
+        // A counter bug that re-mints a version already reached earlier
+        // *within this single call's* backfilled history (instead of
+        // advancing past it) is a genuine NonLinearVersion collision — this
+        // is the within-call shape the backfill chain actually catches (see
+        // `verify_simple_bind`'s doc comment's "Scope, honestly stated"
+        // section for how this differs from the cross-call BT-3131 shape).
+        let errors = verify_simple_bind(VersionPrefix::SelfVt, 2, 1, span());
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::NonLinearVersion { var, producers: 2, .. }
+                    if *var == VersionedVar::new(VersionPrefix::SelfVt, 1, FrameId::ROOT)
+            )),
+            "expected a NonLinearVersion collision on version 1, got: {errors:?}"
+        );
+    }
+
+    /// Demonstrates that `verify()` itself *would* catch the historical
+    /// BT-3131 `self_version` bug shape (`with_branch_context` briefly reset
+    /// `self_version` to 0 on branch entry instead of inheriting the outer
+    /// version — fixed in commit `d436ad7`, "Fix `self_version` stale-read
+    /// regression from branch-entry reset") *if* the two mutation call
+    /// sites' `Bind`s were accumulated into one shared history before
+    /// verifying — a `self.field := ...` immediately preceding a branch
+    /// (minting `Self1`) followed by another `self.field := ...`
+    /// immediately *inside* the branch would, under the reset-to-0 policy,
+    /// also compute `source_version = 0, target_version = 1`, re-minting the
+    /// SAME `Self1` a second time, which `verify()` reports as
+    /// `NonLinearVersion`.
+    ///
+    /// **This is NOT a regression test for `check_simple_field_bind_invariant`
+    /// / `verify_simple_bind`'s real production wiring** — see
+    /// `verify_simple_bind`'s doc comment's "Scope, honestly stated" section.
+    /// That wiring verifies each mutation site in isolation with no
+    /// accumulated method-wide history, so it would NOT catch this exact
+    /// bug shape today; this test only proves the underlying `verify()`
+    /// primitive is capable of it, motivating the follow-up to thread real
+    /// history through.
+    #[test]
+    fn verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history() {
+        let span = span();
+        // outer: self.x := 1, before the branch (correct: source 0, target 1).
+        let mut ir = verify_bind_ir_for_test(VersionPrefix::SelfVt, 0, 1, span);
+        // buggy: self.y := 2, immediately inside a `with_branch_context` arm
+        // whose entry wrongly reset `self_version` to 0 instead of
+        // inheriting the outer value of 1 — recomputes source 0, target 1.
+        ir.extend(verify_bind_ir_for_test(VersionPrefix::SelfVt, 0, 1, span));
+
+        let errors = verify(&ir);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::NonLinearVersion { var, producers: 2, .. }
+                    if *var == VersionedVar::new(VersionPrefix::SelfVt, 1, FrameId::ROOT)
+            )),
+            "expected the reset-on-entry bug to collide on Self1, got: {errors:?}"
+        );
+    }
+
+    /// Builds the same single-`Bind` IR fragment `verify_simple_bind` would
+    /// verify in isolation, but without calling `verify` itself — lets the
+    /// BT-3131 regression test above accumulate two call sites' fixtures
+    /// into one shared history before verifying, exactly as two real
+    /// `generate_field_assignment` call sites in the same method would both
+    /// contribute `Bind`s toward the same method-wide `Self{N}` sequence.
+    fn verify_bind_ir_for_test(
+        prefix: VersionPrefix,
+        source_version: usize,
+        target_version: usize,
+        span: Span,
+    ) -> Vec<ThreadedStmt> {
+        vec![ThreadedStmt::Bind {
+            target: VersionedVar::new(prefix.clone(), target_version, FrameId::ROOT),
+            source: VersionedVar::new(prefix, source_version, FrameId::ROOT),
+            op: BindOp::Direct(ValueRef::Literal("'_'")),
+            shadow_write: false,
+            span,
+        }]
     }
 }

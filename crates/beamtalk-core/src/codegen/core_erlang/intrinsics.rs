@@ -1678,13 +1678,18 @@ impl CoreErlangGenerator {
         // Actor/REPL context: use StateAcc-based inlining (generate_conditional_branch_inline)
         let outer_state = self.current_state_var();
 
-        let (branch_doc, _) = self.with_branch_context(|this| {
+        let (branch_doc, branch_final) = self.with_branch_context(|this| {
             // Set repl_loop_mutated so the REPL module unpacks the {Result, State} tuple
             if this.is_repl_mode() {
                 this.set_repl_loop_mutated(true);
             }
             this.generate_conditional_branch_inline(block)
         })?;
+        // BT-3139: REPL-mode conditional-branch inlining — the third
+        // with_branch_context site that never got a
+        // verify_branch_frame_linearity fixture (BT-3134 covered
+        // conditionals.rs/exception_handling.rs only).
+        self.check_branch_frame_linearity(&[branch_final], block.span);
 
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arg_bindings.len() + 2);
         parts.extend(arg_bindings);
