@@ -1179,7 +1179,7 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 /// always allocates a fresh, distinct `FrameId` per arm and this function
 /// only ever synthesizes a `Bind` chain from a scalar `final_version` count
 /// (not the real per-arm mutation sequence the generator produced), no two
-/// arms can ever collide at any of today's four call sites — this smoke-tests
+/// arms can ever collide at any of today's six call sites — this smoke-tests
 /// the verifier's `FrameId`/linearity plumbing (and pins the acceptance
 /// criterion above), but cannot yet catch a real generator bug. Giving it
 /// that teeth requires threading the real per-arm `Bind` producers through,
