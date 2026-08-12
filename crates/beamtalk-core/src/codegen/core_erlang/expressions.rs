@@ -707,7 +707,7 @@ impl CoreErlangGenerator {
                 class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write,
-            shadow_write, // at_method_top_frame == block_depth == 0, same value
+            self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
             source_version,
             target_version,
             value.span(),
