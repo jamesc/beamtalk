@@ -1396,6 +1396,67 @@ worked.
    paragraph) — BT-3146 itself still needs its own separate
    Addendum-2-style per-shape design pass, out of this issue's scope.
 
+## Addendum 5 (2026-08-12): BT-3148 re-attempt — tasks 1/2/4 landed, measurement result
+
+This concretely-scoped re-attempt landed steps 1-6 of Addendum 4's checklist:
+`ThreadedStmt::Statement` + the `TokenId` mint-order fix (already shipped,
+commit `699bae82`), then task 1 (routing unification —
+`gen_server/methods.rs::lower_body_exprs_with_reply` builds one real
+`Vec<ThreadedStmt>` per Actor method body; `RoutingMismatch` and both
+`verify_routing_invariant` call sites deleted), task 2 (the two named
+`wrap_body_with_nlr_catch` call sites — `generate_method_dispatch`'s Actor
+path and `generate_class_method_functions`'s class-method path — now prepend
+a real `NlrCatch` stmt, token minted before lowering), and task 4 (audited:
+`ThreadingBoundary` survives, narrowed to `threading_result_tail`'s pure
+reply-shape-adapter duty — see `threaded_expr.rs`'s own module-doc addendum
+for the full audit). Step 7 (full `just ci` exit criteria) passed: the
+5666-test Rust suite, 478-case snapshot corpus, 233 stdlib tests, 3216 BUnit
+tests, 7460 Erlang runtime unit tests, and 520 metamorphic assertions all
+pass byte-identically against both the pre-existing snapshot corpus and the
+`class_var_shadow_contract` conformance fixture.
+
+**Not attempted** (scope boundary, not a gap in what was promised): the
+class-method body pipeline (`generate_class_method_body`) is a separate,
+hand-written `Document` builder pre-dating `BodyExprKind`/`classify_body_expr`
+entirely, so its NLR wrap carries its output as one opaque `Statement` rather
+than a fully-classified `Vec<ThreadedStmt>` — converting it is a peer
+migration of comparable size, out of this issue's scope. Consequence,
+restating this addendum's own "Descope alternative" concern: `VerifyError::
+ShadowWriteMissing` still cannot see a real class-var `Bind` jointly with this
+now-real class-method `NlrCatch` — the mint-order hazard (Gap 3) is fixed in
+production for both boundaries, but the ADR 0110 joint-visibility gap the
+descope note named stays open until that pipeline gets its own migration.
+The 5 other `wrap_body_with_nlr_catch` call sites beyond the two this
+addendum names (`gen_server/dispatch.rs`, `gen_server/extensions.rs` ×2,
+`value_type_codegen.rs`, `actor_codegen.rs`,
+`generate_class_method_fun_from_block`) are untouched.
+
+**Measurement gate.** Unlike BT-3145's flag-gated pilot, task 1 replaces the
+Actor body-generation path outright (no on/off flag — `RoutingMismatch` is
+unrepresentable by construction, so there is no second path left to gate),
+so "matched conditions" here means two separate release binaries (baseline
+commit `699bae82` vs. this re-attempt's `HEAD`), `beamtalk build-stdlib`
+(real stdlib corpus), cold `ebin/` each run, 8 runs per side (double
+BT-3145's n=4, given this migration's larger surface):
+
+| | wall-clock (s) | user CPU (s) |
+|---|---|---|
+| baseline (mean of 8) | 7.80 (range 6.50–9.46) | 10.76 |
+| this re-attempt (mean of 8) | 6.96 (range 6.39–7.42) | 10.77 |
+| Δ | −10.8% | **+0.10%** |
+
+Same disagreement-by-an-order-of-magnitude pattern Addendum 3 found, for the
+same reason: this machine's shared/virtualized environment makes wall-clock
+noisy (baseline's own 8 runs span 6.50–9.46s, a 45% spread within one
+unchanged binary — clearly scheduling jitter, not signal), while user CPU
+time is comparatively stable and is the number Addendum 3 itself named as
+the more trustworthy read of actual compute cost. Read on user CPU: **+0.10%,
+inside the ≤3% gate with wide margin** — consistent with what the change
+architecturally is (the same codegen calls, now populating a `Vec<ThreadedStmt>`
+instead of a `Vec<Document>` directly, plus one linear `verify()` pass per
+body). **Gate cleared; the new path ships as the unconditional default**
+(there being no flag to leave off).
+
 ## Context
 
 ### Problem statement

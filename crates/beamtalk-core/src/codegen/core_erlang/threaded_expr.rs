@@ -39,9 +39,34 @@
 //! element 2 of the construct's `{Value, NewState}` tuple **is** the `gen_server` `State`
 //! map (with `__local__`-prefixed local keys threaded in). The boundary therefore binds
 //! element 2 to the next state version and threads it onward, supplying that primitive
-//! via [`CoreErlangGenerator::lower_actor_threaded_last`] /
-//! [`CoreErlangGenerator::emit_actor_threaded_assign_rhs`] — a genuine *extension* of the
-//! seam, not a fold of the existing `{Value, StateAcc}` transform.
+//! via [`CoreErlangGenerator::emit_actor_threaded_last_stmts`] /
+//! [`CoreErlangGenerator::emit_actor_threaded_assign_rhs_stmts`] — a genuine *extension* of
+//! the seam, not a fold of the existing `{Value, StateAcc}` transform.
+//!
+//! ## BT-3148 task 4: `ThreadingBoundary` audit — survives, narrowed to one job
+//!
+//! ADR 0111 Addendum 4 asked whether `ThreadingBoundary` survives BT-3148's routing
+//! unification (task 1) as pure lowering-time classification, or is fully replaced.
+//! Audited: it **survives**, but its job has narrowed to exactly one thing —
+//! [`CoreErlangGenerator::threading_result_tail`]'s return-shape adapter (which
+//! `{Result, ...}` Document a bound value renders as). Its *other*, pre-BT-3148 job —
+//! deciding whether a construct routes through the shared emitter at all, by rechecking
+//! [`CoreErlangGenerator::control_flow_has_mutations`] a second time — is gone:
+//! [`CoreErlangGenerator::lower_threaded_last`] and
+//! [`CoreErlangGenerator::emit_threaded_assign_rhs`] no longer take a `boundary` param to
+//! redirect on (`ThreadingBoundary::Actor` used to short-circuit both into the Actor
+//! transform below); the Actor path is now reached directly, by construction, from
+//! `gen_server/methods.rs`'s already-classified `BodyExprKind::ControlFlowWithMutations`/
+//! `LocalAssignControlFlow` arms calling [`CoreErlangGenerator::emit_actor_threaded_last_stmts`]/
+//! [`CoreErlangGenerator::emit_actor_threaded_assign_rhs_stmts`] — functions that take no
+//! `boundary` at all and never decline. `ThreadingBoundary::Actor` itself still exists,
+//! with exactly one remaining construction site (`emit_actor_threaded_last_stmts`, passed
+//! straight to `threading_result_tail`) and one remaining match site
+//! (`threading_result_tail`'s own `match`) — a pure per-context reply-shape selector, not
+//! a routing decision. `classify_body_expr` (`gen_server/methods.rs`) is now the sole
+//! caller of `control_flow_has_mutations` for this routing question; every other call site
+//! of that function is for an unrelated purpose (conditionals/exception-handling/match-arm
+//! classification), never a second recheck of the same Actor-body-mutation question.
 
 use super::document::{Document, leaf};
 use super::threaded_ir::{BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};

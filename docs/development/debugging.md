@@ -191,7 +191,15 @@ where to start reading:
 | `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). |
 | `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning (unreachable today via `select_tuple_acc`'s own early-return). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
 | `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
-| `RoutingMismatch` | `gen_server/methods.rs`'s upfront `classify_body_expr` classification (`BodyExprKind::LocalAssignControlFlow` / `ControlFlowWithMutations`) committed a construct to the shared Actor `threaded_expr.rs` emitter, but that emitter's own downstream recheck declined and fell through to the generic path instead — the structural replacement for the two `gen_server/methods.rs` routing `debug_assert!`s BT-3135 deleted. | `gen_server/methods.rs`'s `classify_body_expr` vs. `threaded_expr.rs`'s `control_flow_has_mutations`. |
+
+`RoutingMismatch` (BT-3135's structural replacement for the two
+`gen_server/methods.rs` routing `debug_assert!`s) was itself deleted by
+BT-3148 (ADR 0111 Addendum 4): `classify_body_expr`'s upfront classification
+is now the *only* computation deciding whether a construct routes through
+the shared Actor `threaded_expr.rs` emitter (`emit_actor_threaded_last_stmts`/
+`emit_actor_threaded_assign_rhs_stmts`, which never decline) — there is no
+second, independently-computed recheck left to disagree with the first, so
+the mismatch this variant caught is unrepresentable by construction.
 
 `just verify-threaded-ir` (wired into `just ci`) compiles the full
 `stdlib/test/*.bt` + `stdlib/bootstrap-test/*.btscript` corpus in a debug

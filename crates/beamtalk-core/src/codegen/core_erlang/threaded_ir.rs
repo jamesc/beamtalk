@@ -51,7 +51,7 @@
 //! deleting it) — see BT-3145's Linear issue for the full evidentiary trail
 //! and the ≤3% gate's outcome.
 //!
-//! ## Status (as of BT-3148 — partial: class-var Bind producers only)
+//! ## Status (as of BT-3148 re-attempt — see ADR 0111 Addendum 4)
 //!
 //! BT-3148 ("the deepest slice") targeted four sub-tasks: (1) unify
 //! `gen_server/methods.rs`'s upfront `classify_body_expr` routing
@@ -67,34 +67,61 @@
 //! `Document` that mirrors it; (4) `threaded_expr.rs`'s `ThreadingBoundary`
 //! adapter absorbed into or replaced by the IR path.
 //!
-//! **Only (3) landed.** [`construct_and_verify_class_var_bind`] replaces the
-//! deleted `verify_class_var_bind` fixture-mirror: both class-var Bind
-//! producer sites now construct a real `Bind` carrying the actual
-//! `source_version`/`target_version` read off the live generator counter,
-//! verify it, and render it through [`render`] — [`render_bind`]'s
-//! `BindOp::Put` arm is the only place the ADR 0110 shadow write is
-//! constructed in either the verification path or the emitted `Document`.
-//! The existing `invoke_class_method/7` cross-boundary conformance fixture
-//! (`tests/class_var_shadow_contract.rs`) and the full
-//! `compiles_through_erlc`/snapshot-corpus suite pin that this produces
-//! byte-identical output to the hand-rolled `Document` it replaces.
+//! **(3) landed first** (as above). A first re-attempt at (1)/(2)/(4) found
+//! them blocked on a real gap — no `ThreadedStmt` node existed for "an
+//! ordinary AST-directed statement, sitting in a straight-line body next to
+//! real `Bind`s, that this pass doesn't need to understand" (~15 of
+//! `classify_body_expr`'s `BodyExprKind` variants: message sends, dispatch,
+//! Tier 2 calls, `EarlyReturn`, …) — split out and designed separately as
+//! [`ThreadedStmt::Statement`] (BT-3156, ADR 0111 Addendum 4).
 //!
-//! **(1), (2), (4) were investigated and NOT attempted** — closing them
-//! requires a real method-body-wide IR (every ordinary AST-directed
-//! statement — message sends, dispatch, Tier 2 calls, `EarlyReturn`, the
-//! other ~15 `BodyExprKind` variants `gen_server/methods.rs` classifies —
-//! embeddable in a straight-line `Vec<ThreadedStmt>` alongside `Bind`, so
-//! `wrap_body_with_nlr_catch`'s `body_doc` can become a real `NlrCatch`'s
-//! *rest-of-slice* body the way [`render`]'s `NlrCatch` arm already expects
-//! production callers to supply it). That is architecturally a peer of
-//! BT-3145's `ConditionalLoop`/`Gensym`/`ValueRef::Doc` gaps (Addendum 2),
-//! not a variant of the class-var Bind shape (3) closed — a full
-//! `Threaded`/`Bind` sequence can already represent state-only bodies, but
-//! `gen_server` method bodies are NOT state-only; ordinary control-flow-free
-//! statements have no IR representation today. Closing it is scoped as a
-//! design-detour follow-up (mirroring BT-3145's BT-3153 ADR-amendment
-//! pattern), not attempted inline here — see the BT-3148 Linear issue for
-//! the full investigation trail and source citations.
+//! **This re-attempt lands (1), (2), and (4).**
+//! `gen_server/methods.rs::lower_body_exprs_with_reply` builds one real
+//! `Vec<ThreadedStmt>` per Actor method body: mutating `BodyExprKind`
+//! variants construct real `Bind`s (generalizing (3)'s
+//! `construct_and_verify_class_var_bind` pattern to the `State` prefix, via
+//! `BindOp::Put` for static field names and the `Direct(ValueRef::Doc(...))`
+//! two-hop idiom for computed map sources); every other variant is a
+//! [`ThreadedStmt::Statement`]. [`verify_body_with_opaque_version_gaps`]
+//! verifies the real sequence **once** per body (backfilling the `State`
+//! version steps hidden inside shared multi-module helpers —
+//! `generate_self_dispatch_open`, `emit_super_send_open`,
+//! `generate_tier2_self_send_open`, `generate_field_assignment_open`,
+//! `generate_self_field_at_put_open` — whose own internal `next_state_var`
+//! calls have no `Bind` node in this body's IR), replacing every
+//! per-call-site fixture-and-discard `verify_*` wrapper this slice had.
+//! `RoutingMismatch` is deleted along with both `verify_routing_invariant`
+//! call sites: `classify_body_expr` is now the *only* computation deciding
+//! whether a construct routes through the Actor threaded emitter
+//! (`threaded_expr.rs`'s `emit_actor_threaded_last_stmts`/
+//! `emit_actor_threaded_assign_rhs_stmts`, which never decline), so the "two
+//! independently-computed decisions must agree" shape the check existed for
+//! is unrepresentable by construction. `generate_method_dispatch`'s real
+//! NLR call site now mints its token before lowering (production's real
+//! order, per Addendum 4 §Gap 3) and prepends a real
+//! `ThreadedStmt::NlrCatch` to the body's own sequence rather than rendering
+//! the body first and wrapping the `Document` after; the class-method NLR
+//! call site (`generate_class_method_functions`) does the same, with its
+//! own (still hand-written, not `BodyExprKind`-classified)
+//! `generate_class_method_body` output riding as one opaque `Statement`
+//! after the real `NlrCatch`. `ThreadingBoundary` (4) survives, audited and
+//! narrowed to its pure per-context reply-shape adapter duty — see
+//! `threaded_expr.rs`'s module doc, "BT-3148 task 4" — now that
+//! `classify_body_expr` is the sole routing decision it no longer also
+//! rechecks `control_flow_has_mutations` to redirect.
+//!
+//! **Not attempted in this pass:** the class-method body pipeline
+//! (`generate_class_method_body` and its helpers) is a separate,
+//! hand-written `Document` builder that predates `BodyExprKind`/
+//! `classify_body_expr` entirely — it was never in task 1's scope (which is
+//! Actor-body routing specifically) and converting it to produce its own
+//! `Vec<ThreadedStmt>` would be a peer migration of comparable size to this
+//! one, not a subtask of it; the 5 other `wrap_body_with_nlr_catch` call
+//! sites beyond the two ADR 0111 Addendum 4 §"concretely" names
+//! (`gen_server/dispatch.rs`, `gen_server/extensions.rs` ×2,
+//! `value_type_codegen.rs`, `actor_codegen.rs`,
+//! `generate_class_method_fun_from_block`) likewise still wrap a rendered
+//! `Document` rather than carrying a real `NlrCatch` node.
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
@@ -866,18 +893,6 @@ pub(super) enum VerifyError {
     /// `!effects.has_non_tuple_safe_list_op` guard is ever dropped or
     /// reordered past the point where `DirectParams` is selected.
     NestedStateAccFallbackUnderDirectParams { at: Span },
-
-    /// BT-3135: replaces the two `gen_server/methods.rs` routing
-    /// `debug_assert!`s (`:1258`/`:1450`, pre-BT-3135) as a structural
-    /// property: `classify_body_expr`'s upfront classification
-    /// (`BodyExprKind::LocalAssignControlFlow` /
-    /// `BodyExprKind::ControlFlowWithMutations`) commits a construct to
-    /// routing through the shared Actor `threaded_expr.rs` emitter: the
-    /// emitter's own downstream `control_flow_has_mutations` recheck MUST
-    /// also recognize it (`Ok(Some(_))`/`Ok(true)`), not decline
-    /// (`Ok(None)`/`Ok(false)`) and fall through to the generic path. See
-    /// [`verify_routing_invariant`].
-    RoutingMismatch { at: Span },
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -2043,38 +2058,6 @@ pub(super) fn verify_branch_frame_linearity(
         });
     }
     verify(&ir)
-}
-
-// ─── Routing invariant check (BT-3135) ─────────────────────────────────────
-
-/// Replaces the two "classifier and emitter agree on Actor-threaded routing"
-/// `debug_assert!`s (`gen_server/methods.rs:1258`/`:1450`, pre-BT-3135) as a
-/// structural check: `gen_server/methods.rs`'s upfront `classify_body_expr`
-/// commits to `BodyExprKind::LocalAssignControlFlow` /
-/// `BodyExprKind::ControlFlowWithMutations` — i.e. that this construct routes
-/// through the shared Actor [`super::threaded_expr`] emitter
-/// (`emit_threaded_assign_rhs`/`emit_threaded_last`) — for exactly the
-/// expressions where [`super::CoreErlangGenerator::control_flow_has_mutations`]
-/// returns `true`. The downstream emitter re-checks the same predicate
-/// (`threaded_expr.rs`'s `lower_actor_threaded_last`/
-/// `emit_actor_threaded_assign_rhs`) against generator state that may have
-/// advanced since classification ran (Phase 1 classifies the whole body
-/// upfront; Phase 2 emits statement-by-statement, mutating `self` as it
-/// goes) — a drift between the two is exactly the "two independently
-/// computed decisions must agree" shape ADR 0111 §Current state names for
-/// both routing asserts.
-///
-/// `routed` is the emitter's own `Ok(Some(_))`/`Ok(Some(true))` outcome —
-/// this function checks what was *actually observed*, not a re-derivation of
-/// `control_flow_has_mutations` (ADR 0111 §Verifier honesty: a check
-/// comparing the generator against itself is silent when both are
-/// consistently wrong).
-pub(super) fn verify_routing_invariant(routed: bool, span: Span) -> Vec<VerifyError> {
-    if routed {
-        Vec::new()
-    } else {
-        vec![VerifyError::RoutingMismatch { at: span }]
-    }
 }
 
 // ─── Class-var Bind construction (BT-3135/BT-3148, ADR 0110 contract) ─────
@@ -3487,24 +3470,6 @@ mod tests {
             "expected NonLinearVersion for the colliding shared-frame State1, got: {errors:?}"
         );
     }
-    // ── verify_routing_invariant (BT-3135) ───────────────────────────────
-    // Pins the production replacement for `gen_server/methods.rs`'s two
-    // deleted routing `debug_assert!`s.
-
-    #[test]
-    fn verify_routing_invariant_silent_when_routed() {
-        assert_eq!(verify_routing_invariant(true, span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_routing_invariant_fires_when_not_routed() {
-        let errors = verify_routing_invariant(false, span());
-        assert_eq!(
-            errors,
-            vec![VerifyError::RoutingMismatch { at: span() }],
-            "expected RoutingMismatch, got: {errors:?}"
-        );
-    }
 
     // ── construct_and_verify_class_var_bind (BT-3135/BT-3148, ADR 0110
     // contract) ─────────────────────────────────────────────────────────
@@ -3768,6 +3733,78 @@ mod tests {
             shadow_write: false,
             span,
         }]
+    }
+
+    // ── verify_body_with_opaque_version_gaps (BT-3148) ───────────────────
+    // Pins the whole-Actor-body verification `lower_body_exprs_with_reply`
+    // calls once per body: an opaque Statement standing in for a shared
+    // multi-module helper (`generate_self_dispatch_open`, …) may advance
+    // `next_state_var`'s counter with no producing Bind of its own in this
+    // body's IR — the backfill must close that gap without masking a real
+    // regression among the Binds that ARE present.
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_backfills_gap_from_opaque_statement() {
+        let span = span();
+        let ir = vec![
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+            // Stands in for a shared helper (e.g. `generate_self_dispatch_open`)
+            // that internally calls `next_state_var()` twice more, advancing
+            // State1 -> State3 with no `Bind` of its own in this body's IR.
+            ThreadedStmt::Statement(docvec!["<opaque dispatch, mints State2 and State3>"], span),
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 4, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 3, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+        ];
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert_eq!(
+            errors,
+            Vec::new(),
+            "backfilled gap should leave no UnboundVersion, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version() {
+        let span = span();
+        // Two real Binds both target State1 from State0 — a genuine
+        // duplicate-producer regression among the REAL Binds, which the
+        // gap-backfill must not paper over.
+        let ir = vec![
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+        ];
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::NonLinearVersion { var, producers: 2, .. }
+                    if *var == VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT)
+            )),
+            "expected NonLinearVersion for the duplicate State1 producer, got: {errors:?}"
+        );
     }
 
     // ── Dual-run byte-parity harness (BT-3144) ───────────────────────────
