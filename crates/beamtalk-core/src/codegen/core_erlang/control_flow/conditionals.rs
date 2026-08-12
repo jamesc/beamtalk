@@ -56,7 +56,7 @@ use super::super::gen_server::BodyExprKind;
 use super::super::threaded_ir::{
     self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::super::{CoreErlangGenerator, OpenScopeResult, Result};
 use super::StateAccFallbackReason;
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -600,19 +600,12 @@ impl CoreErlangGenerator {
                 BodyExprKind::FieldAssignment => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                            // BT-3140: preserve generate_field_assignment_open's
-                            // class-var-write rejection exactly (§Scope: class-var
-                            // mutations never legitimately reach these arms).
-                            if self.is_class_var_assignment(expr) {
-                                let location = self.span_to_line(expr.span()).map_or_else(
-                                    || format!("offset {}", expr.span().start()),
-                                    |line| format!("line {line}"),
-                                );
-                                return Err(CodeGenError::ClassVarAssignmentInThreadedBody {
-                                    field: field.name.to_string(),
-                                    location,
-                                });
-                            }
+                            // §Scope: class-var mutations never legitimately
+                            // reach these arms — shares
+                            // `generate_field_assignment_open`'s rejection via
+                            // `reject_class_var_field_assignment` (util.rs) so
+                            // the two call sites can't drift out of sync.
+                            self.reject_class_var_field_assignment(expr, field)?;
                             // §Scope: generate_field_assignment_open's hybrid
                             // full-extract sub-branch is unreachable here — a
                             // mutation-carrying conditional forces StateAcc
