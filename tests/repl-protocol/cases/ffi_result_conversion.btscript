@@ -121,4 +121,4 @@ fromTupleResult isError
 // ===========================================================================
 
 Erlang file delete: _btTmpFile
-// => _
+// => Result ok: nil
