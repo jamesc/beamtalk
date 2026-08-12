@@ -1699,7 +1699,9 @@ pass could not produce a compiled repro that reaches it *through*
 `generate_conditional_branch_inline`: the natural repro (`s15`, `Value
 subclass` with `classState`, `class m: flag => x := 1. flag ifTrue: [x :=
 self bump]. x`) routes through `value_type_codegen.rs`'s vt-conditional
-path instead (`_CondResult` wrapper, `value_type_codegen.rs:2762`) — and
+path instead (`generate_vt_conditional_branch`, `value_type_codegen.rs:3089`
+— specifically the `_CondResult` wrapper it builds,
+`value_type_codegen.rs:2762`) — and
 breaks **there**, emitting syntactically invalid Core Erlang: `let X =
 <open ClassVars unwrap chain> in  in X` (empty value doc, doubled `in`;
 erlc: "syntax error before: in") — a production bug in its own right,
@@ -2047,9 +2049,10 @@ papered over:
    [BT-3159](https://linear.app/beamtalk/issue/BT-3159)): `let X =
    <unwrap chain> in  in X` — empty value doc, doubled `in`, hard erlc
    syntax error. The emitting path is `value_type_codegen.rs`'s
-   vt-conditional local-rebind machinery (`_CondResult` wrapper,
-   `value_type_codegen.rs:2762`), not either of this addendum's two body
-   loops — but it means any `Value`/`Object` class method with
+   vt-conditional local-rebind machinery (`generate_vt_conditional_branch`,
+   `value_type_codegen.rs:3089` — specifically the `_CondResult` wrapper it
+   builds, `value_type_codegen.rs:2762`), not either of this addendum's two
+   body loops — but it means any `Value`/`Object` class method with
    `classState` doing `flag ifTrue: [x := self <classVarMutatingMethod>]`
    fails to build today, and C4 has no compilable byte-identity target.
 2. **Exception-body local-assign scope leak** (E3, repro `e04`;
