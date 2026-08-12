@@ -110,6 +110,45 @@ impl std::fmt::Display for StateAccFallbackReason {
     }
 }
 
+/// BT-3147 (ADR 0111 Phase C completion): classifies which family of
+/// `TupleAcc`-mode accumulator shape a foldl list-op uses, each with its own
+/// canonical leading gate-slot count — the reserved tuple positions ahead of
+/// the threaded locals that hold the op's own in-flight result/continuation
+/// state. This is the "per-op declaration" / lowering-time source
+/// [`threaded_ir::VerifyError::EarlyExitGateSlotMismatch`] cross-checks
+/// against the unpack node's own rendering-time `gate_slots` (each call
+/// site's own `index_offset - 1`, passed to
+/// [`ThreadingPlan::generate_tuple_unpack_docs`] unchanged since BT-3133) —
+/// see [`threaded_ir::build_tuple_acc_unpack`]'s doc comment for the full
+/// independent-derivation rationale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ListOpKind {
+    /// `do:` / dict `do:`/`doWithKey:` — no gate slots: `{Var1, ..., VarN}`.
+    Do,
+    /// `collect:`/`select:`/`reject:`/`inject:into:`/`anySatisfy:`/
+    /// `allSatisfy:`/`count:`/`flatMap:`/`groupBy:` — one gate slot
+    /// (`{Acc, Var1, ...}`).
+    Accumulate,
+    /// `detect:`/`takeWhile:`/`dropWhile:`/`partition:` — two gate slots
+    /// (`{Result1, Result2, Var1, ...}`): either an early-exit found-item/
+    /// continue-flag pair, or (`partition:`) two result lists — same shape,
+    /// different semantics, so the SAME gate-slot count applies even though
+    /// `partition:` never early-exits.
+    TwoSlot,
+}
+
+impl ListOpKind {
+    /// The canonical leading gate-slot count for this op family — the
+    /// `mode_gate_slots` half of BT-3147's independent derivation.
+    pub(super) const fn gate_slots(self) -> usize {
+        match self {
+            Self::Do => 0,
+            Self::Accumulate => 1,
+            Self::TwoSlot => 2,
+        }
+    }
+}
+
 /// Pre-computed contract for threading mutable state through a loop body.
 ///
 /// Created once per loop and shared across pack / unpack / extract steps,
@@ -139,6 +178,14 @@ pub(super) struct ThreadingPlan {
     /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`) or
     /// `{FoldAcc, Var1, ..., VarN}` (for `collect:` / `inject:`).
     pub use_tuple_acc: bool,
+    /// BT-3147: the `TupleAcc` mode's canonical leading gate-slot count,
+    /// declared at lowering time from the constructing call site's
+    /// [`ListOpKind`] (`0` for plain `Do`; see [`ListOpKind::gate_slots`]).
+    /// Only meaningful when `use_tuple_acc` is `true`; independent of each
+    /// unpack call's own `index_offset - 1` (`generate_tuple_unpack_docs`'s
+    /// `node_gate_slots`) — see
+    /// [`threaded_ir::build_tuple_acc_unpack`]'s doc comment.
+    pub tuple_acc_gate_slots: usize,
     /// BT-1326/BT-1342: When `true`, use full-extract direct-params for letrec loops.
     ///
     /// Set when the loop body has BOTH local variable mutations AND actor field mutations
@@ -294,7 +341,7 @@ impl ThreadingPlan {
         body: &crate::ast::Block,
         condition: Option<&Expression>,
     ) -> Self {
-        Self::new_impl(generator, body, condition, false, false)
+        Self::new_impl(generator, body, condition, false, None)
     }
 
     /// Creates a `ThreadingPlan` for a letrec-based loop body (whileTrue:, timesRepeat:, etc.).
@@ -308,7 +355,7 @@ impl ThreadingPlan {
         body: &crate::ast::Block,
         condition: Option<&Expression>,
     ) -> Self {
-        Self::new_impl(generator, body, condition, true, false)
+        Self::new_impl(generator, body, condition, true, None)
     }
 
     /// BT-1276: Creates a `ThreadingPlan` for a foldl list-op body with tuple accumulator
@@ -318,11 +365,17 @@ impl ThreadingPlan {
     /// mutations (no field writes, no self-sends, no complex control flow, no tier-2
     /// assignments to threaded locals). Replaces per-iteration `StateAcc` map operations
     /// with a flat tuple accumulator.
+    ///
+    /// BT-3147: `kind` declares this call site's canonical `TupleAcc` gate-slot
+    /// count ([`ListOpKind::gate_slots`]) at construction time — independent
+    /// of whatever `index_offset` the caller later passes to
+    /// [`Self::generate_tuple_unpack_docs`], see that method's doc comment.
     pub fn new_for_foldl_list_op(
         generator: &mut CoreErlangGenerator,
         body: &crate::ast::Block,
+        kind: ListOpKind,
     ) -> Self {
-        Self::new_impl(generator, body, None, false, true)
+        Self::new_impl(generator, body, None, false, Some(kind))
     }
 
     fn new_impl(
@@ -330,8 +383,9 @@ impl ThreadingPlan {
         body: &crate::ast::Block,
         condition: Option<&Expression>,
         allow_direct_params: bool,
-        allow_tuple_acc: bool,
+        tuple_acc_kind: Option<ListOpKind>,
     ) -> Self {
+        let allow_tuple_acc = tuple_acc_kind.is_some();
         if generator.is_repl_mode() {
             generator.set_repl_loop_mutated(true);
         }
@@ -367,24 +421,26 @@ impl ThreadingPlan {
             &effects,
         );
 
-        // BT-3133 (ADR 0111 Phase C, invariant class 2): pins
-        // `select_tuple_acc`'s `ValueType`-context exclusion structurally —
-        // see `check_tuple_acc_value_type_invariant`'s doc comment.
-        generator.check_tuple_acc_value_type_invariant(
-            use_tuple_acc,
-            matches!(context, CodeGenContext::ValueType),
-            body.span,
-        );
+        // BT-3133 (ADR 0111 Phase C, invariant class 2) / BT-3147: no runtime
+        // check here anymore — `select_tuple_acc`'s own `matches!(context,
+        // CodeGenContext::ValueType)` early return (above) already makes
+        // `use_tuple_acc && context_is_value_type` unconditionally
+        // unreachable BY INSPECTION of that one function, the same
+        // already-structural shape BT-3154 found for
+        // `ThreadingModeUnpackMismatch`. `VerifyError::TupleAccInValueTypeContext`,
+        // `threaded_ir::verify_tuple_acc_value_type_exclusion`, and their
+        // hand-built-IR unit tests remain as regression pins (ADR 0111
+        // §Verifier honesty) — only this now-tautological production call
+        // site is gone.
 
-        // BT-3133 (ADR 0111 Phase C, invariant class 3): pins the recursive
-        // inter-construct `list_op_needs_stateacc_fallback_recursive`
-        // invariant structurally — see
-        // `check_nested_list_op_stateacc_invariant`'s doc comment.
-        generator.check_nested_list_op_stateacc_invariant(
-            use_direct_params,
-            effects.has_non_tuple_safe_list_op,
-            body.span,
-        );
+        // BT-3133 (ADR 0111 Phase C, invariant class 3) / BT-3147: likewise
+        // no runtime check here — `select_direct_params`'s own
+        // `!effects.has_non_tuple_safe_list_op` conjunct (above) already
+        // makes `use_direct_params && effects.has_non_tuple_safe_list_op`
+        // unconditionally unreachable by the same reasoning.
+        // `VerifyError::NestedStateAccFallbackUnderDirectParams`,
+        // `threaded_ir::verify_nested_list_op_stateacc_compat`, and their
+        // hand-built-IR unit tests remain as regression pins.
 
         // BT-1326: Hybrid direct-params + State threading for letrec loops.
         let use_hybrid_params = Self::select_hybrid_params(
@@ -430,6 +486,12 @@ impl ThreadingPlan {
             vec![]
         };
 
+        // BT-3147: the mode's canonical gate-slot count, declared here at
+        // lowering time from the caller's `ListOpKind` — independent of
+        // whatever `index_offset` a later `generate_tuple_unpack_docs` call
+        // computes its own `node_gate_slots` from.
+        let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
+
         Self {
             threaded_locals,
             initial_state_var,
@@ -437,6 +499,7 @@ impl ThreadingPlan {
             context,
             use_direct_params,
             use_tuple_acc,
+            tuple_acc_gate_slots,
             use_hybrid_params,
             readonly_fields,
             fallback_reason,
@@ -902,44 +965,48 @@ impl ThreadingPlan {
     /// `index_offset` — 1-based index of the first threaded var:
     ///   - 1 for `do:` (whole tuple is the vars)
     ///   - 2 for `collect:` / `filter:` / `inject:` (slot 1 is `AccList` or `Acc`)
+    ///
+    /// BT-3147: real `ThreadedIr` emission input now — this builds
+    /// [`threaded_ir::build_tuple_acc_unpack`]'s `ThreadedStmt`, `verify()`s
+    /// it, and [`threaded_ir::render`]s it directly; the pre-BT-3147
+    /// hand-rolled `let`-chain loop and the separate verification-only
+    /// fixture it sat alongside are both gone (see `threaded_ir`'s module
+    /// docs §Status). `self.tuple_acc_gate_slots` (declared at
+    /// `ThreadingPlan` construction, from the caller's [`ListOpKind`]) and
+    /// `index_offset - 1` (this call's own, unchanged) are genuinely
+    /// independent sources for [`VerifyError::EarlyExitGateSlotMismatch`]
+    /// to cross-check — no span is available at this call depth
+    /// (`ThreadingPlan` carries none); this is a compiler-internal
+    /// invariant, not user-facing, so `Span::default()` is an acceptable
+    /// diagnostic-location gap here (mirrors `verify`'s own `produces`
+    /// check, which does the same).
     pub fn generate_tuple_unpack_docs(
         &self,
         generator: &mut CoreErlangGenerator,
         source_var: &str,
         index_offset: usize,
-    ) -> Vec<Document<'static>> {
-        // BT-3133 (ADR 0111 Phase C, invariant classes 1 + 4): this is the
-        // single production emitter of the `TupleAcc`-mode positional-unpack
-        // shape across every list-op and dict-op call site — see
-        // `check_tuple_acc_unpack_invariant`'s doc comment. No span is
-        // available at this call depth (`ThreadingPlan` carries none); this
-        // is a compiler-internal invariant, not user-facing, so
-        // `Span::default()` is an acceptable diagnostic-location gap here
-        // (mirrors `verify`'s own `produces` check, which does the same).
-        generator.check_tuple_acc_unpack_invariant(
-            self.use_tuple_acc,
-            self.fallback_reason.clone(),
-            &self.threaded_locals,
+    ) -> Document<'static> {
+        let (stmt, targets) = threaded_ir::build_tuple_acc_unpack(
+            source_var,
+            self.tuple_acc_gate_slots,
             index_offset.saturating_sub(1),
+            &self.threaded_locals,
             Span::default(),
         );
 
-        let mut docs = Vec::new();
-        for (i, var_name) in self.threaded_locals.iter().enumerate() {
-            let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
-            let idx = index_offset + i;
-            generator.bind_var(var_name, &core_var);
-            docs.push(docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
-                ", ",
-                leaf::var(source_var.to_string()),
-                ") in ",
-            ]);
+        let errors = threaded_ir::verify(std::slice::from_ref(&stmt));
+        generator.report_threaded_ir_verify_errors(
+            &errors,
+            "tuple-acc positional-unpack mode/shape mismatch",
+            Span::default(),
+        );
+
+        for (var_name, target) in self.threaded_locals.iter().zip(&targets) {
+            generator.bind_var(var_name, &target.render_name());
         }
-        docs
+
+        let mut ctx = threaded_ir::RenderCtx::new(generator);
+        threaded_ir::render(std::slice::from_ref(&stmt), &mut ctx)
     }
 
     /// Returns element-extraction code after foldl completes for tuple mode as a `Document`.
@@ -1191,86 +1258,6 @@ impl CoreErlangGenerator {
                 span,
             );
         }
-    }
-
-    /// BT-3133 (ADR 0111 Phase C) invariant classes 1 + 4: checks the
-    /// `TupleAcc` mode's flat positional-unpack accumulator discipline via
-    /// [`threaded_ir::verify_tuple_acc_unpack_invariant`]. Single-sourced at
-    /// [`ThreadingPlan::generate_tuple_unpack_docs`] — the sole emitter of
-    /// this unpack shape across every list-op and dict-op call site — so one
-    /// call site here covers `do:`, `collect:`, `select:`/`reject:`,
-    /// `inject:into:`, `anySatisfy:`/`allSatisfy:`, `detect:`,
-    /// `takeWhile:`/`dropWhile:`, and dictionary `do:`.
-    ///
-    /// `gate_slots` is the caller's own already-computed `index_offset - 1`;
-    /// see [`threaded_ir::ThreadingMode::TupleAcc`]'s doc comment for what
-    /// each list-op family's `gate_slots` value means.
-    pub(super) fn check_tuple_acc_unpack_invariant(
-        &mut self,
-        use_tuple_acc: bool,
-        fallback_reason: StateAccFallbackReason,
-        threaded_locals: &[String],
-        gate_slots: usize,
-        span: Span,
-    ) {
-        let errors = threaded_ir::verify_tuple_acc_unpack_invariant(
-            use_tuple_acc,
-            fallback_reason,
-            threaded_locals,
-            gate_slots,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &errors,
-            "tuple-acc positional-unpack mode/shape mismatch",
-            span,
-        );
-    }
-
-    /// BT-3133 (ADR 0111 Phase C) invariant class 2: pins `select_tuple_acc`'s
-    /// `ValueType`-context exclusion via
-    /// [`threaded_ir::verify_tuple_acc_value_type_exclusion`]. Called once
-    /// per loop, immediately after `use_tuple_acc` is resolved in
-    /// [`ThreadingPlan::new_impl`].
-    pub(super) fn check_tuple_acc_value_type_invariant(
-        &mut self,
-        use_tuple_acc: bool,
-        context_is_value_type: bool,
-        span: Span,
-    ) {
-        let errors = threaded_ir::verify_tuple_acc_value_type_exclusion(
-            use_tuple_acc,
-            context_is_value_type,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &errors,
-            "tuple-acc selected in ValueType context",
-            span,
-        );
-    }
-
-    /// BT-3133 (ADR 0111 Phase C) invariant class 3: pins the recursive
-    /// inter-construct `list_op_needs_stateacc_fallback_recursive` invariant
-    /// via [`threaded_ir::verify_nested_list_op_stateacc_compat`]. Called
-    /// once per loop, immediately after `use_direct_params` is resolved in
-    /// [`ThreadingPlan::new_impl`].
-    pub(super) fn check_nested_list_op_stateacc_invariant(
-        &mut self,
-        direct_params_selected: bool,
-        inner_needs_stateacc_fallback: bool,
-        span: Span,
-    ) {
-        let errors = threaded_ir::verify_nested_list_op_stateacc_compat(
-            direct_params_selected,
-            inner_needs_stateacc_fallback,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &errors,
-            "nested list-op StateAcc fallback under DirectParams",
-            span,
-        );
     }
 
     /// Shared failure-reporting path for every `ThreadedIr` production
@@ -3893,6 +3880,7 @@ mod tests {
             context: CodeGenContext::Actor,
             use_direct_params,
             use_tuple_acc,
+            tuple_acc_gate_slots: 0,
             use_hybrid_params,
             readonly_fields,
             fallback_reason: StateAccFallbackReason::None,

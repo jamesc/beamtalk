@@ -13,7 +13,7 @@ use super::super::document::Document;
 use super::super::document::leaf;
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
-use super::{BodyKind, ThreadingPlan};
+use super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -53,7 +53,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let dict_var = self.fresh_temp_var("temp");
@@ -87,7 +87,7 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
+            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
@@ -245,7 +245,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let dict_var = self.fresh_temp_var("temp");
@@ -295,7 +295,7 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.get(1) {
                 self.bind_var(&param.name, &val_var);
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
+            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;

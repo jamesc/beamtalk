@@ -8,7 +8,7 @@ use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
-use super::super::{BodyKind, ThreadingPlan};
+use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -81,7 +81,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -119,7 +119,7 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCount)?;
@@ -308,7 +308,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -346,7 +346,7 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;
@@ -622,7 +622,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible.
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         // BT-524: Add is_list guard for non-list collection types.
@@ -666,7 +666,7 @@ impl CoreErlangGenerator {
             if body.parameters.len() >= 2 {
                 self.bind_var(&body.parameters[1].name, "Item");
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
@@ -873,7 +873,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::TwoSlot);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -913,7 +913,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // Unpack state vars starting at position 3 (after AccList and StillTaking).
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
 
             let (body_doc, _) = self.generate_threaded_loop_body(
                 body,
@@ -1126,7 +1126,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::TwoSlot);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -1165,7 +1165,7 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
 
             let (body_doc, _) = self.generate_threaded_loop_body(
                 body,
@@ -1379,7 +1379,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::TwoSlot);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -1419,7 +1419,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // State vars start at position 3 (after MatchList and NoMatchList).
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 3));
 
             let (body_doc, _) = self.generate_threaded_loop_body(
                 body,
@@ -1681,7 +1681,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -1719,7 +1719,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // State vars start at position 2 (after GroupMap).
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) = self.generate_threaded_loop_body(
                 body,
@@ -1945,7 +1945,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
