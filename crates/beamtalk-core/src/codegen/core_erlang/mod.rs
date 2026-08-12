@@ -3608,6 +3608,23 @@ impl CoreErlangGenerator {
             "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:" => {
                 Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)))
             }
+            // BT-3160: on:do:/ensure: thread outer-local mutations the same way a
+            // conditional's branches do — the try (receiver) block and any
+            // handler/cleanup block(s) are mutually-exclusive-or-sequential
+            // alternatives that are all compiled, only some of which run at a given
+            // call, so the union of their local writes is the threaded set. The
+            // seeding counterpart (`generate_on_do_with_mutations`/
+            // `generate_ensure_with_mutations`, via `seed_conditional_locals`)
+            // guarantees every `__local__` key extracted here is present even on a
+            // path that didn't itself write it.
+            sel if crate::state_threading_selectors::is_exception_selector(sel) => {
+                let mut blocks: Vec<&Block> = Vec::new();
+                if let Expression::Block(b) = receiver.as_ref() {
+                    blocks.push(b);
+                }
+                blocks.extend(Self::block_args(arguments));
+                Self::non_empty(self.conditional_threaded_locals(&blocks))
+            }
             _ => None,
         }
     }

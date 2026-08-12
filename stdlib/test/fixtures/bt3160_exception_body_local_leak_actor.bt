@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3160: Actor fixture for the exception-body local-assign scope-leak repro.
+//
+// `generate_exception_body_with_threading_inner` used to lack the
+// `push_scope`/`pop_scope` bracket `generate_conditional_branch_inline` has,
+// so a local-var assignment inside an `on:do:`/`ensure:` try body leaked its
+// temp binding past the construct, producing an unbound-variable erlc error
+// on any method that reads the local afterward.
+//
+// Each try body here ends in a direct field assignment (not a self-send or a
+// nested conditional) to stay clear of BT-3161's separate erlc
+// `ambiguous_catch_try_state` failure, which is sequenced independently.
+
+Actor subclass: BT3160ExceptionBodyLocalLeakActor
+  state: count = 0
+
+  // `ensure:` shape (ADR 0111 Addendum 5 repro `e04`): local var assigned
+  // inside the try body, read after the construct.
+  runEnsure =>
+    t := 0
+    [
+      t := t + 1
+      self.count := self.count + 1
+    ] ensure: [nil]
+    t
+
+  // `on:do:` shape: same local-assign-then-read, but with a real handler
+  // block instead of a cleanup block.
+  runOnDo =>
+    t := 0
+    [
+      t := t + 1
+      self.count := self.count + 1
+    ] on: Error do: [:e | nil]
+    t
+
+  getCount => self.count

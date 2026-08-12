@@ -362,14 +362,24 @@ impl CoreErlangGenerator {
         let ex_class_code = self.expression_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
         let current_state = self.current_state_var();
+        // BT-3160: seed `__local__` keys for outer locals mutated by either the
+        // try (receiver) block or the handler block — only one of the two ever
+        // runs at a given call, so (mirroring `ifTrue:ifFalse:`'s two branches)
+        // the key must be present in the base state even on the path that
+        // didn't itself write it, or the method-body sequencer's extraction
+        // `maps:get/2` would hit a missing key.
+        let (seed_doc, base_state) =
+            self.seed_conditional_locals(&[receiver_block, handler_block], &current_state);
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
             "let ",
             leaf::var(ex_class_var.clone()),
             " = ",
             ex_class_code,
-            " in let StateAcc = ",
-            leaf::var(current_state),
+            " in ",
+            seed_doc,
+            "let StateAcc = ",
+            leaf::var(base_state),
             " in try ",
         ]];
 
@@ -578,9 +588,19 @@ impl CoreErlangGenerator {
 
         // Rename current state to StateAcc
         let current_state = self.current_state_var();
+        // BT-3160: seed `__local__` keys for outer locals mutated by the try
+        // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
+        // (see `generate_on_do_with_mutations`) so a local written only
+        // conditionally within one of the blocks (e.g. behind a nested
+        // `ifTrue:`) still has its key present for the method-body
+        // sequencer's extraction `maps:get/2`, even though the two blocks
+        // here run sequentially rather than as alternatives.
+        let (seed_doc, base_state) =
+            self.seed_conditional_locals(&[receiver_block, cleanup_block], &current_state);
         let mut docs: Vec<Document<'static>> = vec![docvec![
+            seed_doc,
             "let StateAcc = ",
-            leaf::var(current_state),
+            leaf::var(base_state),
             " in try ",
         ]];
 
@@ -961,6 +981,12 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
     ) -> Result<(Document<'static>, String, usize)> {
+        // BT-3160: push a scope so a local-var assignment's `bind_var` rebind
+        // (from `generate_local_var_assignment_in_loop`) is scoped to this try
+        // body and doesn't leak into the enclosing method scope — matching the
+        // bracket `generate_conditional_branch_inline` already has (conditionals.rs).
+        self.push_scope();
+
         let has_direct_field_assignments = body
             .body
             .iter()
@@ -1073,6 +1099,7 @@ impl CoreErlangGenerator {
         }
 
         let final_state_version = self.state_version();
+        self.pop_scope();
         Ok((Document::Vec(docs), result_var, final_state_version))
     }
 }
