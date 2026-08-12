@@ -1468,8 +1468,12 @@ Empirical routing facts a re-attempt must not re-derive wrongly:
   'ifTrue:', [fun () -> ...])` with the `_CMR`/`ClassVars1` unwrap inside
   the fun — compiled and read), not through
   `generate_conditional_branch_inline` at all. So no `ClassVars`-prefixed
-  `Bind` can appear inside these arms today, with one broken exception
-  (shape C4 below).
+  `Bind` can appear inside these arms today — no exception: shape C4
+  below looks like a class-var-mutating local-assign candidate, but
+  turns out (on inspection) to *also* never reach these arms — its
+  natural repro routes through `value_type_codegen.rs`'s vt-conditional
+  path instead and breaks there, outside either body loop this addendum
+  covers.
 - **`generate_field_assignment_open`'s hybrid full-extract sub-branch
   (`in_hybrid_loop && hybrid_mutated_fields`, `dispatch_codegen.rs:2378`)
   is unreachable from these arms.** A loop body containing a
@@ -1996,16 +2000,23 @@ this ADR's IR would also close) maps onto the IR as follows:
 - **`ClassVars`: restore-only (no reset), `class_var_mutated` sticky
   (BT-1550)** ⇒ irrelevant to these decompositions *today*, because no
   `ClassVars` `Bind` can occur inside these arms (§Scope: BT-3140
-  rejection + runtime-dispatch routing, both compiled-and-confirmed). The
-  one path that would have exercised it — C4's open-scope class-method
-  self-send unwrap, which advances `ClassVars{N}` inside an arm — is the
-  broken shape, descoped. When C4 returns post-fix, its `ClassVars`
-  versions **continue the outer numbering** inside the arm frame
-  (restore-only means the arm inherits, emits `ClassVars{n+1}`, and the
-  outer scope resumes at the saved value afterward) — the natural IR
-  model is a `ClassVars`-prefixed `Bind` in the *arm's* frame whose
-  source version is the inherited outer version, which `check_use`'s
-  frame-flow rule (ancestor-frame producers are visible) already accepts.
+  rejection + runtime-dispatch routing, both compiled-and-confirmed). C4
+  looked like the one path that might exercise it (a class-var-mutating
+  self-send's `ClassVars{N}` advance, reached via a local-assign inside
+  an arm) but turns out, on inspection, not to reach these arms at all —
+  its natural repro routes through `value_type_codegen.rs`'s
+  vt-conditional path instead (§Scope, §C4) — so today there is no
+  candidate path at all, broken or otherwise. **If** a future construct
+  (or a fix that changes C4's routing) does put a `ClassVars`-mutating
+  self-send inside one of these arms, the natural IR model is a
+  `ClassVars`-prefixed `Bind` in the *arm's* frame whose source version
+  is the inherited outer version — restore-only means the arm inherits
+  the outer `ClassVars{n}`, emits `ClassVars{n+1}`, and the outer scope
+  resumes at its saved value afterward — which `check_use`'s frame-flow
+  rule (ancestor-frame producers are visible) already accepts without
+  further design work; this is recorded here so a future pass does not
+  have to re-derive it, not because it is needed by anything in scope
+  today.
 - **`SelfVt`: restore-only (BT-3131's revision)** ⇒ out of scope here
   entirely — value-type conditionals never reach these body loops (§Scope,
   repro `s14`).
