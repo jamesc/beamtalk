@@ -51,6 +51,51 @@
 //! deleting it) — see BT-3145's Linear issue for the full evidentiary trail
 //! and the ≤3% gate's outcome.
 //!
+//! ## Status (as of BT-3148 — partial: class-var Bind producers only)
+//!
+//! BT-3148 ("the deepest slice") targeted four sub-tasks: (1) unify
+//! `gen_server/methods.rs`'s upfront `classify_body_expr` routing
+//! classification with `threaded_expr.rs`'s downstream recheck into one IR
+//! construction, deleting the `verify_routing_invariant` debug-assert
+//! replacements; (2) give `wrap_body_with_nlr_catch` a production `NlrCatch`
+//! node instead of the deliberately-IR-free side channel it still is
+//! (`mod.rs`, doc comment on [`super::CoreErlangGenerator::wrap_body_with_nlr_catch`]);
+//! (3) the two class-var `Bind` producer sites
+//! (`expressions.rs::generate_field_assignment`,
+//! `dispatch_codegen.rs::emit_class_var_result_unwrap`) emit through real
+//! [`ThreadedStmt::Bind`] nodes rendered by [`render`], not a hand-rolled
+//! `Document` that mirrors it; (4) `threaded_expr.rs`'s `ThreadingBoundary`
+//! adapter absorbed into or replaced by the IR path.
+//!
+//! **Only (3) landed.** [`construct_and_verify_class_var_bind`] replaces the
+//! deleted `verify_class_var_bind` fixture-mirror: both class-var Bind
+//! producer sites now construct a real `Bind` carrying the actual
+//! `source_version`/`target_version` read off the live generator counter,
+//! verify it, and render it through [`render`] — [`render_bind`]'s
+//! `BindOp::Put` arm is the only place the ADR 0110 shadow write is
+//! constructed in either the verification path or the emitted `Document`.
+//! The existing `invoke_class_method/7` cross-boundary conformance fixture
+//! (`tests/class_var_shadow_contract.rs`) and the full
+//! `compiles_through_erlc`/snapshot-corpus suite pin that this produces
+//! byte-identical output to the hand-rolled `Document` it replaces.
+//!
+//! **(1), (2), (4) were investigated and NOT attempted** — closing them
+//! requires a real method-body-wide IR (every ordinary AST-directed
+//! statement — message sends, dispatch, Tier 2 calls, `EarlyReturn`, the
+//! other ~15 `BodyExprKind` variants `gen_server/methods.rs` classifies —
+//! embeddable in a straight-line `Vec<ThreadedStmt>` alongside `Bind`, so
+//! `wrap_body_with_nlr_catch`'s `body_doc` can become a real `NlrCatch`'s
+//! *rest-of-slice* body the way [`render`]'s `NlrCatch` arm already expects
+//! production callers to supply it). That is architecturally a peer of
+//! BT-3145's `ConditionalLoop`/`Gensym`/`ValueRef::Doc` gaps (Addendum 2),
+//! not a variant of the class-var Bind shape (3) closed — a full
+//! `Threaded`/`Bind` sequence can already represent state-only bodies, but
+//! `gen_server` method bodies are NOT state-only; ordinary control-flow-free
+//! statements have no IR representation today. Closing it is scoped as a
+//! design-detour follow-up (mirroring BT-3145's BT-3153 ADR-amendment
+//! pattern), not attempted inline here — see the BT-3148 Linear issue for
+//! the full investigation trail and source citations.
+//!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
 //! `VersionCounter` production path (BT-3131). BT-3132 originally added a
@@ -1970,25 +2015,43 @@ pub(super) fn verify_routing_invariant(routed: bool, span: Span) -> Vec<VerifyEr
     }
 }
 
-// ─── Class-var Bind construction (BT-3135, ADR 0110 contract) ─────────────
+// ─── Class-var Bind construction (BT-3135/BT-3148, ADR 0110 contract) ─────
 
-/// Builds a minimal `ThreadedIr` fixture for a single class-var version
-/// `Bind`, exactly as actually emitted by one of the two producer sites
-/// named in ADR 0111 §Phase D: `expressions.rs::generate_field_assignment`'s
-/// class-var branch (a [`BindOp::Put`] field mutation, `shadow_write` set
-/// from the real `block_depth == 0` gate) or
-/// `dispatch_codegen.rs::emit_class_var_result_unwrap` (a [`BindOp::Direct`]
-/// rebind from an inherited self-dispatched call's returned
-/// `class_var_result` tuple — never itself a shadow-write producer, since
-/// self-dispatch runs in the same class `gen_server` process and any mutation
-/// it reflects was already shadow-written by the *callee's own*
+/// Constructs the single class-var version `Bind` a production emission site
+/// is about to render, and verifies it against a synthetic ADR 0110
+/// NLR-relay marker — the two producer sites named in ADR 0111 §Phase D:
+/// `expressions.rs::generate_field_assignment`'s class-var branch (a
+/// [`BindOp::Put`] field mutation, `shadow_write` set from the real
+/// `block_depth == 0` gate) and `dispatch_codegen.rs::emit_class_var_result_unwrap`
+/// (a [`BindOp::Direct`] rebind from an inherited self-dispatched call's
+/// returned `class_var_result` tuple — never itself a shadow-write producer,
+/// since self-dispatch runs in the same class `gen_server` process and any
+/// mutation it reflects was already shadow-written by the *callee's own*
 /// `generate_field_assignment` call under the same `ClassSelf`-tagged key;
 /// see ADR 0110 §Runtime change's "no per-nesting-level save/restore is
 /// needed" reasoning).
 ///
-/// `at_method_top_frame` selects the `Bind`'s (and the always-included
-/// `NlrCatch { has_class_vars: true }` marker's) `FrameId`: [`FrameId::ROOT`]
-/// when `true`, a nested [`FrameId`] otherwise — mirroring
+/// **BT-3148**: unlike the deleted `verify_class_var_bind` (which verified a
+/// hardcoded `0 -> 1` step, disconnected from the version actually in play —
+/// both call sites rendered their real `current_class_var()`/`next_class_var()`
+/// names by hand, and separately passed an always-`0->1` fixture here purely
+/// to run the shadow-write check), the [`ThreadedStmt::Bind`] returned here
+/// carries the REAL `source_version`/`target_version` already read off the
+/// live generator counter and IS what [`render`] renders — there is no
+/// second, independently-reconstructed shape. `1..=source_version` backfills
+/// a dummy `Bind` chain so [`VerifyWalk::check_use`]'s frame-flow rule
+/// doesn't spuriously fail `UnboundVersion` for a mutation past a method's
+/// first (the same technique [`verify_simple_bind`] uses).
+///
+/// The synthetic `NlrCatch { has_class_vars: true }` marker is still
+/// unconditionally included in the *verified* fixture (not in the returned
+/// `Bind`, which callers render alone) — an isolated per-call-site
+/// verification cannot observe whether THIS method's body really contains a
+/// foreign-NLR-relay-capable boundary, so it assumes one, same as the
+/// deleted fixture did (ADR 0111 §Verifier honesty).
+///
+/// `at_method_top_frame` selects the `Bind`'s (and the marker's) `FrameId`:
+/// [`FrameId::ROOT`] when `true`, a nested [`FrameId`] otherwise — mirroring
 /// [`VerifyError::ShadowWriteMissing`]'s own `target.frame == FrameId::ROOT`
 /// gate. **This is deliberately NOT `self.current_nlr_token().is_some()`**
 /// (whether *this* method's own body happens to contain a literal `^` inside
@@ -2010,39 +2073,85 @@ pub(super) fn verify_routing_invariant(routed: bool, span: Span) -> Vec<VerifyEr
 /// gate 1:1 (ADR 0111 §Verifier honesty: comparing the generator against
 /// itself is silent when both are consistently wrong).
 ///
-/// The `dispatch_codegen.rs` rebind site passes `false` unconditionally —
-/// not a claim about its real block-depth, but a deliberate exemption: that
+/// The `dispatch_codegen.rs` rebind site passes `false`/`false` unconditionally
+/// — not a claim about its real block-depth, but a deliberate exemption: that
 /// `Bind` structurally never carries its own shadow-write obligation
 /// regardless of nesting (see its own call-site comment), so it is modeled
 /// as never sitting at the frame this check inspects.
-pub(super) fn verify_class_var_bind(
+pub(super) fn construct_and_verify_class_var_bind(
     op: BindOp,
     shadow_write: bool,
     at_method_top_frame: bool,
+    source_version: usize,
+    target_version: usize,
     span: Span,
-) -> Vec<VerifyError> {
+) -> (ThreadedStmt, Vec<VerifyError>) {
     let frame = if at_method_top_frame {
         FrameId::ROOT
     } else {
         FrameId::new(1)
     };
-    verify(&[
-        ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::ClassVars, 1, frame),
-            source: VersionedVar::new(VersionPrefix::ClassVars, 0, frame),
-            op,
-            shadow_write,
+    let mut body = Vec::with_capacity(source_version + 1);
+    for v in 1..=source_version {
+        body.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::ClassVars, v, frame),
+            source: VersionedVar::new(VersionPrefix::ClassVars, v - 1, frame),
+            op: BindOp::Direct(ValueRef::Literal("'_'")),
+            // `shadow_write: true` here is a backfill-scaffolding
+            // assumption, not a claim about the earlier mutation's real
+            // shape (this fixture never inspects it): only the LAST Bind
+            // below — the one this call site is actually about to
+            // render — is what `ShadowWriteMissing` is checking. Backfilling
+            // `false` would spuriously flag every earlier synthetic step at
+            // `FrameId::ROOT`, since `has_class_vars_nlr` is unconditionally
+            // true here (the synthetic marker below).
+            shadow_write: true,
             span,
+        });
+    }
+    let bind = ThreadedStmt::Bind {
+        target: VersionedVar::new(VersionPrefix::ClassVars, target_version, frame),
+        source: VersionedVar::new(VersionPrefix::ClassVars, source_version, frame),
+        op,
+        shadow_write,
+        span,
+    };
+    body.push(bind.clone());
+    let marker = ThreadedStmt::NlrCatch {
+        boundary: NlrBoundary::ClassMethod {
+            has_class_vars: true,
         },
-        ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
+        token: TokenId::new(0),
+        frame,
+        span,
+    };
+    // `verify()` seeds its frame stack with just `[FrameId::ROOT]` (module
+    // docs on `FrameId`) — when `frame == FrameId::ROOT` (`at_method_top_frame`),
+    // `body`'s Binds are already reachable at the top level with no wrapper.
+    // Otherwise `frame` must be PUSHED via a `Threaded` node, or
+    // `VerifyWalk::check_use`'s frame-flow rule can never find a backfilled
+    // version `>0` at that frame (a bare top-level `Bind`/`NlrCatch` never
+    // pushes anything) — this is exactly the gap that produced a spurious
+    // `UnboundVersion` before BT-3148 added real backfill history here (a
+    // nested class-var rebind is always `at_method_top_frame: false`, so it
+    // always took this branch once `source_version > 0`).
+    let fixture: Vec<ThreadedStmt> = if at_method_top_frame {
+        let mut f = body;
+        f.push(marker);
+        f
+    } else {
+        vec![
+            ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame,
+                body,
+                produces: Vec::new(),
+                span,
             },
-            token: TokenId::new(0),
-            frame,
-            span,
-        },
-    ])
+            marker,
+        ]
+    };
+    (bind, verify(&fixture))
 }
 
 // ─── Simple version-bind construction (BT-3139) ────────────────────────────
@@ -2052,16 +2161,20 @@ pub(super) fn verify_class_var_bind(
 /// numbers already read off the live generator counter at the call site
 /// (BT-3139: `generate_field_assignment`'s value-type and instance-actor
 /// branches, `expressions.rs` around lines 634/664 — the two sibling
-/// branches of the class-var branch [`verify_class_var_bind`] already
-/// covers, BT-3135). Reused for both prefixes instead of copy-pasting
-/// [`verify_class_var_bind`]'s body three times (CLAUDE.md's
-/// no-duplicate-implementations rule).
+/// branches of the class-var branch [`construct_and_verify_class_var_bind`]
+/// already covers, BT-3135/BT-3148). Reused for both prefixes instead of
+/// copy-pasting [`construct_and_verify_class_var_bind`]'s body three times
+/// (CLAUDE.md's no-duplicate-implementations rule).
 ///
-/// Unlike [`verify_class_var_bind`] (which always checks a fixed `0 -> 1`
-/// step, since its only interesting invariant is `ShadowWriteMissing`, not
-/// version linearity — see its own doc comment), this helper is handed the
-/// *actual* version numbers, which may already be arbitrarily large after
-/// earlier mutations in the same method. [`VerifyWalk::check_use`]'s
+/// Like [`construct_and_verify_class_var_bind`] (BT-3148 onward, both are
+/// handed the real version numbers already read off the live generator
+/// counter and share its `1..=source_version` backfill technique), but
+/// without that function's class-var-specific `ShadowWriteMissing`
+/// machinery (the synthetic `NlrCatch` marker, `at_method_top_frame`'s
+/// `FrameId` selection) — `Self{N}`/`State{N}` mutations never carry that
+/// ADR 0110 obligation. This helper is handed the *actual* version numbers,
+/// which may already be arbitrarily large after earlier mutations in the
+/// same method. [`VerifyWalk::check_use`]'s
 /// frame-flow rule requires every version `>0` referenced as a `Bind`'s
 /// source to have a producing `Bind` visible on the frame stack — so without
 /// backfilling that history, every mutation past a method's first would
@@ -3262,7 +3375,8 @@ mod tests {
         );
     }
 
-    // ── verify_class_var_bind (BT-3135, ADR 0110 contract) ───────────────
+    // ── construct_and_verify_class_var_bind (BT-3135/BT-3148, ADR 0110
+    // contract) ─────────────────────────────────────────────────────────
     // Pins the production replacement/extension covering the two Bind-
     // emission sites named in ADR 0111 §Phase D:
     // `expressions.rs::generate_field_assignment` (Put) and
@@ -3277,20 +3391,31 @@ mod tests {
     }
 
     #[test]
-    fn verify_class_var_bind_put_silent_with_shadow_write() {
+    fn construct_and_verify_class_var_bind_put_silent_with_shadow_write() {
         // generate_field_assignment's real post-ADR-0110 shape: block_depth
-        // == 0 (shadow_write: true).
+        // == 0 (shadow_write: true), first mutation in the method
+        // (source_version: 0, target_version: 1).
+        let (bind, errors) =
+            construct_and_verify_class_var_bind(put_op(), true, true, 0, 1, span());
+        assert_eq!(errors, Vec::new());
         assert_eq!(
-            verify_class_var_bind(put_op(), true, true, span()),
-            Vec::new()
+            bind,
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::ClassVars, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::ClassVars, 0, FrameId::ROOT),
+                op: put_op(),
+                shadow_write: true,
+                span: span(),
+            },
+            "the returned Bind must be the exact node a caller renders — no second shape"
         );
     }
 
     #[test]
-    fn verify_class_var_bind_put_fires_when_shadow_write_missing_at_top_frame() {
+    fn construct_and_verify_class_var_bind_put_fires_when_shadow_write_missing_at_top_frame() {
         // The regression this exists to catch: block_depth == 0 (a top-frame
         // mutation) but the shadow write was forgotten.
-        let errors = verify_class_var_bind(put_op(), false, true, span());
+        let (_, errors) = construct_and_verify_class_var_bind(put_op(), false, true, 0, 1, span());
         assert_eq!(
             errors,
             vec![VerifyError::ShadowWriteMissing {
@@ -3302,7 +3427,8 @@ mod tests {
     }
 
     #[test]
-    fn verify_class_var_bind_put_fires_even_without_a_local_nlr_catch_in_this_method() {
+    fn construct_and_verify_class_var_bind_put_fires_even_without_a_local_nlr_catch_in_this_method()
+    {
         // Pins the exact ADR 0110 repro shape, not just the ADR's abbreviated
         // worked example: `CollectionDriver countedRun:over:` mutates a class
         // var, then invokes a *caller-supplied* block (`aBlock value: x`)
@@ -3315,7 +3441,7 @@ mod tests {
         // NEVER by whether this method happens to have its own NLR catch:
         // gating on the latter (an earlier version of this helper's bug)
         // would silently exempt this exact shape from the check.
-        let errors = verify_class_var_bind(put_op(), false, true, span());
+        let (_, errors) = construct_and_verify_class_var_bind(put_op(), false, true, 0, 1, span());
         assert!(
             errors
                 .iter()
@@ -3325,25 +3451,73 @@ mod tests {
     }
 
     #[test]
-    fn verify_class_var_bind_put_silent_below_top_frame() {
+    fn construct_and_verify_class_var_bind_put_silent_below_top_frame() {
         // A class-var mutation inside a nested block (block_depth > 0) is
         // legitimately shadow_write: false — already discarded on normal
         // return (BT-1550), not a regression. Matches
         // `verify_shadow_write_missing_silent_below_top_frame`.
-        assert_eq!(
-            verify_class_var_bind(put_op(), false, false, span()),
-            Vec::new()
-        );
+        let (_, errors) = construct_and_verify_class_var_bind(put_op(), false, false, 0, 1, span());
+        assert_eq!(errors, Vec::new());
     }
 
     #[test]
-    fn verify_class_var_bind_direct_rebind_silent_never_requires_shadow_write() {
+    fn construct_and_verify_class_var_bind_direct_rebind_silent_never_requires_shadow_write() {
         // dispatch_codegen.rs's inherited-self-dispatch rebind: never itself
         // a shadow-write producer (the callee's own Bind already wrote it
         // under the same ClassSelf-tagged key) — its call site always passes
         // at_method_top_frame: false, so this stays silent unconditionally.
         let op = BindOp::Direct(ValueRef::Var("_CV0".to_string()));
-        assert_eq!(verify_class_var_bind(op, false, false, span()), Vec::new());
+        let (_, errors) = construct_and_verify_class_var_bind(op, false, false, 0, 1, span());
+        assert_eq!(errors, Vec::new());
+    }
+
+    #[test]
+    fn construct_and_verify_class_var_bind_direct_rebind_silent_with_a_nonzero_source_version() {
+        // Regression for a real BT-3148 bug caught by this migration's own
+        // tests: `at_method_top_frame: false` selects a non-`ROOT` `FrameId`,
+        // which `verify()`'s frame stack (seeded as `[FrameId::ROOT]` only)
+        // cannot see without an explicit `Threaded` wrapper — a nested
+        // class-var rebind (`emit_class_var_result_unwrap`) is ALWAYS
+        // `at_method_top_frame: false`, and its `source_version` is the real,
+        // possibly-nonzero `class_var_version()` (e.g. an earlier top-frame
+        // mutation already minted `ClassVars1` before this nested rebind
+        // runs) — this must stay silent, not spuriously report
+        // `UnboundVersion` for the backfilled version.
+        let op = BindOp::Direct(ValueRef::Var("_CV3".to_string()));
+        let (bind, errors) = construct_and_verify_class_var_bind(op, false, false, 2, 3, span());
+        assert_eq!(errors, Vec::new(), "got: {errors:?}");
+        assert_eq!(
+            bind,
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::ClassVars, 3, FrameId::new(1)),
+                source: VersionedVar::new(VersionPrefix::ClassVars, 2, FrameId::new(1)),
+                op: BindOp::Direct(ValueRef::Var("_CV3".to_string())),
+                shadow_write: false,
+                span: span(),
+            }
+        );
+    }
+
+    #[test]
+    fn construct_and_verify_class_var_bind_uses_the_real_version_numbers_not_a_fixed_0_to_1_step() {
+        // BT-3148: the whole point of the migration off the deleted
+        // `verify_class_var_bind` — a mutation later in the method (source
+        // version 3, minted to 4) must be silent, not spuriously flagged,
+        // and the returned Bind must carry those exact versions (never the
+        // old fixture's hardcoded 0 -> 1).
+        let (bind, errors) =
+            construct_and_verify_class_var_bind(put_op(), true, true, 3, 4, span());
+        assert_eq!(errors, Vec::new(), "got: {errors:?}");
+        assert_eq!(
+            bind,
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::ClassVars, 4, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::ClassVars, 3, FrameId::ROOT),
+                op: put_op(),
+                shadow_write: true,
+                span: span(),
+            }
+        );
     }
 
     // ── verify_simple_bind (BT-3139) ──────────────────────────────────────
@@ -3371,7 +3545,8 @@ mod tests {
     fn verify_simple_bind_silent_after_several_prior_mutations() {
         // A later mutation in the same method (source_version > 0) must not
         // spuriously fire UnboundVersion — the whole point of this helper's
-        // backfill chain over `verify_class_var_bind`'s fixed `0 -> 1`.
+        // (and, as of BT-3148, `construct_and_verify_class_var_bind`'s)
+        // backfill chain.
         assert_eq!(
             verify_simple_bind(VersionPrefix::SelfVt, 4, 5, span()),
             Vec::new()

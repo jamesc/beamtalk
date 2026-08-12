@@ -2802,10 +2802,11 @@ impl CoreErlangGenerator {
         // `threaded_ir::ThreadedStmt::NlrCatch`) — every NLR try/catch this
         // generator ever emits (Actor/ClassMethod/ValueType alike) is built
         // here; its `boundary` shape is also what
-        // `threaded_ir::verify_class_var_bind`'s `at_method_top_frame`
-        // fixtures reconstruct at the class-var Bind-emission sites
-        // (`expressions.rs`, `dispatch_codegen.rs`) for the ADR 0110
-        // ShadowWriteMissing contract. No standalone `verify()` call here: a
+        // `threaded_ir::construct_and_verify_class_var_bind`'s
+        // `at_method_top_frame` fixtures reconstruct at the class-var
+        // Bind-emission sites (`expressions.rs`, `dispatch_codegen.rs`) for
+        // the ADR 0110 ShadowWriteMissing contract. No standalone
+        // `verify()` call here: a
         // lone `NlrCatch` with no `Bind` can never trigger any
         // `VerifyError` (`walk_stmt` treats it as a no-op), so constructing
         // one on every NLR-catch wrap — a hot path — would pay a real
