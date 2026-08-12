@@ -841,7 +841,7 @@ threading, NLR boundaries, class-var Bind/shadow-write producers") landed
 its task 3 of 4 — the two class-var `Bind` producer sites
 (`expressions.rs::generate_class_var_field_assignment`,
 `dispatch_codegen.rs::emit_class_var_result_unwrap`) now construct, verify,
-and [`render`] a real [`ThreadedStmt::Bind`], deleting the
+and `render` a real `ThreadedStmt::Bind`, deleting the
 `verify_class_var_bind` fixture-mirror. Tasks 1 (routing unification), 2
 (a production `NlrCatch` constructor for `wrap_body_with_nlr_catch`), and 4
 (`threaded_expr.rs`'s `ThreadingBoundary` absorption) were investigated and
@@ -858,7 +858,7 @@ Separately, [BT-3146](https://linear.app/beamtalk/issue/BT-3146)
 reached a **different conclusion about the same-sounding problem**: its
 2026-08-12T08:11 investigation comment compiled `self.x := flag ifTrue:
 [self.y := 1. 42] ifFalse: [0]` and confirmed that
-[`ValueRef::Doc`]/[`VersionPrefix::Gensym`] (BT-3145's own additions) are
+`ValueRef::Doc`/`VersionPrefix::Gensym` (BT-3145's own additions) are
 **already** expressive enough to model every one of its ~10 mutation
 shapes as a two-hop `Bind` chain — quoting the comment directly: *"no
 single shape is architecturally impossible with today's
@@ -975,8 +975,11 @@ enum ThreadedStmt {
     /// opacity (ADR 0111 Addendum 3), built by the SAME codegen call
     /// production already runs at this point (`self.expression_doc(expr)`,
     /// `self.generate_self_dispatch_open(expr)`, the `{'reply', ...}`/
-    /// `{'class_var_result', ...}` epilogue builders, …). Legal wherever a
-    /// Bind is legal in a body sequence. Carries no state-threading
+    /// `{'class_var_result', ...}` epilogue builders, …). Legal in any
+    /// straight-line sequence rendered by `render`'s top-level loop (a
+    /// gen_server method body, an `NlrCatch` try-body); see the
+    /// separator note below before placing one inside a
+    /// `ConditionalLoop` body. Carries no state-threading
     /// content of its own by construction (see the type-level rule
     /// below) — a statement that DOES mutate a threaded
     /// version must be a Bind, never a Statement; there is no `BindOp`
@@ -992,7 +995,7 @@ enum ThreadedStmt {
 ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
 ```
 
-No other change to [`render`]'s structure. This is the smallest possible
+No other change to `render`'s structure. This is the smallest possible
 extension because `render`'s existing loop already has the property that
 matters: it concatenates each statement's `Document` with **no separator**
 (`Document::Vec(docs)`, confirmed by reading the current implementation),
@@ -1002,6 +1005,20 @@ must therefore carry its own correct trailing glue, exactly the discipline
 `BodyExprKind::Pure`'s non-last-position arm already follows today (`let
 seqN = <expr_doc> in `, `gen_server/methods.rs:1533-1536`) — lowering
 constructs it, `render` does not need to know it exists.
+
+**Separator note (loop bodies differ):** the no-separator property above
+is specific to `render`'s top-level loop. A `ConditionalLoop` body renders
+through `render_loop_body_statements`, which inserts a literal `" "`
+between statements — Addendum 3's own empirically-confirmed double-space
+finding for `BodyKind::Letrec` bodies. A `Statement` placed inside a loop
+body therefore composes as glue-plus-separator (`"... in "` + `" "` →
+`"... in  "`), which is exactly what production's Letrec bodies emit — the
+composition is coherent, but no production shape mixes `Statement` into a
+loop body yet (BT-3145's `while_direct_body_is_bind_representable`
+deliberately excludes non-`Bind` statements), so it is stated here rather
+than pinned by a dual-run test. The first implementation that routes a
+mixed `Bind`/`Statement` loop body through `ConditionalLoop` must add that
+dual-run byte-parity test before relying on this paragraph.
 
 **Design options considered:**
 
@@ -1159,7 +1176,7 @@ function it replaces"). This also requires updating every existing
 `TokenId::new(0)` call site to pass a name instead of a numeric
 placeholder — five at the time of writing: four unit tests
 (`threaded_ir.rs:2771,2806,2864,4100`) plus one production site,
-[`construct_and_verify_class_var_bind`]'s synthetic `NlrCatch` marker
+`construct_and_verify_class_var_bind`'s synthetic `NlrCatch` marker
 (`threaded_ir.rs:2124`) — that marker is fixture-only (never rendered,
 per its own doc comment: "not in the returned `Bind`, which callers
 render alone"), so this is a mechanical compile-fix there, not a
