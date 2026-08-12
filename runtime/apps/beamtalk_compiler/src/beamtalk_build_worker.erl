@@ -42,7 +42,7 @@ Protocol:
 -endif.
 
 %% The `{cerl, Etf}' clause of `compile_core_erlang/1' is exercised only by
-%% the EUnit suite `beamtalk_cerl_wire_tests' — the production caller
+%% the EUnit suite `beamtalk_build_worker_tests' — the production caller
 %% (`compile_core_file/2') always passes a binary. Dialyzer's success-typing
 %% therefore narrows the inferred type to `binary()' and flags the `{cerl, _}'
 %% head as unreachable. Suppress that one warning here; the spec on
@@ -261,7 +261,7 @@ compile_core_file(CoreFile, OutDir) ->
 %%
 %% The explicit `-spec' widens the input type so dialyzer accepts the
 %% `{cerl, Etf}' clause — the only production caller (`compile_core_file/2')
-%% passes binaries, but the EUnit tests in `beamtalk_cerl_wire_tests'
+%% passes binaries, but the EUnit tests in `beamtalk_build_worker_tests'
 %% exercise the cerl arm and are part of the supported surface.
 -spec compile_core_erlang(binary() | {cerl, binary()}) ->
     {ok, atom(), binary()} | {error, term()}.

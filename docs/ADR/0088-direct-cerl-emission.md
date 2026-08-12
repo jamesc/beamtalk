@@ -53,7 +53,10 @@ codegen + wire change + 58K LOC migration) is what's rejected.
   but are explicitly marked throwaway. They can be deleted once
   typed-leaves is shipped.
   (`cerl_audit.rs` was removed with ADR 0089's landing; `cerl.rs` and
-  the `cerl_napkin_timing` Rust example were deleted 2026-08-11, BT-3143.)
+  the `cerl_napkin_timing` Rust example were deleted 2026-08-11, BT-3143;
+  the EUnit wire tests (`beamtalk_cerl_wire_tests.erl`) and the
+  `cerl-napkin-timing.escript` Erlang-side timing harness were deleted
+  2026-08-12, BT-3152.)
 - BT-aware stack traces (one of the original Phase 1+ motivators) are
   still a committed downstream consumer, but they do not require cerl
   on the wire — annotations can be carried in the typed-leaves
