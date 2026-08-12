@@ -454,14 +454,19 @@ pub(super) enum ThreadingMode {
     /// 4, "early-exit accumulator liveness"): `0` for `do:`
     /// (`{Var1, ..., VarN}`, `basic_ops.rs`'s `index_offset: 1`); `1` for
     /// `collect:`/`select:`/`reject:`/`inject:into:`/`anySatisfy:`/
-    /// `allSatisfy:`/`count:`/`flatMap:`/`partition:`/`groupBy:`/`sort:`
+    /// `allSatisfy:`/`count:`/`flatMap:`/`groupBy:`/`sort:`
     /// (`{AccList, Var1, ...}` or `{BoolAcc, Var1, ...}`, `index_offset: 2`);
-    /// `2` for `takeWhile:`/`dropWhile:`/`detect:`-family ops
-    /// (`{AccList, StillTaking, Var1, ...}` / `{FoundItem, FoundFlag, Var1,
-    /// ...}`, `index_offset: 3`) — the extra gate slot(s) hold the op's
-    /// own in-flight result/continue-flag, read directly by the op's
-    /// post-fold wrapper (e.g. `search_ops.rs`'s `bind_detect_found_or_raise_doc`)
-    /// rather than threaded back out as a [`VersionedVar`].
+    /// `2` for `takeWhile:`/`dropWhile:`/`detect:`-family ops and
+    /// `partition:` (`{AccList, StillTaking, Var1, ...}` / `{FoundItem,
+    /// FoundFlag, Var1, ...}` / `{MatchList, NoMatchList, Var1, ...}`,
+    /// `index_offset: 3`) — the extra gate slot(s) hold the op's own
+    /// in-flight result/continue-flag (or, for `partition:`, its second
+    /// result list — same tuple shape, no early exit involved), read
+    /// directly by the op's post-fold wrapper (e.g. `search_ops.rs`'s
+    /// `bind_detect_found_or_raise_doc`) rather than threaded back out as a
+    /// [`VersionedVar`]. See `control_flow::ListOpKind` (BT-3147) for the
+    /// canonical per-op table this classification is now independently
+    /// cross-checked against.
     TupleAcc(usize),
     /// `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals plus
     /// pre-extracted read-only/mutated fields as direct params (BT-1326/BT-1342).
