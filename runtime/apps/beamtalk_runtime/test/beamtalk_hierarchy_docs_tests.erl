@@ -12,12 +12,12 @@ Covers all four public functions:
 
 - `metaclass_method_doc/1` — pure pattern match, all four clauses including
   the previously uncovered `<<"spawnWith:">>` clause.
-- `find_defining_class/2` — the root-class (no superclass) and
-  unregistered-superclass terminal paths that were not reachable by the
-  existing callers' integration-level tests.
+- `find_defining_class/2` — the root-class (no superclass),
+  unregistered-superclass terminal paths, and the `max_depth_exceeded`
+  cycle-detection path.
 - `find_defining_class_method/2` — same edge paths for the class-side walk.
-- `collect_flattened_methods/2` — the root-class path that terminates on
-  `superclass => none`.
+- `collect_flattened_methods/2` — the root-class path, multi-level
+  superclass inheritance chain, and the `max_depth_exceeded` cycle path.
 
 The `metaclass_method_doc/1` tests run without any runtime process.
 The hierarchy-walking tests start minimal class processes via
@@ -66,12 +66,20 @@ metaclass_method_doc_empty_binary_test() ->
 -define(GHOST_D, 'BT3087HierarchyDocsGhostD').
 -define(ROOT_E, 'BT3087HierarchyDocsRootE').
 -define(ROOT_F, 'BT3087HierarchyDocsRootF').
+%% Superclass names for inheritance-chain tests:
+-define(SUPERCLASS_H, 'BT3087HierarchyDocsSuperH').
+-define(SUBCLASS_G, 'BT3087HierarchyDocsSubG').
+%% Circular-chain classes for cycle-detection tests:
+-define(CYCLE_X, 'BT3087HierarchyDocsCycleX').
+-define(CYCLE_Y, 'BT3087HierarchyDocsCycleY').
 %% Superclass names that are deliberately never registered:
 -define(GHOST_SUPER_1, 'BT3087HierarchyDocsNeverRegistered1').
 -define(GHOST_SUPER_2, 'BT3087HierarchyDocsNeverRegistered2').
 
 hierarchy_docs_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun({PidA, PidB, PidC, PidD, PidE, PidF}) ->
+    {setup, fun setup/0, fun teardown/1, fun(
+        {PidA, PidB, PidC, PidD, PidE, PidF, PidG, _PidH, PidX, _PidY}
+    ) ->
         [
             {"find_defining_class: root class (no superclass) returns own name", fun() ->
                 ?assertEqual(
@@ -111,7 +119,44 @@ hierarchy_docs_test_() ->
             {"collect_flattened_methods: root class methods tagged with defining class", fun() ->
                 Result = beamtalk_hierarchy_docs:collect_flattened_methods(?ROOT_F, PidF),
                 ?assertMatch(#{fakeMethod := {?ROOT_F, _}}, Result)
-            end}
+            end},
+            {
+                "collect_flattened_methods: superclass methods merged and tagged with defining "
+                "class",
+                fun() ->
+                    Result = beamtalk_hierarchy_docs:collect_flattened_methods(
+                        ?SUBCLASS_G, PidG
+                    ),
+                    ?assertMatch(
+                        #{
+                            ownMethod := {?SUBCLASS_G, _},
+                            inheritedMethod := {?SUPERCLASS_H, _}
+                        },
+                        Result
+                    )
+                end
+            },
+            {"find_defining_class: cycle detection returns receiver class name", fun() ->
+                ?assertEqual(
+                    ?CYCLE_X,
+                    beamtalk_hierarchy_docs:find_defining_class(PidX, undefinedSel)
+                )
+            end},
+            {"find_defining_class_method: cycle detection returns receiver class name", fun() ->
+                ?assertEqual(
+                    ?CYCLE_X,
+                    beamtalk_hierarchy_docs:find_defining_class_method(
+                        PidX, undefinedClassSel
+                    )
+                )
+            end},
+            {"collect_flattened_methods: cycle detection returns partial accumulated result",
+                fun() ->
+                    ?assertMatch(
+                        #{cycleMethod := {?CYCLE_X, _}},
+                        beamtalk_hierarchy_docs:collect_flattened_methods(?CYCLE_X, PidX)
+                    )
+                end}
         ]
     end}.
 
@@ -128,10 +173,18 @@ setup() ->
     PidD = start_class(?GHOST_D, ?GHOST_SUPER_2, #{}, #{}),
     PidE = start_class(?ROOT_E, none, #{}, #{}),
     PidF = start_class(?ROOT_F, none, #{fakeMethod => #{arity => 0}}, #{}),
-    {PidA, PidB, PidC, PidD, PidE, PidF}.
+    %% Inheritance chain: SubG has ownMethod; its superclass SuperH has inheritedMethod.
+    PidH = start_class(?SUPERCLASS_H, none, #{inheritedMethod => #{arity => 0}}, #{}),
+    PidG = start_class(?SUBCLASS_G, ?SUPERCLASS_H, #{ownMethod => #{arity => 0}}, #{}),
+    %% Circular chain: CycleX → CycleY → CycleX → … triggers max_depth_exceeded.
+    %% CycleX carries a method so the partial accumulator on cycle is non-empty,
+    %% making the collect_flattened_methods cycle-detection assertion non-trivial.
+    PidX = start_class(?CYCLE_X, ?CYCLE_Y, #{cycleMethod => #{arity => 0}}, #{}),
+    PidY = start_class(?CYCLE_Y, ?CYCLE_X, #{}, #{}),
+    {PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}.
 
-teardown({PidA, PidB, PidC, PidD, PidE, PidF}) ->
-    lists:foreach(fun stop_class/1, [PidA, PidB, PidC, PidD, PidE, PidF]).
+teardown({PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}) ->
+    lists:foreach(fun stop_class/1, [PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY]).
 
 start_class(Name, Superclass, InstanceMethods, ClassMethods) ->
     ClassInfo = #{

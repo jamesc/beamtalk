@@ -610,49 +610,6 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Returns a human-readable string for a type annotation (for error messages).
-    fn type_annotation_display(ta: &TypeAnnotation) -> String {
-        match ta {
-            TypeAnnotation::Simple(id) => id.name.to_string(),
-            TypeAnnotation::Union { types, .. } => types
-                .iter()
-                .map(Self::type_annotation_display)
-                .collect::<Vec<_>>()
-                .join(" | "),
-            TypeAnnotation::Singleton { name, .. } => format!("#{name}"),
-            TypeAnnotation::Generic {
-                base, parameters, ..
-            } => {
-                let params = parameters
-                    .iter()
-                    .map(Self::type_annotation_display)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}({params})", base.name)
-            }
-            TypeAnnotation::FalseOr { inner, .. } => {
-                format!("{} | False", Self::type_annotation_display(inner))
-            }
-            TypeAnnotation::Difference { base, excluded, .. } => {
-                format!(
-                    "{} \\ {}",
-                    Self::type_annotation_display(base),
-                    Self::type_annotation_display(excluded)
-                )
-            }
-            TypeAnnotation::Intersection { left, right, .. } => {
-                format!(
-                    "{} & {}",
-                    Self::type_annotation_display(left),
-                    Self::type_annotation_display(right)
-                )
-            }
-            TypeAnnotation::SelfType { .. } => "Self".to_string(),
-            TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
-            TypeAnnotation::ClassOf { class_name, .. } => format!("{} class", class_name.name),
-        }
-    }
-
     /// BT-1951 (ADR 0078): Returns the list of user-defined initializers to run
     /// for a class, parent-first.
     ///
@@ -757,7 +714,7 @@ impl CoreErlangGenerator {
                             field_name: s.name.name.to_string(),
                             type_name: s.type_annotation.as_ref().map_or_else(
                                 || "Unknown".to_string(),
-                                Self::type_annotation_display,
+                                |ta| ta.type_name().to_string(),
                             ),
                         })
                         .collect::<Vec<_>>()
@@ -788,7 +745,7 @@ impl CoreErlangGenerator {
                             field_name: s.name.name.to_string(),
                             type_name: s.type_annotation.as_ref().map_or_else(
                                 || "Unknown".to_string(),
-                                Self::type_annotation_display,
+                                |ta| ta.type_name().to_string(),
                             ),
                         });
                     }
@@ -1880,126 +1837,6 @@ mod tests {
             span: s(),
         };
         assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    // --- type_annotation_display ---
-
-    #[test]
-    fn type_annotation_display_simple() {
-        let ta = simple_ta("Integer");
-        assert_eq!(CoreErlangGenerator::type_annotation_display(&ta), "Integer");
-    }
-
-    #[test]
-    fn type_annotation_display_union() {
-        let ta = union_ta(vec![simple_ta("Integer"), simple_ta("String")]);
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Integer | String"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_singleton() {
-        let ta = TypeAnnotation::Singleton {
-            name: "north".into(),
-            span: s(),
-        };
-        assert_eq!(CoreErlangGenerator::type_annotation_display(&ta), "#north");
-    }
-
-    #[test]
-    fn type_annotation_display_generic_single_param() {
-        let ta = TypeAnnotation::Generic {
-            base: id("Collection"),
-            parameters: vec![simple_ta("Integer")],
-            span: s(),
-        };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Collection(Integer)"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_generic_two_params() {
-        let ta = TypeAnnotation::Generic {
-            base: id("Result"),
-            parameters: vec![simple_ta("T"), simple_ta("E")],
-            span: s(),
-        };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Result(T, E)"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_falseor() {
-        let ta = TypeAnnotation::FalseOr {
-            inner: Box::new(simple_ta("Integer")),
-            span: s(),
-        };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Integer | False"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_difference() {
-        let ta = TypeAnnotation::Difference {
-            base: Box::new(simple_ta("Symbol")),
-            excluded: Box::new(TypeAnnotation::Singleton {
-                name: "foo".into(),
-                span: s(),
-            }),
-            span: s(),
-        };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Symbol \\ #foo"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_intersection() {
-        let ta = TypeAnnotation::Intersection {
-            left: Box::new(simple_ta("Collection")),
-            right: Box::new(simple_ta("Comparable")),
-            span: s(),
-        };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Collection & Comparable"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_self_type() {
-        let ta = TypeAnnotation::SelfType { span: s() };
-        assert_eq!(CoreErlangGenerator::type_annotation_display(&ta), "Self");
-    }
-
-    #[test]
-    fn type_annotation_display_self_class() {
-        let ta = TypeAnnotation::SelfClass { span: s() };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Self class"
-        );
-    }
-
-    #[test]
-    fn type_annotation_display_class_of() {
-        let ta = TypeAnnotation::ClassOf {
-            class_name: id("Actor"),
-            span: s(),
-        };
-        assert_eq!(
-            CoreErlangGenerator::type_annotation_display(&ta),
-            "Actor class"
-        );
     }
 
     // --- is_nilable_type_name ---
