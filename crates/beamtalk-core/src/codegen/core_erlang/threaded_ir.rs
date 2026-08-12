@@ -70,17 +70,57 @@
 //! As of BT-3133, every `list_ops/*.rs` and `dict_ops.rs` foldl call site —
 //! `do:`, `collect:`, `select:`/`reject:`, `inject:into:`, `anySatisfy:`/
 //! `allSatisfy:`, `detect:`, `takeWhile:`/`dropWhile:`, and dictionary `do:`
-//! — also constructs and [`verify`]s a real `ThreadedIr` fragment, via
-//! [`verify_tuple_acc_unpack_invariant`] (invariant classes 1 + 4,
-//! single-sourced at `ThreadingPlan::generate_tuple_unpack_docs`),
-//! [`verify_tuple_acc_value_type_exclusion`] (invariant class 2, at
-//! `ThreadingPlan::new_impl`), and [`verify_nested_list_op_stateacc_compat`]
-//! (invariant class 3, also at `ThreadingPlan::new_impl`) — introducing
-//! [`AccParam`] (the unversioned foldl-accumulator lambda parameter,
-//! distinct from [`VersionedVar`]) and [`ThreadedStmt::TupleAccUnpack`] (the
-//! flat positional-unpack accumulator shape) to model them. No
-//! `debug_assert!`s existed in these files to delete (list-ops never had the
-//! loop-unpack duplication BT-3132 closed).
+//! — constructed and [`verify`]d a real `ThreadedIr` fragment for its
+//! per-iteration tuple unpack, introducing [`AccParam`] (the unversioned
+//! foldl-accumulator lambda parameter, distinct from [`VersionedVar`]) and
+//! [`ThreadedStmt::TupleAccUnpack`] (the flat positional-unpack accumulator
+//! shape) to model it — but only as a verification-only side channel: a
+//! *second*, hand-Document-built copy of the same unpack loop was what
+//! `generate_tuple_unpack_docs` actually emitted, and the fixture's mode and
+//! node `gate_slots` were literally the same argument threaded twice, making
+//! [`VerifyError::EarlyExitGateSlotMismatch`] a tautology by construction.
+//!
+//! ## Status (as of BT-3147 — ADR 0111 Phase C completion)
+//!
+//! BT-3147 promotes the `TupleAcc`-mode per-iteration unpack to genuine
+//! emission input: [`build_tuple_acc_unpack`] is now what
+//! `ThreadingPlan::generate_tuple_unpack_docs` (`control_flow/mod.rs`)
+//! actually [`render`]s, for every list-op/dict-op call site named above —
+//! no parallel hand-Document-built duplicate remains. Two changes made this
+//! byte-identical to the pre-BT-3147 hand-rolled loop: each unpack target
+//! is now a [`VersionPrefix::Gensym`] (BT-3145's real-name precedent,
+//! reused here for the real bare `to_core_erlang_var` name production
+//! actually binds — never [`VersionPrefix::Local`]'s `prefix{version}`
+//! scheme, which would have rendered `Sum1` where production emits bare
+//! `Sum`); and `mode_gate_slots`/`node_gate_slots` are now genuinely
+//! independent (the former from `control_flow::ListOpKind::gate_slots`, a
+//! canonical per-op-family table fixed at `ThreadingPlan` construction; the
+//! latter from each call site's own already-existing `index_offset - 1`) —
+//! [`VerifyError::EarlyExitGateSlotMismatch`] is a live check now, not
+//! scaffolding. `TupleAccInValueTypeContext`/`NestedStateAccFallbackUnderDirectParams`
+//! (invariant classes 2 + 3) are unaffected by this migration — they were
+//! already self-admittedly regression-pinning, not counterfactual detection
+//! (see their own doc comments) — but their production call sites are
+//! deleted in this same issue: `select_tuple_acc`'s `ValueType` exclusion
+//! and `select_direct_params`'s nested-`StateAcc`-fallback exclusion are
+//! each already unconditionally guaranteed by the selecting function's own
+//! early-return/`&&`-chain (`control_flow/mod.rs`), exactly the "already
+//! holds structurally" shape BT-3154 found for `ThreadingModeUnpackMismatch`
+//! below — the `VerifyError` variants, [`verify_tuple_acc_value_type_exclusion`]/
+//! [`verify_nested_list_op_stateacc_compat`], and their hand-built-IR unit
+//! tests all remain as regression pins, exercised directly rather than from
+//! a live call site.
+//!
+//! The block-body statements between the unpack and the fold call (arbitrary
+//! Beamtalk block code — field assignments, self-sends, nested control flow,
+//! per-`BodyKind` case-split accumulator logic for `select:`/`detect:`/
+//! `takeWhile:`/`partition:`/`groupBy:`/etc.) remain AST-directed,
+//! `generate_threaded_loop_body`'s existing (unmigrated) responsibility —
+//! the same "materially larger, different body model" scope BT-3145 named
+//! and deferred for loop bodies applies here with even more shape variety
+//! (BT-3145's own `ConditionalLoop`/Bind-representable-body gap, times the
+//! ~10 list-op `BodyKind` accumulator shapes); closing it is out of this
+//! issue's scope (see the BT-3147 Linear issue for the full accounting).
 //!
 //! As of BT-3134, `conditionals.rs`'s mutation-carrying `ifTrue:`/
 //! `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:` inliners and
@@ -697,10 +737,14 @@ pub(super) enum VerifyError {
     /// its enclosing [`ThreadingMode::TupleAcc`]'s `gate_slots`. Each list-op
     /// family reserves a different number of leading accumulator slots for
     /// its own result/continuation state (`do:`: 0; `collect:`/`select:`/
-    /// boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family:
-    /// 2) — a mismatch here means the unpack would read threaded-local values
-    /// from the wrong tuple positions: well-formed Core Erlang, silently
-    /// wrong values (the ADR 0110 danger class, not a `core_lint` failure).
+    /// boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`/
+    /// `partition:`-family: 2) — a mismatch here means the unpack would read
+    /// threaded-local values from the wrong tuple positions: well-formed Core
+    /// Erlang, silently wrong values (the ADR 0110 danger class, not a
+    /// `core_lint` failure). BT-3147: a live check, not scaffolding — see
+    /// [`build_tuple_acc_unpack`]'s doc comment for the two now-independent
+    /// sources (`ListOpKind::gate_slots` at lowering time vs. each call
+    /// site's own `index_offset - 1` at rendering time).
     EarlyExitGateSlotMismatch {
         mode_gate_slots: usize,
         node_gate_slots: usize,
@@ -1537,11 +1581,13 @@ fn render_conditional_loop(
     )
 }
 
-/// Skeleton-fidelity rendering of [`ThreadedStmt::TupleAccUnpack`], mirroring
-/// `generate_tuple_unpack_docs`'s `let V = call 'erlang':'element'(idx, Param)
-/// in` chain — `idx` starts at `gate_slots + 1` (1-based, past the leading
-/// gate slots) for the first target. Already full-fidelity (no generator
-/// context needed): this shape was real before BT-3144, unchanged here.
+/// Full-fidelity rendering of [`ThreadedStmt::TupleAccUnpack`]: `let V = call
+/// 'erlang':'element'(idx, Param) in` chain — `idx` starts at `gate_slots + 1`
+/// (1-based, past the leading gate slots) for the first target. No generator
+/// context needed (every target renders through [`VersionPrefix::Gensym`]'s
+/// context-independent verbatim naming, [`build_tuple_acc_unpack`]'s doc
+/// comment). Real production output as of BT-3147 — see module docs §Status
+/// — not just a byte-identical-by-inspection shape as pre-BT-3147.
 fn render_tuple_acc_unpack(
     param: &AccParam,
     gate_slots: usize,
@@ -1660,82 +1706,122 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
     ]
 }
 
-// ─── BT-3133 (ADR 0111 Phase C) invariant checks ───────────────────────────
+// ─── BT-3133/BT-3147 (ADR 0111 Phase C) TupleAcc unpack: emission input ────
 
-/// Invariant classes 1 + 4 ("flat positional-unpack accumulator" and
-/// "early-exit accumulator liveness"): builds a minimal fixture for one
-/// `TupleAcc`-mode fold lambda's per-iteration positional unpack step and
-/// verifies it. Single-sourced at `generate_tuple_unpack_docs`
-/// (`control_flow/mod.rs`) — the sole production emitter of this unpack shape
-/// across every list-op and dict-op call site (`basic_ops.rs`, `filter_ops.rs`,
-/// `search_ops.rs`, `transform_ops.rs`, `dict_ops.rs`), so this one check
-/// covers all of them.
+/// Builds the real `ThreadedIr` for one `TupleAcc`-mode fold lambda's
+/// per-iteration positional unpack step — the single production emitter of
+/// this unpack shape across every list-op and dict-op call site
+/// (`basic_ops.rs`, `filter_ops.rs`, `search_ops.rs`, `transform_ops.rs`,
+/// `dict_ops.rs`, all via `ThreadingPlan::generate_tuple_unpack_docs`,
+/// `control_flow/mod.rs`).
 ///
-/// `use_tuple_acc` is the loop's already-resolved `ThreadingPlan::use_tuple_acc`
-/// decision; when `false`, this call site should never have been reached in
-/// `TupleAcc` mode at all — `fallback_reason` names why (the same pattern
-/// `check_loop_unpack_invariant`'s deleted `mode` parameter used: the
-/// generator's own already-resolved decision, not a re-derivation). Class 1
-/// (`TupleAccUnpackModeMismatch`) has real teeth: `use_tuple_acc` is an
-/// externally-supplied bool that genuinely varies per call site, so this
-/// guards against `generate_tuple_unpack_docs` being reached from a
-/// `StateAcc`-mode code path.
+/// BT-3147: promoted from a verification-only side channel (BT-3133) to
+/// genuine emission input — [`render`]ing this exact `ThreadedStmt` IS how
+/// `generate_tuple_unpack_docs` now produces its `Document` output, not a
+/// second, independently hand-Document-built duplicate of it. Each target's
+/// identity is a [`VersionPrefix::Gensym`] (never [`VersionPrefix::Local`]):
+/// the real per-iteration unpack binds the BARE `to_core_erlang_var` name
+/// (`Sum`, never `Sum1`) — matching every real call site's pre-BT-3147
+/// hand-rolled loop byte-for-byte (confirmed against `basic_ops.rs`'s
+/// `generate_list_do_with_mutations`, the simplest call site) — never the
+/// sequential `prefix{version}` scheme `Local`'s renderer would apply to a
+/// nonzero version. Same naming-scheme-mismatch class ADR 0111 Addendum 2
+/// "Gap 2" already named and closed for loop-local rebinds; `Gensym`'s
+/// existing verbatim-regardless-of-version rendering closes it here too,
+/// with no new IR machinery.
 ///
-/// `gate_slots` is `index_offset - 1`, the caller's own already-computed
-/// tuple-shape parameter (`1` for `do:`/`dict do:`'s `index_offset: 1`, `2`
-/// for `collect:`/boolean-predicate ops' `index_offset: 2`, `3` for
-/// `takeWhile:`/`dropWhile:`/`detect:`-family's `index_offset: 3`). **Class 4
-/// (`EarlyExitGateSlotMismatch`) is currently a tautology, not a live check**:
-/// both the synthesized `ThreadingMode::TupleAcc(gate_slots)` and the
-/// `TupleAccUnpack` node's own `gate_slots` are built from this single
-/// `gate_slots` argument below, so they cannot disagree at any real call
-/// site — only the hand-built-IR unit test
-/// (`verify_early_exit_gate_slot_mismatch_fires_when_node_disagrees_with_mode`)
-/// exercises the mismatch branch by deliberately diverging them. Unlike
-/// class 1, there is today no second, independently-derived source for
-/// `gate_slots` to disagree with (e.g. resolved from the op selector/kind
-/// rather than threaded through as the caller's `index_offset`), so this
-/// currently exists as structural scaffolding for a future independent
-/// derivation, not as a regression guard against an op-family miscopy.
-pub(super) fn verify_tuple_acc_unpack_invariant(
-    use_tuple_acc: bool,
-    fallback_reason: StateAccFallbackReason,
+/// **Independent gate-slot derivation (BT-3147, invariant class 4 goes
+/// live)**: `mode_gate_slots` and `node_gate_slots` are now two genuinely
+/// separate sources, no longer the same argument threaded twice. Callers
+/// pass `mode_gate_slots` from [`super::control_flow::ListOpKind::gate_slots`]
+/// — a canonical per-op-family table fixed at `ThreadingPlan` construction
+/// (lowering time, before any particular call site's `index_offset` is even
+/// chosen) — and `node_gate_slots` from their own already-computed
+/// `index_offset - 1` (rendering-side construction, unchanged from BT-3133).
+/// A call site whose `index_offset` disagrees with its declared
+/// `ListOpKind` (e.g. a future op miscategorized when copy-pasted from a
+/// same-shaped sibling) now trips [`VerifyError::EarlyExitGateSlotMismatch`]
+/// for real — see [`verify_tuple_acc_unpack_invariant`] and
+/// `control_flow::mod::ListOpKind`'s own doc comment for the full per-op
+/// gate-slot table (`0` for `do:`/`dict do:`; `1` for `collect:`/
+/// `select:`/`reject:`/`inject:into:`/`anySatisfy:`/`allSatisfy:`/`count:`/
+/// `flatMap:`/`groupBy:`; `2` for `detect:`/`takeWhile:`/`dropWhile:`/
+/// `partition:` — `partition:`'s two result lists need the same two leading
+/// slots an early-exit op's found-item/continue-flag pair does, even though
+/// it never early-exits itself).
+pub(super) fn build_tuple_acc_unpack(
+    param_name: &str,
+    mode_gate_slots: usize,
+    node_gate_slots: usize,
     threaded_locals: &[String],
-    gate_slots: usize,
     span: Span,
-) -> Vec<VerifyError> {
+) -> (ThreadedStmt, Vec<VersionedVar>) {
     let frame = FrameId::new(1);
-    let param = AccParam::new("StateAcc");
+    let param = AccParam::new(param_name);
     let targets: Vec<VersionedVar> = threaded_locals
         .iter()
         .enumerate()
-        .map(|(i, local)| VersionedVar::new(VersionPrefix::Local(local.clone()), i + 1, frame))
+        .map(|(i, local)| {
+            let core_name = CoreErlangGenerator::to_core_erlang_var(local);
+            VersionedVar::new(VersionPrefix::Gensym(core_name), i + 1, frame)
+        })
         .collect();
-    let mode = if use_tuple_acc {
-        ThreadingMode::TupleAcc(gate_slots)
-    } else {
-        ThreadingMode::StateAcc(fallback_reason)
-    };
-    verify(&[ThreadedStmt::Threaded {
-        mode,
+    let stmt = ThreadedStmt::Threaded {
+        mode: ThreadingMode::TupleAcc(mode_gate_slots),
         frame,
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
-            gate_slots,
+            gate_slots: node_gate_slots,
             targets: targets.clone(),
             frame,
             span,
         }],
-        produces: targets,
+        produces: targets.clone(),
         span,
-    }])
+    };
+    (stmt, targets)
+}
+
+/// Test-facing convenience: builds the same fixture [`build_tuple_acc_unpack`]
+/// does (always in genuine `TupleAcc` mode — production only ever calls
+/// `generate_tuple_unpack_docs` from inside `if plan.use_tuple_acc { .. }`,
+/// so a `StateAcc`-mode unpack fixture is a hand-built-IR-only scenario, see
+/// `verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context`
+/// / the dedicated `StateAcc` variant below) and verifies it in one call.
+/// Test-only (`#[allow(dead_code)]`): production calls
+/// [`build_tuple_acc_unpack`] + [`verify`] directly (`generate_tuple_unpack_docs`,
+/// `control_flow/mod.rs`) since it also needs the built `ThreadedStmt` for
+/// [`render`], which this convenience wrapper discards.
+#[allow(dead_code)]
+pub(super) fn verify_tuple_acc_unpack_invariant(
+    mode_gate_slots: usize,
+    node_gate_slots: usize,
+    threaded_locals: &[String],
+    span: Span,
+) -> Vec<VerifyError> {
+    let (stmt, _) = build_tuple_acc_unpack(
+        "StateAcc",
+        mode_gate_slots,
+        node_gate_slots,
+        threaded_locals,
+        span,
+    );
+    verify(std::slice::from_ref(&stmt))
 }
 
 /// Invariant class 2: `select_tuple_acc`'s `ValueType`-context exclusion.
-/// Single-sourced at `ThreadingPlan::new_impl` (`control_flow/mod.rs`),
-/// called once per loop right after `use_tuple_acc` is resolved, comparing it
-/// against a direct re-check of the same `context` value `select_tuple_acc`
-/// itself already guarded on.
+/// Compares `use_tuple_acc` against a direct re-check of the same `context`
+/// value `select_tuple_acc` itself already guards on.
+///
+/// BT-3147: no production call site — `select_tuple_acc`'s own early return
+/// on `matches!(context, CodeGenContext::ValueType)` already makes
+/// `use_tuple_acc && context_is_value_type` unconditionally unreachable by
+/// inspection of that one function (`control_flow/mod.rs`), the same
+/// already-structural shape BT-3154 found for `ThreadingModeUnpackMismatch`
+/// — see `threaded_ir`'s module docs §Status. Kept as a regression pin,
+/// exercised directly by hand-built-IR unit tests below (mirrors
+/// `ThreadingModeUnpackMismatch`'s own kept-but-uncalled precedent).
+#[allow(dead_code)]
 pub(super) fn verify_tuple_acc_value_type_exclusion(
     use_tuple_acc: bool,
     context_is_value_type: bool,
@@ -1749,12 +1835,18 @@ pub(super) fn verify_tuple_acc_value_type_exclusion(
 }
 
 /// Invariant class 3: the recursive inter-construct `StateAcc`-fallback
-/// invariant `list_op_needs_stateacc_fallback_recursive` encodes.
-/// Single-sourced at `ThreadingPlan::new_impl` (`control_flow/mod.rs`), called
-/// once per loop right after `use_direct_params` is resolved, comparing it
-/// against `BodyEffects::has_non_tuple_safe_list_op` (an independently
-/// computed recursive scan of the loop body for nested list ops that need a
-/// `StateAcc` fallback).
+/// invariant `list_op_needs_stateacc_fallback_recursive` encodes. Compares
+/// `direct_params_selected` against `BodyEffects::has_non_tuple_safe_list_op`
+/// (an independently computed recursive scan of the loop body for nested
+/// list ops that need a `StateAcc` fallback).
+///
+/// BT-3147: no production call site — `select_direct_params`'s own
+/// `!effects.has_non_tuple_safe_list_op` conjunct already makes
+/// `direct_params_selected && inner_needs_stateacc_fallback` unconditionally
+/// unreachable by inspection of that one function (`control_flow/mod.rs`) —
+/// see `verify_tuple_acc_value_type_exclusion`'s doc comment for the full
+/// rationale, shared verbatim. Kept as a regression pin.
+#[allow(dead_code)]
 pub(super) fn verify_nested_list_op_stateacc_compat(
     direct_params_selected: bool,
     inner_needs_stateacc_fallback: bool,
@@ -2786,43 +2878,50 @@ mod tests {
     fn verify_tuple_acc_unpack_invariant_silent_under_tuple_acc_mode() {
         // The expected, common case: TupleAcc mode with a matching gate_slots
         // unpack — this is what every real `generate_tuple_unpack_docs` call
-        // site produces (`use_tuple_acc: true` implies `TupleAcc(gate_slots)`).
+        // site produces (`mode_gate_slots`/`node_gate_slots` agree).
         let errors = verify_tuple_acc_unpack_invariant(
-            true,
-            StateAccFallbackReason::None,
-            &["sum".to_string(), "count".to_string()],
+            0, // ListOpKind::Do's declared gate_slots
             0, // do:'s index_offset(1) - 1
+            &["sum".to_string(), "count".to_string()],
             span(),
         );
         assert_eq!(errors, Vec::new());
     }
 
     #[test]
-    fn verify_tuple_acc_unpack_invariant_fires_when_use_tuple_acc_is_false() {
-        // Simulates the regression class this check guards against: a
-        // TupleAccUnpack node reached with `use_tuple_acc: false` — i.e.
-        // `generate_tuple_unpack_docs` called from a StateAcc-fallback path.
-        let errors = verify_tuple_acc_unpack_invariant(
-            false,
-            StateAccFallbackReason::SelfSendInBody,
-            &["sum".to_string()],
-            0,
-            span(),
-        );
+    fn verify_tuple_acc_unpack_mode_mismatch_fires_in_stateacc_fallback_context() {
+        // A TupleAccUnpack node hand-placed inside a StateAcc-fallback body
+        // (never legitimate in production — `generate_tuple_unpack_docs` is
+        // only ever called from inside `if plan.use_tuple_acc { .. }` — but a
+        // regression pin for the invariant `TupleAccUnpackModeMismatch`
+        // exists to catch: BT-3147 dropped `verify_tuple_acc_unpack_invariant`'s
+        // old `use_tuple_acc`/`fallback_reason` params since production has
+        // no such call site anymore, so this constructs the fixture directly,
+        // mirroring `verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context`'s
+        // `DirectParams` sibling below.
+        let frame = FrameId::new(1);
+        let param = AccParam::new("StateAcc");
+        let target = local("sum", 1, frame);
+        let ir = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
+            frame,
+            body: vec![ThreadedStmt::TupleAccUnpack {
+                param,
+                gate_slots: 0,
+                targets: vec![target.clone()],
+                frame,
+                span: span(),
+            }],
+            produces: vec![target],
+            span: span(),
+        }];
+        let errors = verify(&ir);
         assert_eq!(
-            errors.len(),
-            1,
-            "expected exactly one error, got: {errors:?}"
-        );
-        assert!(
-            matches!(
-                &errors[0],
-                VerifyError::TupleAccUnpackModeMismatch {
-                    mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
-                    ..
-                }
-            ),
-            "expected TupleAccUnpackModeMismatch, got: {errors:?}"
+            errors,
+            vec![VerifyError::TupleAccUnpackModeMismatch {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
+                at: span(),
+            }]
         );
     }
 
@@ -2863,16 +2962,40 @@ mod tests {
 
     #[test]
     fn verify_tuple_acc_unpack_invariant_silent_with_gate_slots_for_early_exit_op() {
-        // detect:/takeWhile:/dropWhile:'s shape: 2 leading gate slots
-        // (index_offset: 3) before the threaded locals.
+        // detect:/takeWhile:/dropWhile:/partition:'s shape: 2 leading gate
+        // slots (index_offset: 3) before the threaded locals.
         let errors = verify_tuple_acc_unpack_invariant(
-            true,
-            StateAccFallbackReason::None,
+            2, // ListOpKind::TwoSlot's declared gate_slots
+            2, // index_offset(3) - 1
             &["item_var".to_string()],
-            2,
             span(),
         );
         assert_eq!(errors, Vec::new());
+    }
+
+    #[test]
+    fn verify_tuple_acc_unpack_invariant_fires_when_mode_and_node_gate_slots_disagree() {
+        // BT-3147: `mode_gate_slots`/`node_gate_slots` are now two genuinely
+        // independent arguments (previously the same value threaded twice —
+        // see `build_tuple_acc_unpack`'s doc comment) — a call site whose
+        // declared `ListOpKind` disagrees with its own `index_offset` fires
+        // for real, exercised here through the actual production helper
+        // (not just a hand-built `ThreadedStmt`, `verify_early_exit_gate_slot_mismatch_fires_when_node_disagrees_with_mode`
+        // below).
+        let errors = verify_tuple_acc_unpack_invariant(
+            1, // wrongly declared ListOpKind::Accumulate
+            2, // but built with a detect:-shaped index_offset(3) - 1
+            &["found".to_string()],
+            span(),
+        );
+        assert_eq!(
+            errors,
+            vec![VerifyError::EarlyExitGateSlotMismatch {
+                mode_gate_slots: 1,
+                node_gate_slots: 2,
+                at: span(),
+            }]
+        );
     }
 
     #[test]
@@ -2919,10 +3042,9 @@ mod tests {
         // hardcoded to one.
         for gate_slots in [0usize, 1, 2] {
             let errors = verify_tuple_acc_unpack_invariant(
-                true,
-                StateAccFallbackReason::None,
-                &["v".to_string()],
                 gate_slots,
+                gate_slots,
+                &["v".to_string()],
                 span(),
             );
             assert_eq!(

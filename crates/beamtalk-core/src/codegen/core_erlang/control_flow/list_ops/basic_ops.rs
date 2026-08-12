@@ -7,7 +7,7 @@ use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result};
-use super::super::{BodyKind, ThreadingPlan};
+use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -46,7 +46,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible (no field/self-send mutations).
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         // BT-524: Add is_list guard for non-list collection types.
@@ -81,7 +81,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // Unpack vars from the tuple accumulator: element(1..N, StateAcc).
-            docs.extend(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
+            docs.push(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
@@ -242,7 +242,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible.
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -284,7 +284,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // Unpack vars starting at index 2 (slot 1 is AccList).
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;

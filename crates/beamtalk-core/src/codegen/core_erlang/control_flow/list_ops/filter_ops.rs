@@ -7,7 +7,7 @@ use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
-use super::super::{BodyKind, ThreadingPlan};
+use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -103,7 +103,7 @@ impl CoreErlangGenerator {
         negate: bool,
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible.
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
@@ -143,7 +143,7 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+            docs.push(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) = self.generate_threaded_loop_body(
                 body,
