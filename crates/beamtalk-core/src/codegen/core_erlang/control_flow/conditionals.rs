@@ -53,9 +53,14 @@
 use super::super::document::Document;
 use super::super::document::leaf;
 use super::super::gen_server::BodyExprKind;
-use super::super::{CoreErlangGenerator, OpenScopeResult, Result};
+use super::super::threaded_ir::{
+    self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+};
+use super::super::{CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
+use super::StateAccFallbackReason;
 use crate::ast::{Block, Expression};
 use crate::docvec;
+use crate::source_analysis::Span;
 
 impl CoreErlangGenerator {
     /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's
@@ -142,13 +147,14 @@ impl CoreErlangGenerator {
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        let (branch_doc, branch_final) =
+        // ADR 0111 Addendum 5 (BT-3146): `generate_conditional_branch_inline`
+        // now builds, `verify()`s, and `render()`s this arm's real per-frame
+        // `ThreadedIr` internally — the pre-migration
+        // `check_branch_frame_linearity` scalar-synthesis scaffolding check
+        // that used to run here is gone; `NonLinearVersion`/`UnboundVersion`
+        // are live checks against the real IR now.
+        let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
-        // BT-3134: verify the single arm's ThreadedIr frame (the synthetic
-        // non-taken `{'nil', State}` branch never mutates, so it isn't a
-        // second arm here — see generate_if_true_if_false_with_mutations for
-        // the two-real-arm case this check is primarily for).
-        self.check_branch_frame_linearity(&[branch_final], receiver.span());
         // BT-3161: explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -199,12 +205,11 @@ impl CoreErlangGenerator {
         // the post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        let (branch_doc, branch_final) =
+        // ADR 0111 Addendum 5 (BT-3146): see generate_if_true_with_mutations'
+        // matching comment — real per-frame verify() now runs inside
+        // generate_conditional_branch_inline itself.
+        let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
-        // BT-3134: verify the single arm's ThreadedIr frame (the synthetic
-        // non-taken `{'nil', State}` branch never mutates, so it isn't a
-        // second arm here).
-        self.check_branch_frame_linearity(&[branch_final], receiver.span());
         // BT-3161: explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -256,21 +261,23 @@ impl CoreErlangGenerator {
             self.seed_conditional_locals(&[true_block, false_block], &outer_state);
 
         // True branch
-        let (true_branch_doc, true_final) =
+        let (true_branch_doc, _true_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(true_block))?;
 
         // False branch (reset to same initial state)
-        let (false_branch_doc, false_final) =
+        let (false_branch_doc, _false_final) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(false_block))?;
 
-        // BT-3134: the true/false arms are sibling with_branch_context
-        // frames — each mints its own StateAcc version chain, and either
-        // arm may independently reach the same version number as the other
+        // ADR 0111 Addendum 5 (BT-3146): the true/false arms are sibling
+        // with_branch_context frames — each `generate_conditional_branch_inline`
+        // call mints its own fresh FrameId (`current_branch_frame`) and
+        // `verify()`s its own real IR internally, so either arm
+        // independently reaching the same version number as the other
         // (e.g. both perform exactly one field mutation, both producing
-        // "StateAcc1" in their own frame). check_branch_frame_linearity
-        // allocates a fresh FrameId per arm so this is NOT a
-        // NonLinearVersion violation.
-        self.check_branch_frame_linearity(&[true_final, false_final], receiver.span());
+        // "StateAcc1" in their own frame) is correctly NOT a
+        // NonLinearVersion violation — the check that used to run here
+        // (`check_branch_frame_linearity`) is gone; real per-frame
+        // verification now happens where the IR is actually built.
         // BT-3161: explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
@@ -325,7 +332,10 @@ impl CoreErlangGenerator {
         // post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
-        let (branch_doc, branch_final) = self.with_branch_context(|this| {
+        // ADR 0111 Addendum 5 (BT-3146): see generate_if_true_with_mutations'
+        // matching comment — real per-frame verify() now runs inside
+        // generate_conditional_branch_inline itself.
+        let (branch_doc, _branch_final) = self.with_branch_context(|this| {
             // Push a scope so the block-parameter binding is cleaned up after generation
             this.push_scope();
             if let Some(param) = block.parameters.first() {
@@ -336,10 +346,6 @@ impl CoreErlangGenerator {
             this.pop_scope();
             result
         })?;
-        // BT-3134: verify the single arm's ThreadedIr frame (the synthetic
-        // non-taken `{'nil', State}` branch never mutates, so it isn't a
-        // second arm here).
-        self.check_branch_frame_linearity(&[branch_final], receiver.span());
 
         Ok(docvec![
             recv_preamble,
@@ -360,6 +366,178 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0111 Addendum 5 §C2/§C3/§C4: lowers a `LocalAssignPure`/
+    /// `LocalAssignTier2`/`LocalAssignControlFlow`/`LocalAssignSelfSend`
+    /// conditional-branch statement to its real `Bind` sequence, appending
+    /// it to `stmts` and returning the assigned value's temp var name.
+    /// Mirrors `generate_local_var_assignment_in_loop`'s three sub-branches
+    /// (BT-153/BT-912/BT-1397) exactly — same helper calls, same mint
+    /// order — but models the mutation as a [`ThreadedStmt::Bind`] instead
+    /// of a hand-rolled `maps:put` `Document` fragment. Unlike the
+    /// top-level `BodyExprKind` shapes `gen_server/methods.rs` lowers
+    /// (which route `LocalAssignSelfSend` through
+    /// `generate_self_dispatch_open` instead), the four kinds above ALL
+    /// reach `generate_local_var_assignment_in_loop` in this body loop —
+    /// its own `is_tier2_value_call`/open-scope checks decide the actual
+    /// shape at runtime, not `classify_body_expr`'s static kind.
+    #[allow(clippy::too_many_lines)]
+    fn lower_local_var_assignment_bind(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<String> {
+        let Expression::Assignment { target, value, .. } = expr else {
+            unreachable!("LocalAssign* kinds must ensure expr is an Assignment");
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            unreachable!("LocalAssign* kinds must ensure assignment target is an Identifier");
+        };
+
+        let val_var = self.fresh_temp_var("Val");
+        // BT-790: In REPL mode, use the plain variable name as the key (no
+        // __local__ prefix) — see `generate_local_var_assignment_in_loop`.
+        let state_key: String = if self.is_repl_mode() {
+            id.name.to_string()
+        } else {
+            Self::local_state_key(&id.name)
+        };
+
+        // C3 — BT-912: Tier 2 block-call RHS returns {Result, NewStateAcc};
+        // the sanctioned Gensym two-hop (ADR 0111 Addendum 5's "opaque
+        // nested-construct state extraction feeding a maps:put" idiom).
+        if self.is_tier2_value_call(value) {
+            let t2_tuple = self.fresh_temp_var("T2");
+            let t2_state = self.fresh_temp_var("T2St");
+            let value_code = self.generate_tier2_value_call_doc(value)?;
+            let source_version = self.state_version();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(t2_tuple.clone()),
+                    " = ",
+                    value_code,
+                    " in let ",
+                    leaf::var(val_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(t2_tuple.clone()),
+                    ") in ",
+                ],
+                span,
+            ));
+            let gensym_state = VersionedVar::new(VersionPrefix::Gensym(t2_state.clone()), 1, frame);
+            stmts.push(ThreadedStmt::Bind {
+                target: gensym_state.clone(),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(t2_tuple),
+                    ")",
+                ])),
+                shadow_write: false,
+                span,
+            });
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: gensym_state,
+                op: BindOp::Put {
+                    field: state_key,
+                    value: ValueRef::Var(val_var.clone()),
+                    // Unused placeholder: only rendered when shadow_write is
+                    // true, which only class-var Puts ever set (ADR 0110) —
+                    // never reachable here (§Scope: class-var mutations
+                    // never route through these arms).
+                    class_tag: ValueRef::Literal("'nil'"),
+                },
+                shadow_write: false,
+                span,
+            });
+            self.bind_var(&id.name, &val_var);
+            return Ok(val_var);
+        }
+
+        let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
+
+        if let Some(open_scope_result) = open_scope {
+            // C4 (BT-1397) — ADR 0111 Addendum 5 found no compilable repro
+            // reaching this sub-branch through this body loop: a
+            // class-method self-send routes through
+            // `value_type_codegen.rs`'s vt-conditional path instead
+            // (§Scope, §C4). The shape decomposes with the exact same
+            // idiom as the plain case below (a value-temp Statement, then
+            // a real mutation Bind) — modeled here for completeness rather
+            // than left opaque, even though no live program exercises it
+            // today.
+            let open_scope_value_doc = match open_scope_result {
+                OpenScopeResult::Value(v) => leaf::var(v),
+                OpenScopeResult::NoValue => Document::Str("'nil'"),
+            };
+            stmts.push(ThreadedStmt::Statement(value_code, span));
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(val_var.clone()),
+                    " = ",
+                    open_scope_value_doc,
+                    " in ",
+                ],
+                span,
+            ));
+            let source_version = self.state_version();
+            let current_state_name = self.current_state_var();
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'maps':'put'(",
+                    leaf::atom(state_key),
+                    ", ",
+                    leaf::var(val_var.clone()),
+                    ", ",
+                    leaf::var(current_state_name),
+                    ")",
+                ])),
+                shadow_write: false,
+                span,
+            });
+            self.bind_var(&id.name, &val_var);
+            return Ok(val_var);
+        }
+
+        // C2 — the common case (plain / REPL-mode key).
+        let source_version = self.state_version();
+        stmts.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(val_var.clone()),
+                " = ",
+                value_code,
+                " in "
+            ],
+            span,
+        ));
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        stmts.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Put {
+                field: state_key,
+                value: ValueRef::Var(val_var.clone()),
+                class_tag: ValueRef::Literal("'nil'"),
+            },
+            shadow_write: false,
+            span,
+        });
+        self.bind_var(&id.name, &val_var);
+        Ok(val_var)
+    }
+
     /// Generates an inline block body for a conditional branch with field mutation threading.
     ///
     /// **Precondition**: Caller must set `in_loop_body = true` and `state_version = 0`
@@ -369,85 +547,140 @@ impl CoreErlangGenerator {
     ///
     /// Returns `(body_doc, final_state_version)`. The generated code ends with
     /// `{<result>, <final_state>}`.
+    ///
+    /// ADR 0111 Addendum 5 (BT-3146): this arm's mutation sequence is built
+    /// as real [`ThreadedStmt`]s (per the addendum's C1–C13 per-shape
+    /// decomposition table), wrapped in one [`ThreadedStmt::Threaded`] node
+    /// (`mode: StateAcc(None)`, this arm's own [`FrameId`] — Rule 3), then
+    /// [`threaded_ir::verify`]d and [`threaded_ir::render`]ed — the
+    /// `render`()ed `Document` IS this function's return value, byte-identical
+    /// by construction (every shape below reuses the exact codegen calls and
+    /// mint order the pre-migration hand-rolled version used). `StateAcc`
+    /// mode's rendering is a transparent pass-through (`render_threaded`'s
+    /// `ThreadingMode::StateAcc(_) => render(body, ctx)` arm), so wrapping
+    /// changes zero bytes versus rendering `stmts` directly.
     #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_conditional_branch_inline(
         &mut self,
         block: &Block,
     ) -> Result<(Document<'static>, usize)> {
-        let mut docs: Vec<Document<'static>> = Vec::new();
+        let frame = self.current_branch_frame();
         self.push_scope();
 
         let body = super::super::util::collect_body_exprs(&block.body);
 
-        // Empty block returns nil with unchanged state
+        // Empty block returns nil with unchanged state (C13).
         if body.is_empty() {
-            let final_state = self.current_state_var();
-            let version = self.state_version();
+            let final_version = self.state_version();
             self.pop_scope();
-            return Ok((docvec!["{'nil', ", leaf::var(final_state), "}"], version));
+            return Ok(self.verify_and_render_branch_arm(
+                vec![ThreadedStmt::Return(
+                    ValueRef::Literal("'nil'"),
+                    VersionedVar::new(VersionPrefix::State, final_version, frame),
+                    block.span,
+                )],
+                frame,
+                final_version,
+                block.span,
+            ));
         }
 
         // Classify every expression upfront using the shared classifier (BT-1447).
         let plan: Vec<BodyExprKind> = body.iter().map(|e| self.classify_body_expr(e)).collect();
 
-        let mut last_result: Option<String> = None;
+        let mut stmts: Vec<ThreadedStmt> = Vec::new();
+        let mut last_result: Option<ValueRef> = None;
 
         for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
             let is_last = i == body.len() - 1;
+            let span = expr.span();
 
             match kind {
+                // C1
                 BodyExprKind::FieldAssignment => {
-                    // generate_field_assignment_open emits open let chain:
-                    // "let _Val = <value> in let StateAccN = maps:put(...) in "
-                    let (doc, val_var) = self.generate_field_assignment_open(expr)?;
-                    docs.push(doc);
-                    if is_last {
-                        // BT-884: val_var holds the assigned value variable
-                        last_result = Some(val_var);
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            // BT-3140: preserve generate_field_assignment_open's
+                            // class-var-write rejection exactly (§Scope: class-var
+                            // mutations never legitimately reach these arms).
+                            if self.is_class_var_assignment(expr) {
+                                let location = self.span_to_line(expr.span()).map_or_else(
+                                    || format!("offset {}", expr.span().start()),
+                                    |line| format!("line {line}"),
+                                );
+                                return Err(CodeGenError::ClassVarAssignmentInThreadedBody {
+                                    field: field.name.to_string(),
+                                    location,
+                                });
+                            }
+                            // §Scope: generate_field_assignment_open's hybrid
+                            // full-extract sub-branch is unreachable here — a
+                            // mutation-carrying conditional forces StateAcc
+                            // fallback, mutually exclusive with hybrid mode.
+                            let val_var = self.fresh_temp_var("Val");
+                            let source_version = self.state_version();
+                            let value_str = self.generate_field_assignment_value_doc(value)?;
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(val_var.clone()),
+                                    " = ",
+                                    value_str,
+                                    " in ",
+                                ],
+                                span,
+                            ));
+                            let _ = self.next_state_var();
+                            let target_version = self.state_version();
+                            stmts.push(ThreadedStmt::Bind {
+                                target: VersionedVar::new(
+                                    VersionPrefix::State,
+                                    target_version,
+                                    frame,
+                                ),
+                                source: VersionedVar::new(
+                                    VersionPrefix::State,
+                                    source_version,
+                                    frame,
+                                ),
+                                op: BindOp::Put {
+                                    field: field.name.to_string(),
+                                    value: ValueRef::Var(val_var.clone()),
+                                    class_tag: ValueRef::Literal("'nil'"),
+                                },
+                                shadow_write: false,
+                                span,
+                            });
+                            if is_last {
+                                // BT-884: val_var holds the assigned value variable
+                                last_result = Some(ValueRef::Var(val_var));
+                            }
+                        }
                     }
-                    // If not last, the let chain stays open for the next expression
                 }
+                // C2/C3/C4
                 BodyExprKind::LocalAssignPure
                 | BodyExprKind::LocalAssignTier2
                 | BodyExprKind::LocalAssignControlFlow
                 | BodyExprKind::LocalAssignSelfSend => {
-                    // BT-1053/BT-1225: Local variable mutation inside conditional branch.
-                    // generate_local_var_assignment_in_loop emits open let chain:
-                    // "let _Val = <value> in let StateAccN = maps:put('__local__key', _Val, StateAccM) in "
-                    let (doc, val_var) = self.generate_local_var_assignment_in_loop(expr)?;
-                    docs.push(doc);
+                    let val_var =
+                        self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
-                        // val_var is the _Val bound by generate_local_var_assignment_in_loop
-                        last_result = Some(val_var);
-                    } else {
-                        // BT-1225: Bind the variable name to the temp var so subsequent reads
-                        // within this block resolve directly to the temp var (e.g. `_Val1`)
-                        // rather than falling through to maps:get without the __local__ prefix,
-                        // which would cause a {badkey,VarName} crash at runtime.
-                        //
-                        // classify_body_expr guarantees expr is Assignment { target: Identifier }.
-                        // If either invariant breaks, fail loudly rather than silently skipping bind_var.
-                        let Expression::Assignment { target, .. } = expr else {
-                            unreachable!("LocalAssign* kinds must ensure expr is an Assignment");
-                        };
-                        let Expression::Identifier(id) = target.as_ref() else {
-                            unreachable!(
-                                "LocalAssign* kinds must ensure assignment target is an Identifier"
-                            );
-                        };
-                        self.bind_var(&id.name, &val_var);
+                        last_result = Some(ValueRef::Var(val_var));
                     }
                 }
+                // C5 — exempt from Bind modeling: no state version is
+                // produced or consumed, every binding is a plain local.
                 BodyExprKind::DestructureAssignment => {
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                         let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                         for d in binding_docs {
-                            docs.push(d);
+                            stmts.push(ThreadedStmt::Statement(d, span));
                         }
                     }
                 }
-                // BT-1477: self.field := <control-flow-with-mutations> inside a conditional branch.
-                // Unpack the {Value, State} tuple from the RHS, then apply maps:put for the field.
+                // C6 — BT-1477: self.field := <control-flow-with-mutations>.
+                // The sanctioned Gensym two-hop.
                 BodyExprKind::FieldAssignmentControlFlow => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
@@ -455,67 +688,109 @@ impl CoreErlangGenerator {
                             let val_var = self.fresh_temp_var("CfVal");
                             let rhs_doc = self.expression_doc(value)?;
                             let rhs_state = self.fresh_temp_var("CfState");
-                            let new_state = self.next_state_var();
-                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                rhs_doc,
-                                " in let ",
-                                leaf::var(val_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ") in let ",
-                                leaf::var(rhs_state.clone()),
-                                " = call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ") in let ",
-                                leaf::var(new_state.clone()),
-                                " = call 'maps':'put'(",
-                                leaf::atom(field.name.to_string()),
-                                ", ",
-                                leaf::var(val_var.clone()),
-                                ", ",
-                                leaf::var(rhs_state),
-                                ") in ",
-                            ]];
-                            // Rebind threaded __local__ vars from the updated state
-                            // so subsequent expressions in this branch see fresh values.
-                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
-                            {
-                                for var in &threaded_vars {
-                                    let tv_core = self.lookup_var(var).map_or_else(
-                                        || Self::to_core_erlang_var(var),
-                                        String::clone,
-                                    );
-                                    doc_parts.push(docvec![
-                                        "let ",
-                                        leaf::var(tv_core.clone()),
-                                        " = call 'maps':'get'(",
-                                        leaf::atom(Self::local_state_key(var)),
-                                        ", ",
-                                        leaf::var(new_state.clone()),
-                                        ") in ",
-                                    ]);
-                                    self.bind_var(var, &tv_core);
-                                }
-                            }
-                            docs.push(Document::Vec(doc_parts));
+                            let source_version = self.state_version();
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let ",
+                                    leaf::var(tuple_var.clone()),
+                                    " = ",
+                                    rhs_doc,
+                                    " in let ",
+                                    leaf::var(val_var.clone()),
+                                    " = call 'erlang':'element'(1, ",
+                                    leaf::var(tuple_var.clone()),
+                                    ") in ",
+                                ],
+                                span,
+                            ));
+                            let gensym_state =
+                                VersionedVar::new(VersionPrefix::Gensym(rhs_state), 1, frame);
+                            stmts.push(ThreadedStmt::Bind {
+                                target: gensym_state.clone(),
+                                source: VersionedVar::new(
+                                    VersionPrefix::State,
+                                    source_version,
+                                    frame,
+                                ),
+                                op: BindOp::Direct(ValueRef::Doc(docvec![
+                                    "call 'erlang':'element'(2, ",
+                                    leaf::var(tuple_var),
+                                    ")",
+                                ])),
+                                shadow_write: false,
+                                span,
+                            });
+                            let _ = self.next_state_var();
+                            let target_version = self.state_version();
+                            stmts.push(ThreadedStmt::Bind {
+                                target: VersionedVar::new(
+                                    VersionPrefix::State,
+                                    target_version,
+                                    frame,
+                                ),
+                                source: gensym_state,
+                                op: BindOp::Put {
+                                    field: field.name.to_string(),
+                                    value: ValueRef::Var(val_var.clone()),
+                                    class_tag: ValueRef::Literal("'nil'"),
+                                },
+                                shadow_write: false,
+                                span,
+                            });
+                            self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
                             if is_last {
-                                last_result = Some(val_var);
+                                last_result = Some(ValueRef::Var(val_var));
                             }
                         }
                     }
                 }
-                // BT-1479: self fieldAt: name put: expr — explicit handler for reflective field mutation
+                // C7 — BT-1479: self fieldAt: name put: value. Dynamic field
+                // name ⇒ §Dynamic-field-puts option 1 (Direct, not Put).
                 BodyExprKind::SelfFieldAtPut => {
-                    let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
-                    docs.push(doc);
-                    if is_last {
-                        last_result = Some(val_var);
+                    if let Expression::MessageSend { arguments, .. } = expr {
+                        let name_var = self.fresh_var("Name");
+                        let val_var = self.fresh_temp_var("Val");
+                        let name_code = self.expression_doc(&arguments[0])?;
+                        let source_version = self.state_version();
+                        let current_state_name = self.current_state_var();
+                        let val_code = self.expression_doc(&arguments[1])?;
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in let ",
+                                leaf::var(val_var.clone()),
+                                " = ",
+                                val_code,
+                                " in ",
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'maps':'put'(",
+                                leaf::var(name_var),
+                                ", ",
+                                leaf::var(val_var.clone()),
+                                ", ",
+                                leaf::var(current_state_name),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        if is_last {
+                            last_result = Some(ValueRef::Var(val_var));
+                        }
                     }
                 }
-                // BT-1479: self fieldAt: name put: expr where RHS is control flow returning {Value, State}
+                // C8 — BT-1479: self fieldAt: name put: <control-flow-with-mutations>.
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {
                         let name_var = self.fresh_temp_var("Name");
@@ -524,296 +799,498 @@ impl CoreErlangGenerator {
                         let val_var = self.fresh_temp_var("CfVal");
                         let val_code = self.expression_doc(&arguments[1])?;
                         let rhs_state = self.fresh_temp_var("CfState");
-                        let new_state = self.next_state_var();
-                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                            "let ",
-                            leaf::var(name_var.clone()),
-                            " = ",
-                            name_code,
-                            " in let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            val_code,
-                            " in let ",
-                            leaf::var(val_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ") in let ",
-                            leaf::var(rhs_state.clone()),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in let ",
-                            leaf::var(new_state.clone()),
-                            " = call 'maps':'put'(",
-                            leaf::var(name_var),
-                            ", ",
-                            leaf::var(val_var.clone()),
-                            ", ",
-                            leaf::var(rhs_state),
-                            ") in ",
-                        ]];
-                        // Rebind threaded __local__ vars from the updated state
-                        // so subsequent expressions in this branch see fresh values.
-                        if let Some(threaded_vars) =
-                            self.get_control_flow_threaded_vars(&arguments[1])
-                        {
-                            for var in &threaded_vars {
-                                let tv_core = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(tv_core.clone()),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(new_state.clone()),
-                                    ") in ",
-                                ]);
-                                self.bind_var(var, &tv_core);
-                            }
-                        }
-                        docs.push(Document::Vec(doc_parts));
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                val_code,
+                                " in let ",
+                                leaf::var(val_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ],
+                            span,
+                        ));
+                        let gensym_state =
+                            VersionedVar::new(VersionPrefix::Gensym(rhs_state.clone()), 1, frame);
+                        stmts.push(ThreadedStmt::Bind {
+                            target: gensym_state.clone(),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: gensym_state,
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'maps':'put'(",
+                                leaf::var(name_var),
+                                ", ",
+                                leaf::var(val_var.clone()),
+                                ", ",
+                                leaf::var(rhs_state),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        self.push_control_flow_threaded_var_rereads(
+                            &arguments[1],
+                            span,
+                            &mut stmts,
+                        );
                         if is_last {
-                            last_result = Some(val_var);
+                            last_result = Some(ValueRef::Var(val_var));
                         }
                     }
                 }
-                // BT-1479: {a, b} := expr where RHS is control flow returning {Value, State}
+                // C9 — BT-1479: {a, b} := <control-flow-with-mutations>. No
+                // Gensym hop — element(2, tuple) binds State(v+1) directly.
                 BodyExprKind::DestructureAssignmentControlFlow => {
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                         let tuple_var = self.fresh_temp_var("CfTuple");
                         let actual_val = self.fresh_temp_var("CfVal");
                         let value_str = self.expression_doc(value)?;
-                        let next_state = self.next_state_var();
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            value_str,
-                            " in let ",
-                            leaf::var(actual_val.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ") in let ",
-                            leaf::var(next_state.clone()),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in ",
-                        ]);
-                        // Rebind threaded __local__ vars from the updated state
-                        // so subsequent expressions in this branch see fresh values.
-                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
-                            for var in &threaded_vars {
-                                let tv_core = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                docs.push(docvec![
-                                    "let ",
-                                    leaf::var(tv_core.clone()),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(next_state.clone()),
-                                    ") in ",
-                                ]);
-                                self.bind_var(var, &tv_core);
-                            }
-                        }
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                value_str,
+                                " in let ",
+                                leaf::var(actual_val.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
                         let binding_docs =
                             self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
                         for d in binding_docs {
-                            docs.push(d);
+                            stmts.push(ThreadedStmt::Statement(d, span));
                         }
                     }
                 }
+                // C10
                 BodyExprKind::ControlFlowWithMutations => {
                     if is_last {
-                        // Last expression is nested control flow with mutations.
-                        // It returns {Result, State} — unpack both.
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;
-                        let next_state = self.next_state_var();
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            expr_doc,
-                            " in let ",
-                            leaf::var(result_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ") in let ",
-                            leaf::var(next_state),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in ",
-                        ]);
-                        last_result = Some(result_var);
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                expr_doc,
+                                " in let ",
+                                leaf::var(result_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        last_result = Some(ValueRef::Var(result_var));
                     } else {
-                        // Non-last expression is nested control flow with mutations.
-                        // Unpack {Result, State} and thread the state forward.
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let expr_doc = self.expression_doc(expr)?;
-                        let next_state = self.next_state_var();
-                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            expr_doc,
-                            " in let ",
-                            leaf::var(next_state.clone()),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in ",
-                        ]];
-                        // BT-2355: rebind the nested construct's threaded `__local__`
-                        // vars so a later read in THIS branch sees the mutated value
-                        // (mirrors the DestructureAssignmentControlFlow arm above and the
-                        // method-body sequencer). Without this, the state is forwarded but
-                        // the in-scope local binding stays stale.
-                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
-                            for var in &threaded_vars {
-                                let tv_core = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(tv_core.clone()),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(next_state.clone()),
-                                    ") in ",
-                                ]);
-                                self.bind_var(var, &tv_core);
-                            }
-                        }
-                        docs.push(Document::Vec(doc_parts));
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                expr_doc,
+                                " in "
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        self.push_control_flow_threaded_var_rereads(expr, span, &mut stmts);
                     }
                 }
+                // C11 — BT-2797: a Tier 2 `value(:...)` call on a stored
+                // block. Non-last carries the newline quirk
+                // (`")\n in let "`) confirmed against real compiled output.
                 BodyExprKind::Tier2ValueCall => {
-                    // BT-2797 (PR #2899 review fix): a bare (non-assigned)
-                    // `self.field value(:...)` statement inside a
-                    // conditional branch. `generate_tier2_value_call_doc`
-                    // always returns a `{Result, NewState}` tuple for a
-                    // `self.field` receiver in Actor context — unpack it and
-                    // thread the state forward, mirroring the
-                    // `ControlFlowWithMutations` arm above and the top-level
-                    // `Tier2ValueCall` handling in `gen_server/methods.rs`.
                     if is_last {
                         let tuple_var = self.fresh_temp_var("T2Tuple");
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.generate_tier2_value_call_doc(expr)?;
-                        let next_state = self.next_state_var();
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            expr_doc,
-                            " in let ",
-                            leaf::var(result_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ") in let ",
-                            leaf::var(next_state),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in ",
-                        ]);
-                        last_result = Some(result_var);
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                expr_doc,
+                                " in let ",
+                                leaf::var(result_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        last_result = Some(ValueRef::Var(result_var));
                     } else {
                         let tuple_var = self.fresh_temp_var("T2Tuple");
                         let discard_var = self.fresh_temp_var("T2Discard");
                         let expr_doc = self.generate_tier2_value_call_doc(expr)?;
-                        let next_state = self.next_state_var();
-                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            expr_doc,
-                            " in let ",
-                            leaf::var(discard_var),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ")\n in let ",
-                            leaf::var(next_state.clone()),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in ",
-                        ]];
-
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                expr_doc,
+                                " in let ",
+                                leaf::var(discard_var),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ")\n in ",
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
                         // BT-1213: rebind captured local-var mutations from
                         // NewState so a later read in this branch sees the
-                        // mutated value (mirrors the top-level Tier2ValueCall
-                        // handling in gen_server/methods.rs).
+                        // mutated value.
                         if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
+                            let new_state_name = self.current_state_var();
+                            let mut re_reads: Vec<Document<'static>> = Vec::new();
                             for var in &mutations {
                                 let core_var = self
                                     .lookup_var(var)
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
+                                re_reads.push(docvec![
                                     "let ",
                                     leaf::var(core_var),
                                     " = call 'maps':'get'(",
                                     leaf::atom(Self::local_state_key(var)),
                                     ", ",
-                                    leaf::var(next_state.clone()),
+                                    leaf::var(new_state_name.clone()),
                                     ") in ",
                                 ]);
                             }
+                            if !re_reads.is_empty() {
+                                stmts.push(ThreadedStmt::Statement(Document::Vec(re_reads), span));
+                            }
                         }
-                        docs.push(Document::Vec(doc_parts));
                     }
                 }
-                // All other kinds (EarlyReturn, SuperSend, ErrorSend,
-                // Tier2SelfSend, DispatchingSelfSend, Pure) are treated
-                // as pure expressions in the conditional branch context.
+                // C12 — catch-all pure statements (EarlyReturn, SuperSend,
+                // ErrorSend, Tier2SelfSend, DispatchingSelfSend, Pure).
                 _ => {
                     if is_last {
-                        // Last non-assignment: bind to result variable
                         let result_var = self.fresh_temp_var("BranchResult");
                         let expr_doc = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(result_var.clone()),
-                            " = ",
-                            expr_doc,
-                            " in ",
-                        ]);
-                        last_result = Some(result_var);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(result_var.clone()),
+                                " = ",
+                                expr_doc,
+                                " in "
+                            ],
+                            span,
+                        ));
+                        last_result = Some(ValueRef::Var(result_var));
                     } else {
-                        // Non-last, non-assignment: discard result
                         let seq_var = self.fresh_temp_var("seq");
                         let expr_doc = self.expression_doc(expr)?;
-                        docs.push(docvec!["let ", leaf::var(seq_var), " = ", expr_doc, " in ",]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["let ", leaf::var(seq_var), " = ", expr_doc, " in "],
+                            span,
+                        ));
                     }
                 }
             }
         }
 
-        let final_state = self.current_state_var();
+        // C13 — the arm closer: {<result>, <final_state>}.
         let final_version = self.state_version();
-        let result = last_result.unwrap_or_else(|| "'nil'".to_string());
-
-        // Close with {result, final_state} tuple
-        docs.push(docvec![
-            "{",
-            leaf::var(result),
-            ", ",
-            leaf::var(final_state),
-            "}",
-        ]);
+        let result_value = last_result.unwrap_or(ValueRef::Literal("'nil'"));
+        let closing_span = body.last().map_or(block.span, |e| e.span());
+        stmts.push(ThreadedStmt::Return(
+            result_value,
+            VersionedVar::new(VersionPrefix::State, final_version, frame),
+            closing_span,
+        ));
 
         self.pop_scope();
-        Ok((Document::Vec(docs), final_version))
+        Ok(self.verify_and_render_branch_arm(stmts, frame, final_version, block.span))
+    }
+
+    /// ADR 0111 Addendum 5 (BT-1213/BT-2355 rebind idiom, shared by C6/C8/
+    /// C9/C10): rebinds each of a nested control-flow construct's threaded
+    /// `__local__` captured vars from the just-produced state, appending
+    /// one `Statement` (or none, if there are no threaded vars) to `stmts`.
+    /// A rebind read is never itself a version mutation (Rule 1) — always a
+    /// `Statement`, never a `Bind`.
+    fn push_control_flow_threaded_var_rereads(
+        &mut self,
+        source_expr: &Expression,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let Some(threaded_vars) = self.get_control_flow_threaded_vars(source_expr) else {
+            return;
+        };
+        let new_state_name = self.current_state_var();
+        let mut re_reads: Vec<Document<'static>> = Vec::new();
+        for var in &threaded_vars {
+            let tv_core = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            re_reads.push(docvec![
+                "let ",
+                leaf::var(tv_core.clone()),
+                " = call 'maps':'get'(",
+                leaf::atom(Self::local_state_key(var)),
+                ", ",
+                leaf::var(new_state_name.clone()),
+                ") in ",
+            ]);
+            self.bind_var(var, &tv_core);
+        }
+        if !re_reads.is_empty() {
+            stmts.push(ThreadedStmt::Statement(Document::Vec(re_reads), span));
+        }
+    }
+
+    /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/
+    /// `Statement` sequence in one `ThreadedStmt::Threaded { mode:
+    /// StateAcc(None), frame, .. }` node, `verify()`s it, and `render()`s
+    /// it. `StateAcc` mode's rendering is a transparent pass-through
+    /// (`render_threaded`'s `TupleAcc(_) | StateAcc(_) => render(body,
+    /// ctx)` arm) — wrapping changes zero output bytes versus rendering
+    /// `stmts` directly, while giving `verify()`'s frame-scoped `check_use`
+    /// the correct non-ROOT frame to walk against (`verify`'s top-level
+    /// slice is always implicitly `FrameId::ROOT` — see `FrameId`'s doc
+    /// comment — so an un-wrapped `verify(&stmts)` would falsely reject
+    /// every reference to this arm's own frame).
+    fn verify_and_render_branch_arm(
+        &mut self,
+        stmts: Vec<ThreadedStmt>,
+        frame: FrameId,
+        final_version: usize,
+        span: Span,
+    ) -> (Document<'static>, usize) {
+        let produces = if final_version > 0 {
+            vec![VersionedVar::new(
+                VersionPrefix::State,
+                final_version,
+                frame,
+            )]
+        } else {
+            Vec::new()
+        };
+        let wrapper = vec![ThreadedStmt::Threaded {
+            mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+            frame,
+            body: stmts,
+            produces,
+            span,
+        }];
+        let errors = threaded_ir::verify(&wrapper);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "conditional branch arm ThreadedIr must be well-formed",
+            span,
+        );
+        let mut ctx = threaded_ir::RenderCtx::new(self);
+        let doc = threaded_ir::render(&wrapper, &mut ctx);
+        (doc, final_version)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::codegen::core_erlang::tests::codegen;
+
+    // ── ADR 0111 Addendum 5 / BT-3146: NonLinearVersion / UnboundVersion ──
+    // are now LIVE checks for branch-arm IR (previously scaffolding-only —
+    // `check_branch_frame_linearity`'s scalar synthesis could never
+    // construct two arms colliding on the same frame, by construction).
+    // Both regressions below are built through the exact production
+    // types/constructors `generate_conditional_branch_inline`'s lowering
+    // uses — a real `CoreErlangGenerator::with_branch_context` call for
+    // frame allocation (`current_branch_frame`), real `VersionedVar`/
+    // `ThreadedStmt::Bind`/`BindOp::Put` construction — not an isolated
+    // hand-fixture disconnected from any real construction path.
+
+    #[test]
+    fn test_bt3146_nonlinear_version_detected_via_production_lowering_types() {
+        let mut generator = CoreErlangGenerator::new("bt3146_regression_nonlinear");
+        let errors = generator.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            // Two field-mutation Binds that BOTH (incorrectly) target
+            // State(1)@frame from State(0)@frame — the exact shape a
+            // broken lowering (e.g. forgetting to call `next_state_var()`
+            // between two field assignments in the same arm) would
+            // produce. Mirrors C1's real `BindOp::Put` shape exactly.
+            let source = VersionedVar::new(VersionPrefix::State, 0, frame);
+            let target = VersionedVar::new(VersionPrefix::State, 1, frame);
+            let make_put = |field: &str, val: &str, target: VersionedVar, source: VersionedVar| {
+                ThreadedStmt::Bind {
+                    target,
+                    source,
+                    op: BindOp::Put {
+                        field: field.to_string(),
+                        value: ValueRef::Var(val.to_string()),
+                        class_tag: ValueRef::Literal("'nil'"),
+                    },
+                    shadow_write: false,
+                    span: Span::default(),
+                }
+            };
+            let wrapper = vec![ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame,
+                body: vec![
+                    make_put("n", "_Val1", target.clone(), source.clone()),
+                    make_put("n", "_Val2", target.clone(), source),
+                ],
+                produces: vec![target],
+                span: Span::default(),
+            }];
+            threaded_ir::verify(&wrapper)
+        });
+
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                threaded_ir::VerifyError::NonLinearVersion { producers: 2, .. }
+            )),
+            "expected NonLinearVersion(producers: 2) for the duplicate \
+             State(1) producer, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_bt3146_unbound_version_detected_via_production_lowering_types() {
+        let mut generator = CoreErlangGenerator::new("bt3146_regression_unbound");
+        let errors = generator.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            // A Bind whose source references a version this frame never
+            // produced — the exact shape a broken lowering (e.g. reading a
+            // stale `state_version()` snapshot from before an earlier
+            // mutation actually landed) would produce.
+            let phantom_source = VersionedVar::new(VersionPrefix::State, 5, frame);
+            let target = VersionedVar::new(VersionPrefix::State, 6, frame);
+            let bind = ThreadedStmt::Bind {
+                target: target.clone(),
+                source: phantom_source,
+                op: BindOp::Put {
+                    field: "n".to_string(),
+                    value: ValueRef::Var("_Val1".to_string()),
+                    class_tag: ValueRef::Literal("'nil'"),
+                },
+                shadow_write: false,
+                span: Span::default(),
+            };
+            let wrapper = vec![ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame,
+                body: vec![bind],
+                produces: vec![target],
+                span: Span::default(),
+            }];
+            threaded_ir::verify(&wrapper)
+        });
+
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                threaded_ir::VerifyError::UnboundVersion { var, .. } if var.version == 5
+            )),
+            "expected UnboundVersion for the phantom State(5) source, got: {errors:?}"
+        );
+    }
 
     #[test]
     fn test_bt2797_bare_tier2_value_call_in_conditional_branch_unpacks_tuple() {

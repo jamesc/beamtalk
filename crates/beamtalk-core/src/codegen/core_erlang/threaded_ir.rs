@@ -210,6 +210,45 @@
 //! mutations, NLR relay, shadow writes) does not yet construct `ThreadedIr`
 //! — later phases (BT-3135 onward) extend coverage.
 //!
+//! ## Status (as of BT-3146 — ADR 0111 Addendum 5, `conditionals.rs` slice)
+//!
+//! `conditionals.rs`'s `generate_conditional_branch_inline` — the single
+//! shared body-loop behind all seven `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/
+//! `ifNotNil:`/REPL-inline/`match:`-arm call sites — now builds each branch
+//! arm's REAL mutation sequence as [`ThreadedStmt::Bind`]/[`Statement`]
+//! nodes (Addendum 5's C1–C13 per-shape decomposition table), wraps it in
+//! one [`ThreadedStmt::Threaded`] node (`mode: StateAcc(None)`, a fresh
+//! [`FrameId`] minted by [`super::CoreErlangGenerator::current_branch_frame`]
+//! — a new monotonic per-`with_branch_context`-entry counter), [`verify`]s
+//! it, and [`render`]s it — the `render()`ed `Document` **is** this
+//! function's emission, byte-identical by construction (every shape reuses
+//! the exact pre-migration codegen calls and mint order). `NonLinearVersion`/
+//! `UnboundVersion` are live checks against real per-arm IR for the first
+//! time (previously [`check_branch_frame_linearity`] scaffolding could
+//! never trip either, by construction — see its doc comment). The six
+//! `check_branch_frame_linearity` call sites that only ever exercised this
+//! body loop (`conditionals.rs`'s four, `intrinsics.rs`'s REPL-mode
+//! inlining, `expressions.rs`'s `match:`-arm inlining) are deleted; the
+//! scalar-synthesis scaffolding itself stays for its three remaining
+//! callers (`exception_handling.rs`'s `on:do:`/`ensure:`, and
+//! `expressions.rs`'s unrelated `generate_block_stateful_body` — see
+//! `check_branch_frame_linearity`'s doc comment for why that ninth site is
+//! permanently out of this migration's scope).
+//!
+//! **C4** (`LocalAssign*`'s BT-1397 open-scope sub-branch) has no compilable
+//! repro reaching these arms — a class-method self-send routes through
+//! `value_type_codegen.rs`'s vt-conditional path instead (a separate,
+//! already-filed bug, BT-3159) — but decomposes with the same idiom as the
+//! plain case, so it is modeled as real `Bind`s for completeness rather than
+//! left opaque.
+//!
+//! **Not attempted in this pass**: `exception_handling.rs`'s `on:do:`/
+//! `ensure:` mutation-threading generators (ADR 0111 Addendum 5's E1–E7
+//! per-shape table) — the addendum's own recommended PR sequencing splits
+//! `exception_handling.rs` into a separate PR from `conditionals.rs`; this
+//! migration covers `conditionals.rs` only. `exception_handling.rs` stays on
+//! the pre-BT-3146 hand-rolled `Document` path, unaffected.
+//!
 //! ## Scope
 //!
 //! Covers state-version bindings (with frame identity), threading-mode
