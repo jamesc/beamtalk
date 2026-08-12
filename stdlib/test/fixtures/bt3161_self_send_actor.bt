@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3161 Flavor A / E2: BT3161SelfSendActor — an `on:do:` try body whose
+// LAST statement is an actor self-send. The self-dispatch `case` generated
+// in that position lacked an explicit wildcard clause, so the Core Erlang
+// compiler synthesized an implicit non-exhaustive-match fallback — and
+// *that*, nested inside the `try`'s protected region, tripped a genuine OTP
+// `beam_validator` bug ("Internal consistency check failed ...
+// ambiguous_catch_try_state"). See ADR 0111 Addendum 5 ("Production bugs
+// found", bug 3) and `case_clause_fallback`'s doc comment (util.rs) for the
+// root-cause analysis and fix.
+
+Actor subclass: BT3161SelfSendActor
+  state: count = 0
+
+  bump => self.count := self.count + 1
+
+  // Flavor A / E2 repro: on:do: try body's last statement is a self-send.
+  runOnDo =>
+    [
+      self.count := self.count + 1
+      self bump
+    ] on: Error do: [:e | 0]
+
+  // NLR passthrough through the same shape: an early `^` fires before the
+  // self-send (still the try body's last statement) is ever reached, and
+  // must still escape the `on:do:` via its NLR re-raise, unaffected by the
+  // wildcard fallback clause the self-dispatch `case` now carries.
+  runOnDoNlr: flag =>
+    [
+      flag ifTrue: [^"early"]
+      self.count := self.count + 1
+      self bump
+    ] on: Error do: [:e | "caught"]
+    "not early"
+
+  getCount => self.count

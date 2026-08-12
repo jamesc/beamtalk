@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3161 Flavor B / E5: BT3161NestedConditionalActor — an `ensure:` try
+// body whose LAST statement is a nested mutation-carrying conditional. The
+// nested `case` generated in that position lacked an explicit wildcard
+// clause, so the Core Erlang compiler synthesized an implicit
+// non-exhaustive-match fallback — and *that*, nested inside the `try`'s
+// protected region, tripped a genuine OTP `beam_validator` bug ("Internal
+// consistency check failed ... ambiguous_catch_try_state"). See ADR 0111
+// Addendum 5 ("Production bugs found", bug 3) and `case_clause_fallback`'s
+// doc comment (util.rs) for the root-cause analysis and fix.
+
+Actor subclass: BT3161NestedConditionalActor
+  state: count = 0
+
+  // Flavor B / E5 repro: ensure: try body's last statement is a nested
+  // mutation-carrying conditional.
+  runEnsure: flag => [flag ifTrue: [self.count := self.count + 1]] ensure: [nil]
+
+  // NLR passthrough through the same shape: the mutation-carrying ifTrue:
+  // (still the try body's last statement) itself triggers an early `^`
+  // after mutating, verifying the ensure:'s NLR re-raise isn't disturbed by
+  // the wildcard fallback clause the nested conditional `case` now carries.
+  runEnsureNlr: flag =>
+    [
+      flag
+        ifTrue: [
+          self.count := self.count + 1
+          ^"early"
+        ]
+    ] ensure: [nil]
+    "not early"
+
+  getCount => self.count

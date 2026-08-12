@@ -112,7 +112,14 @@ impl CoreErlangGenerator {
     ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace,
     ///         ~{'selector' => 'selector:', 'class' => Class}~)
     /// <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
+    /// <NoMatch> when 'true' -> call 'erlang':'error'({'case_clause', NoMatch})
     /// ```
+    ///
+    /// BT-3161: the trailing wildcard clause is not reachable at runtime
+    /// (`safe_dispatch/3` only ever returns `{'reply', _, _}` or one of the
+    /// two `{'error', _, _}` shapes matched above) but is required to make
+    /// the `case` *statically* exhaustive — see `case_clause_fallback`'s
+    /// doc comment for why an implicit fallback isn't good enough here.
     fn generate_self_dispatch_error_clause(
         &mut self,
         var_prefix: &str,
@@ -123,6 +130,7 @@ impl CoreErlangGenerator {
         let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
         let plain_error_var = self.fresh_var(&format!("{var_prefix}Plain"));
         let class_var = self.fresh_var(&format!("{var_prefix}Class"));
+        let no_match_fallback = self.case_clause_fallback(&format!("{var_prefix}NoMatch"));
         docvec![
             "<{'error', {",
             leaf::var(type_var.clone()),
@@ -148,7 +156,9 @@ impl CoreErlangGenerator {
             leaf::var(plain_error_var.clone()),
             ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
             leaf::var(plain_error_var),
-            ") "
+            ")",
+            no_match_fallback,
+            " ",
         ]
     }
 
