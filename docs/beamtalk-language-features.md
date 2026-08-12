@@ -2316,15 +2316,27 @@ Non-local return (`^`) *does* cross the boundary: the signal is relayed back and
 **Class-variable mutations inside loops and block arguments are rejected at compile time.** A direct class-var assignment (`self.field := value`) or a self-send to a class-var-mutating class method inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:` loop body, or inside a block passed to `select:`/`collect:`/`do:`/`reject:`/`detect:`/`inject:into:`, cannot thread the updated `ClassVars` back to the enclosing class method — the mutation would be silently lost. The compiler rejects these at compile time with a diagnostic recommending the workaround: accumulate into a local variable inside the loop/block, then mutate the class var once after it:
 
 ```beamtalk
-// Rejected: class-var mutation inside a loop body
-class countUp: n =>
-  1 to: n do: [:i | self.counter := self.counter + 1]   // compile error
+Object subclass: LoopCounter
+  classState: runs = 0
 
-// Correct: accumulate locally, mutate once after the loop
-class countUp: n =>
-  count := self.counter.
-  1 to: n do: [:i | count := count + 1].
-  self.counter := count
+  // Rejected: class-var mutation alongside a local mutation inside a loop body
+  class countUpTo: n =>
+    i := 0.
+    [i < n] whileTrue: [
+      self.runs := self.runs + 1.    // compile error — mutation can't thread back
+      i := i + 1
+    ].
+    self.runs
+
+  // Correct: accumulate locally, mutate once after the loop
+  class countUpTo: n =>
+    i := 0.
+    count := self.runs.
+    [i < n] whileTrue: [
+      count := count + 1.
+      i := i + 1
+    ].
+    self.runs := count
 ```
 
 This matters most when building a `Collection` subclass. Implementing `do:` by delegating to a class-side helper is fine — `asList`, `inject:into:`, `sum`, `includes:` and the rest of the inherited protocol all work — but a class-side helper that reaches back into its own class does not:
