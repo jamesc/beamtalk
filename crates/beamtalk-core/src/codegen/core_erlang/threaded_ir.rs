@@ -51,7 +51,7 @@
 //! deleting it) — see BT-3145's Linear issue for the full evidentiary trail
 //! and the ≤3% gate's outcome.
 //!
-//! ## Status (as of BT-3148 — partial: class-var Bind producers only)
+//! ## Status (as of BT-3148 re-attempt — see ADR 0111 Addendum 4)
 //!
 //! BT-3148 ("the deepest slice") targeted four sub-tasks: (1) unify
 //! `gen_server/methods.rs`'s upfront `classify_body_expr` routing
@@ -67,34 +67,61 @@
 //! `Document` that mirrors it; (4) `threaded_expr.rs`'s `ThreadingBoundary`
 //! adapter absorbed into or replaced by the IR path.
 //!
-//! **Only (3) landed.** [`construct_and_verify_class_var_bind`] replaces the
-//! deleted `verify_class_var_bind` fixture-mirror: both class-var Bind
-//! producer sites now construct a real `Bind` carrying the actual
-//! `source_version`/`target_version` read off the live generator counter,
-//! verify it, and render it through [`render`] — [`render_bind`]'s
-//! `BindOp::Put` arm is the only place the ADR 0110 shadow write is
-//! constructed in either the verification path or the emitted `Document`.
-//! The existing `invoke_class_method/7` cross-boundary conformance fixture
-//! (`tests/class_var_shadow_contract.rs`) and the full
-//! `compiles_through_erlc`/snapshot-corpus suite pin that this produces
-//! byte-identical output to the hand-rolled `Document` it replaces.
+//! **(3) landed first** (as above). A first re-attempt at (1)/(2)/(4) found
+//! them blocked on a real gap — no `ThreadedStmt` node existed for "an
+//! ordinary AST-directed statement, sitting in a straight-line body next to
+//! real `Bind`s, that this pass doesn't need to understand" (~15 of
+//! `classify_body_expr`'s `BodyExprKind` variants: message sends, dispatch,
+//! Tier 2 calls, `EarlyReturn`, …) — split out and designed separately as
+//! [`ThreadedStmt::Statement`] (BT-3156, ADR 0111 Addendum 4).
 //!
-//! **(1), (2), (4) were investigated and NOT attempted** — closing them
-//! requires a real method-body-wide IR (every ordinary AST-directed
-//! statement — message sends, dispatch, Tier 2 calls, `EarlyReturn`, the
-//! other ~15 `BodyExprKind` variants `gen_server/methods.rs` classifies —
-//! embeddable in a straight-line `Vec<ThreadedStmt>` alongside `Bind`, so
-//! `wrap_body_with_nlr_catch`'s `body_doc` can become a real `NlrCatch`'s
-//! *rest-of-slice* body the way [`render`]'s `NlrCatch` arm already expects
-//! production callers to supply it). That is architecturally a peer of
-//! BT-3145's `ConditionalLoop`/`Gensym`/`ValueRef::Doc` gaps (Addendum 2),
-//! not a variant of the class-var Bind shape (3) closed — a full
-//! `Threaded`/`Bind` sequence can already represent state-only bodies, but
-//! `gen_server` method bodies are NOT state-only; ordinary control-flow-free
-//! statements have no IR representation today. Closing it is scoped as a
-//! design-detour follow-up (mirroring BT-3145's BT-3153 ADR-amendment
-//! pattern), not attempted inline here — see the BT-3148 Linear issue for
-//! the full investigation trail and source citations.
+//! **This re-attempt lands (1), (2), and (4).**
+//! `gen_server/methods.rs::lower_body_exprs_with_reply` builds one real
+//! `Vec<ThreadedStmt>` per Actor method body: mutating `BodyExprKind`
+//! variants construct real `Bind`s (generalizing (3)'s
+//! `construct_and_verify_class_var_bind` pattern to the `State` prefix, via
+//! `BindOp::Put` for static field names and the `Direct(ValueRef::Doc(...))`
+//! two-hop idiom for computed map sources); every other variant is a
+//! [`ThreadedStmt::Statement`]. [`verify_body_with_opaque_version_gaps`]
+//! verifies the real sequence **once** per body (backfilling the `State`
+//! version steps hidden inside shared multi-module helpers —
+//! `generate_self_dispatch_open`, `emit_super_send_open`,
+//! `generate_tier2_self_send_open`, `generate_field_assignment_open`,
+//! `generate_self_field_at_put_open` — whose own internal `next_state_var`
+//! calls have no `Bind` node in this body's IR), replacing every
+//! per-call-site fixture-and-discard `verify_*` wrapper this slice had.
+//! `RoutingMismatch` is deleted along with both `verify_routing_invariant`
+//! call sites: `classify_body_expr` is now the *only* computation deciding
+//! whether a construct routes through the Actor threaded emitter
+//! (`threaded_expr.rs`'s `emit_actor_threaded_last_stmts`/
+//! `emit_actor_threaded_assign_rhs_stmts`, which never decline), so the "two
+//! independently-computed decisions must agree" shape the check existed for
+//! is unrepresentable by construction. `generate_method_dispatch`'s real
+//! NLR call site now mints its token before lowering (production's real
+//! order, per Addendum 4 §Gap 3) and prepends a real
+//! `ThreadedStmt::NlrCatch` to the body's own sequence rather than rendering
+//! the body first and wrapping the `Document` after; the class-method NLR
+//! call site (`generate_class_method_functions`) does the same, with its
+//! own (still hand-written, not `BodyExprKind`-classified)
+//! `generate_class_method_body` output riding as one opaque `Statement`
+//! after the real `NlrCatch`. `ThreadingBoundary` (4) survives, audited and
+//! narrowed to its pure per-context reply-shape adapter duty — see
+//! `threaded_expr.rs`'s module doc, "BT-3148 task 4" — now that
+//! `classify_body_expr` is the sole routing decision it no longer also
+//! rechecks `control_flow_has_mutations` to redirect.
+//!
+//! **Not attempted in this pass:** the class-method body pipeline
+//! (`generate_class_method_body` and its helpers) is a separate,
+//! hand-written `Document` builder that predates `BodyExprKind`/
+//! `classify_body_expr` entirely — it was never in task 1's scope (which is
+//! Actor-body routing specifically) and converting it to produce its own
+//! `Vec<ThreadedStmt>` would be a peer migration of comparable size to this
+//! one, not a subtask of it; the 5 other `wrap_body_with_nlr_catch` call
+//! sites beyond the two ADR 0111 Addendum 4 §"concretely" names
+//! (`gen_server/dispatch.rs`, `gen_server/extensions.rs` ×2,
+//! `value_type_codegen.rs`, `actor_codegen.rs`,
+//! `generate_class_method_fun_from_block`) likewise still wrap a rendered
+//! `Document` rather than carrying a real `NlrCatch` node.
 //!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
@@ -527,16 +554,31 @@ pub(super) enum ThreadingMode {
 /// Identifies one NLR try/catch wrapper's fresh token variable
 /// (`call 'erlang':'make_ref'()`), distinguishing sibling NLR boundaries from
 /// each other. Not a [`VersionedVar`] — the token is a single-use `make_ref`
-/// value, never rebound. See [`VersionPrefix`]'s doc comment: constructed
-/// only by unit tests until NLR lowering migrates onto this IR (BT-3135).
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct TokenId(u32);
+/// value, never rebound.
+///
+/// Was `TokenId(u32)` — an opaque numeric identity never rendered directly
+/// (`render_nlr_catch` minted its own name independently, at render time,
+/// AFTER the body had already rendered). ADR 0111 Addendum 4 §Gap 3 found
+/// that inverted relative to production's real mint order (the token
+/// consumes the module-wide `fresh_temp_var` counter slot BEFORE the body's
+/// own temps — `gen_server/methods.rs`'s `generate_method_dispatch` /
+/// `generate_class_method_functions` both mint `NlrToken` before generating
+/// the body), a silent byte-identity hazard the moment a real, temp-minting
+/// body sits next to an `NlrCatch`. Now carries the literal Core Erlang name
+/// minted at lowering time, in production's real mint position — the same
+/// "lowering-time pre-allocation, IR carries the rendered name" idiom
+/// [`VersionPrefix::Gensym`] established for `Bind` targets. Rendering no
+/// longer mints anything for this node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TokenId(String);
 
 impl TokenId {
-    #[allow(dead_code)]
-    pub(super) const fn new(id: u32) -> Self {
-        Self(id)
+    pub(super) fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    fn name(&self) -> &str {
+        &self.0
     }
 }
 
@@ -734,6 +776,34 @@ pub(super) enum ThreadedStmt {
         exit_arm: Document<'static>,
         span: Span,
     },
+
+    /// An ordinary AST-directed statement, embedded verbatim as one opaque
+    /// entry in a straight-line `ThreadedStmt` sequence — the statement-level
+    /// counterpart of [`ValueRef::Doc`]'s value-level opacity (ADR 0111
+    /// Addendum 3), built by the SAME codegen call production already runs at
+    /// this point (`expression_doc`, `generate_self_dispatch_open`, the
+    /// `{'reply', ...}`/`{'class_var_result', ...}` epilogue builders, …).
+    /// Legal in any straight-line sequence rendered by [`render`]'s top-level
+    /// loop (a `gen_server` method body, an [`NlrCatch`](Self::NlrCatch)
+    /// try-body). A `Statement`'s `Document` must carry its own correct
+    /// trailing glue (e.g. `"let _seq4 = <expr> in "`) — [`render`]'s loop
+    /// concatenates with no separator. **Separator note (ADR 0111 Addendum
+    /// 4):** `ConditionalLoop` bodies render through
+    /// `render_loop_body_statements`, which inserts a literal `" "` between
+    /// statements — the first implementation that routes a mixed
+    /// `Bind`/`Statement` loop body through `ConditionalLoop` must add a
+    /// dual-run byte-parity test before relying on that composition.
+    ///
+    /// Carries no state-threading content of its own by construction — a
+    /// statement that DOES mutate a threaded version must be a `Bind`, never
+    /// a `Statement`; there is no `BindOp` escape hatch here the way
+    /// [`ValueRef::Doc`] is one inside a `Bind`'s own `op`. This is a
+    /// type-level rule enforced by convention and code review, not by
+    /// `verify()` (the `Document` is opaque by definition) — the same
+    /// distinction `ConditionalLoop` draws between `continue_header` (sound
+    /// opacity) and `exit_arm` (a named, deliberate limitation); a
+    /// `Statement` is only ever the `continue_header` kind.
+    Statement(Document<'static>, Span),
 }
 
 // ─── Verifier ───────────────────────────────────────────────────────────────
@@ -823,18 +893,6 @@ pub(super) enum VerifyError {
     /// `!effects.has_non_tuple_safe_list_op` guard is ever dropped or
     /// reordered past the point where `DirectParams` is selected.
     NestedStateAccFallbackUnderDirectParams { at: Span },
-
-    /// BT-3135: replaces the two `gen_server/methods.rs` routing
-    /// `debug_assert!`s (`:1258`/`:1450`, pre-BT-3135) as a structural
-    /// property: `classify_body_expr`'s upfront classification
-    /// (`BodyExprKind::LocalAssignControlFlow` /
-    /// `BodyExprKind::ControlFlowWithMutations`) commits a construct to
-    /// routing through the shared Actor `threaded_expr.rs` emitter: the
-    /// emitter's own downstream `control_flow_has_mutations` recheck MUST
-    /// also recognize it (`Ok(Some(_))`/`Ok(true)`), not decline
-    /// (`Ok(None)`/`Ok(false)`) and fall through to the generic path. See
-    /// [`verify_routing_invariant`].
-    RoutingMismatch { at: Span },
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -912,7 +970,8 @@ fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
         }
         ThreadedStmt::Bind { .. }
         | ThreadedStmt::Return(..)
-        | ThreadedStmt::TupleAccUnpack { .. } => false,
+        | ThreadedStmt::TupleAccUnpack { .. }
+        | ThreadedStmt::Statement(..) => false,
     })
 }
 
@@ -943,7 +1002,9 @@ fn collect_producer_consumer_counts(
                     *producers.entry(target.clone()).or_insert(0) += 1;
                 }
             }
-            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Return(..) => {}
+            ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Return(..)
+            | ThreadedStmt::Statement(..) => {}
         }
     }
 }
@@ -1053,7 +1114,11 @@ impl VerifyWalk<'_> {
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
-            ThreadedStmt::NlrCatch { .. } => {}
+            // Opaque by design: `NlrCatch` has no body field (`render`
+            // treats the rest of the slice as its body); a `Statement` is
+            // ordinary AST-directed codegen with no state-threading content
+            // of its own (see the variant's doc comment).
+            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Statement(..) => {}
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
                 if let ValueRef::Version(v) = value {
@@ -1263,9 +1328,11 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 produces,
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
-            ThreadedStmt::NlrCatch { boundary, .. } => {
+            ThreadedStmt::NlrCatch {
+                boundary, token, ..
+            } => {
                 let body_doc = render(&ir[i + 1..], ctx);
-                docs.push(render_nlr_catch(*boundary, body_doc, ctx));
+                docs.push(render_nlr_catch(*boundary, token.name(), body_doc, ctx));
                 return Document::Vec(docs);
             }
             ThreadedStmt::Return(value, state, _) => docs.push(render_return(value, state, ctx)),
@@ -1295,6 +1362,10 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 exit_arm,
                 ctx,
             )),
+            // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
+            // verbatim. The doc carries its own trailing glue; this loop
+            // adds no separator, and rendering mints nothing.
+            ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
         }
     }
     Document::Vec(docs)
@@ -1728,22 +1799,28 @@ fn render_bind(
     }
 }
 
-/// Full-fidelity NLR try/catch scaffolding: allocates a fresh token var
-/// (matching every real call site — `self.fresh_temp_var("NlrToken")`,
-/// e.g. `actor_codegen.rs:544`, `gen_server/methods.rs:306`) and reuses
+/// Full-fidelity NLR try/catch scaffolding: reuses
 /// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] verbatim — the exact
 /// function every real NLR try/catch in the codebase already goes through
 /// (module docs on [`ThreadedStmt::NlrCatch`]: "the true call site
 /// `ThreadedStmt::NlrCatch` faithfully models"). Zero re-derivation, so
 /// this can never drift from production's try/catch shape.
+///
+/// ADR 0111 Addendum 4 §Gap 3: `token_var` is the [`TokenId`]-carried name
+/// the lowering pass minted BEFORE the body's own temps (production's real
+/// mint order — `gen_server/methods.rs`'s call sites mint `NlrToken` first,
+/// unconditionally, then generate the body). This function no longer mints
+/// anything; only the catch-scaffolding vars (`NlrResult`, `NlrCls`, …) are
+/// still allocated here, matching production's own post-body
+/// `alloc_nlr_catch_vars` position.
 fn render_nlr_catch(
     boundary: NlrBoundary,
+    token_var: &str,
     body_doc: Document<'static>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
-    let token_var = ctx.fresh_temp_var("NlrToken");
     ctx.generator
-        .wrap_body_with_nlr_catch(body_doc, &token_var, boundary)
+        .wrap_body_with_nlr_catch(body_doc, token_var, boundary)
 }
 
 fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Document<'static> {
@@ -1983,38 +2060,6 @@ pub(super) fn verify_branch_frame_linearity(
     verify(&ir)
 }
 
-// ─── Routing invariant check (BT-3135) ─────────────────────────────────────
-
-/// Replaces the two "classifier and emitter agree on Actor-threaded routing"
-/// `debug_assert!`s (`gen_server/methods.rs:1258`/`:1450`, pre-BT-3135) as a
-/// structural check: `gen_server/methods.rs`'s upfront `classify_body_expr`
-/// commits to `BodyExprKind::LocalAssignControlFlow` /
-/// `BodyExprKind::ControlFlowWithMutations` — i.e. that this construct routes
-/// through the shared Actor [`super::threaded_expr`] emitter
-/// (`emit_threaded_assign_rhs`/`emit_threaded_last`) — for exactly the
-/// expressions where [`super::CoreErlangGenerator::control_flow_has_mutations`]
-/// returns `true`. The downstream emitter re-checks the same predicate
-/// (`threaded_expr.rs`'s `lower_actor_threaded_last`/
-/// `emit_actor_threaded_assign_rhs`) against generator state that may have
-/// advanced since classification ran (Phase 1 classifies the whole body
-/// upfront; Phase 2 emits statement-by-statement, mutating `self` as it
-/// goes) — a drift between the two is exactly the "two independently
-/// computed decisions must agree" shape ADR 0111 §Current state names for
-/// both routing asserts.
-///
-/// `routed` is the emitter's own `Ok(Some(_))`/`Ok(Some(true))` outcome —
-/// this function checks what was *actually observed*, not a re-derivation of
-/// `control_flow_has_mutations` (ADR 0111 §Verifier honesty: a check
-/// comparing the generator against itself is silent when both are
-/// consistently wrong).
-pub(super) fn verify_routing_invariant(routed: bool, span: Span) -> Vec<VerifyError> {
-    if routed {
-        Vec::new()
-    } else {
-        vec![VerifyError::RoutingMismatch { at: span }]
-    }
-}
-
 // ─── Class-var Bind construction (BT-3135/BT-3148, ADR 0110 contract) ─────
 
 /// Constructs the single class-var version `Bind` a production emission site
@@ -2117,11 +2162,14 @@ pub(super) fn construct_and_verify_class_var_bind(
         span,
     };
     body.push(bind.clone());
+    // Fixture-only synthetic marker (never rendered — not in the returned
+    // `Bind`, which callers render alone), so its token name is a literal
+    // placeholder, never a real lowering-minted `NlrToken` temp.
     let marker = ThreadedStmt::NlrCatch {
         boundary: NlrBoundary::ClassMethod {
             has_class_vars: true,
         },
-        token: TokenId::new(0),
+        token: TokenId::new("NlrTokenFixtureOnly"),
         frame,
         span,
     };
@@ -2152,6 +2200,72 @@ pub(super) fn construct_and_verify_class_var_bind(
         ]
     };
     (bind, verify(&fixture))
+}
+
+// ─── Method-body verification with opaque version gaps (BT-3148) ──────────
+
+/// [`verify`]s a straight-line, [`FrameId::ROOT`]-frame method-body IR (ADR
+/// 0111 Addendum 4 / BT-3148 task 1: `gen_server/methods.rs`'s
+/// `lower_body_exprs_with_reply` output — real `Bind`s interleaved with
+/// opaque [`ThreadedStmt::Statement`]s) whose opaque statements may have
+/// advanced the `State` version counter invisibly: a dispatching self-send,
+/// `super` send, or Tier-2 helper (`generate_self_dispatch_open`,
+/// `emit_super_send_open`, `generate_tier2_self_send_open`,
+/// `generate_field_assignment_open`, …) calls `next_state_var` inside its
+/// own shared, multi-module `Document` builder, so the version step it
+/// produces has no `Bind` node in this body's IR.
+///
+/// Without accounting for those gaps, the first real `Bind` after such a
+/// helper would spuriously fail [`VerifyError::UnboundVersion`] (its source
+/// version has no producing `Bind` in the fixture). The fix reuses
+/// [`verify_simple_bind`]/[`construct_and_verify_class_var_bind`]'s
+/// established backfill technique, generalized from "backfill everything
+/// before the one Bind under test" to "backfill exactly the gaps between
+/// this body's real Binds": walk the IR in order, tracking the last
+/// `State`-prefix version produced at [`FrameId::ROOT`], and insert a
+/// synthetic `Direct('_')` `Bind` chain for any versions an opaque
+/// statement consumed. The backfill is verification-fixture-only — the real
+/// IR (and therefore [`render`]'s output) is untouched.
+///
+/// What this still genuinely checks across the REAL Binds, for the first
+/// time over whole-method emission structure rather than per-call-site
+/// fixtures: per-version linearity (a broken `next_state_var` regressing to
+/// an already-produced version now collides with the accumulated real/
+/// backfill history — the BT-3131 regression shape,
+/// `verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history`'s
+/// previously-hypothetical capability made live), `UnboundVersion` for any
+/// source the chain never reached, and [`VerifyError::ShadowWriteMissing`]
+/// over any class-var `Bind` sharing the body with a real `NlrCatch`.
+/// What it cannot check (ADR 0111 §Verifier honesty, same class as
+/// `ValueRef::Doc`/`exit_arm`): mutations hidden inside the opaque
+/// statements themselves — those are exactly the backfilled gaps.
+pub(super) fn verify_body_with_opaque_version_gaps(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
+    let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
+    let mut last_state_version = 0usize;
+    for stmt in ir {
+        if let ThreadedStmt::Bind { target, source, .. } = stmt {
+            if matches!(source.prefix, VersionPrefix::State)
+                && source.frame == FrameId::ROOT
+                && source.version > last_state_version
+            {
+                for v in (last_state_version + 1)..=source.version {
+                    fixture.push(ThreadedStmt::Bind {
+                        target: VersionedVar::new(VersionPrefix::State, v, FrameId::ROOT),
+                        source: VersionedVar::new(VersionPrefix::State, v - 1, FrameId::ROOT),
+                        op: BindOp::Direct(ValueRef::Literal("'_'")),
+                        shadow_write: false,
+                        span: Span::default(),
+                    });
+                }
+                last_state_version = source.version;
+            }
+            if matches!(target.prefix, VersionPrefix::State) && target.frame == FrameId::ROOT {
+                last_state_version = last_state_version.max(target.version);
+            }
+        }
+        fixture.push(stmt.clone());
+    }
+    verify(&fixture)
 }
 
 // ─── Simple version-bind construction (BT-3139) ────────────────────────────
@@ -2768,7 +2882,7 @@ mod tests {
                 boundary: NlrBoundary::ClassMethod {
                     has_class_vars: true,
                 },
-                token: TokenId::new(0),
+                token: TokenId::new("NlrTokenFixtureOnly"),
                 frame: f0,
                 span: span(),
             },
@@ -2803,7 +2917,7 @@ mod tests {
                 boundary: NlrBoundary::ClassMethod {
                     has_class_vars: true,
                 },
-                token: TokenId::new(0),
+                token: TokenId::new("NlrTokenFixtureOnly"),
                 frame: f0,
                 span: span(),
             },
@@ -2861,7 +2975,7 @@ mod tests {
                 boundary: NlrBoundary::ClassMethod {
                     has_class_vars: true,
                 },
-                token: TokenId::new(0),
+                token: TokenId::new("NlrTokenFixtureOnly"),
                 frame: f0,
                 span: span(),
             },
@@ -3356,24 +3470,6 @@ mod tests {
             "expected NonLinearVersion for the colliding shared-frame State1, got: {errors:?}"
         );
     }
-    // ── verify_routing_invariant (BT-3135) ───────────────────────────────
-    // Pins the production replacement for `gen_server/methods.rs`'s two
-    // deleted routing `debug_assert!`s.
-
-    #[test]
-    fn verify_routing_invariant_silent_when_routed() {
-        assert_eq!(verify_routing_invariant(true, span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_routing_invariant_fires_when_not_routed() {
-        let errors = verify_routing_invariant(false, span());
-        assert_eq!(
-            errors,
-            vec![VerifyError::RoutingMismatch { at: span() }],
-            "expected RoutingMismatch, got: {errors:?}"
-        );
-    }
 
     // ── construct_and_verify_class_var_bind (BT-3135/BT-3148, ADR 0110
     // contract) ─────────────────────────────────────────────────────────
@@ -3637,6 +3733,78 @@ mod tests {
             shadow_write: false,
             span,
         }]
+    }
+
+    // ── verify_body_with_opaque_version_gaps (BT-3148) ───────────────────
+    // Pins the whole-Actor-body verification `lower_body_exprs_with_reply`
+    // calls once per body: an opaque Statement standing in for a shared
+    // multi-module helper (`generate_self_dispatch_open`, …) may advance
+    // `next_state_var`'s counter with no producing Bind of its own in this
+    // body's IR — the backfill must close that gap without masking a real
+    // regression among the Binds that ARE present.
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_backfills_gap_from_opaque_statement() {
+        let span = span();
+        let ir = vec![
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+            // Stands in for a shared helper (e.g. `generate_self_dispatch_open`)
+            // that internally calls `next_state_var()` twice more, advancing
+            // State1 -> State3 with no `Bind` of its own in this body's IR.
+            ThreadedStmt::Statement(docvec!["<opaque dispatch, mints State2 and State3>"], span),
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 4, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 3, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+        ];
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert_eq!(
+            errors,
+            Vec::new(),
+            "backfilled gap should leave no UnboundVersion, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version() {
+        let span = span();
+        // Two real Binds both target State1 from State0 — a genuine
+        // duplicate-producer regression among the REAL Binds, which the
+        // gap-backfill must not paper over.
+        let ir = vec![
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::State, 0, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                shadow_write: false,
+                span,
+            },
+        ];
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::NonLinearVersion { var, producers: 2, .. }
+                    if *var == VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT)
+            )),
+            "expected NonLinearVersion for the duplicate State1 producer, got: {errors:?}"
+        );
     }
 
     // ── Dual-run byte-parity harness (BT-3144) ───────────────────────────
@@ -4086,6 +4254,15 @@ mod tests {
         // an explicit dual-run test (rather than relying on that reasoning
         // alone) so a future refactor that breaks the direct-reuse
         // invariant fails loudly here instead of silently drifting.
+        //
+        // ADR 0111 Addendum 4 §Gap 3: the render side mints its token via
+        // `fresh_temp_var` BEFORE building the IR — production's real mint
+        // position — and carries the name in `TokenId`. Both sides now
+        // consume counter slot 0 for the token and slots 1.. for the catch
+        // vars, so an accidental reintroduction of render-time token
+        // minting (which would allocate the token AFTER the catch vars'
+        // relative position changed) shifts every `Nlr*` temp number and
+        // fails this assertion.
         let mut legacy_gen = CoreErlangGenerator::new("dual_run_nlr");
         let legacy_token = legacy_gen.fresh_temp_var("NlrToken");
         let inner_body = docvec!["let ", leaf::var("Sum1"), " = ", leaf::var("Sum"), " in "];
@@ -4093,11 +4270,13 @@ mod tests {
             .wrap_body_with_nlr_catch(inner_body, &legacy_token, NlrBoundary::ActorReply)
             .to_pretty_string();
 
+        let mut render_gen = CoreErlangGenerator::new("dual_run_nlr");
+        let render_token = render_gen.fresh_temp_var("NlrToken");
         let frame = FrameId::new(1);
         let ir = vec![
             ThreadedStmt::NlrCatch {
                 boundary: NlrBoundary::ActorReply,
-                token: TokenId::new(0),
+                token: TokenId::new(render_token),
                 frame,
                 span: span(),
             },
@@ -4109,7 +4288,6 @@ mod tests {
                 span: span(),
             },
         ];
-        let mut render_gen = CoreErlangGenerator::new("dual_run_nlr");
         let mut ctx = RenderCtx::new(&mut render_gen);
         let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
 
