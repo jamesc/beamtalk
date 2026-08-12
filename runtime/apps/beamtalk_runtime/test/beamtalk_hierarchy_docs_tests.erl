@@ -152,8 +152,8 @@ hierarchy_docs_test_() ->
             end},
             {"collect_flattened_methods: cycle detection returns partial accumulated result",
                 fun() ->
-                    ?assertEqual(
-                        #{},
+                    ?assertMatch(
+                        #{cycleMethod := {?CYCLE_X, _}},
                         beamtalk_hierarchy_docs:collect_flattened_methods(?CYCLE_X, PidX)
                     )
                 end}
@@ -177,7 +177,9 @@ setup() ->
     PidH = start_class(?SUPERCLASS_H, none, #{inheritedMethod => #{arity => 0}}, #{}),
     PidG = start_class(?SUBCLASS_G, ?SUPERCLASS_H, #{ownMethod => #{arity => 0}}, #{}),
     %% Circular chain: CycleX → CycleY → CycleX → … triggers max_depth_exceeded.
-    PidX = start_class(?CYCLE_X, ?CYCLE_Y, #{}, #{}),
+    %% CycleX carries a method so the partial accumulator on cycle is non-empty,
+    %% making the collect_flattened_methods cycle-detection assertion non-trivial.
+    PidX = start_class(?CYCLE_X, ?CYCLE_Y, #{cycleMethod => #{arity => 0}}, #{}),
     PidY = start_class(?CYCLE_Y, ?CYCLE_X, #{}, #{}),
     {PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}.
 
