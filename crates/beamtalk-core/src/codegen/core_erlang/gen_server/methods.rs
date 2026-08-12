@@ -1215,32 +1215,29 @@ impl CoreErlangGenerator {
                             let value_str = self.expression_doc(value)?;
                             // Unpack the tuple: element(1) is the value, element(2) is the state
                             let rhs_state = self.fresh_temp_var("CfState");
-                            let field_state = self.next_state_var();
-                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                leaf::var(val_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ") in let ",
-                                leaf::var(rhs_state.clone()),
-                                " = call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ") in let ",
-                                leaf::var(field_state.clone()),
-                                " = call 'maps':'put'(",
-                                leaf::atom(field.name.to_string()),
-                                ", ",
-                                leaf::var(val_var.clone()),
-                                ", ",
-                                leaf::var(rhs_state),
-                                ") in ",
-                            ]];
+                            self.lower_cf_field_assignment_binds(
+                                &mut stmts,
+                                docvec![
+                                    "let ",
+                                    leaf::var(tuple_var.clone()),
+                                    " = ",
+                                    value_str,
+                                    " in let ",
+                                    leaf::var(val_var.clone()),
+                                    " = call 'erlang':'element'(1, ",
+                                    leaf::var(tuple_var.clone()),
+                                    ") in ",
+                                ],
+                                &tuple_var,
+                                &rhs_state,
+                                field.name.as_str(),
+                                &val_var,
+                                span,
+                            );
+                            let field_state = self.current_state_var();
                             // Extract threaded locals from the control flow state
                             // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
+                            let mut doc_parts: Vec<Document<'static>> = Vec::new();
                             if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
                             {
                                 for var in &threaded_vars {
@@ -1259,15 +1256,20 @@ impl CoreErlangGenerator {
                                     ]);
                                 }
                             }
-                            docs.push(Document::Vec(doc_parts));
+                            if !doc_parts.is_empty() {
+                                stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
+                            }
                             if is_last {
-                                docs.push(docvec![
-                                    "{'reply', ",
-                                    leaf::var(val_var),
-                                    ", ",
-                                    leaf::var(field_state),
-                                    "}",
-                                ]);
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "{'reply', ",
+                                        leaf::var(val_var),
+                                        ", ",
+                                        leaf::var(field_state),
+                                        "}",
+                                    ],
+                                    span,
+                                ));
                             }
                         }
                     }
