@@ -17,7 +17,7 @@ use super::document::{Document, concat, join, leaf};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind,
     Module, TypeAnnotation, WellKnownSelector,
@@ -53,6 +53,26 @@ enum VtBodyExprKind {
     WhileWithLocalThreading,
     /// Regular expression with no special Self-threading needs.
     Pure,
+}
+
+/// BT-3159: Intermediate pieces for one arm (true or false) of a vt-conditional's
+/// open-scope case, before the arm's final return value is finalized.
+///
+/// Finalizing (via [`CoreErlangGenerator::finish_vt_conditional_branch`]) is deferred
+/// until both sibling arms are known, because whether the return value needs a
+/// trailing `ClassVars` slot — and hence whether it's a bare value or a tuple —
+/// depends on whether *either* arm mutated a class var, a fact only known once both
+/// arms have been generated. `local_values` must be resolved eagerly, while the arm's
+/// own scope (pushed by [`CoreErlangGenerator::build_vt_conditional_branch_pieces`])
+/// is still active.
+struct VtBranchPieces {
+    /// The arm's own `let`-preamble (empty for a passthrough arm).
+    preamble: Vec<Document<'static>>,
+    /// One resolved value-doc per `all_mutations[i]`, in the same order.
+    local_values: Vec<Document<'static>>,
+    /// `Some(version)` if a class-method self-send in this arm's body advanced the
+    /// class-var version past the baseline it started from.
+    cv_mutated_version: Option<usize>,
 }
 
 /// Auto-generated slot methods for `Value subclass:` classes (ADR 0042).
@@ -2723,22 +2743,32 @@ impl CoreErlangGenerator {
             " in ",
         ]);
 
-        // Generate the true and false branch documents based on the selector.
-        let (true_branch, false_branch) = match selector_name.as_str() {
+        // BT-3159: capture the class-var version before generating either arm so both
+        // are true siblings (each starts from the same baseline, mirroring
+        // `with_branch_context`'s restore-only-no-reset discipline) and so a
+        // class-method self-send inside an arm (`x := self bump`) can be detected by
+        // comparing the version before/after that arm's own generation.
+        let cv_before = self.class_var_version();
+
+        // Generate the true and false branch pieces based on the selector.
+        let (true_pieces, false_pieces) = match selector_name.as_str() {
             "ifTrue:" => {
                 let Expression::Block(block) = &arguments[0] else {
                     return Ok(Document::Nil);
                 };
-                let tb = self.generate_vt_conditional_branch(block, &all_mutations)?;
-                let fb = self.generate_vt_conditional_passthrough(&all_mutations);
+                let tb =
+                    self.build_vt_conditional_branch_pieces(block, &all_mutations, cv_before)?;
+                let fb = Self::build_vt_conditional_passthrough_pieces(self, &all_mutations);
                 (tb, fb)
             }
             "ifFalse:" => {
                 let Expression::Block(block) = &arguments[0] else {
                     return Ok(Document::Nil);
                 };
-                let passthrough = self.generate_vt_conditional_passthrough(&all_mutations);
-                let fb = self.generate_vt_conditional_branch(block, &all_mutations)?;
+                let passthrough =
+                    Self::build_vt_conditional_passthrough_pieces(self, &all_mutations);
+                let fb =
+                    self.build_vt_conditional_branch_pieces(block, &all_mutations, cv_before)?;
                 (passthrough, fb)
             }
             "ifTrue:ifFalse:" => {
@@ -2748,12 +2778,28 @@ impl CoreErlangGenerator {
                 let Expression::Block(false_block) = &arguments[1] else {
                     return Ok(Document::Nil);
                 };
-                let tb = self.generate_vt_conditional_branch(true_block, &all_mutations)?;
-                let fb = self.generate_vt_conditional_branch(false_block, &all_mutations)?;
+                let tb =
+                    self.build_vt_conditional_branch_pieces(true_block, &all_mutations, cv_before)?;
+                let fb = self.build_vt_conditional_branch_pieces(
+                    false_block,
+                    &all_mutations,
+                    cv_before,
+                )?;
                 (tb, fb)
             }
             _ => return Ok(Document::Vec(docs)),
         };
+
+        // BT-3159: a class var is threaded through the case's return tuple iff either
+        // arm mutated one — both arms must agree on the return shape since the
+        // `element/N` extraction after the case is fixed at compile time and runs
+        // regardless of which arm actually executed.
+        let any_cv_mutated =
+            true_pieces.cv_mutated_version.is_some() || false_pieces.cv_mutated_version.is_some();
+        let true_branch =
+            Self::finish_vt_conditional_branch(true_pieces, any_cv_mutated, cv_before);
+        let false_branch =
+            Self::finish_vt_conditional_branch(false_pieces, any_cv_mutated, cv_before);
 
         // Generate the case expression and rebind variables after it.
         let result_var = self.fresh_temp_var("CondResult");
@@ -2769,7 +2815,13 @@ impl CoreErlangGenerator {
             " end in ",
         ]);
 
-        self.rebind_vt_conditional_mutations(&mut docs, &all_mutations, &result_var);
+        self.rebind_vt_conditional_mutations(
+            &mut docs,
+            &all_mutations,
+            &result_var,
+            any_cv_mutated,
+            cv_before,
+        );
 
         Ok(Document::Vec(docs))
     }
@@ -3081,31 +3133,37 @@ impl CoreErlangGenerator {
         Document::Vec(tuple_parts)
     }
 
-    /// Generates a branch body for a VT conditional that inlines the block and returns
-    /// the final values of all captured mutations as a value or tuple.
-    fn generate_vt_conditional_branch(
+    /// Generates a branch body for a VT conditional that inlines the block, resolving
+    /// (but not yet finalizing — see [`VtBranchPieces`]) the final values of all
+    /// captured mutations and detecting any class-var mutation.
+    fn build_vt_conditional_branch_pieces(
         &mut self,
         block: &crate::ast::Block,
         all_mutations: &[String],
-    ) -> Result<Document<'static>> {
+        cv_before: usize,
+    ) -> Result<VtBranchPieces> {
         self.push_scope();
-        let result = self.build_vt_conditional_branch_parts(block, all_mutations);
+        self.set_class_var_version(cv_before);
+        let result = self.build_vt_conditional_branch_pieces_inner(block, all_mutations, cv_before);
+        self.set_class_var_version(cv_before);
         self.pop_scope();
         result
     }
 
-    /// Inner implementation for `generate_vt_conditional_branch`.
+    /// Inner implementation for `build_vt_conditional_branch_pieces`.
     ///
-    /// Separated so that `push_scope`/`pop_scope` always bracket the fallible
-    /// work regardless of whether `?` propagates an error.
-    fn build_vt_conditional_branch_parts(
+    /// Separated so that `push_scope`/`pop_scope` and the class-var-version
+    /// save/restore always bracket the fallible work regardless of whether `?`
+    /// propagates an error.
+    fn build_vt_conditional_branch_pieces_inner(
         &mut self,
         block: &crate::ast::Block,
         all_mutations: &[String],
-    ) -> Result<Document<'static>> {
+        cv_before: usize,
+    ) -> Result<VtBranchPieces> {
         let body = super::util::collect_body_exprs(&block.body);
 
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        let mut preamble: Vec<Document<'static>> = Vec::new();
         for body_expr in &body {
             if Self::is_local_var_assignment(body_expr) {
                 if let Expression::Assignment { target, value, .. } = body_expr {
@@ -3113,73 +3171,164 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(&id.name)
                             .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        let val_doc = self.expression_doc(value)?;
-                        parts.push(docvec![
-                            "let ",
-                            leaf::var(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in ",
-                        ]);
+                        // BT-3159: a class-method self-send on the RHS (`x := self bump`)
+                        // produces an *open* let-chain via `expression_doc_with_open_scope`
+                        // (ending in `... in `, result value carried out-of-band in
+                        // `last_open_scope_result`). Using the plain `expression_doc` here
+                        // and wrapping it in `let core_var = <val_doc> in` left the chain's
+                        // trailing `in` unclosed — an empty value fragment before a doubled
+                        // `in`. Mirrors `try_generate_block_local_plain_let`'s BT-3150 fix:
+                        // keep the open chain (and its `ClassVarsN` rebind) at this level,
+                        // then bind `core_var` to the carried-out result as a separate,
+                        // still-open `let`.
+                        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
                         self.bind_var(&id.name, &core_var);
+                        let doc = match open_scope {
+                            Some(OpenScopeResult::Value(result_var)) => docvec![
+                                val_doc,
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                leaf::var(result_var),
+                                " in ",
+                            ],
+                            Some(OpenScopeResult::NoValue) => docvec![
+                                val_doc,
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = 'nil' in ",
+                            ],
+                            None => {
+                                docvec!["let ", leaf::var(core_var.clone()), " = ", val_doc, " in ",]
+                            }
+                        };
+                        preamble.push(doc);
                     }
                 }
             } else {
                 let tmp = self.fresh_temp_var("seq");
-                let doc = self.expression_doc(body_expr)?;
-                parts.push(docvec!["let ", leaf::var(tmp), " = ", doc, " in ",]);
+                // BT-3159: mirror the assignment arm above — a bare-statement
+                // class-method self-send also produces an open let-chain that must
+                // be closed before wrapping it in `let tmp = <doc> in`.
+                let (val_doc, open_scope) = self.expression_doc_with_open_scope(body_expr)?;
+                let doc = match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => docvec![
+                        val_doc,
+                        "let ",
+                        leaf::var(tmp),
+                        " = ",
+                        leaf::var(result_var),
+                        " in ",
+                    ],
+                    Some(OpenScopeResult::NoValue) => {
+                        docvec![val_doc, "let ", leaf::var(tmp), " = 'nil' in ",]
+                    }
+                    None => docvec!["let ", leaf::var(tmp), " = ", val_doc, " in ",],
+                };
+                preamble.push(doc);
             }
         }
 
-        // Return the final values of all captured mutations
-        let return_doc = Self::build_vt_mutation_return(self, all_mutations);
-        parts.push(return_doc);
-        Ok(Document::Vec(parts))
+        let local_values = Self::resolve_mutation_value_docs(self, all_mutations);
+        let cv_after = self.class_var_version();
+        let cv_mutated_version = (cv_after != cv_before).then_some(cv_after);
+        Ok(VtBranchPieces {
+            preamble,
+            local_values,
+            cv_mutated_version,
+        })
     }
 
-    /// Generates a pass-through branch that returns the current (pre-branch) values of
-    /// all captured mutations, leaving them unchanged.
-    fn generate_vt_conditional_passthrough(&self, all_mutations: &[String]) -> Document<'static> {
-        Self::build_vt_mutation_return(self, all_mutations)
+    /// Generates a pass-through arm's pieces: the current (pre-branch) values of all
+    /// captured mutations, leaving them unchanged, and no class-var mutation (a
+    /// passthrough arm executes no branch code).
+    fn build_vt_conditional_passthrough_pieces(
+        cg: &Self,
+        all_mutations: &[String],
+    ) -> VtBranchPieces {
+        VtBranchPieces {
+            preamble: Vec::new(),
+            local_values: Self::resolve_mutation_value_docs(cg, all_mutations),
+            cv_mutated_version: None,
+        }
     }
 
-    /// Builds a return expression for the current values of `all_mutations`:
-    /// a single variable if there is one mutation, or a tuple if there are multiple.
-    fn build_vt_mutation_return(cg: &Self, all_mutations: &[String]) -> Document<'static> {
-        if all_mutations.len() == 1 {
-            let var = &all_mutations[0];
-            let core_var = cg
-                .lookup_var(var)
-                .cloned()
-                .unwrap_or_else(|| Self::to_core_erlang_var(var));
-            leaf::var(core_var)
-        } else {
-            let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
-            for (i, var) in all_mutations.iter().enumerate() {
-                if i > 0 {
-                    tuple_parts.push(Document::Str(", "));
-                }
+    /// Resolves each of `all_mutations` to its current Core Erlang variable doc.
+    fn resolve_mutation_value_docs(cg: &Self, all_mutations: &[String]) -> Vec<Document<'static>> {
+        all_mutations
+            .iter()
+            .map(|var| {
                 let core_var = cg
                     .lookup_var(var)
                     .cloned()
                     .unwrap_or_else(|| Self::to_core_erlang_var(var));
-                tuple_parts.push(leaf::var(core_var));
+                leaf::var(core_var)
+            })
+            .collect()
+    }
+
+    /// BT-3159: Combines an arm's preamble with its finalized return value, appending a
+    /// trailing `ClassVars` slot (this arm's own resulting version if it mutated one,
+    /// else the unchanged baseline) when `any_cv_mutated` — i.e. when *either* sibling
+    /// arm threads a class var, both arms must agree on the tuple shape so the
+    /// `element/N` extraction after the case is valid regardless of which arm ran.
+    ///
+    /// When `any_cv_mutated` is `false`, this renders byte-identically to the
+    /// pre-BT-3159 shape (bare value for one mutation, `{v1, v2, ...}` tuple otherwise).
+    fn finish_vt_conditional_branch(
+        pieces: VtBranchPieces,
+        any_cv_mutated: bool,
+        cv_before: usize,
+    ) -> Document<'static> {
+        let n_locals = pieces.local_values.len();
+        let return_doc = if !any_cv_mutated && n_locals == 1 {
+            pieces
+                .local_values
+                .into_iter()
+                .next()
+                .unwrap_or(Document::Nil)
+        } else {
+            let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
+            for (i, doc) in pieces.local_values.into_iter().enumerate() {
+                if i > 0 {
+                    tuple_parts.push(Document::Str(", "));
+                }
+                tuple_parts.push(doc);
+            }
+            if any_cv_mutated {
+                // This arm's own resulting ClassVars: its mutated version if it
+                // advanced the counter, else the baseline (unchanged) version
+                // inherited from before the conditional.
+                let cv_version = pieces.cv_mutated_version.unwrap_or(cv_before);
+                tuple_parts.push(Document::Str(", "));
+                tuple_parts.push(leaf::var(super::util::versioned_var(
+                    "ClassVars",
+                    cv_version,
+                )));
             }
             tuple_parts.push(Document::Str("}"));
             Document::Vec(tuple_parts)
-        }
+        };
+        Document::Vec(vec![Document::Vec(pieces.preamble), return_doc])
     }
 
     /// Appends `let VAR = <result_var>` or `let VAR = element(N, <result_var>)` bindings
-    /// to `docs`, updating the scope so subsequent expressions see the new variable names.
+    /// to `docs`, updating the scope so subsequent expressions see the new variable
+    /// names. When `any_cv_mutated` (BT-3159), also mints and binds a fresh outer
+    /// `ClassVarsN` from the case result's trailing tuple element, so a class-var
+    /// mutation made inside either arm is visible — and, via `class_var_mutated`'s
+    /// sticky flag, correctly reflected in the method's own `{class_var_result, ...}`
+    /// wrapping — to code following the conditional.
     fn rebind_vt_conditional_mutations(
         &mut self,
         docs: &mut Vec<Document<'static>>,
         all_mutations: &[String],
         result_var: &str,
+        any_cv_mutated: bool,
+        cv_before: usize,
     ) {
-        if all_mutations.len() == 1 {
-            // Single variable: case returns the value directly
+        if !any_cv_mutated && all_mutations.len() == 1 {
+            // Single variable, no class-var threading: case returns the value directly.
             let var = &all_mutations[0];
             let core_var = Self::to_core_erlang_var(var);
             self.bind_var(var, &core_var);
@@ -3190,21 +3339,36 @@ impl CoreErlangGenerator {
                 leaf::var(result_var.to_string()),
                 " in ",
             ]);
-        } else {
-            // Multiple variables: case returns a tuple, extract with element/N
-            for (i, var) in all_mutations.iter().enumerate() {
-                let core_var = Self::to_core_erlang_var(var);
-                self.bind_var(var, &core_var);
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(core_var),
-                    " = call 'erlang':'element'(",
-                    leaf::int_lit(i64::try_from(i + 1).unwrap_or(i64::MAX)),
-                    ", ",
-                    leaf::var(result_var.to_string()),
-                    ") in ",
-                ]);
-            }
+            return;
+        }
+        // Multiple variables (and/or a threaded class var): case returns a tuple,
+        // extract with element/N.
+        for (i, var) in all_mutations.iter().enumerate() {
+            let core_var = Self::to_core_erlang_var(var);
+            self.bind_var(var, &core_var);
+            docs.push(docvec![
+                "let ",
+                leaf::var(core_var),
+                " = call 'erlang':'element'(",
+                leaf::int_lit(i64::try_from(i + 1).unwrap_or(i64::MAX)),
+                ", ",
+                leaf::var(result_var.to_string()),
+                ") in ",
+            ]);
+        }
+        if any_cv_mutated {
+            self.set_class_var_version(cv_before);
+            let new_cv = self.next_class_var();
+            let idx = all_mutations.len() + 1;
+            docs.push(docvec![
+                "let ",
+                leaf::var(new_cv),
+                " = call 'erlang':'element'(",
+                leaf::int_lit(i64::try_from(idx).unwrap_or(i64::MAX)),
+                ", ",
+                leaf::var(result_var.to_string()),
+                ") in ",
+            ]);
         }
     }
 

@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3159: Tests a class method whose conditional branch assigns a local
+// var from a class-var-mutating self-send (`x := self bump` inside
+// `flag ifTrue: [...]`). Regression: the compiler emitted invalid Core
+// Erlang (an empty value fragment before a doubled `in`) for this pattern,
+// and — once that was fixed — left the mutated class var unbound outside
+// the conditional if not also threaded through the branch's `case` result.
+
+TestCase subclass: ClassMethodConditionalLocalAndClassVarTest
+
+  setUp =>
+    ClassMethodConditionalLocalAndClassVar resetRuns
+    self
+
+  testIfTrueMutatesAndReturnsBumpedValue =>
+    // flag = true: x is assigned from `self bump`, which increments runs to 1.
+    self assert: (ClassMethodConditionalLocalAndClassVar m: true) equals: 1
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 1
+
+  testIfTrueFalseBranchLeavesClassVarUnchanged =>
+    // flag = false: the ifTrue: branch never runs, so `self bump` is never
+    // sent and the class var stays at its pre-call value.
+    self assert: (ClassMethodConditionalLocalAndClassVar m: false) equals: 1
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 0
+
+  testRepeatedCallsAccumulateAcrossCalls =>
+    // Class var mutation is visible in a later call — not just within one.
+    self assert: (ClassMethodConditionalLocalAndClassVar m: true) equals: 1
+    self assert: (ClassMethodConditionalLocalAndClassVar m: true) equals: 2
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 2
+
+  testIfFalseVariantMutatesOnFalseBranch =>
+    // ifFalse: with flag = false takes the mutating branch.
+    self assert: (ClassMethodConditionalLocalAndClassVar n: false) equals: 1
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 1
+
+  testIfFalseVariantTrueBranchLeavesClassVarUnchanged =>
+    // ifFalse: with flag = true skips the mutating branch.
+    self assert: (ClassMethodConditionalLocalAndClassVar n: true) equals: 1
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 0
+
+  testIfTrueIfFalseBothBranchesMutate =>
+    // ifTrue:ifFalse: where both branches call the mutating self-send.
+    self assert: (ClassMethodConditionalLocalAndClassVar p: true) equals: 1
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 1
+    self assert: (ClassMethodConditionalLocalAndClassVar p: false) equals: 2
+    self assert: ClassMethodConditionalLocalAndClassVar runs equals: 2

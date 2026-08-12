@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3159: Fixture for a class method whose conditional branch assigns a
+// local var from a class-var-mutating self-send — `x := self bump` inside
+// `flag ifTrue: [...]`. This routes through value_type_codegen.rs's
+// vt-conditional local-rebind machinery (`generate_vt_conditional_open`),
+// which previously emitted invalid Core Erlang (an empty value fragment
+// before a doubled `in`) because the open `ClassVars` unwrap chain produced
+// by the self-send was never closed, and — once that was fixed — because the
+// mutated `ClassVars` binding was never threaded out of the conditional's
+// `case` back to the enclosing class method.
+
+Value subclass: ClassMethodConditionalLocalAndClassVar
+  classState: runs = 0
+
+  // Mutates the class var and returns its new value.
+  class bump =>
+    self.runs := self.runs + 1
+    self.runs
+
+  // The BT-3159 repro: a local assigned from a class-var-mutating self-send,
+  // inside a class method's conditional branch.
+  class m: flag =>
+    x := 1
+    flag ifTrue: [x := self bump]
+    x
+
+  // ifFalse: variant — mutation in the false branch.
+  class n: flag =>
+    x := 1
+    flag ifFalse: [x := self bump]
+    x
+
+  // ifTrue:ifFalse: variant — both branches mutate the class var.
+  class p: flag =>
+    x := 0
+    flag ifTrue: [x := self bump] ifFalse: [x := self bump]
+    x
+
+  class runs => self.runs
+
+  class resetRuns => self.runs := 0
