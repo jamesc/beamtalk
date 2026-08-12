@@ -826,6 +826,559 @@ after landing real, tested, reviewed infrastructure (the two Addendum-2
 gaps, both now closed) rather than stopping at the investigation stage a
 second time.
 
+## Addendum 4 (2026-08-12): General opaque AST-directed statement node (BT-3156) — unblocking BT-3148's routing/NLR/absorption tasks, a real mint-order hazard found before landing, and why BT-3146 needs something else
+
+All line numbers below are against
+`crates/beamtalk-core/src/codegen/core_erlang/` unless noted, current as of
+`main` at the commit landing BT-3148's task 3
+(`Migrate class-var Bind producers to emission-input ThreadedIr (BT-3148)
+(#3350)`). As Addendum 2 notes for its own citations: resolve by symbol
+name first, treat `:NNN` as a hint — this file is under active migration
+and line numbers drift.
+
+[BT-3148](https://linear.app/beamtalk/issue/BT-3148) ("gen_server state
+threading, NLR boundaries, class-var Bind/shadow-write producers") landed
+its task 3 of 4 — the two class-var `Bind` producer sites
+(`expressions.rs::generate_class_var_field_assignment`,
+`dispatch_codegen.rs::emit_class_var_result_unwrap`) now construct, verify,
+and [`render`] a real [`ThreadedStmt::Bind`], deleting the
+`verify_class_var_bind` fixture-mirror. Tasks 1 (routing unification), 2
+(a production `NlrCatch` constructor for `wrap_body_with_nlr_catch`), and 4
+(`threaded_expr.rs`'s `ThreadingBoundary` absorption) were investigated and
+explicitly not attempted — the BT-3148 PR's own closing comment names the
+reason: `gen_server/methods.rs`'s `classify_body_expr` has ~18
+`BodyExprKind` variants, and most of them (message sends, dispatch, Tier 2
+calls, `EarlyReturn`, …) are ordinary AST-directed statements with **no
+`ThreadedStmt` representation at all** — not a narrower version of the
+class-var `Bind` shape task 3 closed, a different, missing kind of node
+entirely. That gap was split out as this issue.
+
+Separately, [BT-3146](https://linear.app/beamtalk/issue/BT-3146)
+("conditionals + exception_handling") investigated its own migration and
+reached a **different conclusion about the same-sounding problem**: its
+2026-08-12T08:11 investigation comment compiled `self.x := flag ifTrue:
+[self.y := 1. 42] ifFalse: [0]` and confirmed that
+[`ValueRef::Doc`]/[`VersionPrefix::Gensym`] (BT-3145's own additions) are
+**already** expressive enough to model every one of its ~10 mutation
+shapes as a two-hop `Bind` chain — quoting the comment directly: *"no
+single shape is architecturally impossible with today's
+`ThreadedStmt`/`BindOp`/`VersionPrefix::Gensym` vocabulary. The gap is
+volume and risk, not a missing IR node."* BT-3146 was set to `needs-spec`
+on that basis, not because a node was missing.
+
+This addendum's central finding, stated up front because it governs
+everything below: **BT-3148's remaining tasks and BT-3146 are not the same
+gap wearing two names.** BT-3148 tasks 1/2/4 need a genuinely new IR node —
+there is no existing vocabulary for "an ordinary AST-directed statement,
+sitting in a straight-line body next to real `Bind`s, that this pass
+doesn't need to understand." BT-3146's blocker is applying an
+**already-sufficient** vocabulary correctly, by hand, across 10+
+structurally distinct shapes, each needing its own empirical
+byte-identity confirmation — a volume-and-discipline problem a new node
+does not shrink. Building a general node and then reaching for it to
+paper over BT-3146's per-shape work would be the wrong fix for BT-3146
+specifically (§"Why BT-3146 needs something else, not this node", below) —
+this addendum designs the node BT-3148 needs, evaluates it honestly
+against BT-3146's actual blocker, and — per this ADR's own repeated
+practice — recommends BT-3146 proceed differently rather than forcing one
+solution onto both.
+
+### Evidence: two repro shapes, compiled and read (this session's standard)
+
+**Shape 1 — ADR 0110's own `CollectionDriver countedRun:over:`
+(BT-3148's cited repro), no local `^`:**
+
+```beamtalk
+Value subclass: CollectionDriver
+  classState: runs = 0
+
+  class countedRun: aBlock :: Block over: aList :: List -> Nil =>
+    self.runs := self.runs + 1
+    aList do: [:x | aBlock value: x]
+    nil
+```
+
+compiles (`beamtalk build`, read from `bt@collection_driver.core`) to:
+
+```erlang
+'class_countedRun:over:'/4 = fun (ClassSelf, ClassVars, _aBlock1, _aList2) ->
+    let _Val3 = ( call 'erlang':'+'(call 'maps':'get'('runs', ClassVars), 1) ) in
+    let ClassVars1 = call 'maps':'put'('runs', _Val3, ClassVars) in
+    let _ = call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1) in
+    let _seq4 = ( <aList do: [...] — ordinary AST-directed dispatch codegen> ) in
+    let _Ret13 = 'nil' in
+    {'class_var_result', _Ret13, ClassVars1}
+```
+
+(span/`-|` annotations elided; the `do:` block's own dispatch codegen is
+reproduced verbatim in the actual `.core` file and is irrelevant to this
+addendum — it is exactly the kind of ordinary AST-directed statement in
+question.) **No NLR try/catch at all** — `needs_nlr` is `false` because
+`countedRun:over:`'s own body contains no literal `^` in its own directly
+nested blocks (the `^` that ADR 0110 is about lives in the *caller's*
+block, a different method, invisible to this method's own classifier).
+The shadow write is unconditional on `block_depth == 0`, not on local
+NLR-catch presence — confirmed empirically here.
+
+**Shape 2 — the same class, with a literal `^` added so `needs_nlr` is
+`true`, to exercise the boundary this repro lacks:**
+
+```beamtalk
+Value subclass: NlrClassVar
+  classState: runs = 0
+
+  class bump: x :: Integer -> Integer =>
+    self.runs := self.runs + 1
+    x > 5 ifTrue: [^x]
+    0
+```
+
+compiles to:
+
+```erlang
+'class_bump:'/3 = fun (ClassSelf, ClassVars, _x1) ->
+    let _NlrToken2 = call 'erlang':'make_ref'() in
+    try
+        let _Val3 = ( call 'erlang':'+'(call 'maps':'get'('runs', ClassVars), 1) ) in
+        let ClassVars1 = call 'maps':'put'('runs', _Val3, ClassVars) in
+        let _ = call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1) in
+        let _seq4 = ( call 'beamtalk_message_dispatch':'send'(( call 'erlang':'>'(_x1, 5) ), 'ifTrue:',
+                        [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken2, _x1, ClassVars1})]) ) in
+        let _Ret5 = 0 in
+        {'class_var_result', _Ret5, ClassVars1}
+    of _NlrResult6 -> _NlrResult6
+    catch <_NlrCls7, _NlrErr8, _NlrStk9> ->
+        case {_NlrCls7, _NlrErr8} of
+            <{'throw', {'$bt_nlr', _CatchTok10, _NlrVal11, _NlrState12}}> when _CatchTok10 =:= _NlrToken2 ->
+                {'class_var_result', _NlrVal11, _NlrState12}
+            <_OtherPair13> when 'true' ->
+                primop 'raw_raise'(_NlrCls7, _NlrErr8, _NlrStk9)
+        end
+```
+
+**`_NlrToken2` is minted before `_Val3`.** Production
+(`gen_server/methods.rs:305-314`, both the Actor and class-method call
+sites) mints `NlrToken` first, unconditionally, then calls
+`generate_method_definition_body_with_reply` — every temp the body itself
+mints (`_Val3`, `_seq4`, `_Ret5`, …) necessarily gets a **later** module-wide
+counter value. This is the load-bearing fact behind Gap 3, below.
+
+### The node: `ThreadedStmt::Statement`
+
+```rust
+enum ThreadedStmt {
+    // ...Bind, Threaded, NlrCatch, Return, TupleAccUnpack, ConditionalLoop...
+
+    /// An ordinary AST-directed statement, embedded verbatim as one
+    /// opaque entry in a straight-line ThreadedStmt sequence — the
+    /// statement-level counterpart of ValueRef::Doc's value-level
+    /// opacity (ADR 0111 Addendum 3), built by the SAME codegen call
+    /// production already runs at this point (`self.expression_doc(expr)`,
+    /// `self.generate_self_dispatch_open(expr)`, the `{'reply', ...}`/
+    /// `{'class_var_result', ...}` epilogue builders, …). Legal wherever a
+    /// Bind is legal in a body sequence. Carries no state-threading
+    /// content of its own by construction (see the type-level rule
+    /// below) — a statement that DOES mutate a threaded
+    /// version must be a Bind, never a Statement; there is no `BindOp`
+    /// escape hatch here the way `ValueRef::Doc` is one inside a `Bind`'s
+    /// own `op`.
+    Statement(Document<'static>, Span),
+}
+```
+
+`render`'s dispatch loop needs exactly one new arm:
+
+```rust
+ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
+```
+
+No other change to [`render`]'s structure. This is the smallest possible
+extension because `render`'s existing loop already has the property that
+matters: it concatenates each statement's `Document` with **no separator**
+(`Document::Vec(docs)`, confirmed by reading the current implementation),
+relying on each statement's own trailing glue (`Bind`'s render always ends
+`" in "`; a terminal statement carries none). A `Statement`'s `Document`
+must therefore carry its own correct trailing glue, exactly the discipline
+`BodyExprKind::Pure`'s non-last-position arm already follows today (`let
+seqN = <expr_doc> in `, `gen_server/methods.rs:1533-1536`) — lowering
+constructs it, `render` does not need to know it exists.
+
+**Design options considered:**
+
+1. **Fully opaque, `Statement(Document<'static>, Span)`, invisible to
+   `verify()` — Recommended.** Mirrors the established precedent exactly:
+   `NlrCatch` (no body field, `verify()`'s `walk_stmt` arm is `{}`),
+   `ConditionalLoop::continue_header`, and `ValueRef::Doc` are all opaque,
+   pre-rendered `Document`s that `verify()` does not look inside, for the
+   same reason each time (§Verifier honesty: "the condition body is
+   ordinary AST-directed expression codegen with no state-threading
+   content of its own"). A `Statement` used correctly (see the
+   type-level rule below) carries the same property. Smallest surface,
+   smallest effort, and — crucially — a **strict improvement over
+   today with zero new risk**: today these ~15 `BodyExprKind` shapes have
+   *zero* IR representation and are not part of any single-sourced
+   emission path at all; wrapping them in `Statement` gives them a real
+   place in the real `Vec<ThreadedStmt>` `render()` actually emits from,
+   without asking `verify()` to promise anything about them it cannot
+   honestly check.
+2. **`Statement { doc: Document<'static>, reads: Vec<VersionedVar>, span:
+   Span }` — declared reads only, no declared writes.** Would let
+   `check_use` catch `UnboundVersion` through the opacity boundary (e.g. a
+   future lowering bug that emits a `Statement` referencing `State3`
+   before any `Bind` produced it). **Considered, not recommended for this
+   landing.** Two reasons: first, it asks every one of the ~15 call sites
+   this closes to newly enumerate which `VersionedVar`s their embedded
+   `Document` references — bookkeeping none of today's hand-rolled
+   `Document` construction does, for a class of bug (`UnboundVersion`
+   through an opaque statement) that is no *more* likely than the same
+   class of bug already accepted, unverified, inside every `ValueRef::Doc`
+   and `ConditionalLoop::continue_header`/`exit_arm` today. Second, and
+   decisively, per the "verifier honesty" doctrine this ADR has followed
+   since its own §Verifier honesty section: a check is worth adding when
+   it can be sound and is worth the bookkeeping; here it would be *no more
+   sound* than the existing accepted gaps (a `reads` list can go stale
+   exactly like a `shadow_write: bool` can, and unlike `shadow_write`
+   there is no downstream contract like ADR 0110's forcing it to be kept
+   honest by a dedicated `VerifyError`). Not rejected outright — a real,
+   buildable follow-up if a specific bug class ever motivates it (the
+   field shape above is the natural extension point) — but adding it
+   speculatively here would be exactly the "IR scope creep without
+   verification payoff" this ADR has repeatedly declined (Gap 1 option 3;
+   `exit_arm`'s own accepted limitation).
+3. **Fully structural — model every AST shape `classify_body_expr` can
+   produce as `ThreadedStmt` nodes.** **Rejected**, same grounds as Gap 1
+   option 3 and the ADR's own §Constraints non-goal: this is "a
+   full-pipeline IR covering all of Core Erlang codegen," absorbing ADR
+   0018's rejected reasoning. `EarlyReturn`, `DispatchingSelfSend`,
+   `SuperSend`, `ErrorSend`, `Tier2SelfSend`, ordinary `Pure` sends — none
+   of these carry state-threading content whose *structure* `verify()`
+   could usefully check; modeling their internals buys nothing.
+
+**Type-level rule, made explicit because it is load-bearing:** a
+`Statement` **must never** be the sole representation of a version
+mutation. Any statement that produces a new `VersionedVar` — a class-var
+write, a state write, a self-field write — is constructed as a `Bind`
+(using the existing `Direct(ValueRef::Doc(...))`/`Gensym`-two-hop idioms
+BT-3145/BT-3146's own investigation already established for opaque RHS
+extraction), never folded into an opaque `Statement` merely because doing
+so would be less code. This is the same "make the invalid state
+unrepresentable" preference this ADR has applied since Alternative #5
+(the `VersionedVar` typestate) — here enforced by convention and code
+review rather than the type system (a `Statement`'s `Document` is
+opaque by definition; nothing stops a future call site from building one
+that happens to contain a `maps:put` no `Bind` ever sees), so it is
+recorded here as an explicit rule a reviewer must enforce, not a
+guarantee `verify()` can check. This is precisely the distinction BT-3146
+already draws between `continue_header` (sound opacity, `ConditionalLoop`'s
+own doc comment) and `exit_arm` (**hides genuine state-threading content**,
+a named, deliberate limitation) — a `Statement` is only ever the
+`continue_header` kind.
+
+### Gap 3 — NLR-token mint order (found empirically, before landing)
+
+The issue body's own instructions asked specifically for this class of
+check, and it catches something real: **`render`'s current `NlrCatch` arm
+mints its token in the wrong position relative to a real body.**
+
+```rust
+ThreadedStmt::NlrCatch { boundary, .. } => {
+    let body_doc = render(&ir[i + 1..], ctx);      // body rendered FIRST
+    docs.push(render_nlr_catch(*boundary, body_doc, ctx));  // token minted AFTER
+    return Document::Vec(docs);
+}
+```
+
+`render_nlr_catch` mints `ctx.fresh_temp_var("NlrToken")` internally, at
+render time, **after** the "rest of slice" body has already rendered.
+Shape 2's compiled output above shows production's real order is the
+opposite: `_NlrToken2` is minted **before** `_Val3`/`_seq4`/`_Ret5` — the
+token consumes the module-wide counter slot the body's own temps would
+otherwise get, shifting every subsequent number.
+
+This is currently **dormant, not yet triggered**, for the same reason
+§"What did not ship" already gives for `NlrCatch` generally: nothing
+constructs one at a real call site yet. It is dormant in the *test suite*
+too, for a subtler reason worth naming: `dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim`
+(`threaded_ir.rs:4081`) is the one existing test that renders a
+`Bind`-then-`NlrCatch`-adjacent IR — but its body is the **literal,
+hand-written** `docvec!["let ", leaf::var("Sum1"), " = ", leaf::var("Sum"),
+" in "]`, which contains **zero `fresh_temp_var` calls of its own**. Both
+the "legacy" and "render(lower(..))" sides therefore produce `_NlrToken0`
+regardless of whether the token is minted before or after the body — the
+test cannot distinguish correct order from inverted order, because
+nothing in its fixture consumes a counter slot the inversion could
+misplace. Wiring a real `NlrCatch` node into BT-3148 task 2 — a body that
+genuinely mints `_Val`/`_CfTuple`/`_seq`-style temps, exactly Shape 2 above
+— would be the **first** thing to hit this, silently: the compiled output
+would still be valid Core Erlang (every reference still resolves; nothing
+crashes), just with every temp number shifted from `_Val3` to `_Val4`+ and
+so on — a byte-identity break invisible to anything except the snapshot
+corpus, exactly the class of bug the issue's own instructions warned this
+session has already hit twice (BT-3144's initial commit,
+BT-3145/Addendum-2's design).
+
+**Fix, mirroring Gap 2 option 2's already-adopted pattern exactly:** mint
+the NLR token **during lowering**, at the same relative position
+production mints it (before lowering the body's own `Bind`/`Statement`
+nodes), and carry the resulting literal name in the IR — the same
+"lowering-time pre-allocation, IR carries the rendered name" idiom
+`VersionPrefix::Gensym` already established for `Bind` targets.
+
+```rust
+/// Was TokenId(u32) — an opaque numeric identity never rendered directly
+/// (render_nlr_catch minted its own name independently). Now carries the
+/// literal Core Erlang name minted at lowering time, in production's real
+/// mint position (before the body), exactly the fix Gap 2 applied to
+/// Bind-target naming for ConditionalLoop.
+pub(super) struct TokenId(String);
+
+impl TokenId {
+    pub(super) fn new(name: String) -> Self { Self(name) }
+    fn name(&self) -> &str { &self.0 }
+}
+```
+
+```rust
+ThreadedStmt::NlrCatch { boundary, token, .. } => {
+    let body_doc = render(&ir[i + 1..], ctx);
+    docs.push(render_nlr_catch(*boundary, token.name(), body_doc, ctx));
+    return Document::Vec(docs);
+}
+```
+
+`render_nlr_catch` drops its own `ctx.fresh_temp_var("NlrToken")` call and
+takes the name as a parameter instead — rendering no longer mints
+anything for this node, matching every other `Statement`/`Bind` render
+path's "no allocation at render time" property. The lowering pass that
+BT-3148 task 2 writes must mint the token **before** it lowers the body's
+`Bind`/`Statement` sequence (an ordinary code-ordering fact of one
+function, exactly how Gap 2's option 2 closed the equivalent hazard for
+loop-body rebind temps — "the lowering pass must still preserve that
+order... enforced naturally by writing the lowering to mirror the legacy
+function it replaces"). This also requires updating every existing
+`TokenId::new(0)` call site to pass a name instead of a numeric
+placeholder — five at the time of writing: four unit tests
+(`threaded_ir.rs:2771,2806,2864,4100`) plus one production site,
+[`construct_and_verify_class_var_bind`]'s synthetic `NlrCatch` marker
+(`threaded_ir.rs:2124`) — that marker is fixture-only (never rendered,
+per its own doc comment: "not in the returned `Bind`, which callers
+render alone"), so this is a mechanical compile-fix there, not a
+byte-identity concern; called out here so it is not mistaken for scope
+creep when a real implementation attempt touches those lines.
+
+**Composition note:** this fix does not affect `Statement`'s own design —
+`render`'s `Statement` arm still performs zero minting either way, and the
+hazard is specific to `NlrCatch`'s pre-existing (already-in-the-ADR, since
+BT-3129) placeholder `TokenId`, not something this addendum's new node
+introduces. It surfaces here because `Statement` is what makes wiring a
+*real*, temp-minting body next to `NlrCatch` possible for the first time —
+exactly the composition the issue asked this addendum to verify before
+committing to a design.
+
+### `Return`'s scope stays as-is; reply epilogues are `Statement`s, not `Return`s
+
+`ThreadedStmt::Return(ValueRef, VersionedVar, Span)` renders a bare
+`{Value, State}` 2-tuple (`render_return`). Both compiled shapes above
+show this is **not** what a gen_server method body's final statement
+emits: Shape 1/2 emit `{'class_var_result', Value, ClassVars}` (a
+3-element **tagged** tuple); a bare-value class method with no mutation
+(`class_runCount` — `let _Ret14 = call 'maps':'get'('runs', ClassVars) in
+_Ret14`, confirmed in the same compile) emits **no tuple at all**; an
+Actor method emits `{'reply', Value, State}`. `NlrBoundary`'s own
+`nlr_arm_result` (`mod.rs:1086`) already encodes this three-way split for
+the NLR-catch-arm case — the same three shapes recur for the **normal**
+(non-NLR) return path, driven by `emit_dispatch_reply`/
+`emit_tuple_unpack_reply`/`emit_pure_reply`/the inline `{'class_var_result',
+...}` literal in `generate_body_exprs_with_reply`'s class-method-EarlyReturn
+arm.
+
+**Recommendation: leave `Return`'s contract unchanged; represent every
+reply-wrapping epilogue as a final `Statement`, built by the same
+`emit_*_reply` family already in production.** Two reasons this is
+better than widening `Return`: first, `Return`'s existing 2-tuple shape
+has a real, narrower use today (embedded inside `ControlFlowWithMutations`/
+`Tier2ValueCall`'s own `{Result, State}` tuple production, a different
+context from a method's outermost reply) — changing its meaning to
+"whatever this boundary's reply shape is" would be a second, incompatible
+contract wearing the same node name. Second, the reply-shape diversity
+(bare value / `{'reply', ...}` / `{'class_var_result', ...}` / the
+NLR-catch-arm's own three-way echo of the same split) is not
+state-threading structure `verify()` could usefully check regardless of
+which node carries it — it is exactly the kind of "ordinary AST-directed
+tail construction, no threading content of its own" `Statement` exists
+for. Concretely: `docs.push(ThreadedStmt::Statement(<the `emit_*_reply`
+family's existing Document output, unchanged>, span))` as the body
+sequence's last entry, instead of inventing a `ReplyKind` parameter on
+`Return` no other `Return` call site needs.
+
+### Byte-identity walkthrough (Shape 1, the no-NLR case)
+
+```rust
+let f0 = FrameId::ROOT;
+let ir = vec![
+    ThreadedStmt::Statement(docvec!["let ", leaf::var("_Val3"), " = ", rhs_doc, " in "], span),
+    ThreadedStmt::Bind {
+        target: VersionedVar::new(VersionPrefix::ClassVars, 1, f0),
+        source: VersionedVar::new(VersionPrefix::ClassVars, 0, f0),
+        op: BindOp::Put {
+            field: "runs".to_string(),
+            value: ValueRef::Var("_Val3".to_string()),
+            class_tag: ValueRef::Var("ClassSelf".to_string()),
+        },
+        shadow_write: true,
+        span,
+    },
+    ThreadedStmt::Statement(docvec!["let ", leaf::var("_seq4"), " = ", do_doc, " in "], span),
+    ThreadedStmt::Statement(
+        docvec!["let ", leaf::var("_Ret13"), " = 'nil' in {'class_var_result', ",
+                leaf::var("_Ret13"), ", ", leaf::var("ClassVars1"), "}"],
+        span,
+    ),
+];
+```
+
+`render`'s loop concatenates, in order, with no separator: the first
+`Statement`'s doc (`"let _Val3 = <rhs_doc> in "`) — unchanged from
+`generate_class_var_field_assignment`'s existing `val_doc` construction —
+then `render_bind`'s `BindOp::Put` output (unchanged, task 3's already-shipped
+code path: `"let ClassVars1 = call 'maps':'put'('runs', _Val3, ClassVars) in
+let _ = call 'erlang':'put'({'$bt_class_vars_shadow', ...}, ClassVars1) in
+"`), then the second `Statement` (the `do:` dispatch, unchanged AST-directed
+codegen), then the third `Statement` (the reply epilogue). Concatenated,
+this is character-for-character the compiled output quoted above — every
+sub-`Document` is either (a) already exactly what production builds today
+via an unchanged codegen call, or (b) `render_bind`'s already-shipped,
+already-tested `BindOp::Put` rendering. Nothing about wrapping these in
+`ThreadedStmt` changes what text any of them produce; the change is that
+they are now one `Vec<ThreadedStmt>` `render()` emits from, not four
+separately-glued `Document` fragments assembled by hand outside any
+verifier's reach.
+
+### Why BT-3146 needs something else, not this node
+
+`Statement` does not unblock BT-3146, and reaching for it there would be
+the wrong fix. BT-3146's own investigation (quoted above) already
+confirmed every one of its ~10 mutation shapes is representable with
+**existing** vocabulary — a `Gensym`-named two-hop `Bind` chain
+(`Bind{target: Gensym("_CfState8"), source: State(prior), op:
+Direct(Doc(rhs))}` → `Bind{target: State(next), source:
+Gensym("_CfState8"), op: Put{...}}`, confirmed against real compiled
+`_CfTuple`/`_CfVal`/`_CfState` output) or a direct `Direct(ValueRef::Doc(...))`
+rebind (`Tier2ValueCall`/`ControlFlowWithMutations`, which target
+`next_state_var()` directly). **Wrapping one of these mutation-carrying
+shapes in an opaque `Statement` instead would be a regression, not a
+migration** — it would give `check_branch_frame_linearity`'s six call
+sites (`conditionals.rs`/`exception_handling.rs`) a real IR node to point
+at while making the actual mutation invisible to `verify()` again, the
+opposite of BT-3146's stated goal ("each arm's *actual* mutation sequence
+... give the verifier real teeth"). The `Statement`/`Bind` type-level rule
+above says this explicitly: a statement that mutates a version must be a
+`Bind`, and BT-3146's shapes all mutate a version.
+
+What BT-3146 is actually blocked on — per its own comment — is **volume
+and risk**: ~10+ structurally distinct shapes across two files, each
+needing the `Gensym`-two-hop (or direct) pattern applied by hand and
+individually confirmed against real compiled output, at a scope BT-3145's
+own narrower precedent (one loop family, one measurement gate, still two
+follow-up gap-closing rounds) suggests is not safely completable in one
+pass. That is exactly what BT-3146's own recommended follow-up already
+names: an Addendum-2-style design pass enumerating each `BodyExprKind`
+shape's exact `Bind` sequence, one at a time, citing compiled output per
+shape — a `/plan-adr`-sized effort in its own right, not a consequence of
+any node being absent. This addendum does not attempt that enumeration
+(out of scope per BT-3156's own acceptance criteria — implementation
+re-attempts are separate issues, mirroring BT-3153 → BT-3145); it records
+the finding so BT-3146's own follow-up does not restart from "is a node
+missing" a second time.
+
+`Statement` **does** help BT-3146 secondarily, once that per-shape work
+happens: today, any genuinely non-mutating statement interleaved inside a
+conditional/exception arm (a `Pure` send with no threaded result, a
+`DispatchingSelfSend` with no field write) has no home in `ThreadedStmt`
+either — the same ~15-variant gap BT-3148 has, recurring inside branch
+bodies. Once BT-3146's mutation shapes are real `Bind` chains, the
+non-mutating statements sharing their arm can use `Statement` rather than
+needing their own bespoke per-shape handling. This is real but
+incremental value, not the blocking piece.
+
+### Descope alternative, considered and rejected
+
+Per this ADR's Alternative 1b and the practice both prior addenda follow:
+could BT-3148 tasks 1/2/4 simply stay undone, with the class-var slice
+(task 3) as the final state? **Considered, rejected for this addendum's
+scope** (design work only — BT-3156's own acceptance criteria requires
+either an actionable path or a reasoned descope, not silence): tasks 1/2/4
+are not merely "more of the same size of win" as task 3 — `RoutingMismatch`'s
+two `debug_assert!`-replacement call sites stay permanently dual-computed
+without them (the exact "two independently-computed decisions" shape this
+ADR's own §Decision names as Option A's central argument over B2), and
+`NlrCatch`/`ShadowWriteMissing` stay unable to see a real class-var
+mutation jointly with the NLR boundary it is stated against — the
+`ShadowWriteMissing` worked example (§Worked example) has still never run
+over real body IR, only per-call-site fixtures, even after task 3. Unlike
+BT-3146, where the descope-vs-continue question turns on real,
+non-trivial per-shape verification cost, `Statement`'s own cost here is
+small (one node, one `render` arm, the `Gap 3` `TokenId` fix) against a
+real, previously-named gap in what task 3 alone delivers. **Recommendation:
+do not descope BT-3148's remaining tasks;** implement `Statement` and the
+`TokenId` fix as a direct BT-3148 re-attempt, mirroring how BT-3153 → BT-3145
+worked.
+
+### What a BT-3156 implementation attempt should do, concretely
+
+1. Add `ThreadedStmt::Statement(Document<'static>, Span)` and its `render`
+   arm (one line). No `verify()` change — `walk_stmt`,
+   `collect_producer_consumer_counts`, and `contains_class_var_nlr_catch`
+   each need a `Statement(..) => {}` / `false` arm, matching `Bind`'s/
+   `Return`'s existing non-recursive treatment.
+2. Fix Gap 3: change `TokenId` to carry a lowering-time-minted `String`
+   (mirroring `VersionPrefix::Gensym`'s already-adopted pattern exactly);
+   update `render`'s `NlrCatch` arm and `render_nlr_catch` to consume it
+   instead of minting at render time; update the three existing
+   `TokenId::new(0)` test call sites.
+3. BT-3148 task 1 (routing): rewrite `classify_body_expr`'s Phase 2 loop
+   (`generate_body_exprs_with_reply`) to build one real `Vec<ThreadedStmt>`
+   per body instead of a `Vec<Document>` — mutating kinds (`FieldAssignment`,
+   `SelfFieldAtPut`, `DestructureAssignment`, and their `ControlFlow`
+   variants) become `Bind`s via task 3's already-shipped
+   `construct_and_verify_class_var_bind`-style construction (generalized
+   beyond class vars to the `State`/`SelfVt` prefixes the non-class-var
+   sites need); non-mutating kinds become `Statement`s; call `verify()`
+   **once** over the real per-body sequence, replacing every per-call-site
+   fixture-and-discard `verify_*` wrapper this module currently has for
+   this slice. `RoutingMismatch`'s two `debug_assert!`-replacement call
+   sites (`gen_server/methods.rs:1263,1463`) become unrepresentable by
+   construction (there is only one classification pass now, not two to
+   compare) and are deleted, per this ADR's own repeated "single-sourcing
+   removes the check by removing the second computation" argument.
+4. BT-3148 task 2 (`NlrCatch`): `wrap_body_with_nlr_catch`'s real call
+   sites (`gen_server/methods.rs:305-335` and the class-method equivalent)
+   mint the token via the same `TokenId`-carrying lowering step (item 2,
+   above) **before** lowering the body from item 3, then prepend a real
+   `NlrCatch { boundary, token, frame, span }` to the body's
+   `Vec<ThreadedStmt>` and render the whole sequence through `render`'s
+   already-implemented "rest of slice is my body" convention — no change
+   to that convention is needed, only to what now sits on both sides of
+   it.
+5. BT-3148 task 4 (`threaded_expr.rs` absorption): once every
+   `BodyExprKind` variant always produces IR (items 3-4), `ThreadingBoundary`'s
+   job — deciding whether a construct routes through the shared emitter or
+   falls through to a generic path — collapses to "did lowering, not a
+   second recheck, decide"; audit whether any of its logic survives as
+   the lowering-time classification itself, or whether it is fully
+   replaced.
+6. Snapshot-corpus + `class_var_shadow_contract.rs` + `verify-threaded-ir`
+   green, per this ADR's own §Implementation exit criteria for every
+   migration phase; re-measure the cumulative ≤3% gate per §Measurement
+   gate, restated (this migration touches every gen_server method body,
+   unlike BT-3145's narrow while-direct-only slice, so the gate is worth
+   re-checking even though task 3 alone judged itself exempt as "the same
+   code paths, just via an intermediate node").
+7. Only then does BT-3146 gain a place to route its own non-mutating
+   interleaved statements (§"Why BT-3146 needs something else"'s closing
+   paragraph) — BT-3146 itself still needs its own separate
+   Addendum-2-style per-shape design pass, out of this issue's scope.
+
 ## Context
 
 ### Problem statement
