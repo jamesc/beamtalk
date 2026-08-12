@@ -460,24 +460,63 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
-        let new_cv = self.next_class_var();
+        // BT-3148: the version numbers driving both verify() and the real
+        // Bind rendered below — captured before minting, matching the old
+        // `cv`/`new_cv` name-capture ordering exactly (fresh_temp_var call
+        // order for CV/MR/PCV below is unaffected: `class_var_version`
+        // mints from an entirely separate counter).
+        let source_version = self.class_var_version();
         let inner_cv = self.fresh_temp_var("CV");
-        // BT-3135 (ADR 0111 Phase D): construct + verify this Bind's
-        // ThreadedIr shape. This site never itself needs the ADR 0110
-        // shadow write — it rebinds `ClassVarsN` from an inherited
-        // self-dispatched call's own `class_var_result` return, and that
-        // call runs in this same class's gen_server process, so any
-        // mutation it made was already shadow-written by the *callee's own*
-        // `generate_field_assignment` under the identical `ClassSelf`-tagged
-        // key (see `verify_class_var_bind`'s doc comment / ADR 0110
-        // §Runtime change). `at_method_top_frame: false` is not a claim
-        // about this rebind's real nesting — it deliberately exempts this
-        // Bind from the check unconditionally, since it never carries a
-        // shadow-write obligation of its own regardless of block_depth.
-        let rebind_errors = super::threaded_ir::verify_class_var_bind(
-            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Var(inner_cv.clone())),
+        let inner_res = self.fresh_temp_var("MR");
+        let plain_cv = self.fresh_temp_var("PCV");
+
+        // The class-var rebind's opaque RHS (ADR 0111 Addendum 2 "Gap 1"'s
+        // `ValueRef::Doc` precedent): a `case` expression selecting the
+        // inherited self-dispatch call's own returned class vars when
+        // present, falling back to the current `ClassVars` otherwise — not
+        // representable by a bare `ValueRef::Var`/`Version`/`Literal`.
+        let class_var_case_doc = docvec![
+            "case ",
+            leaf::var(call_result.clone()),
+            " of <{'class_var_result', ",
+            leaf::var(inner_res),
+            ", ",
+            leaf::var(inner_cv.clone()),
+            "}> when 'true' -> ",
+            leaf::var(inner_cv.clone()),
+            " <",
+            leaf::var(plain_cv),
+            "> when 'true' -> ",
+            leaf::var(cv),
+            " end",
+        ];
+
+        self.next_class_var();
+        let target_version = self.class_var_version();
+
+        // BT-3135 (ADR 0111 Phase D) / BT-3148: construct, verify, and
+        // render this Bind through the real `threaded_ir` pipeline — no
+        // second, hand-rolled `Document` reconstructs it. This site never
+        // itself needs the ADR 0110 shadow write — it rebinds `ClassVarsN`
+        // from an inherited self-dispatched call's own `class_var_result`
+        // return, and that call runs in this same class's gen_server
+        // process, so any mutation it made was already shadow-written by
+        // the *callee's own* `generate_field_assignment` under the
+        // identical `ClassSelf`-tagged key (see
+        // `threaded_ir::construct_and_verify_class_var_bind`'s doc comment
+        // / ADR 0110 §Runtime change). `at_method_top_frame: false` is not
+        // a claim about this rebind's real nesting — it deliberately
+        // exempts this Bind from the shadow-write check unconditionally,
+        // since it never carries a shadow-write obligation of its own
+        // regardless of block_depth.
+        let (bind, rebind_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
+                class_var_case_doc,
+            )),
             false,
             false,
+            source_version,
+            target_version,
             crate::source_analysis::Span::default(),
         );
         self.report_threaded_ir_verify_errors(
@@ -485,8 +524,11 @@ impl CoreErlangGenerator {
             "class-var rebind from inherited self-dispatch result",
             crate::source_analysis::Span::default(),
         );
-        let inner_res = self.fresh_temp_var("MR");
-        let plain_cv = self.fresh_temp_var("PCV");
+        let bind_doc = {
+            let mut ctx = super::threaded_ir::RenderCtx::new(self);
+            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+        };
+
         let result = self.fresh_temp_var("Unwrapped");
         let wrapped_res = self.fresh_temp_var("WR");
         let plain_res = self.fresh_temp_var("PR");
@@ -497,21 +539,9 @@ impl CoreErlangGenerator {
             leaf::var(call_result.clone()),
             " = ",
             call_doc,
-            " in let ",
-            leaf::var(new_cv),
-            " = case ",
-            leaf::var(call_result.clone()),
-            " of <{'class_var_result', ",
-            leaf::var(inner_res),
-            ", ",
-            leaf::var(inner_cv.clone()),
-            "}> when 'true' -> ",
-            leaf::var(inner_cv),
-            " <",
-            leaf::var(plain_cv),
-            "> when 'true' -> ",
-            leaf::var(cv),
-            " end in let ",
+            " in ",
+            bind_doc,
+            "let ",
             leaf::var(result.clone()),
             " = case ",
             leaf::var(call_result),
