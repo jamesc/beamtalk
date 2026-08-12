@@ -744,6 +744,88 @@ codebase, and smaller than the phase's own size estimate.
    existing measurement flag, and re-run the ≤3% gate (§Measurement gate,
    restated) against real construct-and-render cost for the first time.
 
+## Addendum 3 (2026-08-11): BT-3145 re-attempt — what actually shipped, a third discovered gap, and the measurement outcome
+
+BT-3145 implemented Addendum 2's design in full: `ThreadedStmt::ConditionalLoop`
+(Gap 1), `VersionPrefix::Gensym` (Gap 2), `render_loop_letrec` refactored
+into a shared `render_loop_skeleton` behind both the bare `Threaded` shape
+and `ConditionalLoop`, and the three `dual_run_*` tests rewritten to
+hand-author the real condition/case-split shape and mint via a real,
+identically-seeded `fresh_temp_var` generator — all exactly as specified,
+with zero deviation from the reviewed design's field shapes.
+
+**A real implementation attempt at wiring `generate_while_loop_direct`
+surfaced two small, closely-related mechanical gaps Addendum 2's design
+didn't anticipate** (verified against real compiled output, same standard
+as the original investigation and Addendum 2 itself):
+
+- **`ValueRef` had no way to carry an arbitrary computed RHS.** A real
+  rebind's value is not a bare version reference — `sum := sum + 1`'s RHS is
+  `call 'erlang':'+'(Sum, 1)`, ordinary AST-directed expression codegen.
+  Closed by adding `ValueRef::Doc(Document<'static>)`, the same class of
+  opaque embed `continue_header`/`exit_arm` already use, with the identical
+  §Verifier-honesty justification.
+- **`BodyKind::Letrec` inserts a literal `" "` between body statements**
+  (`generate_threaded_loop_body_inner`, confirmed by compiling a two-rebind
+  loop and finding `"... in  let ..."` — a genuine double space) that
+  neither `render()` nor the pre-Addendum-2 dual-run fixtures reproduced.
+  Closed via `render_loop_body_statements`, scoped to `ConditionalLoop`
+  bodies only (the bare `Threaded` shape's body was never a real production
+  shape, so it correctly never needed this).
+
+Both were small (one new `ValueRef` variant, one small rendering helper) and
+are implemented, tested (including dedicated dual-run byte-parity tests),
+and landed — not deferred.
+
+**A third, larger, genuinely-deferred gap: full loop-body coverage.**
+Modeling *every* shape `select_direct_params` allows through a direct-params
+loop body — plain-let temporaries for non-threaded locals
+(`try_generate_block_local_plain_let`), destructuring, and the
+`direct_params_list_op_result` open-chain shape a nested tuple-safe list op
+produces — needs either a new "opaque non-`Bind` body statement"
+`ThreadedStmt` variant or a materially different body model. This is exactly
+the "third, materially larger gap" this ADR's own Addendum 2 named as the
+point to re-open the descope question, rather than force it through under
+this issue's already-spent budget. BT-3145 does not attempt it: the pilot's
+`while_direct_body_is_bind_representable` conservatively routes only
+straight-line, `Bind`-representable bodies (every statement a reassignment
+of a threaded local, no plain-let temporaries, no nested control flow, no
+list-op RHS) through `ConditionalLoop`; anything else falls back to the
+unmodified legacy path, unconditionally correct. See the BT-3145 Linear
+issue for the follow-up recommendation.
+
+**Measurement gate: inconclusive in this environment, gate not cleared.**
+`beamtalk build-stdlib` (the real stdlib corpus, `just build-stdlib`),
+4 runs each with the flag off vs on, cold `ebin/` each time:
+
+| | wall-clock (s) | user CPU (s) |
+|---|---|---|
+| flag off (mean of 4) | 12.44 | 14.79 |
+| flag on (mean of 4) | 15.30 (18.57 outlier included) / 14.21 (excluded) | 15.18 |
+| Δ | +14–23% wall-clock | +2.6% user CPU |
+
+Wall-clock and CPU-time deltas disagree by an order of magnitude, and the
+wall-clock samples include one clear outlier (18.57s vs. 13–15s for the
+other three) — this machine's shared/virtualized environment does not give
+a clean enough signal to confidently say the gate passes OR fails at a
+precise number. What is clear: overhead is not obviously near zero, and the
+covered subset (straight-line bodies) is a small fraction of the full
+stdlib's while-loop population, so the ≤3% gate is **not affirmatively
+cleared** — this is the ADR's own pre-planned "over threshold → stop, do not
+flip the default" outcome (§Measurement gate), reached here honestly rather
+than rounded away.
+
+**Outcome:** the default stays the legacy path. `BEAMTALK_THREADED_IR_WHILE_DIRECT=1`
+exists as an opt-in, fully-tested (byte-identical on every covered shape)
+path for future measurement once full body coverage closes gap three, but
+is not flipped, and the legacy code is not deleted — both explicitly
+conditional on the ≤3% gate per BT-3145's own acceptance criteria, and
+neither condition holds today. This is not a failure to fix at all costs;
+it is the pre-planned, acceptable descope path this ADR names, reached only
+after landing real, tested, reviewed infrastructure (the two Addendum-2
+gaps, both now closed) rather than stopping at the investigation stage a
+second time.
+
 ## Context
 
 ### Problem statement
