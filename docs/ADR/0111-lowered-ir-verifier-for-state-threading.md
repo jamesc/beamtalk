@@ -1422,18 +1422,34 @@ elided for readability; nothing else altered).
 
 Empirical routing facts a re-attempt must not re-derive wrongly:
 
-- **`generate_conditional_branch_inline` has seven consumers, not four.**
-  The four `conditionals.rs` call sites (`generate_if_true_with_mutations`,
-  `generate_if_false_with_mutations`,
+- **`generate_conditional_branch_inline` has six producing functions across
+  seven call sites, not four.** The four `conditionals.rs` functions
+  (`generate_if_true_with_mutations`, `generate_if_false_with_mutations`,
   `generate_if_true_if_false_with_mutations`,
-  `generate_if_not_nil_with_mutations`) plus BT-3139's three
-  (`intrinsics.rs:1701` — REPL-mode block inlining; `expressions.rs:1125`
-  and `expressions.rs:2600` — `match:`-arm and tier-2 block inlining). All
-  seven reach the same body loop, so migrating the loop once gives all
-  seven real per-arm IR; the nine `check_branch_frame_linearity` call
-  sites (these seven, plus `exception_handling.rs:446,649`) then all
-  flip from scalar synthesis to real IR together (§Migration order,
-  step 4).
+  `generate_if_not_nil_with_mutations`) account for **five** raw calls —
+  `generate_if_true_if_false_with_mutations` calls it twice, once per arm
+  (`conditionals.rs:237,241`) — plus **two** more from BT-3139's
+  instrumentation pass: `intrinsics.rs:1695` (REPL-mode block inlining)
+  and `expressions.rs:2592` (the `match:`-arm case inside
+  `generate_match_arm_body`). All seven calls reach the same body loop, so
+  migrating it once gives all seven real per-arm IR.
+  Separately: BT-3139 added `check_branch_frame_linearity` to **three**
+  sites (the production doc comment at `control_flow/mod.rs:1318-1321`
+  records "BT-3134's original six plus BT-3139's three"), but only **two**
+  of those three — `intrinsics.rs:1701` and `expressions.rs:2600` — check
+  a `generate_conditional_branch_inline` arm. The third,
+  `expressions.rs:1125` (inside `generate_block_stateful`), checks a
+  **different** body loop entirely — `generate_block_stateful_body`, the
+  general Tier-2-stateful-block-body helper used for list-op/message-send
+  block arguments, unrelated to `ifTrue:`/`ifFalse:`/`match:` — and none
+  of this addendum's shapes decompose it. So of the module's nine
+  `check_branch_frame_linearity` call sites, **eight** are in scope for
+  this addendum's migration (the four `conditionals.rs` sites,
+  `intrinsics.rs:1701`, `expressions.rs:2600`, and
+  `exception_handling.rs:446,649`) and flip from scalar synthesis to real
+  IR together (§Migration order, step 4); the ninth, `expressions.rs:1125`,
+  is out of scope and stays on scalar synthesis until a separate pass
+  decomposes `generate_block_stateful_body`.
 - **Value-type conditionals never route here.** Compiled evidence: `Object
   subclass: S14` with `flag ifTrue: [x := 2]` emits `case _Cond2 of
   <'true'> when 'true' -> let X = 2 in X <'false'> when 'true' -> X end` —
@@ -2080,13 +2096,20 @@ flips, per Addendum 4's discipline. The cumulative ≤3% gate
    call-site header mint tables pinned by dual-run tests (they are the
    densest mint-order surface in either file — 14 consecutive header
    mints in `on:do:`), and `ensure:`'s compile-twice cleanup arms.
-4. **PR 4 — teeth:** flip all nine `check_branch_frame_linearity` call
-   sites to verify the real per-arm IR produced by PRs 1–3, delete
-   `verify_branch_frame_linearity`'s scalar-synthesis path, and update
+4. **PR 4 — teeth:** flip the eight in-scope `check_branch_frame_linearity`
+   call sites (§Scope and routing boundaries) to verify the real per-arm
+   IR produced by PRs 1–3, delete `verify_branch_frame_linearity`'s
+   scalar-synthesis path **for those eight**, and update
    `control_flow/mod.rs:1312-1327`'s "scaffolding, not yet a live
-   regression guard" doc comment — the promise BT-3134 left on `main`
-   is discharged here. `NonLinearVersion`/`UnboundVersion` become live
-   regression guards for branch arms from this PR on.
+   regression guard" doc comment — including its "today's nine call
+   sites" line, which becomes "eight of today's nine call sites" (the
+   ninth, `expressions.rs:1125`, still routes through
+   `verify_branch_frame_linearity`'s scalar synthesis, since
+   `generate_block_stateful_body` is not one of this addendum's shapes) —
+   the promise BT-3134 left on `main` is discharged here for the shapes
+   in scope. `NonLinearVersion`/`UnboundVersion` become live regression
+   guards for the eight migrated branch arms from this PR on;
+   `expressions.rs:1125` keeps its pre-existing scaffolding-only behavior.
 
 Descope alternative (Alternative 1b, evaluated per this ADR's practice):
 stopping after PR 1 or 2 leaves exception bodies on scalar synthesis —
@@ -2105,8 +2128,9 @@ task 3 already judged inside budget.
   the same code positions legacy does — every ordering fact above is an
   ordinary code-ordering fact of one function, Gap-2-option-2 style).
 - `verify()` runs once per arm over real IR; after PR 4, the scalar
-  fixture path is gone and the nine call sites cannot drift from what
-  they emit.
+  fixture path is gone for the eight in-scope call sites and they cannot
+  drift from what they emit (`expressions.rs:1125` is not one of the
+  eight — see §Scope and routing boundaries).
 - C4 stays legacy with a code comment citing this addendum and its bug
   issue; E2/E5 migrate byte-identically despite their downstream erlc
   rejection (their fix is separate).
