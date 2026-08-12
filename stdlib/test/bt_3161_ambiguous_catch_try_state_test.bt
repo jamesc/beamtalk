@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3161: an on:do:/ensure: try body whose last statement is an actor
+// self-send (Flavor A / E2) or a nested mutation-carrying conditional
+// (Flavor B / E5) used to fail with erlc's `ambiguous_catch_try_state`
+// internal-consistency-check error. See
+// stdlib/test/fixtures/bt3161_ambiguous_catch_try_state_actor.bt for the
+// fixture actors and ADR 0111 Addendum 5 ("Production bugs found", bug 3)
+// for the root-cause analysis.
+
+TestCase subclass: BT3161AmbiguousCatchTryStateTest
+
+  // Flavor A / E2: on:do: try body ends in a self-send.
+  testSelfSendAsLastOnDoStatementCompilesAndMutates =>
+    a := BT3161SelfSendActor spawn
+    self assert: a runOnDo equals: 2
+    self assert: a getCount equals: 2
+
+  // Flavor A / E2: NLR fired before the try body reaches its last
+  // (self-send) statement still passes through the on:do: correctly, and
+  // the self-send/mutation past the NLR never run.
+  testSelfSendAsLastOnDoStatementPreservesNlr =>
+    a := BT3161SelfSendActor spawn
+    self assert: (a runOnDoNlr: true) equals: "early"
+    self assert: a getCount equals: 0
+    self assert: (a runOnDoNlr: false) equals: "not early"
+    self assert: a getCount equals: 2
+
+  // Flavor B / E5: ensure: try body ends in a nested mutation-carrying
+  // conditional.
+  testNestedConditionalAsLastEnsureStatementMutates =>
+    a := BT3161NestedConditionalActor spawn
+    a runEnsure: false
+    self assert: a getCount equals: 0
+    a runEnsure: true
+    self assert: a getCount equals: 1
+
+  // Flavor B / E5: NLR fired from inside the mutation-carrying conditional
+  // (still the try body's last statement) still passes through the
+  // ensure: correctly, and the mutation before the `^` is preserved.
+  testNestedConditionalAsLastEnsureStatementPreservesNlr =>
+    a := BT3161NestedConditionalActor spawn
+    self assert: (a runEnsureNlr: true) equals: "early"
+    self assert: a getCount equals: 1
+    b := BT3161NestedConditionalActor spawn
+    self assert: (b runEnsureNlr: false) equals: "not early"
+    self assert: b getCount equals: 0

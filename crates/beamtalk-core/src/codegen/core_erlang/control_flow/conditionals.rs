@@ -29,11 +29,20 @@
 //!     {_Val1, StateAcc1}
 //!   <'false'> when 'true' ->
 //!     {'nil', State0}
+//!   <_CondNoMatch2> when 'true' ->
+//!     call 'erlang':'error'({'case_clause', _CondNoMatch2})
 //! end
 //! ```
 //!
 //! The caller (method body generator) unpacks `{Result, NewState}` via
 //! `element/2` to thread the new state to subsequent expressions.
+//!
+//! The trailing wildcard clause (BT-3161) is unreachable at runtime — `flag`
+//! is always a genuine boolean here — but is required to make the `case`
+//! *statically* exhaustive to the Core Erlang compiler; see
+//! `CoreErlangGenerator::case_clause_fallback`'s doc comment for why an
+//! implicit fallback isn't good enough when this `case` is nested inside a
+//! `try`'s protected region (`on:do:`/`ensure:`).
 //!
 //! # State Naming
 //!
@@ -140,6 +149,9 @@ impl CoreErlangGenerator {
         // second arm here — see generate_if_true_if_false_with_mutations for
         // the two-real-arm case this check is primarily for).
         self.check_branch_frame_linearity(&[branch_final], receiver.span());
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
         Ok(docvec![
             cond_preamble,
@@ -156,7 +168,9 @@ impl CoreErlangGenerator {
             branch_doc,
             " <'false'> when 'true' -> {'nil', ",
             leaf::var(base_state),
-            "} end",
+            "}",
+            no_match_fallback,
+            " end",
         ])
     }
 
@@ -191,6 +205,9 @@ impl CoreErlangGenerator {
         // non-taken `{'nil', State}` branch never mutates, so it isn't a
         // second arm here).
         self.check_branch_frame_linearity(&[branch_final], receiver.span());
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
         Ok(docvec![
             cond_preamble,
@@ -207,6 +224,7 @@ impl CoreErlangGenerator {
             leaf::var(base_state),
             " in ",
             branch_doc,
+            no_match_fallback,
             " end",
         ])
     }
@@ -253,6 +271,9 @@ impl CoreErlangGenerator {
         // allocates a fresh FrameId per arm so this is NOT a
         // NonLinearVersion violation.
         self.check_branch_frame_linearity(&[true_final, false_final], receiver.span());
+        // BT-3161: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
 
         Ok(docvec![
             cond_preamble,
@@ -271,6 +292,7 @@ impl CoreErlangGenerator {
             leaf::var(base_state),
             " in ",
             false_branch_doc,
+            no_match_fallback,
             " end",
         ])
     }

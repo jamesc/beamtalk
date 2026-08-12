@@ -391,6 +391,43 @@ impl CoreErlangGenerator {
         super::variable_context::VariableContext::to_core_var(name)
     }
 
+    /// BT-3161: builds an explicit wildcard fallback clause — `<Var> when
+    /// 'true' -> call 'erlang':'error'({'case_clause', Var})` — for a `case`
+    /// whose other clauses match specific literal/tagged-tuple shapes (e.g. a
+    /// boolean `<'true'>`/`<'false'>` case, or a dispatch-result case
+    /// matching only `{'reply',...}`/`{'error',...}` shapes) that are not
+    /// *statically provable* exhaustive to the Core Erlang compiler, even
+    /// when they are exhaustive over every shape the value can genuinely
+    /// take at runtime.
+    ///
+    /// Without an explicit wildcard, the compiler synthesizes an implicit
+    /// one for the same fallback — but when the `case` sits inside a
+    /// `try`'s protected region, OTP's `beam_validator` rejects the
+    /// resulting BEAM with `ambiguous_catch_try_state` ("Internal
+    /// consistency check failed"), a genuine BEAM-compiler edge case
+    /// (confirmed by bisecting the emitted `.core`: on an otherwise-fixed
+    /// `case`-in-`try` repro, adding vs. omitting only this clause was the
+    /// one difference between a passing and a failing `erlc` run — nesting
+    /// depth, tail position, and clause bodies were not the trigger). Making
+    /// the fallback explicit is behavior-preserving (a non-matching value
+    /// already raises `case_clause` via the compiler's own implicit clause)
+    /// and sidesteps the validator bug unconditionally, so callers don't
+    /// need to know whether a given call site happens to be nested inside a
+    /// `try`.
+    pub(super) fn case_clause_fallback(
+        &mut self,
+        var_prefix: &str,
+    ) -> super::document::Document<'static> {
+        let var = self.fresh_temp_var(var_prefix);
+        docvec![
+            " <",
+            super::document::leaf::var(var.clone()),
+            "> when 'true' -> call 'erlang':'error'({'case_clause', ",
+            super::document::leaf::var(var),
+            "})",
+        ]
+    }
+
     /// Returns the class name for the currently compiled class.
     ///
     /// Prefers the AST-derived class identity when available (set during class
