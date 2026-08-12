@@ -1431,15 +1431,17 @@ Empirical routing facts a re-attempt must not re-derive wrongly:
   and `expressions.rs:2600` — `match:`-arm and tier-2 block inlining). All
   seven reach the same body loop, so migrating the loop once gives all
   seven real per-arm IR; the nine `check_branch_frame_linearity` call
-  sites (these seven produce eight of the arm lists;
-  `exception_handling.rs:446,649` the other two) then all flip from
-  scalar synthesis to real IR together (§Migration order, step 4).
+  sites (these seven, plus `exception_handling.rs:446,649`) then all
+  flip from scalar synthesis to real IR together (§Migration order,
+  step 4).
 - **Value-type conditionals never route here.** Compiled evidence: `Object
   subclass: S14` with `flag ifTrue: [x := 2]` emits `case _Cond2 of
   <'true'> when 'true' -> let X = 2 in X <'false'> when 'true' -> X end` —
   plain rebinding, no `StateAcc`, no `{Result, State}` tuple. A different,
-  simpler value-type path owns this shape; the `SelfVt` prefix and its
-  restore-only discipline are **out of these decompositions' scope**.
+  simpler path owns this shape (`value_type_codegen.rs`'s vt-conditional
+  family — `generate_vt_conditional_branch` and the `_CondResult` wrapper,
+  `value_type_codegen.rs:2762`); the `SelfVt` prefix and its restore-only
+  discipline are **out of these decompositions' scope**.
 - **Class-var mutations never route here either — by construction.**
   Direct class-var writes in threaded bodies are rejected at compile time
   (`generate_field_assignment_open`'s BT-3140
@@ -1471,8 +1473,8 @@ Empirical routing facts a re-attempt must not re-derive wrongly:
 ### The decomposition vocabulary — five building blocks, three rules
 
 Every shape below decomposes into existing vocabulary plus Addendum 4's
-`ThreadedStmt::Statement` (a dependency, not new design — see
-§Dependencies):
+`ThreadedStmt::Statement` (a dependency, not new design — see §Migration
+order, PR 1):
 
 1. **`Statement(doc, span)`** — genuinely non-threading text: value-temp
    `let`s, tuple/element extraction of a *result* (not state), destructure
@@ -1668,20 +1670,27 @@ Bind { target: State(v+1)@F, source: Gensym("_T2St9", 1)@F,
        op: Put { field: "__local__r", value: Var("_Val7") } }
 ```
 
-**C4 — `LocalAssign*` open-scope sub-branch (BT-1397) — BROKEN in
-production; descoped until fixed.** Repro `s15` (`Value subclass` with
-`classState`, `class m: flag => x := 1. flag ifTrue: [x := self bump].
-x`) emits **syntactically invalid Core Erlang** — `let X = <open
-ClassVars unwrap chain> in  in X` (empty value, doubled `in`; erlc:
-"syntax error before: in"). The open-scope value doc
-(`control_flow/mod.rs:3456-3462`) resolves to an `OpenScopeResult::Value`
-whose result var is emitted as an empty fragment in this path. There is
-no byte-identity target to pin a decomposition against; the shape is
-descoped from BT-3146 with this evidence, and the bug is filed separately
-(see §Production bugs). Migration rule: the open-scope sub-branch keeps
-the legacy path (which is where the bug lives) until the bug fix lands;
-its decomposition after the fix is C2's plus a leading
-`Statement(<open-chain preamble>)`.
+**C4 — `LocalAssign*` open-scope sub-branch (BT-1397,
+`control_flow/mod.rs:3456-3486`) — no reachable, pinnable repro; descoped
+with evidence.** The sub-branch handles a local assignment whose RHS is a
+class-method self-send emitting an open `ClassVars` unwrap chain. This
+pass could not produce a compiled repro that reaches it *through*
+`generate_conditional_branch_inline`: the natural repro (`s15`, `Value
+subclass` with `classState`, `class m: flag => x := 1. flag ifTrue: [x :=
+self bump]. x`) routes through `value_type_codegen.rs`'s vt-conditional
+path instead (`_CondResult` wrapper, `value_type_codegen.rs:2762`) — and
+breaks **there**, emitting syntactically invalid Core Erlang: `let X =
+<open ClassVars unwrap chain> in  in X` (empty value doc, doubled `in`;
+erlc: "syntax error before: in") — a production bug in its own right,
+filed as [BT-3159](https://linear.app/beamtalk/issue/BT-3159) (see
+§Production bugs). Net: there is no valid byte-identity target to pin a
+decomposition against, and no demonstrated route into this sub-branch
+from either of the two body loops. Descope rule for BT-3146: leave the
+sub-branch on the legacy path with a code comment citing this addendum;
+if BT-3159's fix (or a future routing change) makes it reachable with
+valid output, its decomposition is C2's plus a leading
+`Statement(<open-chain preamble>)`, derived then against real output —
+not pre-pinned now against output that cannot be compiled.
 
 **C5 — `DestructureAssignment` (pure) — exempt from `Bind` modeling**
 (answering the BT-3146 investigation's question 3 directly; repro `s06`).
@@ -1887,8 +1896,9 @@ Rule 2's `render_loop_body_statements` semantics):
 `Statement` + `Put`-`Bind` decomposition. Two byte-facts specific to this
 file: the `" "` separator after an open chain produces `"in  let"`
 (double space), and `is_last` field assignment sets the body's result to
-the **literal `'nil'`** (`exception_handling.rs:979-990` — the assigned
-value is deliberately not threaded out), so `e01`'s handler closes
+the **literal `'nil'`** (`exception_handling.rs:979-990` — the helper's
+own comment: the assigned value's var name isn't readily available at
+that point, so it is not threaded out), so `e01`'s handler closes
 `... in  {'nil', StateAcc1}` — the caller's ` {result, state} ` closer
 with `state_acc_var_doc(final)`.
 
@@ -2005,12 +2015,15 @@ by it, and each is filed as its own Linear issue rather than silently
 papered over:
 
 1. **Class-method conditional local-assign-from-self-send emits invalid
-   Core Erlang** (shape C4, repro `s15`;
+   Core Erlang** (found probing shape C4; repro `s15`;
    [BT-3159](https://linear.app/beamtalk/issue/BT-3159)): `let X =
    <unwrap chain> in  in X` — empty value doc, doubled `in`, hard erlc
-   syntax error. Any `Value`/`Object` class method with `classState`
-   doing `flag ifTrue: [x := self <classVarMutatingMethod>]` fails to
-   build today.
+   syntax error. The emitting path is `value_type_codegen.rs`'s
+   vt-conditional local-rebind machinery (`_CondResult` wrapper,
+   `value_type_codegen.rs:2762`), not either of this addendum's two body
+   loops — but it means any `Value`/`Object` class method with
+   `classState` doing `flag ifTrue: [x := self <classVarMutatingMethod>]`
+   fails to build today, and C4 has no compilable byte-identity target.
 2. **Exception-body local-assign scope leak** (E3, repro `e04`;
    [BT-3160](https://linear.app/beamtalk/issue/BT-3160)):
    `generate_exception_body_with_threading_inner` lacks the
