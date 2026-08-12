@@ -527,16 +527,31 @@ pub(super) enum ThreadingMode {
 /// Identifies one NLR try/catch wrapper's fresh token variable
 /// (`call 'erlang':'make_ref'()`), distinguishing sibling NLR boundaries from
 /// each other. Not a [`VersionedVar`] — the token is a single-use `make_ref`
-/// value, never rebound. See [`VersionPrefix`]'s doc comment: constructed
-/// only by unit tests until NLR lowering migrates onto this IR (BT-3135).
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct TokenId(u32);
+/// value, never rebound.
+///
+/// Was `TokenId(u32)` — an opaque numeric identity never rendered directly
+/// (`render_nlr_catch` minted its own name independently, at render time,
+/// AFTER the body had already rendered). ADR 0111 Addendum 4 §Gap 3 found
+/// that inverted relative to production's real mint order (the token
+/// consumes the module-wide `fresh_temp_var` counter slot BEFORE the body's
+/// own temps — `gen_server/methods.rs`'s `generate_method_dispatch` /
+/// `generate_class_method_functions` both mint `NlrToken` before generating
+/// the body), a silent byte-identity hazard the moment a real, temp-minting
+/// body sits next to an `NlrCatch`. Now carries the literal Core Erlang name
+/// minted at lowering time, in production's real mint position — the same
+/// "lowering-time pre-allocation, IR carries the rendered name" idiom
+/// [`VersionPrefix::Gensym`] established for `Bind` targets. Rendering no
+/// longer mints anything for this node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TokenId(String);
 
 impl TokenId {
-    #[allow(dead_code)]
-    pub(super) const fn new(id: u32) -> Self {
-        Self(id)
+    pub(super) fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    fn name(&self) -> &str {
+        &self.0
     }
 }
 
@@ -734,6 +749,34 @@ pub(super) enum ThreadedStmt {
         exit_arm: Document<'static>,
         span: Span,
     },
+
+    /// An ordinary AST-directed statement, embedded verbatim as one opaque
+    /// entry in a straight-line `ThreadedStmt` sequence — the statement-level
+    /// counterpart of [`ValueRef::Doc`]'s value-level opacity (ADR 0111
+    /// Addendum 3), built by the SAME codegen call production already runs at
+    /// this point (`expression_doc`, `generate_self_dispatch_open`, the
+    /// `{'reply', ...}`/`{'class_var_result', ...}` epilogue builders, …).
+    /// Legal in any straight-line sequence rendered by [`render`]'s top-level
+    /// loop (a `gen_server` method body, an [`NlrCatch`](Self::NlrCatch)
+    /// try-body). A `Statement`'s `Document` must carry its own correct
+    /// trailing glue (e.g. `"let _seq4 = <expr> in "`) — [`render`]'s loop
+    /// concatenates with no separator. **Separator note (ADR 0111 Addendum
+    /// 4):** `ConditionalLoop` bodies render through
+    /// `render_loop_body_statements`, which inserts a literal `" "` between
+    /// statements — the first implementation that routes a mixed
+    /// `Bind`/`Statement` loop body through `ConditionalLoop` must add a
+    /// dual-run byte-parity test before relying on that composition.
+    ///
+    /// Carries no state-threading content of its own by construction — a
+    /// statement that DOES mutate a threaded version must be a `Bind`, never
+    /// a `Statement`; there is no `BindOp` escape hatch here the way
+    /// [`ValueRef::Doc`] is one inside a `Bind`'s own `op`. This is a
+    /// type-level rule enforced by convention and code review, not by
+    /// `verify()` (the `Document` is opaque by definition) — the same
+    /// distinction `ConditionalLoop` draws between `continue_header` (sound
+    /// opacity) and `exit_arm` (a named, deliberate limitation); a
+    /// `Statement` is only ever the `continue_header` kind.
+    Statement(Document<'static>, Span),
 }
 
 // ─── Verifier ───────────────────────────────────────────────────────────────
@@ -912,7 +955,8 @@ fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
         }
         ThreadedStmt::Bind { .. }
         | ThreadedStmt::Return(..)
-        | ThreadedStmt::TupleAccUnpack { .. } => false,
+        | ThreadedStmt::TupleAccUnpack { .. }
+        | ThreadedStmt::Statement(..) => false,
     })
 }
 
@@ -943,7 +987,9 @@ fn collect_producer_consumer_counts(
                     *producers.entry(target.clone()).or_insert(0) += 1;
                 }
             }
-            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Return(..) => {}
+            ThreadedStmt::NlrCatch { .. }
+            | ThreadedStmt::Return(..)
+            | ThreadedStmt::Statement(..) => {}
         }
     }
 }
@@ -1053,7 +1099,11 @@ impl VerifyWalk<'_> {
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
-            ThreadedStmt::NlrCatch { .. } => {}
+            // Opaque by design: `NlrCatch` has no body field (`render`
+            // treats the rest of the slice as its body); a `Statement` is
+            // ordinary AST-directed codegen with no state-threading content
+            // of its own (see the variant's doc comment).
+            ThreadedStmt::NlrCatch { .. } | ThreadedStmt::Statement(..) => {}
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
                 if let ValueRef::Version(v) = value {
@@ -1263,9 +1313,11 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 produces,
                 span: _,
             } => docs.push(render_threaded(mode, *frame, body, produces, ctx)),
-            ThreadedStmt::NlrCatch { boundary, .. } => {
+            ThreadedStmt::NlrCatch {
+                boundary, token, ..
+            } => {
                 let body_doc = render(&ir[i + 1..], ctx);
-                docs.push(render_nlr_catch(*boundary, body_doc, ctx));
+                docs.push(render_nlr_catch(*boundary, token.name(), body_doc, ctx));
                 return Document::Vec(docs);
             }
             ThreadedStmt::Return(value, state, _) => docs.push(render_return(value, state, ctx)),
@@ -1295,6 +1347,10 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 exit_arm,
                 ctx,
             )),
+            // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
+            // verbatim. The doc carries its own trailing glue; this loop
+            // adds no separator, and rendering mints nothing.
+            ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
         }
     }
     Document::Vec(docs)
@@ -1728,22 +1784,28 @@ fn render_bind(
     }
 }
 
-/// Full-fidelity NLR try/catch scaffolding: allocates a fresh token var
-/// (matching every real call site — `self.fresh_temp_var("NlrToken")`,
-/// e.g. `actor_codegen.rs:544`, `gen_server/methods.rs:306`) and reuses
+/// Full-fidelity NLR try/catch scaffolding: reuses
 /// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] verbatim — the exact
 /// function every real NLR try/catch in the codebase already goes through
 /// (module docs on [`ThreadedStmt::NlrCatch`]: "the true call site
 /// `ThreadedStmt::NlrCatch` faithfully models"). Zero re-derivation, so
 /// this can never drift from production's try/catch shape.
+///
+/// ADR 0111 Addendum 4 §Gap 3: `token_var` is the [`TokenId`]-carried name
+/// the lowering pass minted BEFORE the body's own temps (production's real
+/// mint order — `gen_server/methods.rs`'s call sites mint `NlrToken` first,
+/// unconditionally, then generate the body). This function no longer mints
+/// anything; only the catch-scaffolding vars (`NlrResult`, `NlrCls`, …) are
+/// still allocated here, matching production's own post-body
+/// `alloc_nlr_catch_vars` position.
 fn render_nlr_catch(
     boundary: NlrBoundary,
+    token_var: &str,
     body_doc: Document<'static>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
-    let token_var = ctx.fresh_temp_var("NlrToken");
     ctx.generator
-        .wrap_body_with_nlr_catch(body_doc, &token_var, boundary)
+        .wrap_body_with_nlr_catch(body_doc, token_var, boundary)
 }
 
 fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Document<'static> {
@@ -2117,11 +2179,14 @@ pub(super) fn construct_and_verify_class_var_bind(
         span,
     };
     body.push(bind.clone());
+    // Fixture-only synthetic marker (never rendered — not in the returned
+    // `Bind`, which callers render alone), so its token name is a literal
+    // placeholder, never a real lowering-minted `NlrToken` temp.
     let marker = ThreadedStmt::NlrCatch {
         boundary: NlrBoundary::ClassMethod {
             has_class_vars: true,
         },
-        token: TokenId::new(0),
+        token: TokenId::new("NlrTokenFixtureOnly"),
         frame,
         span,
     };
@@ -2768,7 +2833,7 @@ mod tests {
                 boundary: NlrBoundary::ClassMethod {
                     has_class_vars: true,
                 },
-                token: TokenId::new(0),
+                token: TokenId::new("NlrTokenFixtureOnly"),
                 frame: f0,
                 span: span(),
             },
@@ -2803,7 +2868,7 @@ mod tests {
                 boundary: NlrBoundary::ClassMethod {
                     has_class_vars: true,
                 },
-                token: TokenId::new(0),
+                token: TokenId::new("NlrTokenFixtureOnly"),
                 frame: f0,
                 span: span(),
             },
@@ -2861,7 +2926,7 @@ mod tests {
                 boundary: NlrBoundary::ClassMethod {
                     has_class_vars: true,
                 },
-                token: TokenId::new(0),
+                token: TokenId::new("NlrTokenFixtureOnly"),
                 frame: f0,
                 span: span(),
             },
@@ -4086,6 +4151,15 @@ mod tests {
         // an explicit dual-run test (rather than relying on that reasoning
         // alone) so a future refactor that breaks the direct-reuse
         // invariant fails loudly here instead of silently drifting.
+        //
+        // ADR 0111 Addendum 4 §Gap 3: the render side mints its token via
+        // `fresh_temp_var` BEFORE building the IR — production's real mint
+        // position — and carries the name in `TokenId`. Both sides now
+        // consume counter slot 0 for the token and slots 1.. for the catch
+        // vars, so an accidental reintroduction of render-time token
+        // minting (which would allocate the token AFTER the catch vars'
+        // relative position changed) shifts every `Nlr*` temp number and
+        // fails this assertion.
         let mut legacy_gen = CoreErlangGenerator::new("dual_run_nlr");
         let legacy_token = legacy_gen.fresh_temp_var("NlrToken");
         let inner_body = docvec!["let ", leaf::var("Sum1"), " = ", leaf::var("Sum"), " in "];
@@ -4093,11 +4167,13 @@ mod tests {
             .wrap_body_with_nlr_catch(inner_body, &legacy_token, NlrBoundary::ActorReply)
             .to_pretty_string();
 
+        let mut render_gen = CoreErlangGenerator::new("dual_run_nlr");
+        let render_token = render_gen.fresh_temp_var("NlrToken");
         let frame = FrameId::new(1);
         let ir = vec![
             ThreadedStmt::NlrCatch {
                 boundary: NlrBoundary::ActorReply,
-                token: TokenId::new(0),
+                token: TokenId::new(render_token),
                 frame,
                 span: span(),
             },
@@ -4109,7 +4185,6 @@ mod tests {
                 span: span(),
             },
         ];
-        let mut render_gen = CoreErlangGenerator::new("dual_run_nlr");
         let mut ctx = RenderCtx::new(&mut render_gen);
         let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
 
