@@ -1396,7 +1396,763 @@ worked.
    paragraph) — BT-3146 itself still needs its own separate
    Addendum-2-style per-shape design pass, out of this issue's scope.
 
-## Addendum 5 (2026-08-12): BT-3148 re-attempt — tasks 1/2/4 landed, measurement result
+## Addendum 5 (2026-08-12): Per-shape Bind sequences for conditionals + exception_handling (BT-3157) — BT-3146's implementation table
+
+This is the per-shape design pass BT-3146's own investigation
+(2026-08-12T08:11 comment) and Addendum 4 §"Why BT-3146 needs something
+else" both called for: every `BodyExprKind` mutation shape in
+`control_flow/conditionals.rs`'s `generate_conditional_branch_inline` and
+`control_flow/exception_handling.rs`'s
+`generate_exception_body_with_threading_inner`, each compiled from a
+minimal repro with a locally-built `beamtalk` binary, its real Core Erlang
+read from the emitted `.core` file, and its exact
+`Bind`/`Gensym`/`ValueRef::Doc` decomposition pinned against that output —
+including explicit gensym mint order per shape, the bug class found three
+times this cycle (BT-3144's initial commit, Addendum 2 Gap 2's composition
+analysis, Addendum 4 Gap 3).
+
+All line numbers are against `crates/beamtalk-core/src/codegen/core_erlang/`
+unless noted, current as of `main` at commit `d1612626` (BT-3156's landing).
+Per Addendum 2's practice: resolve by symbol name first, treat `:NNN` as a
+hint. Every compiled fragment below is quoted from a real `.core` file
+produced by `beamtalk build` on the cited repro (span `-|` annotations
+elided for readability; nothing else altered).
+
+### Scope and routing boundaries — what these two body loops actually serve
+
+Empirical routing facts a re-attempt must not re-derive wrongly:
+
+- **`generate_conditional_branch_inline` has six producing functions across
+  seven call sites, not four.** The four `conditionals.rs` functions
+  (`generate_if_true_with_mutations`, `generate_if_false_with_mutations`,
+  `generate_if_true_if_false_with_mutations`,
+  `generate_if_not_nil_with_mutations`) account for **five** raw calls —
+  `generate_if_true_if_false_with_mutations` calls it twice, once per arm
+  (`conditionals.rs:237,241`) — plus **two** more from BT-3139's
+  instrumentation pass: `intrinsics.rs:1695` (REPL-mode block inlining)
+  and `expressions.rs:2592` (the `match:`-arm case inside
+  `generate_match_arm_body`). All seven calls reach the same body loop, so
+  migrating it once gives all seven real per-arm IR.
+  Separately: BT-3139 added `check_branch_frame_linearity` to **three**
+  sites (the production doc comment at `control_flow/mod.rs:1318-1321`
+  records "BT-3134's original six plus BT-3139's three"), but only **two**
+  of those three — `intrinsics.rs:1701` and `expressions.rs:2600` — check
+  a `generate_conditional_branch_inline` arm. The third,
+  `expressions.rs:1125` (inside `generate_block_stateful`), checks a
+  **different** body loop entirely — `generate_block_stateful_body`, the
+  general Tier-2-stateful-block-body helper used for list-op/message-send
+  block arguments, unrelated to `ifTrue:`/`ifFalse:`/`match:` — and none
+  of this addendum's shapes decompose it. So of the module's nine
+  `check_branch_frame_linearity` call sites, **eight** are in scope for
+  this addendum's migration (the four `conditionals.rs` sites,
+  `intrinsics.rs:1701`, `expressions.rs:2600`, and
+  `exception_handling.rs:446,649`) and flip from scalar synthesis to real
+  IR together (§Migration order, step 4); the ninth, `expressions.rs:1125`,
+  is out of scope and stays on scalar synthesis until a separate pass
+  decomposes `generate_block_stateful_body`.
+- **Value-type conditionals never route here.** Compiled evidence: `Object
+  subclass: S14` with `flag ifTrue: [x := 2]` emits `case _Cond2 of
+  <'true'> when 'true' -> let X = 2 in X <'false'> when 'true' -> X end` —
+  plain rebinding, no `StateAcc`, no `{Result, State}` tuple. A different,
+  simpler path owns this shape (`value_type_codegen.rs`'s vt-conditional
+  family — `generate_vt_conditional_branch` (`value_type_codegen.rs:3089`)
+  and the `_CondResult` wrapper it builds
+  (`value_type_codegen.rs:2762`)); the `SelfVt` prefix and its restore-only
+  discipline are **out of these decompositions' scope**.
+- **Class-var mutations never route here either — by construction.**
+  Direct class-var writes in threaded bodies are rejected at compile time
+  (`generate_field_assignment_open`'s BT-3140
+  `ClassVarAssignmentInThreadedBody` check, `dispatch_codegen.rs:2364`),
+  and a class-method conditional containing a class-var-mutating self-send
+  (`class m: flag => flag ifTrue: [self bump]`) compiles to a **runtime
+  `ifTrue:` dispatch closure** (`beamtalk_message_dispatch:send(_flag3,
+  'ifTrue:', [fun () -> ...])` with the `_CMR`/`ClassVars1` unwrap inside
+  the fun — compiled and read), not through
+  `generate_conditional_branch_inline` at all. So no `ClassVars`-prefixed
+  `Bind` can appear inside these arms today — no exception: shape C4
+  below looks like a class-var-mutating local-assign candidate, but
+  turns out (on inspection) to *also* never reach these arms — its
+  natural repro routes through `value_type_codegen.rs`'s vt-conditional
+  path instead and breaks there, outside either body loop this addendum
+  covers.
+- **`generate_field_assignment_open`'s hybrid full-extract sub-branch
+  (`in_hybrid_loop && hybrid_mutated_fields`, `dispatch_codegen.rs:2378`)
+  is unreachable from these arms.** A loop body containing a
+  mutation-carrying conditional falls back to `StateAcc` mode
+  (`StateAccFallbackReason::ControlFlowMutations`,
+  `control_flow/mod.rs:74`) — confirmed by compiling a `whileTrue:` whose
+  body contains `i > 1 ifTrue: [self.n := self.n + 1]`: the loop emits
+  `letrec 'while'/1 = fun (StateAcc) -> ...`, StateAcc-mode, no
+  pre-extracted field params. Hybrid mode and inline mutation conditionals
+  are mutually exclusive by the plan selector, so the sub-branch needs no
+  decomposition here. (Likewise `generate_local_var_assignment_in_loop`'s
+  `!in_loop_body` else-branches, `control_flow/mod.rs:3395-3399`, `:3444-3448`:
+  `with_branch_context` sets `in_loop_body = true` unconditionally, so
+  inside these two body loops the `format!("State{}", ...)` legs never
+  run.)
+
+### The decomposition vocabulary — five building blocks, three rules
+
+Every shape below decomposes into existing vocabulary plus Addendum 4's
+`ThreadedStmt::Statement` (a dependency, not new design — see §Migration
+order, PR 1):
+
+1. **`Statement(doc, span)`** — genuinely non-threading text: value-temp
+   `let`s, tuple/element extraction of a *result* (not state), destructure
+   bindings, `__local__` re-reads, pure sends. Carries its own trailing
+   glue exactly as Addendum 4 specifies.
+2. **`Bind { target: State(v+1)@F, source: State(v)@F, op: Put { field,
+   value: ValueRef::Var(temp) } }`** — a static-field state write. Renders
+   (via `render_bind`, in branch context) byte-for-byte as `let
+   StateAcc{v+1} = call 'maps':'put'('field', _Temp, StateAcc{v}) in `.
+3. **`Bind { target: State(v+1)@F, source: State(v)@F, op:
+   Direct(ValueRef::Doc(doc)) }`** — a state rebind from an opaque
+   computed RHS (`element(2, _Tuple)`), rendering `let StateAcc{v+1} =
+   <doc> in `.
+4. **The `Gensym` two-hop** (the BT-3146 investigation's `_CfState8`
+   chain, sanctioned here as the single idiom for "opaque nested-construct
+   state extraction feeding a `maps:put`"):
+   `Bind { target: Gensym(name)@F, source: State(v)@F, op:
+   Direct(Doc(element-2-extract)) }` then `Bind { target: State(v+1)@F,
+   source: Gensym(name)@F, op: Put { field, value: Var(result_temp) } }`.
+   The Gensym var's `version` follows BT-3145's already-shipped production
+   convention (`while_loops.rs:570`): a per-name rebind ordinal ≥ 1, so
+   linearity checks apply to it (exactly one producer, at most one
+   consumer) instead of the version-0 exemption.
+5. **`Return(ValueRef, State(final)@F, span)`** — the conditional arm's
+   closing `{Result, StateAcc{final}}` 2-tuple. This is precisely the
+   "narrower use today" Addendum 4 preserved `Return` for; `render_return`
+   already produces this shape byte-for-byte.
+
+Three rules the compiled outputs force, stated once so no shape re-derives
+them wrongly:
+
+- **Rule 1 — a version may be consumed by at most one `Bind`'s `source`.**
+  `verify()` counts consumers from `Bind::source` only
+  (`collect_producer_consumer_counts`, `threaded_ir.rs:923`), and
+  `NonLinearVersion` fires at `consumed > 1`. Consequence: a value-temp
+  `let` (`let _Val4 = <rhs> in`) must be a `Statement`, **not** a
+  `Gensym`-target `Bind` sourced from `State(v)` — modeling it as a Bind
+  would double-source `State(v)` (once by the temp, once by the `Put`)
+  and false-positive `NonLinearVersion` on every field assignment. The
+  two-hop idiom (block 4) is reserved for the case where the extracted
+  value **is** the next state map (the `Put`'s `source` is the Gensym, so
+  `State(v)` is consumed exactly once, by hop 1).
+- **Rule 2 — statement separators differ between the two files, and both
+  are already implemented.** `generate_conditional_branch_inline` pushes
+  statement docs adjacent with **no separator** (each open chain carries
+  its own trailing `" in "`) — `render`'s top-level loop has exactly this
+  property (Addendum 4's "no separator" note).
+  `generate_exception_body_with_threading_inner` inserts a literal `" "`
+  between statements (`exception_handling.rs:974-976`) — producing the
+  `"in  let"` double space after every open chain — which is exactly
+  `render_loop_body_statements`' behavior (Addendum 3's `BodyKind::Letrec`
+  finding, reused verbatim; the helper is not loop-specific despite its
+  name). A re-attempt renders conditional arms through the no-separator
+  loop and exception bodies through the space-separated loop; inventing a
+  third gluing scheme is how byte-identity dies.
+- **Rule 3 — the arm wrapper is `Threaded { mode:
+  StateAcc(StateAccFallbackReason::None), frame }`.**
+  `verify_branch_frame_linearity` (`threaded_ir.rs:1975-1981`) already
+  pinned this convention for synthesized arms; the real migration keeps
+  it (one `Threaded` node per `with_branch_context` arm, fresh `FrameId`,
+  `produces` = the arm's final `State` version when > 0). `StateAcc(None)`
+  is also semantically honest: branch arms thread through the `StateAcc`
+  map naming convention, and `Unpack` stays legal under `StateAcc` mode,
+  which these arms never emit anyway.
+
+### Dynamic-field puts — the one place `BindOp::Put` is not enough
+
+`SelfFieldAtPut`/`SelfFieldAtPutControlFlow` write through a **runtime**
+field name: `let StateAcc1 = call 'maps':'put'(_Name4, _Val5, StateAcc)` —
+the map key is a *variable*, but `BindOp::Put::field` is a `String`
+rendered through `leaf::atom` (`render_bind`, `threaded_ir.rs:1690`), which
+can only produce `'atom'` literals. Three options:
+
+1. **Model the whole `maps:put` as `BindOp::Direct(ValueRef::Doc(...))` —
+   Recommended.** `Bind { target: State(v+1), source: State(v) (or
+   Gensym(name) for the ControlFlow variant), op: Direct(Doc("call
+   'maps':'put'(<name-var>, <val-var>, <source-name>)")) }`. Byte-identical
+   with zero IR change; linearity/unbound checks (the only checks that have
+   teeth for these arms — `ShadowWriteMissing` is ClassVars-only,
+   unpack-mismatch is `Unpack`-only) apply in full, because they hang off
+   `target`/`source`, not off `Put`-ness. The put's *structure* becomes
+   opaque — an accepted §Verifier-honesty-class opacity: no current or
+   planned check inspects `Put::field` at all, so nothing checkable is
+   hidden. One wrinkle the lowering must respect: the `Doc` must embed the
+   rendered source-state name, because `Direct` renders only `let <target>
+   = <doc> in ` — the `source` field feeds verification, not rendering,
+   for this op (already true of every `Direct(Doc(...))` rebind BT-3145
+   ships).
+2. **Widen `Put::field` to an enum (`Atom(String) | Var(String)`).**
+   Buys rendering fidelity inside `Put`, at the cost of touching every
+   existing `Put` constructor and `render_bind` arm for a distinction no
+   verifier check consumes. Rejected for this migration — pure type-surface
+   cost, zero verification payoff (Addendum 2 Gap 1 option 3's standard).
+3. **A new `BindOp::PutDynamic` variant.** Same payoff/cost analysis as
+   option 2 with more enum surface. Rejected.
+
+### Shape-by-shape: conditionals.rs (`generate_conditional_branch_inline`)
+
+Preliminaries that apply to every conditional call site, compiled and
+confirmed (repro `s12`: `x := 1` then `flag ifTrue: [x := x + 1] ifFalse:
+[x := x + 100]` in an Actor method):
+
+```erlang
+let _SeededState4 = call 'maps':'put'('__local__x', X, State) in
+let _Cond3 = _flag1 in case _Cond3 of
+  <'true'> when 'true' -> let StateAcc = _SeededState4 in
+    let _Val5 = ( <x + 1> ) in
+    let StateAcc1 = call 'maps':'put'('__local__x', _Val5, StateAcc) in
+    {_Val5, StateAcc1}
+  <'false'> when 'true' -> let StateAcc = _SeededState4 in
+    let _Val8 = ( <x + 100> ) in
+    let StateAcc1 = call 'maps':'put'('__local__x', _Val8, StateAcc) in
+    {_Val8, StateAcc1}
+end
+```
+
+- **Call-site mint order inverts emission order**: the receiver's own doc
+  mints first (here: none), then `Cond` (**3**), then
+  `seed_conditional_locals`' `SeededState` (**4**) — yet `_SeededState4`'s
+  `let` is *emitted before* `_Cond3`'s. A lowering that mints in emission
+  order shifts every later number. (`ifNotNil:` mints `Obj` instead of
+  `Cond` and binds the block parameter to it via scope — no extra mint.)
+- **Arms generate strictly in source order** (true arm's mints all precede
+  the false arm's), each inside its own `with_branch_context`; both arms
+  here legitimately produce `StateAcc1` — the sibling-arm same-version
+  case `FrameId` exists for.
+- The call-site skeleton (`case`/arm headers/`let StateAcc = <base> in`/
+  the non-taken `{'nil', <base>}` arm) stays AST-directed `Document`
+  construction in BT-3146 — the migration unit is the **arm body**, which
+  becomes `Threaded { mode: StateAcc(None), frame, body: <the shapes
+  below>, produces }` + `verify()` + `render` at each of the seven
+  consumers.
+
+Each shape below gives: the emitting arm, compiled evidence (repro name),
+the pinned statement sequence, and mint order. `F` is the arm's fresh
+`FrameId`; `State(v)@F` renders `StateAcc{v}` (branch context keeps
+`in_loop_body = true`, `in_hybrid_loop = false`, so `resolve_prefix` is
+faithful — the render must run inside the same branch context the
+lowering runs in, or via `with_loop_context` with those flags).
+
+**C1 — `FieldAssignment`** (via `generate_field_assignment_open`;
+repro `s01`/`s02`). Compiled: `let _Val4 = ( <rhs> ) in let StateAcc1 =
+call 'maps':'put'('n', _Val4, StateAcc) in `.
+
+```text
+Statement("let _Val4 = <rhs_doc> in ")                      // Rule 1: temp let is a Statement
+Bind { target: State(v+1)@F, source: State(v)@F,
+       op: Put { field: "n", value: Var("_Val4") }, shadow_write: false }
+```
+
+Mint order: `Val` first, **then** the RHS doc's own mints
+(`generate_field_assignment_value_doc`), then `next_state_var()` (version
+bump, no gensym). `is_last` ⇒ the arm's `Return` value is
+`Var("_Val4")`.
+
+**C2 — `LocalAssignPure`/`LocalAssignControlFlow`/`LocalAssignSelfSend`,
+plain sub-branch** (via `generate_local_var_assignment_in_loop`; repro
+`s02`). Compiled: `let _Val4 = ( <rhs> ) in let StateAcc1 = call
+'maps':'put'('__local__y', _Val4, StateAcc) in `. Identical decomposition
+to C1 with field `"__local__y"` — plus two lowering-time side effects that
+produce no text: `bind_var(name, _Val4)` (so later reads in the same arm
+resolve to the temp — `s02`'s second statement compiles to `let _Val5 =
+_Val4 in`), and REPL mode swapping the key to the bare name
+(`control_flow/mod.rs:3378-3382`). The REPL sub-branch is a one-atom
+difference in `Put::field`, computed by the same `is_repl_mode()` call at
+the same lowering point — no separate compiled repro exists because no
+offline REPL-compile path emits inspectable `.core` (descope note: pinned
+by the `intrinsics.rs:1701` consumer's existing REPL-protocol e2e coverage
+instead).
+
+**C3 — `LocalAssignTier2` sub-branch** (Tier-2 RHS returning `{Result,
+NewStateAcc}`; repro `s11`). Compiled:
+
+```erlang
+let _T28 = <tier2-call doc> in
+let _Val7 = call 'erlang':'element'(1, _T28) in
+let _T2St9 = call 'erlang':'element'(2, _T28) in
+let StateAcc1 = call 'maps':'put'('__local__r', _Val7, _T2St9) in
+```
+
+**Mint order trap (the reason this addendum exists):** `Val` is minted
+**first** (**7**), then `T2` (**8**), then `T2St` (**9**), then the
+tier-2 doc's own mints (`_Fun10`, `_Arg11`) — the *emission* order
+(`_T28`, `_Val7`, `_T2St9`) does not match the *mint* order
+(`_Val7`, `_T28`, `_T2St9`). Source: `control_flow/mod.rs:3370,3390-3392`.
+Decomposition — the sanctioned two-hop, with a `Statement` prefix:
+
+```text
+Statement("let _T28 = <t2_doc> in let _Val7 = call 'erlang':'element'(1, _T28) in ")
+Bind { target: Gensym("_T2St9", 1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _T28)")) }
+Bind { target: State(v+1)@F, source: Gensym("_T2St9", 1)@F,
+       op: Put { field: "__local__r", value: Var("_Val7") } }
+```
+
+**C4 — `LocalAssign*` open-scope sub-branch (BT-1397,
+`control_flow/mod.rs:3456-3486`) — no reachable, pinnable repro; descoped
+with evidence.** The sub-branch handles a local assignment whose RHS is a
+class-method self-send emitting an open `ClassVars` unwrap chain. This
+pass could not produce a compiled repro that reaches it *through*
+`generate_conditional_branch_inline`: the natural repro (`s15`, `Value
+subclass` with `classState`, `class m: flag => x := 1. flag ifTrue: [x :=
+self bump]. x`) routes through `value_type_codegen.rs`'s vt-conditional
+path instead (`generate_vt_conditional_branch`, `value_type_codegen.rs:3089`
+— specifically the `_CondResult` wrapper it builds,
+`value_type_codegen.rs:2762`) — and
+breaks **there**, emitting syntactically invalid Core Erlang: `let X =
+<open ClassVars unwrap chain> in  in X` (empty value doc, doubled `in`;
+erlc: "syntax error before: in") — a production bug in its own right,
+filed as [BT-3159](https://linear.app/beamtalk/issue/BT-3159) (see
+§Production bugs). Net: there is no valid byte-identity target to pin a
+decomposition against, and no demonstrated route into this sub-branch
+from either of the two body loops. Descope rule for BT-3146: leave the
+sub-branch on the legacy path with a code comment citing this addendum;
+if BT-3159's fix (or a future routing change) makes it reachable with
+valid output, its decomposition is C2's plus a leading
+`Statement(<open-chain preamble>)`, derived then against real output —
+not pre-pinned now against output that cannot be compiled.
+
+**C5 — `DestructureAssignment` (pure) — exempt from `Bind` modeling**
+(answering the BT-3146 investigation's question 3 directly; repro `s06`).
+Compiled: `let _Tup4 = <rhs> in let _SizeOk6 = case
+'erlang':'tuple_size'(_Tup4) of ... in let A = element(1, _Tup4) in let
+_b = element(2, _Tup4) in ` — **no state version is produced or
+consumed**; every binding is a plain local. Decomposition: one
+`Statement` carrying `generate_destructure_bindings`' docs verbatim.
+Mint order: `Tup` (**4**), RHS doc mints, `SizeOk` (**6**),
+`BadArity` inside the case (**7**); pattern names (`A`, `_b`) are
+`to_core_erlang_var` conversions, never minted.
+
+**C6 — `FieldAssignmentControlFlow`** (the investigation's `_CfState8`
+shape, now confirmed *inside* a branch arm; repro `s03`,
+`flag ifTrue: [self.x := (g ifTrue: [self.y := 1. 42] ifFalse: [0])]`).
+Compiled (outer arm):
+
+```erlang
+let _CfTuple5 = ( <nested conditional, opaque> ) in
+let _CfVal6 = call 'erlang':'element'(1, _CfTuple5) in
+let _CfState11 = call 'erlang':'element'(2, _CfTuple5) in
+let StateAcc1 = call 'maps':'put'('x', _CfVal6, _CfState11) in
+```
+
+Mint order: `CfTuple` (**5**), `CfVal` (**6**) **before** the RHS doc's
+mints (**7–10**, the nested conditional's own `Cond`/`Val`/
+`BranchResult` temps), then `CfState` (**11**) **after** the RHS doc,
+then `next_state_var()`. Source: `conditionals.rs:427-431`.
+Decomposition:
+
+```text
+Statement("let _CfTuple5 = <rhs_doc> in let _CfVal6 = call 'erlang':'element'(1, _CfTuple5) in ")
+Bind { target: Gensym("_CfState11", 1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _CfTuple5)")) }
+Bind { target: State(v+1)@F, source: Gensym("_CfState11", 1)@F,
+       op: Put { field: "x", value: Var("_CfVal6") } }
+Statement(<threaded __local__ re-read lets, if any — maps:get from the new state>)
+```
+
+The trailing `__local__` re-reads (`conditionals.rs:457-475`) read the
+*new* state version but bind plain locals — `Statement`s by Rule 1. The
+nested construct itself stays one opaque `Doc`; its own arms get their
+own frames, `verify()`, and rendering at their own (also-migrated) call
+site — recursion composes without any cross-frame bookkeeping. (Note the
+nested call site's base-state binding emits the curious-but-real `let
+StateAcc = StateAcc in` when the outer arm is still at version 0 —
+call-site skeleton text, outside the arm-body migration unit.)
+
+**C7 — `SelfFieldAtPut`** (via `generate_self_field_at_put_open`; repro
+`s04`). Compiled: `let _Name4 = 'x' in let _Val5 = 42 in let StateAcc1 =
+call 'maps':'put'(_Name4, _Val5, StateAcc) in `. Dynamic field ⇒
+§Dynamic-field option 1:
+
+```text
+Statement("let _Name4 = <name_doc> in let _Val5 = <val_doc> in ")
+Bind { target: State(v+1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'maps':'put'(_Name4, _Val5, StateAcc{v})")) }
+```
+
+Mint order (`dispatch_codegen.rs:2484-2493`): `Name` via **`fresh_var`**
+(same counter as `fresh_temp_var`, plus a scope bind), then `Val`, then
+the *name* doc's mints, then the *value* doc's mints, then
+`next_state_var()`. `is_last` ⇒ `Return` value `Var("_Val5")`.
+
+**C8 — `SelfFieldAtPutControlFlow`** (repro `s05`). Compiled: `let _Name5
+= 'x' in let _CfTuple6 = <nested> in let _CfVal7 = element(1, _CfTuple6)
+in let _CfState12 = element(2, _CfTuple6) in let StateAcc1 = call
+'maps':'put'(_Name5, _CfVal7, _CfState12) in `. Mint order differs from
+C7 (`conditionals.rs:494-500`): `Name` (**5**), then the **name** doc's
+mints, then `CfTuple` (**6**), `CfVal` (**7**), then the **value** doc's
+mints (**8–11**), then `CfState` (**12**). Decomposition = C6's two-hop
+with the final `Put` replaced by the dynamic-field `Direct(Doc(...))` of
+C7 (hop 2's `source` is still the Gensym, so linearity is preserved):
+
+```text
+Statement("let _Name5 = <name_doc> in let _CfTuple6 = <val_doc> in let _CfVal7 = element(1, _CfTuple6) in ")
+Bind { target: Gensym("_CfState12", 1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _CfTuple6)")) }
+Bind { target: State(v+1)@F, source: Gensym("_CfState12", 1)@F,
+       op: Direct(Doc("call 'maps':'put'(_Name5, _CfVal7, _CfState12)")) }
+Statement(<threaded __local__ re-reads, if any>)
+```
+
+**C9 — `DestructureAssignmentControlFlow`** (repro `s07`). Compiled:
+`let _CfTuple5 = <nested> in let _CfVal6 = element(1, _CfTuple5) in let
+StateAcc1 = element(2, _CfTuple5) in <__local__ re-reads> <size-check +
+pattern-bind lets> `. **No `CfState` hop** — the new state version binds
+`element(2, ...)` directly (`conditionals.rs:561,572-575`):
+
+```text
+Statement("let _CfTuple5 = <rhs_doc> in let _CfVal6 = element(1, _CfTuple5) in ")
+Bind { target: State(v+1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _CfTuple5)")) }
+Statement(<threaded __local__ re-reads, if any>)
+Statement(<generate_destructure_bindings_from_var docs — SizeOk/BadArity/pattern lets>)
+```
+
+Mint order: `CfTuple` (**5**), `CfVal` (**6**), RHS doc mints (**7–12**),
+`next_state_var()` (no mint), **then** the destructure-binding mints
+(`SizeOk` **13**, `BadArity` **14**) — the size-check temps mint *after*
+the state bump, unlike C5 where they follow the tuple temp directly.
+
+**C10 — `ControlFlowWithMutations`, both positions** (repro `s08`).
+Non-last position discards the result entirely — **no `element(1)` is
+emitted at all**:
+
+```erlang
+let _Tuple5 = ( <nested> ) in
+let StateAcc1 = call 'erlang':'element'(2, _Tuple5) in
+<__local__ re-reads>
+```
+
+```text
+Statement("let _Tuple5 = <expr_doc> in ")
+Bind { target: State(v+1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _Tuple5)")) }
+Statement(<threaded __local__ re-reads, if any>)
+```
+
+Mint order: `Tuple` (**5**), expr doc mints (**6–7**),
+`next_state_var()`. Last position adds a result extraction, and its
+`BranchResult` mints **before** the expr doc (`conditionals.rs:607-610`):
+`Tuple` (**14**), `BranchResult` (**15**), expr doc mints (**16–17**),
+`next_state_var()`:
+
+```text
+Statement("let _Tuple14 = <expr_doc> in let _BranchResult15 = element(1, _Tuple14) in ")
+Bind { target: State(v+1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _Tuple14)")) }
+// Return value: Var("_BranchResult15")
+```
+
+**C11 — `Tier2ValueCall`, both positions** (repro `s09`). Last position is
+C10-last with `T2Tuple`/`BranchResult` naming and
+`generate_tier2_value_call_doc` as the opaque doc (mint order `T2Tuple`
+**10**, `BranchResult` **11**, tier-2 doc's `_Fun12`/`_Arg13` after).
+Non-last position (`conditionals.rs:700-718`) mints `T2Tuple` (**20**),
+`T2Discard` (**21**), then the tier-2 doc (**22–23**), and carries a
+**byte-identity quirk**: the discard extraction embeds a literal newline —
+`")\n in let "` — so the compiled text is
+
+```erlang
+let _T2Discard21 = call 'erlang':'element'(1, _T2Tuple20)
+ in let StateAcc2 = call 'erlang':'element'(2, _T2Tuple20) in
+```
+
+(the Addendum-3-double-space class of finding, confirmed in the emitted
+`.core`). The `Statement` carrying that fragment must reproduce the
+newline verbatim. Decomposition mirrors C10 (non-last) with the discard
+`let` inside the leading `Statement`, plus trailing
+`get_inline_block_captured_mutations` re-read `Statement`s
+(`maps:get('__local__<v>', <new state>)`) when the stored block mutates
+captured locals.
+
+**C12 — catch-all pure statements** (`EarlyReturn`, `SuperSend`,
+`ErrorSend`, `Tier2SelfSend`, `DispatchingSelfSend`, `Pure`; repro `s10`).
+Non-last: `Statement("let _seq5 = <expr_doc> in ")`; last:
+`Statement("let _BranchResult7 = <expr_doc> in ")` with `Return` value
+`Var("_BranchResult7")`. Exactly Addendum 4's secondary-value case —
+`Statement` is their home, confirmed against compiled output
+interleaving them with real `Bind`s in one arm.
+
+**C13 — empty block and the arm closer.** An empty block short-circuits
+(`conditionals.rs:356-361`) to a bare `Return(Literal("'nil'"),
+State(0)@F)`, rendering `{'nil', StateAcc}`. Every non-empty arm closes
+with `Return(<last_result or Literal("'nil'")>, State(final)@F)`
+rendering `{<result>, StateAcc{final}}` — byte-identical via the existing
+`render_return` (the preceding open chain's trailing `" in "` supplies
+the separating space; `render_return` itself adds none).
+
+### Shape-by-shape: exception_handling.rs (`generate_exception_body_with_threading_inner`)
+
+Call-site header mint tables first — both headers mint **every**
+scaffolding temp up front, *before* the `ex_class`/body docs, in strict
+field order (compiled, repros `e01`/`e02`):
+
+- **`generate_on_do_with_mutations`** (`exception_handling.rs:343-359`),
+  14 mints in order: `ExClass`, `Type`, `Error`, `Stack`, `BuiltStack`,
+  `ExObj`, `Match`, `StateAfterTry`, `NlrCheckTok`, `NlrCheckVal`,
+  `NlrCheckState`, `NlrCheckTok`(2nd), `NlrCheckVal`(2nd), `OtherPair` —
+  **then** the `ex_class` expression doc's own mints, then the try-body
+  arm, then the handler arm. (In `e01` these are `_ExClass3` … `_OtherPair16`,
+  ex-class doc **17–20**, try body **21**, handler **22**.) The handler
+  parameter binds via `let E = _ExObj8 in` — `to_core_erlang_var`, no
+  mint.
+- **`generate_ensure_with_mutations`** (`:574-577`), 4 mints: `Type`,
+  `Error`, `Stack`, `StateAfterTry`; then the try-body arm; **then**
+  `TryResult` (`:603` — minted *after* the try body, *before* the
+  success-path cleanup); then the success-cleanup arm; then the
+  error-cleanup arm. The cleanup block is compiled **twice** — two
+  separate `with_branch_context` arms with distinct frames, distinct
+  mints, byte-different only in their temp numbers (`e02`: `_Val10` vs
+  `_Val11`). The success path rebinds the bare name `StateAcc` from
+  `element(2, _StateAfterTry6)` — a *name shadow*, not a version: in IR
+  terms each arm's `State(0)@F` entry parameter is whatever the call-site
+  skeleton bound `StateAcc` to; the skeleton stays AST-directed.
+
+Body-loop shapes (separator: `Document::Str(" ")` between statements —
+Rule 2's `render_loop_body_statements` semantics):
+
+**E1 — field assignment** (repros `e01`, `e02`): same
+`generate_field_assignment_open` open chain as C1, same
+`Statement` + `Put`-`Bind` decomposition. Two byte-facts specific to this
+file: the `" "` separator after an open chain produces `"in  let"`
+(double space), and `is_last` field assignment sets the body's result to
+the **literal `'nil'`** (`exception_handling.rs:979-990` — the helper's
+own comment: the assigned value's var name isn't readily available at
+that point, so it is not threaded out), so `e01`'s handler closes
+`... in  {'nil', StateAcc1}` — the caller's ` {result, state} ` closer
+with `state_acc_var_doc(final)`.
+
+**E2 — actor self-send** (`is_actor_self_send` arm via
+`generate_self_dispatch_open`; repro `e03`). Compiled: `let _SD23 = case
+call 'bt@...':'safe_dispatch'('bump', [], StateAcc1) of <{'reply', ...}>
+... end in let StateAcc2 = call 'erlang':'element'(2, _SD23) in ` — the
+open helper both emits the dispatch `Statement` **and bumps the state
+version itself**:
+
+```text
+Statement("let _SD23 = <safe_dispatch case doc> in ")
+Bind { target: State(v+1)@F, source: State(v)@F,
+       op: Direct(Doc("call 'erlang':'element'(2, _SD23)")) }
+// is_last additionally:
+Statement("let _ExResult31 = call 'erlang':'element'(1, _SD23) in ")
+// Return value: Var("_ExResult31")
+```
+
+(`_ExResult` mints *after* the dispatch doc's many internal temps.) This
+shape's compiled output currently **fails erlc's backend** — see
+§Production bugs; the decomposition above is pinned against the emitted
+`.core` text, which is well-formed Core Erlang at the text level.
+
+**E3 — local var assignment** — same helper and decomposition as C2/C3
+(all three sub-branches). One production bug specific to this file's use
+of it: the body loop never pushes a scope around the block
+(`generate_exception_body_with_threading_inner` has no
+`push_scope`/`pop_scope`, unlike `generate_conditional_branch_inline`),
+so the helper's `bind_var(name, _ValN)` **leaks** past the `try` — repro
+`e04` compiles a method-level read of `t` after the `ensure:` to the
+try-scoped `_Val6`, and erlc rejects the module (`unbound variable
+'_Val6' in dispatch/4`). See §Production bugs; the in-arm decomposition
+is unaffected (the leak manifests outside the arm).
+
+**E4 — destructure assignment** (repro `e05`): identical to C5 —
+`Statement`s only, exempt from `Bind` modeling.
+
+**E5 — last expression, nested control flow with mutations** (repro
+`e06`). Compiled: `let _Tuple8 = <nested> in let _ExResult9 = element(1,
+_Tuple8) in let StateAcc1 = element(2, _Tuple8) in` — C10-last's shape
+with `ExResult` naming and one mint-order subtlety
+(`exception_handling.rs:1033-1053`): the target state name is taken via
+**`peek_next_state_var()`** (no mint, no bump) *before* the expr doc is
+built, and the version bump (`let _ = self.next_state_var()`) happens
+*after* — mint order is `Tuple` (**8**), `ExResult` (**9**), expr doc
+mints (**10–11**), bump. Same
+`Statement`+`Direct(Doc(element-2))`-`Bind`+`Statement` decomposition as
+C10-last; the lowering keeps peek-then-bump only as a code-ordering fact
+(the IR just targets `State(v+1)@F`). Also currently erlc-rejected —
+§Production bugs.
+
+**E6 / E7 — last / non-last plain expressions** (repro `e07`): last is
+`Statement("let _ExResultN = <expr_doc> in")` (both the
+`has_direct_field_assignments` and plain sub-branches emit the same
+shape, trailing `" in"` **without** a trailing space — the separator/
+closer supplies it); non-last is `Statement("let _ = <expr_doc> in")` —
+the one place production uses a bare `_` wildcard instead of a minted
+`seq` temp (contrast C12). No mints beyond the expr doc's own except
+`ExResult`.
+
+### Branch-context version discipline — how BT-1550's asymmetry maps onto the decompositions
+
+`with_branch_context` (`mod.rs:2392`, RAII `BranchContextGuard`) is the
+frame boundary. The per-prefix policy (BT-3131, table in §The duplication
+this ADR's IR would also close) maps onto the IR as follows:
+
+- **`State`: reset to 0 on entry, restored on exit** ⇒ every arm's
+  version sequence starts at `State(0)@F` (the `StateAcc` entry binding),
+  and `VersionedVar`'s frame field makes sibling arms' identical version
+  numbers distinct identities — this is exactly why the decompositions
+  above can use bare `v`/`v+1` without any cross-arm renumbering, and why
+  `verify_branch_frame_linearity`'s acceptance criterion (sibling arms
+  reaching the same version must not trip `NonLinearVersion`) holds for
+  real IR, not just synthesized chains. Rendering: `State@F` resolves to
+  `StateAcc{N}` because the guard holds `in_loop_body = true` — so the
+  migration renders arm IR *inside* the guard (or under
+  `with_loop_context` with the same flags), never after exit.
+- **`ClassVars`: restore-only (no reset), `class_var_mutated` sticky
+  (BT-1550)** ⇒ irrelevant to these decompositions *today*, because no
+  `ClassVars` `Bind` can occur inside these arms (§Scope: BT-3140
+  rejection + runtime-dispatch routing, both compiled-and-confirmed). C4
+  looked like the one path that might exercise it (a class-var-mutating
+  self-send's `ClassVars{N}` advance, reached via a local-assign inside
+  an arm) but turns out, on inspection, not to reach these arms at all —
+  its natural repro routes through `value_type_codegen.rs`'s
+  vt-conditional path instead (§Scope, §C4) — so today there is no
+  candidate path at all, broken or otherwise. **If** a future construct
+  (or a fix that changes C4's routing) does put a `ClassVars`-mutating
+  self-send inside one of these arms, the natural IR model is a
+  `ClassVars`-prefixed `Bind` in the *arm's* frame whose source version
+  is the inherited outer version — restore-only means the arm inherits
+  the outer `ClassVars{n}`, emits `ClassVars{n+1}`, and the outer scope
+  resumes at its saved value afterward — which `check_use`'s frame-flow
+  rule (ancestor-frame producers are visible) already accepts without
+  further design work; this is recorded here so a future pass does not
+  have to re-derive it, not because it is needed by anything in scope
+  today.
+- **`SelfVt`: restore-only (BT-3131's revision)** ⇒ out of scope here
+  entirely — value-type conditionals never reach these body loops (§Scope,
+  repro `s14`).
+
+**FrameId allocation is the one missing production mechanism.** Today the
+scalar check synthesizes positional frames (`FrameId::new(i + 1)`,
+`control_flow/mod.rs:1341`). Real per-arm IR needs real frame identities:
+recommend a monotonic frame counter on `CoreErlangGenerator` minted by
+`enter_branch_context` (the guard already owns entry/exit), stored so the
+arm's lowering reads `self.current_branch_frame()`. Nested arms then get
+distinct frames automatically (the counter never repeats), and the
+verify-time frame stack is built by the `Threaded` wrapper nodes, exactly
+as `verify()` already implements. Alternative (pass a frame down every
+call path) touches dozens of signatures for no additional guarantee —
+rejected.
+
+### Production bugs found while pinning (all compiled from minimal repros)
+
+Byte-identity migration reproduces current output — **including buggy
+output**. Three of the ~20 repros exposed real, previously-unfiled
+production bugs; they are findings of this pass, not blockers introduced
+by it, and each is filed as its own Linear issue rather than silently
+papered over:
+
+1. **Class-method conditional local-assign-from-self-send emits invalid
+   Core Erlang** (found probing shape C4; repro `s15`;
+   [BT-3159](https://linear.app/beamtalk/issue/BT-3159)): `let X =
+   <unwrap chain> in  in X` — empty value doc, doubled `in`, hard erlc
+   syntax error. The emitting path is `value_type_codegen.rs`'s
+   vt-conditional local-rebind machinery (`generate_vt_conditional_branch`,
+   `value_type_codegen.rs:3089` — specifically the `_CondResult` wrapper it
+   builds, `value_type_codegen.rs:2762`), not either of this addendum's two
+   body loops — but it means any `Value`/`Object` class method with
+   `classState` doing `flag ifTrue: [x := self <classVarMutatingMethod>]`
+   fails to build today, and C4 has no compilable byte-identity target.
+2. **Exception-body local-assign scope leak** (E3, repro `e04`;
+   [BT-3160](https://linear.app/beamtalk/issue/BT-3160)):
+   `generate_exception_body_with_threading_inner` lacks the
+   `push_scope`/`pop_scope` bracket `generate_conditional_branch_inline`
+   has, so `bind_var(local, _ValN)` escapes the `try` body and a later
+   method-level read of the local emits the out-of-scope temp — erlc:
+   `unbound variable '_Val6' in dispatch/4`. This is precisely the
+   `UnboundVersion`-adjacent class ADR 0111 exists for, caught today only
+   by `core_lint`'s far-from-cause message.
+3. **erlc backend `ambiguous_catch_try_state` on dispatch/nested-case
+   inside `try`** (E2/E5, repros `e03`, `e06`;
+   [BT-3161](https://linear.app/beamtalk/issue/BT-3161)): an actor
+   self-send or a
+   nested annotated conditional as the try body's last statement produces
+   `.core` text that OTP's beam_validator rejects ("Internal consistency
+   check failed … ambiguous_catch_try_state"). Two repro flavors, one
+   filed issue.
+
+Migration consequence, stated explicitly: shapes E2/E5 have well-formed
+`.core` text to pin against (their decompositions above are safe to
+implement byte-identically — the erlc failure is downstream and
+orthogonal); shape C4 has no valid output to pin and stays legacy until
+its fix; bug 2's fix (adding the scope bracket) changes **no bytes** of
+any currently-*compiling* program (the leak only manifests in programs
+that fail to build), so it can land before or alongside the migration
+without perturbing the parity gate.
+
+### Migration order — PR boundaries for the BT-3146 re-attempt
+
+Precedent: BT-3147/BT-3148-task-3's flagless per-shape promotion (the
+`render()`ed node IS the emission at that site, byte-identical by
+construction, snapshot-corpus-gated) — not BT-3145's whole-construct
+flag, because every shape here is a drop-in replacement for a hand-built
+`docvec!` fragment inside an unchanged skeleton. Dual-run parity tests
+per shape (legacy `docvec!` vs `render(lower(..))`) before each site
+flips, per Addendum 4's discipline. The cumulative ≤3% gate
+(§Measurement gate, restated) is re-measured at each PR.
+
+1. **PR 1 — conditionals.rs, single-`Bind` shapes + statements:** C1, C2,
+   C3, C5, C7, C12, C13 (and C4's descope note in code). Introduces the
+   generator frame counter (§Branch-context) and the arm-level
+   `Threaded`-wrapper + `verify()` call at the seven
+   `generate_conditional_branch_inline` consumers, replacing nothing yet
+   at the check sites (the scalar check runs in parallel during this PR).
+   Depends on `ThreadedStmt::Statement` (Addendum 4 / BT-3148's
+   re-attempt item 1); if that has not landed first, PR 1's first commit
+   is exactly Addendum 4's items 1–2 lifted verbatim (coordinate via the
+   epic to avoid double-landing).
+2. **PR 2 — conditionals.rs, nested-construct shapes:** C6, C8, C9, C10,
+   C11 — the `Gensym` two-hop and `Direct(Doc(element-2))` families,
+   including the C11 newline quirk's dual-run byte test.
+3. **PR 3 — exception_handling.rs:** E1–E7 through
+   `render_loop_body_statements`-style separated rendering, the two
+   call-site header mint tables pinned by dual-run tests (they are the
+   densest mint-order surface in either file — 14 consecutive header
+   mints in `on:do:`), and `ensure:`'s compile-twice cleanup arms.
+4. **PR 4 — teeth:** flip the eight in-scope `check_branch_frame_linearity`
+   call sites (§Scope and routing boundaries) to verify the real per-arm
+   IR produced by PRs 1–3, delete `verify_branch_frame_linearity`'s
+   scalar-synthesis path **for those eight**, and update
+   `control_flow/mod.rs:1312-1327`'s "scaffolding, not yet a live
+   regression guard" doc comment — including its "today's nine call
+   sites" line, which becomes "eight of today's nine call sites" (the
+   ninth, `expressions.rs:1125`, still routes through
+   `verify_branch_frame_linearity`'s scalar synthesis, since
+   `generate_block_stateful_body` is not one of this addendum's shapes) —
+   the promise BT-3134 left on `main` is discharged here for the shapes
+   in scope. `NonLinearVersion`/`UnboundVersion` become live regression
+   guards for the eight migrated branch arms from this PR on;
+   `expressions.rs:1125` keeps its pre-existing scaffolding-only behavior.
+
+Descope alternative (Alternative 1b, evaluated per this ADR's practice):
+stopping after PR 1 or 2 leaves exception bodies on scalar synthesis —
+acceptable if the gate trips (each PR is independently shippable and
+independently valuable), but not recommended a priori: unlike BT-3145's
+loop-family measurement unknowns, every shape here reuses
+already-measured `render` paths (`render_bind`, `Statement`'s zero-cost
+push), so the marginal cost per PR is construction-only, the exact class
+task 3 already judged inside budget.
+
+### Acceptance criteria for the re-attempt, restated against this table
+
+- Each PR's shapes emit through `render()` at their production sites,
+  byte-identical over the expanded snapshot corpus + the per-shape
+  dual-run tests; mint order per the tables above (the lowering mints at
+  the same code positions legacy does — every ordering fact above is an
+  ordinary code-ordering fact of one function, Gap-2-option-2 style).
+- `verify()` runs once per arm over real IR; after PR 4, the scalar
+  fixture path is gone for the eight in-scope call sites and they cannot
+  drift from what they emit (`expressions.rs:1125` is not one of the
+  eight — see §Scope and routing boundaries).
+- C4 stays legacy with a code comment citing this addendum and its bug
+  issue; E2/E5 migrate byte-identically despite their downstream erlc
+  rejection (their fix is separate).
+- `just verify-threaded-ir`, `class_var_shadow_contract.rs`, behavioral
+  suites, and the ordered diagnostic-stream check green per this ADR's
+  standing exit criteria.
+## Addendum 6 (2026-08-12): BT-3148 re-attempt — tasks 1/2/4 landed, measurement result
 
 This concretely-scoped re-attempt landed steps 1-6 of Addendum 4's checklist:
 `ThreadedStmt::Statement` + the `TokenId` mint-order fix (already shipped,

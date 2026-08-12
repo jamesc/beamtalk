@@ -53,10 +53,10 @@ compile_core_erlang_empty_test() ->
 %%% ---------------------------------------------------------------
 %%% compile_core_erlang/1 — {cerl, Etf} wire variant (ADR 0088 Phase 0b, BT-2315)
 %%%
-%%% beamtalk_cerl_wire_tests exercises this path but is a standalone
-%%% suite silently skipped by 'rebar3 eunit --app=beamtalk_compiler'
-%%% (--app only discovers <Module>_tests companions). These tests
-%%% bring lines 272/274/277 of beamtalk_build_worker into coverage.
+%%% Sole EUnit coverage of this arm since the standalone
+%%% beamtalk_cerl_wire_tests suite was deleted (BT-3152) — the ADR 0088
+%%% Phase 0b napkin it exercised end-to-end is done, and ADR 0088's
+%%% Phases 1-4 were rejected in favour of typed leaves (ADR 0089).
 %%% ---------------------------------------------------------------
 
 %% A valid cerl module term encoded as ETF compiles successfully.

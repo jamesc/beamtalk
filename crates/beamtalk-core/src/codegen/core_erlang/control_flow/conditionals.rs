@@ -62,7 +62,12 @@ impl CoreErlangGenerator {
     ///
     /// When there are no threaded locals, returns `(Document::Nil, outer_state)`
     /// so field-only conditionals emit byte-for-byte the same code as before.
-    fn seed_conditional_locals(
+    ///
+    /// BT-3160: also reused by `exception_handling.rs`'s `on:do:`/`ensure:`
+    /// generators — a try (receiver) block and its handler/cleanup block(s) are
+    /// the same "compiled-but-not-all-taken" shape as a conditional's branches,
+    /// so they share this seeding helper rather than re-deriving it.
+    pub(in crate::codegen::core_erlang::control_flow) fn seed_conditional_locals(
         &mut self,
         blocks: &[&Block],
         outer_state: &str,
