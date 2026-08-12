@@ -2313,6 +2313,20 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop, and a class variable mutated *before* the block escaped survives the unwind along with it (ADR 0110). A genuine error after the mutation still reverts it, exactly as before.
 
+**Class-variable mutations inside loops and block arguments are rejected at compile time.** A direct class-var assignment (`self.field := value`) or a self-send to a class-var-mutating class method inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:` loop body, or inside a block passed to `select:`/`collect:`/`do:`/`reject:`/`detect:`/`inject:into:`, cannot thread the updated `ClassVars` back to the enclosing class method — the mutation would be silently lost. The compiler rejects these at compile time with a diagnostic recommending the workaround: accumulate into a local variable inside the loop/block, then mutate the class var once after it:
+
+```beamtalk
+// Rejected: class-var mutation inside a loop body
+class countUp: n =>
+  1 to: n do: [:i | self.counter := self.counter + 1]   // compile error
+
+// Correct: accumulate locally, mutate once after the loop
+class countUp: n =>
+  count := self.counter.
+  1 to: n do: [:i | count := count + 1].
+  self.counter := count
+```
+
 This matters most when building a `Collection` subclass. Implementing `do:` by delegating to a class-side helper is fine — `asList`, `inject:into:`, `sum`, `includes:` and the rest of the inherited protocol all work — but a class-side helper that reaches back into its own class does not:
 
 ```beamtalk
