@@ -1455,8 +1455,9 @@ Empirical routing facts a re-attempt must not re-derive wrongly:
   <'true'> when 'true' -> let X = 2 in X <'false'> when 'true' -> X end` —
   plain rebinding, no `StateAcc`, no `{Result, State}` tuple. A different,
   simpler path owns this shape (`value_type_codegen.rs`'s vt-conditional
-  family — `generate_vt_conditional_branch` and the `_CondResult` wrapper,
-  `value_type_codegen.rs:2762`); the `SelfVt` prefix and its restore-only
+  family — `generate_vt_conditional_branch` (`value_type_codegen.rs:3089`)
+  and the `_CondResult` wrapper it builds
+  (`value_type_codegen.rs:2762`)); the `SelfVt` prefix and its restore-only
   discipline are **out of these decompositions' scope**.
 - **Class-var mutations never route here either — by construction.**
   Direct class-var writes in threaded bodies are rejected at compile time
