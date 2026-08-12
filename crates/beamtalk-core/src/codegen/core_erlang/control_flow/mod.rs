@@ -1297,34 +1297,45 @@ impl CoreErlangGenerator {
     /// BT-3134 (ADR 0111 Phase D — `conditionals`/`exception_handling` slice):
     /// verifies branch-frame version linearity across N sibling
     /// `with_branch_context` arms via [`threaded_ir::verify_branch_frame_linearity`]
-    /// — `ifTrue:ifFalse:`'s two branches (`conditionals.rs`), `on:do:`'s
-    /// try/handler bodies, and `ensure:`'s try/success-cleanup/error-cleanup
-    /// bodies (`exception_handling.rs`).
+    /// — `on:do:`'s try/handler bodies and `ensure:`'s try/success-cleanup/
+    /// error-cleanup bodies (`exception_handling.rs`).
     ///
     /// `final_versions` is each arm's already-observed `state_version()`
     /// reached at the end of its own `with_branch_context` call, in the
     /// order the arms were generated; a fresh [`threaded_ir::FrameId`] is
     /// allocated per arm here so sibling arms that happen to reach the same
-    /// version (e.g. both `ifTrue:`/`ifFalse:` bodies perform exactly one
-    /// field mutation) are correctly modeled as distinct frames rather than
+    /// version are correctly modeled as distinct frames rather than
     /// colliding as [`threaded_ir::VerifyError::NonLinearVersion`].
     ///
-    /// **Current scope — this is scaffolding, not yet a live regression
-    /// guard**: because each arm is always assigned a *fresh*, distinct
-    /// `FrameId` from its position here, and `verify_branch_frame_linearity`
-    /// only ever synthesizes a `Bind` chain from `final_versions`' scalar
-    /// counts (not the real per-arm mutation sequence the generator
-    /// produced), `NonLinearVersion` cannot fire from any of today's nine
-    /// call sites (BT-3134's original six plus BT-3139's three) — there is
-    /// no way for two arms to collide when their
-    /// frame ids are always distinct by construction. This exercises the
-    /// verifier's `FrameId`/linearity plumbing correctly (the acceptance
-    /// criterion: sibling arms minting the same version must not trip a
-    /// false positive) but does not yet catch a real generator bug (wrong
-    /// mutation count, wrong ordering, state leaking into a sibling arm).
-    /// Giving it that teeth requires threading the real per-arm `Bind`
-    /// producers through, which is BT-3135+'s job as it migrates the
-    /// mutation-`Bind` emission sites themselves onto `ThreadedIr`.
+    /// **Still scaffolding for its remaining callers, not yet a live
+    /// regression guard for them**: because each arm is always assigned a
+    /// *fresh*, distinct `FrameId` from its position here, and
+    /// `verify_branch_frame_linearity` only ever synthesizes a `Bind` chain
+    /// from `final_versions`' scalar counts (not the real per-arm mutation
+    /// sequence the generator produced), `NonLinearVersion` cannot fire from
+    /// either of `exception_handling.rs`'s two remaining call sites
+    /// (`on:do:`/`ensure:`) — there is no way for two arms to collide when
+    /// their frame ids are always distinct by construction. Giving those two
+    /// sites real teeth is `exception_handling.rs`'s own follow-up (ADR 0111
+    /// Addendum 5's E1–E7 per-shape table, not attempted by BT-3146's
+    /// `conditionals.rs` slice).
+    ///
+    /// **conditionals.rs (BT-3146, ADR 0111 Addendum 5) discharged the
+    /// promise this doc comment used to make for six of today's original
+    /// nine call sites**: `generate_conditional_branch_inline`'s four
+    /// `conditionals.rs` callers, `intrinsics.rs`'s REPL-mode inlining, and
+    /// `expressions.rs`'s `match:`-arm inlining now build, `verify()`, and
+    /// `render()` each arm's REAL per-frame `ThreadedIr` directly inside
+    /// `generate_conditional_branch_inline` — `NonLinearVersion`/
+    /// `UnboundVersion` are live checks there now (see
+    /// `conditionals.rs::verify_and_render_branch_arm`), and this scalar
+    /// scaffolding check no longer runs at any of those six sites.
+    /// `expressions.rs`'s ninth call site (`generate_block_stateful_body`,
+    /// a different body loop — Tier-2-stateful-block-body threading for
+    /// list-op/message-send block arguments, unrelated to `ifTrue:`/
+    /// `ifFalse:`/`match:`) stays on this scaffolding permanently, alongside
+    /// the two `exception_handling.rs` sites above — three of today's nine
+    /// call sites remain.
     ///
     /// **Failure behavior** (ADR 0111 §The verifier): hard-fails in
     /// debug/CI via `debug_assert!`. In release builds, degrades to an

@@ -2588,16 +2588,17 @@ impl CoreErlangGenerator {
         if self.is_tier2_value_call(body) {
             if let Expression::MessageSend { receiver, .. } = body {
                 if let Expression::Block(block) = receiver.as_ref() {
-                    let (branch_doc, branch_final) = self.with_branch_context(|this| {
+                    // ADR 0111 Addendum 5 (BT-3146): tier2 conditional-branch
+                    // inlining inside a `match:` arm — reaches the SAME
+                    // `generate_conditional_branch_inline` single-arm helper
+                    // conditionals.rs's ifTrue:/ifFalse: use, which now
+                    // builds, `verify()`s, and `render()`s this arm's real
+                    // per-frame ThreadedIr internally; the scalar
+                    // `check_branch_frame_linearity` scaffolding check that
+                    // used to run here is gone.
+                    let (branch_doc, _branch_final) = self.with_branch_context(|this| {
                         this.generate_conditional_branch_inline(block)
                     })?;
-                    // BT-3139: tier2 conditional-branch inlining inside a
-                    // `match:` arm — the second of three with_branch_context
-                    // sites that never got a verify_branch_frame_linearity
-                    // fixture, unlike conditionals.rs's ifTrue:/ifFalse:
-                    // (BT-3134), despite going through the same
-                    // generate_conditional_branch_inline single-arm helper.
-                    self.check_branch_frame_linearity(&[branch_final], body.span());
                     return Ok(docvec![
                         "let StateAcc = ",
                         base_state_var,

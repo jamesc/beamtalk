@@ -14,8 +14,8 @@ use std::fmt::Write as _;
 
 use super::document::leaf::{atom, string_lit};
 use super::document::{Document, join};
-use super::{CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, Expression, ExpressionStatement};
+use super::{CodeGenError, CoreErlangGenerator, Result};
+use crate::ast::{ClassDefinition, Expression, ExpressionStatement, Identifier};
 use crate::docvec;
 
 /// Builds a versioned Core Erlang variable name.
@@ -426,6 +426,42 @@ impl CoreErlangGenerator {
             super::document::leaf::var(var),
             "})",
         ]
+    }
+
+    /// BT-3140: class-var writes can't thread through the generic
+    /// `State`/`StateAcc` mechanism used by [`Self::generate_field_assignment_open`]
+    /// and the conditional-branch `Bind`-chain codegen it mirrors — see
+    /// [`super::CodeGenError::ClassVarAssignmentInThreadedBody`]'s doc comment
+    /// for why. Rejects at compile time (mirroring BT-2792's
+    /// `FieldAssignmentInUnsupportedBlock` for the analogous "can't thread
+    /// this state" shape) instead of silently losing the mutation on both
+    /// normal return and NLR escape.
+    ///
+    /// Shared by both call sites per CLAUDE.md's no-duplicate-implementations
+    /// rule — `is_class_var_assignment`'s `receiver == "self"` gate is the
+    /// authoritative rule for what counts as a class-var assignment, and this
+    /// helper is the single place that turns a positive match into the
+    /// rejection error, so the two call sites can't drift out of sync.
+    ///
+    /// `expr` must be the `Expression::Assignment` whose `target` is the
+    /// given `field`'s `FieldAccess` (the caller has already matched this
+    /// shape before calling in).
+    pub(super) fn reject_class_var_field_assignment(
+        &self,
+        expr: &Expression,
+        field: &Identifier,
+    ) -> Result<()> {
+        if self.is_class_var_assignment(expr) {
+            let location = self.span_to_line(expr.span()).map_or_else(
+                || format!("offset {}", expr.span().start()),
+                |line| format!("line {line}"),
+            );
+            return Err(CodeGenError::ClassVarAssignmentInThreadedBody {
+                field: field.name.to_string(),
+                location,
+            });
+        }
+        Ok(())
     }
 
     /// Returns the class name for the currently compiled class.

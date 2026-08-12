@@ -1559,6 +1559,19 @@ pub(crate) struct CoreErlangGenerator {
     state_threading: VersionCounter,
     /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
     in_loop_body: bool,
+    /// BT-3146 (ADR 0111 Addendum 5, §Branch-context version discipline):
+    /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
+    /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
+    /// (conditional branch, `on:do:`/`ensure:` body, loop body) gets its own
+    /// distinct frame identity, never reused, so sibling arms that legitimately
+    /// reach the same `State` version in disjoint scopes are modeled as
+    /// distinct producer/consumer identities rather than colliding as a false
+    /// [`threaded_ir::VerifyError::NonLinearVersion`]. `0` is reserved for
+    /// [`threaded_ir::FrameId::ROOT`] (the method's own entry frame, never
+    /// allocated by this counter); the first `enter_branch_context` call
+    /// mints frame `1`. Never reset — frame identity must stay unique across
+    /// an entire module compile, not just within one method.
+    branch_frame_counter: u32,
     /// BT-1326: Whether we're inside a hybrid-params loop body.
     ///
     /// When `true`, `current_state_var()` and `next_state_var()` use `State*` naming
@@ -1753,6 +1766,7 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: VersionCounter::new(),
             in_loop_body: false,
+            branch_frame_counter: 0,
             in_hybrid_loop: false,
             in_direct_params_loop: false,
             direct_params_list_op_result: None,
@@ -2342,6 +2356,17 @@ impl CoreErlangGenerator {
         self.state_threading.set_version(version);
     }
 
+    /// BT-3146 (ADR 0111 Addendum 5, §Branch-context version discipline,
+    /// "`FrameId` allocation is the one missing production mechanism"): mints
+    /// and returns the [`threaded_ir::FrameId`] for the CURRENT (already
+    /// entered) branch context — the frame every real `Bind`/`Threaded` node
+    /// a branch-arm lowering constructs must use. Distinct from
+    /// [`threaded_ir::FrameId::ROOT`] always: `enter_branch_context` mints
+    /// starting at `1`.
+    pub(in crate::codegen::core_erlang) fn current_branch_frame(&self) -> threaded_ir::FrameId {
+        threaded_ir::FrameId::new(self.branch_frame_counter)
+    }
+
     /// BT-3131: Enters a branch context, applying the per-prefix reset policy
     /// documented on [`BranchContextGuard`] and returning a guard that
     /// restores everything (per that same policy) when dropped.
@@ -2352,6 +2377,11 @@ impl CoreErlangGenerator {
         let saved_self_version = self.self_version();
         self.set_state_version(0);
         self.in_loop_body = true;
+        // BT-3146: mint a fresh frame identity for this branch context —
+        // see `current_branch_frame`'s doc comment. Never reset/restored
+        // (unlike the version counters above): frame identity must stay
+        // globally unique across the whole module compile.
+        self.branch_frame_counter += 1;
         // BT-3131 review fix: do NOT reset self_version to 0 here — unlike
         // `state`, a `Self{N}` reference is always a syntactically valid
         // Core Erlang variable (the bare `Self` parameter always exists), so
