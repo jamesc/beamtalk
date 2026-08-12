@@ -2219,6 +2219,72 @@ pub(super) fn construct_and_verify_class_var_bind(
     (bind, verify(&fixture))
 }
 
+// ─── Method-body verification with opaque version gaps (BT-3148) ──────────
+
+/// [`verify`]s a straight-line, [`FrameId::ROOT`]-frame method-body IR (ADR
+/// 0111 Addendum 4 / BT-3148 task 1: `gen_server/methods.rs`'s
+/// `lower_body_exprs_with_reply` output — real `Bind`s interleaved with
+/// opaque [`ThreadedStmt::Statement`]s) whose opaque statements may have
+/// advanced the `State` version counter invisibly: a dispatching self-send,
+/// `super` send, or Tier-2 helper (`generate_self_dispatch_open`,
+/// `emit_super_send_open`, `generate_tier2_self_send_open`,
+/// `generate_field_assignment_open`, …) calls `next_state_var` inside its
+/// own shared, multi-module `Document` builder, so the version step it
+/// produces has no `Bind` node in this body's IR.
+///
+/// Without accounting for those gaps, the first real `Bind` after such a
+/// helper would spuriously fail [`VerifyError::UnboundVersion`] (its source
+/// version has no producing `Bind` in the fixture). The fix reuses
+/// [`verify_simple_bind`]/[`construct_and_verify_class_var_bind`]'s
+/// established backfill technique, generalized from "backfill everything
+/// before the one Bind under test" to "backfill exactly the gaps between
+/// this body's real Binds": walk the IR in order, tracking the last
+/// `State`-prefix version produced at [`FrameId::ROOT`], and insert a
+/// synthetic `Direct('_')` `Bind` chain for any versions an opaque
+/// statement consumed. The backfill is verification-fixture-only — the real
+/// IR (and therefore [`render`]'s output) is untouched.
+///
+/// What this still genuinely checks across the REAL Binds, for the first
+/// time over whole-method emission structure rather than per-call-site
+/// fixtures: per-version linearity (a broken `next_state_var` regressing to
+/// an already-produced version now collides with the accumulated real/
+/// backfill history — the BT-3131 regression shape,
+/// `verify_would_catch_the_bt_3131_regression_shape_given_accumulated_history`'s
+/// previously-hypothetical capability made live), `UnboundVersion` for any
+/// source the chain never reached, and [`VerifyError::ShadowWriteMissing`]
+/// over any class-var `Bind` sharing the body with a real `NlrCatch`.
+/// What it cannot check (ADR 0111 §Verifier honesty, same class as
+/// `ValueRef::Doc`/`exit_arm`): mutations hidden inside the opaque
+/// statements themselves — those are exactly the backfilled gaps.
+pub(super) fn verify_body_with_opaque_version_gaps(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
+    let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
+    let mut last_state_version = 0usize;
+    for stmt in ir {
+        if let ThreadedStmt::Bind { target, source, .. } = stmt {
+            if matches!(source.prefix, VersionPrefix::State)
+                && source.frame == FrameId::ROOT
+                && source.version > last_state_version
+            {
+                for v in (last_state_version + 1)..=source.version {
+                    fixture.push(ThreadedStmt::Bind {
+                        target: VersionedVar::new(VersionPrefix::State, v, FrameId::ROOT),
+                        source: VersionedVar::new(VersionPrefix::State, v - 1, FrameId::ROOT),
+                        op: BindOp::Direct(ValueRef::Literal("'_'")),
+                        shadow_write: false,
+                        span: Span::default(),
+                    });
+                }
+                last_state_version = source.version;
+            }
+            if matches!(target.prefix, VersionPrefix::State) && target.frame == FrameId::ROOT {
+                last_state_version = last_state_version.max(target.version);
+            }
+        }
+        fixture.push(stmt.clone());
+    }
+    verify(&fixture)
+}
+
 // ─── Simple version-bind construction (BT-3139) ────────────────────────────
 
 /// Builds and verifies a minimal `ThreadedIr` fixture for a single `Self{N}`

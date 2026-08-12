@@ -15,6 +15,7 @@ use super::super::spec_codegen;
 use super::super::value_type_codegen::has_opaque_native_representation;
 use super::super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
+    threaded_ir,
 };
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
@@ -23,6 +24,7 @@ use crate::ast::{
 };
 use crate::docvec;
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
+use crate::source_analysis::Span;
 use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
@@ -829,20 +831,152 @@ impl CoreErlangGenerator {
     /// Both `generate_method_definition_body_with_reply` (for `MethodDefinition`)
     /// and `generate_method_body_with_reply` (for `Block`) delegate here.
     ///
+    /// BT-3148 (ADR 0111 Addendum 4): thin wrapper over
+    /// [`Self::lower_body_exprs_with_reply`] (one real `Vec<ThreadedStmt>`
+    /// per body) + [`Self::verify_and_render_body_stmts`] (one `verify()`
+    /// call, one [`threaded_ir::render`] call). Callers that need the IR
+    /// itself — `generate_method_dispatch`'s NLR wrap — call the lowering
+    /// step directly.
+    fn generate_body_exprs_with_reply(
+        &mut self,
+        body: &[&Expression],
+        supports_early_return: bool,
+    ) -> Result<Document<'static>> {
+        let span = body.first().map_or_else(Span::default, |e| e.span());
+        let stmts = self.lower_body_exprs_with_reply(body, supports_early_return)?;
+        Ok(self.verify_and_render_body_stmts(&stmts, span))
+    }
+
+    /// BT-3148: verifies a lowered method-body IR once (via
+    /// [`threaded_ir::verify_body_with_opaque_version_gaps`] — see its doc
+    /// comment for what the opaque-statement backfill does and does not
+    /// check) and renders it through [`threaded_ir::render`], the same
+    /// renderer every other emission-input `ThreadedIr` producer uses.
+    fn verify_and_render_body_stmts(
+        &mut self,
+        stmts: &[threaded_ir::ThreadedStmt],
+        span: Span,
+    ) -> Document<'static> {
+        let errors = threaded_ir::verify_body_with_opaque_version_gaps(stmts);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "gen_server method-body ThreadedIr must be well-formed",
+            span,
+        );
+        let mut ctx = threaded_ir::RenderCtx::new(self);
+        threaded_ir::render(stmts, &mut ctx)
+    }
+
+    /// BT-3148: the shared two-hop `Bind` chain for a
+    /// `self.field := <control-flow-with-mutations>` step (both the
+    /// `BodyExprKind::FieldAssignmentControlFlow` arm and its `^`-return
+    /// variant) — BT-3146's investigation-confirmed idiom for a mutation
+    /// whose map source is a computed temp rather than the prior `State`
+    /// version:
+    ///
+    /// 1. `Bind { target: Gensym(CfState), source: State(n), op:
+    ///    Direct(Doc(element(2, CfTuple))) }` — the RHS construct's returned
+    ///    state, bound to its pre-minted `_CfState{N}` temp;
+    /// 2. `Bind { target: State(n+1), source: Gensym(CfState), op: Put {
+    ///    field, CfVal } }` — the real field mutation, a genuine
+    ///    [`threaded_ir::BindOp::Put`] whose `maps:put` rendering is
+    ///    `render_bind`'s (shadow_write is `false`: actor `State` writes
+    ///    never carry the ADR 0110 class-var obligation, so `class_tag` is
+    ///    an unused placeholder).
+    ///
+    /// `prefix_doc` (the `CfTuple`/`CfVal` unpack) precedes the chain as an
+    /// opaque `Statement`. Mint order is the caller's responsibility and
+    /// matches the pre-BT-3148 emission exactly: `CfTuple`/`CfVal`/RHS doc/
+    /// `CfState` are all minted before this is called; `next_state_var`
+    /// advances here, after them.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "two call sites share one mint-order-sensitive lowering step; a params struct would obscure the order the doc comment pins"
+    )]
+    fn lower_cf_field_assignment_binds(
+        &mut self,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+        prefix_doc: Document<'static>,
+        tuple_var: &str,
+        rhs_state: &str,
+        field_name: &str,
+        val_var: &str,
+        span: Span,
+    ) {
+        use threaded_ir::{BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
+
+        let source_version = self.state_version();
+        stmts.push(ThreadedStmt::Statement(prefix_doc, span));
+        let cf_state = VersionedVar::new(VersionPrefix::Gensym(rhs_state.to_string()), 1, FrameId::ROOT);
+        stmts.push(ThreadedStmt::Bind {
+            target: cf_state.clone(),
+            source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
+            op: BindOp::Direct(ValueRef::Doc(docvec![
+                "call 'erlang':'element'(2, ",
+                leaf::var(tuple_var.to_string()),
+                ")",
+            ])),
+            shadow_write: false,
+            span,
+        });
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        stmts.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, FrameId::ROOT),
+            source: cf_state,
+            op: BindOp::Put {
+                field: field_name.to_string(),
+                value: ValueRef::Var(val_var.to_string()),
+                // Unused placeholder: only rendered when shadow_write is
+                // true, which only class-var Puts ever set (ADR 0110).
+                class_tag: ValueRef::Literal("'nil'"),
+            },
+            shadow_write: false,
+            span,
+        });
+    }
+
+    /// Lowers a method body to one straight-line `Vec<ThreadedStmt>` (ADR
+    /// 0111 Addendum 4 / BT-3148 task 1): every `State`-version step this
+    /// function itself emits is a real [`threaded_ir::ThreadedStmt::Bind`]
+    /// (target/source versions read off the live counter); every ordinary
+    /// AST-directed statement — dispatch, sends, Tier-2 calls, destructure
+    /// bindings, reply epilogues — is an opaque
+    /// [`threaded_ir::ThreadedStmt::Statement`] built by the SAME codegen
+    /// call production ran before this migration (byte-identity: only the
+    /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
+    /// Version steps hidden inside shared multi-module helpers
+    /// (`generate_self_dispatch_open`, `emit_super_send_open`,
+    /// `generate_tier2_self_send_open`, `generate_field_assignment_open`,
+    /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
+    /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
+    ///
+    /// Classification happens exactly once (`classify_body_expr`, Phase 1);
+    /// the mutating control-flow arms consume that decision via
+    /// `emit_actor_threaded_last_stmts`/`emit_actor_threaded_assign_rhs_stmts`,
+    /// which never decline — the pre-BT-3148 `verify_routing_invariant`
+    /// call sites (and `VerifyError::RoutingMismatch`) are deleted because
+    /// there is no second computation left to disagree with the first.
+    ///
     /// `supports_early_return` controls whether `^ value` expressions are handled.
     /// Method definitions support it; block bodies do not (NLR uses throw/catch).
     #[expect(
         clippy::too_many_lines,
         reason = "unified handler for all method body expression types with state threading"
     )]
-    fn generate_body_exprs_with_reply(
+    fn lower_body_exprs_with_reply(
         &mut self,
         body: &[&Expression],
         supports_early_return: bool,
-    ) -> Result<Document<'static>> {
+    ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        use threaded_ir::ThreadedStmt;
+
         if body.is_empty() {
             let state = self.current_state_var();
-            return Ok(docvec!["{'reply', Self, ", leaf::var(state), "}"]);
+            return Ok(vec![ThreadedStmt::Statement(
+                docvec!["{'reply', Self, ", leaf::var(state), "}"],
+                Span::default(),
+            )]);
         }
 
         // BT-2797: (Re-)populate tier2_local_vars for *this* body before
@@ -869,13 +1003,14 @@ impl CoreErlangGenerator {
             })
             .collect();
 
-        // Phase 2: emit code for each (expression, kind) pair.
-        let mut docs: Vec<Document<'static>> = Vec::with_capacity(body.len());
+        // Phase 2: lower each (expression, kind) pair to ThreadedStmts.
+        let mut stmts: Vec<ThreadedStmt> = Vec::with_capacity(body.len());
         let body_len = body.len();
 
         for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
             let is_last = i == body_len - 1;
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
+            let span = expr.span();
 
             // Early return — always terminates generation regardless of position.
             // Classify the inner value to handle super/tier2/dispatch returns.
@@ -885,33 +1020,40 @@ impl CoreErlangGenerator {
                     match value_kind {
                         BodyExprKind::SuperSend => {
                             let expr_str = self.expression_doc(value)?;
-                            docs.push(docvec![
-                                "let _SuperTuple = ",
-                                expr_str,
-                                " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
-                                " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
-                                " in {'reply', _Result, _NewState}",
-                            ]);
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let _SuperTuple = ",
+                                    expr_str,
+                                    " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
+                                    " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
+                                    " in {'reply', _Result, _NewState}",
+                                ],
+                                span,
+                            ));
                         }
                         BodyExprKind::Tier2ValueCall => {
                             let expr_str = self.generate_tier2_value_call_doc(value)?;
-                            docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
+                            let reply = self.emit_tuple_unpack_reply("T2Tuple", expr_str);
+                            stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::DispatchingSelfSend => {
                             let (doc, dispatch_var) = self.generate_self_dispatch_open(value)?;
-                            docs.push(doc);
-                            self.emit_dispatch_reply(&mut docs, &dispatch_var);
+                            stmts.push(ThreadedStmt::Statement(doc, span));
+                            let reply = self.dispatch_reply_doc(&dispatch_var);
+                            stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::Tier2SelfSend(ref tier2_args) => {
                             let tier2_args = tier2_args.clone();
                             let (doc, dispatch_var) =
                                 self.generate_tier2_self_send_open(value, &tier2_args)?;
-                            docs.push(doc);
-                            self.emit_dispatch_reply(&mut docs, &dispatch_var);
+                            stmts.push(ThreadedStmt::Statement(doc, span));
+                            let reply = self.dispatch_reply_doc(&dispatch_var);
+                            stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::ControlFlowWithMutations => {
                             let expr_str = self.expression_doc(value)?;
-                            docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
+                            let reply = self.emit_tuple_unpack_reply("Tuple", expr_str);
+                            stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         // BT-1477: ^ self.field := <control-flow-with-mutations>
                         BodyExprKind::FieldAssignmentControlFlow => {
@@ -924,66 +1066,79 @@ impl CoreErlangGenerator {
                                     let val_var = self.fresh_temp_var("CfVal");
                                     let rhs_str = self.expression_doc(rhs)?;
                                     let rhs_state = self.fresh_temp_var("CfState");
-                                    let field_state = self.next_state_var();
-                                    docs.push(docvec![
-                                        "let ",
-                                        leaf::var(tuple_var.clone()),
-                                        " = ",
-                                        rhs_str,
-                                        " in let ",
-                                        leaf::var(val_var.clone()),
-                                        " = call 'erlang':'element'(1, ",
-                                        leaf::var(tuple_var.clone()),
-                                        ") in let ",
-                                        leaf::var(rhs_state.clone()),
-                                        " = call 'erlang':'element'(2, ",
-                                        leaf::var(tuple_var),
-                                        ") in let ",
-                                        leaf::var(field_state.clone()),
-                                        " = call 'maps':'put'(",
-                                        leaf::atom(field.name.to_string()),
-                                        ", ",
-                                        leaf::var(val_var.clone()),
-                                        ", ",
-                                        leaf::var(rhs_state),
-                                        ") in {'reply', ",
-                                        leaf::var(val_var),
-                                        ", ",
-                                        leaf::var(field_state),
-                                        "}",
-                                    ]);
+                                    self.lower_cf_field_assignment_binds(
+                                        &mut stmts,
+                                        docvec![
+                                            "let ",
+                                            leaf::var(tuple_var.clone()),
+                                            " = ",
+                                            rhs_str,
+                                            " in let ",
+                                            leaf::var(val_var.clone()),
+                                            " = call 'erlang':'element'(1, ",
+                                            leaf::var(tuple_var.clone()),
+                                            ") in ",
+                                        ],
+                                        &tuple_var,
+                                        &rhs_state,
+                                        field.name.as_str(),
+                                        &val_var,
+                                        span,
+                                    );
+                                    let field_state = self.current_state_var();
+                                    stmts.push(ThreadedStmt::Statement(
+                                        docvec![
+                                            "{'reply', ",
+                                            leaf::var(val_var),
+                                            ", ",
+                                            leaf::var(field_state),
+                                            "}",
+                                        ],
+                                        span,
+                                    ));
                                 }
                             }
                         }
                         _ => {
                             let final_state = self.current_state_var();
                             let value_str = self.expression_doc(value)?;
-                            docs.push(docvec![
-                                "let _ReturnValue = ",
-                                value_str,
-                                " in {'reply', _ReturnValue, ",
-                                leaf::var(final_state),
-                                "}",
-                            ]);
+                            stmts.push(ThreadedStmt::Statement(
+                                docvec![
+                                    "let _ReturnValue = ",
+                                    value_str,
+                                    " in {'reply', _ReturnValue, ",
+                                    leaf::var(final_state),
+                                    "}",
+                                ],
+                                span,
+                            ));
                         }
                     }
-                    return Ok(Document::Vec(docs));
+                    return Ok(stmts);
                 }
             }
 
             match kind {
+                // Mutation hidden inside a shared multi-module helper
+                // (`generate_self_field_at_put_open` — also called from
+                // conditionals.rs): stays an opaque Statement; the version
+                // step it performs is accounted for by
+                // `verify_body_with_opaque_version_gaps`'s backfill.
                 BodyExprKind::SelfFieldAtPut => {
                     let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
-                    docs.push(doc);
+                    stmts.push(ThreadedStmt::Statement(doc, span));
                     if is_last {
                         let final_state = self.current_state_var();
-                        docs.push(docvec![
-                            "{'reply', ",
-                            leaf::var(val_var),
-                            ", ",
-                            leaf::var(final_state),
-                            "}",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "{'reply', ",
+                                leaf::var(val_var),
+                                ", ",
+                                leaf::var(final_state),
+                                "}",
+                            ],
+                            span,
+                        ));
                     }
                 }
                 BodyExprKind::FieldAssignment => {
@@ -991,33 +1146,63 @@ impl CoreErlangGenerator {
                         if let Expression::Assignment { target, value, .. } = expr {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                                 let val_var = self.fresh_temp_var("Val");
-                                let current_state = self.current_state_var();
+                                let source_version = self.state_version();
                                 let value_str = self.generate_field_assignment_value_doc(value)?;
                                 let new_state = self.next_state_var();
-                                docs.push(docvec![
-                                    "let ",
-                                    leaf::var(val_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in let ",
-                                    leaf::var(new_state.clone()),
-                                    " = call 'maps':'put'(",
-                                    leaf::atom(field.name.to_string()),
-                                    ", ",
-                                    leaf::var(val_var.clone()),
-                                    ", ",
-                                    leaf::var(current_state),
-                                    ") in {'reply', ",
-                                    leaf::var(val_var),
-                                    ", ",
-                                    leaf::var(new_state),
-                                    "}",
-                                ]);
+                                let target_version = self.state_version();
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "let ",
+                                        leaf::var(val_var.clone()),
+                                        " = ",
+                                        value_str,
+                                        " in ",
+                                    ],
+                                    span,
+                                ));
+                                // The real field mutation, as a real Bind —
+                                // `render_bind`'s `BindOp::Put` arm is the
+                                // single place the `maps:put` shape lives.
+                                stmts.push(ThreadedStmt::Bind {
+                                    target: threaded_ir::VersionedVar::new(
+                                        threaded_ir::VersionPrefix::State,
+                                        target_version,
+                                        threaded_ir::FrameId::ROOT,
+                                    ),
+                                    source: threaded_ir::VersionedVar::new(
+                                        threaded_ir::VersionPrefix::State,
+                                        source_version,
+                                        threaded_ir::FrameId::ROOT,
+                                    ),
+                                    op: threaded_ir::BindOp::Put {
+                                        field: field.name.to_string(),
+                                        value: threaded_ir::ValueRef::Var(val_var.clone()),
+                                        // Unused placeholder — see
+                                        // `lower_cf_field_assignment_binds`.
+                                        class_tag: threaded_ir::ValueRef::Literal("'nil'"),
+                                    },
+                                    shadow_write: false,
+                                    span,
+                                });
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "{'reply', ",
+                                        leaf::var(val_var),
+                                        ", ",
+                                        leaf::var(new_state),
+                                        "}",
+                                    ],
+                                    span,
+                                ));
                             }
                         }
                     } else {
+                        // Shared helper (`generate_field_assignment_open`,
+                        // also called from conditionals/exception_handling/
+                        // list_ops/intrinsics): opaque Statement, version
+                        // step backfilled at verify time.
                         let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
-                        docs.push(doc);
+                        stmts.push(ThreadedStmt::Statement(doc, span));
                     }
                 }
                 // BT-1477: self.field := expr where RHS is control flow returning {Value, State}
