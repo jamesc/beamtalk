@@ -43,7 +43,11 @@ Value subclass: FoldClassVarMutation
   // local accumulator, inside a do: body.
   class countedRun: aList =>
     total := 0
-    aList do: [:x | self bump. total := total + x]
+    aList
+      do: [:x |
+        self bump
+        total := total + x
+      ]
     total
 
   // BT-3151 (DriverSelect positives:-style, with the co-occurring local
@@ -52,11 +56,20 @@ Value subclass: FoldClassVarMutation
   // co-occurring local counter inside the block.
   class positives: aList =>
     seen := 0
-    result := aList select: [:x | seen := seen + 1. self bump > 0]
+    result := aList
+      select: [:x |
+        seen := seen + 1
+        self bump > 0
+      ]
     result
 
   // The collect: analogue: a mutating self-send used as the per-item
   // transform, alongside a co-occurring local counter.
   class doubleAllCounting: aList =>
     seen := 0
-    aList collect: [:x | seen := seen + 1. self bump. x * 2]
+    aList
+      collect: [:x |
+        seen := seen + 1
+        self bump
+        x * 2
+      ]
