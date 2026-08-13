@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3151/BT-3169: Fixture for class-var mutations made via a same-class
+// self-send inside a Foldl body (do:/select:/collect:/...), alongside a
+// co-occurring local-variable mutation that routes the body through
+// `generate_threaded_loop_body_inner` in the first place — the same shape
+// as `loop_class_var_mutation.bt`, but for `BodyKind::Foldl*` instead of
+// `BodyKind::Letrec`.
+//
+// Before BT-3169 (ADR 0111 Addendum 9), `ThreadingPlan` only threaded
+// `threaded_locals` (user `:=` locals) through a fold's accumulator, never
+// `ClassVars`, so the self-send's class-var mutation was silently lost by
+// the time the fold finished — the exact `DriverSelect positives:`/
+// `Driver countedRun:`-style silent-loss gap BT-3151's issue body
+// describes. BT-3169 closes that gap: the fold's accumulator becomes a
+// `{ClassVars, StateAcc}` 2-tuple whenever the body threads `ClassVars`,
+// so the mutation now survives and is visible after the fold returns.
+//
+// Note: the *bare* shape from BT-3151's issue body — `aList select: [:x |
+// self check: x]`, with no co-occurring local mutation inside the block —
+// is a separate, intentionally-still-rejected case (never reaches Foldl
+// threading at all; caught by `CodeGenError::ClassMethodSelfSendInUnthreadedBlock`,
+// see `test_bare_class_method_self_send_in_select_body_skips_loop_threading`
+// in `crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs`).
+// This fixture exercises the shape that DOES compile post-BT-3169 — a
+// co-occurring local inside the block — end to end (compiles AND runs
+// correctly), not just the codegen-shape pins in that same test file.
+
+Value subclass: FoldClassVarMutation
+  classState: runs = 0
+
+  class resetRuns => self.runs := 0
+
+  class runs => self.runs
+
+  // Mutates the class var directly and returns its new value — the
+  // self-send target for every fold shape below.
+  class bump => self.runs := self.runs + 1
+
+  // BT-3151 (Driver countedRun:-style, via do: instead of whileTrue:): a
+  // same-class self-send that mutates a class var, alongside a co-occurring
+  // local accumulator, inside a do: body.
+  class countedRun: aList =>
+    total := 0
+    aList do: [:x | self bump. total := total + x]
+    total
+
+  // BT-3151 (DriverSelect positives:-style, with the co-occurring local
+  // mutation required to reach Foldl threading): a same-class self-send
+  // that mutates a class var, used as select:'s predicate, alongside a
+  // co-occurring local counter inside the block.
+  class positives: aList =>
+    seen := 0
+    result := aList select: [:x | seen := seen + 1. self bump > 0]
+    result
+
+  // The collect: analogue: a mutating self-send used as the per-item
+  // transform, alongside a co-occurring local counter.
+  class doubleAllCounting: aList =>
+    seen := 0
+    aList collect: [:x | seen := seen + 1. self bump. x * 2]

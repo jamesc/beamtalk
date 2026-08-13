@@ -156,7 +156,7 @@ If you see a bare `internal error` or a build failure with no readable cause,
 run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
 expected to produce the same wording for the same malformed input.
 
-### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164)
+### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170)
 
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
@@ -202,6 +202,30 @@ the shared Actor `threaded_expr.rs` emitter (`emit_actor_threaded_last_stmts`/
 `emit_actor_threaded_assign_rhs_stmts`, which never decline) — there is no
 second, independently-computed recheck left to disagree with the first, so
 the mismatch this variant caught is unrepresentable by construction.
+
+**`ClassVars` threading through loop/fold bodies (BT-3155 epic: BT-3166-BT-3170).**
+`ShadowWriteMissing`'s frame model above (BT-3167) is what let two more
+`ThreadedIr` node kinds start producing real class-var `Bind`s instead of
+rejecting them at compile time: `ConditionalLoop` (BT-3168, `whileTrue:`/
+`timesRepeat:`/`to:do:`/`to:by:do:` — `Letrec` bodies) now threads
+`ClassVars` as an extra fun parameter through the loop's own recursive tail
+call, gated by the same `shadow_write_eligible` the loop node carries; the
+`Foldl*` accumulator (BT-3169, `do:`/`collect:`/`select:`/`inject:into:`/
+list-op and dict-op bodies) becomes a `{ClassVars, StateAcc}` 2-tuple
+whenever a body threads `ClassVars`, so `EarlyExitGateSlotMismatch`'s
+`gate_slots` count stays untouched by `ClassVars`'s presence — modeled as
+an orthogonal bool, not an extra gate slot (see ADR 0111 Addendum 9,
+Question 6). Neither migration added a new `VerifyError` variant — both
+route through the existing `UnboundVersion`/`NonLinearVersion`/
+`ShadowWriteMissing` checks against the now-real `Bind`s these node kinds
+produce, the same "no net-new detection, just a wider real-IR surface"
+pattern BT-3164's class-method-body pipeline established. The one shape
+still rejected at compile time is a loop/fold body whose only mutation is
+the class-var write/self-send itself, with no other local mutation to
+trigger state threading in the first place — see `docs/beamtalk-language-features.md`'s
+"Passing Blocks Through Class Methods" section for the user-facing version
+of that boundary, and ADR 0111 Addendum 9 for the full six-question design
+this migration implements.
 
 `just verify-threaded-ir` (wired into `just ci`) compiles the full
 `stdlib/test/*.bt` + `stdlib/bootstrap-test/*.btscript` corpus in a debug

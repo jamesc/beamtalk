@@ -2313,29 +2313,53 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop, and a class variable mutated *before* the block escaped survives the unwind along with it (ADR 0110). A genuine error after the mutation still reverts it, exactly as before.
 
-**Class-variable mutations inside loops and block arguments are rejected at compile time.** A direct class-var assignment (`self.field := value`) or a self-send to a class-var-mutating class method inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:` loop body, or inside a block passed to `select:`/`collect:`/`do:`/`reject:`/`detect:`/`inject:into:`, cannot thread the updated `ClassVars` back to the enclosing class method — the mutation would be silently lost. The compiler rejects these at compile time with a diagnostic recommending the workaround: accumulate into a local variable inside the loop/block, then mutate the class var once after it:
+**Class-variable mutations inside loops and block arguments** — a direct class-var assignment (`self.field := value`) or a same-class self-send to a class-var-mutating class method, made inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:` loop body, or inside a block passed to `select:`/`collect:`/`do:`/`reject:`/`detect:`/`inject:into:` — now threads the mutation back to the enclosing class method correctly (ADR 0111 Addendum 9), *as long as the loop/block body has some other local-variable mutation of its own* (an accumulator, a counter, an index) that already triggers state threading for that body:
 
 ```beamtalk
 Object subclass: LoopCounter
   classState: runs = 0
 
-  // Rejected: class-var mutation alongside a local mutation inside a loop body
+  // Compiles and correctly accumulates: `i := i + 1` triggers state
+  // threading for this loop body, so `self.runs`'s mutation threads
+  // through it too, one class-var write per iteration.
   class countUpTo: n =>
     i := 0.
     [i < n] whileTrue: [
-      self.runs := self.runs + 1.    // compile error — mutation can't thread back
+      self.runs := self.runs + 1.
       i := i + 1
     ].
     self.runs
+```
 
-  // Correct: accumulate locally, mutate once after the loop
+**The one shape still rejected at compile time** is a loop/block body whose *only* mutation is the class-var write (or self-send) itself, with no other local variable read or written anywhere in the body. Such a body never triggers state threading in the first place (`needs_mutation_threading`, BT-1346) — it compiles as an ordinary block/closure instead, which has no way to carry the mutation back out, so the compiler rejects it rather than silently losing it. This is a pre-existing rule for a direct field write (`FieldAssignmentInUnsupportedBlock`, BT-2792), and BT-3151 closed the matching gap for a same-class self-send to a class-var-mutating method (`ClassMethodSelfSendInUnthreadedBlock`):
+
+```beamtalk
+Object subclass: LoopCounter
+  classState: runs = 0
+
+  // Rejected: nothing else in the loop body reads or writes a local, so
+  // this body never reaches state threading at all — the mutation would
+  // be silently lost.
   class countUpTo: n =>
-    i := 0.
-    count := self.runs.
-    [i < n] whileTrue: [
-      count := count + 1.
-      i := i + 1
+    n timesRepeat: [
+      self.runs := self.runs + 1    // compile error — mutation can't thread back
     ].
+    self.runs
+
+  // Fix #1: give the body a local to thread alongside the class var —
+  // it doesn't even need to be used afterward.
+  class countUpTo: n =>
+    seen := 0.
+    n timesRepeat: [
+      self.runs := self.runs + 1.
+      seen := seen + 1
+    ].
+    self.runs
+
+  // Fix #2: accumulate locally, mutate the class var once after the loop.
+  class countUpTo: n =>
+    count := self.runs.
+    n timesRepeat: [ count := count + 1 ].
     self.runs := count
 ```
 

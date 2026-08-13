@@ -3644,8 +3644,8 @@ fn test_class_method_self_send_in_while_loop_body_compiles_and_threads_class_var
     // instead. BT-3168 (ADR 0111 Addendum 9) closes that gap: `ClassVars`
     // now threads through the loop's own recursive tail call as an extra fun
     // parameter, so this compiles AND correctly accumulates. See
-    // `stdlib/test/state_threading_letrec_test.bt`'s
-    // `testClassMethodSelfSendInWhileLoopAccumulatesClassVar` for the
+    // `stdlib/test/loop_class_var_mutation_test.bt`'s
+    // `testSelfSendInWhileLoopAccumulates` for the
     // runtime-behavior pin (this test only pins the codegen shape).
     let src = "Value subclass: Driver\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self bump\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
     let tokens = crate::source_analysis::lex_with_eof(src);
@@ -4389,8 +4389,8 @@ fn test_class_var_mutation_in_while_loop_body_compiles_and_threads_class_vars() 
     // Addendum 9) closes the gap: `ClassVars` now threads through the loop's
     // own recursive tail call as an extra fun parameter, tagged with the
     // loop's real frame and a real ADR 0110 shadow write each iteration. See
-    // `stdlib/test/state_threading_letrec_test.bt`'s
-    // `testFieldAssignmentInWhileLoopAccumulatesClassVar` for the
+    // `stdlib/test/loop_class_var_mutation_test.bt`'s
+    // `testFieldAssignmentInWhileLoopAccumulates` for the
     // runtime-behavior pin (this test only pins the codegen shape).
     let src = "Object subclass: LoopShadowCounter\n  classState: runs = 0\n\n  class countUpTo: n =>\n    i := 0\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1\n      i := i + 1\n    ]\n    self.runs";
     let tokens = crate::source_analysis::lex_with_eof(src);
