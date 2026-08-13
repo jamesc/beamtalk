@@ -143,3 +143,12 @@ TestCase subclass: ActorThreadingConstructsTest
 
   testNestedListOpInBranchFalseUnchanged =>
     self assert: (self.a nestedListOpInBranch: false) equals: 0
+
+  // ── BT-3162: mutating construct nested inside another (non-conditional) ───────
+  // block's non-last position — previously corrupted the local with a raw
+  // {Result, StateAcc} tuple instead of the unpacked scalar.
+  testNestedEnsureNonLastInCollectBlockThreads =>
+    self assert: self.a nestedEnsureNonLastInCollectBlock equals: #(101, 102, 103)
+
+  testNestedIfNotNilNonLastInCollectBlockThreads =>
+    self assert: self.a nestedIfNotNilNonLastInCollectBlock equals: #(101, 102, 103)

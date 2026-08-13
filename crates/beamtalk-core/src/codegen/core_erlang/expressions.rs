@@ -2140,10 +2140,24 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Handle control flow with threaded variables (`whileTrue:`/`whileFalse:`/`timesRepeat:`).
+    /// Handle a non-last block-body statement that is a mutating control-flow
+    /// construct (`whileTrue:`/`whileFalse:`/`timesRepeat:`/loops, `ifTrue:`/
+    /// `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`, `on:do:`/`ensure:`, …) — one
+    /// this block's own top-level [`BlockMutationAnalysis`] doesn't classify
+    /// as captured-mutating (see [`Self::get_control_flow_threaded_vars`]),
+    /// so the enclosing block still compiled as a plain (non-`StateAcc`) fun.
     ///
-    /// For single var, the loop returns its final value directly.
-    /// For multiple vars, we'd need a tuple (not yet supported).
+    /// BT-3162: every one of these constructs' `generate_*_with_mutations`
+    /// generator returns a `{Result, StateAcc}` 2-tuple (`StateAcc` a map
+    /// keyed by [`Self::local_state_key`]) — `expr` alone is never the bare
+    /// scalar value. `element(2, ...)` + `maps:get` unpacks it the same way
+    /// the actor method-body sequencer's own "real state Bind" arm does
+    /// (`gen_server/methods.rs`); binding `core_var` directly to the raw
+    /// tuple (the pre-fix behavior) silently produced a `{Val, Map}` pair
+    /// where a scalar was expected, corrupting any later read of `var`.
+    ///
+    /// For multiple vars, we'd need to unpack more than one key — not yet
+    /// supported.
     fn generate_block_control_flow_threaded(
         &mut self,
         expr: &Expression,
@@ -2159,12 +2173,24 @@ impl CoreErlangGenerator {
                 .lookup_var(var)
                 .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
             let expr_doc = self.expression_doc(expr)?;
+            let tuple_var = self.fresh_temp_var("CtrlFlowResult");
+            let state_var = self.fresh_temp_var("CtrlFlowState");
             Ok(docvec![
                 "let ",
-                leaf::var(core_var.clone()),
+                leaf::var(tuple_var.clone()),
                 " = ",
                 expr_doc,
-                " in "
+                " in let ",
+                leaf::var(state_var.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var),
+                ") in let ",
+                leaf::var(core_var),
+                " = call 'maps':'get'(",
+                leaf::atom(Self::local_state_key(var)),
+                ", ",
+                leaf::var(state_var),
+                ") in "
             ])
         } else {
             // Multi-var case not supported yet
