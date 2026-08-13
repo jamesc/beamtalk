@@ -1037,8 +1037,10 @@ pub(crate) enum CodeGenContext {
 ///
 /// Allocated by [`CoreErlangGenerator::alloc_nlr_catch_vars`] and consumed by the
 /// single boundary-parameterised wrapper [`CoreErlangGenerator::wrap_body_with_nlr_catch`]
-/// (via [`CoreErlangGenerator::wrap_actor_body_with_nlr_catch`] and
-/// [`CoreErlangGenerator::wrap_class_method_body_with_nlr_catch`]) and by
+/// (via [`CoreErlangGenerator::wrap_actor_body_with_nlr_catch`]; the class-method
+/// boundary variant, `wrap_class_method_body_with_nlr_catch`, was deleted by BT-3164
+/// once its sole caller — `generate_class_method_fun_from_block` — migrated to
+/// prepending a real `ThreadedStmt::NlrCatch` instead) and by
 /// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`].
 #[allow(clippy::struct_field_names)]
 struct NlrCatchVars {
@@ -2791,24 +2793,6 @@ impl CoreErlangGenerator {
         } else {
             try_catch
         }
-    }
-
-    /// BT-1202: Wraps a class method body with NLR (non-local return) try/catch.
-    ///
-    /// Class method NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, ClassVars}` and
-    /// catches it to return `NlrVal` directly (no class vars) or
-    /// `{class_var_result, NlrVal, NlrState}` (with class vars).
-    pub(super) fn wrap_class_method_body_with_nlr_catch(
-        &mut self,
-        body_doc: Document<'static>,
-        token_var: &str,
-        has_class_vars: bool,
-    ) -> Document<'static> {
-        self.wrap_body_with_nlr_catch(
-            body_doc,
-            token_var,
-            NlrBoundary::ClassMethod { has_class_vars },
-        )
     }
 
     /// BT-2361: The single boundary-parameterised NLR try/catch wrapper.

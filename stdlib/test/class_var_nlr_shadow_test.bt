@@ -20,6 +20,7 @@ TestCase subclass: ClassVarNlrShadowTest
 
   setUp =>
     CollectionDriver resetRunCount
+    CollectionProbe resetHits
     ShadowRelayParent resetHits
     ShadowRelayChild resetHits
     ClassMethodConditionalSelfCall resetCounter
@@ -47,6 +48,28 @@ TestCase subclass: ClassVarNlrShadowTest
   testRepeatedEscapesAccumulate =>
     self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2
     self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2
+    self assert: CollectionDriver runCount equals: 2
+
+  // --- (a2) BT-3164: a method's own last-statement class-var mutation ------
+  // shares its body with that SAME method's own real local NlrCatch (not a
+  // foreign relay) — the ADR 0110 joint-visibility gap ADR 0111 Addendum 6
+  // left open for class methods (`VerifyError::ShadowWriteMissing` could
+  // not previously see a real class-var `Bind` and a real class-method
+  // `NlrCatch` in the same verified IR). Both branches below pin that the
+  // new `lower_class_method_last_class_var_bind` `Bind` composes correctly
+  // with a real local NLR catch in the same body: the `^` unwinding before
+  // the mutation ever runs, and the mutation landing normally when it
+  // doesn't.
+  testOwnLastStatementClassVarMutationSharesBodyWithOwnRealNlrCatch =>
+    // `x > 1` matches x=2 — the local `^` fires and unwinds before this
+    // method's own last statement (`self.hits := self.hits + 1`) runs.
+    self assert: (CollectionProbe escapeAfterCountedRunThenBump: #(1, 2, 3)) equals: 2
+    self assert: CollectionProbe hits equals: 0
+    self assert: CollectionDriver runCount equals: 1
+    // No element `> 1` — the call completes normally, so the last
+    // statement's class-var mutation runs and becomes the return value.
+    self assert: (CollectionProbe escapeAfterCountedRunThenBump: #(1)) equals: 1
+    self assert: CollectionProbe hits equals: 1
     self assert: CollectionDriver runCount equals: 2
 
   // --- (b) a genuine error still reverts -----------------------------------
