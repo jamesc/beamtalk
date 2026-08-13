@@ -2980,18 +2980,38 @@ impl CoreErlangGenerator {
                     // also threads a self-send's own `ClassVarsN` rebind
                     // forward past this `let _ = …` boundary when
                     // `plan.threads_class_vars` (see its own doc comment).
-                    if has_mutations || has_plain_lets {
+                    //
+                    // BT-3169 review fix: this arm must take the same
+                    // unconditional-threading path as `FoldlCollect`/
+                    // `FoldlInject`/the predicate arms whenever
+                    // `plan.threads_class_vars` — not just when
+                    // `has_mutations || has_plain_lets`. A bare, last-statement
+                    // self-send with no co-occurring local mutation (e.g.
+                    // `aList do: [:x | self bump]`) previously fell to
+                    // `closed_expression_doc`, which closes the self-send's own
+                    // `ClassVarsN` rebind out of scope — but the generic
+                    // `{ClassVars, tail}` wrap in `generate_threaded_loop_body_inner`
+                    // (fired whenever `plan.threads_class_vars`, independent of
+                    // `has_mutations`) then referenced that now-out-of-scope name,
+                    // an `erlc` "unbound variable" regression confirmed empirically.
+                    let threads_here = has_mutations || has_plain_lets || plan.threads_class_vars;
+                    if threads_here {
                         docs.push(self.bind_closed_expr_threading_class_vars(expr, "_", plan)?);
                     } else {
                         let doc = self.closed_expression_doc(expr)?;
                         docs.push(doc);
                     }
-                    if has_mutations || has_plain_lets {
+                    if threads_here {
                         if plan.use_tuple_acc {
                             // BT-1276: Repack threaded locals as tuple.
                             docs.push(docvec!["{", plan.current_vars_doc(self), "}"]);
                         } else {
-                            docs.push(leaf::var(self.current_state_var()));
+                            let fs = if has_mutations {
+                                self.current_state_var()
+                            } else {
+                                "StateAcc".to_string()
+                            };
+                            docs.push(leaf::var(fs));
                         }
                     }
                 } else {

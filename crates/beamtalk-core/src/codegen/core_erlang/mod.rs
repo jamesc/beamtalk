@@ -2595,21 +2595,30 @@ impl CoreErlangGenerator {
     /// threading correct in the first place).
     ///
     /// Returns `Some(prelude_doc)` — a `"let <fresh ClassVarsN> = <shadow
-    /// read> in "` binding the caller should push immediately after its own
-    /// opaque-value `let` — when `self.class_var_version()` advanced across
-    /// generating the just-built expression (`version_before` is the
-    /// version read immediately before generating it); `None` when nothing
-    /// changed (including, by construction, every non-class-method context,
-    /// where no code path ever advances `class_var_version` at all).
+    /// read, falling back to the pre-scope value> in "` binding the caller
+    /// should push immediately after its own opaque-value `let` — when
+    /// `self.class_var_version()` advanced across generating the just-built
+    /// expression (`version_before` is the version read immediately before
+    /// generating it); `None` when nothing changed (including, by
+    /// construction, every non-class-method context, where no code path
+    /// ever advances `class_var_version` at all).
     ///
-    /// Known narrower gap (not closed here): an INHERITED self-send
-    /// (`self someInheritedMethod`) routes through `class_self_dispatch`
-    /// instead of a direct module call; if that dispatch path erases the
-    /// shadow key itself (mirroring `invoke_class_method/7`'s own `after`),
-    /// a read here would observe `undefined` rather than the mutated value.
-    /// Not reachable by any of this issue's own repros (all locally-defined
-    /// self-sends) — tracked as a residual gap, the same class already
-    /// documented elsewhere for provably-pure-vs-mutating callee analysis.
+    /// **Guarded against a false-positive shadow read** (found during
+    /// review): `class_var_version` advances on EVERY class-method
+    /// self-send (`emit_class_var_result_unwrap` calls `next_class_var()`
+    /// unconditionally, whether or not the callee performs a real field
+    /// write), but the shadow key is written only by an actual
+    /// `self.field := value` (`shadow_write: true`). A pure self-send (e.g.
+    /// a `select:`/`collect:` predicate/transform with no field write) would
+    /// otherwise read back the atom `'undefined'` and corrupt this class
+    /// method's own class-var state. The `case` below treats `'undefined'`
+    /// as "nothing new was shadow-written" and falls back to the value that
+    /// was already live before this scope, rather than trusting the read.
+    /// This also subsumes the narrower, previously-documented INHERITED
+    /// self-send gap (`self someInheritedMethod` routing through
+    /// `class_self_dispatch`, which may erase the shadow key the same way
+    /// `invoke_class_method/7`'s own `after` does) — that path now falls
+    /// back safely too, for the same reason.
     pub(super) fn refresh_class_var_after_opaque_scope(
         &mut self,
         version_before: usize,
@@ -2617,15 +2626,25 @@ impl CoreErlangGenerator {
         if self.class_var_version() == version_before {
             return None;
         }
+        let mut before_counter = VersionCounter::new();
+        before_counter.set_version(version_before);
+        let cv_before = before_counter.current_var(VersionPrefix::ClassVars);
+        let shadow_raw = self.fresh_temp_var("ClassVarsShadow");
         let cv_new = self.next_class_var();
         Some(docvec![
             "let ",
-            leaf::var(cv_new),
+            leaf::var(shadow_raw.clone()),
             " = call 'erlang':'get'({",
             leaf::atom("$bt_class_vars_shadow"),
             ", call 'erlang':'element'(2, ",
             leaf::var("ClassSelf"),
-            ")}) in ",
+            ")}) in let ",
+            leaf::var(cv_new),
+            " = case ",
+            leaf::var(shadow_raw),
+            " of <'undefined'> when 'true' -> ",
+            leaf::var(cv_before),
+            " <_ShadowVal> when 'true' -> _ShadowVal end in ",
         ])
     }
 

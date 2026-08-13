@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3169 review fix: real BEAM execution coverage for
+// `refresh_class_var_after_opaque_scope`'s guard against a false-positive
+// ADR 0110 shadow-write read (see `foldl_class_var_regression.bt`).
+
+TestCase subclass: FoldlClassVarRegressionTest
+
+  setUp =>
+    FoldlClassVarRegression resetTotal
+    self
+
+  testPureSelfSendPredicateSurvives =>
+    self assert: (FoldlClassVarRegression positives: #[-2, 3, -1, 5]) equals: #[3, 5]
+
+  testPureSelfSendPredicateDoesNotCorruptClassVarState =>
+    FoldlClassVarRegression positives: #[-2, 3, -1, 5]
+    self assert: FoldlClassVarRegression total equals: 100
