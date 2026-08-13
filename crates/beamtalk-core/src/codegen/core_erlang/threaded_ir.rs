@@ -2462,12 +2462,15 @@ pub(super) fn verify_body_with_opaque_version_gaps(ir: &[ThreadedStmt]) -> Vec<V
 /// Shared backfill step for one `VersionPrefix` inside
 /// [`verify_body_with_opaque_version_gaps`]'s per-`Bind` scan — extracted so
 /// the identical technique isn't hand-duplicated once per prefix (CLAUDE.md's
-/// no-duplicate-implementations rule). `prefix` must be one that never
-/// carries the ADR 0110 shadow-write obligation on the SYNTHETIC backfill
-/// `Bind`s this inserts (`State`/`ClassVars` both qualify — `shadow_write:
-/// false` on a backfilled gap step is correct either way, since a real gap
-/// step is never itself the top-frame mutation `ShadowWriteMissing` is
-/// checking; only a body's own real `Bind`s can be that).
+/// no-duplicate-implementations rule). The synthetic `Bind`s this inserts
+/// always carry `shadow_write: true` (BT-3164, fixing a real bug this
+/// issue's own review caught: an earlier `false` here spuriously tripped
+/// [`VerifyError::ShadowWriteMissing`] on a `ClassVars` gap step whenever a
+/// real `NlrCatch` was present — see the `shadow_write: true` assignment
+/// below for the full reasoning, the same [`construct_and_verify_class_var_bind`]
+/// already established for its own backfill loop). Moot for `State`
+/// (`ShadowWriteMissing` never inspects `State`-prefix `Bind`s); load-bearing
+/// for `ClassVars`.
 fn backfill_opaque_version_gap(
     fixture: &mut Vec<ThreadedStmt>,
     prefix: &VersionPrefix,
@@ -2481,23 +2484,26 @@ fn backfill_opaque_version_gap(
                 target: VersionedVar::new(prefix.clone(), v, FrameId::ROOT),
                 source: VersionedVar::new(prefix.clone(), v - 1, FrameId::ROOT),
                 op: BindOp::Direct(ValueRef::Literal("'_'")),
-                // BT-3164: `true`, not `false` — this synthetic step stands
-                // in for a REAL mutation this verifier cannot see (it lives
-                // inside an opaque `Statement`, e.g. `emit_class_var_result_unwrap`'s
-                // own internal `next_class_var()` bump for a class-method
-                // self-send). For `State` this is moot (`ShadowWriteMissing`
-                // never inspects `State`-prefix `Bind`s), but for `ClassVars`
-                // a `false` here would claim "this top-frame mutation is
-                // definitely missing its ADR 0110 shadow write" about a step
-                // whose real emission site this verifier never inspected —
-                // exactly the false-positive `ShadowWriteMissing` a class
-                // method with a class-var-mutating self-send followed by its
-                // own real last-statement class-var `Bind` would spuriously
-                // trip otherwise (confirmed by
+                // BT-3164: `true`, not `false` — same reasoning
+                // `construct_and_verify_class_var_bind`'s own `1..=source_version`
+                // backfill loop (above) already documents for its synthetic
+                // steps: this stands in for a REAL mutation this verifier
+                // cannot see (it lives inside an opaque `Statement`, e.g.
+                // `emit_class_var_result_unwrap`'s own internal
+                // `next_class_var()` bump for a class-method self-send). For
+                // `State` this is moot (`ShadowWriteMissing` never inspects
+                // `State`-prefix `Bind`s), but for `ClassVars` a `false` here
+                // would claim "this top-frame mutation is definitely missing
+                // its ADR 0110 shadow write" about a step whose real emission
+                // site this verifier never inspected — exactly the
+                // false-positive `ShadowWriteMissing` a class method with a
+                // class-var-mutating self-send followed by its own real
+                // last-statement class-var `Bind` spuriously tripped before
+                // this fix (confirmed by
                 // `verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing`
-                // below). ADR 0111 §Verifier honesty: a check that cannot
-                // see the real site must not assert a verdict about it —
-                // `true` is silence, not a claim of compliance either way.
+                // below). ADR 0111 §Verifier honesty: a check that cannot see
+                // the real site must not assert a verdict about it — `true`
+                // is silence, not a claim of compliance either way.
                 shadow_write: true,
                 span: Span::default(),
             });
