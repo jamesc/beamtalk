@@ -55,13 +55,13 @@ infProxy slowGet: 50
 // ===========================================================================
 
 slow stop
-// => _
+// => ok
 
 proxy stop
-// => _
+// => ok
 
 shortProxy stop
-// => _
+// => ok
 
 infProxy stop
-// => _
+// => ok
