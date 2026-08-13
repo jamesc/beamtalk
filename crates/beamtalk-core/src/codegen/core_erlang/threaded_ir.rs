@@ -2483,9 +2483,9 @@ pub(super) fn verify_body_with_opaque_version_gaps(ir: &[ThreadedStmt]) -> Vec<V
 /// handed the real version numbers already read off the live generator
 /// counter and share its `1..=source_version` backfill technique), but
 /// without that function's class-var-specific `ShadowWriteMissing`
-/// machinery (the synthetic `NlrCatch` marker, `at_method_top_frame`'s
-/// `FrameId` selection) — `Self{N}`/`State{N}` mutations never carry that
-/// ADR 0110 obligation. This helper is handed the *actual* version numbers,
+/// machinery (the synthetic `NlrCatch` marker, the `frame`/
+/// `shadow_write_eligible` pair) — `Self{N}`/`State{N}` mutations never
+/// carry that ADR 0110 obligation. This helper is handed the *actual* version numbers,
 /// which may already be arbitrarily large after earlier mutations in the
 /// same method. [`VerifyWalk::check_use`]'s
 /// frame-flow rule requires every version `>0` referenced as a `Bind`'s
