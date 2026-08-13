@@ -3854,8 +3854,11 @@ impl CoreErlangGenerator {
             _ => unreachable!("is_class_var_assignment guarantees an Assignment"),
         };
 
-        let (preamble_doc, bind, val_var) =
-            self.lower_class_var_field_assignment_bind(&field_name, value)?;
+        let (preamble_doc, bind, val_var) = self.lower_class_var_field_assignment_bind(
+            &field_name,
+            value,
+            threaded_ir::FrameId::ROOT,
+        )?;
 
         let final_cv = self.current_class_var();
         stmts.push(threaded_ir::ThreadedStmt::Statement(preamble_doc, span));

@@ -3630,20 +3630,23 @@ fn test_class_method_local_var_after_class_var_mutation() {
 }
 
 #[test]
-fn test_class_method_self_send_in_while_loop_body_is_compile_error() {
-    // BT-3150: a self-send to a same-class class method (`self bump`) used as
-    // a bare statement inside a `whileTrue:` loop body previously produced a
-    // `core_parse_error` — a doubled `in in` around the self-send's
-    // `class_var_result` tuple-unwrapping, from `emit_class_var_result_unwrap`'s
-    // open let-chain being re-wrapped by the loop body's naive
-    // `let _ = <expr> in` statement sequencing. Fixing only the syntax (so it
-    // compiles) was tried and rejected: the mutation is silently discarded by
-    // the time the loop finishes (confirmed empirically — a `bump`-based
-    // counter stayed at 0 across 3 iterations instead of accumulating),
-    // because `ClassVarsN` is never threaded through the loop's recursive
-    // tail call the way `StateAcc` is. Rejected at compile time instead —
-    // BT-3140 found and rejected the same underlying gap for the
-    // direct-field-write analog (`self.field := ...` inside a loop body).
+fn test_class_method_self_send_in_while_loop_body_compiles_and_threads_class_vars() {
+    // BT-3150/BT-3168: a self-send to a same-class class method (`self bump`)
+    // used as a bare statement inside a `whileTrue:` loop body previously
+    // produced a `core_parse_error` — a doubled `in in` around the
+    // self-send's `class_var_result` tuple-unwrapping, from
+    // `emit_class_var_result_unwrap`'s open let-chain being re-wrapped by the
+    // loop body's naive `let _ = <expr> in` statement sequencing. Fixing only
+    // the syntax (so it compiles) was tried and rejected at the time (BT-3140/
+    // BT-3150): the mutation was silently discarded by the time the loop
+    // finished, because `ClassVarsN` was never threaded through the loop's
+    // recursive tail call the way `StateAcc` was — rejected at compile time
+    // instead. BT-3168 (ADR 0111 Addendum 9) closes that gap: `ClassVars`
+    // now threads through the loop's own recursive tail call as an extra fun
+    // parameter, so this compiles AND correctly accumulates. See
+    // `stdlib/test/state_threading_letrec_test.bt`'s
+    // `testClassMethodSelfSendInWhileLoopAccumulatesClassVar` for the
+    // runtime-behavior pin (this test only pins the codegen shape).
     let src = "Value subclass: Driver\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self bump\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3651,25 +3654,29 @@ fn test_class_method_self_send_in_while_loop_body_is_compile_error() {
         &module,
         CodegenOptions::new("bt@driver").with_workspace_mode(true),
     );
-    match result {
-        Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { selector, .. }) => {
-            assert_eq!(selector, "bump");
-        }
-        other => panic!(
-            "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method \
-             self-send inside a whileTrue: body. Got: {other:?}"
-        ),
-    }
+    let code = result
+        .unwrap_or_else(|e| panic!("self bump inside a whileTrue: body must compile. Got: {e:?}"));
+    assert!(
+        !code.contains("in  in"),
+        "Should not contain doubled `in` keyword. Got:\n{code}"
+    );
+    assert!(
+        code.contains("fun (StateAcc, ClassVars)"),
+        "The whileTrue: letrec fun must thread ClassVars as an extra param. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'nil', StateAcc, ClassVars}"),
+        "The whileTrue: exit arm must carry ClassVars through. Got:\n{code}"
+    );
 }
 
 #[test]
-fn test_class_method_self_send_in_to_do_loop_body_is_compile_error() {
-    // BT-3150 review nit: `to:do:`/`to:by:do:` compile through the same
-    // `generate_counted_stateful_loop`/`BodyKind::Letrec` path as
+fn test_class_method_self_send_in_to_do_loop_body_compiles_and_threads_class_vars() {
+    // BT-3150 review nit / BT-3168: `to:do:`/`to:by:do:` compile through the
+    // same `generate_counted_stateful_loop`/`BodyKind::Letrec` path as
     // `timesRepeat:` (see `control_flow/mod.rs`'s `generate_counted_stateful_loop`
-    // doc comment), so the guard — and its error message, which explicitly
-    // names `to:do:`/`to:by:do:` alongside `whileTrue:`/`timesRepeat:` — must
-    // cover this construct too, not just `whileTrue:`/`timesRepeat:`.
+    // doc comment), so the `ClassVars`-threading fix must cover this
+    // construct too, not just `whileTrue:`/`timesRepeat:`.
     let src = "Value subclass: DriverToDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    1 to: n do: [:i | self bump. total := total + i]\n    total";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3677,15 +3684,16 @@ fn test_class_method_self_send_in_to_do_loop_body_is_compile_error() {
         &module,
         CodegenOptions::new("bt@drivertodo").with_workspace_mode(true),
     );
-    match result {
-        Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { selector, .. }) => {
-            assert_eq!(selector, "bump");
-        }
-        other => panic!(
-            "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method \
-             self-send inside a to:do: body. Got: {other:?}"
-        ),
-    }
+    let code = result
+        .unwrap_or_else(|e| panic!("self bump inside a to:do: body must compile. Got: {e:?}"));
+    assert!(
+        !code.contains("in  in"),
+        "Should not contain doubled `in` keyword. Got:\n{code}"
+    );
+    assert!(
+        code.contains(", StateAcc, ClassVars) ->"),
+        "The to:do: letrec fun must thread ClassVars as an extra param. Got:\n{code}"
+    );
 }
 
 #[test]
@@ -3774,14 +3782,16 @@ fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl()
 }
 
 #[test]
-fn test_class_method_self_send_alongside_local_in_times_repeat_body_is_compile_error() {
-    // BT-3150: the same gap reached via `timesRepeat:` instead of `whileTrue:`,
-    // with a co-occurring local-variable mutation — a bare self-send-only
-    // `timesRepeat:` body doesn't reach the state-threaded loop codegen path
-    // at all (see `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
+fn test_class_method_self_send_alongside_local_in_times_repeat_body_compiles() {
+    // BT-3150/BT-3168: the same gap reached via `timesRepeat:` instead of
+    // `whileTrue:`, with a co-occurring local-variable mutation — a bare
+    // self-send-only `timesRepeat:` body doesn't reach the state-threaded
+    // loop codegen path at all (see
+    // `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
     // below), so this pins the shape that actually reaches it: a loop that
     // legitimately needs local threading (an accumulator) with a class-method
-    // self-send alongside it.
+    // self-send alongside it. Now compiles and threads ClassVars correctly
+    // (BT-3168, ADR 0111 Addendum 9) instead of being rejected.
     let src = "Value subclass: Driver5\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    n timesRepeat: [\n      self bump\n      total := total + 1\n    ]\n    total";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3789,24 +3799,28 @@ fn test_class_method_self_send_alongside_local_in_times_repeat_body_is_compile_e
         &module,
         CodegenOptions::new("bt@driver5").with_workspace_mode(true),
     );
+    let code = result.unwrap_or_else(|e| {
+        panic!(
+            "self bump alongside a local mutation inside a timesRepeat: body must compile. \
+             Got: {e:?}"
+        )
+    });
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { .. })
-        ),
-        "Expected ClassMethodSelfSendInThreadedLoopBody for a class-method self-send \
-         alongside a local-variable mutation inside a timesRepeat: body. Got: {result:?}"
+        code.contains(", StateAcc, ClassVars) ->"),
+        "The timesRepeat: letrec fun must thread ClassVars as an extra param. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_non_mutating_class_method_self_send_in_loop_body_is_also_compile_error() {
-    // BT-3150: every same-class class-method self-send routes through the
-    // same `{class_var_result, ...}` unwrap convention regardless of whether
-    // the callee actually touches class state — the caller can't know that
-    // statically (the callee may be overridden, or defined later in the
-    // file). So the rejection is unconditional on any class-method self-send
-    // in a threaded loop body, not just ones provably mutating a class var.
+fn test_non_mutating_class_method_self_send_in_loop_body_also_compiles() {
+    // BT-3150/BT-3168: every same-class class-method self-send routes
+    // through the same `{class_var_result, ...}` unwrap convention
+    // regardless of whether the callee actually touches class state — the
+    // caller can't know that statically (the callee may be overridden, or
+    // defined later in the file). `ClassVars` threading (BT-3168) works
+    // unconditionally for the same reason: it doesn't need to know whether
+    // the self-send actually mutates anything, only that the callee's return
+    // convention always carries a (possibly-unchanged) `ClassVars` value.
     let src = "Value subclass: Driver7\n  class helper: x => x * 2\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self helper: i\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3815,12 +3829,9 @@ fn test_non_mutating_class_method_self_send_in_loop_body_is_also_compile_error()
         CodegenOptions::new("bt@driver7").with_workspace_mode(true),
     );
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody { .. })
-        ),
-        "Expected ClassMethodSelfSendInThreadedLoopBody even for a self-send whose \
-         callee doesn't touch class state. Got: {result:?}"
+        result.is_ok(),
+        "self helper: (a pure, non-class-var-mutating self-send) inside a whileTrue: body \
+         must compile. Got: {result:?}"
     );
 }
 
@@ -4364,19 +4375,23 @@ fn test_class_var_mutation_emits_shadow_write() {
 }
 
 #[test]
-fn test_class_var_mutation_in_while_loop_body_is_compile_error() {
-    // BT-3140: a class-var mutation made directly inside a whileTrue: loop
-    // body can't thread through `generate_field_assignment_open`'s generic
-    // State/StateAcc mechanism — it silently wrote into the loop's own
-    // scratch StateAcc map instead of ClassVars, losing the mutation on
-    // both normal return and a foreign NLR escape (confirmed empirically
-    // via a throwaway BUnit driver/probe fixture, mirroring
-    // fixtures/collection_driver.bt/collection_probe.bt's shape with the
-    // mutation moved inside the loop — not committed, since the compile-time
-    // rejection below makes that runtime repro permanently uncompilable).
-    // Rejected at compile time instead, mirroring BT-2792's
-    // FieldAssignmentInUnsupportedBlock for the analogous "can't thread this
-    // state" shape.
+fn test_class_var_mutation_in_while_loop_body_compiles_and_threads_class_vars() {
+    // BT-3140/BT-3168: a class-var mutation made directly inside a
+    // whileTrue: loop body previously couldn't thread through
+    // `generate_field_assignment_open`'s generic State/StateAcc mechanism —
+    // it silently wrote into the loop's own scratch StateAcc map instead of
+    // ClassVars, losing the mutation on both normal return and a foreign NLR
+    // escape (confirmed empirically via a throwaway BUnit driver/probe
+    // fixture, mirroring fixtures/collection_driver.bt/collection_probe.bt's
+    // shape with the mutation moved inside the loop), so it was rejected at
+    // compile time instead, mirroring BT-2792's FieldAssignmentInUnsupportedBlock
+    // for the analogous "can't thread this state" shape. BT-3168 (ADR 0111
+    // Addendum 9) closes the gap: `ClassVars` now threads through the loop's
+    // own recursive tail call as an extra fun parameter, tagged with the
+    // loop's real frame and a real ADR 0110 shadow write each iteration. See
+    // `stdlib/test/state_threading_letrec_test.bt`'s
+    // `testFieldAssignmentInWhileLoopAccumulatesClassVar` for the
+    // runtime-behavior pin (this test only pins the codegen shape).
     let src = "Object subclass: LoopShadowCounter\n  classState: runs = 0\n\n  class countUpTo: n =>\n    i := 0\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1\n      i := i + 1\n    ]\n    self.runs";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -4384,15 +4399,19 @@ fn test_class_var_mutation_in_while_loop_body_is_compile_error() {
         &module,
         CodegenOptions::new("bt@loopshadowcounter").with_workspace_mode(true),
     );
-    match result {
-        Err(CodeGenError::ClassVarAssignmentInThreadedBody { field, .. }) => {
-            assert_eq!(field, "runs");
-        }
-        other => panic!(
-            "Expected ClassVarAssignmentInThreadedBody for a class-var mutation \
-             inside a whileTrue: body. Got: {other:?}"
+    let code = result.unwrap_or_else(|e| {
+        panic!("self.runs := ... inside a whileTrue: body must compile. Got: {e:?}")
+    });
+    assert!(
+        code.contains("fun (StateAcc, ClassVars)"),
+        "The whileTrue: letrec fun must thread ClassVars as an extra param. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
         ),
-    }
+        "the loop-body mutation must still emit the ADR 0110 shadow write. Got:\n{code}"
+    );
 }
 
 #[test]
@@ -4425,13 +4444,14 @@ fn test_bare_class_var_mutation_in_times_repeat_body_hits_existing_stored_closur
 }
 
 #[test]
-fn test_class_var_mutation_alongside_local_in_times_repeat_body_is_compile_error() {
-    // BT-3140: once a `timesRepeat:` body ALSO has a local-variable mutation
-    // (or self-send), `needs_mutation_threading` fires for that reason and the
-    // body IS routed through `generate_threaded_loop_body` — reaching the same
-    // `generate_field_assignment_open` gap as whileTrue:. This is the shape
-    // that actually matters: a loop that legitimately needs local threading
-    // (an accumulator, a counter) with a class-var write alongside it.
+fn test_class_var_mutation_alongside_local_in_times_repeat_body_compiles() {
+    // BT-3140/BT-3168: once a `timesRepeat:` body ALSO has a local-variable
+    // mutation (or self-send), `needs_mutation_threading` fires for that
+    // reason and the body IS routed through `generate_threaded_loop_body` —
+    // this is the shape that actually matters: a loop that legitimately
+    // needs local threading (an accumulator, a counter) with a class-var
+    // write alongside it. Now compiles and threads ClassVars correctly
+    // (BT-3168, ADR 0111 Addendum 9) instead of being rejected.
     let src = "Object subclass: TimesRepeatShadowCounter2\n  classState: runs = 0\n\n  class bumpN: n =>\n    seen := 0\n    n timesRepeat: [\n      self.runs := self.runs + 1\n      seen := seen + 1\n    ]\n    seen";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -4439,14 +4459,15 @@ fn test_class_var_mutation_alongside_local_in_times_repeat_body_is_compile_error
         &module,
         CodegenOptions::new("bt@timesrepeatshadowcounter2").with_workspace_mode(true),
     );
+    let code = result.unwrap_or_else(|e| {
+        panic!(
+            "self.runs := ... alongside a local mutation inside a timesRepeat: body must \
+             compile. Got: {e:?}"
+        )
+    });
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::ClassVarAssignmentInThreadedBody { .. })
-        ),
-        "Expected ClassVarAssignmentInThreadedBody for a class-var mutation \
-         alongside a local-variable mutation inside a timesRepeat: body. \
-         Got: {result:?}"
+        code.contains(", StateAcc, ClassVars) ->"),
+        "The timesRepeat: letrec fun must thread ClassVars as an extra param. Got:\n{code}"
     );
 }
 

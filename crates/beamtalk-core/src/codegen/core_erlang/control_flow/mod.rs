@@ -222,26 +222,47 @@ pub(super) struct ThreadingPlan {
     ///
     /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
     pub mutated_fields: Vec<String>,
-    /// BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): `true` when this
-    /// `Foldl*` body is a class-method loop/fold body (`generator.in_class_method()`,
-    /// `context != Actor` — see this field's own construction site for why the
-    /// `Actor`-context exclusion matters) that contains a self-send
-    /// (`body_analysis.has_self_sends`) — the only shape Question 4 Part A
-    /// found reachable for `ClassVars` mutation via a class-method self-send,
-    /// since `has_self_sends` already unconditionally forces `StateAcc`/
-    /// plain-map-fold mode (`use_tuple_acc`/`use_direct_params`/`use_hybrid_params`
-    /// all false) whenever it's true. When `true`, the fold's own accumulator
-    /// must carry an extra `ClassVars` slot (a leading tuple position,
-    /// Question 6) so a class-var mutation made by the self-send survives the
-    /// fold instead of being silently discarded — the exact BT-3151 gap this
-    /// issue closes. A bare class-var field write (not a self-send) inside a
-    /// threaded body is unaffected — `reject_class_var_field_assignment`
-    /// already rejects that at compile time, unchanged by this field.
+    /// BT-3168/BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): `true` when
+    /// this loop/fold body threads a `ClassVars` mutation. Two mutually
+    /// exclusive shapes, distinguished by `allow_direct_params` at
+    /// construction time (never both true for the same plan):
+    ///
+    /// * **Letrec** (`new_for_letrec`, `allow_direct_params: true`, BT-3168):
+    ///   `true` when the body has a direct class-var field write or a
+    ///   same-class self-send (`generator.loop_body_threads_class_vars`).
+    ///   Threads through the loop's own recursive tail call as an extra,
+    ///   explicit trailing fun parameter, never folded into `StateAcc`'s own
+    ///   map (Question 3). Per Question 4 Part A, any body shape that sets
+    ///   this also always has `use_direct_params`/`use_tuple_acc`/
+    ///   `use_hybrid_params` all `false`, so only the `StateAcc` base-path
+    ///   loop generators (`while_loops.rs`, `counted_loops.rs`) ever consult
+    ///   it in this shape.
+    /// * **`Foldl*`** (`new`/`new_for_foldl_list_op`, `allow_direct_params:
+    ///   false`, BT-3169): `true` when this is a class-method loop/fold body
+    ///   (`generator.in_class_method()`, `context != Actor` — see this
+    ///   field's own construction site for why the `Actor`-context exclusion
+    ///   matters) that contains a self-send (`body_analysis.has_self_sends`)
+    ///   — the only shape Question 4 Part A found reachable for `ClassVars`
+    ///   mutation via a class-method self-send, since `has_self_sends`
+    ///   already unconditionally forces `StateAcc`/plain-map-fold mode
+    ///   whenever it's true. When `true`, the fold's own accumulator must
+    ///   carry an extra `ClassVars` slot (a leading tuple position, Question
+    ///   6) so a class-var mutation made by the self-send survives the fold
+    ///   instead of being silently discarded — the exact BT-3151 gap BT-3169
+    ///   closes.
+    ///
+    /// A bare class-var field write (not a self-send) inside a threaded
+    /// `Foldl*` body is unaffected by the `Foldl*` shape above —
+    /// `reject_class_var_field_assignment` already rejects that at compile
+    /// time, unchanged by this field.
     pub threads_class_vars: bool,
     /// BT-3169: the class-var version name (`generator.current_class_var()`)
     /// in effect immediately before this loop/fold begins — mirrors
     /// `initial_state_var`'s own capture-at-construction-time discipline.
-    /// Only meaningful when `threads_class_vars` is `true`.
+    /// Only meaningful for the `Foldl*` shape of `threads_class_vars`
+    /// (`allow_direct_params: false`) — the Letrec shape threads `ClassVars`
+    /// via its own recursive-call fun parameter instead, never consulting
+    /// this field.
     pub initial_class_var: String,
 }
 
@@ -485,7 +506,7 @@ impl ThreadingPlan {
             use_direct_params,
             &body_analysis,
             &effects,
-            generator.in_class_method(),
+            generator,
         );
 
         // BT-1326: In hybrid mode, collect fields that are read but never written.
@@ -528,6 +549,11 @@ impl ThreadingPlan {
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
 
+        // BT-3168 (ADR 0111 Addendum 9, Question 3/4): whether this Letrec
+        // loop body threads a `ClassVars` mutation through its own recursive
+        // tail call. Only ever true for `new_for_letrec`-constructed plans
+        // (`allow_direct_params`).
+        //
         // BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): a class-method
         // `Foldl*` body containing a self-send needs to thread `ClassVars`
         // through the fold's own accumulator. Excluded for `Actor` context:
@@ -566,10 +592,16 @@ impl ThreadingPlan {
         // Foldl-only wrap on the OUTER Letrec plan (the nested `do:`'s own,
         // separately-constructed Foldl plan still threads correctly on its
         // own terms).
-        let threads_class_vars = !allow_direct_params
-            && !matches!(context, CodeGenContext::Actor)
-            && generator.in_class_method()
-            && body_analysis.has_self_sends;
+        let threads_class_vars = if allow_direct_params {
+            // Letrec shape (BT-3168): `new_for_letrec`-constructed plans only.
+            generator.loop_body_threads_class_vars(body)
+        } else {
+            // Foldl* shape (BT-3169): `new`/`new_for_foldl_list_op`-constructed
+            // plans only.
+            !matches!(context, CodeGenContext::Actor)
+                && generator.in_class_method()
+                && body_analysis.has_self_sends
+        };
         let initial_class_var = generator.current_class_var();
 
         Self {
@@ -640,20 +672,22 @@ impl ThreadingPlan {
     /// (tier-2 assignments, control-flow mutations, conditional writes, nested list ops)
     /// prevent it. Actor context only (`ValueType` has no actor State to thread).
     ///
-    /// BT-3169 (ADR 0111 Addendum 9, Question 4 Part B): also excluded for
-    /// any class-method loop/fold body (`in_class_method`), even one whose
-    /// class is an `Actor` subclass. `Hybrid`'s whole premise — amortize the
-    /// `State` map's per-iteration `maps:get`/`maps:put` cost by pre-extracting
-    /// mutated fields as direct fun params — has no `State` to amortize
-    /// against inside a class method (a class method's own `field_writes` are,
-    /// by construction, 100% class-var names; there is no instance `self.field`
-    /// at that level). Before this guard, an `Actor` subclass's class-method
-    /// loop body writing only a class var could latently select `Hybrid`
-    /// (confirmed empirically, ADR 0111 Addendum 9 Question 4 Part B) — the
-    /// exact wrong-pre-extraction shape this addendum's repros found, though
-    /// it never manifested as a live bug because `reject_class_var_field_assignment`
-    /// already rejects any direct class-var field write downstream, regardless
-    /// of which mode was selected first.
+    /// BT-3168 (ADR 0111 Addendum 9, Question 4 Part B): also excluded for ANY
+    /// class-method loop/fold body (`generator.in_class_method()`), not just
+    /// `ValueType` ones. A class method has no instance `self.field` at all —
+    /// `field_writes` inside a class-method body is, by construction, 100%
+    /// class-var names — and Hybrid mode's entire premise (amortizing the
+    /// actor `State` map's per-iteration `maps:get`/`maps:put` cost by
+    /// pre-extracting mutated fields as direct fun params) has no `State` to
+    /// amortize against inside a class method. Before this guard, an `Actor`
+    /// subclass's class-method loop body mutating only a class var could
+    /// latently select Hybrid mode (its own `CodeGenContext::Actor` check
+    /// alone doesn't distinguish "instance method on an Actor class" from
+    /// "class method on an Actor class") — never manifesting as a visible bug
+    /// only because `reject_class_var_field_assignment` fired downstream
+    /// regardless of the selected mode; now that class-var writes thread
+    /// through `StateAcc` mode instead of being rejected, mode selection must
+    /// route them there correctly rather than latently into Hybrid.
     fn select_hybrid_params(
         allow_direct_params: bool,
         threaded_locals: &[String],
@@ -661,13 +695,13 @@ impl ThreadingPlan {
         use_direct_params: bool,
         body_analysis: &block_analysis::BlockMutationAnalysis,
         effects: &BodyEffects,
-        in_class_method: bool,
+        generator: &CoreErlangGenerator,
     ) -> bool {
         if !allow_direct_params
             || threaded_locals.is_empty()
             || use_direct_params
             || !matches!(context, CodeGenContext::Actor)
-            || in_class_method
+            || generator.in_class_method()
         {
             return false;
         }
@@ -1414,6 +1448,24 @@ pub(super) struct CountedLoopFrame {
     /// unique suffix also keeps it distinct from underscore-prefixed user
     /// identifiers (which `to_core_var` passes through verbatim).
     pub counter: String,
+    /// BT-3168 (ADR 0111 Addendum 9, Question 3): the pre-loop `ClassVars`
+    /// name (`current_class_var()`, captured before body generation runs),
+    /// when the body threads a `ClassVars` mutation through the loop's own
+    /// recursive tail call. `None` when it doesn't. Used, verbatim, as both
+    /// the letrec fun's extra trailing formal parameter and the initial
+    /// `apply`'s trailing argument — see [`class_var_arg_doc`].
+    pub class_var_param: Option<String>,
+}
+
+/// BT-3168 (ADR 0111 Addendum 9, Question 3): renders `", <name>"` for a
+/// threaded `ClassVars` fun-argument slot, or nothing when the loop doesn't
+/// thread class vars. Shared by `while_loops.rs`'s and `counted_loops.rs`'s
+/// (via `generate_counted_stateful_loop`) Letrec base-path `ClassVars`
+/// plumbing — the letrec fun signature, both `apply` call sites, and the
+/// exit arm all need the identical "extra trailing arg, or nothing" shape,
+/// so it is written once rather than copy-evolved per call site.
+pub(super) fn class_var_arg_doc(name: Option<&String>) -> Document<'static> {
+    name.map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())])
 }
 
 // ─── CoreErlangGenerator impls ────────────────────────────────────────────────
@@ -1506,6 +1558,54 @@ impl CoreErlangGenerator {
         );
     }
 
+    /// ADR 0111 Addendum 9 (BT-3168), Questions 3/4: whether a Letrec loop
+    /// body threads a `ClassVars` mutation through the loop's own recursive
+    /// tail call. True exactly when the body is compiled inside a class
+    /// method AND has a direct class-var field write or a same-class
+    /// self-send — per Question 4 Part A, either shape already
+    /// unconditionally forces `StateAcc` mode for the loop's own
+    /// local-variable threading (`has_state_effects()`/`has_self_sends`
+    /// exclude `DirectParams`/`TupleAcc`/`Hybrid`), so `ClassVars`
+    /// composition only needs to be designed against that one shape.
+    ///
+    /// Shared by [`ThreadingPlan::new_impl`] (Letrec-only, via
+    /// `allow_direct_params`) and the value-type/class-method loop-open
+    /// consumers (`value_type_codegen.rs`) so the routing decision and the
+    /// tuple-shape decision can never independently drift out of sync
+    /// (CLAUDE.md's no-duplicate-implementations rule).
+    pub(super) fn loop_body_threads_class_vars(&self, body: &crate::ast::Block) -> bool {
+        if !self.in_class_method() {
+            return false;
+        }
+        // Deliberately narrower than `block_analysis::analyze_block`'s own
+        // (recursive) `field_writes`/`has_self_sends` — those also count a
+        // class-var write or self-send NESTED inside a conditional, a binary
+        // op, or any other sub-expression position, which is exactly right
+        // for THEIR job (deciding whether the body needs `StateAcc` fallback
+        // at all) but wrong for this one: `generate_threaded_loop_body_inner`
+        // only ever threads `ClassVars` through the loop's tail call for a
+        // BARE, top-level class-var-assignment or class-method-self-send
+        // STATEMENT (the two shapes it has real Bind-construction branches
+        // for) — never for one buried inside a larger expression, whose own
+        // `ClassVarsN` rebind is scoped to that expression's own nested
+        // `let`, not threaded out to the loop body's own statement sequence.
+        // Confirmed by a real regression while validating this issue: a
+        // pre-existing, previously-compiling fixture
+        // (`class_var_subexpr.bt`'s `tickInLoopConditional`, a self-send
+        // nested inside a `to:do:` body's `ifTrue:` *condition*) started
+        // emitting `unbound variable 'ClassVars1'` once this predicate used
+        // the recursive analysis — the self-send's own internally-minted
+        // rebind was correctly scoped to its own conditional's nested `let`,
+        // but this predicate's resulting extra loop-level `ClassVars` fun
+        // parameter/tail-call argument then referenced that same
+        // already-out-of-scope name.
+        let filtered_body = super::util::collect_body_exprs(&body.body);
+        filtered_body.iter().any(|expr| {
+            (Self::is_field_assignment(expr) && self.is_class_var_assignment(expr))
+                || self.is_class_method_self_send(expr)
+        })
+    }
+
     /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
     pub(super) fn emit_self_send_in_loop_diagnostic(&mut self, expr: &Expression, span: Span) {
         if !self.codegen_diagnostics_enabled {
@@ -1548,13 +1648,34 @@ impl CoreErlangGenerator {
     ///
     /// `(body_doc, final_state_version)` — body document and the `StateAcc` version
     /// number in effect at the end of the body.
+    ///
+    /// BT-3168: also scopes `loop_threads_class_vars` to this exact frame —
+    /// set from `plan.threads_class_vars` right after `with_branch_context`
+    /// resets it to `false` on entry (mirroring `state_version`'s
+    /// reset-on-entry discipline, not `class_var_version`'s
+    /// restore-without-reset one), so a nested construct that calls
+    /// `generate_threaded_loop_body` again (or any other `with_branch_context`
+    /// user — a conditional, `sort:`'s manually-inlined body, …) always sees
+    /// the flag correctly reflecting ITS OWN body, never a leaked `true` from
+    /// an enclosing Letrec loop. On success, also stashes the loop's final
+    /// in-body `current_class_var()` name into `last_loop_class_var` — read
+    /// by `while_loops.rs`/`counted_loops.rs` right after this call returns
+    /// (`with_branch_context`'s guard restores `class_var_version` to the
+    /// pre-loop value on drop, so this is the only chance to capture it).
     pub(super) fn generate_threaded_loop_body(
         &mut self,
         body: &crate::ast::Block,
         plan: &ThreadingPlan,
         kind: &BodyKind,
     ) -> Result<(Document<'static>, usize)> {
-        self.with_branch_context(|this| this.generate_threaded_loop_body_inner(body, plan, kind))
+        self.with_branch_context(|this| {
+            this.loop_threads_class_vars = plan.threads_class_vars;
+            let result = this.generate_threaded_loop_body_inner(body, plan, kind);
+            if plan.threads_class_vars {
+                this.last_loop_class_var = Some(this.current_class_var());
+            }
+            result
+        })
     }
 
     /// Inner implementation of `generate_threaded_loop_body`, called inside
@@ -1625,63 +1746,84 @@ impl CoreErlangGenerator {
                     );
                 }
             } else if matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send(expr) {
-                // BT-3150: a self-send to a same-class class method inside a
-                // whileTrue:/timesRepeat:/to:do:/to:by:do: loop body routes through
-                // `emit_class_var_result_unwrap`, which leaves an *open*
-                // let-chain ending in `... in ` and rebinds `ClassVarsN` from
-                // the callee's own `{class_var_result, Result, ClassVars}`
-                // reply. `Letrec`'s recursive tail call threads only the
-                // loop's own local-variable `StateAcc` — `ClassVarsN` is
-                // never part of that thread — so any class-var mutation the
-                // self-send makes is silently discarded once the loop
-                // finishes, AND (unlike every `Foldl*` construct) `Letrec`'s
-                // own body value is *always* discarded too — a `whileTrue:`/
-                // `timesRepeat:` loop unconditionally evaluates to `nil`
-                // regardless of its last statement — so a self-send here can
-                // only ever be present for a side effect, never for its
-                // return value. That's what makes "reject any self-send,
-                // since we can't know if it mutates" an acceptable
-                // conservative call with no legitimate collateral, unlike the
-                // `Foldl*` family (see below). Confirmed empirically: a
-                // mutating count stayed at 0 across 3 iterations instead of
-                // accumulating. Reject at compile time rather than emit code
-                // that's silently wrong — the same "can't thread this state
-                // shape back correctly here" category as BT-2792's
-                // `FieldAssignmentInUnsupportedBlock`.
-                //
-                // Deliberately scoped to `Letrec` only, NOT any `Foldl*`
-                // kind (`do:`/`collect:`/`select:`/`inject:into:`/...) —
-                // tried and reverted after two rounds of CI failure. The
-                // identical class-var-mutation-loss bug IS reachable via
-                // `Foldl*` bodies too (confirmed empirically for `do:`), but
-                // unlike `Letrec`, `Foldl*` bodies routinely use a
-                // self-send's return value as (or within) the fold's own
-                // output, AND — per a pre-existing, intentionally-supported
-                // BT-2350 pattern — even a *discarded*, non-last self-send
-                // statement inside `do:`/`inject:into:`/`collect:` is common
-                // and expected to compile (see
-                // `stdlib/test/fixtures/class_method_block.bt`, which uses
-                // pure self-sends like `self double:`/`self logIt:` in
-                // exactly these positions). Neither "is the return value
-                // used" nor "is the statement last" reliably distinguishes
-                // safe from unsafe there, so a position-based rejection
-                // breaks real code. Properly closing the `Foldl*` gap needs
-                // either real `ClassVars` threading through fold
-                // accumulators or static purity analysis of the callee —
-                // tracked as a follow-up under BT-3151.
-                let selector = if let Expression::MessageSend { selector, .. } = expr {
-                    selector.name().to_string()
+                // BT-3150/BT-3168 (ADR 0111 Addendum 9, Questions 3/5): a
+                // self-send to a same-class class method inside a
+                // whileTrue:/timesRepeat:/to:do:/to:by:do: loop body routes
+                // through `emit_class_var_result_unwrap`, which leaves an
+                // *open* let-chain ending in `... in ` and rebinds
+                // `ClassVarsN` from the callee's own `{class_var_result,
+                // Result, ClassVars}` reply — exactly like a top-frame
+                // self-send. `loop_threads_class_vars` (set by
+                // `generate_threaded_loop_body` from this call's own
+                // `ThreadingPlan::threads_class_vars`) is `true` here by
+                // construction whenever this branch is reached (the same
+                // body-analysis formula that decided `threads_class_vars`
+                // found this exact self-send) — so the loop's own
+                // ClassVars fun parameter/tail-call argument
+                // (while_loops.rs/counted_loops.rs) picks up the resulting
+                // `current_class_var()` name the same way any other
+                // in-body class-var mutation does. Reading `ClassSelf` and
+                // the loop-entry `ClassVars` value needs no extra plumbing
+                // here (Question 5: ordinary Core Erlang closure scoping —
+                // both are free variables at this `letrec` nesting depth).
+                if self.loop_threads_class_vars {
+                    has_mutations = true;
+                    let doc = self.generate_expression(expr)?;
+                    docs.push(doc);
+                    // `Letrec`'s own body value is *always* discarded
+                    // regardless of the last statement (a `whileTrue:`/
+                    // `timesRepeat:` unconditionally evaluates to `nil`,
+                    // mirroring `emit_self_send_last_expr`'s Letrec arm —
+                    // "nothing; caller appends recursive call") — so
+                    // `is_last` needs no special handling here.
                 } else {
-                    unreachable!("is_class_method_self_send only matches MessageSend")
-                };
-                let location = self.span_to_line(expr.span()).map_or_else(
-                    || format!("offset {}", expr.span().start()),
-                    |line| format!("line {line}"),
-                );
-                return Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody {
-                    selector,
-                    location,
-                });
+                    // Defensive fallback: `loop_threads_class_vars` should
+                    // always be `true` whenever this branch is reached (see
+                    // above), so this path is not expected to be live in
+                    // practice — kept as a conservative rejection rather
+                    // than an `unreachable!()`, per CLAUDE.md's "never panic
+                    // on user input" rule, in case a future divergence
+                    // between this predicate and `loop_body_threads_class_vars`
+                    // is ever introduced. Confirmed empirically: without this
+                    // guard a mutating count stayed at 0 across 3 iterations
+                    // instead of accumulating — reject at compile time rather
+                    // than emit code that's silently wrong, the same
+                    // "can't thread this state shape back correctly here"
+                    // category as BT-2792's `FieldAssignmentInUnsupportedBlock`.
+                    //
+                    // Deliberately scoped to `Letrec` only, NOT any `Foldl*`
+                    // kind (`do:`/`collect:`/`select:`/`inject:into:`/...) —
+                    // tried and reverted after two rounds of CI failure. The
+                    // identical class-var-mutation-loss bug IS reachable via
+                    // `Foldl*` bodies too (confirmed empirically for `do:`),
+                    // but unlike `Letrec`, `Foldl*` bodies routinely use a
+                    // self-send's return value as (or within) the fold's own
+                    // output, AND — per a pre-existing, intentionally-supported
+                    // BT-2350 pattern — even a *discarded*, non-last self-send
+                    // statement inside `do:`/`inject:into:`/`collect:` is
+                    // common and expected to compile (see
+                    // `stdlib/test/fixtures/class_method_block.bt`, which uses
+                    // pure self-sends like `self double:`/`self logIt:` in
+                    // exactly these positions). Neither "is the return value
+                    // used" nor "is the statement last" reliably distinguishes
+                    // safe from unsafe there, so a position-based rejection
+                    // breaks real code. Closing the `Foldl*` gap needs real
+                    // `ClassVars` threading through fold accumulators —
+                    // tracked as BT-3169.
+                    let selector = if let Expression::MessageSend { selector, .. } = expr {
+                        selector.name().to_string()
+                    } else {
+                        unreachable!("is_class_method_self_send only matches MessageSend")
+                    };
+                    let location = self.span_to_line(expr.span()).map_or_else(
+                        || format!("offset {}", expr.span().start()),
+                        |line| format!("line {line}"),
+                    );
+                    return Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody {
+                        selector,
+                        location,
+                    });
+                }
             } else if !matches!(kind, BodyKind::Letrec) && self.is_tier2_value_call(expr) {
                 // BT-2813: a bare (non-assigned) Tier 2 `value(:...)` statement
                 // (field-stored or local-var-stored block) inside a foldl-based
@@ -2965,15 +3107,29 @@ impl CoreErlangGenerator {
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): an extra, explicit
+        // trailing fun parameter when the body threads `ClassVars` — the
+        // arity grows to 3 (`counter, StateAcc, ClassVars`) instead of 2.
+        // `frame.class_var_param` was captured pre-loop by the
+        // `counted_loops.rs` constructor that built this frame.
+        let arity = if frame.class_var_param.is_some() {
+            3
+        } else {
+            2
+        };
+        let cv_param_doc = class_var_arg_doc(frame.class_var_param.as_ref());
+
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
         docs.push(frame.preamble.clone());
         docs.push(docvec![
             " letrec ",
-            leaf::fname(frame.fn_name.clone(), 2),
+            leaf::fname(frame.fn_name.clone(), arity),
             " = fun (",
             leaf::var(frame.counter.clone()),
-            ", StateAcc) -> ",
+            ", StateAcc",
+            cv_param_doc.clone(),
+            ") -> ",
         ]);
 
         self.push_scope();
@@ -2993,28 +3149,34 @@ impl CoreErlangGenerator {
         // Body
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        let final_class_var = self.last_loop_class_var.take();
         docs.push(body_doc);
         let final_state_var = super::util::versioned_var("StateAcc", final_state_version);
+        let recur_cv_doc = final_class_var
+            .as_ref()
+            .map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())]);
 
         self.pop_scope();
 
         // Recursive call + false arm + initial apply
         docs.push(docvec![
             " apply ",
-            leaf::fname(frame.fn_name.clone(), 2),
+            leaf::fname(frame.fn_name.clone(), arity),
             " (",
             frame.next_counter.clone(),
             ", ",
             leaf::var(final_state_var),
+            recur_cv_doc,
             ") ",
             frame.false_arm.clone(),
             docvec![
                 "in apply ",
-                leaf::fname(frame.fn_name.clone(), 2),
+                leaf::fname(frame.fn_name.clone(), arity),
                 " (",
                 frame.initial_counter.clone(),
                 ", ",
                 leaf::var(init_state),
+                cv_param_doc,
                 ")",
             ],
         ]);
@@ -4121,6 +4283,13 @@ mod tests {
 
     // ─── Helper constructors ────────────────────────────────────────────────────
 
+    /// Creates a bare `CoreErlangGenerator` (not inside a class method,
+    /// `Actor` context) — used only to exercise `select_hybrid_params`'s
+    /// `generator.in_class_method()` guard (BT-3168) in isolation.
+    fn plain_generator() -> CoreErlangGenerator {
+        CoreErlangGenerator::new("test")
+    }
+
     /// Creates a `BodyEffects` with all flags set to `false`.
     fn clean_effects() -> BodyEffects {
         BodyEffects {
@@ -4578,28 +4747,7 @@ mod tests {
             false,
             &analysis,
             &effects,
-            false,
-        ));
-    }
-
-    #[test]
-    fn select_hybrid_params_blocked_by_in_class_method() {
-        // BT-3169 (ADR 0111 Addendum 9, Question 4 Part B): otherwise-eligible
-        // Hybrid selection (Actor context, field writes, no self-sends) must
-        // still be excluded for a class-method loop/fold body — a class
-        // method has no instance `State` to amortize Hybrid's pre-extraction
-        // against.
-        let threaded = vec!["x".to_string()];
-        let analysis = body_with_field_writes(&["n"]);
-        let effects = clean_effects();
-        assert!(!ThreadingPlan::select_hybrid_params(
-            true,
-            &threaded,
-            CodeGenContext::Actor,
-            false,
-            &analysis,
-            &effects,
-            true,
+            &plain_generator()
         ));
     }
 
@@ -4615,7 +4763,7 @@ mod tests {
             false,
             &analysis,
             &effects,
-            false,
+            &plain_generator()
         ));
     }
 
@@ -4630,7 +4778,7 @@ mod tests {
             false,
             &analysis,
             &effects,
-            false,
+            &plain_generator()
         ));
     }
 
@@ -4647,7 +4795,7 @@ mod tests {
             true,
             &analysis,
             &effects,
-            false,
+            &plain_generator()
         ));
     }
 
@@ -4663,7 +4811,7 @@ mod tests {
             false,
             &analysis,
             &effects,
-            false,
+            &plain_generator()
         ));
     }
 
@@ -4679,7 +4827,7 @@ mod tests {
             false,
             &analysis,
             &effects,
-            false,
+            &plain_generator()
         ));
     }
 
@@ -4695,7 +4843,7 @@ mod tests {
             false,
             &analysis,
             &effects,
-            false,
+            &plain_generator()
         ));
     }
 
@@ -4712,7 +4860,30 @@ mod tests {
             false,
             &analysis,
             &effects,
+            &plain_generator()
+        ));
+    }
+
+    #[test]
+    fn select_hybrid_params_blocked_by_class_method() {
+        // ADR 0111 Addendum 9 Question 4 Part B (BT-3168): an otherwise-eligible
+        // body (identical to `select_hybrid_params_eligible`'s fixture) must be
+        // excluded from Hybrid mode once the generator is inside a class method,
+        // since Hybrid's per-field pre-extraction doesn't understand ADR 0110's
+        // multi-field class-var map + shadow-write semantics.
+        let threaded = vec!["x".to_string()];
+        let analysis = body_with_field_writes(&["n"]);
+        let effects = clean_effects();
+        let mut generator = plain_generator();
+        generator.set_in_class_method(true);
+        assert!(!ThreadingPlan::select_hybrid_params(
+            true,
+            &threaded,
+            CodeGenContext::Actor,
             false,
+            &analysis,
+            &effects,
+            &generator
         ));
     }
 
@@ -4961,7 +5132,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
-            false,
+            &plain_generator(),
         );
 
         assert!(direct);
@@ -4991,7 +5162,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
-            false,
+            &plain_generator(),
         );
 
         assert!(!direct);
@@ -5014,7 +5185,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
-            false,
+            &plain_generator(),
         );
 
         assert!(!direct); // field writes block direct-params
@@ -5043,7 +5214,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
-            false,
+            &plain_generator(),
         );
 
         assert!(!direct);

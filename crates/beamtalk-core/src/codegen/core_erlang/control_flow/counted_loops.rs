@@ -12,7 +12,7 @@
 use super::super::document::Document;
 use super::super::document::leaf;
 use super::super::{CoreErlangGenerator, Result};
-use super::{CountedLoopFrame, ThreadingPlan};
+use super::{CountedLoopFrame, ThreadingPlan, class_var_arg_doc};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -61,6 +61,14 @@ impl CoreErlangGenerator {
         // cannot collide with the loop fun parameter.
         let counter = self.fresh_temp_var("loopidx");
 
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): pre-loop ClassVars name,
+        // captured before `generate_counted_stateful_loop` runs —
+        // `with_branch_context` inherits (never resets) the outer
+        // `class_var_version`, so this is both the letrec fun's own extra
+        // trailing formal parameter and the exit arm's reference to it.
+        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        let cv_arg = class_var_arg_doc(class_var_param.as_ref());
+
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
@@ -80,9 +88,15 @@ impl CoreErlangGenerator {
             ],
             next_counter: docvec!["call 'erlang':'+'(", leaf::var(counter.clone()), ", 1)"],
             initial_counter: leaf::int_lit(1),
-            false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
+            false_arm: docvec![
+                "<'false'> when 'true' -> {'nil', StateAcc",
+                cv_arg,
+                "} ",
+                "end "
+            ],
             body_param: None,
             counter,
+            class_var_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -107,6 +121,11 @@ impl CoreErlangGenerator {
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
 
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
+        // comment in `generate_times_repeat_with_mutations`.
+        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        let cv_arg = class_var_arg_doc(class_var_param.as_ref());
+
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
@@ -130,9 +149,15 @@ impl CoreErlangGenerator {
             ],
             next_counter: docvec!["call 'erlang':'+'(", leaf::var(counter.clone()), ", 1)"],
             initial_counter: leaf::var(start_var),
-            false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
+            false_arm: docvec![
+                "<'false'> when 'true' -> {'nil', StateAcc",
+                cv_arg,
+                "} ",
+                "end "
+            ],
             body_param,
             counter,
+            class_var_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -158,6 +183,11 @@ impl CoreErlangGenerator {
         let counter = self.fresh_temp_var("loopidx");
 
         let body_param = body.parameters.first().map(|p| p.name.to_string());
+
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
+        // comment in `generate_times_repeat_with_mutations`.
+        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        let cv_arg = class_var_arg_doc(class_var_param.as_ref());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -207,9 +237,15 @@ impl CoreErlangGenerator {
                 ")"
             ],
             initial_counter: leaf::var(start_var),
-            false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
+            false_arm: docvec![
+                "<'false'> when 'true' -> {'nil', StateAcc",
+                cv_arg,
+                "} ",
+                "end "
+            ],
             body_param,
             counter,
+            class_var_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
