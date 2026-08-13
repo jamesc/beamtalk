@@ -41,15 +41,6 @@ Protocol:
 ]).
 -endif.
 
-%% The `{cerl, Etf}' clause of `compile_core_erlang/1' is exercised only by
-%% the EUnit suite `beamtalk_build_worker_tests' — the production caller
-%% (`compile_core_file/2') always passes a binary. Dialyzer's success-typing
-%% therefore narrows the inferred type to `binary()' and flags the `{cerl, _}'
-%% head as unreachable. Suppress that one warning here; the spec on
-%% `compile_core_erlang/1' is the source of truth for the supported input
-%% shapes (see ADR 0088 Phase 0b).
--dialyzer({no_match, compile_core_erlang/1}).
-
 -spec main() -> no_return().
 main() ->
     ok = io:setopts([binary, {encoding, utf8}]),
@@ -248,34 +239,12 @@ compile_core_file(CoreFile, OutDir) ->
 
 %% Compile Core Erlang to BEAM bytecode in memory.
 %%
-%% Two input shapes are accepted (mirrors `beamtalk_compiler_server:compile_core_erlang/1'):
-%%
-%%   * A binary — the legacy text wire (ADR 0022).
-%%   * `{cerl, Etf}' — the ADR 0088 Phase 0b napkin wire (BT-2315). The
-%%     `Etf' binary decodes via `binary_to_term(_, [safe])'.
+%% Accepts a binary — the legacy text wire (ADR 0022).
 %%
 %% Includes `debug_info' so hot code reload works on the resulting BEAM
-%% module. ADR 0088 explicitly calls out that the cerl path must be
-%% exercised with `debug_info' on (this is the build path) to surface any
-%% annotation-chunk surprises Phase 1 would otherwise hit.
-%%
-%% The explicit `-spec' widens the input type so dialyzer accepts the
-%% `{cerl, Etf}' clause — the only production caller (`compile_core_file/2')
-%% passes binaries, but the EUnit tests in `beamtalk_build_worker_tests'
-%% exercise the cerl arm and are part of the supported surface.
--spec compile_core_erlang(binary() | {cerl, binary()}) ->
+%% module.
+-spec compile_core_erlang(binary()) ->
     {ok, atom(), binary()} | {error, term()}.
-compile_core_erlang({cerl, Etf}) when is_binary(Etf) ->
-    %% ADR 0088 Phase 0b napkin wire (BT-2315). [safe] decode — see the
-    %% matching clause in beamtalk_compiler_server for the atom-safety
-    %% reasoning.
-    try binary_to_term(Etf, [safe]) of
-        CoreModule ->
-            compile_core_forms(CoreModule)
-    catch
-        error:badarg ->
-            {error, {cerl_decode_error, unsafe_atoms_or_malformed_etf}}
-    end;
 compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
     CoreErlangStr = binary_to_list(CoreErlangBin),
     case core_scan:string(CoreErlangStr) of

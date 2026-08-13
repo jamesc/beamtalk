@@ -50,26 +50,6 @@ compile_core_erlang_empty_test() ->
     Result = beamtalk_build_worker:compile_core_erlang(<<>>),
     ?assertMatch({error, _}, Result).
 
-%%% ---------------------------------------------------------------
-%%% compile_core_erlang/1 — {cerl, Etf} wire variant (ADR 0088 Phase 0b, BT-2315)
-%%%
-%%% Sole EUnit coverage of this arm since the standalone
-%%% beamtalk_cerl_wire_tests suite was deleted (BT-3152) — the ADR 0088
-%%% Phase 0b napkin it exercised end-to-end is done, and ADR 0088's
-%%% Phases 1-4 were rejected in favour of typed leaves (ADR 0089).
-%%% ---------------------------------------------------------------
-
-%% A valid cerl module term encoded as ETF compiles successfully.
-compile_core_erlang_cerl_valid_test() ->
-    Mod = cerl_minimum_module(bt_bw_tests_cerl_valid),
-    Result = beamtalk_build_worker:compile_core_erlang({cerl, term_to_binary(Mod)}),
-    ?assertMatch({ok, bt_bw_tests_cerl_valid, _}, Result).
-
-%% Malformed ETF (not valid binary_to_term input) returns cerl_decode_error.
-compile_core_erlang_cerl_malformed_etf_test() ->
-    Result = beamtalk_build_worker:compile_core_erlang({cerl, <<0, 1, 2, 3>>}),
-    ?assertMatch({error, {cerl_decode_error, _}}, Result).
-
 %% Core Erlang that scans and parses but fails compile:forms (exports foo/0,
 %% defines bar/0) → {error, Errors, _Warnings} → covers compile_core_forms line 313.
 compile_core_erlang_compile_error_test() ->
@@ -118,21 +98,6 @@ compile_core_erlang_warning_reaches_stderr_test() ->
         ?assert(is_binary(Binary))
     end),
     ?assertNotEqual(nomatch, binary:match(Captured, <<"Warning:">>)).
-
-%% {cerl, Etf} path: cerl module that exports foo/0 but only defines bar/0.
-%% Covers the same compile_core_forms error arm via the ETF wire.
-compile_core_erlang_cerl_compile_error_test() ->
-    Foo0Var = cerl:c_var({foo, 0}),
-    Bar0Var = cerl:c_var({bar, 0}),
-    BarFun = cerl:c_fun([], cerl:c_atom(bar_result)),
-    CoreModule = cerl:c_module(
-        cerl:c_atom(bt_bw_cerl_compile_err),
-        [Foo0Var],
-        [],
-        [{Bar0Var, BarFun}]
-    ),
-    Result = beamtalk_build_worker:compile_core_erlang({cerl, term_to_binary(CoreModule)}),
-    ?assertMatch({error, {core_compile_error, _}}, Result).
 
 %%% ---------------------------------------------------------------
 %%% compile_core_file/2 — reads file, compiles, writes .beam
@@ -340,19 +305,3 @@ core_erlang_module(Name) ->
         "  attributes []\n"
         "  'hello'/0 = fun () -> 'ok'\n"
         "end\n">>.
-
-%% Smallest cerl module that compiles: only module_info/0 and module_info/1.
-cerl_minimum_module(ModName) ->
-    Mi0Var = cerl:c_var({module_info, 0}),
-    Mi1Var = cerl:c_var({module_info, 1}),
-    Mi0Fun = cerl:c_fun(
-        [],
-        cerl:c_call(cerl:c_atom(erlang), cerl:c_atom(get_module_info), [cerl:c_atom(ModName)])
-    ),
-    X = cerl:c_var('X'),
-    Mi1Fun = cerl:c_fun(
-        [X],
-        cerl:c_call(cerl:c_atom(erlang), cerl:c_atom(get_module_info), [cerl:c_atom(ModName), X])
-    ),
-    Defs = [{Mi0Var, Mi0Fun}, {Mi1Var, Mi1Fun}],
-    cerl:c_module(cerl:c_atom(ModName), [Mi0Var, Mi1Var], [], Defs).
