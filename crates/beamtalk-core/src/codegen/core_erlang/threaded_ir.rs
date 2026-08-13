@@ -3260,6 +3260,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn verify_shadow_write_eligible_stack_and_combines_nested_frames() {
+        // ADR 0111 Addendum 9, Question 1's defense-in-depth: a nested
+        // `Threaded` frame's own `shadow_write_eligible: true` must NOT
+        // override an ineligible ancestor — the stack ANDs with the
+        // parent's current top, not replaces it. No real lowering needs
+        // this today (a nested node's own `block_depth`-derived flag
+        // already encodes total nesting depth by construction), but a
+        // hand-built fixture exercising the combinator directly must still
+        // get it right. Outer frame: `shadow_write_eligible: false`. Inner
+        // frame (nested two `Threaded` levels deep): `shadow_write_eligible:
+        // true`. The class-var `Bind` at the inner frame, missing its
+        // shadow write, must stay SILENT — the outer `false` wins.
+        let outer = FrameId::new(1);
+        let inner = FrameId::new(2);
+        let f0 = FrameId::ROOT;
+        let ir = vec![
+            ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame: outer,
+                shadow_write_eligible: false,
+                body: vec![ThreadedStmt::Threaded {
+                    mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                    frame: inner,
+                    shadow_write_eligible: true,
+                    body: vec![ThreadedStmt::Bind {
+                        target: VersionedVar::new(VersionPrefix::ClassVars, 1, inner),
+                        source: VersionedVar::new(VersionPrefix::ClassVars, 0, inner),
+                        op: BindOp::Put {
+                            field: "runs".to_string(),
+                            value: ValueRef::Var("_Val0".to_string()),
+                            class_tag: ValueRef::Var("ClassSelf".to_string()),
+                        },
+                        shadow_write: false,
+                        span: span(),
+                    }],
+                    produces: vec![VersionedVar::new(VersionPrefix::ClassVars, 1, inner)],
+                    span: span(),
+                }],
+                produces: vec![],
+                span: span(),
+            },
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ClassMethod {
+                    has_class_vars: true,
+                },
+                token: TokenId::new("NlrTokenFixtureOnly"),
+                frame: f0,
+                span: span(),
+            },
+        ];
+        assert_eq!(
+            verify(&ir),
+            Vec::new(),
+            "an ineligible outer frame must veto an eligible inner frame's own flag"
+        );
+    }
+
     // ── lower_and_render (test shim) ─────────────────────────────────────
 
     #[test]
