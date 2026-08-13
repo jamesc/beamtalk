@@ -4525,6 +4525,29 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn select_hybrid_params_blocked_by_class_method() {
+        // ADR 0111 Addendum 9 Question 4 Part B (BT-3168): an otherwise-eligible
+        // body (identical to `select_hybrid_params_eligible`'s fixture) must be
+        // excluded from Hybrid mode once the generator is inside a class method,
+        // since Hybrid's per-field pre-extraction doesn't understand ADR 0110's
+        // multi-field class-var map + shadow-write semantics.
+        let threaded = vec!["x".to_string()];
+        let analysis = body_with_field_writes(&["n"]);
+        let effects = clean_effects();
+        let mut generator = plain_generator();
+        generator.set_in_class_method(true);
+        assert!(!ThreadingPlan::select_hybrid_params(
+            true,
+            &threaded,
+            CodeGenContext::Actor,
+            false,
+            &analysis,
+            &effects,
+            &generator
+        ));
+    }
+
     // ─── determine_fallback_reason tests ────────────────────────────────────────
 
     #[test]
