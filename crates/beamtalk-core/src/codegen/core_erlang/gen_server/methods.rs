@@ -139,7 +139,7 @@ pub(crate) fn extract_package_from_module_name(module_name: &str) -> Option<Stri
 
 /// Classification of how a method body expression should be handled for
 /// state threading.  Produced by [`CoreErlangGenerator::classify_body_expr`]
-/// and consumed by the unified [`CoreErlangGenerator::generate_body_exprs_with_reply`]
+/// and consumed by the unified [`CoreErlangGenerator::lower_body_exprs_with_reply`]
 /// and [`CoreErlangGenerator::generate_conditional_branch_inline`].
 pub(in crate::codegen::core_erlang) enum BodyExprKind {
     /// `^ value` — early return from method.
@@ -281,7 +281,7 @@ impl CoreErlangGenerator {
         // BT-851: Populate tier2_block_params for this method from pre-scanned info
         self.tier2_block_params.clear();
         // BT-2797: Reset the same-method local-var tracking. The real
-        // (re-)population happens inside generate_body_exprs_with_reply via
+        // (re-)population happens inside lower_body_exprs_with_reply via
         // prescan_tier2_local_vars — this clear here is belt-and-suspenders
         // for the case where a caller inspects the field between the clear
         // and the body being generated.
@@ -513,7 +513,7 @@ impl CoreErlangGenerator {
     /// that would otherwise qualify as safe. A nested block literal compiles
     /// through a completely separate path
     /// (`generate_block_body_slice`/`BlockExprKind` in `expressions.rs`, not
-    /// `generate_body_exprs_with_reply`/`BodyExprKind` here) that has no
+    /// `lower_body_exprs_with_reply`/`BodyExprKind` here) that has no
     /// Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for
     /// its own body — so a "safe-looking" `value:` call on a promoted var
     /// found inside a nested block either leaks an unpacked

@@ -2047,7 +2047,7 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile
     // must NOT be treated as a safe use, even though it looks identical to a
     // safe top-level `value:` call. A nested block compiles through a
     // completely separate path (`generate_block_body_slice`/`BlockExprKind`,
-    // not `generate_body_exprs_with_reply`/`BodyExprKind`) that has no
+    // not `lower_body_exprs_with_reply`/`BodyExprKind`) that has no
     // Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for its
     // own body — so wrongly promoting `blk` here would either leak an
     // unpacked `{Result, NewState}` tuple as the inner block's return value,

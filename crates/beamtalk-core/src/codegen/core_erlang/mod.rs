@@ -1746,7 +1746,7 @@ pub(crate) struct CoreErlangGenerator {
     /// block literal has captured-local or field mutations, *and* every later
     /// reference to `var` in the same body is a safe `value`/`value:`/etc.
     /// call (proven by `prescan_tier2_local_vars`, which runs once at the top
-    /// of `generate_body_exprs_with_reply` before classification starts).
+    /// of `lower_body_exprs_with_reply` before classification starts).
     /// `value:` / `value:value:` calls on a variable in this set use the
     /// stateful Tier 2 protocol: `apply _Fun(Args..., State) → {Result, NewState}`.
     /// A block whose safety can't be proven (returned, passed elsewhere,
