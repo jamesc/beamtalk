@@ -247,3 +247,44 @@ Actor subclass: ActorThreadingCorpus
     sum := 0
     flag ifTrue: [#(1, 2, 3) do: [:x | sum := sum + x]]
     sum
+
+  // ── BT-3162: mutating construct nested inside another block's non-last ────────
+  // position (not a conditional branch — see nestedListOpInBranch above for that
+  // case). `t`/`n` are declared *outside* the collect: block (a method-level
+  // local, captured by the block, not a top-level write of the block itself —
+  // `t := 0` as the block's own first statement would instead make `collect:`'s
+  // own call site classify the block Tier 2 via a different, unrelated code
+  // path). `analyze_block` only propagates a nested block's local writes to the
+  // *enclosing* block for ifTrue:/ifFalse:/ifTrue:ifFalse:, so the `collect:`
+  // block below is itself classified Tier 1 (a plain fun, no StateAcc) even
+  // though it contains a non-last `ensure:`/`ifNotNil:` that mutates the
+  // captured local. Before the fix, `generate_block_control_flow_threaded`
+  // bound that local's Core Erlang variable directly to the nested construct's
+  // raw `{Result, StateAcc}` tuple instead of unpacking it, so the very next
+  // read of the local in the same block invocation returned a tuple instead of
+  // the mutated scalar (BT-3162's original repro used the tuple as a binary
+  // `+` operand and crashed with `Tuple does not understand '+'`).
+  //
+  // Because the Tier 1 `collect:` block is a plain closure (no per-call
+  // accumulator threading of `t`/`n` in from outside — a separate, not-yet-
+  // fixed gap: `collect:`'s own call site has the same ensure:/ifNotNil: blind
+  // spot deciding whether *it* needs threading), each invocation captures the
+  // same never-reassigned outer `t`/`n` = 0, so every element is computed
+  // fresh from `x` alone, independent of prior iterations. This corpus
+  // fragment pins the intra-invocation unpacking fix, not cross-iteration
+  // accumulation.
+  nestedEnsureNonLastInCollectBlock =>
+    t := 0
+    #(1, 2, 3)
+      collect: [:x |
+        [t := t + x] ensure: [nil]
+        t + 100
+      ]
+
+  nestedIfNotNilNonLastInCollectBlock =>
+    n := 0
+    #(1, 2, 3)
+      collect: [:x |
+        x ifNotNil: [:v | n := n + v]
+        n + 100
+      ]
