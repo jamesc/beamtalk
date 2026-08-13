@@ -339,11 +339,11 @@ impl CoreErlangGenerator {
             None
         };
 
-        let body_result = self.generate_method_definition_body_with_reply(method);
+        let lowered = self.lower_method_definition_body_with_reply(method);
         self.set_current_nlr_token(None);
 
-        let body_doc = match body_result {
-            Ok(doc) => doc,
+        let stmts = match lowered {
+            Ok(stmts) => stmts,
             Err(e) => {
                 self.pop_scope();
                 self.context = prev_context;
@@ -351,11 +351,16 @@ impl CoreErlangGenerator {
             }
         };
 
-        let body_doc = if let Some(ref token_var) = nlr_token_var {
-            self.wrap_actor_body_with_nlr_catch(body_doc, token_var, false)
-        } else {
-            body_doc
-        };
+        // BT-3171 (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt and
+        // verify+render once, instead of rendering the body then wrapping the
+        // `Document`. Extension funs are standalone functions (not inside
+        // case arms), so no letrec is needed.
+        let span = method
+            .body
+            .first()
+            .map_or_else(|| method.span, |s| s.expression.span());
+        let body_doc =
+            self.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, false);
 
         self.pop_scope();
         self.context = prev_context;

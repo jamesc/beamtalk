@@ -2479,7 +2479,7 @@ impl CoreErlangGenerator {
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         //
                         // BT-1324: Method-body-level state threading is handled by
-                        // generate_method_body_with_reply via is_self_field_at_put/
+                        // lower_body_exprs_with_reply via is_self_field_at_put/
                         // generate_self_field_at_put_open, which intercepts before
                         // expression_doc is called. This intrinsic path is a
                         // deadlock-avoidance fallback for contexts where method-body

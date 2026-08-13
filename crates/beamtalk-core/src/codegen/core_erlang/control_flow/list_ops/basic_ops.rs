@@ -131,7 +131,7 @@ impl CoreErlangGenerator {
                 ]
             } else {
                 // BT-1276: Re-pack updated locals into StateAcc so the outer method-body
-                // threading (`maps:get` in `generate_method_body_with_reply`) can extract them.
+                // threading (`maps:get` in `lower_body_exprs_with_reply`) can extract them.
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
                     " in let ",

@@ -548,30 +548,33 @@ impl CoreErlangGenerator {
                 None
             };
 
-            // Generate method body with reply tuple (reuse existing codegen)
-            // BT-1482: Capture result so we can clean up NLR token and scope
-            // unconditionally, then propagate error afterwards.
-            let method_body_result = self.generate_method_definition_body_with_reply(method);
+            // Lower the method body (reuse existing codegen). BT-1482: Capture
+            // result so we can clean up NLR token and scope unconditionally,
+            // then propagate error afterwards.
+            let lowered = self.lower_method_definition_body_with_reply(method);
 
             self.set_current_nlr_token(None);
 
             // If codegen failed, pop scope before propagating the error.
-            let method_body_doc = match method_body_result {
-                Ok(doc) => doc,
+            let stmts = match lowered {
+                Ok(stmts) => stmts,
                 Err(e) => {
                     self.pop_scope();
                     return Err(e);
                 }
             };
 
-            // BT-761/BT-764: Sealed methods are standalone functions (not inside case arms),
-            // so the try/catch can be placed directly at function level (no letrec needed).
-            // BT-774: Compose at Document level without intermediate string rendering.
-            let method_body_doc = if let Some(ref token_var) = nlr_token_var {
-                self.wrap_actor_body_with_nlr_catch(method_body_doc, token_var, false)
-            } else {
-                method_body_doc
-            };
+            // BT-3171 (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt
+            // and verify+render once, instead of rendering the body then
+            // wrapping the `Document`. BT-761/BT-764: Sealed methods are
+            // standalone functions (not inside case arms), so the try/catch
+            // can be placed directly at function level (no letrec needed).
+            let span = method
+                .body
+                .first()
+                .map_or_else(|| method.span, |s| s.expression.span());
+            let method_body_doc =
+                self.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, false);
 
             // BT-940: Annotate the `fun` expression (not just the body) with source line.
             // Annotating the body would create invalid `( ( e -| [...] ) -| [...] )` when the
