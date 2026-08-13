@@ -936,6 +936,72 @@ register_class_method_fun_dropped_on_reload_test_() ->
     end}.
 
 %%====================================================================
+%% Selector utility functions: is_keyword_selector/1, selector_arity/1
+%%
+%% CI run 31645733960 showed the atom clause of is_keyword_selector/1
+%% (L657-658) and eight is_binary_selector_char/1 clauses (L684-695)
+%% were uncovered.  Both functions are exported and pure — no OTP
+%% processes required.
+%%====================================================================
+
+%% is_keyword_selector/1 — atom clause coverage (L657-658).
+is_keyword_selector_atom_keyword_test() ->
+    ?assert(beamtalk_class_builder:is_keyword_selector('foo:')).
+
+is_keyword_selector_atom_unary_test() ->
+    ?assertNot(beamtalk_class_builder:is_keyword_selector('foo')).
+
+is_keyword_selector_atom_multi_keyword_test() ->
+    ?assert(beamtalk_class_builder:is_keyword_selector('at:put:')).
+
+%% Remaining overloads — binary and string.
+is_keyword_selector_binary_keyword_test() ->
+    ?assert(beamtalk_class_builder:is_keyword_selector(<<"foo:">>)).
+
+is_keyword_selector_binary_unary_test() ->
+    ?assertNot(beamtalk_class_builder:is_keyword_selector(<<"foo">>)).
+
+is_keyword_selector_binary_empty_test() ->
+    ?assertNot(beamtalk_class_builder:is_keyword_selector(<<>>)).
+
+is_keyword_selector_string_keyword_test() ->
+    ?assert(beamtalk_class_builder:is_keyword_selector("foo:")).
+
+is_keyword_selector_string_unary_test() ->
+    ?assertNot(beamtalk_class_builder:is_keyword_selector("foo")).
+
+is_keyword_selector_string_empty_test() ->
+    ?assertNot(beamtalk_class_builder:is_keyword_selector([])).
+
+%% selector_arity/1 — exercises the 8 is_binary_selector_char/1 clauses that
+%% were uncovered: $-, $<, $~, $%, $&, $?, $,, $\.  Each single-char atom
+%% consists entirely of operator characters so resolves to arity 1.
+selector_arity_uncovered_binary_chars_test() ->
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('-')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('<')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('~')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('%')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('&')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('?')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity(',')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('\\')).
+
+%% Sanity checks for the other arity branches.
+selector_arity_keyword_test() ->
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('foo:')),
+    ?assertEqual(2, beamtalk_class_builder:selector_arity('at:put:')).
+
+selector_arity_unary_test() ->
+    ?assertEqual(0, beamtalk_class_builder:selector_arity('foo')).
+
+selector_arity_covered_binary_chars_test() ->
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('+')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('*')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('/')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('>')),
+    ?assertEqual(1, beamtalk_class_builder:selector_arity('=')).
+
+%%====================================================================
 %% ADR 0087 Phase 4 (BT-2301): ClassBuilder methods reach beamtalk_xref
 %%====================================================================
 
