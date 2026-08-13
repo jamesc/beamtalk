@@ -366,6 +366,73 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// ADR 0111 Addendum 5 §C1: lowers a `self.field := value`
+    /// conditional-branch/block-body statement to its real `Bind` sequence,
+    /// appending it to `stmts` and returning the assigned value's temp var
+    /// name. Mirrors `generate_field_assignment_open`'s normal (non
+    /// hybrid-full-extract) branch exactly — same helper calls, same mint
+    /// order — but models the state mutation as a [`ThreadedStmt::Bind`]
+    /// instead of a hand-rolled `maps:put` `Document` fragment.
+    ///
+    /// `generate_field_assignment_open`'s hybrid full-extract sub-branch
+    /// (`in_hybrid_loop && hybrid_mutated_fields.contains(field)`) produces
+    /// no state-version step at all — it rebinds a direct fun parameter
+    /// instead of `maps:put`-ing into `StateAcc` — so it is delegated to
+    /// unchanged and modeled as a single opaque `Statement`, exactly as it
+    /// already renders. §Scope (BT-3146): a mutation-carrying conditional
+    /// forces `StateAcc` fallback, mutually exclusive with hybrid mode, so
+    /// this branch is unreached from `generate_conditional_branch_inline`;
+    /// BT-3149 reuses this helper from `expressions.rs`'s
+    /// `generate_block_stateful_body`, where the exclusion is less directly
+    /// self-evident, so the check is real rather than assumed away.
+    pub(in crate::codegen::core_erlang) fn lower_field_assignment_bind(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<String> {
+        let Expression::Assignment { target, value, .. } = expr else {
+            unreachable!("field-assignment lowering requires an Assignment expr");
+        };
+        let Expression::FieldAccess { field, .. } = target.as_ref() else {
+            unreachable!("field-assignment lowering requires a FieldAccess target");
+        };
+        // §Scope: class-var mutations never legitimately reach these arms —
+        // shares `generate_field_assignment_open`'s rejection via
+        // `reject_class_var_field_assignment` (util.rs) so the two call
+        // sites can't drift out of sync.
+        self.reject_class_var_field_assignment(expr, field)?;
+
+        if self.in_hybrid_loop && self.hybrid_mutated_fields.contains(field.name.as_str()) {
+            let (doc, val_var) = self.generate_field_assignment_open(expr)?;
+            stmts.push(ThreadedStmt::Statement(doc, span));
+            return Ok(val_var);
+        }
+
+        let val_var = self.fresh_temp_var("Val");
+        let source_version = self.state_version();
+        let value_str = self.generate_field_assignment_value_doc(value)?;
+        stmts.push(ThreadedStmt::Statement(
+            docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in ",],
+            span,
+        ));
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        stmts.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Put {
+                field: field.name.to_string(),
+                value: ValueRef::Var(val_var.clone()),
+                class_tag: ValueRef::Literal("'nil'"),
+            },
+            shadow_write: false,
+            span,
+        });
+        Ok(val_var)
+    }
+
     /// ADR 0111 Addendum 5 §C2/§C3/§C4: lowers a `LocalAssignPure`/
     /// `LocalAssignTier2`/`LocalAssignControlFlow`/`LocalAssignSelfSend`
     /// conditional-branch statement to its real `Bind` sequence, appending
@@ -380,8 +447,13 @@ impl CoreErlangGenerator {
     /// reach `generate_local_var_assignment_in_loop` in this body loop —
     /// its own `is_tier2_value_call`/open-scope checks decide the actual
     /// shape at runtime, not `classify_body_expr`'s static kind.
+    ///
+    /// BT-3149 also calls this directly from `expressions.rs`'s
+    /// `generate_block_stateful_body` (the Tier 2 stateful-block-body local
+    /// var assignment case) — same shape, same mint order, one fewer
+    /// hand-rolled duplicate.
     #[allow(clippy::too_many_lines)]
-    fn lower_local_var_assignment_bind(
+    pub(in crate::codegen::core_erlang) fn lower_local_var_assignment_bind(
         &mut self,
         expr: &Expression,
         frame: FrameId,
@@ -598,57 +670,11 @@ impl CoreErlangGenerator {
             match kind {
                 // C1
                 BodyExprKind::FieldAssignment => {
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                            // §Scope: class-var mutations never legitimately
-                            // reach these arms — shares
-                            // `generate_field_assignment_open`'s rejection via
-                            // `reject_class_var_field_assignment` (util.rs) so
-                            // the two call sites can't drift out of sync.
-                            self.reject_class_var_field_assignment(expr, field)?;
-                            // §Scope: generate_field_assignment_open's hybrid
-                            // full-extract sub-branch is unreachable here — a
-                            // mutation-carrying conditional forces StateAcc
-                            // fallback, mutually exclusive with hybrid mode.
-                            let val_var = self.fresh_temp_var("Val");
-                            let source_version = self.state_version();
-                            let value_str = self.generate_field_assignment_value_doc(value)?;
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(val_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in ",
-                                ],
-                                span,
-                            ));
-                            let _ = self.next_state_var();
-                            let target_version = self.state_version();
-                            stmts.push(ThreadedStmt::Bind {
-                                target: VersionedVar::new(
-                                    VersionPrefix::State,
-                                    target_version,
-                                    frame,
-                                ),
-                                source: VersionedVar::new(
-                                    VersionPrefix::State,
-                                    source_version,
-                                    frame,
-                                ),
-                                op: BindOp::Put {
-                                    field: field.name.to_string(),
-                                    value: ValueRef::Var(val_var.clone()),
-                                    class_tag: ValueRef::Literal("'nil'"),
-                                },
-                                shadow_write: false,
-                                span,
-                            });
-                            if is_last {
-                                // BT-884: val_var holds the assigned value variable
-                                last_result = Some(ValueRef::Var(val_var));
-                            }
-                        }
+                    let val_var =
+                        self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
+                    if is_last {
+                        // BT-884: val_var holds the assigned value variable
+                        last_result = Some(ValueRef::Var(val_var));
                     }
                 }
                 // C2/C3/C4
@@ -1145,7 +1171,12 @@ impl CoreErlangGenerator {
     /// slice is always implicitly `FrameId::ROOT` — see `FrameId`'s doc
     /// comment — so an un-wrapped `verify(&stmts)` would falsely reject
     /// every reference to this arm's own frame).
-    fn verify_and_render_branch_arm(
+    ///
+    /// BT-3149 also calls this directly from `expressions.rs`'s
+    /// `generate_block_stateful` — a single-arm `with_branch_context` use
+    /// (the Tier 2 stateful-block-body threading), same wrap/verify/render
+    /// shape as a conditional branch arm.
+    pub(in crate::codegen::core_erlang) fn verify_and_render_branch_arm(
         &mut self,
         stmts: Vec<ThreadedStmt>,
         frame: FrameId,

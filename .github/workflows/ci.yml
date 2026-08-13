@@ -272,15 +272,21 @@ jobs:
       - name: Test BUnit (TestCase tests)
         run: just test-bunit
 
-      # ADR 0111 / BT-3136: no separate "verify-threaded-ir" step here — its
-      # only prerequisites are test-stdlib and test-bunit above, which this
-      # job already runs via `cargo run` in the dev profile (debug_assertions
-      # on), so any threaded_ir::verify() violation already hard-panics one
-      # of those two steps. A third invocation would only recompile the same
-      # corpus for zero additional detection (just's dependency dedup applies
-      # within one `just` invocation, not across separate CI steps/processes
-      # — see `just ci`'s single-invocation use of verify-threaded-ir for the
-      # case where dedup does apply).
+      # ADR 0111 / BT-3136 (confirmed still true as of BT-3149's close-out —
+      # ThreadedIr moving from a per-construct verification-only side
+      # channel to the real emission input for most state-threading codegen
+      # didn't change this job's shape): no separate "verify-threaded-ir"
+      # step here — its only prerequisites are test-stdlib and test-bunit
+      # above, which this job already runs via `cargo run` in the dev
+      # profile (debug_assertions on), so any threaded_ir::verify()
+      # violation already hard-panics one of those two steps. A third
+      # invocation would only recompile the same corpus for zero additional
+      # detection (just's dependency dedup applies within one `just`
+      # invocation, not across separate CI steps/processes — see `just
+      # ci`'s single-invocation use of verify-threaded-ir for the case
+      # where dedup does apply; `just ci-changed` relies on the same
+      # reasoning to justify not adding a separate call after its own
+      # unconditional `just test`, see that recipe's own comment).
 
       - name: Test metamorphic (BT-3117 — semantics-preserving transforms)
         run: just test-metamorphic
