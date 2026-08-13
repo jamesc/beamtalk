@@ -86,11 +86,7 @@ impl TypeChecker {
                 }
             }
         }
-        all_missing
-            .iter()
-            .map(|s| format!("'{s}'"))
-            .collect::<Vec<_>>()
-            .join(", ")
+        Self::format_selector_list(&all_missing)
     }
 
     /// Check a class-side message send (e.g., `Counter spawn`, `Object new`).
@@ -3057,11 +3053,7 @@ impl TypeChecker {
                 match protocol_registry.check_conformance(class_name, base_protocol, hierarchy) {
                     Ok(()) => {} // Conforms — no warning
                     Err(missing) => {
-                        let missing_list = missing
-                            .iter()
-                            .map(|s| format!("'{s}'"))
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                        let missing_list = Self::format_selector_list(&missing);
                         self.diagnostics.push(
                             Diagnostic::warning(
                                 format!(
@@ -3215,11 +3207,7 @@ impl TypeChecker {
         match protocol_registry.check_class_side_conformance(class_name, base_protocol, hierarchy) {
             Ok(()) => {} // Class side conforms — no warning
             Err(missing) => {
-                let missing_list = missing
-                    .iter()
-                    .map(|s| format!("'{s}'"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let missing_list = Self::format_selector_list(&missing);
                 self.diagnostics.push(
                     Diagnostic::warning(
                         format!("{class_name} class does not conform to protocol {base_protocol}"),
@@ -3333,11 +3321,7 @@ impl TypeChecker {
                         Ok(()) => {} // Conforms — no warning
                         Err(missing) => {
                             let param_name = param_names.get(i).map_or("?", |p| p.as_str());
-                            let missing_list = missing
-                                .iter()
-                                .map(|s| format!("'{s}'"))
-                                .collect::<Vec<_>>()
-                                .join(", ");
+                            let missing_list = Self::format_selector_list(&missing);
                             self.diagnostics.push(
                                 Diagnostic::warning(
                                     format!(
@@ -3418,5 +3402,15 @@ impl TypeChecker {
                 | InferredType::Intersection { .. } => {}
             }
         }
+    }
+
+    /// Format a slice of selector names as a comma-separated list of
+    /// single-quoted atoms for use in diagnostic hint strings.
+    fn format_selector_list(selectors: &[EcoString]) -> String {
+        selectors
+            .iter()
+            .map(|s| format!("'{s}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
