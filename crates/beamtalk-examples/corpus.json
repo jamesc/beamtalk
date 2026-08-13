@@ -20711,6 +20711,42 @@
       "explanation": "Fixture for file_handle_io_test.bt — an actor that opens a `File open:mode:` handle and never closes it, so the handle's registered owner (BT-3020 tier 2) is this actor's own pid, and killing the actor is the only thing that reclaims it."
     },
     {
+      "id": "stdlib-test-fixtures-foldl-class-var-regression",
+      "title": "FoldlClassVarRegression",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "FoldlClassVarRegression",
+        "Object",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "filter",
+        "filtering",
+        "foldl_class_var_regression",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "isPositive:",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "positives:",
+        "property",
+        "resetTotal",
+        "set",
+        "subclassing",
+        "total",
+        "where"
+      ],
+      "source": "// BT-3169 review fix: fixture pinning a correctness gap found and fixed\n// during review of PR #3371, which the PR's own new `tests/gen_server.rs`\n// assertions (compiled-text-only) could not catch — it needs real\n// `erl`/BEAM execution.\n//\n// A pure (non-mutating) class-method self-send used as a fold\n// predicate/transform advances `class_var_version` the same way a real\n// mutation does (`emit_class_var_result_unwrap` calls `next_class_var()`\n// unconditionally), but the ADR 0110 shadow-write process-dictionary key is\n// only set on an actual field write — so `refresh_class_var_after_opaque_scope`'s\n// naive shadow read could observe `'undefined'` and corrupt this class's\n// own class-var state for all subsequent calls.\n\nObject subclass: FoldlClassVarRegression\n  classState: total = 100\n\n  class resetTotal => self.total := 100\n\n  class total => self.total\n\n  // Pure — never touches a field.\n  class isPositive: x => x > 0\n\n  // A `select:` predicate that is a pure self-send, assigned to a local,\n  // alongside an unrelated class var (`total`) that must survive untouched.\n  class positives: aList =>\n    result := aList select: [:x | self isPositive: x]\n    result",
+      "explanation": "BT-3169 review fix: fixture pinning a correctness gap found and fixed during review of PR #3371, which the PR's own new `tests/gen_server.rs` assertions (compiled-text-only) could not catch — it needs real `erl`/BEAM execution.  A pure (non-mutating) class-method self-send used as a fold predicate/transform advances `class_var_version` the same way a real mutation does (`emit_class_var_result_unwrap` calls `next_class_var()` unconditionally), but the ADR 0110 shadow-write process-dictionary key is only set on an actual field write — so `refresh_class_var_after_opaque_scope`'s naive shadow read could observe `'undefined'` and corrupt this class's own class-var state for all subsequent calls."
+    },
+    {
       "id": "stdlib-test-fixtures-fraction",
       "title": "Fraction",
       "category": "stdlib-fixtures",
@@ -25079,6 +25115,26 @@
       ],
       "source": "// BT-2709 fixture: a value-type with NO arithmetic operators, used to exercise\n// the DNU path — `aWidget + 1` must raise `does_not_understand`, not `badarith`.\n\nValue subclass: Widget\n  field: size :: Integer = 0\n\n  /// The widget size.\n  size -> Integer => self.size",
       "explanation": "BT-2709 fixture: a value-type with NO arithmetic operators, used to exercise the DNU path — `aWidget + 1` must raise `does_not_understand`, not `badarith`."
+    },
+    {
+      "id": "stdlib-test-foldl-class-var-regression-test",
+      "title": "FoldlClassVarRegressionTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "FoldlClassVarRegressionTest",
+        "TestCase",
+        "extends",
+        "foldl_class_var_regression_test",
+        "inherit",
+        "inheritance",
+        "object",
+        "setUp",
+        "subclassing",
+        "testPureSelfSendPredicateDoesNotCorruptClassVarState",
+        "testPureSelfSendPredicateSurvives"
+      ],
+      "source": "// BT-3169 review fix: real BEAM execution coverage for\n// `refresh_class_var_after_opaque_scope`'s guard against a false-positive\n// ADR 0110 shadow-write read (see `foldl_class_var_regression.bt`).\n\nTestCase subclass: FoldlClassVarRegressionTest\n\n  setUp =>\n    FoldlClassVarRegression resetTotal\n    self\n\n  testPureSelfSendPredicateSurvives =>\n    self assert: (FoldlClassVarRegression positives: #[-2, 3, -1, 5]) equals: #[3, 5]\n\n  testPureSelfSendPredicateDoesNotCorruptClassVarState =>\n    FoldlClassVarRegression positives: #[-2, 3, -1, 5]\n    self assert: FoldlClassVarRegression total equals: 100",
+      "explanation": "BT-3169 review fix: real BEAM execution coverage for `refresh_class_var_after_opaque_scope`'s guard against a false-positive ADR 0110 shadow-write read (see `foldl_class_var_regression.bt`)."
     },
     {
       "id": "stdlib-test-foreign-extension-codegen-test",
