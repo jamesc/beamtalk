@@ -3068,3 +3068,47 @@ extended.
     `invoke_class_method/7`, the Erlang half of the 0110 contract
   - `runtime/apps/beamtalk_compiler/src/beamtalk_compile_diagnostics.erl`
     — `core_lint` integration
+
+## Addendum 8 (2026-08-13): BT-3165 — `exception_handling.rs` slice lands, closing the gap Addendum 5/7 tracked
+
+BT-3165 implemented Addendum 5's E1–E7 table for `exception_handling.rs`'s
+`generate_exception_body_with_threading_inner` (both `on:do:`'s try/handler
+bodies and `ensure:`'s try/success-cleanup/error-cleanup bodies), the last
+construct family this ADR's epic (BT-3141) had not yet migrated to real
+`ThreadedIr` emission input. E1/E3 reused `conditionals.rs`'s
+`lower_field_assignment_bind`/`lower_local_var_assignment_bind` directly, as
+this addendum recommended; E2 required splitting
+`dispatch_codegen.rs::generate_self_dispatch_open` into a call-only half
+(`generate_self_dispatch_call_doc`) so the state-version bump it used to
+bake into one opaque `Document` could become a real `Bind` instead. Both
+`check_branch_frame_linearity` (`control_flow/mod.rs`) and
+`verify_branch_frame_linearity` (`threaded_ir.rs`) — the scalar-synthesis
+scaffolding these two call sites were the last production users of anywhere
+in the codebase — are deleted.
+
+**One correction to this addendum's Rule 2, found while implementing it.**
+§"The decomposition vocabulary" describes gluing exception-body statements
+by routing them "through `render_loop_body_statements`-style separated
+rendering" (§Migration order, PR 3's description) and Rule 2 says exception
+bodies render "through the space-separated loop" — i.e., literally through
+[`render_loop_body_statements`]. That does not hold: `render_loop_body_statements`
+inserts its literal `" "` separator between every RAW entry of the
+`&[ThreadedStmt]` slice it is given, not once per *source-level* Beamtalk
+statement. Every E1/E2/E3 shape decomposes into more than one raw
+`ThreadedStmt` (at minimum a `Statement` + a `Bind`), so feeding the flat
+per-shape sequence through it directly would inject a spurious extra space
+*inside* each shape's own decomposition — e.g. between E1's value-temp
+`Statement` and its `Put` `Bind` — that the legacy hand-rolled code never
+had. Confirmed empirically: implementing it literally as specified would
+have broken byte-identity. The fix implemented instead: the lowering pushes
+the legacy separator as its own `ThreadedStmt::Statement(Document::Str("
+"), span)` at each *source-statement* boundary (mirroring the pre-migration
+`if i > 0 { docs.push(" ") }` loop exactly), and the whole arm renders
+through plain [`render`] — the same no-separator function
+`conditionals.rs` uses — so the manually-placed `Statement`s are the only
+separators that end up in the output. `render_loop_body_statements` itself
+is untouched, still used only by real `ConditionalLoop` bodies
+(`while_loops.rs`), where every body statement is (today) representable as
+exactly one `Bind` — the raw-entry-vs-source-statement distinction happens
+to not yet matter there. Byte-identical over the full snapshot corpus +
+`stdlib`/`BUnit`/REPL-protocol suites, confirmed before and after.

@@ -53,6 +53,7 @@ use super::super::document::{join, leaf};
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
+use super::super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -447,13 +448,17 @@ impl CoreErlangGenerator {
         ]);
         self.pop_scope();
 
-        // BT-3134: the try body and the handler body are sibling
-        // with_branch_context frames (only one of them ever actually runs at
-        // a given call, but both are compiled) — either may independently
-        // reach the same StateAcc version number as the other. Verify a
-        // ThreadedIr fixture with one FrameId per arm so this is correctly
-        // modeled, not flagged as NonLinearVersion.
-        self.check_branch_frame_linearity(&[try_final, handler_final], receiver_block.span);
+        // ADR 0111 Addendum 5 (BT-3165): the try body and the handler body
+        // are sibling with_branch_context frames (only one of them ever
+        // actually runs at a given call, but both are compiled) — each
+        // `generate_exception_body_with_threading` call mints its own fresh
+        // FrameId (`current_branch_frame`) and `verify()`s its own real IR
+        // internally, so either arm independently reaching the same
+        // StateAcc version number as the other is correctly NOT a
+        // NonLinearVersion violation — the check that used to run here
+        // (`check_branch_frame_linearity`) is gone; real per-frame
+        // verification now happens where the IR is actually built (inside
+        // `generate_exception_body_with_threading_inner`).
 
         // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
         docs.push(docvec![
@@ -657,19 +662,18 @@ impl CoreErlangGenerator {
         ]);
 
         // Cleanup body generates state mutations that are discarded (re-raise follows)
-        let (cleanup_error_doc, _, cleanup_error_final) =
+        let (cleanup_error_doc, _, _cleanup_error_final) =
             self.generate_exception_body_with_threading(cleanup_block)?;
         docs.push(cleanup_error_doc);
 
-        // BT-3134: three sibling with_branch_context frames — the try body,
-        // the success-path cleanup run, and the error-path cleanup run
-        // (`cleanup_block` is compiled twice, once per path, each its own
-        // arm) — any two may independently reach the same StateAcc version
-        // number. Verify a ThreadedIr fixture with one FrameId per arm.
-        self.check_branch_frame_linearity(
-            &[try_final, cleanup_success_final, cleanup_error_final],
-            receiver_block.span,
-        );
+        // ADR 0111 Addendum 5 (BT-3165): three sibling with_branch_context
+        // frames — the try body, the success-path cleanup run, and the
+        // error-path cleanup run (`cleanup_block` is compiled twice, once
+        // per path, each its own arm) — each `generate_exception_body_with_threading`
+        // call mints its own fresh FrameId and `verify()`s its own real IR
+        // internally, so any two independently reaching the same StateAcc
+        // version number is correctly NOT a NonLinearVersion violation —
+        // see the matching comment in `generate_on_do_with_mutations`.
 
         docs.push(docvec![
             " ",
@@ -977,12 +981,34 @@ impl CoreErlangGenerator {
     }
 
     /// Inner implementation called inside `with_branch_context`.
+    ///
+    /// ADR 0111 Addendum 5 (BT-3165): this arm's mutation sequence is built
+    /// as real [`ThreadedStmt`]s — the E1–E7 per-shape decomposition table
+    /// (E1/E3 reuse `conditionals.rs`'s C1/C2 helpers,
+    /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`,
+    /// exactly — same shape, same mint order) — then `verify()`d and
+    /// `render()`d via `conditionals.rs`'s `verify_and_render_branch_arm`.
+    /// Rule 2's separator divergence (this file inserts a literal `" "`
+    /// between SOURCE-level statements, `conditionals.rs` inserts none at
+    /// all) is reproduced by pushing that literal space as its own
+    /// `ThreadedStmt::Statement` at each source-statement boundary —
+    /// **not** by feeding the flat per-shape `Bind`/`Statement` sequence
+    /// through `render_loop_body_statements` (that function separates every
+    /// *raw* `ThreadedStmt` entry, which would inject a spurious extra
+    /// space inside any shape that itself decomposes into more than one
+    /// entry, e.g. E1's Statement+Bind pair — breaking byte-identity).
+    /// `verify_and_render_branch_arm`'s plain `render()` has no separator
+    /// of its own, so the manually-inserted space is the only one that
+    /// ends up in the output, at exactly the position the legacy
+    /// `if i > 0 { docs.push(" ") }` loop put it.
+    #[allow(clippy::too_many_lines)]
     fn generate_exception_body_with_threading_inner(
         &mut self,
         body: &Block,
     ) -> Result<(Document<'static>, String, usize)> {
+        let frame = self.current_branch_frame();
         // BT-3160: push a scope so a local-var assignment's `bind_var` rebind
-        // (from `generate_local_var_assignment_in_loop`) is scoped to this try
+        // (from `lower_local_var_assignment_bind`) is scoped to this try
         // body and doesn't leak into the enclosing method scope — matching the
         // bracket `generate_conditional_branch_inline` already has (conditionals.rs).
         self.push_scope();
@@ -993,120 +1019,176 @@ impl CoreErlangGenerator {
             .any(|s| Self::is_field_assignment(&s.expression));
 
         let mut result_var = "'nil'".to_string();
-        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut stmts: Vec<ThreadedStmt> = Vec::new();
 
         for (i, stmt) in body.body.iter().enumerate() {
             let expr = &stmt.expression;
+            let span = expr.span();
             if i > 0 {
-                docs.push(Document::Str(" "));
+                // Rule 2: the literal space `generate_exception_body_with_threading_inner`
+                // has always inserted between source-level statements —
+                // modeled as its own opaque Statement so it renders exactly
+                // once per statement boundary, never inside a shape's own
+                // multi-entry decomposition.
+                stmts.push(ThreadedStmt::Statement(Document::Str(" "), span));
             }
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
+                // E1 — same shape/mint-order as C1; reused directly.
+                let _val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                 if is_last {
                     // BT-483: Field assignment returns the assigned value
-                    // The val was already bound by generate_field_assignment_open
+                    // The val was already bound by lower_field_assignment_bind.
                     // Use the current state var for the state, and the assigned value as result
-                    // Note: generate_field_assignment_open binds _ValN = <value>
+                    // Note: lower_field_assignment_bind binds _ValN = <value>
                     // We need to capture what was assigned - use nil since field assignment
                     // semantically returns the value but we don't easily have the var name here
                     result_var = "'nil'".to_string();
                 }
             } else if self.is_actor_self_send(expr) {
-                let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
-                docs.push(doc);
+                // E2 — the dispatch-open helper both emits the dispatch
+                // Statement and bumps the state version; split via
+                // `generate_self_dispatch_call_doc` so the bump becomes a
+                // real Bind (Direct rebind, `element(2, _SD)`) instead of
+                // living inside an opaque Statement's text.
+                let source_version = self.state_version();
+                let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
+                stmts.push(ThreadedStmt::Statement(call_doc, span));
+                let target_version = self.state_version();
+                stmts.push(ThreadedStmt::Bind {
+                    target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                    source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                    op: BindOp::Direct(ValueRef::Doc(docvec![
+                        "call 'erlang':'element'(2, ",
+                        leaf::var(dispatch_var.clone()),
+                        ")",
+                    ])),
+                    shadow_write: false,
+                    span,
+                });
                 if is_last {
                     // BT-483: Self-dispatch result is in dispatch_var
                     let rv = self.fresh_temp_var("ExResult");
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(rv.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(dispatch_var),
-                        ") in ",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "let ",
+                            leaf::var(rv.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(dispatch_var),
+                            ") in ",
+                        ],
+                        span,
+                    ));
                     result_var = rv;
                 }
             } else if Self::is_local_var_assignment(expr) {
-                let (assign_doc, _val_var) = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
+                // E3 — same shape/mint-order as C2/C3/C4; reused directly.
+                let _val_var =
+                    self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                // E4 — exempt from Bind modeling, same as C5: no state
+                // version is produced or consumed, every binding is plain.
                 let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                 for d in binding_docs {
-                    docs.push(d);
+                    stmts.push(ThreadedStmt::Statement(d, span));
                 }
             } else if is_last {
                 if has_direct_field_assignments {
-                    // Has direct field assignments — last non-assignment expr result is captured
+                    // E6 — has_direct_field_assignments sub-branch.
                     let rv = self.fresh_temp_var("ExResult");
                     let expr_doc = self.expression_doc(expr)?;
-                    docs.push(docvec![
-                        "let ",
-                        leaf::var(rv.clone()),
-                        " = ",
-                        expr_doc,
-                        " in",
-                    ]);
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
+                        span,
+                    ));
                     result_var = rv;
                 } else {
                     // BT-483: Last expression with no direct field assignments.
                     // If this is a nested control flow construct returning {Result, State},
                     // destructure it. Otherwise just capture the result.
                     if self.control_flow_has_mutations(expr) {
-                        // Nested mutation construct returns {Result, State} tuple
+                        // E5 — nested mutation construct returns {Result,
+                        // State} tuple; C10-last's shape with ExResult
+                        // naming. Legacy read the target state name via
+                        // `peek_next_state_var()` (no mint) before building
+                        // the expr doc purely to have the LHS text ready —
+                        // the Bind below re-derives the same rendered name
+                        // from the version number instead, so the peek call
+                        // itself is no longer needed (it never minted
+                        // anything; only the ordering of the real mints
+                        // around it matters, and that ordering — Tuple,
+                        // ExResult, expr doc's own mints, then the bump —
+                        // is unchanged below).
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let rv = self.fresh_temp_var("ExResult");
-                        let next_var = self.peek_next_state_var();
                         let expr_doc = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            expr_doc,
-                            " in let ",
-                            leaf::var(rv.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ") in ",
-                            "let ",
-                            leaf::var(next_var),
-                            " = call 'erlang':'element'(2, ",
-                            leaf::var(tuple_var),
-                            ") in",
-                        ]);
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                expr_doc,
+                                " in let ",
+                                leaf::var(rv.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ],
+                            span,
+                        ));
                         let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
                         result_var = rv;
                     } else {
-                        // Regular expression — capture result, state unchanged
+                        // E6/E7 — plain expression, no direct field
+                        // assignments in this body.
                         let rv = self.fresh_temp_var("ExResult");
                         let expr_doc = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(rv.clone()),
-                            " = ",
-                            expr_doc,
-                            " in",
-                        ]);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
+                            span,
+                        ));
                         result_var = rv;
                     }
                 }
             } else {
+                // E7 — non-last plain expression.
                 let expr_doc = self.expression_doc(expr)?;
-                docs.push(docvec!["let _ = ", expr_doc, " in",]);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let _ = ", expr_doc, " in"],
+                    span,
+                ));
             }
         }
 
         let final_state_version = self.state_version();
         self.pop_scope();
-        Ok((Document::Vec(docs), result_var, final_state_version))
+        let (doc, _) =
+            self.verify_and_render_branch_arm(stmts, frame, final_state_version, body.span);
+        Ok((doc, result_var, final_state_version))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::threaded_ir::{self, ThreadingMode};
+    use super::super::StateAccFallbackReason;
+    use super::*;
     use crate::codegen::core_erlang::tests::codegen;
+    use crate::source_analysis::Span;
 
     #[test]
     fn test_on_do_generates_try_catch_with_nlr_passthrough() {
@@ -1312,6 +1394,161 @@ Actor subclass: Srv
         assert!(
             code.contains("primop 'raw_raise'"),
             "ensure: with mutation must re-raise after cleanup on error. Got:\n{code}"
+        );
+    }
+
+    // ── ADR 0111 Addendum 5 / BT-3165: NonLinearVersion is now a LIVE check
+    // for `on:do:`/`ensure:` arms (previously scaffolding-only —
+    // `check_branch_frame_linearity`'s scalar synthesis always allocated a
+    // fresh, distinct FrameId per arm by construction, so two arms could
+    // never collide, by construction, regardless of what the generator
+    // actually produced). Mirrors `conditionals.rs`'s
+    // `test_bt3146_nonlinear_version_detected_via_production_lowering_types`.
+
+    #[test]
+    fn test_bt3165_sibling_try_and_handler_arms_reaching_same_version_do_not_trip_nonlinear_version()
+     {
+        // THE acceptance-criteria case `check_branch_frame_linearity` used
+        // to guarantee only by never exercising real IR: on:do:'s try body
+        // and handler body each perform exactly one field mutation, so BOTH
+        // sibling with_branch_context arms independently produce
+        // "StateAcc1" — in disjoint frames minted by `current_branch_frame`.
+        // `generate_exception_body_with_threading_inner` now `verify()`s
+        // each arm's REAL IR (via `verify_and_render_branch_arm`); a
+        // regression that collapsed frame identity across arms (e.g. reused
+        // the same FrameId, or dropped the per-with_branch_context mint)
+        // would trip `VerifyError::NonLinearVersion`, hard-failing via
+        // `report_threaded_ir_verify_errors`'s `debug_assert!` and panicking
+        // this test in this debug build.
+        let src = "\
+Actor subclass: Srv
+  state: count = 0
+
+  run =>
+    [self.count := self.count + 1] on: Error do: [:e | self.count := self.count + 2]
+";
+        let code = codegen(src);
+        assert!(
+            code.contains("StateAcc1"),
+            "both sibling arms should independently reach StateAcc1. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt3165_sibling_ensure_arms_reaching_same_version_do_not_trip_nonlinear_version() {
+        // `ensure:`'s three-sibling-arm shape: try body, success-path
+        // cleanup, error-path cleanup (`cleanup_block` compiled twice) —
+        // each performing exactly one field mutation, so all three
+        // independently reach "StateAcc1" in three disjoint frames.
+        let src = "\
+Actor subclass: Srv
+  state: count = 0
+
+  run =>
+    [self.count := self.count + 1] ensure: [self.count := self.count + 2]
+";
+        let code = codegen(src);
+        assert!(
+            code.contains("StateAcc1"),
+            "all three sibling arms should independently reach StateAcc1. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt3165_nonlinear_version_detected_via_production_lowering_types() {
+        // Built through the exact production types/constructors
+        // `generate_exception_body_with_threading_inner`'s lowering uses — a
+        // real `CoreErlangGenerator::with_branch_context` call for frame
+        // allocation (`current_branch_frame`), real `VersionedVar`/
+        // `ThreadedStmt::Bind`/`BindOp::Put` construction — not an isolated
+        // hand-fixture disconnected from any real construction path. Mirrors
+        // `conditionals.rs`'s
+        // `test_bt3146_nonlinear_version_detected_via_production_lowering_types`.
+        let mut generator = CoreErlangGenerator::new("bt3165_regression_nonlinear");
+        let errors = generator.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            // Two field-mutation Binds that BOTH (incorrectly) target
+            // State(1)@frame from State(0)@frame — the exact shape a broken
+            // lowering (e.g. forgetting to call `next_state_var()` between
+            // two field assignments in the same exception-body arm) would
+            // produce. Mirrors E1's real `BindOp::Put` shape exactly.
+            let source = VersionedVar::new(VersionPrefix::State, 0, frame);
+            let target = VersionedVar::new(VersionPrefix::State, 1, frame);
+            let make_put = |field: &str, val: &str, target: VersionedVar, source: VersionedVar| {
+                ThreadedStmt::Bind {
+                    target,
+                    source,
+                    op: BindOp::Put {
+                        field: field.to_string(),
+                        value: ValueRef::Var(val.to_string()),
+                        class_tag: ValueRef::Literal("'nil'"),
+                    },
+                    shadow_write: false,
+                    span: Span::default(),
+                }
+            };
+            let wrapper = vec![ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame,
+                body: vec![
+                    make_put("count", "_Val1", target.clone(), source.clone()),
+                    make_put("count", "_Val2", target.clone(), source),
+                ],
+                produces: vec![target],
+                span: Span::default(),
+            }];
+            threaded_ir::verify(&wrapper)
+        });
+
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                threaded_ir::VerifyError::NonLinearVersion { producers: 2, .. }
+            )),
+            "expected NonLinearVersion(producers: 2) for the duplicate State(1) producer, \
+             got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_bt3165_unbound_version_detected_via_production_lowering_types() {
+        // Mirrors `conditionals.rs`'s
+        // `test_bt3146_unbound_version_detected_via_production_lowering_types`:
+        // a Bind whose source references a version this frame never
+        // produced — the exact shape a broken lowering (e.g. reading a
+        // stale `state_version()` snapshot from before an earlier E1/E3
+        // mutation actually landed) would produce.
+        let mut generator = CoreErlangGenerator::new("bt3165_regression_unbound");
+        let errors = generator.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            let phantom_source = VersionedVar::new(VersionPrefix::State, 5, frame);
+            let target = VersionedVar::new(VersionPrefix::State, 6, frame);
+            let bind = ThreadedStmt::Bind {
+                target: target.clone(),
+                source: phantom_source,
+                op: BindOp::Put {
+                    field: "count".to_string(),
+                    value: ValueRef::Var("_Val1".to_string()),
+                    class_tag: ValueRef::Literal("'nil'"),
+                },
+                shadow_write: false,
+                span: Span::default(),
+            };
+            let wrapper = vec![ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame,
+                body: vec![bind],
+                produces: vec![target],
+                span: Span::default(),
+            }];
+            threaded_ir::verify(&wrapper)
+        });
+
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, threaded_ir::VerifyError::UnboundVersion { .. })),
+            "expected UnboundVersion for the phantom State(5) source, got: {errors:?}"
         );
     }
 }

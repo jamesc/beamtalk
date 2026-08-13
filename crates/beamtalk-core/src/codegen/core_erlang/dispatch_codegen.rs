@@ -1844,8 +1844,42 @@ impl CoreErlangGenerator {
     /// it's discarded since this is used for non-last expressions in block bodies.
     ///
     /// Uses Document/docvec! (ADR 0018) for composable rendering.
-    #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
     pub(super) fn generate_self_dispatch_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<(Document<'static>, String)> {
+        let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
+        let new_state = self.current_state_var();
+        let doc = docvec![
+            call_doc,
+            "let ",
+            leaf::var(new_state),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(dispatch_var.clone()),
+            ") in "
+        ];
+        Ok((doc, dispatch_var))
+    }
+
+    /// ADR 0111 Addendum 5 (BT-3165, shape E2): the dispatch-call/
+    /// case-clause portion of [`Self::generate_self_dispatch_open`],
+    /// WITHOUT the trailing state-extraction `let` — factored out so
+    /// `exception_handling.rs`'s per-arm `ThreadedIr` lowering can model the
+    /// state-version bump as a real `Bind` (`BindOp::Direct`) instead of
+    /// baking it into an opaque `Statement`'s text. Still mints the version
+    /// bump itself (`next_state_var()`, right before
+    /// `generate_self_dispatch_error_clause`, exactly where the un-split
+    /// function always minted it) so every mint *after* this call keeps its
+    /// original position — callers that need the bumped state's rendered
+    /// name read it back via `current_state_var()` rather than consuming a
+    /// return value, since a real `Bind`'s `render_bind` re-derives the same
+    /// name from the version number, not from a string this function hands
+    /// back. `generate_self_dispatch_open` is unchanged in every other
+    /// respect (same mint order, same returned bytes) — it now simply
+    /// delegates here and appends the extraction `let` it used to build
+    /// inline.
+    #[allow(clippy::too_many_lines)] // Document-based sealed/normal dispatch branches
+    pub(super) fn generate_self_dispatch_call_doc(
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, String)> {
@@ -1939,8 +1973,14 @@ impl CoreErlangGenerator {
                 ]
             };
 
-            // Result/error clauses + state extraction
-            let new_state = self.next_state_var();
+            // Result/error clauses. BT-3165: the state-version bump
+            // (`next_state_var()`) stays exactly here — mint-order fidelity
+            // — but its returned name is no longer consumed for rendering;
+            // `generate_self_dispatch_open` re-reads it via
+            // `current_state_var()`, and the E2 `Bind`-based caller
+            // (`exception_handling.rs`) re-derives it from the version
+            // number via `render_bind`.
+            let _ = self.next_state_var();
             let error_clause =
                 self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);
             let doc = docvec![
@@ -1956,17 +1996,12 @@ impl CoreErlangGenerator {
                 "} ",
                 error_clause,
                 "end in ",
-                "let ",
-                leaf::var(new_state),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(dispatch_var.clone()),
-                ") in "
             ];
 
             return Ok((doc, dispatch_var));
         }
         Err(CodeGenError::Internal(
-            "generate_self_dispatch_open called on non-MessageSend expression".to_string(),
+            "generate_self_dispatch_call_doc called on non-MessageSend expression".to_string(),
         ))
     }
     ///
