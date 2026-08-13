@@ -212,9 +212,29 @@ impl CoreErlangGenerator {
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): when the body threads a
+        // `ClassVars` mutation through the loop's own recursive tail call,
+        // the letrec fun grows an extra, explicit trailing parameter —
+        // `fun (StateAcc, ClassVars)`, never folded into `StateAcc`'s own
+        // map. Captured before `generate_threaded_loop_body` runs:
+        // `with_branch_context` inherits (never resets) the outer
+        // `class_var_version`, so whatever name `current_class_var()`
+        // reports here (bare "ClassVars" the first time a method mutates
+        // one, "ClassVarsN" otherwise) is both the fun's own formal
+        // parameter identifier and the initial `apply`'s argument.
+        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
+        let arity = if class_var_param.is_some() { 2 } else { 1 };
+        let cv_param_doc = super::class_var_arg_doc(class_var_param.as_ref());
+
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
-        docs.push(docvec!["letrec 'while'/1 = fun (StateAcc) -> "]);
+        docs.push(docvec![
+            "letrec ",
+            leaf::fname("while".to_string(), arity),
+            " = fun (StateAcc",
+            cv_param_doc.clone(),
+            ") -> ",
+        ]);
 
         // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
         // Use push_scope so bindings don't leak to caller after the letrec.
@@ -259,17 +279,37 @@ impl CoreErlangGenerator {
 
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, &plan, &BodyKind::Letrec)?;
+        let final_class_var = self.last_loop_class_var.take();
         docs.push(body_doc);
         let final_state_var = super::super::util::versioned_var("StateAcc", final_state_version);
+        let recur_cv_doc = final_class_var
+            .as_ref()
+            .map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())]);
 
+        // BT-3168: the exit arm is reached WITHOUT running the body this
+        // round (the condition check failed) — it must reference the fun's
+        // own incoming `ClassVars` parameter (`class_var_param`, the SAME
+        // text as the fun signature above), never the post-body
+        // `final_class_var`.
         let exit_arm = if negate {
-            "<'true'> when 'true' -> {'nil', StateAcc} "
+            docvec![
+                "<'true'> when 'true' -> {'nil', StateAcc",
+                cv_param_doc.clone(),
+                "} "
+            ]
         } else {
-            "<'false'> when 'true' -> {'nil', StateAcc} "
+            docvec![
+                "<'false'> when 'true' -> {'nil', StateAcc",
+                cv_param_doc.clone(),
+                "} "
+            ]
         };
         docs.push(docvec![
-            " apply 'while'/1 (",
+            " apply ",
+            leaf::fname("while".to_string(), arity),
+            " (",
             leaf::var(final_state_var),
+            recur_cv_doc,
             ") ",
             exit_arm,
             "end ",
@@ -279,7 +319,14 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // Initial call with packed state
-        docs.push(docvec!["in apply 'while'/1 (", leaf::var(init_state), ")"]);
+        docs.push(docvec![
+            "in apply ",
+            leaf::fname("while".to_string(), arity),
+            " (",
+            leaf::var(init_state),
+            cv_param_doc,
+            ")",
+        ]);
 
         Ok(Document::Vec(docs))
     }
