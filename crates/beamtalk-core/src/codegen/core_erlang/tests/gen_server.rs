@@ -7406,6 +7406,36 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
 }
 
 #[test]
+fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
+    // BT-3172 review follow-up: `nested_loop_or_fold_body` must also cover
+    // the predicate-based `Foldl*` shapes (`detect:`/`count:`/`takeWhile:`/
+    // `dropWhile:`/`partition:`/`groupBy:`), not just `do:`/`collect:`/
+    // `select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/`inject:into:` —
+    // `ThreadingPlan::new_impl`'s `threads_class_vars` gate
+    // (`!Actor && in_class_method() && body_analysis.has_self_sends`)
+    // applies uniformly to every non-`Letrec` `BodyKind`, so a class-var
+    // self-send nested inside `detect:`, itself nested inside another
+    // `detect:`, is exactly as vulnerable to the silent-loss/`erlc`-crash
+    // bug as the `do:`-in-`do:` shape pinned above.
+    let src = "Value subclass: NestedDetectClassVarMutation\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDetect: aList =>\n    outerSeen := 0\n    aList\n      detect: [:x |\n        total := 0\n        aList\n          detect: [:y |\n            self bump\n            total := total + 1\n            true\n          ]\n        outerSeen := outerSeen + 1\n        true\n      ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nesteddetectclassvarmutation").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "'self bump'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a self-send inside a detect: \
+             nested inside another detect:. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
 fn test_mixed_letrec_nested_in_foldl_is_compile_error() {
     // BT-3172 audit (acceptance criteria bullet 3): mixed nesting — a
     // `Letrec` (`whileTrue:`) loop with a direct class-var field write,

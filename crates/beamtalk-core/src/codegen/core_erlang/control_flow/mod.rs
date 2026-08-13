@@ -1675,7 +1675,13 @@ impl CoreErlangGenerator {
         }
         if self.in_class_method() {
             let analysis = block_analysis::analyze_block(body);
-            if let Some(selector) = analysis.self_send_selectors.iter().next() {
+            // BT-3172 review: `self_send_selectors` is a `HashSet` (default
+            // `RandomState`) — pick the lexicographically-smallest selector
+            // so the diagnostic text is reproducible across runs for
+            // identical source, rather than depending on hash-iteration
+            // order. Which selector is named doesn't affect the
+            // accept/reject decision, only the message.
+            if let Some(selector) = analysis.self_send_selectors.iter().min() {
                 return Some(format!("'self {selector}'"));
             }
         }
@@ -1685,14 +1691,23 @@ impl CoreErlangGenerator {
     /// Extracts the body block of `expr` if it is a nested loop/fold send —
     /// the `BodyKind::Letrec` shapes (`whileTrue:`/`whileFalse:`/
     /// `timesRepeat:`/`to:do:`/`to:by:do:`, see this module's `//!` doc
-    /// comment) or the most common `BodyKind::Foldl*` shapes (`do:`/
-    /// `collect:`/`select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/
-    /// `inject:into:` — the same set [`Self::list_op_needs_stateacc_fallback`]/
-    /// [`Self::collect_list_op_cross_scope_mutations`] special-case for the
-    /// analogous local-variable cross-scope-mutation analysis; the less
-    /// common predicate-based fold shapes — `detect:`/`count:`/
-    /// `takeWhile:`/... — are out of scope here for the same reason they're
-    /// out of scope there).
+    /// comment) or the `BodyKind::Foldl*` shapes (`do:`/`collect:`/
+    /// `select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/`inject:into:`/
+    /// `detect:`/`count:`/`takeWhile:`/`dropWhile:`/`partition:`/
+    /// `groupBy:`). Unlike the analogous local-variable cross-scope-mutation
+    /// analysis in [`Self::list_op_needs_stateacc_fallback`]/
+    /// [`Self::collect_list_op_cross_scope_mutations`] (which safely omit
+    /// the predicate-based shapes — a narrower, unrelated optimization
+    /// concern), this list must cover every `Foldl*` `BodyKind`: per
+    /// `ThreadingPlan::new_impl`'s `else` branch (~line 607), ALL of them —
+    /// not just `do:`/`collect:`/etc. — share the exact same
+    /// `threads_class_vars` gate (`!Actor && in_class_method() &&
+    /// body_analysis.has_self_sends`) and the same `{ClassVars, tail}` wrap,
+    /// so a class-var self-send nested inside e.g. `detect:` is exactly as
+    /// vulnerable to this predicate's silent-loss/`erlc`-crash bug as one
+    /// nested inside `do:`. `detect:ifNone:` is intentionally excluded: its
+    /// second (`ifNone:`) block argument is a separate, not-yet-analyzed
+    /// risk surface this predicate doesn't attempt to cover.
     fn nested_loop_or_fold_body(expr: &Expression) -> Option<&crate::ast::Block> {
         use crate::ast::MessageSelector;
         let Expression::MessageSend {
@@ -1706,7 +1721,8 @@ impl CoreErlangGenerator {
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         match sel.as_str() {
             "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
-            | "anySatisfy:" | "allSatisfy:" => match arguments.first() {
+            | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:"
+            | "dropWhile:" | "partition:" | "groupBy:" => match arguments.first() {
                 Some(Expression::Block(block)) => Some(block),
                 _ => None,
             },

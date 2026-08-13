@@ -337,7 +337,8 @@ pub enum CodeGenError {
     /// BT-3172 (BT-3168 follow-up): a `Letrec`- or `Foldl*`-shaped loop
     /// (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`/
     /// `do:`/`collect:`/`select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/
-    /// `inject:into:`) nested inside another such loop — in any
+    /// `inject:into:`/`detect:`/`count:`/`takeWhile:`/`dropWhile:`/
+    /// `partition:`/`groupBy:`) nested inside another such loop — in any
     /// Letrec/Letrec, Foldl*/Foldl*, or mixed combination — where the INNER
     /// loop's own body would thread a `ClassVars` mutation through its own
     /// recursive tail call or fold accumulator, but the OUTER loop's own
