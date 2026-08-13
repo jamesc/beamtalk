@@ -853,9 +853,21 @@ pub(super) enum ThreadedStmt {
     /// A loop or mutation-carrying conditional, with its mode already
     /// resolved. `produces` lists the versions the body makes available to
     /// its enclosing frame once the construct completes.
+    ///
+    /// `shadow_write_eligible` (ADR 0111 Addendum 9, Question 1): whether a
+    /// class-var mutation inside `body` is eligible for the ADR 0110
+    /// shadow write / [`VerifyError::ShadowWriteMissing`] check — read fresh
+    /// from `self.block_depth == 0` at construction time (independently
+    /// re-derived, never reused from a caller's `shadow_write` value; see
+    /// [`construct_and_verify_class_var_bind`]'s doc comment). Orthogonal to
+    /// `frame`: `frame` scopes version-linearity, `shadow_write_eligible`
+    /// scopes shadow-write eligibility — they only coincided at
+    /// `FrameId::ROOT` historically because no non-ROOT frame ever carried a
+    /// legitimate class-var mutation before loop/fold bodies did.
     Threaded {
         mode: ThreadingMode,
         frame: FrameId,
+        shadow_write_eligible: bool,
         body: Vec<ThreadedStmt>,
         produces: Vec<VersionedVar>,
         span: Span,
@@ -932,6 +944,10 @@ pub(super) enum ThreadedStmt {
         fn_name: String,
         mode: ThreadingMode,
         frame: FrameId,
+        /// See [`ThreadedStmt::Threaded`]'s field of the same name (ADR
+        /// 0111 Addendum 9, Question 1) — identical meaning and
+        /// construction discipline, on the loop-shaped variant.
+        shadow_write_eligible: bool,
         /// Present only for counted loops (`to:do:`/`to:by:do:`/
         /// `timesRepeat:`/`repeat`) — `None` for while/`whileFalse:`. See
         /// [`LoopCounter`]'s doc comment.
@@ -1145,6 +1161,7 @@ pub(super) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
         has_class_vars_nlr,
         frame_stack: vec![FrameId::ROOT],
         mode_stack: Vec::new(),
+        shadow_write_eligible_stack: vec![true],
         errors: &mut errors,
     };
     walk.walk(ir);
@@ -1218,6 +1235,15 @@ struct VerifyWalk<'a> {
     has_class_vars_nlr: bool,
     frame_stack: Vec<FrameId>,
     mode_stack: Vec<ThreadingMode>,
+    /// ADR 0111 Addendum 9, Question 1: parallel to `frame_stack`, seeded
+    /// `[true]` (a method's own top level is always shadow-write-eligible),
+    /// pushed/popped in lockstep in the `Threaded | ConditionalLoop` arm of
+    /// `walk_stmt`, AND-combined with the parent's current top for
+    /// defense-in-depth on hand-built fixtures (correct lowering never needs
+    /// the AND — a nested node's own `block_depth`-derived flag already
+    /// encodes total nesting depth). `ShadowWriteMissing`'s gate reads this
+    /// stack's top instead of `target.frame == FrameId::ROOT`.
+    shadow_write_eligible_stack: Vec<bool>,
     errors: &'a mut Vec<VerifyError>,
 }
 
@@ -1274,7 +1300,7 @@ impl VerifyWalk<'_> {
                     }
                 }
                 if matches!(target.prefix, VersionPrefix::ClassVars)
-                    && target.frame == FrameId::ROOT
+                    && *self.shadow_write_eligible_stack.last().unwrap()
                     && !*shadow_write
                     && self.has_class_vars_nlr
                 {
@@ -1287,6 +1313,7 @@ impl VerifyWalk<'_> {
             ThreadedStmt::Threaded {
                 mode,
                 frame,
+                shadow_write_eligible,
                 body,
                 produces,
                 span: _,
@@ -1294,6 +1321,7 @@ impl VerifyWalk<'_> {
             | ThreadedStmt::ConditionalLoop {
                 mode,
                 frame,
+                shadow_write_eligible,
                 body,
                 produces,
                 span: _,
@@ -1305,12 +1333,20 @@ impl VerifyWalk<'_> {
                 // `exit_arm`/`fn_name`/`counter` are opaque (or caller-
                 // supplied, non-threading) fields `verify()` does not, and
                 // is not meant to, inspect — see the variant's doc comment.
+                //
+                // ADR 0111 Addendum 9, Question 1: `shadow_write_eligible`
+                // pushes/pops in lockstep with `frame`/`mode`, AND-combined
+                // with the parent's current top.
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
+                self.shadow_write_eligible_stack.push(
+                    *self.shadow_write_eligible_stack.last().unwrap() && *shadow_write_eligible,
+                );
                 self.walk(body);
                 for v in produces {
                     self.check_use(v, Span::default());
                 }
+                self.shadow_write_eligible_stack.pop();
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
@@ -1524,6 +1560,7 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
             ThreadedStmt::Threaded {
                 mode,
                 frame,
+                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 body,
                 produces,
                 span: _,
@@ -1546,6 +1583,7 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 fn_name,
                 mode,
                 frame,
+                shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
                 counter: _counter, // counted-loop rendering: a later migration wires a real counted-loop call site (BT-3145 pilots while-direct only)
                 continue_header,
                 body,
@@ -2096,6 +2134,13 @@ pub(super) fn build_tuple_acc_unpack(
     let stmt = ThreadedStmt::Threaded {
         mode: ThreadingMode::TupleAcc(mode_gate_slots),
         frame,
+        // `TupleAcc` unpacks only local threaded vars — never a class var
+        // (per ADR 0111 Addendum 9, Question 4/6: `TupleAcc(>0)` is
+        // unconditionally excluded whenever a body threads `ClassVars`), so
+        // this node can never itself contain a class-var `Bind` needing the
+        // eligibility check. `true` is the neutral default, matching
+        // `verify()`'s own `[true]` seed.
+        shadow_write_eligible: true,
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: node_gate_slots,
@@ -2221,12 +2266,25 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 /// foreign-NLR-relay-capable boundary, so it assumes one, same as the
 /// deleted fixture did (ADR 0111 §Verifier honesty).
 ///
-/// `at_method_top_frame` selects the `Bind`'s (and the marker's) `FrameId`:
-/// [`FrameId::ROOT`] when `true`, a nested [`FrameId`] otherwise — mirroring
-/// [`VerifyError::ShadowWriteMissing`]'s own `target.frame == FrameId::ROOT`
-/// gate. **This is deliberately NOT `self.current_nlr_token().is_some()`**
-/// (whether *this* method's own body happens to contain a literal `^` inside
-/// one of its own block literals, gating `wrap_class_method_body_with_nlr_catch`)
+/// `frame` (ADR 0111 Addendum 9, Question 2) is the `Bind`'s (and the
+/// marker's) real `FrameId` — the caller's own `current_branch_frame()` for
+/// a loop/fold-body class-var mutation, or [`FrameId::ROOT`] for a
+/// top-frame one. Unlike the deleted `at_method_top_frame: bool` this
+/// replaces, `frame` no longer doubles as the shadow-write-eligibility
+/// signal — that is `shadow_write_eligible`'s own, independent job
+/// (Addendum 9, Question 1): whether a foreign NLR relayed out of this
+/// class method is still guaranteed to observe this mutation via the ADR
+/// 0110 process-dictionary shadow write. `FrameId` scopes version linearity
+/// (sibling branch arms/loop iterations getting fresh, disjoint identities);
+/// `shadow_write_eligible` scopes shadow-write eligibility
+/// (`self.block_depth == 0` — "is this still the method's own top level, not
+/// nested inside a first-class block-literal closure boundary"). The two
+/// axes coincided at `FrameId::ROOT` only because no non-`ROOT` frame ever
+/// carried a legitimate class-var mutation before loop/fold bodies did.
+///
+/// **This is deliberately NOT `self.current_nlr_token().is_some()`** (whether
+/// *this* method's own body happens to contain a literal `^` inside one of
+/// its own block literals, gating `wrap_class_method_body_with_nlr_catch`)
 /// — that would silently exempt the *exact* ADR 0110 repro shape from this
 /// check: `CollectionDriver countedRun:over:` mutates a class var and then
 /// invokes a **caller-supplied** block (`aBlock value: x`, inside its own
@@ -2238,30 +2296,27 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 /// production code is correspondingly unconditional too — gated only on
 /// `block_depth == 0` (`generate_field_assignment`), never on local
 /// NLR-catch presence. Callers must therefore pass an *independently
-/// re-derived* top-frame signal (`self.block_depth == 0`, read fresh from
-/// live generator state — not reused from whatever `shadow_write` value a
-/// future regression might compute wrong), matching production's actual
+/// re-derived* `shadow_write_eligible` (`self.block_depth == 0`, read fresh
+/// from live generator state — not reused from whatever `shadow_write` value
+/// a future regression might compute wrong), matching production's actual
 /// gate 1:1 (ADR 0111 §Verifier honesty: comparing the generator against
 /// itself is silent when both are consistently wrong).
 ///
-/// The `dispatch_codegen.rs` rebind site passes `false`/`false` unconditionally
-/// — not a claim about its real block-depth, but a deliberate exemption: that
-/// `Bind` structurally never carries its own shadow-write obligation
-/// regardless of nesting (see its own call-site comment), so it is modeled
-/// as never sitting at the frame this check inspects.
+/// The `dispatch_codegen.rs` rebind site passes `FrameId::ROOT`/`false`
+/// unconditionally — the frame is now honestly `ROOT` (that call site never
+/// claims a real nested identity), and `shadow_write_eligible: false` is a
+/// deliberate exemption: that `Bind` structurally never carries its own
+/// shadow-write obligation regardless of nesting (see its own call-site
+/// comment), so it is modeled as never eligible for this check.
 pub(super) fn construct_and_verify_class_var_bind(
     op: BindOp,
     shadow_write: bool,
-    at_method_top_frame: bool,
+    frame: FrameId,
+    shadow_write_eligible: bool,
     source_version: usize,
     target_version: usize,
     span: Span,
 ) -> (ThreadedStmt, Vec<VerifyError>) {
-    let frame = if at_method_top_frame {
-        FrameId::ROOT
-    } else {
-        FrameId::new(1)
-    };
     let mut body = Vec::with_capacity(source_version + 1);
     for v in 1..=source_version {
         body.push(ThreadedStmt::Bind {
@@ -2300,30 +2355,48 @@ pub(super) fn construct_and_verify_class_var_bind(
         span,
     };
     // `verify()` seeds its frame stack with just `[FrameId::ROOT]` (module
-    // docs on `FrameId`) — when `frame == FrameId::ROOT` (`at_method_top_frame`),
-    // `body`'s Binds are already reachable at the top level with no wrapper.
-    // Otherwise `frame` must be PUSHED via a `Threaded` node, or
-    // `VerifyWalk::check_use`'s frame-flow rule can never find a backfilled
-    // version `>0` at that frame (a bare top-level `Bind`/`NlrCatch` never
-    // pushes anything) — this is exactly the gap that produced a spurious
-    // `UnboundVersion` before BT-3148 added real backfill history here (a
-    // nested class-var rebind is always `at_method_top_frame: false`, so it
-    // always took this branch once `source_version > 0`).
-    let fixture: Vec<ThreadedStmt> = if at_method_top_frame {
-        let mut f = body;
-        f.push(marker);
-        f
-    } else {
+    // docs on `FrameId`) and its shadow-write-eligibility stack with just
+    // `[true]` — `body`'s Binds are only reachable at the top level with no
+    // wrapper when BOTH `frame == FrameId::ROOT` AND `shadow_write_eligible`
+    // (ADR 0111 Addendum 9, Question 2's correction to this branch: an OR of
+    // two independent triggers, not a replacement of one by the other).
+    //
+    // Trigger 1 (unchanged from before Addendum 9): `frame != FrameId::ROOT`
+    // must PUSH `frame` via a `Threaded` node, or `VerifyWalk::check_use`'s
+    // frame-flow rule can never find a backfilled version `>0` at that frame
+    // (a bare top-level `Bind`/`NlrCatch` never pushes anything) — this is
+    // exactly the gap that produced a spurious `UnboundVersion` before
+    // BT-3148 added real backfill history here (the `dispatch_codegen.rs`
+    // rebind site's frame is now honestly `FrameId::ROOT` too, so it no
+    // longer triggers this one — see its own call-site comment).
+    //
+    // Trigger 2 (new in Addendum 9): `!shadow_write_eligible` must ALSO wrap,
+    // independently of `frame` — the `dispatch_codegen.rs` rebind site's
+    // `shadow_write_eligible: false` at its now-`FrameId::ROOT` frame would
+    // otherwise fall onto the bare path and be silently exempt from
+    // `ShadowWriteMissing`'s eligibility check for the wrong reason (a bare
+    // top-level `Bind` is unconditionally eligible per `verify()`'s `[true]`
+    // seed) — wrapping still resolves that false exemption, because the
+    // wrapper's own `shadow_write_eligible: false` correctly AND-combines
+    // down to `false` on the stack, matching production's real "never
+    // eligible" semantics for this call site.
+    let needs_wrap = frame != FrameId::ROOT || !shadow_write_eligible;
+    let fixture: Vec<ThreadedStmt> = if needs_wrap {
         vec![
             ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                shadow_write_eligible,
                 body,
                 produces: Vec::new(),
                 span,
             },
             marker,
         ]
+    } else {
+        let mut f = body;
+        f.push(marker);
+        f
     };
     (bind, verify(&fixture))
 }
@@ -2570,6 +2643,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             body: vec![
                 ThreadedStmt::Bind {
                     target: local("sum", 1, frame),
@@ -2607,6 +2681,7 @@ mod tests {
             fn_name: "while".to_string(),
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             counter: None,
             continue_header: Document::Str("<opaque condition>"),
             body: vec![ThreadedStmt::Bind {
@@ -2634,6 +2709,7 @@ mod tests {
             fn_name: "while".to_string(),
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             counter: None,
             continue_header: Document::Str("<opaque condition>"),
             body: vec![ThreadedStmt::Bind {
@@ -2740,9 +2816,11 @@ mod tests {
             ThreadedStmt::Threaded {
                 mode: ThreadingMode::DirectParams,
                 frame: f1,
+                shadow_write_eligible: true,
                 body: vec![ThreadedStmt::Threaded {
                     mode: ThreadingMode::DirectParams,
                     frame: f2,
+                    shadow_write_eligible: true,
                     body: vec![ThreadedStmt::Bind {
                         target: class_var(2, f2),
                         source: class_var(1, f0), // grandparent's binding
@@ -2771,6 +2849,7 @@ mod tests {
             ThreadedStmt::Threaded {
                 mode: ThreadingMode::DirectParams,
                 frame: f1,
+                shadow_write_eligible: true,
                 body: vec![ThreadedStmt::Bind {
                     target: local("sum", 1, f1),
                     source: local("sum", 0, f1),
@@ -2784,6 +2863,7 @@ mod tests {
             ThreadedStmt::Threaded {
                 mode: ThreadingMode::DirectParams,
                 frame: f2,
+                shadow_write_eligible: true,
                 body: vec![ThreadedStmt::Bind {
                     target: local("count", 1, f2),
                     // References F1's Sum1 — F1 is a sibling, not an
@@ -2942,6 +3022,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::Bind {
                 target: local("sum", 1, frame),
                 source: local("sum", 0, frame),
@@ -2973,6 +3054,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::Bind {
                 target: local("sum", 1, frame),
                 source: local("sum", 0, frame),
@@ -3074,16 +3156,22 @@ mod tests {
 
     #[test]
     fn verify_shadow_write_missing_silent_below_top_frame() {
-        // Same missing-shadow-write shape, but the Bind is inside a nested
-        // frame (block_depth > 0 analogue) — not a top-frame mutation, so
-        // the ADR 0110 contract doesn't apply here (matches
-        // `generate_field_assignment`'s `block_depth == 0` gate).
+        // Same missing-shadow-write shape, but the wrapper is not
+        // shadow-write-eligible (block_depth > 0 analogue) — not a top-frame
+        // mutation, so the ADR 0110 contract doesn't apply here (matches
+        // `generate_field_assignment`'s `block_depth == 0` gate). ADR 0111
+        // Addendum 9, Question 1: this is now expressed via the explicit
+        // `shadow_write_eligible: false` field, not via `frame != ROOT` (a
+        // non-ROOT frame alone is no longer sufficient to exempt a Bind —
+        // see `verify_shadow_write_missing_fires_on_non_root_eligible_frame`
+        // just below for the converse case this test used to conflate).
         let f0 = FrameId::ROOT;
         let inner = FrameId::new(1);
         let ir = vec![
             ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame: inner,
+                shadow_write_eligible: false,
                 body: vec![ThreadedStmt::Bind {
                     target: VersionedVar::new(VersionPrefix::ClassVars, 1, inner),
                     source: VersionedVar::new(VersionPrefix::ClassVars, 0, inner),
@@ -3108,6 +3196,68 @@ mod tests {
             },
         ];
         assert_eq!(verify(&ir), Vec::new());
+    }
+
+    #[test]
+    fn verify_shadow_write_missing_fires_on_non_root_eligible_frame() {
+        // BT-3167 (ADR 0111 Addendum 9, Question 1): the exact gap this
+        // issue closes — before the widened frame model, `ShadowWriteMissing`
+        // gated on `target.frame == FrameId::ROOT` alone, so a class-var
+        // mutation inside ANY non-ROOT frame (every loop/fold body's real
+        // `FrameId`, minted fresh by `with_branch_context`) was silently
+        // exempt from the check, regardless of whether it was really
+        // shadow-write-eligible. A "control-flow-only" frame — the shape
+        // BT-3140's amendment describes: a loop body never increments
+        // `block_depth`, so it stays semantically "the method's own top
+        // level" for shadow-write purposes even though it gets a fresh,
+        // non-ROOT `FrameId` for version-linearity scoping — must still be
+        // caught. This synthesizes exactly that: a `Threaded` wrapper at a
+        // non-ROOT `frame`, but `shadow_write_eligible: true` (the
+        // independent signal this issue introduces), containing a class-var
+        // `Bind` with a forgotten shadow write.
+        let f0 = FrameId::ROOT;
+        let control_flow_only = FrameId::new(1);
+        let ir = vec![
+            ThreadedStmt::Threaded {
+                mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
+                frame: control_flow_only,
+                shadow_write_eligible: true,
+                body: vec![ThreadedStmt::Bind {
+                    target: VersionedVar::new(VersionPrefix::ClassVars, 1, control_flow_only),
+                    source: VersionedVar::new(VersionPrefix::ClassVars, 0, control_flow_only),
+                    op: BindOp::Put {
+                        field: "runs".to_string(),
+                        value: ValueRef::Var("_Val0".to_string()),
+                        class_tag: ValueRef::Var("ClassSelf".to_string()),
+                    },
+                    shadow_write: false, // BUG: forgot the shadow write
+                    span: span(),
+                }],
+                produces: vec![VersionedVar::new(
+                    VersionPrefix::ClassVars,
+                    1,
+                    control_flow_only,
+                )],
+                span: span(),
+            },
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ClassMethod {
+                    has_class_vars: true,
+                },
+                token: TokenId::new("NlrTokenFixtureOnly"),
+                frame: f0,
+                span: span(),
+            },
+        ];
+        let errors = verify(&ir);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::ShadowWriteMissing { mutated, .. }
+                    if *mutated == VersionedVar::new(VersionPrefix::ClassVars, 1, control_flow_only)
+            )),
+            "expected ShadowWriteMissing for the eligible non-ROOT frame, got: {errors:?}"
+        );
     }
 
     // ── lower_and_render (test shim) ─────────────────────────────────────
@@ -3212,6 +3362,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::Bind {
                 target: local("sum", 1, frame),
                 source: sum_source.clone(),
@@ -3264,6 +3415,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::SelfSendInBody),
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::TupleAccUnpack {
                 param,
                 gate_slots: 0,
@@ -3294,6 +3446,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::TupleAccUnpack {
                 param,
                 gate_slots: 0,
@@ -3371,6 +3524,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::TupleAcc(1),
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::TupleAccUnpack {
                 param,
                 gate_slots: 2,
@@ -3543,10 +3697,11 @@ mod tests {
     #[test]
     fn construct_and_verify_class_var_bind_put_silent_with_shadow_write() {
         // generate_field_assignment's real post-ADR-0110 shape: block_depth
-        // == 0 (shadow_write: true), first mutation in the method
-        // (source_version: 0, target_version: 1).
+        // == 0 (shadow_write: true, shadow_write_eligible: true), first
+        // mutation in the method (source_version: 0, target_version: 1), at
+        // the method's own top frame.
         let (bind, errors) =
-            construct_and_verify_class_var_bind(put_op(), true, true, 0, 1, span());
+            construct_and_verify_class_var_bind(put_op(), true, FrameId::ROOT, true, 0, 1, span());
         assert_eq!(errors, Vec::new());
         assert_eq!(
             bind,
@@ -3564,8 +3719,10 @@ mod tests {
     #[test]
     fn construct_and_verify_class_var_bind_put_fires_when_shadow_write_missing_at_top_frame() {
         // The regression this exists to catch: block_depth == 0 (a top-frame
-        // mutation) but the shadow write was forgotten.
-        let (_, errors) = construct_and_verify_class_var_bind(put_op(), false, true, 0, 1, span());
+        // mutation, shadow_write_eligible: true) but the shadow write was
+        // forgotten.
+        let (_, errors) =
+            construct_and_verify_class_var_bind(put_op(), false, FrameId::ROOT, true, 0, 1, span());
         assert_eq!(
             errors,
             vec![VerifyError::ShadowWriteMissing {
@@ -3587,11 +3744,12 @@ mod tests {
         // try/catch at all (`self.current_nlr_token()` is `None` throughout
         // its body). The foreign `^` still relays, caught one layer out by
         // `apply_class_method_fun/6`'s unconditional `?IS_NLR` clause — so
-        // `at_method_top_frame` must be driven by `block_depth == 0` alone,
+        // `shadow_write_eligible` must be driven by `block_depth == 0` alone,
         // NEVER by whether this method happens to have its own NLR catch:
         // gating on the latter (an earlier version of this helper's bug)
         // would silently exempt this exact shape from the check.
-        let (_, errors) = construct_and_verify_class_var_bind(put_op(), false, true, 0, 1, span());
+        let (_, errors) =
+            construct_and_verify_class_var_bind(put_op(), false, FrameId::ROOT, true, 0, 1, span());
         assert!(
             errors
                 .iter()
@@ -3604,9 +3762,19 @@ mod tests {
     fn construct_and_verify_class_var_bind_put_silent_below_top_frame() {
         // A class-var mutation inside a nested block (block_depth > 0) is
         // legitimately shadow_write: false — already discarded on normal
-        // return (BT-1550), not a regression. Matches
+        // return (BT-1550), not a regression. ADR 0111 Addendum 9: modeled
+        // via `shadow_write_eligible: false` at a nested `frame`, not by
+        // `frame` alone. Matches
         // `verify_shadow_write_missing_silent_below_top_frame`.
-        let (_, errors) = construct_and_verify_class_var_bind(put_op(), false, false, 0, 1, span());
+        let (_, errors) = construct_and_verify_class_var_bind(
+            put_op(),
+            false,
+            FrameId::new(1),
+            false,
+            0,
+            1,
+            span(),
+        );
         assert_eq!(errors, Vec::new());
     }
 
@@ -3615,32 +3783,41 @@ mod tests {
         // dispatch_codegen.rs's inherited-self-dispatch rebind: never itself
         // a shadow-write producer (the callee's own Bind already wrote it
         // under the same ClassSelf-tagged key) — its call site always passes
-        // at_method_top_frame: false, so this stays silent unconditionally.
+        // `FrameId::ROOT` (honest — it never claims a real nested identity)
+        // with `shadow_write_eligible: false` (ADR 0111 Addendum 9, Question
+        // 2), so this stays silent unconditionally regardless of `frame`.
         let op = BindOp::Direct(ValueRef::Var("_CV0".to_string()));
-        let (_, errors) = construct_and_verify_class_var_bind(op, false, false, 0, 1, span());
+        let (_, errors) =
+            construct_and_verify_class_var_bind(op, false, FrameId::ROOT, false, 0, 1, span());
         assert_eq!(errors, Vec::new());
     }
 
     #[test]
     fn construct_and_verify_class_var_bind_direct_rebind_silent_with_a_nonzero_source_version() {
         // Regression for a real BT-3148 bug caught by this migration's own
-        // tests: `at_method_top_frame: false` selects a non-`ROOT` `FrameId`,
-        // which `verify()`'s frame stack (seeded as `[FrameId::ROOT]` only)
-        // cannot see without an explicit `Threaded` wrapper — a nested
-        // class-var rebind (`emit_class_var_result_unwrap`) is ALWAYS
-        // `at_method_top_frame: false`, and its `source_version` is the real,
-        // possibly-nonzero `class_var_version()` (e.g. an earlier top-frame
-        // mutation already minted `ClassVars1` before this nested rebind
-        // runs) — this must stay silent, not spuriously report
-        // `UnboundVersion` for the backfilled version.
+        // tests, re-pinned under ADR 0111 Addendum 9's widened frame model:
+        // even at the caller's now-honest `FrameId::ROOT`, `verify()`'s
+        // frame stack alone would NOT save this call site from a spurious
+        // `UnboundVersion` on a nonzero backfilled version — it is
+        // `shadow_write_eligible: false` (Question 2's second wrap trigger,
+        // `frame != FrameId::ROOT || !shadow_write_eligible`) that forces
+        // the wrap, and the wrap is what supplies the `Threaded` frame push
+        // `check_use`'s frame-flow rule needs. A nested class-var rebind
+        // (`emit_class_var_result_unwrap`) is ALWAYS `shadow_write_eligible:
+        // false`, and its `source_version` is the real, possibly-nonzero
+        // `class_var_version()` (e.g. an earlier top-frame mutation already
+        // minted `ClassVars1` before this nested rebind runs) — this must
+        // stay silent, not spuriously report `UnboundVersion` for the
+        // backfilled version.
         let op = BindOp::Direct(ValueRef::Var("_CV3".to_string()));
-        let (bind, errors) = construct_and_verify_class_var_bind(op, false, false, 2, 3, span());
+        let (bind, errors) =
+            construct_and_verify_class_var_bind(op, false, FrameId::ROOT, false, 2, 3, span());
         assert_eq!(errors, Vec::new(), "got: {errors:?}");
         assert_eq!(
             bind,
             ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::ClassVars, 3, FrameId::new(1)),
-                source: VersionedVar::new(VersionPrefix::ClassVars, 2, FrameId::new(1)),
+                target: VersionedVar::new(VersionPrefix::ClassVars, 3, FrameId::ROOT),
+                source: VersionedVar::new(VersionPrefix::ClassVars, 2, FrameId::ROOT),
                 op: BindOp::Direct(ValueRef::Var("_CV3".to_string())),
                 shadow_write: false,
                 span: span(),
@@ -3656,7 +3833,7 @@ mod tests {
         // and the returned Bind must carry those exact versions (never the
         // old fixture's hardcoded 0 -> 1).
         let (bind, errors) =
-            construct_and_verify_class_var_bind(put_op(), true, true, 3, 4, span());
+            construct_and_verify_class_var_bind(put_op(), true, FrameId::ROOT, true, 3, 4, span());
         assert_eq!(errors, Vec::new(), "got: {errors:?}");
         assert_eq!(
             bind,
@@ -4039,6 +4216,7 @@ mod tests {
             fn_name: "while".to_string(),
             mode: ThreadingMode::DirectParams,
             frame,
+            shadow_write_eligible: true,
             counter: None,
             continue_header: ir_continue_header,
             body: ir_body,
@@ -4220,6 +4398,7 @@ mod tests {
             fn_name: "while".to_string(),
             mode: ThreadingMode::Hybrid,
             frame,
+            shadow_write_eligible: true,
             counter: None,
             continue_header: ir_continue_header,
             body: ir_body,
@@ -4264,6 +4443,7 @@ mod tests {
         let ir = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::Hybrid,
             frame,
+            shadow_write_eligible: true,
             body: vec![ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, 1, frame),
                 source: VersionedVar::new(VersionPrefix::State, 0, frame),

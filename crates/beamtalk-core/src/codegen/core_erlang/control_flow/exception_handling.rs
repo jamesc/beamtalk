@@ -1490,6 +1490,7 @@ Actor subclass: Srv
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![
                     make_put("count", "_Val1", target.clone(), source.clone()),
                     make_put("count", "_Val2", target.clone(), source),
@@ -1537,6 +1538,7 @@ Actor subclass: Srv
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![bind],
                 produces: vec![target],
                 span: Span::default(),
