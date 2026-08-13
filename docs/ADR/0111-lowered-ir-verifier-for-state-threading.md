@@ -3660,3 +3660,111 @@ This addendum answers the six cross-cutting design questions BT-3155's own
 epic body named as blocking; a full per-shape decomposition, if the
 migration issues need one before implementing, is their own follow-up design
 pass against this table, not pre-empted here.
+
+## Addendum 10 (2026-08-13): BT-3170 close-out — Epic BT-3155 implementation tracking and final measurement
+
+**Epic:** [BT-3155](https://linear.app/beamtalk/issue/BT-3155) — Thread ClassVars through loop bodies and fold accumulators
+**Status:** Done
+
+| Issue | Description | Size | PR |
+|---|---|---|---|
+| [BT-3166](https://linear.app/beamtalk/issue/BT-3166) | Design: ClassVars threading through loop/fold bodies — six design questions resolved (this ADR's own Addendum 9) | M | [#3367](https://github.com/jamesc/beamtalk/pull/3367) |
+| [BT-3167](https://linear.app/beamtalk/issue/BT-3167) | Infra: widen class-var `Bind` frame construction (`frame`/`shadow_write_eligible` replacing `at_method_top_frame`) + `ShadowWriteMissing` frame-scoping fix | M | [#3369](https://github.com/jamesc/beamtalk/pull/3369) |
+| [BT-3168](https://linear.app/beamtalk/issue/BT-3168) | Migrate `Letrec` (loop) bodies: un-reject BT-3140/BT-3150 for `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:` | L | [#3370](https://github.com/jamesc/beamtalk/pull/3370) |
+| [BT-3169](https://linear.app/beamtalk/issue/BT-3169) | Migrate `Foldl*` bodies: close BT-3151's silent-loss gap for list_ops + dict_ops | L | [#3371](https://github.com/jamesc/beamtalk/pull/3371) |
+| [BT-3170](https://linear.app/beamtalk/issue/BT-3170) | Close-out: regression sweep, new Foldl runtime coverage, docs, this addendum | M | this PR |
+
+**Regression sweep (task 1 of this issue).** Every `Err(CodeGenError::ClassVarAssignmentInThreadedBody{..})`/
+`Err(CodeGenError::ClassMethodSelfSendInThreadedLoopBody{..})` test in
+`tests/gen_server.rs` pinning the old (broken) rejection behavior for the
+`Letrec`/`Foldl*` shapes BT-3168/BT-3169 fixed had already been flipped to
+success assertions as part of those two issues' own PRs — confirmed by
+grep (`Err(CodeGenError::` now matches only `ClassMethodSelfSendInUnthreadedBlock`
+and `FieldAssignmentInUnsupportedBlock`, the two still-intentionally-rejected
+shapes: a bare loop/fold block with no co-occurring local mutation, which
+never reaches state threading at all — see this ADR's main body's
+`ThreadedIr verifier` cross-reference in `docs/development/debugging.md`
+and `docs/beamtalk-language-features.md`'s "Passing Blocks Through Class
+Methods" section for the user-facing version of that remaining boundary).
+`test_class_method_self_send_alongside_local_in_do_body_survives_via_class_vars_threading`
+and its `select:` sibling (BT-3169) were re-checked and already assert
+success + the `{ClassVars, StateAcc}` accumulator shape correctly. No
+further flips were needed.
+
+**New runtime-correctness coverage (task 2).** BT-3168 already shipped
+`stdlib/test/fixtures/loop_class_var_mutation.bt` +
+`loop_class_var_mutation_test.bt`, running BT-3140/BT-3150's exact
+`Driver countedRun:`-style repro (direct field write and self-send, inside
+`whileTrue:`/`timesRepeat:`/`to:do:`, alongside a co-occurring local) end
+to end and checking the class var's actual final value — this closes task
+2 for the `Letrec` side. The `Foldl*` side had only a pure-self-send
+regression test (`foldl_class_var_regression_test.bt`, added during
+BT-3169's own PR review to pin an unrelated shadow-read correctness bug);
+no runtime test exercised a *mutating* self-send inside a `do:`/`select:`/
+`collect:` body actually accumulating across iterations — the direct
+`Foldl*` analogue of BT-3151's `DriverSelect positives:` repro. This issue
+adds `stdlib/test/fixtures/fold_class_var_mutation.bt` +
+`fold_class_var_mutation_test.bt`, covering `countedRun:` (do:),
+`positives:` (select:), and `doubleAllCounting:` (collect:), each with a
+same-class mutating self-send alongside a co-occurring local — the shape
+that reaches `Foldl*` threading — plus cross-call persistence and
+zero-iteration edge cases, mirroring `loop_class_var_mutation_test.bt`'s
+own structure. All pass.
+
+**Docs (tasks 3-4).** `docs/beamtalk-language-features.md`'s "Passing
+Blocks Through Class Methods" trap note was rewritten: the previous
+blanket "class-var mutations inside loops/blocks are rejected at compile
+time" statement is now accurate only for the narrower bare-body case (no
+co-occurring local mutation); the common case (a loop/fold body that also
+has its own accumulator/counter/index) now compiles and threads correctly,
+shown with a positive example instead of only a rejection + workaround.
+`docs/development/debugging.md`'s `ShadowWriteMissing` row was already
+updated by BT-3167's own PR (confirmed by `git log`/`git show` against
+that commit, per this issue's own instruction to check first rather than
+redo it) — this issue adds a short paragraph after the `VerifyError` table
+summarizing what BT-3166-BT-3169 actually landed (`ConditionalLoop`'s
+`shadow_write_eligible`-gated `ClassVars` fun parameter for `Letrec`
+bodies; the `Foldl*` accumulator's `{ClassVars, StateAcc}` 2-tuple shape)
+and confirms no new `VerifyError` variant was introduced — both migrations
+route through the pre-existing `UnboundVersion`/`NonLinearVersion`/
+`ShadowWriteMissing` checks against the now-real `Bind`s these node kinds
+produce.
+
+**Cumulative measurement** (this issue's own task 5 — BT-3148 Addendum
+6 / BT-3149 Addendum 7 methodology: two separate release binaries, cold
+`ebin/` each run, `beamtalk build-stdlib --quiet --warnings-as-errors`,
+8 runs per side, alternating baseline/HEAD per round to spread any
+systematic drift evenly across the run order). Baseline is `d4c2e57`
+(`main` immediately before BT-3166, the epic's first commit); "this epic"
+is this issue's own branch HEAD, which carries every `Letrec`/`Foldl*`
+`ClassVars`-threading codegen change BT-3167-BT-3169 shipped to `main`
+(this issue's own changes are tests/docs only — no codegen, confirmed by
+`git diff --stat` touching no `crates/beamtalk-core/src/codegen/` production
+file):
+
+| | wall-clock (s) | user CPU (s) |
+|---|---|---|
+| baseline (mean of 8, `d4c2e57`) | 7.80 (range 6.36–9.47) | 10.97 (range 10.71–11.34) |
+| this epic (mean of 8, HEAD) | 7.71 (range 6.87–8.89) | 10.93 (range 10.55–11.57) |
+| Δ | −1.17% | **−0.39%** |
+
+Both ranges overlap heavily (baseline user CPU 10.71–11.34s vs. this
+epic's 10.55–11.57s), consistent with Addenda 3/6/7's own finding that
+this shared/virtualized environment's noise floor dominates at this scale
+— not distinguishable from noise at n=8, and in either case the measured
+delta is a **reduction**, not a regression. Read on user CPU (the more
+trustworthy metric per Addenda 3/6/7): **−0.39%, comfortably inside the
+≤3% gate**. This is consistent with what the `ClassVars`-threading changes
+architecturally are: an extra fun parameter (`Letrec`) or a wider
+accumulator tuple (`Foldl*`) on the specific bodies that mutate a class
+var from inside a loop/fold — a small fraction of the stdlib corpus's
+total loop/fold bodies, most of which don't touch class vars at all and
+so take neither code path. **Gate cleared.**
+
+All acceptance criteria for BT-3155 are met: BT-3140/BT-3150/BT-3151 are
+closed (marked Done in Linear, each with a comment linking the PR that
+fixed it — BT-3168's #3370 for BT-3140/BT-3150, BT-3169's #3371 for
+BT-3151); the stale-rejection test sweep found nothing left to flip;
+runtime-correctness regression coverage exists for both the `Letrec` and
+`Foldl*` sides; docs reflect the new, narrower restriction; and the
+cumulative build-time gate is cleared.
