@@ -149,13 +149,11 @@
 //! `exception_handling.rs`'s `on:do:`/`ensure:` still on the scaffolding —
 //! two call sites BT-3146's issue description named in scope but whose
 //! shipped PR covered `conditionals.rs` only (its own doc comment already
-//! said so; see [`check_branch_frame_linearity`]'s
-//! doc comment for the accounting). BT-3165 tracks that gap as a
-//! dedicated follow-up (ADR 0111 Addendum 5's E1-E7 table) rather than
-//! folding a second, differently-shaped multi-arm migration into this
-//! close-out issue. `check_branch_frame_linearity` and
-//! [`verify_branch_frame_linearity`] therefore both remain live code —
-//! not residue — until BT-3165 lands.
+//! said so; see the accounting below and BT-3165's own "Status" section
+//! further down). `check_branch_frame_linearity` and
+//! `verify_branch_frame_linearity` therefore both remain live code —
+//! not residue — until BT-3165 lands (see the BT-3165 status section for
+//! their eventual deletion).
 //!
 //! **Dead-code allowances**: reduced from twelve `#[allow(dead_code)]`s to
 //! four, each now scoped to one enum variant or one function instead of a
@@ -253,7 +251,7 @@
 //! `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:` inliners and
 //! `exception_handling.rs`'s `on:do:`/`ensure:` mutation-threading
 //! generators each construct and [`verify`] a
-//! [`verify_branch_frame_linearity`] `ThreadedIr` fixture — one [`FrameId`]
+//! `verify_branch_frame_linearity` `ThreadedIr` fixture — one [`FrameId`]
 //! per `with_branch_context` arm (branch bodies for conditionals; try/
 //! handler bodies for `on:do:`; try/success-cleanup/error-cleanup bodies
 //! for `ensure:`) — checking that sibling arms independently minting the
@@ -303,6 +301,62 @@
 //! `exception_handling.rs` into a separate PR from `conditionals.rs`; this
 //! migration covers `conditionals.rs` only. `exception_handling.rs` stays on
 //! the pre-BT-3146 hand-rolled `Document` path, unaffected.
+//!
+//! ## Status (as of BT-3165 — ADR 0111 Addendum 5, `exception_handling.rs`
+//! slice, closing the gap)
+//!
+//! `exception_handling.rs`'s `generate_exception_body_with_threading_inner`
+//! — the single shared body loop behind both `on:do:`'s try/handler bodies
+//! and `ensure:`'s try/success-cleanup/error-cleanup bodies — now builds
+//! each arm's REAL mutation sequence as [`ThreadedStmt::Bind`]/[`Statement`]
+//! nodes (Addendum 5's E1–E7 per-shape table), wraps it in one
+//! [`ThreadedStmt::Threaded`] node via `conditionals.rs`'s
+//! `verify_and_render_branch_arm` (`mode: StateAcc(None)`, this arm's own
+//! [`FrameId`] minted by [`super::CoreErlangGenerator::current_branch_frame`]
+//! — the same mechanism BT-3146 introduced), [`verify`]s it, and [`render`]s
+//! it. E1 (field assignment) and E3 (local-var assignment) reuse
+//! `conditionals.rs`'s `lower_field_assignment_bind`/
+//! `lower_local_var_assignment_bind` directly — the identical C1/C2-C4
+//! `Bind` decomposition and mint order, no re-derivation. E2 (actor
+//! self-send) required one small factoring:
+//! `dispatch_codegen.rs::generate_self_dispatch_open` used to bake its
+//! state-version bump into the same opaque `Document` as its dispatch call,
+//! so `generate_self_dispatch_call_doc` now exposes the call-only half,
+//! letting the state bump become a real `Bind` (`Direct`, `element(2,
+//! _SD)`) instead of hiding inside `Statement` text — `generate_self_dispatch_open`
+//! itself is unchanged for its other five call sites, just now a thin
+//! wrapper. E4 (destructure assignment) is exempt from `Bind` modeling,
+//! same as C5. E5 (last expression, nested control-flow-with-mutations)
+//! reuses C10-last's shape with `ExResult` naming.
+//!
+//! **This file's one gluing difference from `conditionals.rs`, resolved
+//! without a new render path**: `generate_exception_body_with_threading_inner`
+//! has always inserted a literal `" "` between *source-level* statements
+//! (Rule 2), unlike `conditionals.rs`'s no-separator arms. Rather than
+//! routing the flat per-shape `ThreadedStmt` sequence through
+//! `render_loop_body_statements` (which separates every RAW entry in the
+//! list — spurious for any shape spanning more than one entry, e.g. E1's
+//! Statement+Bind pair, which would gain an extra space it never had), the
+//! lowering pushes that literal space as its own `ThreadedStmt::Statement`
+//! at each source-statement boundary and renders the whole arm through
+//! plain [`render`] (the same no-separator function `conditionals.rs` uses)
+//! — the manually-placed `Statement`s supply the only separators that end
+//! up in the output, at exactly the positions the legacy `if i > 0 {
+//! docs.push(" ") }` loop put them.
+//!
+//! `control_flow/mod.rs`'s `check_branch_frame_linearity` and this file's
+//! `verify_branch_frame_linearity` — the scalar-synthesis scaffolding these
+//! two call sites were the last production users of anywhere in the
+//! codebase (confirmed by grep: zero live callers remained once these two
+//! sites migrated) — are deleted along with their now-dead call sites and
+//! test coverage; the regression coverage proving `NonLinearVersion`/
+//! `UnboundVersion` are live against real exception-arm IR now lives in
+//! `exception_handling.rs`'s own test module
+//! (`test_bt3165_nonlinear_version_detected_via_production_lowering_types`/
+//! `test_bt3165_unbound_version_detected_via_production_lowering_types`),
+//! mirroring `conditionals.rs`'s BT-3146 regression tests for the same
+//! shapes. Byte-identical over the full snapshot corpus + `stdlib`/`BUnit`/
+//! REPL-protocol suites, confirmed before and after.
 //!
 //! ## Scope
 //!
@@ -2132,80 +2186,6 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
     }
 }
 
-// ─── Branch-frame linearity check (BT-3134) ────────────────────────────────
-
-/// Builds a minimal `ThreadedIr` fixture modeling N sibling
-/// `with_branch_context` arms — `ifTrue:ifFalse:`'s two branches,
-/// `on:do:`'s try/handler bodies, `ensure:`'s try/success-cleanup/
-/// error-cleanup bodies — each its own [`FrameId`], and [`verify`]s
-/// branch-frame version linearity across them.
-///
-/// Each arm mints a `StateAcc` `Bind` chain from version 0 (the frame's
-/// entry parameter — `StateAcc`, bound by the caller from the outer
-/// state before entering the arm) up to `final_version`
-/// (`state_version()` reached at the end of
-/// `generate_conditional_branch_inline`/
-/// `generate_exception_body_with_threading`'s `with_branch_context`
-/// call), mirroring the real generator's sequential per-mutation
-/// `StateAcc{N}` rebind. `arms` carries each arm's already-allocated
-/// `FrameId` alongside its `final_version` — distinct arms are distinct
-/// frames BY CONSTRUCTION, so two sibling arms that reach the SAME
-/// `final_version` (e.g. both `ifTrue:`/`ifFalse:` bodies perform exactly
-/// one field mutation, each independently producing `StateAcc1` in their
-/// own frame) must NOT trip [`VerifyError::NonLinearVersion`] — this is
-/// the ADR 0111 §The IR frame-identity requirement (see [`FrameId`]'s doc
-/// comment).
-///
-/// **Scaffolding, not yet a live regression guard**: because the caller
-/// ([`super::control_flow::CoreErlangGenerator::check_branch_frame_linearity`])
-/// always allocates a fresh, distinct `FrameId` per arm and this function
-/// only ever synthesizes a `Bind` chain from a scalar `final_version` count
-/// (not the real per-arm mutation sequence the generator produced), no two
-/// arms can ever collide at any of today's nine call sites (BT-3134's
-/// original six plus BT-3139's three) — this smoke-tests
-/// the verifier's `FrameId`/linearity plumbing (and pins the acceptance
-/// criterion above), but cannot yet catch a real generator bug. Giving it
-/// that teeth requires threading the real per-arm `Bind` producers through,
-/// left to BT-3135+ as it migrates the mutation-`Bind` emission sites
-/// themselves onto `ThreadedIr`.
-pub(super) fn verify_branch_frame_linearity(
-    arms: &[(FrameId, usize)],
-    span: Span,
-) -> Vec<VerifyError> {
-    let mut ir = Vec::with_capacity(arms.len());
-    for &(frame, final_version) in arms {
-        let mut body = Vec::with_capacity(final_version);
-        for v in 1..=final_version {
-            let source = VersionedVar::new(VersionPrefix::State, v - 1, frame);
-            let target = VersionedVar::new(VersionPrefix::State, v, frame);
-            body.push(ThreadedStmt::Bind {
-                target,
-                source,
-                op: BindOp::Direct(ValueRef::Literal("'_'")),
-                shadow_write: false,
-                span,
-            });
-        }
-        let produces = if final_version > 0 {
-            vec![VersionedVar::new(
-                VersionPrefix::State,
-                final_version,
-                frame,
-            )]
-        } else {
-            Vec::new()
-        };
-        ir.push(ThreadedStmt::Threaded {
-            mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
-            frame,
-            body,
-            produces,
-            span,
-        });
-    }
-    verify(&ir)
-}
-
 // ─── Class-var Bind construction (BT-3135/BT-3148, ADR 0110 contract) ─────
 
 /// Constructs the single class-var version `Bind` a production emission site
@@ -2440,8 +2420,9 @@ pub(super) fn verify_body_with_opaque_version_gaps(ir: &[ThreadedStmt]) -> Vec<V
 /// backfilling that history, every mutation past a method's first would
 /// spuriously fail `UnboundVersion` (its `source_version` would have no
 /// producer in an isolated single-`Bind` fixture). The backfill chain
-/// (`1..=source_version`) is exactly [`verify_branch_frame_linearity`]'s own
-/// technique, generalized here to an arbitrary prefix and reused rather than
+/// (`1..=source_version`) is exactly the technique BT-3134's
+/// branch-frame-linearity check used (retired, ADR 0111 Addendum 5 /
+/// BT-3165), generalized here to an arbitrary prefix and reused rather than
 /// re-implemented.
 ///
 /// **Scope, honestly stated (ADR 0111 §Verifier honesty):** each call is
@@ -3533,89 +3514,16 @@ mod tests {
         assert_eq!(rendered, "let N1 = call 'erlang':'element'(3, AccSt0) in ");
     }
 
-    // ── verify_branch_frame_linearity (BT-3134) ──────────────────────────
-    // Pins the production check behind `ifTrue:ifFalse:`'s two branches,
-    // `on:do:`'s try/handler bodies, and `ensure:`'s try/success-cleanup/
-    // error-cleanup bodies.
-
-    #[test]
-    fn verify_branch_frame_linearity_silent_when_arms_are_empty() {
-        assert_eq!(verify_branch_frame_linearity(&[], span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_branch_frame_linearity_silent_for_single_arm_with_mutations() {
-        // One arm, three mutations (final_version = 3) — a plain linear
-        // Bind chain within one frame, no sibling to interact with.
-        let arms = [(FrameId::new(1), 3)];
-        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_branch_frame_linearity_silent_for_arms_with_no_mutations() {
-        // Both branches of `ifTrue:ifFalse:` performed zero field mutations
-        // (final_version = 0 — nothing to bind, `produces` stays empty).
-        let arms = [(FrameId::new(1), 0), (FrameId::new(2), 0)];
-        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_branch_frame_linearity_sibling_arms_same_version_do_not_trip_non_linear() {
-        // THE acceptance-criteria case: `ifTrue:` and `ifFalse:` each
-        // perform exactly one field mutation, so BOTH sibling arms produce
-        // "State1" — but in disjoint frames. Frame identity must keep these
-        // from being counted as two producers of the same VersionedVar.
-        let true_arm = FrameId::new(1);
-        let false_arm = FrameId::new(2);
-        let arms = [(true_arm, 1), (false_arm, 1)];
-        assert_eq!(
-            verify_branch_frame_linearity(&arms, span()),
-            Vec::new(),
-            "sibling arms independently minting State1 in disjoint frames must not report \
-             NonLinearVersion"
-        );
-    }
-
-    #[test]
-    fn verify_branch_frame_linearity_three_sibling_arms_same_version() {
-        // `ensure:`'s shape: try body, success-path cleanup, error-path
-        // cleanup — three sibling arms (not just two), each reaching the
-        // same final_version.
-        let arms = [
-            (FrameId::new(1), 2),
-            (FrameId::new(2), 2),
-            (FrameId::new(3), 2),
-        ];
-        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_branch_frame_linearity_sibling_arms_different_versions_still_silent() {
-        // Sibling arms need not reach the same final_version at all — e.g.
-        // the try body does two mutations while the handler does none.
-        let arms = [(FrameId::new(1), 2), (FrameId::new(2), 0)];
-        assert_eq!(verify_branch_frame_linearity(&arms, span()), Vec::new());
-    }
-
-    #[test]
-    fn verify_branch_frame_linearity_detects_genuine_cross_frame_leak() {
-        // Negative control: if a hypothetical future bug had a "sibling" arm
-        // reuse an ANCESTOR frame's FrameId instead of allocating its own,
-        // the two arms' Bind chains would collide as the same VersionedVar
-        // sequence, in the same frame, and NonLinearVersion must fire. This
-        // pins that the check is not vacuously silent for every input.
-        let shared_frame = FrameId::new(1);
-        let arms = [(shared_frame, 1), (shared_frame, 1)];
-        let errors = verify_branch_frame_linearity(&arms, span());
-        assert!(
-            errors.iter().any(|e| matches!(
-                e,
-                VerifyError::NonLinearVersion { var, producers: 2, .. }
-                    if *var == VersionedVar::new(VersionPrefix::State, 1, shared_frame)
-            )),
-            "expected NonLinearVersion for the colliding shared-frame State1, got: {errors:?}"
-        );
-    }
+    // `verify_branch_frame_linearity` (BT-3134) and its coverage above were
+    // deleted by BT-3165 (ADR 0111 Addendum 5) once
+    // `exception_handling.rs`'s `on:do:`/`ensure:` — its last two production
+    // callers via `check_branch_frame_linearity` — moved to real per-arm
+    // `ThreadedIr` (`verify_and_render_branch_arm`, `conditionals.rs`). The
+    // regression coverage proving `NonLinearVersion`/`UnboundVersion` are
+    // live against real exception-arm IR now lives in
+    // `exception_handling.rs`'s own test module, mirroring
+    // `conditionals.rs`'s `test_bt3146_*_detected_via_production_lowering_types`
+    // pattern.
 
     // ── construct_and_verify_class_var_bind (BT-3135/BT-3148, ADR 0110
     // contract) ─────────────────────────────────────────────────────────
