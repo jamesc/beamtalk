@@ -1318,24 +1318,29 @@ impl CoreErlangGenerator {
     /// their frame ids are always distinct by construction. Giving those two
     /// sites real teeth is `exception_handling.rs`'s own follow-up (ADR 0111
     /// Addendum 5's E1–E7 per-shape table, not attempted by BT-3146's
-    /// `conditionals.rs` slice).
+    /// `conditionals.rs` slice, nor by BT-3149's close-out — see that
+    /// issue's own accounting for why: it discovered this doc comment's
+    /// premise that `conditionals.rs` discharged `exception_handling.rs`
+    /// too was stale, and split the gap into a dedicated follow-up rather
+    /// than absorb E1–E7's design cost into a close-out issue).
     ///
-    /// **conditionals.rs (BT-3146, ADR 0111 Addendum 5) discharged the
-    /// promise this doc comment used to make for six of today's original
-    /// nine call sites**: `generate_conditional_branch_inline`'s four
-    /// `conditionals.rs` callers, `intrinsics.rs`'s REPL-mode inlining, and
-    /// `expressions.rs`'s `match:`-arm inlining now build, `verify()`, and
-    /// `render()` each arm's REAL per-frame `ThreadedIr` directly inside
-    /// `generate_conditional_branch_inline` — `NonLinearVersion`/
-    /// `UnboundVersion` are live checks there now (see
-    /// `conditionals.rs::verify_and_render_branch_arm`), and this scalar
-    /// scaffolding check no longer runs at any of those six sites.
-    /// `expressions.rs`'s ninth call site (`generate_block_stateful_body`,
-    /// a different body loop — Tier-2-stateful-block-body threading for
-    /// list-op/message-send block arguments, unrelated to `ifTrue:`/
-    /// `ifFalse:`/`match:`) stays on this scaffolding permanently, alongside
-    /// the two `exception_handling.rs` sites above — three of today's nine
-    /// call sites remain.
+    /// **conditionals.rs (BT-3146, ADR 0111 Addendum 5) and
+    /// expressions.rs (BT-3149, this close-out) discharged the promise
+    /// this doc comment used to make for seven of today's original nine
+    /// call sites**: `generate_conditional_branch_inline`'s four
+    /// `conditionals.rs` callers, `intrinsics.rs`'s REPL-mode inlining,
+    /// `expressions.rs`'s `match:`-arm inlining, and (BT-3149)
+    /// `expressions.rs`'s `generate_block_stateful` (the Tier 2
+    /// stateful-block-body threading for list-op/message-send block
+    /// arguments — a single-arm `with_branch_context` use, unrelated to
+    /// `ifTrue:`/`ifFalse:`/`match:`, reusing `conditionals.rs`'s
+    /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`/
+    /// `verify_and_render_branch_arm`) now build, `verify()`, and
+    /// `render()` each arm's REAL per-frame `ThreadedIr` directly —
+    /// `NonLinearVersion`/`UnboundVersion` are live checks at all seven
+    /// sites now, and this scalar scaffolding check no longer runs at any
+    /// of them. Only `exception_handling.rs`'s two `on:do:`/`ensure:`
+    /// sites remain on this scaffolding.
     ///
     /// **Failure behavior** (ADR 0111 §The verifier): hard-fails in
     /// debug/CI via `debug_assert!`. In release builds, degrades to an

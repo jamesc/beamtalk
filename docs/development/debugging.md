@@ -156,17 +156,19 @@ If you see a bare `internal error` or a build failure with no readable cause,
 run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
 expected to produce the same wording for the same malformed input.
 
-### ThreadedIr verifier (ADR 0111, BT-3129-BT-3136)
+### ThreadedIr verifier (ADR 0111, BT-3129-BT-3149)
 
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
 coordinated only by scattered `debug_assert!`s at each emission site, each
 independently re-deriving the same invariants. `crates/beamtalk-core/src/codegen/core_erlang/threaded_ir.rs`
-replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) built
-alongside the real `Document` emission at every state-threading call site,
-and a single `verify()` pass that checks it. A violation is a
-`threaded_ir::VerifyError`, reported through the shared
-`report_threaded_ir_verify_errors` helper (`control_flow/mod.rs`,
+replaces that with a small mid-level IR (`ThreadedIr`/`ThreadedStmt`) that IS
+the `Document` emission for every construct family this table covers
+(conditionals, exception handling's `on:do:`/`ensure:` remain the one
+exception — see below), and a single `verify()` pass per construct/method
+that checks it before `render()` turns it into the `Document` the caller
+emits. A violation is a `threaded_ir::VerifyError`, reported through the
+shared `report_threaded_ir_verify_errors` helper (`control_flow/mod.rs`,
 `pub(super)`) — a `debug_assert!` in debug/CI builds (hard failure, `just
 verify-threaded-ir` runs the whole `stdlib/test/*.bt` +
 `stdlib/bootstrap-test/*.btscript` corpus through this path specifically to
@@ -183,14 +185,14 @@ where to start reading:
 
 | Variant | Means | Look at |
 |---|---|---|
-| `UnboundVersion` | A versioned var (e.g. `State2`) was referenced with no producing `Bind` in its frame or an ancestor frame on the frame stack. | Whatever emission path built the `ThreadedIr` fragment around the failing construct — it referenced a version it never bound. |
-| `NonLinearVersion` | Within one `FrameId`, a version was produced by more than one `Bind`, or consumed as the source of more than one successor — frame-scoped SSA-like linearity broken. | The generator for that frame; likely a duplicate `Bind` or a version reused across two branch arms that should have gotten distinct `FrameId`s. |
+| `UnboundVersion` | A versioned var (e.g. `State2`) was referenced with no producing `Bind` in its frame or an ancestor frame on the frame stack. | Whatever emission path built the `ThreadedIr` fragment around the failing construct — it referenced a version it never bound. Live against real per-arm/per-method IR everywhere except `exception_handling.rs`'s `on:do:`/`ensure:` (still scaffolding — see below). |
+| `NonLinearVersion` | Within one `FrameId`, a version was produced by more than one `Bind`, or consumed as the source of more than one successor — frame-scoped SSA-like linearity broken. | The generator for that frame; likely a duplicate `Bind` or a version reused across two branch arms that should have gotten distinct `FrameId`s. Same live/scaffolding split as `UnboundVersion`. |
 | `ThreadingModeUnpackMismatch` | An optimized `ThreadingMode` (a mode chosen specifically because it needs no `StateAcc` unpack) contains an unpack `Bind` anyway. | `while_loops.rs` / `counted_loops.rs`'s mode-selection logic — `ThreadingPlan::generate_unpack_at_iteration_start`'s `if !use_direct_params && !use_hybrid_params` guard (`control_flow/mod.rs`) is what makes this invariant hold structurally; BT-3154 deleted the per-call-site `check_loop_unpack_invariant`/`verify_loop_unpack_invariant` wrapper that used to check it explicitly, since `verify()`'s general `ThreadingModeUnpackMismatch` check was redundant with that guard. |
-| `ShadowWriteMissing` | A class-var `Bind` at frame depth 0 (method top frame) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. |
+| `ShadowWriteMissing` | A class-var `Bind` at frame depth 0 (method top frame) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path (BT-3148, real `Bind` producer) and `gen_server/methods.rs`'s method-body backfill (`verify_body_with_opaque_version_gaps`) — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. |
 | `TupleAccUnpackModeMismatch` | A `ThreadedStmt::TupleAccUnpack` node (flat positional-unpack accumulator) appeared outside a `ThreadingMode::TupleAcc` body. | `list_ops/*.rs` / `dict_ops.rs`'s `ThreadingPlan::generate_tuple_unpack_docs` — the tuple-shaped sibling of `ThreadingModeUnpackMismatch`. |
-| `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). |
-| `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning (unreachable today via `select_tuple_acc`'s own early-return). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
-| `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
+| `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). Live since BT-3147 — `mode_gate_slots` (from `ListOpKind::gate_slots`, a canonical per-op table) and `node_gate_slots` (from each call site's own `index_offset - 1`) are genuinely independent sources now. |
+| `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_tuple_acc`'s own early-return; no production constructor). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
+| `NestedStateAccFallbackUnderDirectParams` | A nested list-op that itself needs a `StateAcc`-map fallback appeared under an enclosing `DirectParams` loop, which has no `StateAcc` map for the inner `{value, StateAcc}` result to unpack into. Regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_direct_params`'s own guard; no production constructor). | `control_flow/mod.rs`'s `select_direct_params`'s `!effects.has_non_tuple_safe_list_op` guard. |
 
 `RoutingMismatch` (BT-3135's structural replacement for the two
 `gen_server/methods.rs` routing `debug_assert!`s) was itself deleted by
@@ -209,20 +211,45 @@ narrow that corpus down: `just test-stdlib <file>` / `just test-bunit
 <file>` against the specific fixture, then `dbg!` the `ThreadedIr` fragment
 at the failing construct's emission site.
 
-**`ConditionalLoop` — the first real (non-test) emission-input call site
-(BT-3145, ADR 0111 Addendum 2/3).** Every other construct in this table is
-still verification-only: `ThreadedIr` is built as a side-channel fixture and
-checked, but `Document` emission happens separately, directly from AST +
-generator state (ADR 0111's own Addendum, "delivered vs. designed"). As of
-BT-3145, `while_loops.rs`'s `generate_while_loop_direct` — gated behind
-`BEAMTALK_THREADED_IR_WHILE_DIRECT=1`, off by default — is the first call
-site where the `ThreadedStmt` built (a `ConditionalLoop` node) IS the
-`Document` returned: `verify()` runs on the real fragment, and `render()`'s
-output is what the caller emits, not a discarded side-channel check. Only
-straight-line loop bodies (every statement a reassignment of a threaded
-local — see `while_direct_body_is_bind_representable`'s doc comment) route
-through this path; anything else silently falls back to the pre-existing
-AST-directed emission, unconditionally correct either way.
+**Emission-input coverage, as of BT-3149's close-out.** `ThreadedIr` started
+(BT-3129-BT-3144) as a verification-only side channel: a fixture built and
+checked alongside `Document` emission that happened separately, directly
+from AST + generator state (ADR 0111's own Addendum, "delivered vs.
+designed"). BT-3145 (`while_loops.rs`'s `generate_while_loop_direct`) was
+the first real emission-input call site; BT-3146 (`conditionals.rs`),
+BT-3147 (`list_ops/*.rs`/`dict_ops.rs`), BT-3148 (`gen_server/methods.rs`
+Actor method bodies, class-var `Bind`s, `NlrCatch`), and BT-3149
+(`expressions.rs`'s `generate_block_stateful`, the Tier 2 stateful-block-body
+threading for list-op/message-send block arguments) each promoted another
+construct family the same way: the `ThreadedStmt`(s) built for the
+construct's own mutation sequence — real `Bind`/`Threaded`/`NlrCatch`/
+`Return`/`TupleAccUnpack`/`ConditionalLoop` nodes, not a hand-fixture — ARE
+what `verify()` checks and `render()` emits, byte-identical to the
+pre-migration hand-rolled `Document` by construction. Verification is
+per-construct (one `verify()` call per branch arm / loop / stateful-block
+body) except for gen_server Actor method bodies, where BT-3148's
+`lower_body_exprs_with_reply` + `verify_body_with_opaque_version_gaps`
+already verify the WHOLE method body in one call — the "method-level
+verify()" shape ADR 0111's close-out aimed at. Generalizing that same
+single-call-per-method shape to constructs nested inside expression
+position (conditionals, loops, list-ops) would require those constructs to
+hand their real `Vec<ThreadedStmt>` fragment up to the enclosing body
+instead of rendering to a `Document` at their own boundary — a comparable
+migration to the `ThreadedStmt::Statement` opaque-embedding design BT-3156
+did for gen_server bodies, generalized to expression-nested constructs, and
+was evaluated as ADR-0018-§Alternative-3-scale scope, deliberately not
+attempted in this close-out (see the ADR 0111 addendum's "full-pipeline
+re-evaluation" note).
+
+**Known remaining gap**: `exception_handling.rs`'s `on:do:`/`ensure:`
+mutation-threading generators are the one construct family BT-3149 confirmed
+(by grep, per its own task list) is *not* migrated — `conditionals.rs`'s
+BT-3146 PR covered `conditionals.rs` only, despite the issue that opened it
+naming `exception_handling.rs` too; a dedicated follow-up (ADR 0111 Addendum
+5's E1-E7 per-shape table) tracks closing it. Both call sites still go
+through `control_flow/mod.rs`'s `check_branch_frame_linearity` scalar-
+synthesis scaffolding — `NonLinearVersion`/`UnboundVersion` cannot fire from
+either site today (see that function's own doc comment for why).
 
 ## Runtime/REPL Debugging
 

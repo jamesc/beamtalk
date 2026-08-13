@@ -123,6 +123,61 @@
 //! `generate_class_method_fun_from_block`) likewise still wrap a rendered
 //! `Document` rather than carrying a real `NlrCatch` node.
 //!
+//! ## Status (as of BT-3149 — ADR 0111 close-out)
+//!
+//! BT-3149 migrates the last real production caller of
+//! [`check_branch_frame_linearity`]'s
+//! scalar-synthesis scaffolding that BT-3146 didn't already cover:
+//! `expressions.rs`'s `generate_block_stateful` (the Tier 2
+//! stateful-block-body threading for list-op/message-send block
+//! arguments) now builds its single arm's real mutation sequence as
+//! `Bind`/`Statement` nodes — reusing `conditionals.rs`'s
+//! `lower_field_assignment_bind`/`lower_local_var_assignment_bind`
+//! (widened from `conditionals.rs`-private to
+//! `pub(in crate::codegen::core_erlang)`, since the C1/C2 shapes those
+//! helpers build are exactly what this single-arm case needs too — the
+//! only difference is this call site's own is-last/non-last result
+//! wrapping, which stays local since it predates and differs from
+//! `conditionals.rs`'s C1/C2 arm closer), wraps them via
+//! `conditionals.rs`'s `verify_and_render_branch_arm` (similarly widened),
+//! `verify()`s, and `render()`s — byte-identical by construction (every
+//! shape reuses the exact pre-migration codegen calls and mint order,
+//! confirmed against the full snapshot corpus and `stdlib`/`BUnit` suites).
+//!
+//! **Confirmed genuinely NOT the last caller**: grepping after this
+//! migration (per this issue's own task list) found
+//! `exception_handling.rs`'s `on:do:`/`ensure:` still on the scaffolding —
+//! two call sites BT-3146's issue description named in scope but whose
+//! shipped PR covered `conditionals.rs` only (its own doc comment already
+//! said so; see [`check_branch_frame_linearity`]'s
+//! doc comment for the accounting). BT-3165 tracks that gap as a
+//! dedicated follow-up (ADR 0111 Addendum 5's E1-E7 table) rather than
+//! folding a second, differently-shaped multi-arm migration into this
+//! close-out issue. `check_branch_frame_linearity` and
+//! [`verify_branch_frame_linearity`] therefore both remain live code —
+//! not residue — until BT-3165 lands.
+//!
+//! **Dead-code allowances**: reduced from twelve `#[allow(dead_code)]`s to
+//! four, each now scoped to one enum variant or one function instead of a
+//! whole type, with a doc comment naming exactly which future migration
+//! would give it a production constructor: [`LoopCounter::new`] (counted
+//! loops never migrated — only `while_loops.rs`'s `DirectParams` path
+//! did, BT-3145), [`ThreadingMode::Hybrid`] (hybrid loops never migrated —
+//! same gap), [`ValueRef::Version`] (no current `Bind`/`Return` producer
+//! needs a second, value-position version reference alongside `Bind`'s
+//! own dedicated `source` field), and [`BindOp::Unpack`] (the `StateAcc`-
+//! mode per-iteration unpack never migrated — only `TupleAcc` mode's did,
+//! BT-3147). The eight others became either genuinely reachable in
+//! production (the `VersionPrefix`/`ThreadingMode`/`ValueRef`/`BindOp`/
+//! `ThreadedStmt` enum-level allowances — every variant these five types
+//! need for BT-3145-3149's coverage now has a real constructor) or
+//! honestly `#[cfg(test)]` (`lower_and_render`,
+//! `verify_tuple_acc_unpack_invariant`, `verify_tuple_acc_value_type_exclusion`,
+//! `verify_nested_list_op_stateacc_compat`, and the two `VerifyError`
+//! variants only those last two ever construct) — test-only code the
+//! `dead_code` lint should never have been asked to look past in the
+//! first place.
+//!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
 //! `VersionCounter` production path (BT-3131). BT-3132 originally added a
@@ -338,7 +393,6 @@ impl FrameId {
 /// [`verify_tuple_acc_unpack_invariant`]. `#[allow(dead_code)]` here
 /// documents that the remaining variants stay test-only for now, instead of
 /// forcing artificial non-test construction sites.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum VersionPrefix {
     /// Actor/instance state (`State`, `State1`, … — rendered as `StateAcc{N}`
@@ -473,7 +527,18 @@ impl AccParam {
 pub(super) struct LoopCounter(pub(super) String);
 
 impl LoopCounter {
-    #[allow(dead_code)] // counted-loop call sites are a later migration, not this pilot
+    /// BT-3149: still genuinely unconstructed — counted loops
+    /// (`to:do:`/`to:by:do:`/`timesRepeat:`/`repeat`) never migrated to
+    /// `ThreadedIr` emission in this close-out (only `while_loops.rs`'s
+    /// `DirectParams` path did, BT-3145); no other item in this file's
+    /// remaining `#[allow(dead_code)]`s has an even indirect test
+    /// exerciser the way the pinned-invariant `VerifyError` variants do.
+    /// Left in place — not deleted — because `ConditionalLoop::counter`'s
+    /// `Option<LoopCounter>` field is real production IR shape (`None`
+    /// today, `Some` once counted loops migrate), and `LoopCounter` with
+    /// no way to construct one would be a type that documents an
+    /// unreachable state.
+    #[allow(dead_code)]
     pub(super) fn new(name: impl Into<String>) -> Self {
         Self(name.into())
     }
@@ -553,7 +618,6 @@ impl VersionCounter {
 /// decision, recorded as durable IR data instead of re-derived at emission.
 /// See [`VersionPrefix`]'s doc comment for why several variants are
 /// test-only for now.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ThreadingMode {
     /// `fun (Var1, ..., VarN)` — no `StateAcc` map at all (BT-1275).
@@ -581,6 +645,19 @@ pub(super) enum ThreadingMode {
     TupleAcc(usize),
     /// `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals plus
     /// pre-extracted read-only/mutated fields as direct params (BT-1326/BT-1342).
+    ///
+    /// BT-3149: still genuinely unconstructed in production — BT-3145
+    /// wired only `DirectParams` (`generate_while_loop_direct`) to real
+    /// `ThreadedIr` emission; `generate_while_loop_hybrid`/
+    /// `generate_counted_stateful_loop_hybrid` remain on the pre-migration
+    /// hand-rolled path. `render_threaded`'s `DirectParams | Hybrid =>`
+    /// arm (this file) already renders both identically once given real
+    /// IR, so a future hybrid-loop migration is a lowering-side change
+    /// only. Kept `#[allow(dead_code)]` rather than deleted — the
+    /// render/`LoopContextFlags` plumbing for it is real, tested
+    /// production code today (see `render_threaded_tests`), only its
+    /// lowering-side constructor is missing.
+    #[allow(dead_code)]
     Hybrid,
     /// Fallback: threading rides a `StateAcc` map, unpacked at iteration
     /// start. `reason` records why an optimized mode was not selected
@@ -625,11 +702,22 @@ impl TokenId {
 
 /// A value referenced by a [`BindOp`] or [`ThreadedStmt::Return`]. See
 /// [`VersionPrefix`]'s doc comment for why `Version` is test-only for now.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ValueRef {
     /// A previously-bound versioned variable (e.g. the source of a chained
     /// mutation).
+    ///
+    /// BT-3149: still genuinely unconstructed in production — every real
+    /// `Bind`/`Return` producer that reaches for a prior version threads
+    /// it through the `source: VersionedVar` field directly (`Bind`'s own
+    /// dedicated slot) rather than wrapping it as a `ValueRef`; nothing
+    /// yet needs a *second*, value-position version reference alongside
+    /// `source` in the same node. `render_value`'s arm for it is real,
+    /// tested production code (see `render_value_tests`) — only a
+    /// constructor is missing, kept ready for a future shape that needs
+    /// one (e.g. a `Put`/`Direct` RHS that is itself a bare prior
+    /// version, not a fresh temp or opaque `Doc`).
+    #[allow(dead_code)]
     Version(VersionedVar),
     /// A fresh, non-versioned Core Erlang variable name (e.g. a computed
     /// `_Val0` RHS temp).
@@ -657,7 +745,6 @@ pub(super) enum ValueRef {
 /// The mutation an individual [`ThreadedStmt::Bind`] performs. See
 /// [`VersionPrefix`]'s doc comment for why `Put`/`Unpack` are test-only for
 /// now (the Phase A0 prototype only exercises `Direct`).
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum BindOp {
     /// A field/class-var mutation: `call 'maps':'put'(field, value, source)`.
@@ -675,6 +762,15 @@ pub(super) enum BindOp {
     /// loop-iteration start (`generate_unpack_at_iteration_start`) — legal
     /// only inside a [`ThreadingMode::StateAcc`] body; see
     /// [`VerifyError::ThreadingModeUnpackMismatch`].
+    ///
+    /// BT-3149: still genuinely unconstructed in production —
+    /// `generate_unpack_at_iteration_start`'s `StateAcc`-mode per-iteration
+    /// unpack never migrated to real `ThreadedIr` emission in this
+    /// close-out (only the `TupleAcc`-mode unpack did, via
+    /// [`ThreadedStmt::TupleAccUnpack`], BT-3147). `render_bind`'s arm for
+    /// it is real, tested production code (see `render_bind_tests`) —
+    /// only a lowering-side constructor is missing.
+    #[allow(dead_code)]
     Unpack { field: String },
     /// A direct rebind from a computed value (e.g. a direct-params loop's
     /// per-iteration local rebind, or a value-type `Self{N}` rebind).
@@ -686,7 +782,6 @@ pub(super) enum BindOp {
 /// One statement of the lowered IR. See [`VersionPrefix`]'s doc comment for
 /// why `NlrCatch`/`Return` are test-only for now (the Phase A0 prototype only
 /// exercises `Threaded`/`Bind`).
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ThreadedStmt {
     /// A mutation: binds a fresh version from a prior one in the same frame.
@@ -919,6 +1014,12 @@ pub(super) enum VerifyError {
     /// `true` in a `ValueType` context. Regression-pinning, like
     /// `ShadowWriteMissing` (see ADR §Verifier honesty) — `select_tuple_acc`'s
     /// own early-return already makes this unreachable today.
+    ///
+    /// `#[cfg(test)]`: this variant's sole constructor
+    /// ([`verify_tuple_acc_value_type_exclusion`]) is itself test-only —
+    /// see that function's doc comment for why production never reaches
+    /// it structurally.
+    #[cfg(test)]
     TupleAccInValueTypeContext { at: Span },
 
     /// BT-3133 invariant class 3: the recursive inter-construct fallback
@@ -931,6 +1032,12 @@ pub(super) enum VerifyError {
     /// to unpack into. Fires if `select_direct_params`'s
     /// `!effects.has_non_tuple_safe_list_op` guard is ever dropped or
     /// reordered past the point where `DirectParams` is selected.
+    ///
+    /// `#[cfg(test)]`: this variant's sole constructor
+    /// ([`verify_nested_list_op_stateacc_compat`]) is itself test-only —
+    /// see that function's doc comment for why production never reaches
+    /// it structurally.
+    #[cfg(test)]
     NestedStateAccFallbackUnderDirectParams { at: Span },
 }
 
@@ -1415,13 +1522,13 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
 /// [`CoreErlangGenerator`] (cheap — no I/O) so every existing
 /// `lower_and_render(&ir).to_pretty_string()` test call survives verbatim.
 ///
-/// `#[allow(dead_code)]`: unlike [`render`] itself (which now has a real
+/// `#[cfg(test)]`: unlike [`render`] itself (which now has a real
 /// production caller as of BT-3145 — see [`render`]'s doc comment), this
 /// shim remains test-only: `while_loops.rs`'s
 /// `try_render_while_direct_via_threaded_ir` builds its own
 /// [`RenderCtx`] directly against the live generator rather than a
 /// throwaway one, so this convenience wrapper has no production caller.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
     let mut generator = CoreErlangGenerator::new("__threaded_ir_render_shim");
     let mut ctx = RenderCtx::new(&mut generator);
@@ -1954,11 +2061,11 @@ pub(super) fn build_tuple_acc_unpack(
 /// so a `StateAcc`-mode unpack fixture is a hand-built-IR-only scenario, see
 /// `verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context`
 /// / the dedicated `StateAcc` variant below) and verifies it in one call.
-/// Test-only (`#[allow(dead_code)]`): production calls
+/// Test-only (`#[cfg(test)]`): production calls
 /// [`build_tuple_acc_unpack`] + [`verify`] directly (`generate_tuple_unpack_docs`,
 /// `control_flow/mod.rs`) since it also needs the built `ThreadedStmt` for
 /// [`render`], which this convenience wrapper discards.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn verify_tuple_acc_unpack_invariant(
     mode_gate_slots: usize,
     node_gate_slots: usize,
@@ -1987,7 +2094,7 @@ pub(super) fn verify_tuple_acc_unpack_invariant(
 /// — see `threaded_ir`'s module docs §Status. Kept as a regression pin,
 /// exercised directly by hand-built-IR unit tests below (mirrors
 /// `ThreadingModeUnpackMismatch`'s own kept-but-uncalled precedent).
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn verify_tuple_acc_value_type_exclusion(
     use_tuple_acc: bool,
     context_is_value_type: bool,
@@ -2012,7 +2119,7 @@ pub(super) fn verify_tuple_acc_value_type_exclusion(
 /// unreachable by inspection of that one function (`control_flow/mod.rs`) —
 /// see `verify_tuple_acc_value_type_exclusion`'s doc comment for the full
 /// rationale, shared verbatim. Kept as a regression pin.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn verify_nested_list_op_stateacc_compat(
     direct_params_selected: bool,
     inner_needs_stateacc_fallback: bool,

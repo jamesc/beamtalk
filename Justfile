@@ -47,6 +47,16 @@ ci-changed:
     set -euo pipefail
     just build
     just lint
+    # BT-3149: `verify-threaded-ir`'s prerequisites (test-stdlib, test-bunit)
+    # are already run here as part of `test`'s own dependency graph, in the
+    # dev profile (debug_assertions on) — any ThreadedIr (ADR 0111) `verify()`
+    # violation across the codegen paths this changed set touches already
+    # hard-panics right here. No separate `just verify-threaded-ir` call
+    # follows: same "would just recompile the same corpus for zero new
+    # detection" reasoning `verify-threaded-ir`'s own doc comment gives for
+    # why ci.yml's `test-beam` job doesn't add one either — it applies
+    # doubly here, since (unlike that job) `test` isn't even scoped by the
+    # changed-files check below.
     just test
     just check-corpus
     just check-generated-builtins
