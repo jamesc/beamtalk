@@ -3739,8 +3739,10 @@ systematic drift evenly across the run order). Baseline is `d4c2e57`
 is this issue's own branch HEAD, which carries every `Letrec`/`Foldl*`
 `ClassVars`-threading codegen change BT-3167-BT-3169 shipped to `main`
 (this issue's own changes are tests/docs only — no codegen, confirmed by
-`git diff --stat` touching no `crates/beamtalk-core/src/codegen/` production
-file):
+`git diff --stat`: two stale doc-comment path references in
+`tests/gen_server.rs` (a test file, not a codegen production module), new
+`stdlib/test/*.bt` fixtures, and doc/ADR prose — no file under
+`crates/beamtalk-core/src/codegen/` outside its `tests/` subtree changed):
 
 | | wall-clock (s) | user CPU (s) |
 |---|---|---|
