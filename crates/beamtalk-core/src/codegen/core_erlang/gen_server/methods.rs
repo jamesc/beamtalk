@@ -372,27 +372,17 @@ impl CoreErlangGenerator {
         Ok(result_doc)
     }
 
-    /// Generates a method definition body wrapped in a reply tuple.
-    ///
-    /// For `MethodDefinition` nodes with explicit body expressions.
-    /// Delegates to [`Self::generate_body_exprs_with_reply`].
-    pub(in crate::codegen::core_erlang) fn generate_method_definition_body_with_reply(
-        &mut self,
-        method: &MethodDefinition,
-    ) -> Result<Document<'static>> {
-        let body = super::super::util::collect_body_exprs(&method.body);
-        self.generate_body_exprs_with_reply(&body, true)
-    }
-
-    /// BT-3148 (ADR 0111 Addendum 4 task 2): lowering-only counterpart of
-    /// [`Self::generate_method_definition_body_with_reply`], returning the
-    /// raw `Vec<ThreadedStmt>` instead of rendering it. Used by
-    /// [`Self::generate_method_dispatch`], which needs the IR itself so it
-    /// can prepend a real `NlrCatch` stmt (token already minted, in
+    /// BT-3148 (ADR 0111 Addendum 4 task 2): lowering-only counterpart of the
+    /// old `generate_method_definition_body_with_reply` (deleted BT-3171 once
+    /// its last caller migrated off it), returning the raw `Vec<ThreadedStmt>`
+    /// instead of rendering it. Used by [`Self::generate_method_dispatch`]
+    /// and, since BT-3171, the other Actor-boundary NLR call sites (sealed
+    /// methods, actor extension funs), all of which need the IR itself so
+    /// they can prepend a real `NlrCatch` stmt (token already minted, in
     /// production's real mint position) before the single `verify()` +
     /// `render()` pass — rather than rendering the body first and wrapping
     /// the resulting `Document` afterward.
-    fn lower_method_definition_body_with_reply(
+    pub(in crate::codegen::core_erlang) fn lower_method_definition_body_with_reply(
         &mut self,
         method: &MethodDefinition,
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
@@ -425,14 +415,41 @@ impl CoreErlangGenerator {
             .map_or_else(|| method.span, |s| s.expression.span());
         let lowered = self.lower_method_definition_body_with_reply(method);
         self.set_current_nlr_token(None);
-        let mut stmts = lowered?;
+        let stmts = lowered?;
 
-        if let Some(ref token_var) = nlr_token_var {
+        // Case-arm context (dispatch clause): always needs the letrec frame
+        // when NLR is present — see `prepend_nlr_catch_and_render`'s doc.
+        Ok(self.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, true))
+    }
+
+    /// BT-3171 (ADR 0111 Addendum 4/6): shared tail step for every
+    /// Actor-boundary NLR call site — prepends a real `ThreadedStmt::NlrCatch`
+    /// (when `nlr_token_var` is `Some`; the token is already minted, in
+    /// production's real mint position, by the caller) to an already-lowered
+    /// method body, then verifies and renders the whole sequence in one pass.
+    /// Replaces the old two-step "render body, then
+    /// `wrap_actor_body_with_nlr_catch` the rendered `Document`" shape.
+    ///
+    /// `needs_letrec` mirrors `wrap_actor_body_with_nlr_catch`'s own
+    /// parameter of the same name: `true` when the try/catch would otherwise
+    /// nest inside a `case` arm (dispatch clauses — BEAM validator
+    /// `ambiguous_catch_try_state`), `false` for standalone functions (sealed
+    /// methods, extension funs) that don't need the extra function frame. No
+    /// letrec is emitted when `nlr_token_var` is `None` regardless of
+    /// `needs_letrec` — there is no try/catch to isolate.
+    pub(in crate::codegen::core_erlang) fn prepend_nlr_catch_and_render(
+        &mut self,
+        mut stmts: Vec<threaded_ir::ThreadedStmt>,
+        nlr_token_var: Option<&str>,
+        span: Span,
+        needs_letrec: bool,
+    ) -> Document<'static> {
+        if let Some(token_var) = nlr_token_var {
             stmts.insert(
                 0,
                 threaded_ir::ThreadedStmt::NlrCatch {
                     boundary: super::super::NlrBoundary::ActorReply,
-                    token: threaded_ir::TokenId::new(token_var.clone()),
+                    token: threaded_ir::TokenId::new(token_var.to_string()),
                     frame: threaded_ir::FrameId::ROOT,
                     span,
                 },
@@ -447,7 +464,7 @@ impl CoreErlangGenerator {
         // already produced the try/catch itself; the letrec is a Document-level
         // wrapper around that, unchanged from `wrap_actor_body_with_nlr_catch`'s
         // own `needs_letrec` shape.
-        Ok(if nlr_token_var.is_some() {
+        if needs_letrec && nlr_token_var.is_some() {
             docvec![
                 "letrec '__nlr_body'/0 = fun () ->\n",
                 rendered_body,
@@ -456,19 +473,23 @@ impl CoreErlangGenerator {
             ]
         } else {
             rendered_body
-        })
+        }
     }
 
-    /// Generates a block-based method body with state threading and reply tuple.
-    ///
-    /// For methods using block syntax with implicit returns.
-    /// Delegates to [`Self::generate_body_exprs_with_reply`].
-    pub(in crate::codegen::core_erlang) fn generate_method_body_with_reply(
+    /// BT-3171 (ADR 0111 Addendum 4/6): lowering-only counterpart of the old
+    /// `generate_method_body_with_reply` (deleted BT-3171 once its last
+    /// caller migrated off it), returning the raw `Vec<ThreadedStmt>` instead
+    /// of rendering it — the Block-based sibling of
+    /// [`Self::lower_method_definition_body_with_reply`]. Used by
+    /// `generate_legacy_method_clause` (top-level `name := [block]`
+    /// workspace bindings), which needs the IR itself so it can prepend a
+    /// real `NlrCatch` stmt before the single verify+render pass.
+    pub(in crate::codegen::core_erlang) fn lower_method_body_with_reply(
         &mut self,
         block: &Block,
-    ) -> Result<Document<'static>> {
+    ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
         let body = super::super::util::collect_body_exprs(&block.body);
-        self.generate_body_exprs_with_reply(&body, false)
+        self.lower_body_exprs_with_reply(&body, false)
     }
 
     // ── BT-1422: Unified method body state-threading ──────────────────
@@ -876,27 +897,6 @@ impl CoreErlangGenerator {
         }
 
         BodyExprKind::Pure
-    }
-
-    /// Unified method body code generation with state threading and reply tuple.
-    ///
-    /// Both `generate_method_definition_body_with_reply` (for `MethodDefinition`)
-    /// and `generate_method_body_with_reply` (for `Block`) delegate here.
-    ///
-    /// BT-3148 (ADR 0111 Addendum 4): thin wrapper over
-    /// [`Self::lower_body_exprs_with_reply`] (one real `Vec<ThreadedStmt>`
-    /// per body) + [`Self::verify_and_render_body_stmts`] (one `verify()`
-    /// call, one [`threaded_ir::render`] call). Callers that need the IR
-    /// itself — `generate_method_dispatch`'s NLR wrap — call the lowering
-    /// step directly.
-    fn generate_body_exprs_with_reply(
-        &mut self,
-        body: &[&Expression],
-        supports_early_return: bool,
-    ) -> Result<Document<'static>> {
-        let span = body.first().map_or_else(Span::default, |e| e.span());
-        let stmts = self.lower_body_exprs_with_reply(body, supports_early_return)?;
-        Ok(self.verify_and_render_body_stmts(&stmts, span))
     }
 
     /// BT-3148: verifies a lowered method-body IR once (via

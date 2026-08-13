@@ -243,6 +243,52 @@
 //! the vt-conditional family's own permanent ADR-documented exception to
 //! this migration) — audited, not applicable.
 //!
+//! ## Status (as of BT-3171 — the remaining Actor-boundary call sites)
+//!
+//! BT-3171 migrates the 3 Actor-boundary call sites the BT-3164 audit above
+//! named as real, well-understood follow-up: `gen_server/dispatch.rs`'s
+//! `generate_legacy_method_clause`, `gen_server/extensions.rs`'s
+//! `generate_actor_extension_fun`, and `actor_codegen.rs`'s sealed-method
+//! generator. Each now lowers its body (via
+//! `gen_server/methods.rs::lower_method_definition_body_with_reply` — widened
+//! from `gen_server::methods`-private to `pub(in
+//! crate::codegen::core_erlang)`, mirroring `generate_method_dispatch`'s own
+//! caller — or the new Block-based sibling `lower_method_body_with_reply`,
+//! for `dispatch.rs`'s Block-shaped legacy clause), prepends a real
+//! `ThreadedStmt::NlrCatch` when NLR was detected, and runs the whole
+//! sequence through the SAME `verify_and_render_body_stmts` call — replacing
+//! the "render body, then `wrap_actor_body_with_nlr_catch` the rendered
+//! `Document`" shape. The three call sites' shared tail (prepend + verify +
+//! render + the `needs_letrec`-gated `letrec` wrapper) is itself extracted
+//! once as `gen_server/methods.rs::prepend_nlr_catch_and_render`, reused by
+//! `generate_method_dispatch`'s own (BT-3148) NLR call site too rather than
+//! left duplicated inline.
+//!
+//! As the BT-3164 audit noted, none of these three carry the ADR 0110
+//! `ShadowWriteMissing` joint-visibility gap that migration closed for class
+//! methods — they are all `State`-prefix (Actor) bodies, and that check only
+//! fires for `VersionPrefix::ClassVars` `Bind`s — so this migration is
+//! architectural consistency cleanup, not a verification-gap closure.
+//!
+//! With all Actor- and class-method-boundary callers migrated,
+//! `wrap_actor_body_with_nlr_catch` had no callers left and was deleted
+//! (`mod.rs`), the same way BT-3164 deleted
+//! `wrap_class_method_body_with_nlr_catch`. `wrap_body_with_nlr_catch`
+//! itself remains live: [`render`]'s `NlrCatch` arm (this module) still
+//! calls it directly to build the real try/catch scaffolding. Deleting the
+//! now-unused rendering-only wrappers these three call sites left behind
+//! (`generate_method_definition_body_with_reply`, `generate_method_body_with_reply`,
+//! and their shared `generate_body_exprs_with_reply` helper — all in
+//! `gen_server/methods.rs`, all with zero remaining callers once the
+//! migration landed) mirrors how BT-3164 renamed away
+//! `generate_class_method_body` rather than leaving a dead rendering path
+//! beside the lowering one.
+//!
+//! `gen_server/extensions.rs`'s OTHER NLR-wrap call site
+//! (`generate_value_extension_fun`, `wrap_value_type_body_with_nlr_catch`)
+//! remains explicitly out of scope, per the BT-3164 audit above — it is not
+//! the same shape at all.
+//!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
 //! `VersionCounter` production path (BT-3131). BT-3132 originally added a

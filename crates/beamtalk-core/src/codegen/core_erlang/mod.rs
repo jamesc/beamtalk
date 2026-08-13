@@ -1058,10 +1058,11 @@ pub(crate) enum CodeGenContext {
 ///
 /// Allocated by [`CoreErlangGenerator::alloc_nlr_catch_vars`] and consumed by the
 /// single boundary-parameterised wrapper [`CoreErlangGenerator::wrap_body_with_nlr_catch`]
-/// (via [`CoreErlangGenerator::wrap_actor_body_with_nlr_catch`]; the class-method
-/// boundary variant, `wrap_class_method_body_with_nlr_catch`, was deleted by BT-3164
-/// once its sole caller — `generate_class_method_fun_from_block` — migrated to
-/// prepending a real `ThreadedStmt::NlrCatch` instead) and by
+/// (the class-method boundary variant, `wrap_class_method_body_with_nlr_catch`, was
+/// deleted by BT-3164 once its sole caller — `generate_class_method_fun_from_block` —
+/// migrated to prepending a real `ThreadedStmt::NlrCatch` instead; the Actor boundary
+/// variant, `wrap_actor_body_with_nlr_catch`, was deleted the same way by BT-3171 once
+/// its last of 3 remaining callers migrated) and by
 /// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`].
 #[allow(clippy::struct_field_names)]
 struct NlrCatchVars {
@@ -2961,38 +2962,6 @@ impl CoreErlangGenerator {
             val_var: self.fresh_temp_var("NlrVal"),
             state_var: self.fresh_temp_var("NlrState"),
             ot_pair_var: self.fresh_temp_var("OtherPair"),
-        }
-    }
-
-    /// BT-764: Wraps an actor method body with NLR (non-local return) try/catch.
-    ///
-    /// Actor NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}` and
-    /// catches it to produce `{reply, Value, State}`.
-    ///
-    /// When `needs_letrec` is true, the body is wrapped in a `letrec` function to
-    /// create a separate function frame, avoiding BEAM validator
-    /// `ambiguous_catch_try_state` errors in case arms. When false (sealed methods),
-    /// the try/catch is emitted directly.
-    ///
-    /// BT-774: Accepts and returns `Document` instead of `String` to avoid
-    /// intermediate string rendering.
-    pub(super) fn wrap_actor_body_with_nlr_catch(
-        &mut self,
-        body_doc: Document<'static>,
-        token_var: &str,
-        needs_letrec: bool,
-    ) -> Document<'static> {
-        let try_catch = self.wrap_body_with_nlr_catch(body_doc, token_var, NlrBoundary::ActorReply);
-
-        if needs_letrec {
-            docvec![
-                "letrec '__nlr_body'/0 = fun () ->\n",
-                try_catch,
-                "\n",
-                "in apply '__nlr_body'/0 ()",
-            ]
-        } else {
-            try_catch
         }
     }
 

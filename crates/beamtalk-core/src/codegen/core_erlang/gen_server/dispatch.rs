@@ -342,8 +342,8 @@ impl CoreErlangGenerator {
             None
         };
 
-        let body_doc = match self.generate_method_body_with_reply(block) {
-            Ok(doc) => doc,
+        let stmts = match self.lower_method_body_with_reply(block) {
+            Ok(stmts) => stmts,
             Err(e) => {
                 self.set_current_nlr_token(None);
                 self.pop_scope();
@@ -352,13 +352,16 @@ impl CoreErlangGenerator {
         };
         self.set_current_nlr_token(None);
 
-        // BT-761/BT-764: Wrap body in letrec function with try/catch via shared helper.
-        // BT-774: Compose at Document level without intermediate string rendering.
-        let body_doc = if let Some(ref token_var) = nlr_token_var {
-            self.wrap_actor_body_with_nlr_catch(body_doc, token_var, true)
-        } else {
-            body_doc
-        };
+        // BT-3171 (ADR 0111 Addendum 4/6): prepend a real `NlrCatch` stmt and
+        // verify+render once, instead of rendering the body then wrapping the
+        // `Document`. BT-761/BT-764: the body sits inside a `case` arm, so it
+        // still needs the letrec function frame when NLR is present.
+        let span = block
+            .body
+            .first()
+            .map_or_else(|| block.span, |s| s.expression.span());
+        let body_doc =
+            self.prepend_nlr_catch_and_render(stmts, nlr_token_var.as_deref(), span, true);
 
         let clause_doc = Self::build_dispatch_clause(name, &param_vars, body_doc);
 
