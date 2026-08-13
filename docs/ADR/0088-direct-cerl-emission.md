@@ -56,7 +56,10 @@ codegen + wire change + 58K LOC migration) is what's rejected.
   the `cerl_napkin_timing` Rust example were deleted 2026-08-11, BT-3143;
   the EUnit wire tests (`beamtalk_cerl_wire_tests.erl`) and the
   `cerl-napkin-timing.escript` Erlang-side timing harness were deleted
-  2026-08-12, BT-3152.)
+  2026-08-12, BT-3152; the `{cerl, Etf}` wire arms in
+  `beamtalk_compiler_server.erl`/`beamtalk_build_worker.erl`, their
+  remaining EUnit coverage, and `scripts/cerl-napkin-dump.escript` were
+  deleted 2026-08-13, BT-3158 — nothing downstream remains.)
 - BT-aware stack traces (one of the original Phase 1+ motivators) are
   still a committed downstream consumer, but they do not require cerl
   on the wire — annotations can be carried in the typed-leaves
