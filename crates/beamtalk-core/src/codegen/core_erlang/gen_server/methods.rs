@@ -3811,31 +3811,33 @@ impl CoreErlangGenerator {
     /// method's own `self.classVar := value` when it is the body's last
     /// statement — the shape `lower_class_method_body` promotes out of the
     /// generic `generate_class_method_last_expr_with_class_vars` path.
-    /// Reuses [`threaded_ir::construct_and_verify_class_var_bind`] for the
-    /// `Bind`'s exact shape (identical to what
-    /// `expressions.rs::generate_class_var_field_assignment` builds for
-    /// every OTHER position), but — unlike that call site, which still
-    /// renders its `Bind` immediately and keeps it inside an opaque
-    /// `Statement` — pushes the returned `Bind` into `stmts` as a real IR
-    /// node, so the method's real `NlrCatch` (prepended by the caller after
-    /// this function returns) and this `Bind` are both visible to the
-    /// single `verify_and_render_body_stmts` call over the whole body,
-    /// closing the ADR 0110 joint-visibility gap ADR 0111 Addendum 6 left
-    /// open for class methods.
+    /// Delegates the actual `Bind` construction to the shared
+    /// [`Self::lower_class_var_field_assignment_bind`] (`expressions.rs`;
+    /// same struct, `impl` block in a different file — the identical
+    /// sequence `expressions.rs::generate_class_var_field_assignment`
+    /// builds for every OTHER position, not hand-rolled a second time here,
+    /// CLAUDE.md's no-duplicate-implementations rule), but — unlike that
+    /// call site, which still renders its `Bind` immediately and keeps it
+    /// inside an opaque `Statement` — pushes the returned `Bind` into
+    /// `stmts` as a real IR node, so the method's real `NlrCatch`
+    /// (prepended by the caller after this function returns) and this
+    /// `Bind` are both visible to the single `verify_and_render_body_stmts`
+    /// call over the whole body, closing the ADR 0110 joint-visibility gap
+    /// ADR 0111 Addendum 6 left open for class methods.
     ///
-    /// The isolated, synthetic-marker `ShadowWriteMissing` check
-    /// `construct_and_verify_class_var_bind` runs internally is deliberately
-    /// still reported here (not dropped in favor of the new joint check):
-    /// it is the ONLY check that still fires for a method with no literal
-    /// `^` at all (`needs_nlr: false`, so no real `NlrCatch` in the body at
-    /// all) — the exact ADR 0110 `CollectionDriver countedRun:over:` repro
-    /// shape (the mutation must still be shadow-written even though this
-    /// specific method never mints a local NLR catch, because the relay can
-    /// happen one layer out via a caller-supplied block) — so dropping it
-    /// would regress coverage the joint check cannot replace. The two
-    /// checks are complementary, not redundant: the isolated one always
-    /// assumes the worst case; the joint one is precise when a real
-    /// `NlrCatch` is actually present.
+    /// The isolated, synthetic-marker `ShadowWriteMissing` check the shared
+    /// helper runs internally is deliberately still reported (not dropped
+    /// in favor of the new joint check): it is the ONLY check that still
+    /// fires for a method with no literal `^` at all (`needs_nlr: false`,
+    /// so no real `NlrCatch` in the body at all) — the exact ADR 0110
+    /// `CollectionDriver countedRun:over:` repro shape (the mutation must
+    /// still be shadow-written even though this specific method never
+    /// mints a local NLR catch, because the relay can happen one layer out
+    /// via a caller-supplied block) — so dropping it would regress
+    /// coverage the joint check cannot replace. The two checks are
+    /// complementary, not redundant: the isolated one always assumes the
+    /// worst case; the joint one is precise when a real `NlrCatch` is
+    /// actually present.
     fn lower_class_method_last_class_var_bind(
         &mut self,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
@@ -3852,41 +3854,11 @@ impl CoreErlangGenerator {
             _ => unreachable!("is_class_var_assignment guarantees an Assignment"),
         };
 
-        let val_var = self.fresh_temp_var("Val");
-        // BT-3164: the version numbers driving both the isolated verify()
-        // call and the real Bind pushed below — captured before/after
-        // minting, mirroring `generate_class_var_field_assignment` exactly.
-        let source_version = self.class_var_version();
-        let val_doc = self.expression_doc(value)?;
-        self.next_class_var();
-        let target_version = self.class_var_version();
-        // ADR 0110 (BT-3032/BT-3037): see `generate_class_var_field_assignment`'s
-        // own doc comment for the full shadow-write rationale — unchanged here.
-        let shadow_write = self.block_depth == 0;
-
-        let (bind, isolated_errors) = threaded_ir::construct_and_verify_class_var_bind(
-            threaded_ir::BindOp::Put {
-                field: field_name,
-                value: threaded_ir::ValueRef::Var(val_var.clone()),
-                class_tag: threaded_ir::ValueRef::Var("ClassSelf".to_string()),
-            },
-            shadow_write,
-            self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
-            source_version,
-            target_version,
-            value.span(),
-        );
-        self.report_threaded_ir_verify_errors(
-            &isolated_errors,
-            "class-var mutation missing ADR 0110 shadow write",
-            value.span(),
-        );
+        let (preamble_doc, bind, val_var) =
+            self.lower_class_var_field_assignment_bind(&field_name, value)?;
 
         let final_cv = self.current_class_var();
-        stmts.push(threaded_ir::ThreadedStmt::Statement(
-            docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in "],
-            span,
-        ));
+        stmts.push(threaded_ir::ThreadedStmt::Statement(preamble_doc, span));
         stmts.push(bind);
         stmts.push(threaded_ir::ThreadedStmt::Statement(
             docvec![

@@ -638,11 +638,98 @@ impl CoreErlangGenerator {
     ///
     /// The generated code leaves `let ClassVarsN = ...` open — the caller
     /// (sequential expression handler) must provide the continuation.
+    ///
+    /// BT-3164: delegates the actual `Bind` construction (mint/
+    /// version-capture/shadow-write/isolated-verify) to the shared
+    /// [`Self::lower_class_var_field_assignment_bind`] — see its own doc
+    /// comment for the full ADR 0110 shadow-write rationale — and renders
+    /// the returned `Bind` immediately here (unlike
+    /// `gen_server::methods`'s `lower_class_method_last_class_var_bind`,
+    /// the one case BT-3164 promotes to a real top-level `ThreadedStmt::Bind`
+    /// instead of an immediately-rendered `Document`).
     fn generate_class_var_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
     ) -> Result<Document<'static>> {
+        let (preamble_doc, bind, val_var) =
+            self.lower_class_var_field_assignment_bind(field_name, value)?;
+        let bind_doc = {
+            let mut ctx = super::threaded_ir::RenderCtx::new(self);
+            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+        };
+        let doc = docvec![preamble_doc, bind_doc];
+        // Store result var name for callers that need to reference it
+        self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
+        Ok(doc)
+    }
+
+    /// BT-412/BT-3164: shared class-var assignment `Bind` construction —
+    /// the `self.classVar := value` shape's core sequence (mint `Val`,
+    /// capture `source_version`/`target_version` around
+    /// `expression_doc(value)`/`next_class_var()`, derive the ADR 0110
+    /// shadow-write gate, construct + isolated-verify the `Bind` via
+    /// [`super::threaded_ir::construct_and_verify_class_var_bind`]) —
+    /// extracted so [`Self::generate_class_var_field_assignment`] (every
+    /// non-last-position or nested class-var assignment, which still
+    /// renders its `Bind` immediately and keeps it inside an opaque
+    /// `Statement`) and `gen_server::methods`'s
+    /// `lower_class_method_last_class_var_bind` (BT-3164: the ONE case
+    /// promoted to a real top-level `Bind` node) don't each hand-roll the
+    /// same sequence (CLAUDE.md's no-duplicate-implementations rule).
+    ///
+    /// ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign NLR
+    /// (`^` belonging to another method's frame) relayed out of this class
+    /// method does not lose the mutation — `invoke_class_method/7` reads
+    /// the shadow back on the `{nlr_relay, ...}` path and erases it in
+    /// `after` on every path. Gated on `block_depth == 0`: a block literal
+    /// written in this method can execute in a *different* class's
+    /// `gen_server` process (ADR 0109), where an unconditional write would
+    /// corrupt that class's vars with this class's map. Top-frame-only
+    /// also matches existing semantics — block-interior class-var
+    /// mutations are already discarded on normal return (BT-1550).
+    ///
+    /// ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)` —
+    /// this call's dynamic runtime class identity — not a single shared
+    /// key. A mutating self-send inside a block invoked from a foreign
+    /// class's process (`block_depth` resets to 0 on entering the
+    /// self-sent method's own body) would otherwise write the *same*
+    /// global key that process's own class method is using, clobbering it
+    /// before that class's `invoke_class_method/7` reads it back.
+    /// `element(2, ClassSelf)` (not the static `self.class_name()`) also
+    /// keeps an inherited self-dispatch chain (`self otherClassMethod:`)
+    /// tagged with the calling subclass's identity, not the defining
+    /// ancestor's.
+    ///
+    /// BT-3140: this is NOT the only class-var write site —
+    /// `whileTrue:`/`timesRepeat:` loop bodies (and other state-threaded
+    /// constructs) never reach it; a class-var write there goes through
+    /// `generate_field_assignment_open` (`dispatch_codegen.rs`), which
+    /// threads via the generic State/StateAcc map and has no class-var
+    /// branch at all, so `block_depth == 0` never even gets consulted for
+    /// that shape. That gap is now a compile-time error
+    /// (`CodeGenError::ClassVarAssignmentInThreadedBody`) rather than a
+    /// silent runtime no-op — see ADR 0110's BT-3140 amendment.
+    ///
+    /// BT-3148 (ADR 0111 Phase D completion): this `Bind` is constructed
+    /// and isolated-verified through the SAME `threaded_ir::ThreadedStmt::Bind`
+    /// a `while_loops.rs`-style caller would — `threaded_ir::render`'s
+    /// `BindOp::Put` arm is the only place the ADR 0110 shadow write is
+    /// constructed (see [`super::threaded_ir::construct_and_verify_class_var_bind`]'s
+    /// doc comment); no second, hand-rolled `Document` reconstructs it.
+    ///
+    /// Returns `(preamble_doc, bind, val_var)`: `preamble_doc` is `"let
+    /// Val = <value> in "` — the caller supplies its own
+    /// continuation/glue after (rendering the `Bind` immediately and
+    /// appending, or pushing both as separate real `ThreadedStmt`s);
+    /// `bind` is the real, not-yet-rendered `ThreadedStmt::Bind`;
+    /// `val_var` is the minted temp variable name (both the `Bind`'s
+    /// `Put` value and the expression's own logical result).
+    pub(super) fn lower_class_var_field_assignment_bind(
+        &mut self,
+        field_name: &str,
+        value: &Expression,
+    ) -> Result<(Document<'static>, super::threaded_ir::ThreadedStmt, String)> {
         if !self.class_var_names().contains(field_name) {
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
@@ -659,47 +746,6 @@ impl CoreErlangGenerator {
         let val_doc = self.expression_doc(value)?;
         self.next_class_var();
         let target_version = self.class_var_version();
-        // ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign
-        // NLR (`^` belonging to another method's frame) relayed out of
-        // this class method does not lose the mutation —
-        // `invoke_class_method/7` reads the shadow back on the
-        // `{nlr_relay, ...}` path and erases it in `after` on every
-        // path. Gated on `block_depth == 0`: a block literal written in
-        // this method can execute in a *different* class's gen_server
-        // process (ADR 0109), where an unconditional write would corrupt
-        // that class's vars with this class's map. Top-frame-only also
-        // matches existing semantics — block-interior class-var
-        // mutations are already discarded on normal return (BT-1550).
-        //
-        // ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)`
-        // — this call's dynamic runtime class identity — not a single
-        // shared key. A mutating self-send inside a block invoked from a
-        // foreign class's process (block_depth resets to 0 on entering
-        // the self-sent method's own body) would otherwise write the
-        // *same* global key that process's own class method is using,
-        // clobbering it before that class's `invoke_class_method/7`
-        // reads it back. `element(2, ClassSelf)` (not the static
-        // `self.class_name()`) also keeps an inherited self-dispatch
-        // chain (`self otherClassMethod:`) tagged with the calling
-        // subclass's identity, not the defining ancestor's.
-        //
-        // BT-3140: this function is NOT the only class-var write site —
-        // `whileTrue:`/`timesRepeat:` loop bodies (and other state-threaded
-        // constructs) never reach it; a class-var write there goes through
-        // `generate_field_assignment_open` (`dispatch_codegen.rs`), which
-        // threads via the generic State/StateAcc map and has no class-var
-        // branch at all, so `block_depth == 0` never even gets consulted for
-        // that shape. That gap is now a compile-time error
-        // (`CodeGenError::ClassVarAssignmentInThreadedBody`) rather than a
-        // silent runtime no-op — see ADR 0110's BT-3140 amendment.
-        //
-        // BT-3148 (ADR 0111 Phase D completion): this Bind is now
-        // constructed, verified, and rendered through the SAME
-        // `threaded_ir::ThreadedStmt::Bind` a `while_loops.rs`-style caller
-        // would — `threaded_ir::render`'s `BindOp::Put` arm is the only
-        // place the ADR 0110 shadow write is constructed (see
-        // `threaded_ir::construct_and_verify_class_var_bind`'s doc
-        // comment); no second, hand-rolled `Document` reconstructs it.
         let shadow_write = self.block_depth == 0;
         let (bind, verify_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Put {
@@ -718,21 +764,8 @@ impl CoreErlangGenerator {
             "class-var mutation missing ADR 0110 shadow write",
             value.span(),
         );
-        let bind_doc = {
-            let mut ctx = super::threaded_ir::RenderCtx::new(self);
-            super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
-        };
-        let doc = docvec![
-            "let ",
-            leaf::var(val_var.clone()),
-            " = ",
-            val_doc,
-            " in ",
-            bind_doc,
-        ];
-        // Store result var name for callers that need to reference it
-        self.last_open_scope_result = Some(OpenScopeResult::Value(val_var));
-        Ok(doc)
+        let preamble_doc = docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in ",];
+        Ok((preamble_doc, bind, val_var))
     }
 
     /// BT-3139 (ADR 0111 coverage extension): construct + verify the
@@ -1817,7 +1850,8 @@ impl CoreErlangGenerator {
             BlockExprKind::LastClassMethodSelfSend => {
                 // BT-1397: Class method self-send as last expression in a block body.
                 // The generated code leaves an open scope ending with `in ` — close it
-                // with the unwrapped result variable (same pattern as generate_class_method_body).
+                // with the unwrapped result variable (same pattern as
+                // lower_class_method_body, BT-3164; formerly generate_class_method_body).
                 let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
                 match open_scope {
                     Some(OpenScopeResult::Value(result_var)) => {

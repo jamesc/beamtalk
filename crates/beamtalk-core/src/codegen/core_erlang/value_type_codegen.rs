@@ -1874,7 +1874,8 @@ impl CoreErlangGenerator {
     /// BT-1053: Returns `true` if `expr` is a `do:` message send with a literal
     /// block that, in `ValueType` context, captures and mutates outer local variables.
     ///
-    /// Used by `generate_value_type_method` and `generate_class_method_body` (BT-1414)
+    /// Used by `generate_value_type_method` and `lower_class_method_body` (BT-1414;
+    /// BT-3164 renamed the latter from `generate_class_method_body`)
     /// to select the open-let-chain path for non-last `do:` loops so the mutated
     /// locals are visible to subsequent exprs.
     pub(in crate::codegen::core_erlang) fn is_do_with_vt_local_threading(
