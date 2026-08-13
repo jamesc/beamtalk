@@ -2481,7 +2481,24 @@ fn backfill_opaque_version_gap(
                 target: VersionedVar::new(prefix.clone(), v, FrameId::ROOT),
                 source: VersionedVar::new(prefix.clone(), v - 1, FrameId::ROOT),
                 op: BindOp::Direct(ValueRef::Literal("'_'")),
-                shadow_write: false,
+                // BT-3164: `true`, not `false` — this synthetic step stands
+                // in for a REAL mutation this verifier cannot see (it lives
+                // inside an opaque `Statement`, e.g. `emit_class_var_result_unwrap`'s
+                // own internal `next_class_var()` bump for a class-method
+                // self-send). For `State` this is moot (`ShadowWriteMissing`
+                // never inspects `State`-prefix `Bind`s), but for `ClassVars`
+                // a `false` here would claim "this top-frame mutation is
+                // definitely missing its ADR 0110 shadow write" about a step
+                // whose real emission site this verifier never inspected —
+                // exactly the false-positive `ShadowWriteMissing` a class
+                // method with a class-var-mutating self-send followed by its
+                // own real last-statement class-var `Bind` would spuriously
+                // trip otherwise (confirmed by
+                // `verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing`
+                // below). ADR 0111 §Verifier honesty: a check that cannot
+                // see the real site must not assert a verdict about it —
+                // `true` is silence, not a claim of compliance either way.
+                shadow_write: true,
                 span: Span::default(),
             });
         }
@@ -4052,6 +4069,61 @@ mod tests {
             verify_body_with_opaque_version_gaps(&ir),
             Vec::new(),
             "correctly shadow-written class-method body should verify cleanly"
+        );
+    }
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing()
+     {
+        // `class doStuff => self bump. self.total := self.total + 1` — a
+        // non-last self-send (`self bump`, opaque Statement standing in for
+        // `emit_class_var_result_unwrap`'s own internal `next_class_var()`
+        // bump, ClassVars0 -> ClassVars1, no Bind of its own in THIS body's
+        // IR) followed by a real top-level, correctly shadow-written
+        // last-statement class-var Bind (ClassVars1 -> ClassVars2). The
+        // backfill must synthesize a ClassVars0->ClassVars1 gap-filler
+        // Bind to avoid UnboundVersion — that synthetic Bind must NOT
+        // itself spuriously trip ShadowWriteMissing merely because it
+        // carries `shadow_write: false` at FrameId::ROOT.
+        let span = span();
+        let ir = vec![
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ClassMethod {
+                    has_class_vars: true,
+                },
+                token: TokenId::new("_NlrToken0".to_string()),
+                frame: FrameId::ROOT,
+                span,
+            },
+            ThreadedStmt::Statement(
+                docvec!["<opaque self-send, mints ClassVars1 with no Bind of its own>"],
+                span,
+            ),
+            ThreadedStmt::Statement(
+                docvec![
+                    "let _Val1 = call 'erlang':'+'(call 'maps':'get'('total', ClassVars1), 1) in "
+                ],
+                span,
+            ),
+            ThreadedStmt::Bind {
+                target: class_var(2, FrameId::ROOT),
+                source: class_var(1, FrameId::ROOT),
+                op: BindOp::Put {
+                    field: "total".to_string(),
+                    value: ValueRef::Var("_Val1".to_string()),
+                    class_tag: ValueRef::Var("ClassSelf".to_string()),
+                },
+                shadow_write: true,
+                span,
+            },
+            ThreadedStmt::Statement(docvec!["{'class_var_result', _Val1, ClassVars2}"], span),
+        ];
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert_eq!(
+            errors,
+            Vec::new(),
+            "ClassVars gap-backfill's own synthetic Bind must not spuriously trigger \
+             ShadowWriteMissing, got: {errors:?}"
         );
     }
 

@@ -67,3 +67,25 @@ Value subclass: CollectionProbe
   class hits -> Integer => self.hits
 
   class resetHits => self.hits := 0
+
+  // BT-3164 review finding: a class-method self-send to THIS SAME class
+  // (`self bumpHitsViaSelfSend`, below) mutates `hits` via the shared
+  // `emit_class_var_result_unwrap` path — an opaque `Statement` whose own
+  // internal `next_class_var()` bump has no `Bind` of its own in THIS
+  // method's IR, so `verify_body_with_opaque_version_gaps`'s `ClassVars`
+  // backfill must synthesize a gap-filler `Bind` for it. `aList do: [...]`
+  // contains a literal `^`, directly in this method's own body, so
+  // `needs_nlr` is true and a real local `NlrCatch` wraps the whole body.
+  // The LAST statement, `self.hits := self.hits + 1`, is this method's own
+  // second direct mutation, lowered as a real `Bind`. Before this issue's
+  // review caught it, the backfilled gap-filler `Bind` for the self-send's
+  // invisible bump spuriously tripped `ShadowWriteMissing` in this exact
+  // shape (a real `NlrCatch` present + a `ClassVars` version gap before a
+  // real top-level `Bind`) — compiling this class at all is the regression
+  // pin.
+  class bumpViaSelfSendThenBumpDirectlyWithNlr: aList :: List -> Integer =>
+    self bumpHitsViaSelfSend
+    aList do: [:x | x > 100 ifTrue: [^x]]
+    self.hits := self.hits + 1
+
+  class bumpHitsViaSelfSend => self.hits := self.hits + 1

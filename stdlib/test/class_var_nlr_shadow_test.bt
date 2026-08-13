@@ -72,6 +72,18 @@ TestCase subclass: ClassVarNlrShadowTest
     self assert: CollectionProbe hits equals: 1
     self assert: CollectionDriver runCount equals: 2
 
+  // --- (a3) BT-3164 review finding: a ClassVars version gap (from an -------
+  // opaque class-var-mutating self-send) before a real last-statement
+  // Bind, in a body with a real local NlrCatch — regression pin for a bug
+  // this issue's own review caught: the ClassVars gap-backfill's synthetic
+  // placeholder Bind spuriously tripped ShadowWriteMissing in exactly this
+  // shape before the fix (see `backfill_opaque_version_gap`'s doc
+  // comment). Compiling/running this class at all is the pin; the
+  // asserted values confirm both mutations still land correctly.
+  testSelfSendMutationThenDirectLastStatementMutationInSameNlrBody =>
+    self assert: (CollectionProbe bumpViaSelfSendThenBumpDirectlyWithNlr: #(1, 2, 3)) equals: 2
+    self assert: CollectionProbe hits equals: 2
+
   // --- (b) a genuine error still reverts -----------------------------------
   testGenuineErrorStillRevertsMutation =>
     // The raw badarith from `1 / 0` is classified to #type_error at the
