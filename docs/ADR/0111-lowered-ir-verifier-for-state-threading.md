@@ -3294,13 +3294,35 @@ never claims a real nested identity — the old `FrameId::new(1)` sentinel
 was never inspected for any purpose other than "not ROOT," and dropping it
 removes a small, previously load-bearing-by-convention magic number); a new
 loop-body class-var `Bind` call site passes `self.current_branch_frame()`
-(`mod.rs:2366-2368`), the loop's real, already-minted frame. The function's
-internal `at_method_top_frame` branch (`threaded_ir.rs:2312-2327`, choosing
-bare-vs-`Threaded`-wrapped fixture construction) is unaffected in structure —
-it re-derives its own local `let at_method_top_frame = frame ==
-FrameId::ROOT;` from the new parameter and keeps every downstream branch
-identical; only the call site's *supplied* frame identity changes from a
-boolean-selected sentinel to the caller's real value.
+(`mod.rs:2366-2368`), the loop's real, already-minted frame.
+
+**Correction to the function's internal fixture-building branch
+(`threaded_ir.rs:2312-2327`).** This branch cannot stay keyed off `frame ==
+FrameId::ROOT` the way `at_method_top_frame` was — doing so silently
+reintroduces the bug Question 1's flag exists to fix. Once the self-dispatch
+rebind's `frame` becomes `FrameId::ROOT` (this decision's own change,
+above), a `frame == FrameId::ROOT`-derived branch would flip that call
+site onto the **bare** fixture path (no `Threaded` wrapper), because it
+would now be indistinguishable from the real top-frame case. But Question
+1's gate consults `shadow_write_eligible_stack.last()`, which is only
+pushed/popped by `walk_stmt`'s `Threaded | ConditionalLoop` arm
+(`threaded_ir.rs:1287-1316`); with no wrapper node for the bare path,
+there is nothing to carry the rebind's `shadow_write_eligible: false` onto
+the stack, so the bare `Bind` would verify against the stack's seeded
+`[true]` — a false-positive `ShadowWriteMissing` on every self-send that
+mutates a class var. Frame identity and shadow-write eligibility are
+independent per Question 1's own framing (that is the whole point of
+splitting them into two parameters), so the bare-vs-wrapped choice must
+key off the new `shadow_write_eligible` parameter directly, not be
+re-derived from `frame`: whenever `shadow_write_eligible` is `false`,
+always synthesize the `Threaded`-wrapped fixture (carrying that `false` so
+`walk_stmt` pushes it onto the stack), regardless of `frame`'s
+ROOT-ness; the bare path is reserved for `shadow_write_eligible == true`,
+which today only the real top-frame class-var writes at
+`expressions.rs:704` produce. Only the call site's *supplied* frame
+identity changes from a boolean-selected sentinel to the caller's real
+value — the wrap decision itself moves from `frame`-derived to
+`shadow_write_eligible`-derived.
 
 ### Question 3 — How `ClassVars` threads through the loop's own recursive tail call
 
