@@ -156,7 +156,7 @@ If you see a bare `internal error` or a build failure with no readable cause,
 run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
 expected to produce the same wording for the same malformed input.
 
-### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165)
+### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164)
 
 State threading — actor/instance `State`, class-var `ClassVars`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
@@ -188,7 +188,7 @@ where to start reading:
 | `UnboundVersion` | A versioned var (e.g. `State2`) was referenced with no producing `Bind` in its frame or an ancestor frame on the frame stack. | Whatever emission path built the `ThreadedIr` fragment around the failing construct — it referenced a version it never bound. Live against real per-arm/per-method IR everywhere, including `exception_handling.rs`'s `on:do:`/`ensure:` arms as of BT-3165. |
 | `NonLinearVersion` | Within one `FrameId`, a version was produced by more than one `Bind`, or consumed as the source of more than one successor — frame-scoped SSA-like linearity broken. | The generator for that frame; likely a duplicate `Bind` or a version reused across two branch arms that should have gotten distinct `FrameId`s. Live everywhere `UnboundVersion` is. |
 | `ThreadingModeUnpackMismatch` | An optimized `ThreadingMode` (a mode chosen specifically because it needs no `StateAcc` unpack) contains an unpack `Bind` anyway. | `while_loops.rs` / `counted_loops.rs`'s mode-selection logic — `ThreadingPlan::generate_unpack_at_iteration_start`'s `if !use_direct_params && !use_hybrid_params` guard (`control_flow/mod.rs`) is what makes this invariant hold structurally; BT-3154 deleted the per-call-site `check_loop_unpack_invariant`/`verify_loop_unpack_invariant` wrapper that used to check it explicitly, since `verify()`'s general `ThreadingModeUnpackMismatch` check was redundant with that guard. |
-| `ShadowWriteMissing` | A class-var `Bind` at frame depth 0 (method top frame) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path (BT-3148, real `Bind` producer) and `gen_server/methods.rs`'s method-body backfill (`verify_body_with_opaque_version_gaps`) — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. |
+| `ShadowWriteMissing` | A class-var `Bind` at frame depth 0 (method top frame) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path (BT-3148, real `Bind` producer) and `gen_server/methods.rs`'s method-body backfill (`verify_body_with_opaque_version_gaps`) — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. As of BT-3164, `verify_body_with_opaque_version_gaps` backfills both `State`- and `ClassVars`-prefix gaps (`backfill_opaque_version_gap`), and `gen_server/methods.rs::lower_class_method_body` promotes a class method's own last-statement `self.classVar := value` to a real `Bind` — the shape that first lets this variant see a real class-var `Bind` jointly with a real class-method `NlrCatch` over the method's actual emitted IR, not just the isolated synthetic-marker fixture `construct_and_verify_class_var_bind` has always checked. |
 | `TupleAccUnpackModeMismatch` | A `ThreadedStmt::TupleAccUnpack` node (flat positional-unpack accumulator) appeared outside a `ThreadingMode::TupleAcc` body. | `list_ops/*.rs` / `dict_ops.rs`'s `ThreadingPlan::generate_tuple_unpack_docs` — the tuple-shaped sibling of `ThreadingModeUnpackMismatch`. |
 | `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). Live since BT-3147 — `mode_gate_slots` (from `ListOpKind::gate_slots`, a canonical per-op table) and `node_gate_slots` (from each call site's own `index_offset - 1`) are genuinely independent sources now. |
 | `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_tuple_acc`'s own early-return; no production constructor). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
@@ -229,8 +229,9 @@ mutation sequence — real `Bind`/`Threaded`/`NlrCatch`/`Return`/
 `verify()` checks and `render()` emits, byte-identical to the pre-migration
 hand-rolled `Document` by construction. Verification is per-construct (one
 `verify()` call per branch arm / loop / stateful-block body / exception-body
-arm) except for gen_server Actor method bodies, where BT-3148's
-`lower_body_exprs_with_reply` + `verify_body_with_opaque_version_gaps`
+arm) except for gen_server Actor method bodies and class-method bodies,
+where BT-3148's `lower_body_exprs_with_reply` and BT-3164's
+`lower_class_method_body` (both + `verify_body_with_opaque_version_gaps`)
 already verify the WHOLE method body in one call — the "method-level
 verify()" shape ADR 0111's close-out aimed at. Generalizing that same
 single-call-per-method shape to constructs nested inside expression
@@ -265,6 +266,41 @@ than one entry, e.g. a field assignment's Statement+Bind pair).
 scaffolding these two call sites were the last production users of — are
 deleted; `NonLinearVersion`/`UnboundVersion` are live checks for `on:do:`/
 `ensure:` arms now, same as everywhere else in this table.
+
+**The class-method body pipeline (BT-3164, closing the gap BT-3148 left
+open).** `gen_server/methods.rs`'s class-method body generator
+(`generate_class_method_body`, pre-dating `BodyExprKind`/
+`classify_body_expr` entirely) is now `lower_class_method_body`, returning
+a real `Vec<ThreadedStmt>` instead of a hand-rolled `Document` — mirroring
+BT-3148's own `is_last`-only precedent for the Actor pipeline's
+`BodyExprKind::FieldAssignment`: only a class method's own direct
+`self.classVar := value` in the body's *last* position is promoted to a
+real `Bind` (`lower_class_method_last_class_var_bind`); every other
+position, and any class-var rebind hidden inside the shared
+`emit_class_var_result_unwrap` helper (the class-method analogue of the
+Actor pipeline's `generate_self_dispatch_open`), stays an opaque
+`Statement`. Both class-method NLR call sites
+(`generate_class_method_functions`, `generate_class_method_fun_from_block`
+— the latter migrated off the now-deleted `wrap_class_method_body_with_nlr_catch`
+Document-wrap by this issue) mint the token before lowering and prepend a
+real `NlrCatch`, then verify the whole body in one
+`verify_and_render_body_stmts` call — the same "method-level `verify()`"
+shape BT-3148 established for Actor bodies, now also covering class
+methods. This is what first lets `ShadowWriteMissing` see a real
+class-var `Bind` jointly with a real class-method `NlrCatch` (the ADR 0110
+joint-visibility gap ADR 0111 Addendum 6 left open); the pre-existing
+isolated, synthetic-marker check `construct_and_verify_class_var_bind`
+still runs too, since it is the only one of the two that fires for a
+method with no literal `^` at all (the ADR 0110 `CollectionDriver
+countedRun:over:` repro shape). The other 5 `wrap_body_with_nlr_catch`-family
+call sites this issue's task list named were audited: `generate_class_method_fun_from_block`
+(above) shares the same pipeline and was migrated; the 3 Actor-flavored
+call sites (`actor_codegen.rs`, `gen_server/dispatch.rs`,
+`gen_server/extensions.rs`) don't carry the `ClassVars`
+`ShadowWriteMissing` gap this issue closes and are tracked separately
+(BT-3171); `gen_server/extensions.rs`'s value-type NLR site
+(`wrap_value_type_body_with_nlr_catch`) is a structurally different,
+already-inline mechanism, not applicable.
 
 ## Runtime/REPL Debugging
 
