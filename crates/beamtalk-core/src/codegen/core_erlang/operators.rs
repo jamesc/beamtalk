@@ -300,6 +300,21 @@ impl CoreErlangGenerator {
     /// `erlang_op` and the predicate module/function are static literals (safe as
     /// `Document::Str`); the dispatch selector uses `leaf::atom` for the original
     /// Beamtalk operator.
+    ///
+    /// BT-3163: this `case` matches only `<'true'>`/`<'false'>`, no wildcard —
+    /// the same non-exhaustive-to-the-compiler shape `case_clause_fallback`
+    /// exists for (see its doc comment and ADR 0111 Addendum 5, "Production
+    /// bugs found", bug 3 / BT-3161). Confirmed empirically reachable for the
+    /// **comparison** guard (`beamtalk_primitive:is_object/1`, a plain
+    /// function the Core Erlang compiler cannot prove exhaustive) as a try
+    /// body's last statement, e.g. `[... . a < b] ensure: [...]` with
+    /// `a`/`b` not statically comparable: erlc's `ambiguous_catch_try_state`
+    /// `beam_validator` bug. The **arithmetic** guard's `erlang:is_number/1`
+    /// predicate happens not to trigger it — the compiler's BIF return-type
+    /// inference already proves that case exhaustive without a wildcard — but
+    /// the explicit fallback is added to both branches uniformly (cheap,
+    /// behavior-preserving, and doesn't depend on that inference continuing
+    /// to hold in some future OTP release).
     fn guarded_op_doc(
         &mut self,
         guard: OperatorGuard,
@@ -339,6 +354,10 @@ impl CoreErlangGenerator {
         } else {
             (bif_branch, send_branch)
         };
+        // BT-3163: explicit wildcard so this boolean `case` is statically
+        // exhaustive — see this function's doc comment and
+        // `case_clause_fallback`'s doc comment.
+        let no_match_fallback = self.case_clause_fallback("BinOpNoMatch");
 
         docvec![
             "let ",
@@ -359,6 +378,7 @@ impl CoreErlangGenerator {
             true_branch,
             " <'false'> when 'true' -> ",
             false_branch,
+            no_match_fallback,
             " end",
         ]
     }

@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3163: BT3163WhileLoopInTryActor — pins the finding that a `whileTrue:`
+// loop as an `ensure:` try body's LAST statement compiles cleanly, even
+// with an earlier field mutation in the same try body forcing the inlined
+// (non-closure) try shape that made BT-3161's two flavors fail. Every
+// non-exhaustive boolean `case` `while_loops.rs` generates lives inside a
+// `letrec`-bound loop `fun`'s own body, entered via `apply` — a genuinely
+// separate BEAM function from the `try`'s own function, structurally unable
+// to trip erlc's `ambiguous_catch_try_state` beam_validator bug. See
+// `control_flow/while_loops.rs`'s module doc comment (BT-3163) for the full
+// analysis.
+
+Actor subclass: BT3163WhileLoopInTryActor
+  state: count = 0
+
+  runUnsafe: startFlag =>
+    [
+      self.count := self.count + 1
+      [startFlag] whileTrue: [startFlag := false]
+    ] ensure: [nil]
+
+  getCount => self.count

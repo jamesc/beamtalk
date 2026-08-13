@@ -21,17 +21,17 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
 
 'countUpTo:'/2 = fun (Self, _limit1) ->
     let X = 0 in
-    let _WhileResult10 = letrec 'while'/1 = fun (X) -> let _CondFun2 = fun (X) -> let _BinLeft3 = X in let _BinRight4 = _limit1 in case call 'beamtalk_primitive':'is_object'(_BinLeft3) of <'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '<', [_BinRight4]) <'false'> when 'true' -> call 'erlang':'<'(_BinLeft3, _BinRight4) end in case apply _CondFun2 (X) of <'true'> when 'true' -> let _X7 = let _BinLeft5 = X in let _BinRight6 = 1 in case call 'erlang':'is_number'(_BinLeft5) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft5, _BinRight6) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft5, '+', [_BinRight6]) end in  apply 'while'/1 (_X7) <'false'> when 'true' -> let _ExitSA8 = call 'maps':'new'() in let _ExitSA9 = call 'maps':'put'('__local__x', X, _ExitSA8) in {'nil', _ExitSA9} end in apply 'while'/1 (X) in
-    let _WhileState11 = call 'erlang':'element'(2, _WhileResult10) in
-    let _x12 = call 'maps':'get'('__local__x', _WhileState11) in
-    _x12
+    let _WhileResult12 = letrec 'while'/1 = fun (X) -> let _CondFun2 = fun (X) -> let _BinLeft3 = X in let _BinRight4 = _limit1 in case call 'beamtalk_primitive':'is_object'(_BinLeft3) of <'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '<', [_BinRight4]) <'false'> when 'true' -> call 'erlang':'<'(_BinLeft3, _BinRight4) <_BinOpNoMatch5> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch5}) end in case apply _CondFun2 (X) of <'true'> when 'true' -> let _X9 = let _BinLeft6 = X in let _BinRight7 = 1 in case call 'erlang':'is_number'(_BinLeft6) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft6, _BinRight7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft6, '+', [_BinRight7]) <_BinOpNoMatch8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch8}) end in  apply 'while'/1 (_X9) <'false'> when 'true' -> let _ExitSA10 = call 'maps':'new'() in let _ExitSA11 = call 'maps':'put'('__local__x', X, _ExitSA10) in {'nil', _ExitSA11} end in apply 'while'/1 (X) in
+    let _WhileState13 = call 'erlang':'element'(2, _WhileResult12) in
+    let _x14 = call 'maps':'get'('__local__x', _WhileState13) in
+    _x14
 
-'sumTo:'/2 = fun (Self, _limit13) ->
+'sumTo:'/2 = fun (Self, _limit15) ->
     let Sum = 0 in
-    let _CountedLoopResult22 = let _temp14 = 1 in let _temp15 = _limit13 in letrec 'loop'/2 = fun (_loopidx16, Sum) -> case call 'erlang':'=<'(_loopidx16, _temp15) of <'true'> when 'true' -> let _Sum19 = let _BinLeft17 = Sum in let _BinRight18 = _loopidx16 in case call 'erlang':'is_number'(_BinLeft17) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft17, _BinRight18) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft17, '+', [_BinRight18]) end in  apply 'loop'/2 (call 'erlang':'+'(_loopidx16, 1), _Sum19) <'false'> when 'true' -> let _ExitSA20 = call 'maps':'new'() in let _ExitSA21 = call 'maps':'put'('__local__sum', Sum, _ExitSA20) in {'nil', _ExitSA21} end in apply 'loop'/2 (_temp14, Sum) in
-    let _CountedLoopState23 = call 'erlang':'element'(2, _CountedLoopResult22) in
-    let _sum24 = call 'maps':'get'('__local__sum', _CountedLoopState23) in
-    _sum24
+    let _CountedLoopResult25 = let _temp16 = 1 in let _temp17 = _limit15 in letrec 'loop'/2 = fun (_loopidx18, Sum) -> case call 'erlang':'=<'(_loopidx18, _temp17) of <'true'> when 'true' -> let _Sum22 = let _BinLeft19 = Sum in let _BinRight20 = _loopidx18 in case call 'erlang':'is_number'(_BinLeft19) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft19, _BinRight20) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft19, '+', [_BinRight20]) <_BinOpNoMatch21> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch21}) end in  apply 'loop'/2 (call 'erlang':'+'(_loopidx18, 1), _Sum22) <'false'> when 'true' -> let _ExitSA23 = call 'maps':'new'() in let _ExitSA24 = call 'maps':'put'('__local__sum', Sum, _ExitSA23) in {'nil', _ExitSA24} end in apply 'loop'/2 (_temp16, Sum) in
+    let _CountedLoopState26 = call 'erlang':'element'(2, _CountedLoopResult25) in
+    let _sum27 = call 'maps':'get'('__local__sum', _CountedLoopState26) in
+    _sum27
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

@@ -7,6 +7,30 @@
 //!
 //! Generates code for `whileTrue:` and `whileFalse:` loop constructs
 //! with both pure and state-threading variants.
+//!
+//! ## BT-3163: `case apply CondFun(...) of <'true'>/<'false'>` needs no
+//! explicit wildcard clause
+//!
+//! Every condition-dispatch `case` this file generates (`generate_while_simple`,
+//! `generate_while_loop_with_mutations`, `generate_while_loop_direct`,
+//! `try_render_while_direct_via_threaded_ir`, `generate_while_loop_hybrid`)
+//! matches only `<'true'>`/`<'false'>`, the same non-exhaustive-to-the-compiler
+//! shape [`super::super::CoreErlangGenerator::case_clause_fallback`] exists to
+//! guard (see its doc comment and ADR 0111 Addendum 5, "Production bugs
+//! found", bug 3 / BT-3161). Unlike BT-3161's two flavors, this one is **not
+//! reachable**: the case is always the tail of a `letrec`-bound loop `fun`'s
+//! own body, entered via `apply` — a genuinely separate BEAM function from
+//! whatever function contains the loop expression (e.g. `dispatch/4`'s `try`
+//! body, when the loop is a try's last statement). `beam_validator`'s
+//! `ambiguous_catch_try_state` check tracks catch/try state per function, so
+//! a non-exhaustive case belonging to a *different* function than the `try`
+//! cannot trip it. Confirmed empirically (BT-3163 investigation): a
+//! `[... whileTrue: [...]]` as an `ensure:`/`on:do:` try body's last
+//! statement, with a field mutation earlier in the same try body (forcing
+//! the inlined, non-closure `try` shape), still compiles cleanly through
+//! `erlc`. No fallback added here; if a future refactor ever inlines one of
+//! these `case`s directly into the same function as an enclosing `try`
+//! (removing the `letrec`/`apply` boundary), reconsider this note.
 
 use super::super::document::{Document, join, leaf};
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
