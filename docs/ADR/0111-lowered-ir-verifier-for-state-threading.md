@@ -3297,32 +3297,37 @@ loop-body class-var `Bind` call site passes `self.current_branch_frame()`
 (`mod.rs:2366-2368`), the loop's real, already-minted frame.
 
 **Correction to the function's internal fixture-building branch
-(`threaded_ir.rs:2312-2327`).** This branch cannot stay keyed off `frame ==
-FrameId::ROOT` the way `at_method_top_frame` was — doing so silently
-reintroduces the bug Question 1's flag exists to fix. Once the self-dispatch
-rebind's `frame` becomes `FrameId::ROOT` (this decision's own change,
-above), a `frame == FrameId::ROOT`-derived branch would flip that call
-site onto the **bare** fixture path (no `Threaded` wrapper), because it
-would now be indistinguishable from the real top-frame case. But Question
-1's gate consults `shadow_write_eligible_stack.last()`, which is only
-pushed/popped by `walk_stmt`'s `Threaded | ConditionalLoop` arm
-(`threaded_ir.rs:1287-1316`); with no wrapper node for the bare path,
-there is nothing to carry the rebind's `shadow_write_eligible: false` onto
-the stack, so the bare `Bind` would verify against the stack's seeded
-`[true]` — a false-positive `ShadowWriteMissing` on every self-send that
-mutates a class var. Frame identity and shadow-write eligibility are
-independent per Question 1's own framing (that is the whole point of
-splitting them into two parameters), so the bare-vs-wrapped choice must
-key off the new `shadow_write_eligible` parameter directly, not be
-re-derived from `frame`: whenever `shadow_write_eligible` is `false`,
-always synthesize the `Threaded`-wrapped fixture (carrying that `false` so
-`walk_stmt` pushes it onto the stack), regardless of `frame`'s
-ROOT-ness; the bare path is reserved for `shadow_write_eligible == true`,
-which today only the real top-frame class-var writes at
-`expressions.rs:704` produce. Only the call site's *supplied* frame
-identity changes from a boolean-selected sentinel to the caller's real
-value — the wrap decision itself moves from `frame`-derived to
-`shadow_write_eligible`-derived.
+(`threaded_ir.rs:2312-2327`).** This branch cannot drop its existing
+`frame == FrameId::ROOT` trigger — that trigger is load-bearing for a
+reason unrelated to `shadow_write_eligible`: `verify()`'s `frame_stack` is
+seeded `[FrameId::ROOT]` and is only ever pushed by a `Threaded`/
+`ConditionalLoop` wrapper (`threaded_ir.rs:1308`), and `check_use`
+(`threaded_ir.rs:1235-1247`) requires `frame_stack.contains(&var.frame)`
+for any `version > 0` use. A `Bind` verified bare (no wrapper) while its
+`target.frame` is non-`ROOT` — exactly what the new loop-body call site
+above supplies via `self.current_branch_frame()` — would spuriously fail
+`check_use` with `UnboundVersion` the moment the same class var is
+mutated a second time in one iteration (`source_version > 0`), i.e. an
+ordinary loop body like `[ myVar := myVar + 1. myVar := myVar * 2 ]
+timesRepeat: 3` would crash the compiler (`debug_assert!` in debug
+builds, a hard "internal:" diagnostic otherwise, per
+`report_threaded_ir_verify_errors`) once this design is implemented as
+written. This is a distinct failure mode from Question 1's
+`ShadowWriteMissing` false-positive, driven by a separate need
+(version-linearity frame tracking, not shadow-write eligibility), so the
+fix is to **add** the `shadow_write_eligible` trigger alongside the
+existing `frame` trigger, not replace one with the other: wrap whenever
+`frame != FrameId::ROOT || !shadow_write_eligible` (bare only when *both*
+`frame == FrameId::ROOT` and `shadow_write_eligible == true`). This still
+resolves the self-dispatch rebind's false positive (its
+`shadow_write_eligible` is `false`, so it wraps regardless of its now-ROOT
+frame) without breaking the loop-body call site (its `frame != ROOT`, so
+it always wraps, regardless of `shadow_write_eligible`) or the real
+top-frame class-var write at `expressions.rs:704` (`frame == ROOT` *and*
+`shadow_write_eligible == true`, so it stays on the bare path, unchanged).
+Only the call site's *supplied* frame identity changes from a
+boolean-selected sentinel to the caller's real value — the wrap decision
+itself gains a second, independent trigger alongside the original one.
 
 ### Question 3 — How `ClassVars` threads through the loop's own recursive tail call
 
