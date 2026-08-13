@@ -2816,8 +2816,9 @@ impl CoreErlangGenerator {
         // `threaded_ir::ThreadedStmt::NlrCatch`) — every NLR try/catch this
         // generator ever emits (Actor/ClassMethod/ValueType alike) is built
         // here; its `boundary` shape is also what
-        // `threaded_ir::construct_and_verify_class_var_bind`'s
-        // `at_method_top_frame` fixtures reconstruct at the class-var
+        // `threaded_ir::construct_and_verify_class_var_bind`'s synthetic
+        // marker (built from its `frame`/`shadow_write_eligible` pair, ADR
+        // 0111 Addendum 9) reconstructs at the class-var
         // Bind-emission sites (`expressions.rs`, `dispatch_codegen.rs`) for
         // the ADR 0110 ShadowWriteMissing contract. No standalone
         // `verify()` call here: a

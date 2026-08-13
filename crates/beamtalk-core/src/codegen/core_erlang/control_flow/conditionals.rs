@@ -1195,6 +1195,15 @@ impl CoreErlangGenerator {
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
+            // ADR 0111 Addendum 9, Question 1's scope check: a conditional
+            // branch arm never carries a class-var mutation by construction
+            // (`reject_class_var_field_assignment` fires before mode
+            // selection for any threaded body, conditionals included), so
+            // this value is inert here — set per the general lowering rule
+            // (`self.block_depth == 0`, independently re-derived) for
+            // consistency/forward-compatibility, not because this call site
+            // needs it today.
+            shadow_write_eligible: self.block_depth == 0,
             body: stmts,
             produces,
             span,
@@ -1255,6 +1264,7 @@ mod tests {
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![
                     make_put("n", "_Val1", target.clone(), source.clone()),
                     make_put("n", "_Val2", target.clone(), source),
@@ -1300,6 +1310,7 @@ mod tests {
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
+                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![bind],
                 produces: vec![target],
                 span: Span::default(),

@@ -514,16 +514,18 @@ impl CoreErlangGenerator {
         // the *callee's own* `generate_field_assignment` under the
         // identical `ClassSelf`-tagged key (see
         // `threaded_ir::construct_and_verify_class_var_bind`'s doc comment
-        // / ADR 0110 §Runtime change). `at_method_top_frame: false` is not
-        // a claim about this rebind's real nesting — it deliberately
-        // exempts this Bind from the shadow-write check unconditionally,
-        // since it never carries a shadow-write obligation of its own
-        // regardless of block_depth.
+        // / ADR 0110 §Runtime change). `FrameId::ROOT` here is honest (this
+        // rebind never claims a real nested identity) — `shadow_write_eligible:
+        // false` is what deliberately exempts this Bind from the
+        // shadow-write check unconditionally, since it never carries a
+        // shadow-write obligation of its own regardless of block_depth
+        // (ADR 0111 Addendum 9, Question 2).
         let (bind, rebind_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
                 class_var_case_doc,
             )),
             false,
+            super::threaded_ir::FrameId::ROOT,
             false,
             source_version,
             target_version,

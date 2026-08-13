@@ -605,6 +605,14 @@ impl CoreErlangGenerator {
             fn_name: "while".to_string(),
             mode: ThreadingMode::DirectParams,
             frame,
+            // ADR 0111 Addendum 9, Question 1: read fresh from live
+            // generator state at construction time, per the general
+            // lowering rule — `DirectParams` mode itself never carries a
+            // class-var mutation (`has_state_effects()` excludes it), so
+            // this value is inert for this pilot today, but every
+            // `Threaded`/`ConditionalLoop` construction site sets it the
+            // same way regardless of whether the body happens to use it.
+            shadow_write_eligible: self.block_depth == 0,
             counter: None,
             continue_header,
             body: ir_body,
