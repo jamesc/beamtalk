@@ -1237,11 +1237,25 @@ impl CoreErlangGenerator {
     /// in `{Result, Self{N}}` when NLR is active) and by the class-method body generator
     /// (which wraps it in `{class_var_result, Result, ClassVarsN}` when class vars were
     /// mutated).
+    ///
+    /// BT-3168 (ADR 0111 Addendum 9, Question 3): when `expr` is a
+    /// Letrec-shaped loop (`whileTrue:`/`whileFalse:`/`to:do:`/`to:by:do:`/
+    /// `timesRepeat:`) that threads a `ClassVars` mutation through its own
+    /// recursive tail call, ALSO extracts `ClassVars` from element 3 and
+    /// rebinds it via [`CoreErlangGenerator::rebind_class_vars_from_doc`] —
+    /// without this, a class-var-mutating loop in last/return position would
+    /// compile and run, but the mutation's shadow write (fired correctly,
+    /// per-iteration, inside the loop body) would never reach this method's
+    /// own `class_var_mutated()`/`current_class_var()` state, so its normal
+    /// return would silently carry a stale `ClassVars` value instead of the
+    /// loop's.
     pub(in crate::codegen::core_erlang) fn emit_vt_threaded_tuple_unwrap_to_var(
         &mut self,
         expr: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
+        let threads_class_vars = self.vt_construct_threads_class_vars(expr);
+        let span = expr.span();
         let tuple_var = self.fresh_temp_var("ThreadedResult");
         let result_var = self.fresh_temp_var("ThreadedValue");
         let loop_doc = self.expression_doc(expr)?;
@@ -1253,9 +1267,14 @@ impl CoreErlangGenerator {
             " in\n    let ",
             leaf::var(result_var.clone()),
             " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var),
+            leaf::var(tuple_var.clone()),
             ") in\n",
         ]);
+        if threads_class_vars {
+            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+            let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
+            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+        }
         Ok(result_var)
     }
 
@@ -1964,12 +1983,21 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-3168: computed BEFORE `expression_doc` runs the loop's own
+        // codegen (which, via `with_branch_context`, restores
+        // `class_var_version` to its pre-loop value by the time this call
+        // returns) — this predicate itself doesn't need that, but keeping it
+        // adjacent to the other pre-loop reads (`get_while_threaded_locals`)
+        // matches the loop codegen's own read order.
+        let threads_class_vars = self.vt_construct_threads_class_vars(expr);
         // Generate the while loop expression (returns {'nil', StateAcc} tuple)
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = self.get_while_threaded_locals(expr);
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
+            threads_class_vars,
+            expr.span(),
             "WhileResult",
             "WhileState",
         ))
@@ -1983,24 +2011,34 @@ impl CoreErlangGenerator {
     /// 2. Extracts the `StateAcc` from element 2
     /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`, rebinding the
     ///    variable names in scope so subsequent code sees the updated values
+    /// 4. BT-3168 (ADR 0111 Addendum 9, Question 3): when `threads_class_vars`,
+    ///    ALSO extracts `ClassVars` from element 3 and rebinds it via
+    ///    [`CoreErlangGenerator::rebind_class_vars_from_doc`] — the same
+    ///    extra trailing tuple slot `while_loops.rs`/`counted_loops.rs`
+    ///    append to the `{'nil', StateAcc, ClassVars}` result. `false` for
+    ///    every `do:`/`collect:`/`select:`/`inject:into:` caller
+    ///    (`generate_vt_foldl_list_op_open`/`generate_value_type_do_open`) —
+    ///    those Foldl-shaped constructs' accumulator has no matching slot
+    ///    yet (BT-3169).
     ///
-    /// When there are no threaded locals, falls back to sequencing the loop as a side
-    /// effect (`let _seqN = <loop> in`).
+    /// When there are no threaded locals AND no `ClassVars` slot, falls back
+    /// to sequencing the loop as a side effect (`let _seqN = <loop> in`).
     fn emit_vt_loop_open_extraction(
         &mut self,
         loop_doc: Document<'static>,
         threaded_locals: &[String],
+        threads_class_vars: bool,
+        span: crate::source_analysis::Span,
         result_var_prefix: &str,
         state_var_prefix: &str,
     ) -> Document<'static> {
-        if threaded_locals.is_empty() {
+        if threaded_locals.is_empty() && !threads_class_vars {
             // Fallback: just sequence the expression
             let tmp = self.fresh_temp_var("seq");
             return docvec!["    let ", leaf::var(tmp), " = ", loop_doc, " in\n"];
         }
 
         let tuple_var = self.fresh_temp_var(result_var_prefix);
-        let state_var = self.fresh_temp_var(state_var_prefix);
 
         let mut parts: Vec<Document<'static>> = Vec::new();
 
@@ -2013,29 +2051,39 @@ impl CoreErlangGenerator {
             " in\n",
         ]);
 
-        // Extract StateAcc from element 2 of the tuple
-        parts.push(docvec![
-            "    let ",
-            leaf::var(state_var.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(tuple_var),
-            ") in\n",
-        ]);
+        if !threaded_locals.is_empty() {
+            let state_var = self.fresh_temp_var(state_var_prefix);
 
-        // Extract each threaded local from the state map
-        for var_name in threaded_locals {
-            let core_var = self.fresh_var(var_name);
-            let key = Self::local_state_key(var_name);
+            // Extract StateAcc from element 2 of the tuple
             parts.push(docvec![
                 "    let ",
-                leaf::var(core_var.clone()),
-                " = call 'maps':'get'(",
-                leaf::atom(key),
-                ", ",
                 leaf::var(state_var.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var.clone()),
                 ") in\n",
             ]);
-            self.bind_var(var_name, &core_var);
+
+            // Extract each threaded local from the state map
+            for var_name in threaded_locals {
+                let core_var = self.fresh_var(var_name);
+                let key = Self::local_state_key(var_name);
+                parts.push(docvec![
+                    "    let ",
+                    leaf::var(core_var.clone()),
+                    " = call 'maps':'get'(",
+                    leaf::atom(key),
+                    ", ",
+                    leaf::var(state_var.clone()),
+                    ") in\n",
+                ]);
+                self.bind_var(var_name, &core_var);
+            }
+        }
+
+        if threads_class_vars {
+            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")",];
+            let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
+            parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
 
         Document::Vec(parts)
@@ -2084,6 +2132,10 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
+        // BT-3168 (ADR 0111 Addendum 9, Question 3): see the analogous
+        // comment on `emit_vt_threaded_tuple_unwrap_to_var`.
+        let threads_class_vars = self.vt_construct_threads_class_vars(value);
+        let span = value.span();
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignThreaded");
 
@@ -2121,7 +2173,7 @@ impl CoreErlangGenerator {
                 "    let ",
                 leaf::var(state_var.clone()),
                 " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
+                leaf::var(tuple_var.clone()),
                 ") in\n",
             ]);
             for tl in rebind {
@@ -2139,6 +2191,15 @@ impl CoreErlangGenerator {
                 self.bind_var(tl, &tl_core);
             }
         }
+
+        // BT-3168: extract ClassVars from element 3 and rebind it, same as
+        // the non-last-statement / last-position consumers.
+        if threads_class_vars {
+            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
+            let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
+            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
+        }
+
         Ok(core_var)
     }
 
@@ -2160,6 +2221,35 @@ impl CoreErlangGenerator {
             return false;
         };
         !self.compute_threaded_locals_for_loop(body, None).is_empty()
+    }
+
+    /// BT-3168 (ADR 0111 Addendum 9, Questions 3/4): whether the loop
+    /// construct `expr` threads a `ClassVars` mutation through its own
+    /// recursive tail call — true only for the Letrec-shaped constructs this
+    /// issue implements (`whileTrue:`/`whileFalse:`,
+    /// `to:do:`/`to:by:do:`/`timesRepeat:`). `do:`/`collect:`/`select:`/
+    /// `inject:into:` (Foldl-shaped) are BT-3169's territory and never match
+    /// here even when class-var-mutating — their accumulator has no
+    /// matching tuple slot for this yet (Question 6). Shares
+    /// [`CoreErlangGenerator::loop_body_threads_class_vars`] with
+    /// `ThreadingPlan::new_impl` (`control_flow/mod.rs`) so the routing
+    /// decision here and the tuple-shape decision the loop's own codegen
+    /// makes can never independently drift out of sync.
+    fn vt_construct_threads_class_vars(&self, expr: &Expression) -> bool {
+        let expr = expr.unwrap_parens();
+        if self.is_while_with_vt_local_threading(expr) {
+            if let Expression::MessageSend { arguments, .. } = expr {
+                if let Some(Expression::Block(body)) = arguments.first() {
+                    return self.loop_body_threads_class_vars(body);
+                }
+            }
+            false
+        } else if self.is_counted_loop_with_vt_local_threading(expr) {
+            Self::counted_loop_body_block(expr)
+                .is_some_and(|b| self.loop_body_threads_class_vars(b))
+        } else {
+            false
+        }
     }
 
     /// BT-2308: Returns the body block of a counted loop message send
@@ -2195,6 +2285,8 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-3168: see the analogous comment in `generate_vt_while_open`.
+        let threads_class_vars = self.vt_construct_threads_class_vars(expr);
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::counted_loop_body_block(expr)
@@ -2203,6 +2295,8 @@ impl CoreErlangGenerator {
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
+            threads_class_vars,
+            expr.span(),
             "CountedLoopResult",
             "CountedLoopState",
         ))
@@ -2282,6 +2376,11 @@ impl CoreErlangGenerator {
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
+            // BT-3168: Foldl-shaped constructs never thread `ClassVars`
+            // through this tuple slot — that's BT-3169's territory
+            // (Question 6's `{ClassVars, StateAcc}` accumulator shape).
+            false,
+            expr.span(),
             "FoldlListOpResult",
             "FoldlListOpState",
         ))
@@ -2674,11 +2773,14 @@ impl CoreErlangGenerator {
                 // BT-2342: a non-last loop / foldl list-op that mutates captured locals returns
                 // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
                 // statements in this branch see the updates (the value itself is discarded).
+                let threads_class_vars = self.vt_construct_threads_class_vars(body_expr);
                 let loop_doc = self.expression_doc(body_expr)?;
                 let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                 let doc = self.emit_vt_loop_open_extraction(
                     loop_doc,
                     &threaded_locals,
+                    threads_class_vars,
+                    body_expr.span(),
                     "BranchThreadedResult",
                     "BranchThreadedState",
                 );
@@ -3027,11 +3129,14 @@ impl CoreErlangGenerator {
                     // BT-2359: a non-last threaded loop/foldl that mutates a captured local
                     // returns {value, StateAcc}; extract and rebind the threaded locals so a
                     // later expression in this branch sees the update (value discarded).
+                    let threads_class_vars = self.vt_construct_threads_class_vars(body_expr);
                     let loop_doc = self.expression_doc(body_expr)?;
                     let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                     parts.push(self.emit_vt_loop_open_extraction(
                         loop_doc,
                         &threaded_locals,
+                        threads_class_vars,
+                        body_expr.span(),
                         "BranchThreadedResult",
                         "BranchThreadedState",
                     ));

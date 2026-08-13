@@ -1,0 +1,91 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3140/BT-3150/BT-3168: Fixture for class-var mutations inside a Letrec
+// loop body (whileTrue:/timesRepeat:/to:do:), alongside a co-occurring
+// local-variable mutation — the shape that actually reaches the threaded
+// loop codegen path (`needs_mutation_threading` requires a captured local
+// read+write; a bare class-var write or self-send with no other mutation
+// never reaches it at all, see `resetRuns`/`bump`'s own callers below).
+//
+// Before BT-3168 (ADR 0111 Addendum 9), both shapes were rejected at
+// compile time (`CodeGenError::ClassVarAssignmentInThreadedBody` /
+// `ClassMethodSelfSendInThreadedLoopBody`) because `ClassVars` was never
+// threaded through the loop's own recursive tail call the way `StateAcc`
+// is. BT-3168 closes that gap — this fixture exercises the fix end to end
+// (compiles AND runs correctly), not just the codegen-shape pins in
+// `crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs`.
+
+Object subclass: LoopClassVarMutation
+  classState: runs = 0
+
+  class resetRuns => self.runs := 0
+
+  class runs => self.runs
+
+  // Mutates the class var directly and returns its new value — the BT-3150
+  // self-send target for the class-method self-send variants below.
+  class bump => self.runs := self.runs + 1
+
+  // BT-3140: a direct class-var field write inside a whileTrue: loop body.
+  class countUpTo: n =>
+    i := 0
+    [i < n]
+      whileTrue: [
+        self.runs := self.runs + 1
+        i := i + 1
+      ]
+    self.runs
+
+  // BT-3140: the same shape via timesRepeat:.
+  class bumpTimes: n =>
+    seen := 0
+    n
+      timesRepeat: [
+        self.runs := self.runs + 1
+        seen := seen + 1
+      ]
+    self.runs
+
+  // BT-3140: the same shape via to:do:.
+  class bumpUpTo: n =>
+    seen := 0
+    1
+      to: n
+      do: [:i |
+        self.runs := self.runs + 1
+        seen := seen + i
+      ]
+    self.runs
+
+  // BT-3150: a same-class self-send (mutating the class var) inside a
+  // whileTrue: loop body.
+  class bumpViaSelfSendUpTo: n =>
+    i := 0
+    [i < n]
+      whileTrue: [
+        self bump
+        i := i + 1
+      ]
+    self.runs
+
+  // BT-3150: the same shape via timesRepeat:.
+  class bumpViaSelfSendTimes: n =>
+    seen := 0
+    n
+      timesRepeat: [
+        self bump
+        seen := seen + 1
+      ]
+    self.runs
+
+  // BT-3150: the same shape via to:do:.
+  class bumpViaSelfSendToDo: n =>
+    seen := 0
+    1
+      to: n
+      do: [:i |
+        self bump
+        seen := seen + i
+      ]
+    self.runs

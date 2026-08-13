@@ -571,6 +571,44 @@ impl CoreErlangGenerator {
         doc
     }
 
+    /// BT-3168 (ADR 0111 Addendum 9, Questions 2/3): rebinds `ClassVarsN`
+    /// from an already-produced value Document — a Letrec loop construct's
+    /// own returned tuple slot carrying the `ClassVars` mutations threaded
+    /// through its recursive tail call (`while_loops.rs`/`counted_loops.rs`
+    /// via `generate_counted_stateful_loop`). Mirrors
+    /// [`Self::emit_class_var_result_unwrap`]'s inherited-self-dispatch
+    /// rebind: never itself a shadow-write producer (each loop iteration's
+    /// own class-var write, inside the loop body, already shadow-wrote it
+    /// under the identical `ClassSelf`-tagged key — ADR 0110 §Runtime
+    /// change) and never claims a real nested frame identity of its own
+    /// (`FrameId::ROOT`, `shadow_write_eligible: false`, per ADR 0111
+    /// Addendum 9 Question 2).
+    pub(super) fn rebind_class_vars_from_doc(
+        &mut self,
+        value_doc: Document<'static>,
+        span: crate::source_analysis::Span,
+    ) -> Document<'static> {
+        let source_version = self.class_var_version();
+        self.next_class_var();
+        let target_version = self.class_var_version();
+        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(value_doc)),
+            false,
+            super::threaded_ir::FrameId::ROOT,
+            false,
+            source_version,
+            target_version,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "class-var rebind from a loop construct's threaded result",
+            span,
+        );
+        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+        super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+    }
+
     /// Generates code for a message send.
     ///
     /// This is the **main entry point** for message compilation. It dispatches
@@ -2397,6 +2435,29 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, String)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                // BT-3168 (ADR 0111 Addendum 9, Questions 2/3): a class-var
+                // write directly inside a Letrec loop body that threads
+                // `ClassVars` through the loop's own recursive tail call —
+                // threaded via the SAME shared helper the method's own
+                // top-frame write uses (`lower_class_var_field_assignment_bind`),
+                // but tagged with the loop's real, already-minted frame
+                // (`current_branch_frame()`) instead of `FrameId::ROOT`, per
+                // Question 2's resolution. `loop_threads_class_vars` scopes
+                // this to exactly the Letrec loop-body call path — see its
+                // own doc comment for why it can never leak into a nested
+                // Foldl body, conditional, or block literal (all of which
+                // still hit `reject_class_var_field_assignment` below,
+                // unchanged).
+                if self.is_class_var_assignment(expr) && self.loop_threads_class_vars {
+                    let frame = self.current_branch_frame();
+                    let (preamble_doc, bind, val_var) =
+                        self.lower_class_var_field_assignment_bind(&field.name, value, frame)?;
+                    let bind_doc = {
+                        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+                        super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+                    };
+                    return Ok((docvec![preamble_doc, bind_doc], val_var));
+                }
                 self.reject_class_var_field_assignment(expr, field)?;
                 // BT-1342: Full-extract mode — rebind field param instead of maps:put.
                 // When the field is in hybrid_mutated_fields, the field has been extracted

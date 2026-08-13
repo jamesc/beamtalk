@@ -189,6 +189,16 @@ pub enum CodeGenError {
     /// as a statement inside a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:`
     /// (`BodyKind::Letrec`) loop body in a class method.
     ///
+    /// BT-3168 (ADR 0111 Addendum 9): narrowed to a defensive fallback —
+    /// `ClassVars` now threads through a `Letrec` loop's own recursive tail
+    /// call as an extra fun parameter (`while_loops.rs`/`counted_loops.rs`),
+    /// so this is no longer raised for the shape it originally targeted. Kept
+    /// as a conservative rejection for the one case that check found
+    /// structurally guaranteed not to occur (see
+    /// `control_flow::generate_threaded_loop_body_inner`'s
+    /// `loop_threads_class_vars`-gated branch) rather than an `unreachable!()`,
+    /// per CLAUDE.md's "never panic on user input" rule.
+    ///
     /// Every same-class class-method self-send routes through
     /// `emit_class_var_result_unwrap`'s `{class_var_result, Result, ClassVarsN}`
     /// unwrap convention (BT-412) — regardless of whether the callee actually
@@ -280,6 +290,17 @@ pub enum CodeGenError {
     /// BT-3140: A class-var assignment (`self.field := ...`) inside a loop, conditional,
     /// exception handler, or list-op body (or any other context reached via
     /// `generate_field_assignment_open`) in a class method.
+    ///
+    /// BT-3168 (ADR 0111 Addendum 9): no longer raised for a class-var write
+    /// directly inside a `Letrec` (`whileTrue:`/`timesRepeat:`/`to:do:`/
+    /// `to:by:do:`) loop body that threads `ClassVars` through the loop's
+    /// own recursive tail call (`dispatch_codegen.rs`'s
+    /// `generate_field_assignment_open` now threads that shape via a real
+    /// `Bind` instead) — still raised for every other reachable shape:
+    /// `Foldl*` bodies (`do:`/`collect:`/`select:`/`inject:into:`, BT-3169's
+    /// territory), the still-open C4 conditional case
+    /// (`conditionals.rs`'s `lower_field_assignment_bind`, tracked by
+    /// BT-3159), and exception-handler/other list-op bodies.
     ///
     /// `generate_field_assignment_open` threads field writes via the generic
     /// `State`/`StateAcc` map used for Actor instance state and `ValueType` `Self`
@@ -1515,6 +1536,7 @@ struct BranchContextGuard<'a> {
     saved_state_version: usize,
     saved_class_var_version: usize,
     saved_self_version: usize,
+    saved_loop_threads_class_vars: bool,
 }
 
 impl Drop for BranchContextGuard<'_> {
@@ -1524,6 +1546,7 @@ impl Drop for BranchContextGuard<'_> {
         self.generator
             .set_class_var_version(self.saved_class_var_version);
         self.generator.set_self_version(self.saved_self_version);
+        self.generator.loop_threads_class_vars = self.saved_loop_threads_class_vars;
         // class_var_mutated intentionally NOT restored — sticky (BT-1550).
     }
 }
@@ -1585,6 +1608,35 @@ pub(crate) struct CoreErlangGenerator {
     /// `append_repack_stateacc_doc` step and return just the result value (not
     /// `{Result, StateAcc}`), since there is no `StateAcc` variable in scope.
     in_direct_params_loop: bool,
+    /// BT-3168 (ADR 0111 Addendum 9, Questions 2/3/4): whether the generator
+    /// is directly inside a Letrec loop body that threads a `ClassVars`
+    /// mutation through its own recursive tail call. When `true`,
+    /// `generate_field_assignment_open`'s class-var branch threads the write
+    /// via a real, `current_branch_frame()`-tagged `Bind` instead of calling
+    /// `reject_class_var_field_assignment`, and the `BodyKind::Letrec`
+    /// same-class self-send branch in `generate_threaded_loop_body_inner`
+    /// emits the self-send (via its own `emit_class_var_result_unwrap` open
+    /// chain) instead of raising `ClassMethodSelfSendInThreadedLoopBody`.
+    /// Reset to `false` on every `enter_branch_context` entry (mirroring
+    /// `state_version`'s reset-on-entry discipline, not `class_var_version`'s
+    /// restore-without-reset one) and restored on exit, so it can never leak
+    /// from an enclosing Letrec loop into a nested construct
+    /// (conditional, `sort:`'s manually-inlined body, a nested Foldl body, …)
+    /// that doesn't understand this loop's specific tuple-shape convention.
+    /// `generate_threaded_loop_body` is the only place that sets it `true`,
+    /// immediately after entry, from that specific call's own
+    /// `ThreadingPlan::threads_class_vars`.
+    loop_threads_class_vars: bool,
+    /// BT-3168: the current Letrec loop body's final in-body `ClassVars`
+    /// name (`current_class_var()`, captured just before
+    /// `with_branch_context`'s guard restores `class_var_version` to its
+    /// pre-loop value), stashed by `generate_threaded_loop_body` for
+    /// `while_loops.rs`/`counted_loops.rs` to read immediately afterward as
+    /// the loop's own recursive-tail-call `ClassVars` argument. `Some` only
+    /// when that call's `plan.threads_class_vars` was `true`; consumed
+    /// (`Option::take`) by the reader so a stale value can never leak into
+    /// an unrelated later loop.
+    last_loop_class_var: Option<String>,
     /// BT-1329: When a list op in direct-params mode generates an open let-chain
     /// (omitting the trailing result expression), it stores the result variable name
     /// here so the caller can append `let AssignedVar = <result_var> in` separately.
@@ -1771,6 +1823,8 @@ impl CoreErlangGenerator {
             branch_frame_counter: 0,
             in_hybrid_loop: false,
             in_direct_params_loop: false,
+            loop_threads_class_vars: false,
+            last_loop_class_var: None,
             direct_params_list_op_result: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
             hybrid_mutated_fields: std::collections::HashSet::new(),
@@ -2377,8 +2431,13 @@ impl CoreErlangGenerator {
         let saved_in_loop = self.in_loop_body;
         let saved_class_var_version = self.class_var_version();
         let saved_self_version = self.self_version();
+        let saved_loop_threads_class_vars = self.loop_threads_class_vars;
         self.set_state_version(0);
         self.in_loop_body = true;
+        // BT-3168: reset-on-entry, like `state_version` — see
+        // `loop_threads_class_vars`'s own doc comment for why this must
+        // never inherit an enclosing Letrec loop's `true` by default.
+        self.loop_threads_class_vars = false;
         // BT-3146: mint a fresh frame identity for this branch context —
         // see `current_branch_frame`'s doc comment. Never reset/restored
         // (unlike the version counters above): frame identity must stay
@@ -2401,6 +2460,7 @@ impl CoreErlangGenerator {
             saved_state_version,
             saved_class_var_version,
             saved_self_version,
+            saved_loop_threads_class_vars,
         }
     }
 

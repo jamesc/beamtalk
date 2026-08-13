@@ -443,6 +443,14 @@ impl CoreErlangGenerator {
     /// helper is the single place that turns a positive match into the
     /// rejection error, so the two call sites can't drift out of sync.
     ///
+    /// BT-3168 (ADR 0111 Addendum 9): `generate_field_assignment_open` now
+    /// calls this only as its fallback branch — a class-var write directly
+    /// inside a Letrec loop body that threads `ClassVars` through the loop's
+    /// own recursive tail call (`loop_threads_class_vars`) is threaded via a
+    /// real `Bind` instead, before ever reaching this call. This helper's own
+    /// behavior is unchanged; only its one call site inside
+    /// `generate_field_assignment_open` became conditional.
+    ///
     /// `expr` must be the `Expression::Assignment` whose `target` is the
     /// given `field`'s `FieldAccess` (the caller has already matched this
     /// shape before calling in).

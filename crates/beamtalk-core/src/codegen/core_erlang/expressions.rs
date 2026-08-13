@@ -652,8 +652,11 @@ impl CoreErlangGenerator {
         field_name: &str,
         value: &Expression,
     ) -> Result<Document<'static>> {
-        let (preamble_doc, bind, val_var) =
-            self.lower_class_var_field_assignment_bind(field_name, value)?;
+        let (preamble_doc, bind, val_var) = self.lower_class_var_field_assignment_bind(
+            field_name,
+            value,
+            super::threaded_ir::FrameId::ROOT,
+        )?;
         let bind_doc = {
             let mut ctx = super::threaded_ir::RenderCtx::new(self);
             super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
@@ -725,10 +728,25 @@ impl CoreErlangGenerator {
     /// `bind` is the real, not-yet-rendered `ThreadedStmt::Bind`;
     /// `val_var` is the minted temp variable name (both the `Bind`'s
     /// `Put` value and the expression's own logical result).
+    ///
+    /// BT-3168: `frame` is the real [`threaded_ir::FrameId`] this write's
+    /// `Bind` is tagged with — `FrameId::ROOT` for the method's own
+    /// top-frame write (`generate_class_var_field_assignment`,
+    /// `lower_class_method_last_class_var_bind`), or the loop's real,
+    /// already-minted frame (`current_branch_frame()`) for a class-var write
+    /// directly inside a Letrec loop body that threads `ClassVars` through
+    /// the loop's own recursive tail call (`dispatch_codegen.rs`'s
+    /// `generate_field_assignment_open`) — per ADR 0111 Addendum 9, Question
+    /// 2's resolution. `shadow_write`/`shadow_write_eligible` stay driven by
+    /// `block_depth == 0` regardless of `frame`: a loop body never
+    /// increments `block_depth` (it is control flow, not a lexical closure
+    /// boundary), so this is `true` there exactly as it is at the method's
+    /// own top level.
     pub(super) fn lower_class_var_field_assignment_bind(
         &mut self,
         field_name: &str,
         value: &Expression,
+        frame: super::threaded_ir::FrameId,
     ) -> Result<(Document<'static>, super::threaded_ir::ThreadedStmt, String)> {
         if !self.class_var_names().contains(field_name) {
             return Err(CodeGenError::UnsupportedFeature {
@@ -754,7 +772,7 @@ impl CoreErlangGenerator {
                 class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
             },
             shadow_write,
-            super::threaded_ir::FrameId::ROOT, // this is the method's own top-frame class-var write
+            frame,
             self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
             source_version,
             target_version,
