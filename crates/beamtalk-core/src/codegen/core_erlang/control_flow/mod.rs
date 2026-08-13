@@ -1668,10 +1668,25 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
         kind: &BodyKind,
     ) -> Result<(Document<'static>, usize)> {
+        // BT-3168/BT-3169 merge: `plan.threads_class_vars` is `true` for two
+        // mutually exclusive shapes (see `ThreadingPlan::threads_class_vars`'s
+        // own doc comment) — `loop_threads_class_vars` and
+        // `last_loop_class_var` are exclusively the Letrec shape's own
+        // consumer-facing signals (`dispatch_codegen.rs`'s direct-field-write
+        // Bind bypass, `while_loops.rs`/`counted_loops.rs`'s recursive-tail-
+        // call `ClassVars` argument), so both must stay scoped to
+        // `BodyKind::Letrec` — never set for a `Foldl*` plan, whose own
+        // ClassVars threading is the `{ClassVars, StateAcc}` accumulator wrap
+        // in `generate_threaded_loop_body_inner` instead. Letting either leak
+        // true for a Foldl* body would wrongly bypass
+        // `reject_class_var_field_assignment` for a bare (non-self-send)
+        // class-var field write there, or leave a stale `last_loop_class_var`
+        // for a later, unrelated Letrec loop's own `.take()` to pick up.
+        let is_letrec = matches!(kind, BodyKind::Letrec);
         self.with_branch_context(|this| {
-            this.loop_threads_class_vars = plan.threads_class_vars;
+            this.loop_threads_class_vars = is_letrec && plan.threads_class_vars;
             let result = this.generate_threaded_loop_body_inner(body, plan, kind);
-            if plan.threads_class_vars {
+            if is_letrec && plan.threads_class_vars {
                 this.last_loop_class_var = Some(this.current_class_var());
             }
             result
@@ -2446,7 +2461,21 @@ impl CoreErlangGenerator {
         // class-method self-send's own `ClassVarsN` rebind inside this
         // iteration (`emit_class_var_result_unwrap`, frame-scoped to this
         // loop body's `current_branch_frame()` per Question 2) is reflected.
-        if plan.threads_class_vars {
+        //
+        // BT-3168/BT-3169 merge: `plan.threads_class_vars` is now `true` for
+        // TWO mutually exclusive shapes (see `ThreadingPlan::threads_class_vars`'s
+        // own doc comment) — this `{ClassVars, tail}` accumulator wrap is
+        // the `Foldl*` shape's own mechanism (Question 6) and must NOT also
+        // fire for a `BodyKind::Letrec` plan: `while_loops.rs`/
+        // `counted_loops.rs` already build their OWN, textually-different
+        // `{ClassVars1, <tail>}` true-arm shape via the loop's extra
+        // recursive-tail-call fun parameter (Question 3) as part of the
+        // `BodyKind::Letrec` arms above, and popping+rewrapping that
+        // half-built `docs` entry a second time here would splice the
+        // closing `}` in before the arm's own trailing `apply` call —
+        // confirmed the hard way via `erlc`'s "syntax error before: '}'"
+        // on `loop_class_var_mutation.bt`.
+        if !matches!(kind, BodyKind::Letrec) && plan.threads_class_vars {
             let cv = self.current_class_var();
             // BT-3169: record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
