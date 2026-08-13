@@ -3112,3 +3112,524 @@ is untouched, still used only by real `ConditionalLoop` bodies
 exactly one `Bind` — the raw-entry-vs-source-statement distinction happens
 to not yet matter there. Byte-identical over the full snapshot corpus +
 `stdlib`/`BUnit`/REPL-protocol suites, confirmed before and after.
+
+## Addendum 9 (2026-08-13): BT-3166 — ClassVars threading through loop/fold bodies: six design questions resolved against compiled repros
+
+[BT-3155](https://linear.app/beamtalk/issue/BT-3155)'s epic goal — thread
+`ClassVars` mutations through `whileTrue:`/`timesRepeat:`/`to:do:` loop
+bodies (`BodyKind::Letrec`) and `do:`/`collect:`/`select:`/`inject:into:`
+fold bodies (`BodyKind::Foldl*`), closing BT-3140/BT-3150/BT-3151's
+compile-time rejections into correctly-compiling code — cannot start
+implementation until six open design questions are pinned. This section
+resolves all six, each against a real compiled repro (a locally built
+`beamtalk` binary, `.core` read from the actual `build/` output), following
+Addendum 2/4/5/8's own methodology: resolve by symbol name first, treat
+`:NNN` line numbers as a hint. All line numbers below are against
+`crates/beamtalk-core/src/codegen/core_erlang/` unless noted, current as of
+`main` at commit `d4c2e57` — past the `73eeef1` floor this issue's branch
+note required, confirmed before starting. No production code changed as
+part of this addendum (design-only, per the issue's own "Files to Modify:
+None").
+
+**Repro naming.** `s01`–`s15` below are throwaway `.bt` fixtures compiled
+directly with `beamtalk build <file>.bt`, read from the emitted
+`build/bt@<file>.core`; they are not committed anywhere (scratch files,
+deleted with the work session) — quoted here only for their compiled
+output. One repro (`s01`'s equivalent trace) needed a temporary
+`eprintln!` inserted into `ThreadingPlan::new_impl` to observe mode
+selection *before* today's compile-time rejection fires (§Question 4);
+the instrumentation was reverted immediately after capturing the two data
+points it produced (`git diff` confirmed clean before continuing) — no
+trace of it remains in this branch's history.
+
+### Baseline, confirmed empirically: `generate_threaded_loop_body_inner` is unmigrated, and a narrower, disabled-by-default pilot sits beside it
+
+The issue's own framing — "zero `ThreadedStmt`/`threaded_ir::` construction
+anywhere in [`generate_threaded_loop_body`/`_inner`]" — is confirmed exactly:
+
+```
+$ awk 'NR==1351,NR==2067' control_flow/mod.rs | grep -c "ThreadedStmt\|threaded_ir::"
+0
+```
+
+(`generate_threaded_loop_body_inner` spans `mod.rs:1351`–`2067`, ending at
+the next function boundary, `emit_field_assign_last_expr` at `:2068`.) Every
+statement shape inside it — field assignment, actor self-send, class-method
+self-send (rejected), Tier-2 value call, local-var assignment, destructure —
+still builds a hand-rolled `Document` directly, exactly as BT-3141's
+research found for the rest of the pre-migration codebase.
+
+One nuance the issue's framing doesn't mention, found while establishing
+the baseline: `while_loops.rs` already carries a **narrower, parallel,
+disabled-by-default** `ThreadedIr` pilot — `try_render_while_direct_via_threaded_ir`
+(`while_loops.rs:604`+), gated by `BEAMTALK_THREADED_IR_WHILE_DIRECT=1`
+(`:320-321`, off unless explicitly set — confirmed not read anywhere in
+`beamtalk build`'s normal path). It lowers a real `ThreadedStmt::ConditionalLoop`
+for the single narrowest case — `whileTrue:`/`whileFalse:`, `DirectParams`
+mode only, no field writes, no self-sends — and is a genuinely separate code
+path from `generate_threaded_loop_body`/`_inner` (it builds its own
+`ir_body: Vec<ThreadedStmt>` by walking `filtered_body` directly). It does
+not contradict the issue's claim — `generate_threaded_loop_body_inner`
+itself is still 100% legacy, confirmed above — but it means BT-3155's
+migration issues are not literally starting from a blank page for
+`ConditionalLoop`'s wire-up mechanics (verify/render call sites, `RenderCtx`
+plumbing) — only for the `StateAcc`/`Hybrid`/`Foldl*` shapes this design
+targets, which the pilot deliberately does not cover.
+
+### Question 1 — Frame semantics for `ShadowWriteMissing`
+
+**Evidence.** `ShadowWriteMissing`'s gate (`walk_stmt`'s `Bind` arm,
+`threaded_ir.rs:1276-1280`) is:
+
+```rust
+if matches!(target.prefix, VersionPrefix::ClassVars)
+    && target.frame == FrameId::ROOT
+    && !*shadow_write
+    && self.has_class_vars_nlr
+{ /* ShadowWriteMissing */ }
+```
+
+`with_branch_context`/`enter_branch_context` (`mod.rs:2373-2403`) mints a
+**fresh, non-ROOT `FrameId`** on every entry, unconditionally:
+
+```rust
+self.set_state_version(0);
+self.in_loop_body = true;
+self.branch_frame_counter += 1;   // mod.rs:2384 — never reset, globally unique
+```
+
+— and `generate_threaded_loop_body` (`mod.rs:1339-1346`) calls
+`with_branch_context` to run `generate_threaded_loop_body_inner`. So a
+loop-body class-var `Bind`'s real `FrameId` (`current_branch_frame()`,
+`mod.rs:2366-2368`) is **always** non-`ROOT` — `ShadowWriteMissing` would
+never fire for one, exactly as the issue states.
+
+Independently, ADR 0110's real production shadow-write gate is
+`self.block_depth == 0` (`expressions.rs:703,711` — the two arguments to
+`construct_and_verify_class_var_bind`, "independently re-derived per ADR
+0111 §Verifier honesty"), never `FrameId`. `block_depth`
+(`mod.rs:1615`) is incremented/decremented in exactly two places,
+`expressions.rs:992/1012` and `:1063/1132` — both inside `generate_block`,
+the compiler for a **first-class block literal closure** (`select:`/`do:`
+arguments, stored blocks, `ifTrue:`'s dynamically-dispatched arm). Grepping
+the full body of `generate_threaded_loop_body_inner` (`mod.rs:1351-2067`)
+for `block_depth` returns zero matches — a `whileTrue:`/`do:` loop body
+compiled through it never touches the counter at all. This is the concrete
+mechanism behind BT-3140's amendment ("loop bodies never increment
+`block_depth`"): a loop body is control flow, not a lexical closure
+boundary, so `block_depth` correctly stays at whatever it was on entry
+(0, at a class method's own top level) — while `FrameId` is minted fresh
+regardless, because `FrameId`'s job (version-linearity scoping across
+sibling branch arms/loop iterations) is orthogonal to `block_depth`'s job
+(shadow-write eligibility: "is a foreign NLR still guaranteed to observe
+this mutation via the process-dictionary side channel").
+
+**Decision: a parallel `shadow_write_eligible: bool` field on
+`ThreadedStmt::Threaded` and `ThreadedStmt::ConditionalLoop`** — the
+issue's own second option, not a new `FrameId`-adjacent classification
+type. Concretely:
+
+- At lowering time, whenever a `Threaded`/`ConditionalLoop` node is
+  constructed, the caller reads `self.block_depth == 0` fresh from live
+  generator state (the same independently-re-derived pattern
+  `expressions.rs:711` already establishes) and stores it as the node's
+  `shadow_write_eligible`. This is correct by construction for every
+  current and future call site: `block_depth` is a single, monotonically
+  correct scalar counter across the *whole* nesting stack (not per-frame),
+  so reading it once, at construction time, already reflects every
+  enclosing block-literal boundary crossed so far — no AND-combination
+  with a parent node's own flag is needed at construction time.
+- `verify()` gains a `shadow_write_eligible_stack: Vec<bool>`, seeded
+  `[true]` (mirroring `frame_stack: vec![FrameId::ROOT]` at
+  `threaded_ir.rs:1146`), pushed/popped in lockstep with `frame_stack`/
+  `mode_stack` in the `Threaded | ConditionalLoop` arm of `walk_stmt`
+  (`threaded_ir.rs:1287-1316`) — `AND`ed with the parent's current top
+  (`push(*shadow_write_eligible_stack.last().unwrap() && node.shadow_write_eligible)`)
+  for defense-in-depth on hand-built fixtures, even though correct lowering
+  never needs the AND (a nested frame's own `block_depth`-derived flag
+  already encodes total nesting depth).
+- `ShadowWriteMissing`'s gate changes from `target.frame == FrameId::ROOT`
+  to `*shadow_write_eligible_stack.last().unwrap()`. `FrameId` keeps its
+  existing, unrelated job (version linearity) untouched.
+- Scope check, confirmed via Addendum 5: conditionals/`exception_handling.rs`
+  do **not** need this field — Addendum 5's "Class-var mutations never route
+  here either — by construction" finding (§"Scope and routing boundaries")
+  still holds today (`reject_class_var_field_assignment`,
+  `dispatch_codegen.rs:2398`, fires before mode selection for *any*
+  threaded body, conditionals included) — so `shadow_write_eligible` is
+  needed only on the two loop/fold-shaped variants this epic touches; giving
+  it to `Threaded` too (not only `ConditionalLoop`) is forward-looking for
+  when conditionals/exception-handling eventually gain the same capability,
+  not something this epic's own repros require today.
+
+### Question 2 — `construct_and_verify_class_var_bind`'s frame model
+
+**Evidence.** The function (`threaded_ir.rs:2252-2329`) takes
+`at_method_top_frame: bool` and hardcodes:
+
+```rust
+let frame = if at_method_top_frame { FrameId::ROOT } else { FrameId::new(1) };
+```
+
+Both of today's two production call sites confirm this is fixture-and-discard,
+never a real per-call-site frame: `expressions.rs:704` (the top-frame class-var
+field-write branch of `generate_field_assignment`) always passes
+`at_method_top_frame: true` in practice (it's the top-frame branch by
+construction); `dispatch_codegen.rs:522` (`emit_class_var_result_unwrap`,
+the self-dispatch `ClassVarsN` rebind) always passes `false`/`false`
+unconditionally, per its own doc comment (`threaded_ir.rs:2247-2251`):
+"not a claim about its real block-depth... exempted" — that call site can
+never need `ShadowWriteMissing` (it never sets `shadow_write: true`) or a
+real frame identity, so `FrameId::new(1)`'s sentinel value has never mattered.
+
+**Decision: replace `at_method_top_frame: bool` with a real `frame:
+FrameId` parameter**, plus a separate `shadow_write_eligible: bool`
+parameter (Question 1's flag — now genuinely independent of `frame`, so it
+can no longer be derived from `frame == FrameId::ROOT` inside this
+function either). Every future call site already has the real value at
+hand: the two existing call sites use `FrameId::ROOT` (top-frame writes,
+unchanged) and an unconditionally-exempt frame (the self-dispatch rebind,
+where `frame` can now honestly be `FrameId::ROOT` too, since the call site
+never claims a real nested identity — the old `FrameId::new(1)` sentinel
+was never inspected for any purpose other than "not ROOT," and dropping it
+removes a small, previously load-bearing-by-convention magic number); a new
+loop-body class-var `Bind` call site passes `self.current_branch_frame()`
+(`mod.rs:2366-2368`), the loop's real, already-minted frame. The function's
+internal `at_method_top_frame` branch (`threaded_ir.rs:2312-2327`, choosing
+bare-vs-`Threaded`-wrapped fixture construction) is unaffected in structure —
+it re-derives its own local `let at_method_top_frame = frame ==
+FrameId::ROOT;` from the new parameter and keeps every downstream branch
+identical; only the call site's *supplied* frame identity changes from a
+boolean-selected sentinel to the caller's real value.
+
+### Question 3 — How `ClassVars` threads through the loop's own recursive tail call
+
+**Evidence — three real fun signatures, one per today's local-threading
+convention, none carrying a `ClassVars` slot:**
+
+- **`DirectParams`** (repro `s06`, `whileTrue:`, local-only mutation):
+  `letrec 'while'/2 = fun (I, Sum) -> ...` — `mod.rs`'s
+  `DirectParams` doc comment ("`fun (Var1, ..., VarN)` — no `StateAcc` map
+  at all," `threaded_ir.rs:677-678`) confirmed exactly; no map anywhere in
+  the signature.
+- **Counted-loop `LoopCounter`** (repro `s07`, `to:do:`): `letrec 'loop'/2
+  = fun (_loopidx4, Sum) -> ... apply 'loop'/2 (call 'erlang':'+'(_loopidx4,
+  1), _Sum7) ...` — confirms `LoopCounter`'s doc comment precedent
+  (`threaded_ir.rs:567-579`): an extra, unversioned, raw-next-value-expression
+  parameter, never a `Bind` target/source.
+- **`StateAcc` fallback** (repro `s08`, Actor instance `whileTrue:` with a
+  self-send): `letrec 'while'/1 = fun (StateAcc) -> ...` — exactly one map
+  parameter.
+- **`TupleAcc` (Foldl, gate_slots=1)** (repro `s10`, `select:`, local-only):
+  `fun (X, _AccSt5) -> let AccList = element(1, _AccSt5) in let StateAcc =
+  element(2, _AccSt5) in ...` — a 2-tuple wrapping the early-exit gate slot
+  and the (still map-shaped) locals accumulator; **`TupleAcc(0)`** (repro
+  `s12`, plain `do:`) degenerates to a *bare* `StateAcc` — `fun (X, StateAcc)
+  -> ...`, no tuple wrapper at all (correcting `ThreadingMode::TupleAcc`'s
+  own doc comment, `threaded_ir.rs:679-698`, which describes gate_slots=0
+  as `{Var1,...,VarN}` — the real, compiled shape at gate_slots=0 is a bare
+  map, not a flat per-local tuple; locals are *never* flattened positionally
+  into the tuple in any of `s10`/`s12`'s output, only the early-exit gate
+  value(s) are — see Question 6 for why this matters).
+
+None of the four shapes has room for `ClassVars`: `DirectParams`/`Hybrid`
+have no map to piggyback a key on (Question 3's own framing, confirmed); the
+`StateAcc` map's other keys are all scalars (a nested `ClassVars` map under
+one key would work syntactically but is semantically wrong — see below);
+`TupleAcc`'s tuple wraps only the early-exit gate + the locals map, not a
+third independent value.
+
+**Decision: `ClassVars`, when a loop/fold body threads it, is always an
+extra, explicit trailing fun parameter — parallel to, but distinct in kind
+from, `LoopCounter`** — present *regardless* of which of the three
+local-threading conventions is chosen for the loop's own locals:
+
+- `DirectParams`/`Hybrid`: `fun (Var1, ..., VarN, ClassVars)`.
+- `StateAcc`: `fun (StateAcc, ClassVars)` — two explicit map parameters,
+  never one key folded into the other. This directly answers the "fold
+  into StateAcc under a reserved key" question the issue poses and rejects
+  it: every other `StateAcc` key holds a scalar (`Question 3`'s own
+  observation); a `ClassVars` key would hold a *second, independently
+  keyed and independently shadow-written* map with entirely different
+  mutation semantics (ADR 0110's `class_tag`-keyed process-dictionary
+  shadow write has nothing to do with the loop's own local-var `StateAcc`
+  map) — conflating the two into one map buys nothing and risks a key
+  collision if a Beamtalk field is ever literally named the reserved key.
+- **Unlike `LoopCounter`, `ClassVars` needs real `Bind` linearity**:
+  `LoopCounter` is unversioned (a single gensym'd identity, threaded by a
+  raw next-value expression with no producer/consumer bookkeeping,
+  `threaded_ir.rs:567-579`) because a loop index has no meaningful "was
+  this mutated correctly" invariant beyond arithmetic. A class-var mutation
+  is exactly what `ShadowWriteMissing`/version linearity exist to check —
+  so `ClassVars` inside a loop body is a real `VersionedVar`
+  (`VersionPrefix::ClassVars`, real per-iteration versions), not an
+  `AccParam`/`LoopCounter`-shaped unversioned identity, structurally closer
+  to `StateAcc`'s own threaded-local `Bind` chain than to the loop index.
+
+**Foldl's structural constraint (forces a different mechanism from
+Letrec's).** `lists:foldl(Fun, Acc0, List)`'s callback is fixed at 2
+arguments (`fun(Elem, Acc) -> NewAcc`) — there is no third "extra fun
+parameter" slot the way a `letrec` fun can just grow its parameter list.
+`ClassVars` therefore cannot be a sibling parameter for Foldl the way it is
+for Letrec; it must be folded into the accumulator value ITSELF, tuple-packed
+alongside `StateAcc` — this is Question 6's subject, resolved there in full,
+composing with this question's "`ClassVars` is always adjacent to the
+locals map, never inside it" answer: for Foldl, "adjacent" means the tuple
+position immediately before `StateAcc`, not a map key inside it.
+
+### Question 4 — Mode-selection interaction with `has_self_sends`/Hybrid pre-extraction
+
+**Part A — `has_self_sends` always forces `StateAcc`, confirmed both by
+source and by a compiled repro.** `body_analysis.has_state_effects()`
+(`semantic_analysis/block_facts.rs:60-62`) is `!field_writes.is_empty() ||
+has_self_sends || has_field_value_call` — consumed by `select_direct_params`
+(`mod.rs:513-527`, `!body_analysis.has_state_effects()`) and
+`select_tuple_acc` (`mod.rs:535-553`, same check) — both unconditionally
+excluded whenever `has_self_sends`. `select_hybrid_params`
+(`mod.rs:560-582`) excludes it explicitly: `!body_analysis.has_self_sends`
+(`:576`). Compiled confirmation (repro `s08`, an Actor instance self-send
+inside `whileTrue:`): `letrec 'while'/1 = fun (StateAcc) -> ...` —
+single-param `StateAcc` mode, exactly as source analysis predicts. **This
+simplifies the epic's scope directly**: BT-3150's self-send-in-`Letrec`
+repro and BT-3151's self-send-in-`Foldl` repro both *always* land in
+`StateAcc`/plain-map-fold mode today — `DirectParams`/`Hybrid`/`TupleAcc`
+never need to reason about a self-send at all, for either Letrec or Foldl.
+
+**Part B — Hybrid's pre-extraction is unconditionally wrong for class-var
+writes, confirmed empirically, and the fix is broader than the issue's own
+framing suggests.** `select_hybrid_params`'s gate is
+`!body_analysis.field_writes.is_empty()` (`:575`) — and `field_writes` comes
+from `is_field_assignment` (`dispatch_codegen.rs:2121-2130`), a purely
+syntactic `self.field := value` check with **no class-var awareness**
+(`is_class_var_assignment`, the class-var-aware predicate, is a *separate*
+function, consulted only later, inside `generate_field_assignment_open`'s
+`reject_class_var_field_assignment` call, `dispatch_codegen.rs:2398` — after
+mode selection has already run). `hybrid_mutated_fields`
+(`while_loops.rs:967-969`) is populated straight from `plan.mutated_fields`,
+itself `body_analysis.field_writes` verbatim (`mod.rs:481-487`) — so mode
+selection cannot distinguish a class-var write from an instance-field write
+at all.
+
+Confirmed with a real (pre-rejection) trace: a temporary `eprintln!` after
+`ThreadingPlan::new_impl`'s mode-selection block showed, for repro `s01`
+(`Value subclass:`, a `whileTrue:` body writing only a class var, no
+self-send): `hybrid=false` — but for repro `s11` (the **identical** loop
+body, on an `Actor subclass:`'s class method instead of a `Value
+subclass:`'s): `hybrid=true, field_writes={"runs"}`. The difference is
+`select_hybrid_params`'s `matches!(context, CodeGenContext::Actor)` gate
+(`:571`) — and a class method's `context` is `CodeGenContext::Actor` when
+the class itself is an `Actor` subclass, `ValueType` when it's a `Value`
+subclass (confirmed by the two traces; `CodeGenContext` has only `Actor`/
+`ValueType`/`Repl` variants, `mod.rs:1013-1034` — there is no distinct
+"class-method" context). **This means Hybrid mode is, today, latently
+reachable for an `Actor` subclass's class-method loop body that mutates
+only a class var — exactly the wrong-pre-extraction shape the issue
+describes — and it has simply never manifested as a bug because
+`reject_class_var_field_assignment` (`dispatch_codegen.rs:2398`) fires
+downstream, inside body generation, regardless of which mode was already
+selected.**
+
+A further structural fact narrows the fix: a class method has no instance
+`self.field` at all — `self.x` inside a `class` method resolves to a class
+var or nothing (DNU), never an instance field — so `field_writes` inside
+**any** `in_class_method()` loop body is, by construction, 100% class-var
+names. There is no legitimate "mix of real instance-field pre-extraction
+candidates plus an incidental class-var write" case for Hybrid to partially
+exclude; Hybrid's entire premise (amortize the `State` map's per-iteration
+`maps:get`/`maps:put` cost by pre-extracting mutated fields as direct fun
+params) has no `State` to amortize against inside a class method at all.
+
+**Decision: add `!generator.in_class_method()` to `select_hybrid_params`'s
+existing guard clause**, excluding Hybrid mode entirely for any
+class-method loop/fold body — not merely "exclude class-var field names
+from `hybrid_mutated_fields`." Once this lands, combined with Part A's
+finding, **every** `ClassVars`-mutating shape this epic cares about (a
+direct field write, repro `s01`/`s11`; a self-send, repro `s02`/`s08`) is
+excluded from `DirectParams` (field-write-excluded already, `has_state_effects()`),
+`TupleAcc` (same check, `select_tuple_acc:548`), *and* now `Hybrid` — always
+falling to `StateAcc`/plain-map-fold mode for the loop's own local-variable
+threading. The two migration issues therefore only need to design/implement
+`ClassVars` composition against `ThreadingMode::StateAcc`'s single-map
+`fun(StateAcc)` (Letrec) and the plain, gate_slots=0 map-fold `fun(X,
+StateAcc)` (Foldl) shapes — `DirectParams`/`Hybrid`/`TupleAcc(>0)`
+composition with `ClassVars` is out of scope for this epic's three concrete
+repros and is not designed here (a real, but not currently reachable,
+future generalization — see Question 6's TupleAcc note).
+
+### Question 5 — Is `ClassSelf` visible inside a loop's `fun` body without being an explicit parameter?
+
+**Confirmed empirically, decisively, via repro `s09`** (`do:` with a
+co-occurring local accumulator and a class-method self-send — the exact
+BT-3151-addendum "silent loss" shape, which compiles today without
+rejection because the `Letrec`-only guard, `mod.rs:1415`, doesn't cover
+`Foldl*`). The class method itself is `fun (ClassSelf, ClassVars,
+_aList2) -> ...`; its fold's inner closure is:
+
+```erlang
+let _temp7 = fun (X, StateAcc) ->
+  let Total = call 'maps':'get'('__local__total', StateAcc) in
+  let _CMR8 = call 'bt@...':'class_bump'(ClassSelf, ClassVars) in
+  let ClassVars1 = case _CMR8 of
+    <{'class_var_result', _MR10, _CV9}> when 'true' -> _CV9
+    <_PCV11> when 'true' -> ClassVars
+  end in
+  ...
+```
+
+`_temp7`'s own parameter list is `(X, StateAcc)` — **no `ClassSelf`, no
+`ClassVars`** — yet its body references both directly, closing over them
+from the enclosing `class_countedRun:`/3 fun's own scope. This is ordinary
+Core Erlang closure semantics (a nested `fun` closes over its lexical
+environment, exactly like `letrec`-bound funs do too — `s06`/`s07`/`s08`'s
+compiled `letrec 'while'`/`'loop'` bodies already reference `_n1`/`_n3`
+(the enclosing method's own parameters) freely, without them being
+declared loop parameters, confirming the SAME mechanism applies at
+`letrec` nesting depth, not only plain `fun` nesting depth). **Answer: yes
+— reading `ClassSelf` (for the shadow write's `element(2, ClassSelf)` key)
+and the *original* `ClassVars` value needs zero extra plumbing inside
+either a `letrec` loop body or a `Foldl` closure; both are already free
+variables at that nesting depth.**
+
+What is *not* free — and is exactly why Question 3's extra-parameter design
+is necessary — is threading an *updated* `ClassVars` value forward across
+iterations and back out to the caller after the construct completes. Core
+Erlang funs are immutable/single-assignment: `ClassVars1`, computed inside
+one iteration's closure body, is invisible to the next iteration and to the
+method's own final `{'class_var_result', ..., ClassVars}` return unless it
+is explicitly re-passed as a parameter (Letrec) or folded into the
+accumulator (Foldl) — which is precisely why `s09`'s `ClassVars1` is a dead
+local today: `_temp7`'s recursive-via-`foldl` invocation only ever carries
+`StateAcc` forward, so `class_bump`'s mutation is computed, verified,
+shadow-written (via `construct_and_verify_class_var_bind`, already correct
+in isolation) — and then discarded, never reaching the fold's own output.
+The shadow write itself (the process-dictionary side channel) already
+fires correctly per-iteration today, for free, because it only needs the
+free `ClassSelf`/`ClassVars` read — it is the *pure-functional* return path
+that is missing, confirming this is a state-threading-plumbing gap, not a
+`Bind`-construction gap.
+
+### Question 6 — Letrec vs. Foldl accumulator shape
+
+**Letrec never returns a value** (confirmed: `s06`'s exit arm is `<'false'>
+when 'true' -> let _ExitSA11 = ... in {'nil', _ExitSA13} end`; `s08`'s is
+`<'false'> when 'true' -> {'nil', StateAcc} end` — always `{'nil', ...}`
+regardless of body shape). `ConditionalLoop`'s existing `exit_arm` field
+(opaque `Document`, built by `generate_exit_stateacc`) already owns this
+shape; a `ClassVars` extra parameter (Question 3) simply becomes one more
+argument the exit arm's repack and the recursive tail call both carry — no
+new accumulator-shape design needed for Letrec beyond "add one more
+parameter, consistently, everywhere the existing `Var1..VarN`/`StateAcc`
+parameters are threaded."
+
+**Foldl's accumulator IS the body's output**, and — corrected against
+compiled evidence, not `ThreadingMode::TupleAcc`'s doc comment (Question
+3's finding) — locals are *never* positionally flattened into the tuple;
+only the early-exit gate slot(s) are tuple-wrapped ahead of a trailing,
+still-map-shaped `StateAcc`. Since `lists:foldl`'s callback has exactly one
+accumulator parameter (no room for a sibling `ClassVars` parameter the way
+Letrec's `letrec` fun can simply grow), `ClassVars` must ride inside that
+one accumulator value, as one more tuple position — but per Question 4's
+Part B finding, no compiled repro today ever reaches `TupleAcc(>0)` with a
+class-var write in play (it's excluded by the same `has_state_effects()`
+check `DirectParams` uses), so this design only needs to specify, and only
+needs to be *implemented* for, the plain (`gate_slots=0`) map-fold shape:
+
+- **`ClassVars` absent** (today, `s09`/`s12`): accumulator is bare
+  `StateAcc`; `fun (X, StateAcc) -> ... StateAcc1 end`.
+- **`ClassVars` present** (the fix): accumulator becomes a 2-tuple `{ClassVars,
+  StateAcc}`, unconditionally, whenever the body threads `ClassVars` — `fun
+  (X, {ClassVars, StateAcc}) -> ... {ClassVars1, StateAcc1} end` (rendered,
+  per Addendum 5's established two-hop `element(1,_)`/`element(2,_)` idiom
+  already used for `TupleAcc`'s own gate/`StateAcc` split, `s10`'s compiled
+  shape). `emit_class_var_result_unwrap`'s already-correct, already-verified
+  `Bind` (`dispatch_codegen.rs:466-521`) needs no change to how it
+  *constructs* `ClassVars1` — only to where that value goes: into the new
+  tuple slot instead of a dead `let`.
+- **General composition (specified, not implemented in this pass):** for a
+  future body that reaches `TupleAcc(G)` (`G>0`) *and* threads `ClassVars`
+  — not reachable by any of BT-3155's three repros today, since
+  `select_tuple_acc` excludes class-var/self-send bodies exactly like
+  `select_direct_params` does — the accumulator generalizes to `{Gate1, ...,
+  GateG, ClassVars, StateAcc}`: `ClassVars` always sits immediately before
+  the trailing `StateAcc`, as one more position *after* the existing
+  early-exit gate slots. Represented as an orthogonal boolean (e.g.
+  `ThreadingMode::TupleAcc { gate_slots: usize, threads_class_vars: bool }`
+  — exact field name a migration-issue implementation decision, not pinned
+  here), never by incrementing `gate_slots` itself — `EarlyExitGateSlotMismatch`
+  (`threaded_ir.rs:1336-1340`) compares `mode_gate_slots` against
+  `TupleAccUnpack`'s own `gate_slots`, and that comparison must stay about
+  the pre-existing early-exit-result count only; folding `ClassVars` into
+  the same counter would make the check fire (or fail to fire) for reasons
+  having nothing to do with early-exit gate-slot liveness, the exact kind
+  of invariant-conflation this ADR's methodology (Addendum 2 Gap 1 option 3;
+  Addendum 5's dynamic-field-`Put` options analysis) consistently rejects.
+  Deferred, not designed further — no compiled evidence exists to pin an
+  unpack `Bind` sequence against, and (per Question 4 Part B) none can exist
+  until a *separate*, later change relaxes `select_tuple_acc`'s exclusion —
+  out of this epic's scope.
+
+**The `dict_ops.rs::generate_dict_do` bare-self-send coverage question,
+confirmed with real evidence, not inference.** Two repros:
+
+- `s13` (list-shaped `do:`, receiver a variable — not a `MapLiteral`, so
+  `try_generate_dict_message`'s `do:` arm never matches, per its own doc
+  comment "only intercept when receiver is a dictionary literal... other
+  receivers fall through to the list `do:` handler," `intrinsics.rs:760-762`)
+  and `s14` (the true `dict_ops.rs`-routed shape: a literal `#{...}`
+  receiver, matching `try_generate_dict_message`'s actual precondition,
+  `intrinsics.rs:782-784`) both compile a bare (no co-occurring local
+  mutation), class-method-self-send-only `do:` block. **Both are correctly
+  rejected**, with BT-3151's exact `check_no_unsafe_class_method_self_sends`
+  error text ("this self-send cannot be proven free of class-variable
+  mutation... unlike a threaded loop body, this block has no way to thread
+  such a mutation back"). For `s14` specifically: `generate_dict_do`
+  (`dict_ops.rs:25-47`) calls `needs_mutation_threading` (`false` here — a
+  bare self-send in class-method context is not a "captured local variable
+  mutation," `mod.rs:2606-2621`'s `in_class_method()` branch), returns
+  `Document::Nil`, and `try_generate_dict_message` (`intrinsics.rs:789-794`)
+  converts that into `Ok(None)` — ceding control to the fallthrough chain,
+  which reaches `list_ops`'s own `check_no_unsafe_class_method_self_sends`
+  call (`list_ops/mod.rs:105`/`list_ops/transform_ops.rs:546`) via the same
+  "any collection-like receiver, `beamtalk_collection:to_list`" path `s13`
+  exercises directly. **Corrected finding: there is no `dict_ops.rs`
+  bare-self-send coverage gap** — coverage is real, provided by construction
+  of the fallthrough architecture (every mode-declining call site ceding to
+  a generic path that itself carries the check), not by `dict_ops.rs`
+  needing its own copy of the check.
+- `s15` (the `dict_ops.rs`-routed **co-occurring**-mutation shape — a
+  literal `#{...}` `do:` with both a class-method self-send and a
+  co-occurring local accumulator, mirroring `s09`'s `DriverDo` shape exactly)
+  **compiles successfully and silently loses the mutation** — confirmed via
+  its `.core` output, byte-for-byte the same dead-`ClassVars1`-local shape
+  as `s09`. This is **not a new or different gap**: `generate_dict_do_with_mutations`
+  (`dict_ops.rs:51`+) calls the *same* `generate_threaded_loop_body` this
+  entire addendum targets — it inherits Question 6's fix automatically once
+  the plain-map-fold `{ClassVars, StateAcc}` accumulator design lands there,
+  exactly as every other `Foldl*` call site does. Confirms the issue's own
+  framing (`generate_threaded_loop_body`/`_inner` is *the* shared body
+  generator for every `Foldl*` construct, dict-specific or list-generic
+  alike) rather than requiring a separate design.
+
+### Implementation table for BT-3155's Letrec/Foldl migration issues
+
+| # | Question | Decision | Primary site(s) |
+|---|---|---|---|
+| 1 | `ShadowWriteMissing` frame gate | New `shadow_write_eligible: bool` on `Threaded`/`ConditionalLoop`, lowered from live `self.block_depth == 0`; `verify()` gains a parallel `shadow_write_eligible_stack`, AND-combined on push. Gate changes from `target.frame == FrameId::ROOT` to the stack's top. | `threaded_ir.rs:845-862,925-960,1276-1285,1287-1316` |
+| 2 | `construct_and_verify_class_var_bind`'s frame param | Replace `at_method_top_frame: bool` with a real `frame: FrameId` (caller's `current_branch_frame()` or `FrameId::ROOT`) + the new `shadow_write_eligible: bool` (Question 1) as a separate parameter. Internal branching re-derives `at_method_top_frame` locally; both existing call sites pass their real values (one of which is now honestly `FrameId::ROOT` instead of the old sentinel `FrameId::new(1)`). | `threaded_ir.rs:2252-2329`; callers `expressions.rs:704`, `dispatch_codegen.rs:522` |
+| 3 | `ClassVars` through the tail call | Always an extra, explicit, real-`VersionedVar`-backed fun parameter — `fun(Var1..VarN, ClassVars)` (DirectParams/Hybrid) or `fun(StateAcc, ClassVars)` (StateAcc) for Letrec. Never folded into `StateAcc`'s own map. | `while_loops.rs` (`ConditionalLoop` construction), `control_flow/mod.rs`'s counted-loop/StateAcc-mode fun-header builders |
+| 4 | Mode-selection interaction | (a) Confirmed: `has_self_sends` already unconditionally forces `StateAcc`/plain-map-fold for both Letrec and Foldl — no change needed there. (b) Fix: add `!generator.in_class_method()` to `select_hybrid_params`'s guard, closing the latent wrong-Hybrid-selection gap for Actor-class-method loop bodies. Net: every ClassVars-mutating body in scope always lands in `StateAcc`/plain-map-fold mode. | `control_flow/mod.rs:560-582` (`select_hybrid_params`) |
+| 5 | `ClassSelf` visibility | Confirmed free (ordinary Core Erlang closure scoping) inside both `letrec` and `Foldl` fun bodies — no plumbing needed for the shadow write's `ClassSelf` read or for reading the loop-entry `ClassVars` value. Only the *updated*, per-iteration value needs the Question 3/6 extra-parameter/tuple-slot plumbing to escape the closure. | n/a (confirms no code change needed for this half) |
+| 6 | Letrec vs. Foldl accumulator shape | Letrec: `ClassVars` is one more parameter next to the existing `exit_arm`/tail-call argument list — no new shape. Foldl: accumulator becomes `{ClassVars, StateAcc}` (2-tuple) whenever `ClassVars` threads, unconditionally at `gate_slots=0` (the only reachable case per Question 4); the general `{Gate1..GateG, ClassVars, StateAcc}` composition is specified but deliberately not implemented (no reachable repro; `EarlyExitGateSlotMismatch`'s `gate_slots` count must stay untouched by `ClassVars`'s presence — model as an orthogonal bool, not an extra gate slot). | `control_flow/mod.rs`'s Foldl accumulator plumbing (`ThreadingPlan`, `generate_tuple_unpack_docs`), `dispatch_codegen.rs:466-521` (`emit_class_var_result_unwrap`, unchanged in *how* it builds `ClassVars1`, changed in where that value is threaded) |
+
+**Explicitly out of scope for this addendum** (left to the Letrec-migration
+and Foldl-migration implementation issues themselves, mirroring how
+Addendum 5 was its own dedicated per-shape design pass, sequenced *after*
+Addenda 2/4 pinned the general node shapes): the full per-statement-shape
+`Bind`/`Gensym`/`ValueRef::Doc` decomposition of every branch inside
+`generate_threaded_loop_body_inner` (field assignment, actor self-send,
+Tier-2 value call, local-var assignment, destructure — the ~15-shape
+enumeration Addendum 5 did for `conditionals.rs`/`exception_handling.rs`).
+This addendum answers the six cross-cutting design questions BT-3155's own
+epic body named as blocking; a full per-shape decomposition, if the
+migration issues need one before implementing, is their own follow-up design
+pass against this table, not pre-empted here.
