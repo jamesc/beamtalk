@@ -294,10 +294,25 @@ impl CoreErlangGenerator {
         boundary: ThreadingBoundary,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<bool> {
+        // BT-3169: captured before lowering — `lower_threaded_last`'s two
+        // internal builders (`emit_vt_threaded_tuple_unwrap_to_var`,
+        // `emit_vt_conditional_case_to_var`) both bind the construct's own
+        // Document opaquely (`let TupleVar = <construct> in ...`), which
+        // confines any `ClassVarsN` a class-method self-send inside a
+        // `Foldl*` body minted (ADR 0111 Addendum 9 Question 6) to that
+        // `let`'s own RHS. Refreshed below so `threading_result_tail`'s
+        // `ClassMethod` boundary references a name that's actually visible —
+        // see `refresh_class_var_after_opaque_scope`'s own doc comment. A
+        // no-op (`None`) for the `ValueType`/`Actor` boundaries, where
+        // `class_var_version` never advances.
+        let cv_version_before = self.class_var_version();
         let Some(threaded) = self.lower_threaded_last(expr, position)? else {
             return Ok(false);
         };
         body_parts.push(threaded.value_doc);
+        if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
+            body_parts.push(refresh);
+        }
         body_parts.push(self.threading_result_tail(
             &threaded.result_var,
             threaded.state_var.as_deref(),

@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
+use super::control_flow::ThreadingPlan;
 use super::document::{Document, concat, join, leaf};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
@@ -2084,6 +2085,13 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
+        // BT-3169: captured before generating `value` so a class-method
+        // self-send inside it (e.g. a `Foldl*` body's own accumulator
+        // threading, ADR 0111 Addendum 9 Question 6) can be detected —
+        // `class_var_version` only ever advances from class-method-specific
+        // code paths, so this is a no-op read for every non-class-method
+        // context.
+        let cv_version_before = self.class_var_version();
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignThreaded");
 
@@ -2095,6 +2103,16 @@ impl CoreErlangGenerator {
             rhs_doc,
             " in\n",
         ]);
+        // BT-3169: `value`'s own returned Document is now bound opaquely to
+        // `tuple_var` above — any class-var rebind a self-send inside it
+        // performed (e.g. the fold's own post-accumulator `ClassVarsN`) is
+        // confined to that `let`'s RHS and unreachable from here on. Refresh
+        // via the ADR 0110 shadow write so later code (a class-var read, or
+        // another self-send) references a name that's actually visible —
+        // see `refresh_class_var_after_opaque_scope`'s own doc comment.
+        if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
+            body_parts.push(refresh);
+        }
 
         // Bind the assignment target to element 1 (the logical value).
         let core_var = self
@@ -2345,7 +2363,21 @@ impl CoreErlangGenerator {
             "The do: block must take exactly one argument: [:each | ...]",
         )?;
 
-        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+        // BT-3169: a second, throwaway `ThreadingPlan` — constructed purely to
+        // read `threads_class_vars`/`initial_class_var` (both pure functions
+        // of the current generator state and `body`, computed identically to
+        // the one `generate_list_do_body_with_threading` builds internally
+        // below via `ThreadingPlan::new`) — NOT passed to
+        // `emit_loop_convention_diagnostic` (that would double-emit the
+        // diagnostic `generate_list_do_body_with_threading` already emits
+        // for its own, real plan). This "open" `do:` codegen is a genuinely
+        // separate reimplementation from `list_ops/basic_ops.rs`'s closed
+        // form (it needs an open let-chain, not a closed `{Value, StateAcc}`
+        // return) — see this function's own doc comment — so it needs the
+        // identical fun-header/foldl-call wrap `class_var_fun_param`/
+        // `foldl_call_doc` give every other `Foldl*` call site.
+        let cv_plan = ThreadingPlan::new(self, body, None);
+        let threaded_locals = cv_plan.threaded_locals.clone();
 
         // Phase 1: create a fresh map and pack each captured local into it.
         let init_map_var = self.fresh_temp_var("InitMap");
@@ -2385,6 +2417,11 @@ impl CoreErlangGenerator {
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
 
+        // BT-3169: when this class-method body threads ClassVars, the fold
+        // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
+        // tuple, unwrapped by `cv_prelude` immediately below — see
+        // `ThreadingPlan::class_var_fun_param`'s doc comment.
+        let (fun_param, cv_prelude) = cv_plan.class_var_fun_param(self, "StateAcc");
         let mut docs: Vec<Document<'static>> = vec![
             concat(pack_docs),
             docvec![
@@ -2404,7 +2441,10 @@ impl CoreErlangGenerator {
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(item_var.clone()),
-                ", StateAcc) -> ",
+                ", ",
+                leaf::var(fun_param),
+                ") -> ",
+                cv_prelude,
             ],
         ];
 
@@ -2417,17 +2457,13 @@ impl CoreErlangGenerator {
         // expression, so they shadow the pre-loop bindings and are visible to all
         // subsequent `body_parts`.
         let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_docs: Vec<Document<'static>> = vec![docvec![
-            " in let ",
-            leaf::var(fold_result.clone()),
-            " = call 'lists':'foldl'(",
-            leaf::var(lambda_var),
-            ", ",
+        let mut post_docs: Vec<Document<'static>> = vec![cv_plan.foldl_call_doc(
+            self,
+            &lambda_var,
             leaf::var(init_state_code),
-            ", ",
-            leaf::var(safe_list_var),
-            ") in ",
-        ]];
+            &safe_list_var,
+            &fold_result,
+        )];
         for var_name in &threaded_locals {
             let core_var = Self::to_core_erlang_var(var_name);
             // Update the scope so subsequent method-body expressions look up

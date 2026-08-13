@@ -4212,6 +4212,14 @@ impl CoreErlangGenerator {
                 let core_var = self
                     .lookup_var(var_name)
                     .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                // BT-3169: captured before generating `value` — see
+                // `emit_vt_threaded_local_assignment`'s identical capture for
+                // the full rationale (this is the `Foldl*`-body-selectors
+                // NOT covered by `emit_threaded_assign_rhs`'s own dedicated
+                // path above — anySatisfy:/allSatisfy:/partition:/
+                // takeWhile:/dropWhile:/groupBy:, whose class-method
+                // self-send shape reaches only this generic fallback).
+                let cv_version_before = self.class_var_version();
                 // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
                 let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
                 self.bind_var(var_name, &core_var);
@@ -4237,7 +4245,23 @@ impl CoreErlangGenerator {
                     }
                     None => {}
                 }
-                return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in "]);
+                // BT-3169: `val_doc` is about to be bound opaquely to
+                // `core_var` below — refresh the live ClassVars name from
+                // the ADR 0110 shadow write if a class-method self-send
+                // inside `val_doc` advanced it, so later code references a
+                // name that's actually visible (see
+                // `refresh_class_var_after_opaque_scope`'s doc comment).
+                let refresh = self
+                    .refresh_class_var_after_opaque_scope(cv_version_before)
+                    .unwrap_or(Document::Nil);
+                return Ok(docvec![
+                    "let ",
+                    leaf::var(core_var),
+                    " = ",
+                    val_doc,
+                    " in ",
+                    refresh,
+                ]);
             }
         }
         Ok(Document::Nil)

@@ -164,12 +164,20 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
+        // BT-3169: when this class-method body threads ClassVars, the fold
+        // fun's own accumulator parameter is a raw {ClassVars, StateAcc}
+        // tuple, unwrapped by `cv_prelude` immediately below — see
+        // `class_var_fun_param`'s doc comment.
+        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, "StateAcc");
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
-            ", StateAcc) -> ",
+            ", ",
+            leaf::var(fun_param),
+            ") -> ",
+            cv_prelude,
         ]);
 
         self.push_scope();
@@ -184,17 +192,13 @@ impl CoreErlangGenerator {
 
         // BT-598: After foldl, extract threaded locals and rebind them.
         let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_docs: Vec<Document<'static>> = vec![docvec![
-            " in let ",
-            leaf::var(fold_result.clone()),
-            " = call 'lists':'foldl'(",
-            leaf::var(lambda_var),
-            ", ",
+        let mut post_docs: Vec<Document<'static>> = vec![plan.foldl_call_doc(
+            self,
+            &lambda_var,
             leaf::var(init_state),
-            ", ",
-            leaf::var(safe_list_var),
-            ") in ",
-        ]];
+            &safe_list_var,
+            &fold_result,
+        )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
         // BT-1053: Value types return 'nil' (no state); actors return {'nil', FinalState}.
@@ -374,14 +378,21 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
+        // BT-3169: when this class-method body threads ClassVars, the fold
+        // fun's own accumulator parameter is a raw {ClassVars, AccSt} tuple,
+        // unwrapped by `cv_prelude` immediately below — see
+        // `class_var_fun_param`'s doc comment.
+        let (fun_param, cv_prelude) = plan.class_var_fun_param(self, &acc_state_var);
         docs.push(docvec![
             "let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
             ", ",
-            leaf::var(acc_state_var.clone()),
-            ") -> let AccList = call 'erlang':'element'(1, ",
+            leaf::var(fun_param),
+            ") -> ",
+            cv_prelude,
+            "let AccList = call 'erlang':'element'(1, ",
             leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
             leaf::var(acc_state_var),
@@ -409,15 +420,14 @@ impl CoreErlangGenerator {
             self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
         let pre_doc = docvec![
-            " in let ",
-            leaf::var(fold_result.clone()),
-            " = call 'lists':'foldl'(",
-            leaf::var(lambda_var),
-            ", {[], ",
-            leaf::var(init_state),
-            "}, ",
-            leaf::var(safe_list_var),
-            ") in let ",
+            plan.foldl_call_doc(
+                self,
+                &lambda_var,
+                docvec!["{[], ", leaf::var(init_state), "}"],
+                &safe_list_var,
+                &fold_result,
+            ),
+            "let ",
             leaf::var(rev_list.clone()),
             " = call 'erlang':'element'(1, ",
             leaf::var(fold_result.clone()),

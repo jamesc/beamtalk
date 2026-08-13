@@ -153,6 +153,12 @@ impl ListOpKind {
 ///
 /// Created once per loop and shared across pack / unpack / extract steps,
 /// eliminating the copy-paste that previously existed in 7+ generators.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent, mutually-orthogonal threading-mode flag \
+              (direct-params / tuple-acc / hybrid-params / class-vars), not encodable \
+              as a single state machine — mirrors CoreErlangGenerator's own allow"
+)]
 pub(super) struct ThreadingPlan {
     /// Variables that must be threaded through the loop's `StateAcc`.
     pub threaded_locals: Vec<String>,
@@ -216,6 +222,27 @@ pub(super) struct ThreadingPlan {
     ///
     /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
     pub mutated_fields: Vec<String>,
+    /// BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): `true` when this
+    /// `Foldl*` body is a class-method loop/fold body (`generator.in_class_method()`,
+    /// `context != Actor` — see this field's own construction site for why the
+    /// `Actor`-context exclusion matters) that contains a self-send
+    /// (`body_analysis.has_self_sends`) — the only shape Question 4 Part A
+    /// found reachable for `ClassVars` mutation via a class-method self-send,
+    /// since `has_self_sends` already unconditionally forces `StateAcc`/
+    /// plain-map-fold mode (`use_tuple_acc`/`use_direct_params`/`use_hybrid_params`
+    /// all false) whenever it's true. When `true`, the fold's own accumulator
+    /// must carry an extra `ClassVars` slot (a leading tuple position,
+    /// Question 6) so a class-var mutation made by the self-send survives the
+    /// fold instead of being silently discarded — the exact BT-3151 gap this
+    /// issue closes. A bare class-var field write (not a self-send) inside a
+    /// threaded body is unaffected — `reject_class_var_field_assignment`
+    /// already rejects that at compile time, unchanged by this field.
+    pub threads_class_vars: bool,
+    /// BT-3169: the class-var version name (`generator.current_class_var()`)
+    /// in effect immediately before this loop/fold begins — mirrors
+    /// `initial_state_var`'s own capture-at-construction-time discipline.
+    /// Only meaningful when `threads_class_vars` is `true`.
+    pub initial_class_var: String,
 }
 
 /// Pre-computed body-effect predicates for threading strategy selection.
@@ -443,6 +470,14 @@ impl ThreadingPlan {
         // hand-built-IR unit tests remain as regression pins.
 
         // BT-1326: Hybrid direct-params + State threading for letrec loops.
+        // BT-3169 (ADR 0111 Addendum 9, Question 4 Part B): also excluded for
+        // any class-method loop/fold body — a class method has no instance
+        // `State` map to amortize `Hybrid`'s pre-extraction against, and
+        // `field_writes` inside a class method is, by construction, 100%
+        // class-var names (a class method has no `self.field` instance
+        // field at all), so `Hybrid`'s pre-extraction was latently reachable
+        // there for exactly the wrong-pre-extraction shape this addendum
+        // found — see `select_hybrid_params`'s own doc comment.
         let use_hybrid_params = Self::select_hybrid_params(
             allow_direct_params,
             &threaded_locals,
@@ -450,6 +485,7 @@ impl ThreadingPlan {
             use_direct_params,
             &body_analysis,
             &effects,
+            generator.in_class_method(),
         );
 
         // BT-1326: In hybrid mode, collect fields that are read but never written.
@@ -492,6 +528,50 @@ impl ThreadingPlan {
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
 
+        // BT-3169 (ADR 0111 Addendum 9, Questions 3/4/6): a class-method
+        // `Foldl*` body containing a self-send needs to thread `ClassVars`
+        // through the fold's own accumulator. Excluded for `Actor` context:
+        // `is_actor_self_send` (checked before any class-method-self-send
+        // path in `generate_threaded_loop_body_inner`) unconditionally wins
+        // for a `self <msg>` send whenever `context == Actor`, regardless of
+        // `in_class_method()` — an Actor subclass's class-method self-send
+        // never reaches the `emit_class_var_result_unwrap`/`class_bump` path
+        // this field's threading exists to support, so claiming
+        // `threads_class_vars` there would build a fun signature/accumulator
+        // shape the body never actually populates. Scoped to the addendum's
+        // own confirmed-reachable repros (`ValueType`/`Object subclass:`
+        // class methods) — not a general fix for that separate, pre-existing
+        // Actor-class-method-self-send gap, out of this issue's scope.
+        // `!allow_direct_params` restricts this to Foldl-shaped constructors
+        // (`new_for_foldl_list_op` and the plain `new` compat-shim variant) —
+        // `new_for_letrec` passes `allow_direct_params: true` unconditionally,
+        // so a `whileTrue:`/`timesRepeat:`/`to:do:` (`BodyKind::Letrec`) plan
+        // never sets this field, regardless of self-sends. This is a hard
+        // safety boundary, not merely an optimization: BT-3169's own
+        // `generate_threaded_loop_body_inner` wrap (below, guarded on this
+        // same field) is Foldl-only by design (Question 6's `{ClassVars,
+        // StateAcc}` accumulator shape has no Letrec analogue — Letrec's own
+        // `ClassVars` threading is BT-3168's parallel, independent migration,
+        // via an extra `letrec` fun parameter, never this accumulator wrap).
+        // A direct top-level self-send statement inside a real Letrec body is
+        // already unconditionally rejected before reaching this wrap
+        // (`ClassMethodSelfSendInThreadedLoopBody`, this file's `else if
+        // matches!(kind, BodyKind::Letrec) && self.is_class_method_self_send`
+        // arm) — but a self-send nested inside a DEEPER block within a
+        // Letrec body (e.g. `whileTrue: [ i := i + 1. aList do: [:x | self
+        // bump] ]`) would not trip that direct-statement check, since
+        // `body_analysis.has_self_sends` recurses into nested blocks while
+        // `is_class_method_self_send` only inspects the top-level statement
+        // expression — this gate is what keeps that shape from reaching the
+        // Foldl-only wrap on the OUTER Letrec plan (the nested `do:`'s own,
+        // separately-constructed Foldl plan still threads correctly on its
+        // own terms).
+        let threads_class_vars = !allow_direct_params
+            && !matches!(context, CodeGenContext::Actor)
+            && generator.in_class_method()
+            && body_analysis.has_self_sends;
+        let initial_class_var = generator.current_class_var();
+
         Self {
             threaded_locals,
             initial_state_var,
@@ -504,6 +584,8 @@ impl ThreadingPlan {
             readonly_fields,
             fallback_reason,
             mutated_fields,
+            threads_class_vars,
+            initial_class_var,
         }
     }
 
@@ -557,6 +639,21 @@ impl ThreadingPlan {
     /// Eligible when body has field mutations but NOT self-sends, and no guards
     /// (tier-2 assignments, control-flow mutations, conditional writes, nested list ops)
     /// prevent it. Actor context only (`ValueType` has no actor State to thread).
+    ///
+    /// BT-3169 (ADR 0111 Addendum 9, Question 4 Part B): also excluded for
+    /// any class-method loop/fold body (`in_class_method`), even one whose
+    /// class is an `Actor` subclass. `Hybrid`'s whole premise — amortize the
+    /// `State` map's per-iteration `maps:get`/`maps:put` cost by pre-extracting
+    /// mutated fields as direct fun params — has no `State` to amortize
+    /// against inside a class method (a class method's own `field_writes` are,
+    /// by construction, 100% class-var names; there is no instance `self.field`
+    /// at that level). Before this guard, an `Actor` subclass's class-method
+    /// loop body writing only a class var could latently select `Hybrid`
+    /// (confirmed empirically, ADR 0111 Addendum 9 Question 4 Part B) — the
+    /// exact wrong-pre-extraction shape this addendum's repros found, though
+    /// it never manifested as a live bug because `reject_class_var_field_assignment`
+    /// already rejects any direct class-var field write downstream, regardless
+    /// of which mode was selected first.
     fn select_hybrid_params(
         allow_direct_params: bool,
         threaded_locals: &[String],
@@ -564,11 +661,13 @@ impl ThreadingPlan {
         use_direct_params: bool,
         body_analysis: &block_analysis::BlockMutationAnalysis,
         effects: &BodyEffects,
+        in_class_method: bool,
     ) -> bool {
         if !allow_direct_params
             || threaded_locals.is_empty()
             || use_direct_params
             || !matches!(context, CodeGenContext::Actor)
+            || in_class_method
         {
             return false;
         }
@@ -755,6 +854,119 @@ impl ThreadingPlan {
             }
         }
         docs
+    }
+
+    /// BT-3169 (ADR 0111 Addendum 9, Question 6): returns the fold fun's own
+    /// second (accumulator) parameter name to print at the `fun (Item, <here>) ->`
+    /// position, plus a prelude `Document` binding `real_param_name` (and,
+    /// when threading, the loop-entry `ClassVars` name) from it.
+    ///
+    /// When `threads_class_vars` is `false`, returns `(real_param_name,
+    /// Document::Nil)` unchanged — the caller's existing `fun (Item,
+    /// <real_param_name>) -> ...` continues to bind the accumulator directly,
+    /// byte-identical to before this field existed.
+    ///
+    /// When `true`, the fold's own accumulator is wrapped one level deeper as
+    /// `{ClassVars, <original accumulator>}` (Question 6's "`gate_slots=0`"
+    /// shape — the only reachable one per Question 4 Part A). This method
+    /// mints a fresh raw parameter name to receive that 2-tuple and returns a
+    /// prelude that unwraps it: `let <initial_class_var> = element(1, Raw) in
+    /// let <real_param_name> = element(2, Raw) in`. Every existing line of
+    /// code downstream of the fun header that references `real_param_name`
+    /// (however it further destructures that value — a bare `StateAcc`, or a
+    /// `{AccList, StateAcc}` pair for `collect:`/`inject:into:`-shaped
+    /// bodies) needs no change: after this prelude, `real_param_name` is
+    /// bound to exactly the same value it always was.
+    pub fn class_var_fun_param(
+        &self,
+        generator: &mut CoreErlangGenerator,
+        real_param_name: &str,
+    ) -> (String, Document<'static>) {
+        if !self.threads_class_vars {
+            return (real_param_name.to_string(), Document::Nil);
+        }
+        let raw = generator.fresh_temp_var("AccCV");
+        let doc = docvec![
+            "let ",
+            leaf::var(self.initial_class_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(raw.clone()),
+            ") in let ",
+            leaf::var(real_param_name.to_string()),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(raw.clone()),
+            ") in ",
+        ];
+        (raw, doc)
+    }
+
+    /// BT-3169 (ADR 0111 Addendum 9, Question 6): builds
+    /// `" in let <fold_result> = call 'lists':'foldl'(<lambda>, <init_acc>,
+    /// <list>) in "` — transparently wrapping `init_acc` with a leading
+    /// `ClassVars` slot, and unwrapping the fold's own result back out
+    /// immediately after the call, whenever `threads_class_vars`. Every call
+    /// site's existing post-fold code keeps referencing `fold_result` by the
+    /// same name, bound to exactly the same (unwrapped) shape it always was —
+    /// only the freshly-minted post-fold `ClassVars` version name differs,
+    /// silently making the mutated value visible to subsequent statements in
+    /// the calling method via the generator's own class-var version counter
+    /// (`next_class_var`).
+    ///
+    /// When `threads_class_vars` is `false`, this is exactly the `" in let
+    /// <fold_result> = call 'lists':'foldl'(...) in "` text every call site
+    /// built by hand before this method existed — byte-identical.
+    pub fn foldl_call_doc(
+        &self,
+        generator: &mut CoreErlangGenerator,
+        lambda_var: &str,
+        init_acc: Document<'static>,
+        safe_list_var: &str,
+        fold_result: &str,
+    ) -> Document<'static> {
+        if !self.threads_class_vars {
+            return docvec![
+                " in let ",
+                leaf::var(fold_result.to_string()),
+                " = call 'lists':'foldl'(",
+                leaf::var(lambda_var.to_string()),
+                ", ",
+                init_acc,
+                ", ",
+                leaf::var(safe_list_var.to_string()),
+                ") in ",
+            ];
+        }
+        let raw = generator.fresh_temp_var("RawFoldCV");
+        // BT-3169: fast-forward past whatever peak the fold body's own
+        // closure reached internally (already restored by now) before
+        // minting — otherwise this mint can collide with an
+        // already-used-inside-the-closure name (Core Erlang requires
+        // globally unique variable names across nested `fun` scopes within
+        // one compiled function) — see `last_foldl_class_var_peak`'s doc
+        // comment.
+        generator.catch_up_class_var_version_to_foldl_peak();
+        let cv_after = generator.next_class_var();
+        docvec![
+            " in let ",
+            leaf::var(raw.clone()),
+            " = call 'lists':'foldl'(",
+            leaf::var(lambda_var.to_string()),
+            ", {",
+            leaf::var(self.initial_class_var.clone()),
+            ", ",
+            init_acc,
+            "}, ",
+            leaf::var(safe_list_var.to_string()),
+            ") in let ",
+            leaf::var(cv_after),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(raw.clone()),
+            ") in let ",
+            leaf::var(fold_result.to_string()),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(raw),
+            ") in ",
+        ]
     }
 
     /// Returns the initial argument values for a direct-params loop call (BT-1275).
@@ -2060,6 +2272,52 @@ impl CoreErlangGenerator {
         }
 
         let final_state_version = self.state_version();
+
+        // BT-3169 (ADR 0111 Addendum 9, Question 6): whenever this fold body
+        // threads `ClassVars`, wrap its returned TAIL VALUE — regardless of
+        // which `BodyKind` arm above produced it, and regardless of that
+        // arm's own internal shape (a bare `StateAcc`, `{[Result|AccList],
+        // StateAcc}`, `{AccOut, StateAcc}`, a filter/predicate tuple, …) —
+        // as `{ClassVars, <original tail value>}`. This is the single choke
+        // point every `Foldl*` exit arm's tail value flows through
+        // (`generate_threaded_loop_body`'s only call site into this
+        // function), so it closes BT-3151's silent-loss gap uniformly
+        // without touching any of the ~15 individual exit-arm branches
+        // above: each keeps building exactly the value it always did.
+        //
+        // Deliberately `docs.pop()` + re-push, NOT `let FoldTail = <all of
+        // docs> in {ClassVars, FoldTail}` (an earlier, rejected version of
+        // this fix): `docs` is an OPEN Core Erlang let-chain — every element
+        // but the last ends in `in `, and the last is a bare tail
+        // expression, still lexically inside every preceding `let`'s scope.
+        // Wrapping the WHOLE chain as the RHS of a fresh `let` closes that
+        // scope at the chain's own tail expression, making any name a
+        // mid-chain statement bound (e.g. a self-send's own `ClassVarsN`
+        // rebind, `emit_class_var_result_unwrap`) unreachable from outside
+        // — confirmed the hard way: `erlc` rejected it with "unbound
+        // variable", not a scoping warning. Popping and rewrapping only the
+        // last element leaves every earlier `let`'s scope untouched and
+        // still open, so `cv` (itself possibly bound by one of those
+        // `let`s) stays visible at the exact point it's used.
+        //
+        // Read AFTER the loop body is fully generated (not before) so a
+        // class-method self-send's own `ClassVarsN` rebind inside this
+        // iteration (`emit_class_var_result_unwrap`, frame-scoped to this
+        // loop body's `current_branch_frame()` per Question 2) is reflected.
+        if plan.threads_class_vars {
+            let cv = self.current_class_var();
+            // BT-3169: record this closure's peak class-var version (BEFORE
+            // `with_branch_context`'s guard restores it on drop, right after
+            // this function returns) so `ThreadingPlan::foldl_call_doc` can
+            // fast-forward past it — see `last_foldl_class_var_peak`'s own
+            // doc comment for why a naive post-fold `next_class_var()` call
+            // would otherwise mint an already-used name.
+            self.set_foldl_class_var_peak(self.class_var_version());
+            let tail = docs
+                .pop()
+                .expect("a Foldl* body must push at least one tail-expression Document");
+            docs.push(docvec!["{", leaf::var(cv), ", ", tail, "}"]);
+        }
         Ok((Document::Vec(docs), final_state_version))
     }
 
@@ -2397,6 +2655,96 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-3169 (ADR 0111 Addendum 9, Question 6): builds `"let <result_var> =
+    /// <expr's closed value> in "` — the exact prelude every `is_last`
+    /// `Foldl*` exit arm below builds by hand around
+    /// [`Self::closed_expression_doc`] — except, when `plan.threads_class_vars`,
+    /// it ALSO threads the (possibly self-send-advanced) class-var name
+    /// forward past `expr`'s own closed-scope boundary.
+    ///
+    /// Why this is needed (confirmed empirically, not by inspection):
+    /// [`Self::closed_expression_doc`] does not itself introduce a new scope
+    /// boundary — it just appends a bare tail value to an already-open
+    /// let-chain (e.g. a self-send's own `ClassVarsN` rebind,
+    /// `emit_class_var_result_unwrap`). The boundary is introduced by EVERY
+    /// caller's own `"let <result_var> = ", expr_code, " in "` wrapper —
+    /// Core Erlang confines any name that closed chain binds (including
+    /// `ClassVarsN`) to that wrapper's own RHS, unreachable once its `in`
+    /// closes. `erlc` rejects the naive version with "unbound variable", not
+    /// a scoping warning — confirmed against a real `select:`-predicate
+    /// self-send repro. `push_discarded_stmt` (used for every NON-last
+    /// statement) does not have this problem — it deliberately keeps the
+    /// chain open at the current level instead of closing it inside a new
+    /// `let`; only the `is_last` position (where the exit arm's own
+    /// `"let <result_var> = ", ..., " in "` pattern is unavoidable) needs
+    /// this.
+    ///
+    /// The fix: when threading, don't let `expr`'s own closed value stand
+    /// alone — pair it with the live class-var name (still reachable at
+    /// this exact textual point, since we haven't left `expr`'s own open
+    /// chain yet) as a 2-tuple, unpack THAT within the SAME enclosing
+    /// `let`/`let`/`let` chain the caller already builds around
+    /// `result_var`, and re-mint a fresh class-var name (`next_class_var`)
+    /// for the unpacked copy — visible to every subsequent statement,
+    /// including this function's own final `{ClassVars, tail}` wrap.
+    fn bind_closed_expr_threading_class_vars(
+        &mut self,
+        expr: &Expression,
+        result_var: &str,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        if !plan.threads_class_vars {
+            let expr_code = self.closed_expression_doc(expr)?;
+            return Ok(docvec![
+                "let ",
+                leaf::var(result_var.to_string()),
+                " = ",
+                expr_code,
+                " in ",
+            ]);
+        }
+        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+        let value_doc = match open_scope {
+            Some(OpenScopeResult::Value(v)) => leaf::var(v),
+            Some(OpenScopeResult::NoValue) => Document::Str("'nil'"),
+            None => {
+                // `expr` itself didn't open a new class-var-rebinding scope —
+                // any earlier statement's rebind (via `push_discarded_stmt`,
+                // which never confines it) is already visible normally at
+                // the outer level, so no extra unpack is needed here.
+                return Ok(docvec![
+                    "let ",
+                    leaf::var(result_var.to_string()),
+                    " = ",
+                    doc,
+                    " in ",
+                ]);
+            }
+        };
+        let cv = self.current_class_var();
+        let raw = self.fresh_temp_var("ClosedCV");
+        let cv_new = self.next_class_var();
+        Ok(docvec![
+            "let ",
+            leaf::var(raw.clone()),
+            " = ",
+            doc,
+            "{",
+            value_doc,
+            ", ",
+            leaf::var(cv),
+            "} in let ",
+            leaf::var(result_var.to_string()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(raw.clone()),
+            ") in let ",
+            leaf::var(cv_new),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(raw),
+            ") in ",
+        ])
+    }
+
     #[allow(
         clippy::too_many_arguments,
         clippy::fn_params_excessive_bools,
@@ -2454,19 +2802,25 @@ impl CoreErlangGenerator {
                     // `let _ =` before `in StateAcc`. Without this,
                     // `let Y = ... in <expr> in StateAcc` is invalid Core Erlang
                     // (the `in StateAcc` has no corresponding `let`).
+                    //
+                    // BT-2350/BT-3169: close any class self-send open scope so
+                    // the trailing `… in {vars}` / `… in StateAcc` does not
+                    // dangle a second `in` — `bind_closed_expr_threading_class_vars`
+                    // also threads a self-send's own `ClassVarsN` rebind
+                    // forward past this `let _ = …` boundary when
+                    // `plan.threads_class_vars` (see its own doc comment).
                     if has_mutations || has_plain_lets {
-                        docs.push(Document::Str("let _ = "));
+                        docs.push(self.bind_closed_expr_threading_class_vars(expr, "_", plan)?);
+                    } else {
+                        let doc = self.closed_expression_doc(expr)?;
+                        docs.push(doc);
                     }
-                    // BT-2350: close any class self-send open scope so the trailing
-                    // `… in {vars}` / `… in StateAcc` does not dangle a second `in`.
-                    let doc = self.closed_expression_doc(expr)?;
-                    docs.push(doc);
                     if has_mutations || has_plain_lets {
                         if plan.use_tuple_acc {
                             // BT-1276: Repack threaded locals as tuple.
-                            docs.push(docvec![" in {", plan.current_vars_doc(self), "}"]);
+                            docs.push(docvec!["{", plan.current_vars_doc(self), "}"]);
                         } else {
-                            docs.push(docvec![" in ", leaf::var(self.current_state_var())]);
+                            docs.push(leaf::var(self.current_state_var()));
                         }
                     }
                 } else {
@@ -2479,16 +2833,31 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 if is_last {
                     let result_var = self.fresh_temp_var("CollectItem");
-                    let expr_code = self.closed_expression_doc(expr)?;
+                    // BT-3169: threads a self-send's own `ClassVarsN` rebind
+                    // forward past this `let` boundary when
+                    // `plan.threads_class_vars` — see
+                    // `bind_closed_expr_threading_class_vars`'s doc comment.
+                    // BT-3169: pushed as its OWN `docs` entry, separate from
+                    // the tuple-construction push below — this function's
+                    // own final `{ClassVars, tail}` wrap only pops the LAST
+                    // `docs` entry, so a self-send's `ClassVarsN` rebind
+                    // inside `bind_doc` (an open, not-yet-closed chain) must
+                    // stay a strictly EARLIER entry, not fused into the same
+                    // one as the tuple it precedes — fusing them would place
+                    // the wrap's `{ClassVars, …}` reference to `ClassVarsN`
+                    // BEFORE the `let` that defines it (confirmed empirically
+                    // — `erlc` "unbound variable", the same failure mode this
+                    // whole helper exists to avoid).
+                    docs.push(self.bind_closed_expr_threading_class_vars(
+                        expr,
+                        &result_var,
+                        plan,
+                    )?);
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         docs.push(docvec![
-                            "let ",
-                            leaf::var(result_var.clone()),
-                            " = ",
-                            expr_code,
-                            " in {[",
+                            "{[",
                             leaf::var(result_var),
                             " | AccList], ",
                             vars_doc,
@@ -2501,11 +2870,7 @@ impl CoreErlangGenerator {
                             "StateAcc".to_string()
                         };
                         docs.push(docvec![
-                            "let ",
-                            leaf::var(result_var.clone()),
-                            " = ",
-                            expr_code,
-                            " in {[",
+                            "{[",
                             leaf::var(result_var),
                             " | AccList], ",
                             leaf::var(fs),
@@ -2529,14 +2894,13 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlGroupBy { .. } => {
                 if is_last {
                     if let Some(pv) = pred_var {
-                        let expr_code = self.closed_expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(pv.clone()),
-                            " = ",
-                            expr_code,
-                            " in ",
-                        ]);
+                        // BT-3169: threads a self-send's own `ClassVarsN`
+                        // rebind forward past this `let` boundary when
+                        // `plan.threads_class_vars` — see
+                        // `bind_closed_expr_threading_class_vars`'s doc
+                        // comment. This is the exact shape a `select:`
+                        // predicate self-send needs (BT-3151's own repro).
+                        docs.push(self.bind_closed_expr_threading_class_vars(expr, pv, plan)?);
                     }
                 } else {
                     // BT-2350: see FoldlCollect — close a non-last open scope while
@@ -2547,38 +2911,23 @@ impl CoreErlangGenerator {
             BodyKind::FoldlInject => {
                 if is_last {
                     let acc_var = self.fresh_temp_var("AccOut");
-                    let expr_code = self.closed_expression_doc(expr)?;
+                    // BT-3169: pushed as its OWN `docs` entry, separate from
+                    // the tuple-construction push below — see the identical
+                    // `FoldlCollect` comment above for why fusing them is
+                    // wrong (confirmed empirically, `erlc` "unbound
+                    // variable").
+                    docs.push(self.bind_closed_expr_threading_class_vars(expr, &acc_var, plan)?);
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(acc_var.clone()),
-                            " = ",
-                            expr_code,
-                            " in {",
-                            leaf::var(acc_var),
-                            ", ",
-                            vars_doc,
-                            "}",
-                        ]);
+                        docs.push(docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",]);
                     } else {
                         let fs = if has_mutations {
                             self.current_state_var()
                         } else {
                             "StateAcc".to_string()
                         };
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(acc_var.clone()),
-                            " = ",
-                            expr_code,
-                            " in {",
-                            leaf::var(acc_var),
-                            ", ",
-                            leaf::var(fs),
-                            "}",
-                        ]);
+                        docs.push(docvec!["{", leaf::var(acc_var), ", ", leaf::var(fs), "}",]);
                     }
                 } else {
                     // BT-2350: see FoldlCollect — close a non-last open scope while
@@ -3833,6 +4182,8 @@ mod tests {
             readonly_fields,
             fallback_reason: StateAccFallbackReason::None,
             mutated_fields,
+            threads_class_vars: false,
+            initial_class_var: "ClassVars".to_string(),
         }
     }
 
@@ -4226,7 +4577,29 @@ mod tests {
             CodeGenContext::Actor,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
+        ));
+    }
+
+    #[test]
+    fn select_hybrid_params_blocked_by_in_class_method() {
+        // BT-3169 (ADR 0111 Addendum 9, Question 4 Part B): otherwise-eligible
+        // Hybrid selection (Actor context, field writes, no self-sends) must
+        // still be excluded for a class-method loop/fold body — a class
+        // method has no instance `State` to amortize Hybrid's pre-extraction
+        // against.
+        let threaded = vec!["x".to_string()];
+        let analysis = body_with_field_writes(&["n"]);
+        let effects = clean_effects();
+        assert!(!ThreadingPlan::select_hybrid_params(
+            true,
+            &threaded,
+            CodeGenContext::Actor,
+            false,
+            &analysis,
+            &effects,
+            true,
         ));
     }
 
@@ -4241,7 +4614,8 @@ mod tests {
             CodeGenContext::Actor,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4255,7 +4629,8 @@ mod tests {
             CodeGenContext::Actor,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4271,7 +4646,8 @@ mod tests {
             CodeGenContext::Actor,
             true,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4286,7 +4662,8 @@ mod tests {
             CodeGenContext::ValueType,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4301,7 +4678,8 @@ mod tests {
             CodeGenContext::Actor,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4316,7 +4694,8 @@ mod tests {
             CodeGenContext::Actor,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4332,7 +4711,8 @@ mod tests {
             CodeGenContext::Actor,
             false,
             &analysis,
-            &effects
+            &effects,
+            false,
         ));
     }
 
@@ -4581,6 +4961,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
+            false,
         );
 
         assert!(direct);
@@ -4610,6 +4991,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
+            false,
         );
 
         assert!(!direct);
@@ -4632,6 +5014,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
+            false,
         );
 
         assert!(!direct); // field writes block direct-params
@@ -4660,6 +5043,7 @@ mod tests {
             direct,
             &analysis,
             &effects,
+            false,
         );
 
         assert!(!direct);

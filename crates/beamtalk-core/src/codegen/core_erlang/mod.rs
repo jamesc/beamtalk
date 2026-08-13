@@ -1590,6 +1590,29 @@ pub(crate) struct CoreErlangGenerator {
     /// here so the caller can append `let AssignedVar = <result_var> in` separately.
     /// `None` when no list op result is pending.
     direct_params_list_op_result: Option<String>,
+    /// BT-3169: side channel from [`control_flow::CoreErlangGenerator::generate_threaded_loop_body_inner`]'s
+    /// `ClassVars`-threading wrap to [`control_flow::ThreadingPlan::foldl_call_doc`] —
+    /// the peak `class_var_version` reached *inside* a `Foldl*` body's own
+    /// `with_branch_context` scope (captured just before that scope's guard
+    /// restores the live counter to its pre-loop value on drop, per
+    /// `BranchContextGuard`'s `class_var_version` restore-without-reset
+    /// discipline, shared with conditionals/`on:do:`/`ensure:`).
+    ///
+    /// Needed because Core Erlang requires globally unique variable names
+    /// across nested `fun` scopes within one compiled function (confirmed
+    /// empirically — `erlc` rejects a reused name with "unbound variable",
+    /// not a "shadowing" diagnostic): the fold body's own internal
+    /// `emit_class_var_result_unwrap` self-send rebind mints
+    /// `ClassVars1`..`ClassVars{peak}` starting from the SAME pre-loop
+    /// version the (restored) live counter sits at again once
+    /// `generate_threaded_loop_body` returns — so a naive `next_class_var()`
+    /// call right after would mint an already-used name.
+    /// [`control_flow::ThreadingPlan::foldl_call_doc`] consumes (takes) this
+    /// field to fast-forward the live counter past the peak before minting
+    /// the post-fold rebind, guaranteeing a fresh name. `None` when the fold
+    /// body did not thread `ClassVars` (`plan.threads_class_vars == false`)
+    /// or hasn't run yet.
+    last_foldl_class_var_peak: Option<usize>,
     /// BT-1326: Map of actor field name → Core Erlang variable name for fields
     /// that have been pre-extracted before a hybrid/full-extract letrec loop.
     ///
@@ -1772,6 +1795,7 @@ impl CoreErlangGenerator {
             in_hybrid_loop: false,
             in_direct_params_loop: false,
             direct_params_list_op_result: None,
+            last_foldl_class_var_peak: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
             hybrid_mutated_fields: std::collections::HashSet::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
@@ -2445,6 +2469,104 @@ impl CoreErlangGenerator {
             .next_var(VersionPrefix::ClassVars);
         self.set_class_var_mutated(true);
         name
+    }
+
+    /// BT-3169: records the peak `class_var_version` reached inside a
+    /// `Foldl*` body's own `with_branch_context` scope, for
+    /// [`Self::take_foldl_class_var_peak`] to consume once that scope's
+    /// guard has restored the live counter — see
+    /// `last_foldl_class_var_peak`'s own doc comment for the full rationale.
+    pub(super) fn set_foldl_class_var_peak(&mut self, version: usize) {
+        self.last_foldl_class_var_peak = Some(version);
+    }
+
+    /// BT-3169: takes (clears) the peak class-var version recorded by
+    /// [`Self::set_foldl_class_var_peak`], if any, and — when it exceeds the
+    /// live (already-restored) counter — fast-forwards the live counter to
+    /// it, so the next [`Self::next_class_var`] mint is guaranteed not to
+    /// collide with a name already used inside the fold body's own closure.
+    /// A no-op when no peak was recorded (non-`ClassVars`-threading bodies).
+    pub(super) fn catch_up_class_var_version_to_foldl_peak(&mut self) {
+        if let Some(peak) = self.last_foldl_class_var_peak.take() {
+            if peak > self.class_var_version() {
+                self.set_class_var_version(peak);
+            }
+        }
+    }
+
+    /// BT-3169: refreshes the live `ClassVars` name after generating an
+    /// expression whose caller is about to bind the WHOLE returned
+    /// `Document` opaquely (`let X = <expr> in ...`, e.g.
+    /// `emit_vt_threaded_local_assignment`'s `{Value, StateAcc}`-tuple
+    /// binding, or `generate_class_method_local_var_binding`'s generic
+    /// `expression_doc_with_open_scope` fallback when the callee sets no
+    /// open scope).
+    ///
+    /// The gap this closes: a class-method self-send inside a `Foldl*` body
+    /// (`do:`/`collect:`/`select:`/`inject:into:`) correctly threads its own
+    /// `ClassVarsN` rebind through the fold's `{ClassVars, StateAcc}`
+    /// accumulator (ADR 0111 Addendum 9, Question 6) — but that name is
+    /// minted, and lexically bound, entirely INSIDE the list-op function's
+    /// own returned `Document`. A caller that treats the whole thing as an
+    /// opaque value (rather than splicing it into its own open let-chain,
+    /// the way `push_discarded_stmt` and the value-type/class-method "open"
+    /// loop-body family already do) confines that binding to its own `let`'s
+    /// RHS — any LATER code in the same method that references
+    /// `self.current_class_var()`'s name (a class-var read, or another
+    /// self-send) would then reference a name Core Erlang never actually
+    /// bound at that point — confirmed empirically as an `erlc` "unbound
+    /// variable" compiler crash, not merely a silently-wrong value.
+    ///
+    /// Rather than widening every list-op function's own external contract
+    /// to also expose `ClassVars` as an explicit extra tuple element (a much
+    /// larger, cross-cutting change to every consumer of that contract),
+    /// this reaches for the ADR 0110 process-dictionary shadow write that
+    /// already exists for the analogous foreign-NLR-relay problem: a
+    /// same-class, locally-defined self-send call (`class_bump`-style,
+    /// compiled as a direct module call, not a dispatch) unconditionally
+    /// writes its own mutation to `{'$bt_class_vars_shadow', element(2,
+    /// ClassSelf)}` before returning, and that key is erased only by the
+    /// OUTER-MOST dispatch wrapper (`invoke_class_method/7`'s `after`) —
+    /// never by the direct call itself — so it is still live, and correct,
+    /// for the remainder of the SAME class method's own body. Reading it
+    /// back here is a safe, minimal escape hatch scoped to exactly the
+    /// opaque-wrap gap above, not a substitute for the accumulator threading
+    /// itself (which is still what makes the fold's OWN cross-iteration
+    /// threading correct in the first place).
+    ///
+    /// Returns `Some(prelude_doc)` — a `"let <fresh ClassVarsN> = <shadow
+    /// read> in "` binding the caller should push immediately after its own
+    /// opaque-value `let` — when `self.class_var_version()` advanced across
+    /// generating the just-built expression (`version_before` is the
+    /// version read immediately before generating it); `None` when nothing
+    /// changed (including, by construction, every non-class-method context,
+    /// where no code path ever advances `class_var_version` at all).
+    ///
+    /// Known narrower gap (not closed here): an INHERITED self-send
+    /// (`self someInheritedMethod`) routes through `class_self_dispatch`
+    /// instead of a direct module call; if that dispatch path erases the
+    /// shadow key itself (mirroring `invoke_class_method/7`'s own `after`),
+    /// a read here would observe `undefined` rather than the mutated value.
+    /// Not reachable by any of this issue's own repros (all locally-defined
+    /// self-sends) — tracked as a residual gap, the same class already
+    /// documented elsewhere for provably-pure-vs-mutating callee analysis.
+    pub(super) fn refresh_class_var_after_opaque_scope(
+        &mut self,
+        version_before: usize,
+    ) -> Option<Document<'static>> {
+        if self.class_var_version() == version_before {
+            return None;
+        }
+        let cv_new = self.next_class_var();
+        Some(docvec![
+            "let ",
+            leaf::var(cv_new),
+            " = call 'erlang':'get'({",
+            leaf::atom("$bt_class_vars_shadow"),
+            ", call 'erlang':'element'(2, ",
+            leaf::var("ClassSelf"),
+            ")}) in ",
+        ])
     }
 
     /// BT-833: Returns the current Self variable name for value type Self-threading.
