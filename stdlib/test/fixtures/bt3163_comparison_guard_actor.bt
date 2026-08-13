@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3163: BT3163ComparisonGuardActor — an `ensure:` try body whose LAST
+// statement is a comparison operator (`<`) on operands not statically known
+// comparable (untyped params), forcing `generate_binary_op`'s runtime
+// `beamtalk_primitive:is_object/1` guard (`operators.rs::guarded_op_doc`).
+// That guard's `case` matched only `<'true'>`/`<'false'>` with no wildcard
+// clause — the same non-exhaustive-to-the-compiler shape BT-3161 fixed for
+// self-dispatch and boolean `ifTrue:`/`ifFalse:` cases — and, nested inside
+// the `try`'s protected region, tripped the same OTP `beam_validator`
+// `ambiguous_catch_try_state` bug. Unlike the arithmetic (`is_number`) guard,
+// which the Core Erlang compiler proves exhaustive via BIF return-type
+// inference, `is_object` is a plain function the compiler cannot prove
+// exhaustive, so the implicit fallback — and the bug — were real here. See
+// `operators.rs::guarded_op_doc`'s doc comment for the full analysis.
+
+Actor subclass: BT3163ComparisonGuardActor
+  state: count = 0
+
+  // BT-3163 repro: ensure: try body's last statement is a comparison
+  // operator forcing the is_object runtime guard.
+  compareUnsafe: a with: b =>
+    [
+      self.count := self.count + 1
+      a < b
+    ] ensure: [nil]
+
+  // NLR passthrough through the same shape: an early `^` fires before the
+  // comparison (still the try body's last statement) is ever reached, and
+  // must still escape the `ensure:` unaffected by the wildcard fallback
+  // clause the comparison guard's `case` now carries.
+  compareUnsafeNlr: flag with: a with: b =>
+    [
+      flag ifTrue: [^"early"]
+      self.count := self.count + 1
+      a < b
+    ] ensure: [nil]
+    "not early"
+
+  getCount => self.count
