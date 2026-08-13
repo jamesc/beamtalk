@@ -176,6 +176,73 @@
 //! `dead_code` lint should never have been asked to look past in the
 //! first place.
 //!
+//! ## Status (as of BT-3164 — the class-method body pipeline)
+//!
+//! BT-3164 migrates the class-method body pipeline BT-3148's own "Not
+//! attempted in this pass" note (above) named as a peer migration:
+//! `gen_server/methods.rs::generate_class_method_body` is now
+//! `lower_class_method_body`, returning a real `Vec<ThreadedStmt>` instead
+//! of a hand-rolled `Document`. Unlike the Actor pipeline (whose ONLY
+//! version-threaded prefix is `State`), a class method's only
+//! version-threaded prefix is `ClassVars` — there is no `State` counter in
+//! class-method context at all — so [`verify_body_with_opaque_version_gaps`]
+//! is generalized to backfill BOTH prefixes' gaps (previously `State`-only;
+//! see [`backfill_opaque_version_gap`]), not a second, parallel function.
+//! Mirroring BT-3148's own precedent exactly (its Actor pipeline only
+//! promotes `BodyExprKind::FieldAssignment` to a real `Bind` in its
+//! `is_last`/implicit-return arm, leaving every other position's field
+//! mutation opaque inside a shared helper), `lower_class_method_body` only
+//! promotes a class method's own direct `self.classVar := value` to a real
+//! `Bind` when it is the body's last statement
+//! (`lower_class_method_last_class_var_bind`) — every other position, every
+//! local-var/destructure/self-send/`^`-return statement, and any class-var
+//! rebind hidden inside `emit_class_var_result_unwrap` (the class-method
+//! analogue of the Actor pipeline's `generate_self_dispatch_open` et al.)
+//! stays an opaque `Statement`, unchanged AST-directed codegen.
+//!
+//! Both class-method NLR call sites this issue's scope named
+//! (`generate_class_method_functions`, already minting its token before
+//! lowering and already prepending a real `NlrCatch` as of BT-3148;
+//! `generate_class_method_fun_from_block`, migrated by this issue from the
+//! Document-wrapping `wrap_class_method_body_with_nlr_catch` — deleted, its
+//! sole caller — to the same real-`NlrCatch`-prepend pattern) now run their
+//! real class-var `Bind` (when the last statement produces one) and their
+//! real `NlrCatch` through the SAME `verify_and_render_body_stmts` call —
+//! closing the ADR 0110 joint-visibility gap ADR 0111 Addendum 6 left open:
+//! [`VerifyError::ShadowWriteMissing`] can now see a real class-var `Bind`
+//! jointly with a real class-method `NlrCatch`, not just the isolated,
+//! synthetic-marker fixture [`construct_and_verify_class_var_bind`] has
+//! always checked (kept, not replaced — see
+//! `lower_class_method_last_class_var_bind`'s own doc comment for why both
+//! checks are complementary, not redundant).
+//!
+//! **Audit of the other 5 `wrap_body_with_nlr_catch`-family call sites**
+//! (this issue's own task list): `gen_server/dispatch.rs`'s
+//! `generate_legacy_method_clause`, `gen_server/extensions.rs`'s
+//! `generate_actor_extension_fun`, and `actor_codegen.rs`'s sealed-method
+//! generator all call `wrap_actor_body_with_nlr_catch` around an
+//! already-migrated (BT-3148) `Vec<ThreadedStmt>`-sourced `Document` —
+//! structurally the same "render, then wrap" shape this issue closes for
+//! class methods, but for the `State` prefix, which never carries the ADR
+//! 0110 `ShadowWriteMissing` obligation `Bind`s land here; joint visibility
+//! has no counterfactual to close for them the way it did for `ClassVars`.
+//! Migrating them is real, well-understood follow-up work (each needs a
+//! `lower_*`-only sibling of its `generate_*_with_reply` call, exactly the
+//! `lower_method_definition_body_with_reply`/`lower_class_method_body`
+//! precedent this issue and BT-3148 established) but is not required to
+//! satisfy this issue's acceptance criteria and is out of its scope —
+//! tracked separately (BT-3171) rather than folded in, mirroring how BT-3149
+//! deferred `exception_handling.rs` as BT-3165 instead of rushing a second
+//! differently-shaped migration into one issue.
+//! `gen_server/extensions.rs`'s OTHER NLR-wrap call site
+//! (`generate_value_extension_fun`, `wrap_value_type_body_with_nlr_catch`)
+//! is not the same shape at all — it never renders a body `Document` and
+//! wraps it after; its catch scaffolding is built from `NlrCatchVars`
+//! directly, integrated inline into the streaming
+//! `generate_vt_body_exprs`/`emit_vt_*` construction (`value_type_codegen.rs`,
+//! the vt-conditional family's own permanent ADR-documented exception to
+//! this migration) — audited, not applicable.
+//!
 //! This module lands the IR types, the [`verify`] checker, and the
 //! [`lower_and_render`] test shim (BT-3129), the unified `VersionedVar`/
 //! `VersionCounter` production path (BT-3131). BT-3132 originally added a
@@ -2284,7 +2351,8 @@ pub(super) fn verify_nested_list_op_stateacc_compat(
 ///
 /// **This is deliberately NOT `self.current_nlr_token().is_some()`** (whether
 /// *this* method's own body happens to contain a literal `^` inside one of
-/// its own block literals, gating `wrap_class_method_body_with_nlr_catch`)
+/// its own block literals, gating whether `lower_class_method_body`'s
+/// caller prepends a real `NlrCatch` — BT-3164, formerly `wrap_class_method_body_with_nlr_catch`)
 /// — that would silently exempt the *exact* ADR 0110 repro shape from this
 /// check: `CollectionDriver countedRun:over:` mutates a class var and then
 /// invokes a **caller-supplied** block (`aBlock value: x`, inside its own
@@ -2441,30 +2509,83 @@ pub(super) fn construct_and_verify_class_var_bind(
 pub(super) fn verify_body_with_opaque_version_gaps(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
     let mut last_state_version = 0usize;
+    let mut last_class_var_version = 0usize;
     for stmt in ir {
         if let ThreadedStmt::Bind { target, source, .. } = stmt {
-            if matches!(source.prefix, VersionPrefix::State)
-                && source.frame == FrameId::ROOT
-                && source.version > last_state_version
-            {
-                for v in (last_state_version + 1)..=source.version {
-                    fixture.push(ThreadedStmt::Bind {
-                        target: VersionedVar::new(VersionPrefix::State, v, FrameId::ROOT),
-                        source: VersionedVar::new(VersionPrefix::State, v - 1, FrameId::ROOT),
-                        op: BindOp::Direct(ValueRef::Literal("'_'")),
-                        shadow_write: false,
-                        span: Span::default(),
-                    });
-                }
-                last_state_version = source.version;
-            }
-            if matches!(target.prefix, VersionPrefix::State) && target.frame == FrameId::ROOT {
-                last_state_version = last_state_version.max(target.version);
-            }
+            backfill_opaque_version_gap(
+                &mut fixture,
+                &VersionPrefix::State,
+                target,
+                source,
+                &mut last_state_version,
+            );
+            backfill_opaque_version_gap(
+                &mut fixture,
+                &VersionPrefix::ClassVars,
+                target,
+                source,
+                &mut last_class_var_version,
+            );
         }
         fixture.push(stmt.clone());
     }
     verify(&fixture)
+}
+
+/// Shared backfill step for one `VersionPrefix` inside
+/// [`verify_body_with_opaque_version_gaps`]'s per-`Bind` scan — extracted so
+/// the identical technique isn't hand-duplicated once per prefix (CLAUDE.md's
+/// no-duplicate-implementations rule). The synthetic `Bind`s this inserts
+/// always carry `shadow_write: true` (BT-3164, fixing a real bug this
+/// issue's own review caught: an earlier `false` here spuriously tripped
+/// [`VerifyError::ShadowWriteMissing`] on a `ClassVars` gap step whenever a
+/// real `NlrCatch` was present — see the `shadow_write: true` assignment
+/// below for the full reasoning, the same [`construct_and_verify_class_var_bind`]
+/// already established for its own backfill loop). Moot for `State`
+/// (`ShadowWriteMissing` never inspects `State`-prefix `Bind`s); load-bearing
+/// for `ClassVars`.
+fn backfill_opaque_version_gap(
+    fixture: &mut Vec<ThreadedStmt>,
+    prefix: &VersionPrefix,
+    target: &VersionedVar,
+    source: &VersionedVar,
+    last_version: &mut usize,
+) {
+    if source.prefix == *prefix && source.frame == FrameId::ROOT && source.version > *last_version {
+        for v in (*last_version + 1)..=source.version {
+            fixture.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(prefix.clone(), v, FrameId::ROOT),
+                source: VersionedVar::new(prefix.clone(), v - 1, FrameId::ROOT),
+                op: BindOp::Direct(ValueRef::Literal("'_'")),
+                // BT-3164: `true`, not `false` — same reasoning
+                // `construct_and_verify_class_var_bind`'s own `1..=source_version`
+                // backfill loop (above) already documents for its synthetic
+                // steps: this stands in for a REAL mutation this verifier
+                // cannot see (it lives inside an opaque `Statement`, e.g.
+                // `emit_class_var_result_unwrap`'s own internal
+                // `next_class_var()` bump for a class-method self-send). For
+                // `State` this is moot (`ShadowWriteMissing` never inspects
+                // `State`-prefix `Bind`s), but for `ClassVars` a `false` here
+                // would claim "this top-frame mutation is definitely missing
+                // its ADR 0110 shadow write" about a step whose real emission
+                // site this verifier never inspected — exactly the
+                // false-positive `ShadowWriteMissing` a class method with a
+                // class-var-mutating self-send followed by its own real
+                // last-statement class-var `Bind` spuriously tripped before
+                // this fix (confirmed by
+                // `verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing`
+                // below). ADR 0111 §Verifier honesty: a check that cannot see
+                // the real site must not assert a verdict about it — `true`
+                // is silence, not a claim of compliance either way.
+                shadow_write: true,
+                span: Span::default(),
+            });
+        }
+        *last_version = source.version;
+    }
+    if target.prefix == *prefix && target.frame == FrameId::ROOT {
+        *last_version = (*last_version).max(target.version);
+    }
 }
 
 // ─── Simple version-bind construction (BT-3139) ────────────────────────────
@@ -4093,6 +4214,157 @@ mod tests {
                     if *var == VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT)
             )),
             "expected NonLinearVersion for the duplicate State1 producer, got: {errors:?}"
+        );
+    }
+
+    // ── BT-3164: joint ShadowWriteMissing visibility over a real
+    //    class-method-body shape (ClassVars backfill + NlrCatch) ──────────
+    //
+    // Before BT-3164, `lower_class_method_body`'s output rode as ONE opaque
+    // `Statement` next to the real `NlrCatch` `generate_class_method_functions`/
+    // `generate_class_method_fun_from_block` prepend — any class-var `Bind`
+    // inside that opaque body was invisible to the `verify()` call run over
+    // the enclosing method's real IR, so `ShadowWriteMissing` could never
+    // fire jointly with a real class-method `NlrCatch` (only the isolated,
+    // synthetic-marker fixture `construct_and_verify_class_var_bind` builds
+    // per call site could see it). These two tests build the REALISTIC
+    // shape `lower_class_method_body` + its callers' `NlrCatch`-prepend now
+    // produce for `class run: aBlock => aBlock value: [:x | ^x].
+    // self.runs := self.runs + 1` (an opaque `Statement` preamble for the
+    // non-last self-send, a real `ClassVars` `Bind` for the last-statement
+    // mutation, a `Statement` reply epilogue, and a real prepended
+    // `NlrCatch` — mirroring `lower_class_method_last_class_var_bind`'s own
+    // three-`ThreadedStmt` output exactly) — not a two-node minimal
+    // fixture — proving the new `ClassVars` backfill and `ShadowWriteMissing`
+    // compose correctly over that realistic interleaving, in both
+    // directions.
+
+    fn realistic_class_method_body_ir(shadow_write: bool) -> Vec<ThreadedStmt> {
+        let span = span();
+        vec![
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ClassMethod {
+                    has_class_vars: true,
+                },
+                token: TokenId::new("_NlrToken0".to_string()),
+                frame: FrameId::ROOT,
+                span,
+            },
+            // Non-last statement: `aBlock value: [:x | ^x]` — an ordinary
+            // opaque AST-directed send, no class-var content of its own.
+            ThreadedStmt::Statement(
+                docvec!["let _seq1 = call 'beamtalk_message_dispatch':'send'(...) in "],
+                span,
+            ),
+            // Last statement: `self.runs := self.runs + 1` —
+            // `lower_class_method_last_class_var_bind`'s real 3-node shape.
+            ThreadedStmt::Statement(
+                docvec![
+                    "let _Val2 = call 'erlang':'+'(call 'maps':'get'('runs', ClassVars), 1) in "
+                ],
+                span,
+            ),
+            ThreadedStmt::Bind {
+                target: class_var(1, FrameId::ROOT),
+                source: class_var(0, FrameId::ROOT),
+                op: BindOp::Put {
+                    field: "runs".to_string(),
+                    value: ValueRef::Var("_Val2".to_string()),
+                    class_tag: ValueRef::Var("ClassSelf".to_string()),
+                },
+                shadow_write,
+                span,
+            },
+            ThreadedStmt::Statement(docvec!["{'class_var_result', _Val2, ClassVars1}"], span),
+        ]
+    }
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_catches_shadow_write_missing_in_realistic_class_method_body()
+     {
+        // The previously-invisible case: a real class-var `Bind` (BT-3164's
+        // `lower_class_method_last_class_var_bind`) missing its ADR 0110
+        // shadow write, sharing a body with a real `NlrCatch` — both now
+        // constructed by production and verified in ONE call, exactly the
+        // shape this issue's acceptance criteria names.
+        let ir = realistic_class_method_body_ir(false);
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                VerifyError::ShadowWriteMissing { mutated, .. }
+                    if *mutated == class_var(1, FrameId::ROOT)
+            )),
+            "expected ShadowWriteMissing over the realistic class-method body shape, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_silent_on_realistic_class_method_body_with_shadow_write()
+     {
+        // Production's actual (correct) shape: `shadow_write: true`. Clean —
+        // proves the new joint check doesn't spuriously fire over ordinary,
+        // correctly-shadow-written class-method bodies.
+        let ir = realistic_class_method_body_ir(true);
+        assert_eq!(
+            verify_body_with_opaque_version_gaps(&ir),
+            Vec::new(),
+            "correctly shadow-written class-method body should verify cleanly"
+        );
+    }
+
+    #[test]
+    fn verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_fire_shadow_write_missing()
+     {
+        // `class doStuff => self bump. self.total := self.total + 1` — a
+        // non-last self-send (`self bump`, opaque Statement standing in for
+        // `emit_class_var_result_unwrap`'s own internal `next_class_var()`
+        // bump, ClassVars0 -> ClassVars1, no Bind of its own in THIS body's
+        // IR) followed by a real top-level, correctly shadow-written
+        // last-statement class-var Bind (ClassVars1 -> ClassVars2). The
+        // backfill must synthesize a ClassVars0->ClassVars1 gap-filler
+        // Bind to avoid UnboundVersion — that synthetic Bind must NOT
+        // itself spuriously trip ShadowWriteMissing merely because it
+        // carries `shadow_write: false` at FrameId::ROOT.
+        let span = span();
+        let ir = vec![
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ClassMethod {
+                    has_class_vars: true,
+                },
+                token: TokenId::new("_NlrToken0".to_string()),
+                frame: FrameId::ROOT,
+                span,
+            },
+            ThreadedStmt::Statement(
+                docvec!["<opaque self-send, mints ClassVars1 with no Bind of its own>"],
+                span,
+            ),
+            ThreadedStmt::Statement(
+                docvec![
+                    "let _Val1 = call 'erlang':'+'(call 'maps':'get'('total', ClassVars1), 1) in "
+                ],
+                span,
+            ),
+            ThreadedStmt::Bind {
+                target: class_var(2, FrameId::ROOT),
+                source: class_var(1, FrameId::ROOT),
+                op: BindOp::Put {
+                    field: "total".to_string(),
+                    value: ValueRef::Var("_Val1".to_string()),
+                    class_tag: ValueRef::Var("ClassSelf".to_string()),
+                },
+                shadow_write: true,
+                span,
+            },
+            ThreadedStmt::Statement(docvec!["{'class_var_result', _Val1, ClassVars2}"], span),
+        ];
+        let errors = verify_body_with_opaque_version_gaps(&ir);
+        assert_eq!(
+            errors,
+            Vec::new(),
+            "ClassVars gap-backfill's own synthetic Bind must not spuriously trigger \
+             ShadowWriteMissing, got: {errors:?}"
         );
     }
 

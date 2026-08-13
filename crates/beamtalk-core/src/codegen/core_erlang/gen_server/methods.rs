@@ -3395,45 +3395,40 @@ impl CoreErlangGenerator {
                 // Empty class method body returns self (ClassSelf)
                 docvec!["ClassSelf"]
             } else {
-                let inner_doc = match self
-                    .generate_class_method_body(method, !class.class_variables.is_empty())
-                {
-                    Ok(doc) => doc,
-                    Err(e) => {
-                        self.set_current_nlr_token(None);
-                        self.pop_scope();
-                        self.set_in_class_method(false);
-                        self.current_method_selector = None;
-                        return Err(e);
-                    }
-                };
+                let mut body_stmts =
+                    match self.lower_class_method_body(method, !class.class_variables.is_empty()) {
+                        Ok(stmts) => stmts,
+                        Err(e) => {
+                            self.set_current_nlr_token(None);
+                            self.pop_scope();
+                            self.set_in_class_method(false);
+                            self.current_method_selector = None;
+                            return Err(e);
+                        }
+                    };
                 self.set_current_nlr_token(None);
                 // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
                 // to preserve the {class_var_result, ...} contract. The normal path only wraps
                 // in class_var_result when class vars were actually mutated; the NLR path must
-                // match. class_var_mutated is set by generate_class_method_body when it sees a
+                // match. class_var_mutated is set by lower_class_method_body when it sees a
                 // class var assignment.
                 let returns_class_var_result = self.class_var_mutated();
+                // BT-1202/BT-3148/BT-3164 (ADR 0111 Addendum 4 task 2, closed out
+                // for class methods by BT-3164): the token was already minted
+                // above, before `lower_class_method_body` ran (production's real
+                // mint order). Since BT-3164, `lower_class_method_body` returns a
+                // real `Vec<ThreadedStmt>` (a real class-var `Bind` when the
+                // body's last statement mutates one — see
+                // `lower_class_method_last_class_var_bind`'s doc comment) rather
+                // than one opaque `Statement` wrapping an already-rendered
+                // `Document` — prepending a real `NlrCatch` here and verifying
+                // the whole sequence in one `verify_and_render_body_stmts` call
+                // is what lets `VerifyError::ShadowWriteMissing` see a real
+                // class-var `Bind` jointly with this real `NlrCatch` for the
+                // first time (ADR 0111 Addendum 6's closing note).
                 if let Some(ref token_var) = nlr_token_var {
-                    // BT-1202/BT-3148 (ADR 0111 Addendum 4 task 2): wrap body in
-                    // try/catch to catch NLR throws from ^ inside blocks, via a
-                    // real `NlrCatch` stmt — the token was already minted above,
-                    // before `generate_class_method_body` ran (production's real
-                    // mint order). `generate_class_method_body`'s own pipeline is
-                    // a separate, hand-written Document builder (not the Actor
-                    // `BodyExprKind`/`Vec<ThreadedStmt>` path task 1 converts),
-                    // so its output rides as one opaque `Statement` — no
-                    // state-threading content of its own is claimed or checked
-                    // beyond what `Statement`'s type-level rule already permits.
-                    // Residual gap (ADR 0111 Addendum 4's own "Descope
-                    // alternative" note): any class-var `Bind` inside that
-                    // opaque body is still invisible to `verify()`, so
-                    // `VerifyError::ShadowWriteMissing` cannot yet see a real
-                    // class-var mutation jointly with this real `NlrCatch` —
-                    // that needs the class-method body pipeline's own
-                    // `BodyExprKind`-style migration (out of this task's
-                    // scope; see the module doc's BT-3148 status section).
-                    let stmts = vec![
+                    body_stmts.insert(
+                        0,
                         threaded_ir::ThreadedStmt::NlrCatch {
                             boundary: super::super::NlrBoundary::ClassMethod {
                                 has_class_vars: returns_class_var_result,
@@ -3442,12 +3437,9 @@ impl CoreErlangGenerator {
                             frame: threaded_ir::FrameId::ROOT,
                             span: method.span,
                         },
-                        threaded_ir::ThreadedStmt::Statement(inner_doc, method.span),
-                    ];
-                    self.verify_and_render_body_stmts(&stmts, method.span)
-                } else {
-                    inner_doc
+                    );
                 }
+                self.verify_and_render_body_stmts(&body_stmts, method.span)
             };
 
             // Build function header with params (Document pieces, not format! —
@@ -3685,8 +3677,8 @@ impl CoreErlangGenerator {
             self.set_current_nlr_token(None);
             docvec!["ClassSelf"]
         } else {
-            let inner_doc = match self.generate_class_method_body(&method, has_class_vars) {
-                Ok(doc) => doc,
+            let mut body_stmts = match self.lower_class_method_body(&method, has_class_vars) {
+                Ok(stmts) => stmts,
                 Err(e) => {
                     self.set_current_nlr_token(None);
                     self.block_depth = saved_block_depth;
@@ -3696,15 +3688,24 @@ impl CoreErlangGenerator {
             };
             self.set_current_nlr_token(None);
             let returns_class_var_result = self.class_var_mutated();
+            // BT-3164: same real-`NlrCatch`-prepend pattern as
+            // `generate_class_method_functions` — see that call site's
+            // comment for why this replaces the old
+            // `wrap_class_method_body_with_nlr_catch` Document-wrap.
             if let Some(ref token_var) = nlr_token_var {
-                self.wrap_class_method_body_with_nlr_catch(
-                    inner_doc,
-                    token_var,
-                    returns_class_var_result,
-                )
-            } else {
-                inner_doc
+                body_stmts.insert(
+                    0,
+                    threaded_ir::ThreadedStmt::NlrCatch {
+                        boundary: super::super::NlrBoundary::ClassMethod {
+                            has_class_vars: returns_class_var_result,
+                        },
+                        token: threaded_ir::TokenId::new(token_var.clone()),
+                        frame: threaded_ir::FrameId::ROOT,
+                        span: method.span,
+                    },
+                );
             }
+            self.verify_and_render_body_stmts(&body_stmts, method.span)
         };
 
         let doc = docvec![
@@ -3731,39 +3732,145 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Generates the body of a class-side method.
+    /// Lowers the body of a class-side method to one straight-line
+    /// `Vec<ThreadedStmt>` (BT-3164, ADR 0111 Addendum 4/6: mirrors
+    /// `lower_body_exprs_with_reply`'s pattern for the Actor pipeline, for
+    /// the class-method body pipeline BT-3148 explicitly left as a
+    /// hand-written `Document` builder).
     ///
-    /// Unlike instance methods, class methods have no state threading.
-    /// They simply evaluate expressions and return the last value.
-    /// BT-412: If class variables were mutated, wraps the final result
-    /// in `{class_var_result, Result, ClassVarsN}`.
-    fn generate_class_method_body(
+    /// Unlike instance methods, class methods have no `State` threading —
+    /// the only version-mutating construct a class method's own body can
+    /// directly produce is a class-var write (`self.classVar := value`, ADR
+    /// 0110's `ClassVars` counter). Every other body statement — local-var
+    /// bindings, destructuring, `^`-returns, class-method self-sends (whose
+    /// own class-var rebind, if any, is produced by the shared
+    /// `emit_class_var_result_unwrap` helper and stays opaque here — the
+    /// same "mutation hidden inside a shared multi-module helper" treatment
+    /// BT-3148 gave `generate_self_dispatch_open` et al. in the Actor
+    /// pipeline) — is an opaque [`threaded_ir::ThreadedStmt::Statement`]
+    /// built by the SAME `generate_class_method_*` codegen calls production
+    /// used before this migration (byte-identity: only the container
+    /// changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
+    ///
+    /// The ONE case promoted to a real [`threaded_ir::ThreadedStmt::Bind`]
+    /// is a class method's own direct `self.classVar := value` when it is
+    /// the body's *last* statement (implicit return) — mirroring exactly
+    /// how BT-3148's Actor pipeline only promotes
+    /// `BodyExprKind::FieldAssignment` to a real `Bind` in its `is_last`
+    /// arm (`lower_body_exprs_with_reply`), leaving every other position's
+    /// field mutation inside a shared helper's opaque `Statement`. This is
+    /// the ADR 0110 joint-visibility case this issue exists to close: once
+    /// the caller (`generate_class_method_functions`/
+    /// `generate_class_method_fun_from_block`) prepends a real `NlrCatch`,
+    /// this `Bind` and that `NlrCatch` are visible to the SAME `verify()`
+    /// call for the first time — see `lower_class_method_last_class_var_bind`'s
+    /// own doc comment for why the pre-existing isolated
+    /// `construct_and_verify_class_var_bind` check stays alongside the new
+    /// joint one rather than being replaced by it.
+    ///
+    /// BT-412: when a class-var write happened anywhere in the body
+    /// (`class_var_mutated()`), the caller wraps the final result in
+    /// `{class_var_result, Result, ClassVarsN}` — unchanged, decided after
+    /// this function returns, exactly as before.
+    fn lower_class_method_body(
         &mut self,
         method: &MethodDefinition,
         has_class_vars: bool,
-    ) -> Result<Document<'static>> {
-        let mut docs: Vec<Document<'static>> = Vec::new();
+    ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        use threaded_ir::ThreadedStmt;
+
+        let mut stmts: Vec<ThreadedStmt> = Vec::new();
 
         // Filter out @expect directives (compile-time only, no runtime representation).
         let body = super::super::util::collect_body_exprs(&method.body);
+        let body_len = body.len();
         for (i, expr) in body.iter().enumerate() {
-            let is_last = i == body.len() - 1;
+            let is_last = i == body_len - 1;
+            let span = expr.span();
 
             if let Expression::Return { value, .. } = expr {
                 let doc = self.generate_class_method_return(value, has_class_vars)?;
-                docs.push(doc);
-                return Ok(Document::Vec(docs));
+                stmts.push(ThreadedStmt::Statement(doc, span));
+                return Ok(stmts);
             }
 
-            if is_last {
+            if is_last && has_class_vars && self.is_class_var_assignment(expr) {
+                self.lower_class_method_last_class_var_bind(&mut stmts, expr, span)?;
+            } else if is_last {
                 let doc = self.generate_class_method_last_expr(expr, has_class_vars)?;
-                docs.push(doc);
+                stmts.push(ThreadedStmt::Statement(doc, span));
             } else {
                 let doc = self.generate_class_method_non_last_expr(expr)?;
-                docs.push(doc);
+                stmts.push(ThreadedStmt::Statement(doc, span));
             }
         }
-        Ok(Document::Vec(docs))
+        Ok(stmts)
+    }
+
+    /// BT-3164: constructs the real `ThreadedStmt::Bind` for a class
+    /// method's own `self.classVar := value` when it is the body's last
+    /// statement — the shape `lower_class_method_body` promotes out of the
+    /// generic `generate_class_method_last_expr_with_class_vars` path.
+    /// Delegates the actual `Bind` construction to the shared
+    /// [`Self::lower_class_var_field_assignment_bind`] (`expressions.rs`;
+    /// same struct, `impl` block in a different file — the identical
+    /// sequence `expressions.rs::generate_class_var_field_assignment`
+    /// builds for every OTHER position, not hand-rolled a second time here,
+    /// CLAUDE.md's no-duplicate-implementations rule), but — unlike that
+    /// call site, which still renders its `Bind` immediately and keeps it
+    /// inside an opaque `Statement` — pushes the returned `Bind` into
+    /// `stmts` as a real IR node, so the method's real `NlrCatch`
+    /// (prepended by the caller after this function returns) and this
+    /// `Bind` are both visible to the single `verify_and_render_body_stmts`
+    /// call over the whole body, closing the ADR 0110 joint-visibility gap
+    /// ADR 0111 Addendum 6 left open for class methods.
+    ///
+    /// The isolated, synthetic-marker `ShadowWriteMissing` check the shared
+    /// helper runs internally is deliberately still reported (not dropped
+    /// in favor of the new joint check): it is the ONLY check that still
+    /// fires for a method with no literal `^` at all (`needs_nlr: false`,
+    /// so no real `NlrCatch` in the body at all) — the exact ADR 0110
+    /// `CollectionDriver countedRun:over:` repro shape (the mutation must
+    /// still be shadow-written even though this specific method never
+    /// mints a local NLR catch, because the relay can happen one layer out
+    /// via a caller-supplied block) — so dropping it would regress
+    /// coverage the joint check cannot replace. The two checks are
+    /// complementary, not redundant: the isolated one always assumes the
+    /// worst case; the joint one is precise when a real `NlrCatch` is
+    /// actually present.
+    fn lower_class_method_last_class_var_bind(
+        &mut self,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+        expr: &Expression,
+        span: Span,
+    ) -> Result<()> {
+        let (field_name, value) = match expr {
+            Expression::Assignment { target, value, .. } => match target.as_ref() {
+                Expression::FieldAccess { field, .. } => (field.name.to_string(), value.as_ref()),
+                _ => unreachable!(
+                    "is_class_var_assignment guarantees an Assignment with a FieldAccess target"
+                ),
+            },
+            _ => unreachable!("is_class_var_assignment guarantees an Assignment"),
+        };
+
+        let (preamble_doc, bind, val_var) =
+            self.lower_class_var_field_assignment_bind(&field_name, value)?;
+
+        let final_cv = self.current_class_var();
+        stmts.push(threaded_ir::ThreadedStmt::Statement(preamble_doc, span));
+        stmts.push(bind);
+        stmts.push(threaded_ir::ThreadedStmt::Statement(
+            docvec![
+                "{'class_var_result', ",
+                leaf::var(val_var),
+                ", ",
+                leaf::var(final_cv),
+                "}",
+            ],
+            span,
+        ));
+        Ok(())
     }
 
     /// Generates code for an explicit `^` return in a class method.
