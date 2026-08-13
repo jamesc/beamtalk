@@ -514,18 +514,37 @@ impl CoreErlangGenerator {
         // the *callee's own* `generate_field_assignment` under the
         // identical `ClassSelf`-tagged key (see
         // `threaded_ir::construct_and_verify_class_var_bind`'s doc comment
-        // / ADR 0110 §Runtime change). `FrameId::ROOT` here is honest (this
-        // rebind never claims a real nested identity) — `shadow_write_eligible:
-        // false` is what deliberately exempts this Bind from the
-        // shadow-write check unconditionally, since it never carries a
-        // shadow-write obligation of its own regardless of block_depth
-        // (ADR 0111 Addendum 9, Question 2).
+        // / ADR 0110 §Runtime change). `shadow_write_eligible: false` is
+        // what deliberately exempts this Bind from the shadow-write check
+        // unconditionally, since it never carries a shadow-write obligation
+        // of its own regardless of block_depth (ADR 0111 Addendum 9,
+        // Question 2).
+        //
+        // BT-3169 (ADR 0111 Addendum 9, Questions 2/5): `frame` is
+        // `FrameId::ROOT` at a class method's own top level, but this same
+        // function is also reached from INSIDE a `do:`/`collect:`/`select:`/
+        // `inject:into:` fold body's closure (a same-class self-send used or
+        // discarded there compiles through the identical
+        // `generate_class_method_self_send` path) — `self.in_loop_body`
+        // distinguishes the two: a fold-body call site's real, already-minted
+        // frame is `self.current_branch_frame()`, never `ROOT` (loop bodies
+        // always run inside `with_branch_context`). Passing `ROOT` there
+        // would be dishonest about this rebind's real nesting identity and
+        // would let a second, unrelated mutation later in the SAME iteration
+        // spuriously collide during verification (Question 2's own
+        // `UnboundVersion` finding for the analogous top-frame field-write
+        // call site).
+        let frame = if self.in_loop_body {
+            self.current_branch_frame()
+        } else {
+            super::threaded_ir::FrameId::ROOT
+        };
         let (bind, rebind_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
                 class_var_case_doc,
             )),
             false,
-            super::threaded_ir::FrameId::ROOT,
+            frame,
             false,
             source_version,
             target_version,

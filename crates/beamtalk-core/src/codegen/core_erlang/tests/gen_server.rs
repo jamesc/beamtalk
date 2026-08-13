@@ -3897,31 +3897,28 @@ fn test_class_method_self_send_after_loop_still_compiles() {
 }
 
 #[test]
-fn test_class_method_self_send_alongside_local_in_do_body_still_compiles_but_loses_mutation() {
-    // BT-3150 review follow-up: the `Letrec` (whileTrue:/timesRepeat:) guard
-    // leaves the identical class-var-mutation-loss gap open for `Foldl*`
-    // bodies (do:/collect:/select:/inject:into:/...) — `ThreadingPlan` threads
-    // only `threaded_locals` (user `:=` locals) through a fold's accumulator,
-    // never `ClassVars`, so a class-method self-send inside a `do:` block with
-    // a co-occurring local mutation (which is what actually routes it through
-    // `generate_threaded_loop_body_inner` in the first place) loses its
-    // class-var mutation exactly like the `whileTrue:` case — confirmed
-    // empirically: `runs` stayed at 0 across all 3 list elements instead of
-    // accumulating.
+fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_vars_threading() {
+    // BT-3150 review follow-up / BT-3169: the `Letrec` (whileTrue:/timesRepeat:)
+    // guard used to leave an identical class-var-mutation-loss gap open for
+    // `Foldl*` bodies (do:/collect:/select:/inject:into:/...) — `ThreadingPlan`
+    // threaded only `threaded_locals` (user `:=` locals) through a fold's
+    // accumulator, never `ClassVars`, so a class-method self-send inside a
+    // `do:` block with a co-occurring local mutation (which is what actually
+    // routes it through `generate_threaded_loop_body_inner` in the first
+    // place) lost its class-var mutation exactly like the `whileTrue:` case
+    // — confirmed empirically (pre-fix): `runs` stayed at 0 across all 3 list
+    // elements instead of accumulating.
     //
-    // This is a REAL, confirmed, still-open bug (tracked under BT-3151) — but
-    // it is deliberately NOT rejected at compile time the way the `Letrec`
-    // case is. An attempt to reject it (first scoped to all `BodyKind`s, then
-    // narrowed to `Letrec`/`FoldlDo` "discarded statement" positions only)
-    // was reverted after two rounds of CI failure: `Foldl*` bodies —
-    // including bare, discarded `do:`/`inject:into:` statements — routinely
-    // and legitimately use pure (non-mutating) self-sends in these same
-    // positions (BT-2350, `stdlib/test/fixtures/class_method_block.bt`), and
-    // neither "is the return value used" nor "is the statement last"
-    // distinguishes that safe, common case from this unsafe one. So this
-    // pins the current, intentional (if unsatisfying) tradeoff: `do:`
-    // compiles, silently losing the mutation, until BT-3151 lands proper
-    // `ClassVars` fold-threading or callee purity analysis.
+    // BT-3169 closes this: the fold's accumulator becomes a `{ClassVars,
+    // StateAcc}` 2-tuple whenever the body threads `ClassVars` (ADR 0111
+    // Addendum 9, Question 6), so the mutation now survives the loop and is
+    // visible in the method's own `{'class_var_result', Result, ClassVarsN}`
+    // return. Confirmed both by direct `erl` execution against the compiled
+    // `.beam` (`runs` correctly ends at 3, not 0 — see BT-3169's own PR
+    // description) and, structurally, here: the compiled `class_countedRun:`
+    // fun's accumulator parameter and the post-`lists:foldl` extraction both
+    // reference a *versioned* `ClassVarsN` name (`N > 0`), never the bare,
+    // unmutated `ClassVars` the pre-fix compiler silently discarded into.
     let src = "Value subclass: DriverDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    total := 0\n    aList do: [:x | self bump. total := total + x]\n    total";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3929,32 +3926,61 @@ fn test_class_method_self_send_alongside_local_in_do_body_still_compiles_but_los
         &module,
         CodegenOptions::new("bt@driverdo").with_workspace_mode(true),
     );
+    let code = result.unwrap_or_else(|e| {
+        panic!("A class-method self-send inside a do: body must compile. Got: {e:?}")
+    });
+    let func = extract_core_fn(&code, "'class_countedRun:'/3 = fun")
+        .expect("expected a class_countedRun:/3 function in the generated code");
+    // The fold's own accumulator parameter must be a raw {ClassVars, StateAcc}
+    // tuple (unwrapped via two `erlang:element/2` calls), not the bare
+    // literal `StateAcc` the pre-fix compiler emitted.
     assert!(
-        result.is_ok(),
-        "A class-method self-send inside a do: body (BT-3150's guard is Letrec-only \
-         by design — see BT-3151 for the tracked Foldl* gap). Got: {result:?}"
+        func.contains("call 'erlang':'element'(1,") && func.contains("call 'erlang':'element'(2,"),
+        "the fold fun's accumulator must be unwrapped from a {{ClassVars, StateAcc}} \
+         tuple via two element/2 calls. Got:\n{func}"
+    );
+    // The method's own final class-var-result reply must reference a
+    // *versioned* ClassVars name (ClassVars1, ClassVars2, ...) — proof the
+    // self-send's mutation, threaded through the fold, reached the method's
+    // own top-level return, not the bare (unmutated, version-0) `ClassVars`
+    // parameter the pre-fix bug silently returned instead.
+    let reply_idx = func
+        .rfind("{'class_var_result',")
+        .expect("expected a final {'class_var_result', ...} reply");
+    let reply_tail = &func[reply_idx..];
+    assert!(
+        !reply_tail.trim_end_matches(')').ends_with(", ClassVars}"),
+        "the method's own final class_var_result reply must thread the \
+         self-send's mutated (versioned) ClassVars forward, not the bare, \
+         unmutated ClassVars parameter — this is the exact BT-3151 silent-loss \
+         shape BT-3169 closes. Got:\n{reply_tail}"
     );
 }
 
 #[test]
-fn test_class_method_self_send_as_select_predicate_alongside_local_still_compiles() {
-    // BT-3150 review follow-up: an earlier version of this fix blanket-rejected
-    // a class-method self-send in ANY `BodyKind::Foldl*` body, including
-    // `select:`'s predicate position — but that broke a real, existing stdlib
-    // fixture (`test/fixtures/class_method_block.bt`) that uses pure
-    // (non-mutating) self-sends as the value feeding `collect:`/`sort:`/
-    // `inject:into:` (see `test_class_method_self_send_as_collect_transform_still_compiles`
+fn test_class_method_self_send_as_select_predicate_alongside_local_survives_via_class_vars_threading()
+ {
+    // BT-3150 review follow-up / BT-3169: an earlier version of this fix
+    // blanket-rejected a class-method self-send in ANY `BodyKind::Foldl*`
+    // body, including `select:`'s predicate position — but that broke a
+    // real, existing stdlib fixture (`test/fixtures/class_method_block.bt`)
+    // that uses pure (non-mutating) self-sends as the value feeding
+    // `collect:`/`sort:`/`inject:into:` (see
+    // `test_class_method_self_send_as_collect_transform_still_compiles`
     // below). Unlike `Letrec`, `select:`'s predicate result is NOT discarded
     // — it structurally IS the fold's output — so rejecting every self-send
-    // there has a real false-positive cost. The guard is scoped to `Letrec`
-    // only; a `select:` predicate self-send (even alongside a co-occurring
-    // local mutation) must keep compiling.
+    // there has a real false-positive cost. The `Letrec`-only compile-time
+    // guard was never widened to cover this shape.
     //
-    // NOTE: if `check:` here actually mutated a class var, that mutation
-    // would still be silently lost — this narrower guard doesn't catch that
-    // shape (tracked under BT-3151 as a known, documented residual gap:
-    // catching it without also rejecting the pure/common case needs static
-    // analysis of whether the callee provably mutates class state).
+    // BT-3169 instead makes this shape correct rather than rejecting it: the
+    // fold's accumulator threads `ClassVars` through a `{ClassVars, StateAcc}`
+    // 2-tuple, so a class-var mutation performed by `check:` — hypothetically
+    // — would now survive rather than being silently lost. This fixture's
+    // own `check:` is pure (no class var declared at all), so the test below
+    // checks the *threading machinery* is in place — the fold fun's
+    // accumulator unwrap and the assignment's own final ClassVars rebind —
+    // not a specific mutated value, mirroring `class_method_block.bt`'s
+    // deliberately-pure self-send shapes this fixture is modeled on.
     let src = "Value subclass: DriverSelect2\n  class check: x => x > 0\n  class positives: aList =>\n    seen := 0\n    result := aList select: [:x | seen := seen + 1. self check: x]\n    result";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -3962,11 +3988,33 @@ fn test_class_method_self_send_as_select_predicate_alongside_local_still_compile
         &module,
         CodegenOptions::new("bt@driverselect2").with_workspace_mode(true),
     );
+    let code = result.unwrap_or_else(|e| {
+        panic!(
+            "A class-method self-send used as select:'s predicate value, alongside a \
+             co-occurring local mutation, must still compile. Got: {e:?}"
+        )
+    });
+    let func = extract_core_fn(&code, "'class_positives:'/3 = fun")
+        .expect("expected a class_positives:/3 function in the generated code");
+    // The fold's own accumulator parameter must be a raw {ClassVars, AccSt}
+    // tuple (unwrapped via two `erlang:element/2` calls before the
+    // pre-existing {AccList, StateAcc} unpack), not the bare AccSt the
+    // pre-fix compiler emitted.
     assert!(
-        result.is_ok(),
-        "A class-method self-send used as select:'s predicate value, alongside a \
-         co-occurring local mutation, must still compile (its return value is needed, \
-         unlike a bare Letrec/do: statement). Got: {result:?}"
+        func.contains("call 'erlang':'element'(1,") && func.contains("call 'erlang':'element'(2,"),
+        "the fold fun's accumulator must be unwrapped from a {{ClassVars, AccSt}} \
+         tuple via two element/2 calls. Got:\n{func}"
+    );
+    // A fresh ClassVars name must be minted after the fold (from the raw,
+    // still-wrapped `lists:foldl` result — `_RawFoldCV<N>`, per
+    // `ThreadingPlan::foldl_call_doc`) to receive the threaded-through value
+    // — proof the fold's own `{ClassVars, ...}` accumulator wrap and
+    // post-`foldl` unwrap are both wired up for this predicate-position
+    // self-send.
+    assert!(
+        func.contains("'erlang':'element'(1, _RawFoldCV"),
+        "expected a post-fold ClassVars unwrap (element(1, _RawFoldCV...)) \
+         rebinding the threaded-through value. Got:\n{func}"
     );
 }
 

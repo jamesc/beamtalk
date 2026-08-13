@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3169 review fix: fixture pinning a correctness gap found and fixed
+// during review of PR #3371, which the PR's own new `tests/gen_server.rs`
+// assertions (compiled-text-only) could not catch — it needs real
+// `erl`/BEAM execution.
+//
+// A pure (non-mutating) class-method self-send used as a fold
+// predicate/transform advances `class_var_version` the same way a real
+// mutation does (`emit_class_var_result_unwrap` calls `next_class_var()`
+// unconditionally), but the ADR 0110 shadow-write process-dictionary key is
+// only set on an actual field write — so `refresh_class_var_after_opaque_scope`'s
+// naive shadow read could observe `'undefined'` and corrupt this class's
+// own class-var state for all subsequent calls.
+
+Object subclass: FoldlClassVarRegression
+  classState: total = 100
+
+  class resetTotal => self.total := 100
+
+  class total => self.total
+
+  // Pure — never touches a field.
+  class isPositive: x => x > 0
+
+  // A `select:` predicate that is a pure self-send, assigned to a local,
+  // alongside an unrelated class var (`total`) that must survive untouched.
+  class positives: aList =>
+    result := aList select: [:x | self isPositive: x]
+    result
