@@ -334,6 +334,67 @@ pub enum CodeGenError {
         location: String,
     },
 
+    /// BT-3172 (BT-3168 follow-up): a `Letrec`- or `Foldl*`-shaped loop
+    /// (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`/
+    /// `do:`/`collect:`/`select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/
+    /// `inject:into:`) nested inside another such loop — in any
+    /// Letrec/Letrec, Foldl*/Foldl*, or mixed combination — where the INNER
+    /// loop's own body would thread a `ClassVars` mutation through its own
+    /// recursive tail call or fold accumulator, but the OUTER loop's own
+    /// top-level statements don't independently trigger `ClassVars`
+    /// threading (see `nested_loop_lost_class_var_mutation`'s doc comment
+    /// for the exact per-shape trigger).
+    ///
+    /// For a `Letrec`-in-`Letrec` nesting, the failure mode is silent data
+    /// loss: no code path in `generate_threaded_loop_body_inner`/
+    /// `emit_non_assign_expr` unpacks a nested loop's `ClassVars` tuple
+    /// element back into the outer loop (only `StateAcc`, via the
+    /// BT-478/BT-483 last-statement `element(2)` unpack), so the mutation is
+    /// silently discarded once the inner loop's own branch exits
+    /// (`with_branch_context`'s `class_var_version` restore has nothing to
+    /// hand off to). For a nesting involving `Foldl*`, the failure mode is
+    /// worse — confirmed empirically to be an `erlc` "unbound variable"
+    /// compile crash instead: the inner construct's own `next_class_var()`
+    /// mint permanently advances the generator's single, unscoped
+    /// class-var-name counter, but the resulting name is only ever bound
+    /// inside the inner construct's own (already-exited) closure, not the
+    /// enclosing scope the outer loop's own `ClassVars` wrap then tries to
+    /// reference it from.
+    ///
+    /// Extending `ClassVars` threading to propagate through nested loop
+    /// levels is tracked as a real design follow-up (needs its own
+    /// frame/accumulator design, comparable in scope to ADR 0111 Addendum 9)
+    /// — not attempted here, per BT-3172's own risk assessment (this
+    /// predicate/generator pair already absorbed two reverted
+    /// over-broad-detection attempts during BT-3168's own development).
+    #[error(
+        "Cannot mutate {mutation} inside a loop nested inside another loop, at {location}.\n\n\
+             The inner loop's own mutation would be threaded correctly on its own, but the outer \
+             loop (whileTrue:/whileFalse:/timesRepeat:/to:do:/to:by:do:/do:/collect:/select:/\
+             reject:/anySatisfy:/allSatisfy:/inject:into:) has no class-variable mutation of its \
+             own to carry it back out — so it is silently discarded, or fails to compile, once \
+             the inner loop finishes.\n\n\
+             Fix: Accumulate into a local variable across both loops, then mutate the class variable \
+             once after the outer loop finishes:\n\
+             \x20 // Instead of:\n\
+             \x20 [i < n] whileTrue: [\n\
+             \x20   [j < n] whileTrue: [self.runs := self.runs + 1. j := j + 1].\n\
+             \x20   i := i + 1].\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 delta := 0.\n\
+             \x20 [i < n] whileTrue: [\n\
+             \x20   [j < n] whileTrue: [delta := delta + 1. j := j + 1].\n\
+             \x20   i := i + 1].\n\
+             \x20 self.runs := self.runs + delta."
+    )]
+    ClassVarMutationLostAcrossNestedLoop {
+        /// Description of the inner loop's mutation (e.g. "class variable 'runs'" or "'self bump'").
+        mutation: String,
+        /// Source location.
+        location: String,
+    },
+
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned (BT-2792).
     #[error(
