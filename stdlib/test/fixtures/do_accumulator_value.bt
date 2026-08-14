@@ -71,3 +71,58 @@ Value subclass: DoAccumulatorValue
     acc := initial
     items do: [:each | acc := block value: acc value: each]
     acc
+
+  // BT-3173: the do: block's ONLY mutation of the outer `sum` local happens
+  // through a nested ensure: — analyze_block must propagate that write up
+  // to the do: block's own top level for it to be classified Tier 2.
+  sumListEnsure: items :: List -> Integer =>
+    sum := 0
+    items do: [:each | [sum := sum + each] ensure: [nil]]
+    sum
+
+  // BT-3173 live repro: the collect: block's only mutation of `t` happens
+  // through a nested ensure:, and the per-element result (t, read after the
+  // ensure:) must reflect cross-iteration accumulation, not a reset-per-call
+  // capture of the same stale initial value.
+  collectAccumulateEnsure: items :: List -> List =>
+    t := 0
+    items
+      collect: [:x |
+        [t := t + x] ensure: [nil]
+        t
+      ]
+
+  // Same shape as sumListEnsure:, but the nested construct is on:do: instead
+  // of ensure: — on:do:'s receiver (the try body) is likewise inline and
+  // must propagate its write to the enclosing do: block's own analysis.
+  sumListOnDo: items :: List -> Integer =>
+    sum := 0
+    items do: [:each | [sum := sum + each] on: Error do: [:e | nil]]
+    sum
+
+  // BT-3173: the do: block's only mutation of `sum` happens through a
+  // nested ifNotNil: — same propagation gap as ensure:/on:do:.
+  sumListIfNotNil: items :: List -> Integer =>
+    sum := 0
+    items do: [:each | each ifNotNil: [:v | sum := sum + v]]
+    sum
+
+  // BT-3173 bug variant 2: a counted loop (to:do:) nested inside a do:
+  // block. The outer do:'s call site correctly detects total's mutation
+  // (via the pre-existing nested-loop cross-scope collector), but the
+  // INNER do: block's own Tier1/Tier2 self-classification previously
+  // disagreed — it compiled as plain lists:foreach (returning 'ok') while
+  // the call site expected a {Result, State} tuple, crashing with badarg.
+  sumWithNestedToDo: items :: List -> Integer =>
+    total := 0
+    items do: [:x | 1 to: 2 do: [:i | total := total + i]]
+    total
+
+  // BT-3173 "combined-gap" variant: an ensure: layer sits BETWEEN the outer
+  // do: and the nested to:do: — exercises whether the cross-scope collector
+  // that decides the outer do: needs threading still recurses through the
+  // exception construct to find the nested counted loop's mutation.
+  sumWithEnsureWrappingNestedToDo: items :: List -> Integer =>
+    total := 0
+    items do: [:x | [1 to: 2 do: [:i | total := total + i]] ensure: [nil]]
+    total

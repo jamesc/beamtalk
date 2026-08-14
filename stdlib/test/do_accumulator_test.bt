@@ -199,3 +199,41 @@ TestCase subclass: DoAccumulatorTest
     self assert: (self.helper sumList: #(1, 2, 3)) equals: 6
     self assert: (self.helper sumList: #(10, 20)) equals: 30
     self assert: (self.helper sumList: #(1, 2, 3)) equals: 6
+
+  // =========================================================================
+  // BT-3173: a do:/collect: block's only mutation of a captured local
+  // happens through a nested ensure:/on:do:/ifNotNil: — analyze_block must
+  // propagate that write up so the outer list-op is still promoted to
+  // Tier 2 (accumulator-threaded) instead of silently resetting per call.
+  // =========================================================================
+  testSumListEnsureBasic =>
+    self assert: (self.helper sumListEnsure: #(1, 2, 3)) equals: 6
+
+  testSumListEnsureEmptyList =>
+    self assert: (self.helper sumListEnsure: #()) equals: 0
+
+  testCollectAccumulateEnsureCrossIterationAccumulation =>
+    // Live repro from BT-3173: t must accumulate across iterations
+    // (#(1, 3, 6)), not reset to the same captured 0 on every call.
+    self assert: (self.helper collectAccumulateEnsure: #(1, 2, 3)) equals: #(1, 3, 6)
+
+  testSumListOnDoBasic =>
+    self assert: (self.helper sumListOnDo: #(1, 2, 3)) equals: 6
+
+  testSumListIfNotNilBasic =>
+    self assert: (self.helper sumListIfNotNil: #(1, 2, 3)) equals: 6
+
+  // BT-3173 bug variant 2: nested to:do: inside do: — previously crashed
+  // with badarg (Tier1/Tier2 disagreement between the do: block's own
+  // classification and the outer call site's expectation).
+  testSumWithNestedToDoBasic =>
+    self assert: (self.helper sumWithNestedToDo: #(1, 2, 3)) equals: 9
+
+  testSumWithNestedToDoEmptyList =>
+    self assert: (self.helper sumWithNestedToDo: #()) equals: 0
+
+  // BT-3173 "combined-gap" variant: ensure: wrapping a nested to:do: inside
+  // an outer do: — probes whether the cross-scope collector deciding the
+  // OUTER do: needs threading recurses through the exception construct.
+  testSumWithEnsureWrappingNestedToDoBasic =>
+    self assert: (self.helper sumWithEnsureWrappingNestedToDo: #(1, 2, 3)) equals: 9

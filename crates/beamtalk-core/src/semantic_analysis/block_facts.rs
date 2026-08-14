@@ -293,48 +293,36 @@ fn analyze_expression(
             if is_self_field_value_send(receiver, selector) {
                 analysis.has_field_value_call = true;
             }
-            analyze_expression(receiver, analysis, ctx);
-            // BT-1053: ifTrue:/ifFalse:/ifTrue:ifFalse: blocks are compiled inline
-            // (not as closures), so their local_writes and some captured_reads affect
-            // the enclosing scope. Propagate them to allow the outer loop analysis to
-            // detect that a captured local variable is mutated inside a conditional.
+            // BT-3173: on:do:/ensure: run their receiver (the try/protected
+            // block) inline too, in the same activation — so it needs the same
+            // local_writes propagation as an inline-conditional block argument
+            // (see below), not the isolated-closure treatment the generic
+            // `Expression::Block` arm gives an ordinary block operand.
+            let selector_name = selector.name();
+            if is_exception_selector_name(&selector_name) {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    propagate_inline_block_writes(block, analysis, ctx);
+                } else {
+                    analyze_expression(receiver, analysis, ctx);
+                }
+            } else {
+                analyze_expression(receiver, analysis, ctx);
+            }
+            // BT-1053/BT-3173: ifTrue:/ifFalse:/ifTrue:ifFalse:/ifNotNil:/on:do:/
+            // ensure: blocks are compiled inline (not as closures), so their
+            // local_writes and some captured_reads affect the enclosing scope.
+            // Propagate them to allow the outer loop analysis to detect that a
+            // captured local variable is mutated inside one of these constructs.
             //
             // captured_reads from the inner block are propagated selectively: only
             // variables that are NOT already defined in the outer block's local bindings
             // context are considered captured from the method scope. This prevents
             // variables introduced within the outer block body (e.g. `newI := i + 1`
             // before an `ifTrue: [^newI]`) from being misclassified as outer captures.
-            if is_inline_conditional_selector(selector) {
+            if is_inline_propagating_selector(&selector_name) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
-                        let nested = analyze_block(block);
-                        analysis
-                            .local_reads
-                            .extend(nested.local_reads.iter().cloned());
-                        analysis
-                            .local_writes
-                            .extend(nested.local_writes.iter().cloned());
-                        // Only propagate captured_reads for vars not yet defined locally
-                        for v in &nested.captured_reads {
-                            if !ctx.local_bindings.contains(v.as_str()) {
-                                analysis.captured_reads.insert(v.clone());
-                            }
-                        }
-                        analysis
-                            .field_reads
-                            .extend(nested.field_reads.iter().cloned());
-                        analysis
-                            .field_writes
-                            .extend(nested.field_writes.iter().cloned());
-                        if nested.has_self_sends {
-                            analysis.has_self_sends = true;
-                        }
-                        analysis
-                            .self_send_selectors
-                            .extend(nested.self_send_selectors.iter().cloned());
-                        if nested.has_field_value_call {
-                            analysis.has_field_value_call = true;
-                        }
+                        propagate_inline_block_writes(block, analysis, ctx);
                     } else {
                         analyze_expression(arg, analysis, ctx);
                     }
@@ -598,15 +586,80 @@ fn is_self_field_value_send(receiver: &Expression, selector: &MessageSelector) -
     ) || selector.name() == "valueWithArguments:")
 }
 
-/// Returns true if the selector is an inline conditional (`ifTrue:`, `ifFalse:`, or
-/// `ifTrue:ifFalse:`). These are compiled inline rather than as closures, so mutations
-/// inside their block arguments affect the enclosing scope.
-fn is_inline_conditional_selector(selector: &MessageSelector) -> bool {
-    if let MessageSelector::Keyword(parts) = selector {
-        let name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        matches!(name.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:")
-    } else {
-        false
+/// BT-3173: Returns true if `selector_name` is `on:do:` or `ensure:` — exception
+/// selectors whose *receiver* (the try/protected block) runs inline in the
+/// enclosing activation, not as an isolated closure. Delegates to the shared
+/// classifier in [`crate::state_threading_selectors`] so this stays in sync
+/// with codegen's own state-threading selector classification.
+fn is_exception_selector_name(selector_name: &str) -> bool {
+    crate::state_threading_selectors::is_exception_selector(selector_name)
+}
+
+/// Returns true if the selector's block arguments (and, for `on:do:`/`ensure:`,
+/// receiver — handled separately, see [`is_exception_selector_name`]) are
+/// compiled inline rather than as isolated closures, so mutations inside them
+/// affect the enclosing scope: `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`
+/// (via [`crate::state_threading_selectors::is_conditional_selector`]), plus
+/// `on:do:`/`ensure:` (BT-3173: their non-receiver block arguments — e.g.
+/// `on:do:`'s handler — are inline for the same reason as the receiver).
+fn is_inline_propagating_selector(selector_name: &str) -> bool {
+    crate::state_threading_selectors::is_conditional_selector(selector_name)
+        || is_exception_selector_name(selector_name)
+}
+
+/// BT-1053/BT-3173: Propagates a nested inline-compiled block's mutation
+/// analysis into the enclosing block's `analysis` — used for the block
+/// receiver/arguments of `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`/
+/// `on:do:`/`ensure:`, none of which introduce a separate closure activation
+/// (unlike an ordinary block operand, e.g. a `do:`/`collect:` argument, which
+/// isolates its own `local_writes` — see the `Expression::Block` arm below).
+fn propagate_inline_block_writes(
+    block: &Block,
+    analysis: &mut BlockMutationAnalysis,
+    ctx: &AnalysisContext,
+) {
+    let nested = analyze_block(block);
+    analysis
+        .local_reads
+        .extend(nested.local_reads.iter().cloned());
+    // BT-3173 review follow-up: exclude this block's own parameters (e.g.
+    // on:do:'s exception var, ifNotNil:'s bound value) before merging
+    // local_writes into the enclosing analysis — a write to the block's own
+    // param (`on: Error do: [:e | e := 1]`) is confined to that param's own
+    // shadowed binding, not a genuine outer-scope mutation. Mirrors the same
+    // exclusion `collect_list_op_cross_scope_mutations`/
+    // `collect_nested_loop_outer_local_writes` apply for the identical
+    // construct shape.
+    let block_params: HashSet<String> = block
+        .parameters
+        .iter()
+        .map(|p| p.name.to_string())
+        .collect();
+    for v in &nested.local_writes {
+        if !block_params.contains(v.as_str()) {
+            analysis.local_writes.insert(v.clone());
+        }
+    }
+    // Only propagate captured_reads for vars not yet defined locally.
+    for v in &nested.captured_reads {
+        if !ctx.local_bindings.contains(v.as_str()) {
+            analysis.captured_reads.insert(v.clone());
+        }
+    }
+    analysis
+        .field_reads
+        .extend(nested.field_reads.iter().cloned());
+    analysis
+        .field_writes
+        .extend(nested.field_writes.iter().cloned());
+    if nested.has_self_sends {
+        analysis.has_self_sends = true;
+    }
+    analysis
+        .self_send_selectors
+        .extend(nested.self_send_selectors.iter().cloned());
+    if nested.has_field_value_call {
+        analysis.has_field_value_call = true;
     }
 }
 
@@ -927,6 +980,199 @@ mod tests {
         assert!(
             analysis.local_writes.is_empty(),
             "local_writes should not propagate from nested blocks"
+        );
+    }
+
+    #[test]
+    fn test_ensure_receiver_propagates_local_writes() {
+        // BT-3173: [t := t + 1] ensure: [nil] — ensure:'s receiver (the
+        // protected block) runs inline in the enclosing activation, so its
+        // write to `t` must be visible at this block's own top-level
+        // analysis (previously only ifTrue:/ifFalse:/ifTrue:ifFalse:
+        // propagated local_writes out of a nested block).
+        let protected_block = Expression::Block(Block::new(
+            vec![],
+            vec![bare(Expression::Assignment {
+                target: Box::new(make_expr_id("t")),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("t")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(
+                        crate::ast::Literal::Integer(1),
+                        Span::new(9, 10),
+                    )],
+                    is_cast: false,
+                    span: Span::new(0, 10),
+                }),
+                type_annotation: None,
+                span: Span::new(0, 10),
+            })],
+            Span::new(0, 12),
+        ));
+        let handler_block = Expression::Block(Block::new(vec![], vec![], Span::new(20, 26)));
+
+        let outer_block = Block::new(
+            vec![],
+            vec![bare(Expression::MessageSend {
+                receiver: Box::new(protected_block),
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                    "ensure:",
+                    Span::new(13, 20),
+                )]),
+                arguments: vec![handler_block],
+                is_cast: false,
+                span: Span::new(0, 26),
+            })],
+            Span::new(0, 28),
+        );
+
+        let analysis = analyze_block(&outer_block);
+        assert!(
+            analysis.local_writes.contains("t"),
+            "ensure:'s protected-block write to t must propagate to the enclosing block"
+        );
+    }
+
+    #[test]
+    fn test_on_do_receiver_propagates_local_writes() {
+        // BT-3173: [t := t + 1] on: Error do: [:e | nil] — on:do:'s receiver
+        // (the try body) runs inline, same as ensure:'s.
+        let try_block = Expression::Block(Block::new(
+            vec![],
+            vec![bare(Expression::Assignment {
+                target: Box::new(make_expr_id("t")),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("t")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(
+                        crate::ast::Literal::Integer(1),
+                        Span::new(9, 10),
+                    )],
+                    is_cast: false,
+                    span: Span::new(0, 10),
+                }),
+                type_annotation: None,
+                span: Span::new(0, 10),
+            })],
+            Span::new(0, 12),
+        ));
+        // Handler block binds its own exception param `e` — it must stay a
+        // local binding of the nested block, not leak into the outer
+        // analysis's captured_reads.
+        let handler_block = Expression::Block(Block::new(
+            vec![BlockParameter::new("e", Span::new(30, 31))],
+            vec![],
+            Span::new(29, 34),
+        ));
+
+        let outer_block = Block::new(
+            vec![],
+            vec![bare(Expression::MessageSend {
+                receiver: Box::new(try_block),
+                selector: MessageSelector::Keyword(vec![
+                    crate::ast::KeywordPart::new("on:", Span::new(13, 16)),
+                    crate::ast::KeywordPart::new("do:", Span::new(25, 28)),
+                ]),
+                arguments: vec![make_expr_id("Error"), handler_block],
+                is_cast: false,
+                span: Span::new(0, 34),
+            })],
+            Span::new(0, 36),
+        );
+
+        let analysis = analyze_block(&outer_block);
+        assert!(
+            analysis.local_writes.contains("t"),
+            "on:do:'s try-body write to t must propagate to the enclosing block"
+        );
+        assert!(
+            !analysis.captured_reads.contains("e"),
+            "on:do:'s handler block param must not leak as a captured read"
+        );
+    }
+
+    #[test]
+    fn test_on_do_handler_param_write_does_not_leak_as_outer_local_write() {
+        // BT-3173 review follow-up: [nil] on: Error do: [:e | e := 1] — the
+        // handler writes its OWN exception param `e`. That write is confined
+        // to the handler's own shadowed binding, not a genuine outer-scope
+        // mutation, so it must NOT propagate into the enclosing block's
+        // local_writes (which would otherwise misclassify the enclosing
+        // block as needing mutation threading for a nonexistent outer `e`,
+        // or spuriously fold into a same-named real outer local via
+        // shadowing).
+        let try_block = Expression::Block(Block::new(vec![], vec![], Span::new(0, 6)));
+        let handler_block = Expression::Block(Block::new(
+            vec![BlockParameter::new("e", Span::new(15, 16))],
+            vec![bare(Expression::Assignment {
+                target: Box::new(make_expr_id("e")),
+                value: Box::new(Expression::Literal(
+                    crate::ast::Literal::Integer(1),
+                    Span::new(23, 24),
+                )),
+                type_annotation: None,
+                span: Span::new(18, 24),
+            })],
+            Span::new(14, 26),
+        ));
+
+        let outer_block = Block::new(
+            vec![],
+            vec![bare(Expression::MessageSend {
+                receiver: Box::new(try_block),
+                selector: MessageSelector::Keyword(vec![
+                    crate::ast::KeywordPart::new("on:", Span::new(7, 10)),
+                    crate::ast::KeywordPart::new("do:", Span::new(19, 22)),
+                ]),
+                arguments: vec![make_expr_id("Error"), handler_block],
+                is_cast: false,
+                span: Span::new(0, 26),
+            })],
+            Span::new(0, 28),
+        );
+
+        let analysis = analyze_block(&outer_block);
+        assert!(
+            !analysis.local_writes.contains("e"),
+            "on:do:'s handler writing its own param must not leak as an outer local_write"
+        );
+    }
+
+    #[test]
+    fn test_if_not_nil_propagates_local_writes() {
+        // BT-3173: x ifNotNil: [:v | t := v] — ifNotNil: was previously
+        // excluded from is_inline_conditional_selector even for this
+        // single-level (non-nested) case.
+        let handler_block = Expression::Block(Block::new(
+            vec![BlockParameter::new("v", Span::new(15, 16))],
+            vec![bare(Expression::Assignment {
+                target: Box::new(make_expr_id("t")),
+                value: Box::new(make_expr_id("v")),
+                type_annotation: None,
+                span: Span::new(18, 25),
+            })],
+            Span::new(14, 26),
+        ));
+
+        let outer_block = Block::new(
+            vec![],
+            vec![bare(Expression::MessageSend {
+                receiver: Box::new(make_expr_id("x")),
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                    "ifNotNil:",
+                    Span::new(2, 11),
+                )]),
+                arguments: vec![handler_block],
+                is_cast: false,
+                span: Span::new(0, 26),
+            })],
+            Span::new(0, 28),
+        );
+
+        let analysis = analyze_block(&outer_block);
+        assert!(
+            analysis.local_writes.contains("t"),
+            "ifNotNil:'s handler-block write to t must propagate to the enclosing block"
         );
     }
 
