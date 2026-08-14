@@ -71,6 +71,13 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // analogue of BT-2359, applied in gen_server/methods.rs).
   bt2360ClassMethodCondAssignRhsPending => false
 
+  // Pending switch for BT-3178: an Actor self-send that mutates the actor's
+  // own state field, called from inside an `ifTrue:` conditional branch
+  // (not a loop), doesn't thread the mutation back (BT-3178) — the identical
+  // self-send inside a loop, and a direct field write inside the identical
+  // conditional, both thread correctly. Discovered by BT-3176.
+  bt3178ActorSelfSendInConditionalPending => true
+
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
   fragToDoNonLastWriteOnly =>
@@ -120,6 +127,13 @@ TestCase subclass: ValueTypeMutationMatrixTest
     x := 1
     flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]
     x
+
+  // BT-3176 axis 1 / axis 3 shared fragments (outer-local only, so they run
+  // identically in every context — see mutation_corpus_value.bt for both).
+  fragNestedToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
+    sum
 
   // ════════════════════════════════════════════════════════════════════════
   //  to:do:  (construct) — BT-2308 regression cells
@@ -479,3 +493,96 @@ TestCase subclass: ValueTypeMutationMatrixTest
         ^self skip: "BT-2371: conditional as a parenthesized assignment RHS drops sibling-local threading in class-method context"
       ]
     self assert: (MutationCorpusClassMethod ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3176 axis 1 — nested loop-in-loop, outer local
+  // ════════════════════════════════════════════════════════════════════════
+  testNestedToDoNonLastReadWriteValue =>
+    self assert: self valueCorpus nestedToDoNonLastReadWrite equals: 18
+
+  testNestedToDoNonLastReadWriteActor =>
+    self assert: self actorCorpus nestedToDoNonLastReadWrite equals: 18
+
+  testNestedToDoNonLastReadWriteTestCase =>
+    self assert: self fragNestedToDoNonLastReadWrite equals: 18
+
+  testNestedToDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod nestedToDoNonLastReadWrite equals: 18
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3176 axis 1b — nested loop, class var / state field mutated only in
+  //  the OUTER loop's top-level body (the compiling counterpart of BT-3172's
+  //  rejected inner-mutates shape — see
+  //  crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs for the
+  //  ClassVarMutationLostAcrossNestedLoop compile-error regression tests).
+  // ════════════════════════════════════════════════════════════════════════
+  testNestedWhileTrueOuterOnlyStateReadWriteActor =>
+    self assert: self actorCorpus nestedWhileTrueOuterOnlyStateReadWrite equals: 3
+
+  testNestedWhileTrueOuterOnlyClassVarReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod nestedWhileTrueOuterOnlyClassVarReadWrite equals: 3
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3176 axis 2 — self-send as the mutation mechanism (not a direct
+  //  `self.field :=`), inside a loop or conditional body. See BT-3150/BT-3159.
+  // ════════════════════════════════════════════════════════════════════════
+  testSelfSendWhileTrueNonLastReadWriteActor =>
+    self assert: self actorCorpus selfSendWhileTrueNonLastReadWrite equals: 5
+
+  testSelfSendWhileTrueNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod selfSendWhileTrueNonLastReadWrite equals: 5
+
+  testSelfSendIfTrueNonLastReadWriteTrueActor =>
+    self bt3178ActorSelfSendInConditionalPending
+      ifTrue: [
+        ^self skip: "BT-3178: self-send state mutation inside ifTrue: (not a loop) doesn't thread back in Actor context"
+      ]
+    self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: true) equals: 1
+
+  testSelfSendIfTrueNonLastReadWriteFalseActor =>
+    self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: false) equals: 0
+
+  testSelfSendIfTrueNonLastReadWriteTrueClassMethod =>
+    self assert: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: true) equals: 1
+
+  testSelfSendIfTrueNonLastReadWriteFalseClassMethod =>
+    self assert: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: false) equals: 0
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3176 axis 3 — on:do:/ensure: combined with a self-send or a nested
+  //  conditional in the try body's LAST statement. See BT-3160/BT-3161.
+  //  Actor-only for now: the class-method self-send analogue and the
+  //  value-type/class-method nested-conditional analogue still fail erlc
+  //  (BT-3161 only fixed Actor context) — see mutation_corpus_actor.bt and
+  //  BT-3177.
+  // ════════════════════════════════════════════════════════════════════════
+  testOnDoSelfSendLastReadWriteActor =>
+    self assert: self actorCorpus onDoSelfSendLastReadWrite equals: 1
+
+  testEnsureNestedConditionalLastReadWriteTrueActor =>
+    self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: true) equals: 11
+
+  testEnsureNestedConditionalLastReadWriteFalseActor =>
+    self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3176 axis 4 — class-var / state-field mutation, threaded the same
+  //  way the rest of the corpus threads outer locals.
+  // ════════════════════════════════════════════════════════════════════════
+  testStateFieldToDoNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldToDoNonLastReadWrite equals: 15
+
+  testClassVarToDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod classVarToDoNonLastReadWrite equals: 15
+
+  testStateFieldIfTrueNonLastReadWriteTrueActor =>
+    self assert: (self actorCorpus stateFieldIfTrueNonLastReadWrite: true) equals: 7
+
+  testStateFieldIfTrueNonLastReadWriteFalseActor =>
+    self assert: (self actorCorpus stateFieldIfTrueNonLastReadWrite: false) equals: 0
+
+  testClassVarIfTrueNonLastReadWriteTrueClassMethod =>
+    self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: true) equals: 7
+
+  testClassVarIfTrueNonLastReadWriteFalseClassMethod =>
+    self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: false) equals: 0

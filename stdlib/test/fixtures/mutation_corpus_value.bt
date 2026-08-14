@@ -95,6 +95,21 @@ Value subclass: MutationCorpusValue
     (1 to: 5) do: [:i | sum := sum + i]
     sum
 
+  // ── nested loop-in-loop (BT-3176 axis 1) ─────────────────────────────────────
+  // Loop nested inside another loop, both threading the SAME outer local — the
+  // shape BT-3172 found silently dropped a class-var mutation across the outer
+  // Letrec's own tail call. Here the mutated value is an outer local (not a
+  // class var), which does thread correctly at every loop-nesting depth; a
+  // direct class-var mutation nested two loops deep is a deliberate compile
+  // error (`CodeGenError::ClassVarMutationLostAcrossNestedLoop`, see
+  // crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs) and so
+  // cannot be expressed as a runnable corpus fragment — see
+  // nestedWhileTrueOuterOnlyReadWrite below for the compiling class-var variant.
+  nestedToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
+    sum
+
   // ── construct-equivalence summing accumulators (BT-2345) ────────────────────
   // timesRepeat: / whileTrue: variants that SUM 1..5 (the count/n fragments
   // above only count iterations). Carry their own index so they are
@@ -258,3 +273,11 @@ Value subclass: MutationCorpusValue
       ]
       ifFalse: [0]
     x
+
+// ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
+// NOT present here: a nested conditional as the LAST statement of an
+// `ensure:` try body (BT-3161 Flavor B / E5's shape) still fails erlc with
+// "unbound variable 'State'" in value-type context — BT-3161 only fixed the
+// Actor-context analogue. See mutation_corpus_actor.bt's
+// `ensureNestedConditionalLastReadWrite` for the working fragment and
+// BT-3177 for the value-type/class-method gap this discovery filed.
