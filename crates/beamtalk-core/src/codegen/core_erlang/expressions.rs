@@ -799,7 +799,13 @@ impl CoreErlangGenerator {
     /// the caller's own `next_self_var()`/`next_state_var()` call — not
     /// re-derived here, so this checks what the generator actually produced,
     /// not a recomputation of it (ADR 0111 §Verifier honesty).
-    fn check_simple_field_bind_invariant(
+    ///
+    /// `pub(super)` (BT-3180): also reused by `dispatch_codegen.rs`'s
+    /// `generate_field_assignment_open` plain-`State` branch, the sibling
+    /// "open" (non-last-position) mint site this function's own BT-3139
+    /// scope note left uncovered — same check, same reasoning, no reason to
+    /// hand-roll a second copy (CLAUDE.md's no-duplicate-implementations rule).
+    pub(super) fn check_simple_field_bind_invariant(
         &mut self,
         prefix: super::threaded_ir::VersionPrefix,
         source_version: usize,
