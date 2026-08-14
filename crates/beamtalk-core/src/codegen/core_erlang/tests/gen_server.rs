@@ -4494,6 +4494,93 @@ fn test_class_var_mutation_before_loop_still_emits_shadow_write() {
 }
 
 #[test]
+fn test_nested_letrec_direct_field_mutation_in_inner_loop_is_compile_error() {
+    // BT-3172 (BT-3168 follow-up): a `Letrec` loop nested inside another
+    // `Letrec` loop, where the INNER loop directly mutates a class var, but
+    // the OUTER loop's own top-level statements (`j := 0`, the inner
+    // `whileTrue:` send, `i := i + 1`) have no bare class-var mutation of
+    // their own — so `loop_body_threads_class_vars` correctly returns
+    // `false` for the outer loop (per its own narrow, top-level-only
+    // design), meaning the outer loop's fun/tail call never threads
+    // `ClassVars` at all. Before this fix, this compiled successfully but
+    // silently discarded every inner-loop mutation (confirmed empirically:
+    // both the method's own return and a later fresh read of the class var
+    // returned `0` instead of `9` for `nestedBump: 3`). Now rejected at
+    // compile time instead — see
+    // `CodeGenError::ClassVarMutationLostAcrossNestedLoop`'s doc comment.
+    let src = "Object subclass: NestedLoopShadowCounter\n  classState: runs = 0\n\n  class nestedBump: n =>\n    i := 0\n    [i < n] whileTrue: [\n      j := 0\n      [j < n] whileTrue: [\n        self.runs := self.runs + 1\n        j := j + 1\n      ]\n      i := i + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedloopshadowcounter").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "class variable 'runs'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a class-var write inside a \
+             loop nested inside another loop. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_nested_letrec_self_send_mutation_in_inner_loop_is_compile_error() {
+    // BT-3172: the same gap via a same-class self-send (BT-3150's shape)
+    // inside the inner loop instead of a direct field write — the inner
+    // loop's own `loop_body_threads_class_vars` matches `is_class_method_self_send`,
+    // not `is_class_var_assignment`, but the outer loop's discard is
+    // identical either way.
+    let src = "Object subclass: NestedLoopSelfSendCounter\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedBumpViaSelfSend: n =>\n    i := 0\n    [i < n] whileTrue: [\n      j := 0\n      [j < n] whileTrue: [\n        self bump\n        j := j + 1\n      ]\n      i := i + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedloopselfsendcounter").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "'self bump'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a self-send inside a loop \
+             nested inside another loop. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_nested_timesrepeat_class_var_mutation_in_inner_loop_is_compile_error() {
+    // BT-3172: the same gap via `timesRepeat:`/`to:do:` nesting, not just
+    // `whileTrue:` — `nested_letrec_loop_body` must recognize all four
+    // Letrec-shaped loop selectors, not just `whileTrue:`/`whileFalse:`. The
+    // outer body needs its own co-occurring local-variable mutation
+    // (`seen := seen + 1`) so the OUTER `timesRepeat:` itself reaches
+    // `generate_threaded_loop_body` (mirroring `bumpTimes:` in
+    // `loop_class_var_mutation.bt`) instead of being caught earlier, for an
+    // unrelated reason, by the generic `FieldAssignmentInUnsupportedBlock`
+    // block-validator guard that a bare-class-var-only body (no co-occurring
+    // local mutation) hits regardless of nesting.
+    let src = "Object subclass: NestedCountedLoopCounter\n  classState: runs = 0\n\n  class nestedBumpTimes: n =>\n    seen := 0\n    n timesRepeat: [\n      n timesRepeat: [\n        self.runs := self.runs + 1\n      ]\n      seen := seen + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedcountedloopcounter").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { .. })
+        ),
+        "Expected ClassVarMutationLostAcrossNestedLoop for a class-var write inside a \
+         timesRepeat: nested inside another timesRepeat:. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_instance_field_mutation_does_not_emit_shadow_write() {
     // ADR 0110: the shadow write is scoped to class-var mutations in class
     // methods — ordinary actor state threading must not gain a pdict write.
@@ -7279,4 +7366,194 @@ fn test_self_extension_not_registered_via_beamtalk_extensions() {
         "self-extension (Counter >> in the same module as Counter) must NOT emit \
          beamtalk_extensions:register. Got:\n{code}"
     );
+}
+
+#[test]
+fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
+    // BT-3172 audit (acceptance criteria bullet 3): the same silent-loss gap
+    // reachable via `Foldl*`-in-`Foldl*` nesting (`do:`-in-`do:`), not just
+    // `Letrec`-in-`Letrec`. Confirmed empirically to be WORSE than silent
+    // loss before this fix: the outer `do:`'s own `plan.threads_class_vars`
+    // comes back `true` (Foldl's gate is `body_analysis.has_self_sends`,
+    // which — unlike `loop_body_threads_class_vars` — recurses into the
+    // nested `do:`'s own block and finds `self bump`), so the outer fold
+    // expects to build its own `{ClassVars, StateAcc}` accumulator wrap —
+    // but the inner `do:`'s own `next_class_var()` mint (from
+    // `ThreadingPlan::foldl_call_doc`) permanently advances the generator's
+    // single, unscoped class-var-name counter without that name ever being
+    // surfaced back to the outer scope, so the outer wrap references a name
+    // that was only ever bound inside the inner `do:`'s own (already
+    // exited) fold closure — an `erlc` "unbound variable" compile crash,
+    // not silent data loss, but broken all the same. Rejected at compile
+    // time instead — see `CodeGenError::ClassVarMutationLostAcrossNestedLoop`'s
+    // doc comment.
+    let src = "Value subclass: NestedFoldClassVarMutation\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            self bump\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedfoldclassvarmutation").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "'self bump'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a self-send inside a do: \
+             nested inside another do:. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
+    // BT-3172 review follow-up: a same-class self-send buried inside an
+    // `ifTrue:` conditional (NOT a bare top-level statement) within an
+    // inner `whileTrue:` that's itself nested inside an outer `whileTrue:`
+    // must NOT be rejected. `Letrec`'s own real `threads_class_vars` gate
+    // (`loop_body_threads_class_vars`) is narrowly top-level-only by
+    // design — recursing into a conditional buried inside a `Letrec` body
+    // is exactly the shape that predicate was narrowed to exclude (the
+    // `class_var_subexpr.bt` `tickInLoopConditional` regression documented
+    // on `loop_body_threads_class_vars` itself), and it's also the shape
+    // `class_var_subexpr_test.bt`'s
+    // `testTickInLoopConditionalCompilesAndRuns` already pins as
+    // accepted, silently-non-threading behavior at a single loop level
+    // (BT-2308, out of BT-3172's scope). The inner loop was never going to
+    // attempt `ClassVars` threading for this self-send in the first place,
+    // so nothing is "lost" here for the outer loop to fail to recover —
+    // rejecting only the nested-loop variant of this exact same shape
+    // would be an inconsistent new restriction. Mirrors
+    // `tickInLoopConditional` one loop level deeper.
+    let src = "Object subclass: NestedCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class run: n =>\n    j := 0\n    [j < n] whileTrue: [\n      i := 0\n      [i < n] whileTrue: [\n        (i >= 0) ifTrue: [self bump]\n        i := i + 1\n      ]\n      j := j + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedcondselfsend").with_workspace_mode(true),
+    );
+    result.unwrap_or_else(|e| {
+        panic!(
+            "A self-send buried inside a conditional (not a bare top-level statement) \
+             inside a Letrec loop nested inside another Letrec loop must not be rejected \
+             by ClassVarMutationLostAcrossNestedLoop — Letrec's own real threading gate \
+             never attempts to thread it in the first place. Got: {e:?}"
+        )
+    });
+}
+
+#[test]
+fn test_nested_foldl_self_send_buried_in_conditional_is_compile_error() {
+    // BT-3172 review follow-up (contrast case): the same "self-send buried
+    // in a conditional, not a bare top-level statement" shape as the
+    // Letrec test above, but inside a `Foldl*` (`do:`) body instead —
+    // `Foldl*`'s own real `threads_class_vars` gate
+    // (`!Actor && in_class_method() && body_analysis.has_self_sends`) IS
+    // genuinely recursive (unlike Letrec's), so this shape must still be
+    // rejected when nested inside another loop.
+    let src = "Value subclass: NestedFoldCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            (y >= 0) ifTrue: [self bump]\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedfoldcondselfsend").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { .. })
+        ),
+        "Expected ClassVarMutationLostAcrossNestedLoop for a self-send buried in a \
+         conditional inside a do: nested inside another do: — Foldl*'s own real \
+         threading gate is recursive, unlike Letrec's. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
+    // BT-3172 review follow-up: `nested_loop_or_fold_body` must also cover
+    // the predicate-based `Foldl*` shapes (`detect:`/`count:`/`takeWhile:`/
+    // `dropWhile:`/`partition:`/`groupBy:`), not just `do:`/`collect:`/
+    // `select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/`inject:into:` —
+    // `ThreadingPlan::new_impl`'s `threads_class_vars` gate
+    // (`!Actor && in_class_method() && body_analysis.has_self_sends`)
+    // applies uniformly to every non-`Letrec` `BodyKind`, so a class-var
+    // self-send nested inside `detect:`, itself nested inside another
+    // `detect:`, is exactly as vulnerable to the silent-loss/`erlc`-crash
+    // bug as the `do:`-in-`do:` shape pinned above.
+    let src = "Value subclass: NestedDetectClassVarMutation\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDetect: aList =>\n    outerSeen := 0\n    aList\n      detect: [:x |\n        total := 0\n        aList\n          detect: [:y |\n            self bump\n            total := total + 1\n            true\n          ]\n        outerSeen := outerSeen + 1\n        true\n      ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nesteddetectclassvarmutation").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "'self bump'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a self-send inside a detect: \
+             nested inside another detect:. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_mixed_letrec_nested_in_foldl_is_compile_error() {
+    // BT-3172 audit (acceptance criteria bullet 3): mixed nesting — a
+    // `Letrec` (`whileTrue:`) loop with a direct class-var field write,
+    // nested inside a `Foldl*` (`do:`) body — hits the same gap. The inner
+    // `whileTrue:`'s own `ThreadingPlan::threads_class_vars` (Letrec's
+    // narrow, top-level-only `loop_body_threads_class_vars` gate) is `true`
+    // for its own bare `self.runs := self.runs + 1`, but nothing in the
+    // outer `Foldl*` machinery (which only knows how to unpack its OWN
+    // `{ClassVars, StateAcc}` accumulator shape, not a nested `Letrec`
+    // loop's extra tail-call `ClassVars` fun parameter) surfaces that
+    // mutation back out.
+    let src = "Object subclass: MixedLetrecFoldCounter\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class mixedBumpUpTo: n =>\n    seen := 0\n    #(1) do: [:x |\n      i := 0\n      [i < n] whileTrue: [\n        self.runs := self.runs + 1\n        i := i + 1\n      ]\n      seen := seen + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@mixedletrecfoldcounter").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "class variable 'runs'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a whileTrue: (with a direct \
+             class-var write) nested inside a do:. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_mixed_foldl_nested_in_letrec_is_compile_error() {
+    // BT-3172 audit (acceptance criteria bullet 3): the reverse mixed
+    // nesting — a `Foldl*` (`do:`) body with a direct class-var field
+    // write, nested inside a `Letrec` (`whileTrue:`) loop. The inner `do:`
+    // never reaches Foldl's own `ClassVars` threading at all here (a bare
+    // field write inside a `Foldl*` body is unconditionally rejected by
+    // `reject_class_var_field_assignment` regardless of nesting — see
+    // `nested_loop_lost_class_var_mutation`'s doc comment), so this pins
+    // that the OUTER `Letrec`'s own top-level dispatch catches the shape
+    // before ever generating the inner `do:` at all.
+    let src = "Value subclass: MixedFoldLetrecCounter\n  classState: runs = 0\n\n  class mixedBumpAll: aList =>\n    outerSeen := 0\n    [outerSeen < 2] whileTrue: [\n      aList do: [:x |\n        self.runs := self.runs + 1\n      ]\n      outerSeen := outerSeen + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@mixedfoldletreccounter").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "class variable 'runs'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a do: (with a direct class-var \
+             write) nested inside a whileTrue:. Got: {other:?}"
+        ),
+    }
 }

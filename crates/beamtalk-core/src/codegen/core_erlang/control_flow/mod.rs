@@ -1416,6 +1416,22 @@ pub(super) enum BodyKind {
     FoldlSort,
 }
 
+/// BT-3172: which family a [`Self::nested_loop_or_fold_body`] match belongs
+/// to — `ThreadingPlan::threads_class_vars` uses a genuinely different
+/// formula for each (see that field's doc comment), so
+/// [`Self::nested_loop_lost_class_var_mutation`] must apply the matching
+/// one rather than a single one-size-fits-all check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NestedLoopShape {
+    /// `whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:` — the
+    /// `BodyKind::Letrec` shapes, gated by the narrow, top-level-only
+    /// `loop_body_threads_class_vars`.
+    Letrec,
+    /// `do:`/`collect:`/`select:`/... — the `BodyKind::Foldl*` shapes,
+    /// gated by the recursive, Actor-excluded `has_self_sends` formula.
+    Foldl,
+}
+
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
 
 /// Describes the loop-type-specific structure of a counted (`letrec`-based) loop.
@@ -1574,36 +1590,206 @@ impl CoreErlangGenerator {
     /// tuple-shape decision can never independently drift out of sync
     /// (CLAUDE.md's no-duplicate-implementations rule).
     pub(super) fn loop_body_threads_class_vars(&self, body: &crate::ast::Block) -> bool {
+        self.find_class_var_mutating_stmt(body).is_some()
+    }
+
+    /// Shared predicate behind [`Self::loop_body_threads_class_vars`] and
+    /// [`Self::nested_loop_lost_class_var_mutation`] (BT-3172) — returns the
+    /// first top-level statement of `body` that is a bare class-var
+    /// assignment or class-method self-send, or `None` if there isn't one.
+    ///
+    /// Deliberately narrower than `block_analysis::analyze_block`'s own
+    /// (recursive) `field_writes`/`has_self_sends` — those also count a
+    /// class-var write or self-send NESTED inside a conditional, a binary
+    /// op, or any other sub-expression position, which is exactly right
+    /// for THEIR job (deciding whether the body needs `StateAcc` fallback
+    /// at all) but wrong for this one: `generate_threaded_loop_body_inner`
+    /// only ever threads `ClassVars` through the loop's tail call for a
+    /// BARE, top-level class-var-assignment or class-method-self-send
+    /// STATEMENT (the two shapes it has real Bind-construction branches
+    /// for) — never for one buried inside a larger expression, whose own
+    /// `ClassVarsN` rebind is scoped to that expression's own nested
+    /// `let`, not threaded out to the loop body's own statement sequence.
+    /// Confirmed by a real regression while validating this issue: a
+    /// pre-existing, previously-compiling fixture
+    /// (`class_var_subexpr.bt`'s `tickInLoopConditional`, a self-send
+    /// nested inside a `to:do:` body's `ifTrue:` *condition*) started
+    /// emitting `unbound variable 'ClassVars1'` once this predicate used
+    /// the recursive analysis — the self-send's own internally-minted
+    /// rebind was correctly scoped to its own conditional's nested `let`,
+    /// but this predicate's resulting extra loop-level `ClassVars` fun
+    /// parameter/tail-call argument then referenced that same
+    /// already-out-of-scope name.
+    fn find_class_var_mutating_stmt<'a>(
+        &self,
+        body: &'a crate::ast::Block,
+    ) -> Option<&'a Expression> {
         if !self.in_class_method() {
-            return false;
+            return None;
         }
-        // Deliberately narrower than `block_analysis::analyze_block`'s own
-        // (recursive) `field_writes`/`has_self_sends` — those also count a
-        // class-var write or self-send NESTED inside a conditional, a binary
-        // op, or any other sub-expression position, which is exactly right
-        // for THEIR job (deciding whether the body needs `StateAcc` fallback
-        // at all) but wrong for this one: `generate_threaded_loop_body_inner`
-        // only ever threads `ClassVars` through the loop's tail call for a
-        // BARE, top-level class-var-assignment or class-method-self-send
-        // STATEMENT (the two shapes it has real Bind-construction branches
-        // for) — never for one buried inside a larger expression, whose own
-        // `ClassVarsN` rebind is scoped to that expression's own nested
-        // `let`, not threaded out to the loop body's own statement sequence.
-        // Confirmed by a real regression while validating this issue: a
-        // pre-existing, previously-compiling fixture
-        // (`class_var_subexpr.bt`'s `tickInLoopConditional`, a self-send
-        // nested inside a `to:do:` body's `ifTrue:` *condition*) started
-        // emitting `unbound variable 'ClassVars1'` once this predicate used
-        // the recursive analysis — the self-send's own internally-minted
-        // rebind was correctly scoped to its own conditional's nested `let`,
-        // but this predicate's resulting extra loop-level `ClassVars` fun
-        // parameter/tail-call argument then referenced that same
-        // already-out-of-scope name.
         let filtered_body = super::util::collect_body_exprs(&body.body);
-        filtered_body.iter().any(|expr| {
+        filtered_body.into_iter().find(|expr| {
             (Self::is_field_assignment(expr) && self.is_class_var_assignment(expr))
                 || self.is_class_method_self_send(expr)
         })
+    }
+
+    /// BT-3172: if `expr` is itself a nested `Letrec`- or `Foldl*`-shaped
+    /// loop (per [`Self::nested_loop_or_fold_body`]) whose own body would
+    /// thread a `ClassVars` mutation through its own recursive tail call or
+    /// fold accumulator, returns a short description of that mutation for
+    /// use in [`CodeGenError::ClassVarMutationLostAcrossNestedLoop`]'s
+    /// message. Returns `None` for anything else, including a nested
+    /// loop/fold whose own body has no class-var mutation to lose in the
+    /// first place.
+    ///
+    /// Two independent triggers, matching each shape's own real threading
+    /// gate:
+    /// * [`Self::loop_body_threads_class_vars`] — a BARE, top-level
+    ///   class-var field write or class-method self-send (the `Letrec`
+    ///   gate, `ThreadingPlan::threads_class_vars`'s `allow_direct_params`
+    ///   branch).
+    /// * `block_analysis::analyze_block(body).has_self_sends` — ANY
+    ///   same-class self-send anywhere in the body, however deeply nested
+    ///   in a conditional or another block (the `Foldl*` gate, that same
+    ///   field's `else` branch) — deliberately recursive here, unlike the
+    ///   first trigger, because that IS how `Foldl*`'s own
+    ///   `ThreadingPlan::new_impl` decides `threads_class_vars`. A bare
+    ///   class-var field write inside a `Foldl*` body needs no matching
+    ///   trigger here: `generate_field_assignment_open` never threads one
+    ///   regardless of nesting (`loop_threads_class_vars` stays scoped to
+    ///   `BodyKind::Letrec`), so it is already unconditionally rejected by
+    ///   `reject_class_var_field_assignment` at any depth.
+    ///
+    /// This is a detection-only predicate, deliberately separate from
+    /// `ThreadingPlan::threads_class_vars`, which stays scoped to the OUTER
+    /// body's own top-level statements (see that field's doc comment)
+    /// rather than being extended to also thread the inner construct's
+    /// `ClassVars` value through — no code path currently unpacks a nested
+    /// loop/fold's `ClassVars` tuple element back into an enclosing body
+    /// (confirmed empirically for the `Foldl*`-in-`Foldl*` shape: the
+    /// nested fold's own `next_class_var()` mint permanently advances the
+    /// generator's single, unscoped class-var-name counter even though the
+    /// resulting name is never surfaced to the enclosing body, producing an
+    /// `erlc` "unbound variable" compile crash rather than a clean
+    /// diagnostic) — so this predicate exists purely to reject the shape,
+    /// not to make it work.
+    pub(super) fn nested_loop_lost_class_var_mutation(&self, expr: &Expression) -> Option<String> {
+        let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
+        if let Some(mutating_stmt) = self.find_class_var_mutating_stmt(body) {
+            if Self::is_field_assignment(mutating_stmt)
+                && self.is_class_var_assignment(mutating_stmt)
+            {
+                if let Expression::Assignment { target, .. } = mutating_stmt {
+                    if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                        return Some(format!("class variable '{}'", field.name));
+                    }
+                }
+            } else if let Expression::MessageSend { selector, .. } = mutating_stmt {
+                return Some(format!("'self {}'", selector.name()));
+            }
+        }
+        // BT-3172 review: the recursive self-send fallback must match
+        // `ThreadingPlan::new_impl`'s OWN per-shape gate exactly, not apply
+        // uniformly to both shapes. `Letrec`'s real gate
+        // (`loop_body_threads_class_vars`, already checked above) is
+        // deliberately top-level-only — recursing into a conditional
+        // buried inside a `Letrec` body is EXACTLY the shape that predicate
+        // was narrowed to exclude (the `class_var_subexpr.bt`
+        // `tickInLoopConditional` regression), and it's also the shape
+        // `class_var_subexpr_test.bt`'s `testTickInLoopConditionalCompilesAndRuns`
+        // pins as already-accepted, out-of-scope, silently-non-threading
+        // behavior (BT-2308) at a single loop level — rejecting only the
+        // nested-loop variant of that exact same shape would be an
+        // inconsistent, surprising new restriction this predicate has no
+        // business introducing. Only `Foldl*`'s own real gate
+        // (`!Actor && in_class_method() && body_analysis.has_self_sends`)
+        // is genuinely recursive, so the fallback below applies only when
+        // `shape` is `Foldl` — matching `context` too.
+        if matches!(shape, NestedLoopShape::Foldl)
+            && !matches!(self.context, CodeGenContext::Actor)
+            && self.in_class_method()
+        {
+            let analysis = block_analysis::analyze_block(body);
+            // `self_send_selectors` is a `HashSet` (default `RandomState`) —
+            // pick the lexicographically-smallest selector so the
+            // diagnostic text is reproducible across runs for identical
+            // source, rather than depending on hash-iteration order. Which
+            // selector is named doesn't affect the accept/reject decision,
+            // only the message.
+            if let Some(selector) = analysis.self_send_selectors.iter().min() {
+                return Some(format!("'self {selector}'"));
+            }
+        }
+        None
+    }
+
+    /// Extracts the body block of `expr`, and which family it belongs to,
+    /// if it is a nested loop/fold send — the `BodyKind::Letrec` shapes
+    /// (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`, see
+    /// this module's `//!` doc comment) or the `BodyKind::Foldl*` shapes
+    /// (`do:`/`collect:`/`select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/
+    /// `inject:into:`/`detect:`/`count:`/`takeWhile:`/`dropWhile:`/
+    /// `partition:`/`groupBy:`). Unlike the analogous local-variable
+    /// cross-scope-mutation analysis in
+    /// [`Self::list_op_needs_stateacc_fallback`]/
+    /// [`Self::collect_list_op_cross_scope_mutations`] (which safely omit
+    /// the predicate-based shapes — a narrower, unrelated optimization
+    /// concern), this list must cover every `Foldl*` `BodyKind`: per
+    /// `ThreadingPlan::new_impl`'s `else` branch (~line 607), ALL of them —
+    /// not just `do:`/`collect:`/etc. — share the exact same
+    /// `threads_class_vars` gate (`!Actor && in_class_method() &&
+    /// body_analysis.has_self_sends`) and the same `{ClassVars, tail}` wrap,
+    /// so a class-var self-send nested inside e.g. `detect:` is exactly as
+    /// vulnerable to this predicate's silent-loss/`erlc`-crash bug as one
+    /// nested inside `do:`. `detect:ifNone:` is intentionally excluded: its
+    /// second (`ifNone:`) block argument is a separate, not-yet-analyzed
+    /// risk surface this predicate doesn't attempt to cover. The returned
+    /// [`NestedLoopShape`] tells [`Self::nested_loop_lost_class_var_mutation`]
+    /// which of `ThreadingPlan`'s two `threads_class_vars` gates applies.
+    fn nested_loop_or_fold_body(
+        expr: &Expression,
+    ) -> Option<(&crate::ast::Block, NestedLoopShape)> {
+        use crate::ast::MessageSelector;
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr.unwrap_parens()
+        else {
+            return None;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        match sel.as_str() {
+            "whileTrue:" | "whileFalse:" => match arguments.first() {
+                Some(Expression::Block(block)) => Some((block, NestedLoopShape::Letrec)),
+                _ => None,
+            },
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
+            | "detect:" | "count:" | "takeWhile:" | "dropWhile:" | "partition:" | "groupBy:" => {
+                match arguments.first() {
+                    Some(Expression::Block(block)) => Some((block, NestedLoopShape::Foldl)),
+                    _ => None,
+                }
+            }
+            "timesRepeat:" => match arguments.last() {
+                Some(Expression::Block(block)) => Some((block, NestedLoopShape::Letrec)),
+                _ => None,
+            },
+            "to:do:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => Some((block, NestedLoopShape::Letrec)),
+                _ => None,
+            },
+            "inject:into:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => Some((block, NestedLoopShape::Foldl)),
+                _ => None,
+            },
+            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
+                Expression::Block(block) => Some((block, NestedLoopShape::Letrec)),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
@@ -1733,6 +1919,42 @@ impl CoreErlangGenerator {
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
+
+            // BT-3172: `expr` is a top-level statement of THIS loop/fold's
+            // own body — if it's itself a nested loop/fold whose own body
+            // threads a `ClassVars` mutation, no downstream branch (this
+            // function's own field-assignment/self-send/tier2/local-var/
+            // destructure/control-flow-has-mutations dispatch above
+            // `emit_non_assign_expr`'s generic fallback, direct-params, the
+            // `is_last`/`element(2)` unpacks, or `push_discarded_stmt`'s
+            // open-scope tracking) unpacks that nested construct's
+            // `ClassVars` value, so the mutation would be silently lost or
+            // (for a nested `Foldl*`, confirmed empirically) crash `erlc`
+            // with an unbound-variable error — regardless of which branch
+            // below would otherwise handle `expr`, `is_last`, or
+            // `plan.threads_class_vars`. Checked once here, at the very top
+            // of the per-statement loop (ahead of every dispatch branch,
+            // not just `emit_non_assign_expr`'s fallback) because a nested
+            // `do:`/`collect:`/etc. statement is classified
+            // `DispatchKind::ControlFlow` (`is_state_threading_keyword_selector`
+            // includes the `Foldl*` selectors, not just conditionals) and so
+            // is actually intercepted by the `control_flow_has_mutations`
+            // branch below, never reaching `emit_non_assign_expr` at all —
+            // confirmed empirically when this check lived only there and
+            // silently failed to catch the `Foldl*`-in-`Foldl*` repro.
+            // Reject rather than emit code that's silently wrong or
+            // malformed — see `CodeGenError::ClassVarMutationLostAcrossNestedLoop`'s
+            // doc comment.
+            if let Some(mutation) = self.nested_loop_lost_class_var_mutation(expr) {
+                let location = self.span_to_line(expr.span()).map_or_else(
+                    || format!("offset {}", expr.span().start()),
+                    |line| format!("line {line}"),
+                );
+                return Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop {
+                    mutation,
+                    location,
+                });
+            }
 
             // Letrec body uses a space separator between statements.
             if i > 0 && matches!(kind, BodyKind::Letrec) {
@@ -2934,6 +3156,13 @@ impl CoreErlangGenerator {
         pred_var: Option<&String>,
         plan: &ThreadingPlan,
     ) -> Result<()> {
+        // BT-3172: the nested-loop/fold `ClassVars`-loss check runs once, at
+        // the top of `generate_threaded_loop_body_inner`'s per-statement
+        // loop — ahead of every dispatch branch, not just this function's
+        // own fallback — since a nested `do:`/`collect:`/etc. statement is
+        // classified `DispatchKind::ControlFlow` and is actually intercepted
+        // by that loop's `control_flow_has_mutations` branch before ever
+        // reaching here. See that check's own comment for why.
         match kind {
             BodyKind::Letrec => {
                 if self.in_direct_params_loop {
