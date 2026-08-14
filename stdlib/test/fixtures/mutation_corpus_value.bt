@@ -107,11 +107,7 @@ Value subclass: MutationCorpusValue
   // nestedWhileTrueOuterOnlyReadWrite below for the compiling class-var variant.
   nestedToDoNonLastReadWrite =>
     sum := 0
-    1 to: 3 do: [:i |
-      1 to: 3 do: [:j |
-        sum := sum + j
-      ]
-    ]
+    1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
 
   // ── construct-equivalence summing accumulators (BT-2345) ────────────────────
@@ -278,10 +274,10 @@ Value subclass: MutationCorpusValue
       ifFalse: [0]
     x
 
-  // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
-  // NOT present here: a nested conditional as the LAST statement of an
-  // `ensure:` try body (BT-3161 Flavor B / E5's shape) still fails erlc with
-  // "unbound variable 'State'" in value-type context — BT-3161 only fixed the
-  // Actor-context analogue. See mutation_corpus_actor.bt's
-  // `ensureNestedConditionalLastReadWrite` for the working fragment and
-  // BT-3177 for the value-type/class-method gap this discovery filed.
+// ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
+// NOT present here: a nested conditional as the LAST statement of an
+// `ensure:` try body (BT-3161 Flavor B / E5's shape) still fails erlc with
+// "unbound variable 'State'" in value-type context — BT-3161 only fixed the
+// Actor-context analogue. See mutation_corpus_actor.bt's
+// `ensureNestedConditionalLastReadWrite` for the working fragment and
+// BT-3177 for the value-type/class-method gap this discovery filed.

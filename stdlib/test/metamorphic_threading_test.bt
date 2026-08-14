@@ -143,11 +143,7 @@ TestCase subclass: MetamorphicThreadingTest
   // identically in every context — see mutation_corpus_value.bt for both).
   fragNestedToDoNonLastReadWrite =>
     sum := 0
-    1 to: 3 do: [:i |
-      1 to: 3 do: [:j |
-        sum := sum + j
-      ]
-    ]
+    1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
 
   // ════════════════════════════════════════════════════════════════════════

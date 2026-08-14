@@ -92,11 +92,7 @@ Actor subclass: MutationCorpusActor
   // not here).
   nestedToDoNonLastReadWrite =>
     sum := 0
-    1 to: 3 do: [:i |
-      1 to: 3 do: [:j |
-        sum := sum + j
-      ]
-    ]
+    1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
 
   // A nested loop where only the OUTER loop's top-level body mutates the actor
@@ -313,10 +309,11 @@ Actor subclass: MutationCorpusActor
   // mutation_corpus_class_method.bt's classState comment).
   selfSendIfTrueNonLastReadWrite: flag =>
     seen := 0
-    flag ifTrue: [
-      self bump
-      seen := seen + 1
-    ]
+    flag
+      ifTrue: [
+        self bump
+        seen := seen + 1
+      ]
     self.total
 
   // ── on:do: + self-send (BT-3176 axis 3) ──────────────────────────────────────
@@ -340,16 +337,19 @@ Actor subclass: MutationCorpusActor
   // shape the actor corpus explicitly excluded until now.
   stateFieldToDoNonLastReadWrite =>
     seen := 0
-    1 to: 5 do: [:i |
-      self.total := self.total + i
-      seen := seen + 1
-    ]
+    1
+      to: 5
+      do: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
     self.total
 
   stateFieldIfTrueNonLastReadWrite: flag =>
     seen := 0
-    flag ifTrue: [
-      self.total := self.total + 7
-      seen := seen + 1
-    ]
+    flag
+      ifTrue: [
+        self.total := self.total + 7
+        seen := seen + 1
+      ]
     self.total

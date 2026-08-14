@@ -98,11 +98,7 @@ Object subclass: MutationCorpusClassMethod
   // not here).
   class nestedToDoNonLastReadWrite =>
     sum := 0
-    1 to: 3 do: [:i |
-      1 to: 3 do: [:j |
-        sum := sum + j
-      ]
-    ]
+    1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
 
   // A nested loop where only the OUTER loop's top-level body mutates the class
@@ -295,8 +291,7 @@ Object subclass: MutationCorpusClassMethod
   // which mutates the class var, inside a loop/conditional body — not a direct
   // `self.field :=`. See BT-3159 (class-method conditional + self-send) and
   // BT-3150 (loop + self-send, actor context) for the bugs this generalizes.
-  class bump =>
-    self.runs := self.runs + 1
+  class bump => self.runs := self.runs + 1
 
   class selfSendWhileTrueNonLastReadWrite =>
     self.runs := 0
@@ -315,10 +310,11 @@ Object subclass: MutationCorpusClassMethod
   class selfSendIfTrueNonLastReadWrite: flag =>
     self.runs := 0
     seen := 0
-    flag ifTrue: [
-      self bump
-      seen := seen + 1
-    ]
+    flag
+      ifTrue: [
+        self bump
+        seen := seen + 1
+      ]
     self.runs
 
   // ── on:do: + self-send (BT-3176 axis 3) ──────────────────────────────────────
@@ -336,17 +332,20 @@ Object subclass: MutationCorpusClassMethod
   class classVarToDoNonLastReadWrite =>
     self.runs := 0
     seen := 0
-    1 to: 5 do: [:i |
-      self.runs := self.runs + i
-      seen := seen + 1
-    ]
+    1
+      to: 5
+      do: [:i |
+        self.runs := self.runs + i
+        seen := seen + 1
+      ]
     self.runs
 
   class classVarIfTrueNonLastReadWrite: flag =>
     self.runs := 0
     seen := 0
-    flag ifTrue: [
-      self.runs := self.runs + 7
-      seen := seen + 1
-    ]
+    flag
+      ifTrue: [
+        self.runs := self.runs + 7
+        seen := seen + 1
+      ]
     self.runs
