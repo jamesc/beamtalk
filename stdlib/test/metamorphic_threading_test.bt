@@ -51,6 +51,20 @@
 // jointly complete because they share one fragment corpus. The truly arbitrary
 // user-method-shape case (uniform breakage in a method nobody enumerated) stays
 // out of scope and is deferred to the fuzzing item.
+//
+// BT-3176 narrowed this gap along four dimensions the corpus previously
+// missed entirely (every ThreadedIr-migration bug found after BT-3112 landed
+// lived in one of them): nested loop-in-loop threading an outer local
+// (`nestedToDoNonLastReadWrite`), a nested loop where only the OUTER loop's
+// top-level body mutates a class var/state field (`nestedWhileTrueOuterOnly*`
+// — the direct-inner-mutation variant stays a deliberate compile error, see
+// crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs), a
+// same-class self-send as the mutation mechanism inside a loop/conditional
+// (`selfSend*`), on:do:/ensure: whose try body's last statement is a
+// self-send or a nested mutation-carrying conditional (`onDoSelfSendLast*`,
+// `ensureNestedConditionalLast*`), and direct class-var/state-field mutation
+// threaded the same way outer locals are (`stateField*`/`classVar*`). The
+// remaining gap is still the truly arbitrary user-method-shape case above.
 // ────────────────────────────────────────────────────────────────────────────
 //
 // Gating: the matrix test gates a small number of cells behind known-open bugs.
@@ -123,6 +137,17 @@ TestCase subclass: MetamorphicThreadingTest
         sum := sum + i
         i := i + 1
       ]
+    sum
+
+  // BT-3176 axis 1 / axis 3 shared fragments (outer-local only, so they run
+  // identically in every context — see mutation_corpus_value.bt for both).
+  fragNestedToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 3 do: [:i |
+      1 to: 3 do: [:j |
+        sum := sum + j
+      ]
+    ]
     sum
 
   // ════════════════════════════════════════════════════════════════════════
@@ -279,6 +304,18 @@ TestCase subclass: MetamorphicThreadingTest
       ifFalse: [
         self assert: (MutationCorpusClassMethod ifTrueIfFalseAssignRhsReadWrite: true) equals: ref
       ]
+
+  // ── nested loop-in-loop (BT-3176 axis 1) ─────────────────────────────────────
+  testContextInvarianceNestedToDoNonLastReadWrite =>
+    ref := self valueCorpus nestedToDoNonLastReadWrite
+    self assert: self actorCorpus nestedToDoNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod nestedToDoNonLastReadWrite equals: ref
+    self assert: self fragNestedToDoNonLastReadWrite equals: ref
+
+  // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
+  // No context-invariance relation here: `ensureNestedConditionalLastReadWrite`
+  // only compiles in Actor context today (see mutation_corpus_actor.bt and
+  // BT-3177) — a relation needs at least two agreeing contexts to check.
 
   // ════════════════════════════════════════════════════════════════════════
   //  RELATION 2 — Position invariance

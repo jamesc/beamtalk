@@ -20,6 +20,13 @@
 // ground-truth values). See mutation_corpus_value.bt for the axis legend.
 
 Object subclass: MutationCorpusClassMethod
+  // BT-3176 axis 4: a class var, distinct from the outer locals every fragment
+  // above threads. Every fragment that reads/writes it resets it to 0 first,
+  // so results stay deterministic regardless of prior test-call order (unlike
+  // the actor corpus, class methods run against one shared class object —
+  // there is no per-test "spawn fresh" the way `MutationCorpusActor spawn`
+  // gives the actor fragments).
+  classState: runs = 0
 
   // ── to:do: ────────────────────────────────────────────────────────────────
   class toDoNonLastWriteOnly =>
@@ -82,6 +89,38 @@ Object subclass: MutationCorpusClassMethod
     sum := 0
     (1 to: 5) do: [:i | sum := sum + i]
     sum
+
+  // ── nested loop-in-loop (BT-3176 axis 1) ─────────────────────────────────────
+  // Loop nested inside another loop, both threading the SAME outer local — see
+  // mutation_corpus_value.bt for the BT-3172 cross-reference (direct class-var
+  // mutation nested two loops deep is a deliberate compile error; that shape is
+  // covered by crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs,
+  // not here).
+  class nestedToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 3 do: [:i |
+      1 to: 3 do: [:j |
+        sum := sum + j
+      ]
+    ]
+    sum
+
+  // A nested loop where only the OUTER loop's top-level body mutates the class
+  // var (the inner loop touches only its own local) — the compiling
+  // counterpart of BT-3172's rejected inner-mutates shape. Class-var threading
+  // is top-level-body-only by design (`loop_body_threads_class_vars`), so this
+  // shape threads correctly and must keep doing so.
+  class nestedWhileTrueOuterOnlyClassVarReadWrite =>
+    self.runs := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self.runs := self.runs + 1
+        j := 0
+        [j < 3] whileTrue: [j := j + 1]
+        i := i + 1
+      ]
+    self.runs
 
   // ── construct-equivalence summing accumulators (BT-2345) ────────────────────
   // timesRepeat: / whileTrue: variants that SUM 1..5 (the count/n fragments
@@ -242,3 +281,72 @@ Object subclass: MutationCorpusClassMethod
       ]
       ifFalse: [0]
     x
+
+  // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
+  // NOT present here: a nested conditional as the LAST statement of an
+  // `ensure:` try body (BT-3161 Flavor B / E5's shape) still fails erlc with
+  // "unbound variable 'State'" in class-method context (same as value-type
+  // context — see mutation_corpus_value.bt). See mutation_corpus_actor.bt's
+  // `ensureNestedConditionalLastReadWrite` for the working fragment and
+  // BT-3177 for the gap this discovery filed.
+
+  // ── self-send as the mutation mechanism (BT-3176 axis 2) ────────────────────
+  // A fragment method that calls another class method (a same-class self-send)
+  // which mutates the class var, inside a loop/conditional body — not a direct
+  // `self.field :=`. See BT-3159 (class-method conditional + self-send) and
+  // BT-3150 (loop + self-send, actor context) for the bugs this generalizes.
+  class bump =>
+    self.runs := self.runs + 1
+
+  class selfSendWhileTrueNonLastReadWrite =>
+    self.runs := 0
+    i := 0
+    [i < 5]
+      whileTrue: [
+        self bump
+        i := i + 1
+      ]
+    self.runs
+
+  // `needs_mutation_threading` requires a co-occurring outer-local read+write
+  // alongside the class-var write/self-send — a bare self-send with no other
+  // mutation in the block never reaches the threaded path at all (see
+  // `resetRuns`/`bump`'s own callers in loop_class_var_mutation.bt).
+  class selfSendIfTrueNonLastReadWrite: flag =>
+    self.runs := 0
+    seen := 0
+    flag ifTrue: [
+      self bump
+      seen := seen + 1
+    ]
+    self.runs
+
+  // ── on:do: + self-send (BT-3176 axis 3) ──────────────────────────────────────
+  // NOT present here: a same-class self-send as the LAST statement of an
+  // `on:do:` try body (BT-3161 Flavor A's shape) still produces invalid Core
+  // Erlang (an empty value fragment before a doubled `in` — erlc
+  // `core_parse_error`) in class-method context; BT-3161 only fixed the
+  // Actor-context analogue. See mutation_corpus_actor.bt's
+  // `onDoSelfSendLastReadWrite` for the working fragment and BT-3177 for the
+  // class-method gap this discovery filed.
+
+  // ── class-var mutation, threaded like an outer local (BT-3176 axis 4) ───────
+  // Every fragment above threads an outer LOCAL; these mirror the same
+  // constructs but mutate the class var directly instead.
+  class classVarToDoNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    1 to: 5 do: [:i |
+      self.runs := self.runs + i
+      seen := seen + 1
+    ]
+    self.runs
+
+  class classVarIfTrueNonLastReadWrite: flag =>
+    self.runs := 0
+    seen := 0
+    flag ifTrue: [
+      self.runs := self.runs + 7
+      seen := seen + 1
+    ]
+    self.runs

@@ -16,6 +16,11 @@
 // regression in either context surfaces as a wrong asserted value.
 
 Actor subclass: MutationCorpusActor
+  // BT-3176 axis 4: the actor's own state field, distinct from the outer
+  // locals every fragment above threads. A fresh actor is spawned per test
+  // (`actorCorpus => MutationCorpusActor spawn`), so this never bleeds state
+  // across assertions.
+  state: total = 0
 
   // ── to:do: ────────────────────────────────────────────────────────────────
   toDoNonLastWriteOnly =>
@@ -78,6 +83,37 @@ Actor subclass: MutationCorpusActor
     sum := 0
     (1 to: 5) do: [:i | sum := sum + i]
     sum
+
+  // ── nested loop-in-loop (BT-3176 axis 1) ─────────────────────────────────────
+  // Loop nested inside another loop, both threading the SAME outer local — see
+  // mutation_corpus_value.bt for the BT-3172 cross-reference (direct class-var
+  // mutation nested two loops deep is a deliberate compile error; that shape is
+  // covered by crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs,
+  // not here).
+  nestedToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 3 do: [:i |
+      1 to: 3 do: [:j |
+        sum := sum + j
+      ]
+    ]
+    sum
+
+  // A nested loop where only the OUTER loop's top-level body mutates the actor
+  // state field (the inner loop touches only its own local) — the compiling
+  // counterpart of BT-3172's rejected inner-mutates shape. Class-var/state-field
+  // threading is top-level-body-only by design (`loop_body_threads_class_vars`),
+  // so this shape threads correctly and must keep doing so.
+  nestedWhileTrueOuterOnlyStateReadWrite =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self.total := self.total + 1
+        j := 0
+        [j < 3] whileTrue: [j := j + 1]
+        i := i + 1
+      ]
+    self.total
 
   // ── construct-equivalence summing accumulators (BT-2345) ────────────────────
   // timesRepeat: / whileTrue: variants that SUM 1..5 (the count/n fragments
@@ -237,3 +273,83 @@ Actor subclass: MutationCorpusActor
       ]
       ifFalse: [0]
     x
+
+  // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
+  // The try body's LAST statement is a nested conditional mutating the same
+  // outer local assigned earlier in the try body — BT-3161 Flavor B / E5's
+  // shape (`ambiguous_catch_try_state`), folded into the shared corpus so the
+  // metamorphic/matrix harnesses cover it too, not just the dedicated
+  // bt3161_nested_conditional_actor.bt fixture. Actor-only for now — the
+  // value-type/class-method analogue still fails erlc with "unbound variable
+  // 'State'" (BT-3161 only fixed Actor context); see BT-3177.
+  ensureNestedConditionalLastReadWrite: flag =>
+    t := 0
+    [
+      t := t + 1
+      flag ifTrue: [t := t + 10]
+    ] ensure: [nil]
+    t
+
+  // ── self-send as the mutation mechanism (BT-3176 axis 2) ────────────────────
+  // A fragment method that calls another method (a same-actor self-send) which
+  // mutates the actor's own state field, inside a loop/conditional body — not
+  // a direct `self.field :=`. See BT-3150 (whileTrue:) and
+  // mutation_corpus_class_method.bt's `bump`-based fragments for the
+  // class-method analogue.
+  bump => self.total := self.total + 1
+
+  selfSendWhileTrueNonLastReadWrite =>
+    i := 0
+    [i < 5]
+      whileTrue: [
+        self bump
+        i := i + 1
+      ]
+    self.total
+
+  // `needs_mutation_threading` requires a co-occurring outer-local read+write
+  // alongside the field write/self-send — a bare self-send with no other
+  // mutation in the block never reaches the threaded path at all (see
+  // mutation_corpus_class_method.bt's classState comment).
+  selfSendIfTrueNonLastReadWrite: flag =>
+    seen := 0
+    flag ifTrue: [
+      self bump
+      seen := seen + 1
+    ]
+    self.total
+
+  // ── on:do: + self-send (BT-3176 axis 3) ──────────────────────────────────────
+  // The try body's LAST statement is a self-send that mutates state — BT-3161
+  // Flavor A's exact shape, folded into the shared corpus so the
+  // metamorphic/matrix harnesses cover it too, not just the dedicated
+  // bt3161_self_send_actor.bt fixture. Actor-only for now — the class-method
+  // analogue still produces invalid Core Erlang (BT-3161 only fixed Actor
+  // context); see BT-3177.
+  onDoSelfSendLastReadWrite =>
+    t := 0
+    [
+      t := t + 1
+      self bump
+    ] on: Error do: [:e | nil]
+    t
+
+  // ── class-var / state-field mutation, threaded like an outer local (BT-3176 axis 4) ──
+  // Every fragment above threads an outer LOCAL (see file header); these mirror
+  // the same constructs but mutate the actor's own state field instead — the
+  // shape the actor corpus explicitly excluded until now.
+  stateFieldToDoNonLastReadWrite =>
+    seen := 0
+    1 to: 5 do: [:i |
+      self.total := self.total + i
+      seen := seen + 1
+    ]
+    self.total
+
+  stateFieldIfTrueNonLastReadWrite: flag =>
+    seen := 0
+    flag ifTrue: [
+      self.total := self.total + 7
+      seen := seen + 1
+    ]
+    self.total
