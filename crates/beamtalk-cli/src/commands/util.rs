@@ -13,6 +13,19 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::SystemTime;
 
+/// Escape HTML special characters.
+///
+/// Shared by `commands/doc` and `commands/registry` — both render third-party
+/// or user-supplied text into HTML and must escape the same four characters.
+/// Centralised here (the shared-helpers leaf) so the two renderer modules
+/// import a single definition rather than each carrying a private copy.
+pub(crate) fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Build the BEAM module name for a user-code file stem (`bt@<normalised-stem>`).
 ///
 /// ADR 0016: all user-code modules use the `bt@` prefix. The stem is normalised

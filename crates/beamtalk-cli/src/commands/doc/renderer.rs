@@ -16,13 +16,10 @@ use super::extractor::{ClassInfo, MethodInfo};
 use super::highlighter::highlight_beamtalk;
 use super::layout::{page_footer, page_header, write_hierarchy_tree};
 
-/// Escape HTML special characters.
-pub(super) fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
+// Re-export the shared implementation so `doc/highlighter.rs`, `doc/layout.rs`,
+// `doc/site.rs`, and tests in `doc/mod.rs` can still reach it via
+// `use super::renderer::html_escape` without any changes to those call sites.
+pub(super) use crate::commands::util::html_escape;
 
 /// Convert a class name to a link if the class exists in the docs.
 pub(super) fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
