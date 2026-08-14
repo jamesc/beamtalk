@@ -4050,3 +4050,115 @@ variant sketched above with its own justification for why `verify()` would
 catch something real for a construct with no loop and no early exit, or (b)
 a change to `select_tuple_acc`'s guards that already-shipped, already-tested
 production code depends on staying as they are.
+
+## Addendum 12 (2026-08-14): BT-3164/BT-3171/BT-3172 close-out — correcting Addendum 6's stale "5 other call sites... untouched" claim
+
+Found during a post-Addendum-11 cleanup review: this ADR had gone three
+addenda (9, 10, 11) without recording the three issues that closed out
+Addendum 6's own "Not attempted" note, even though all three merged to
+`main` before Addendum 11 was written. This addendum records them and
+corrects the one sentence of Addendum 6 they make false.
+
+**BT-3164 — class-method body pipeline migrated (PR
+[#3366](https://github.com/jamesc/beamtalk/pull/3366), merged
+2026-08-13).** `gen_server/methods.rs::generate_class_method_body` — the
+"separate, hand-written `Document` builder pre-dating `BodyExprKind`/
+`classify_body_expr` entirely" Addendum 6 named as out of its scope — is
+now `lower_class_method_body`, returning a real `Vec<ThreadedStmt>`.
+`generate_class_method_fun_from_block` was migrated the same way, its
+`wrap_class_method_body_with_nlr_catch` call site deleted. Both now run
+their class-var `Bind` and their `NlrCatch` through one
+`verify_and_render_body_stmts` call, closing the ADR 0110 joint-visibility
+gap Addendum 6 itself flagged: `VerifyError::ShadowWriteMissing` can now
+see a real class-var `Bind` jointly with a real class-method `NlrCatch`.
+BT-3164 also audited the remaining Actor-side `wrap_body_with_nlr_catch`-family
+call sites and named three of them as real, well-understood follow-up
+(tracked as BT-3171 rather than folded in), and confirmed
+`gen_server/extensions.rs`'s `generate_value_extension_fun` is a
+structurally different call site, not deferred work — see below. Full
+citations: `threaded_ir.rs`'s own "Status (as of BT-3164 — the
+class-method body pipeline)" section, lines 179-244.
+
+**BT-3171 — the 3 remaining Actor-boundary call sites migrated (PR
+[#3373](https://github.com/jamesc/beamtalk/pull/3373), merged
+2026-08-13).** The three sites BT-3164's audit named —
+`gen_server/dispatch.rs`'s `generate_legacy_method_clause`,
+`gen_server/extensions.rs`'s `generate_actor_extension_fun`, and
+`actor_codegen.rs`'s sealed-method generator — each now lower their body
+via `lower_method_definition_body_with_reply` (widened to
+`pub(in crate::codegen::core_erlang)`) or the new Block-based
+`lower_method_body_with_reply`, prepend a real `ThreadedStmt::NlrCatch`
+when NLR was detected, and share one tail,
+`gen_server/methods.rs::prepend_nlr_catch_and_render`, also adopted by
+`generate_method_dispatch`'s own BT-3148-era call site rather than left
+duplicated. `wrap_actor_body_with_nlr_catch` had no callers left afterward
+and was deleted, the same way BT-3164 deleted
+`wrap_class_method_body_with_nlr_catch` — confirmed still gone by grep
+against current `main` (only `prepend_nlr_catch_and_render` call sites
+remain in `dispatch.rs`, `extensions.rs`, `methods.rs`, `actor_codegen.rs`).
+Full citations: `threaded_ir.rs`'s "Status (as of BT-3171 — the remaining
+Actor-boundary call sites)" section, lines 246-291.
+
+**The one call site that is not migrated, and was never meant to be:**
+`gen_server/extensions.rs`'s `generate_value_extension_fun`
+(`wrap_value_type_body_with_nlr_catch`). Both BT-3164's audit and BT-3171's
+own scope confirm this is a different shape entirely — it never renders a
+body `Document` and wraps it after; its catch scaffolding is built from
+`NlrCatchVars` directly, integrated inline into the streaming
+`generate_vt_body_exprs`/`emit_vt_*` construction in
+`value_type_codegen.rs`, the vt-conditional family Addendum 5 and Addendum
+11 both independently confirm is a permanent, ADR-documented exception to
+this migration (§Addendum 11's "Decision," `value_type_codegen.rs`'s
+798-line hand-rolled family stays hand-rolled, AST-directed Core Erlang
+construction). This is the one site of Addendum 6's original "5 other"
+list that stays unmigrated by design, not by omission.
+
+**BT-3172 — nested-loop class-var mutation rejected at compile time (PR
+[#3375](https://github.com/jamesc/beamtalk/pull/3375), merged
+2026-08-14).** Unlike BT-3164/BT-3171, this is not a `wrap_body_with_nlr_catch`
+migration at all — it closes a silent-data-loss gap BT-3140/BT-3150/BT-3151
+(Addendum 10) left standing one level deeper: a class-var mutation (or
+same-class self-send) inside a loop/fold that is itself nested inside
+another loop/fold, where the *outer* construct has no class-var mutation
+of its own to carry the inner one back out. `control_flow/mod.rs`'s
+`find_class_var_mutating_stmt` (~line 1623) now detects the shape via two
+independent triggers mirroring each body kind's own real threading gate
+(`loop_body_threads_class_vars` for `Letrec`, `block_analysis::analyze_block`'s
+recursive `has_self_sends` for `Foldl*`), and rejects it at compile time
+with `CodeGenError::ClassVarMutationLostAcrossNestedLoop`
+(`mod.rs:393-398`) — an actionable diagnostic naming the mutation and
+location, with a fix (accumulate into a local across both loops, mutate
+the class var once after the outer loop finishes). This is a **compile-time
+rejection**, not a `ThreadedIr`-threaded construct: no new `ThreadedStmt`
+variant or `VerifyError` was introduced, and none was needed — the
+nested-loop shape stays permanently unrepresentable input, the same class
+of guard as the bare-loop-no-co-occurring-local rejection Addendum 10's
+own regression sweep names as "still intentionally-rejected."
+
+**Correcting Addendum 6.** Addendum 6 (2026-08-12) states: "The 5 other
+`wrap_body_with_nlr_catch` call sites beyond the two this addendum names
+... are untouched." That sentence was accurate on 2026-08-12 and is false
+as of BT-3164/BT-3171 (2026-08-13): four of those five sites are migrated
+to real `NlrCatch` prepend, and the fifth
+(`generate_value_extension_fun`) is confirmed permanently out of scope
+rather than merely untouched. Per this ADR's own precedent for correcting
+an earlier addendum — Addendum 8's "One correction to this addendum's Rule
+2" (correcting Addendum 5's Rule 2 without editing Addendum 5's text) and
+Addendum 11's correction of Addendum 5's instance-side finding (again
+without editing Addendum 5) — this addendum leaves Addendum 6's text
+unedited as the honest record of what was known on 2026-08-12, and
+supersedes only that one sentence going forward: readers following
+Addendum 6's "untouched" claim past 2026-08-13 should read this addendum
+instead. `threaded_ir.rs`'s own module-doc "Status" sections (BT-3164:
+lines 179-244; BT-3171: lines 246-291) are the accurate, current record
+this addendum draws from and should stay the first place future migrations
+of the remaining permanent exception (should one ever be proposed) update
+— cross-referenced here specifically so this ADR and that module doc do
+not drift apart again the way this addendum's own existence shows they
+already did once.
+
+**No remaining ADR claim contradicted by current `main`, beyond the one
+sentence corrected above** — spot-checked by re-reading Addendum 6 in full
+against `threaded_ir.rs`'s BT-3164/BT-3171 status sections and the three
+PRs' diffs; no other claim in Addendum 6, or elsewhere in this ADR, refers
+to these three issues' scope.
