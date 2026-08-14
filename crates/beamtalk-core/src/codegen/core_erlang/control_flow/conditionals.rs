@@ -1080,8 +1080,50 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+                // C12b — BT-3178: a same-class self-send dispatched through
+                // `safe_dispatch`/a sealed call, which itself may mutate
+                // `self`'s state — returns `{Result, NewState}`. Unlike the
+                // C12 catch-all below (whose `expression_doc` render+`let`
+                // discards everything but the raw tuple value), this must
+                // Bind the returned `NewState` as this branch's own next
+                // real `State` version, mirroring C11
+                // (`ControlFlowWithMutations`)'s tuple-unpack `Bind` above —
+                // otherwise a mutation performed via the self-send (as
+                // opposed to a direct `self.field := value`) is silently
+                // dropped once the branch closes.
+                BodyExprKind::DispatchingSelfSend => {
+                    let source_version = self.state_version();
+                    let (call_doc, dispatch_var) = self.generate_self_dispatch_call_doc(expr)?;
+                    stmts.push(ThreadedStmt::Statement(call_doc, span));
+                    let target_version = self.state_version();
+                    stmts.push(ThreadedStmt::Bind {
+                        target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                        source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                        op: BindOp::Direct(ValueRef::Doc(docvec![
+                            "call 'erlang':'element'(2, ",
+                            leaf::var(dispatch_var.clone()),
+                            ")",
+                        ])),
+                        shadow_write: false,
+                        span,
+                    });
+                    if is_last {
+                        let result_var = self.fresh_temp_var("SDResultVal");
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(result_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(dispatch_var),
+                                ") in ",
+                            ],
+                            span,
+                        ));
+                        last_result = Some(ValueRef::Var(result_var));
+                    }
+                }
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
-                // ErrorSend, Tier2SelfSend, DispatchingSelfSend, Pure).
+                // ErrorSend, Tier2SelfSend, Pure).
                 _ => {
                     if is_last {
                         let result_var = self.fresh_temp_var("BranchResult");

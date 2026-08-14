@@ -311,13 +311,19 @@ TestCase subclass: MetamorphicThreadingTest
   // ── self-send as the mutation mechanism (BT-3176 axis 2) ────────────────────
   // Actor (state field) vs. class-method (class var) only — Value has no
   // mutable field for a self-send to mutate, so there's no third context to
-  // compare. `selfSendIfTrueNonLastReadWrite:` is NOT included here: its
-  // Actor-context "true" branch is exactly BT-3178's open bug (the self-send's
-  // state mutation doesn't thread back through ifTrue:), so asserting equality
-  // there would assert across a known-broken cell — see
-  // value_type_mutation_matrix_test.bt's `bt3178ActorSelfSendInConditionalPending`.
+  // compare.
   testContextInvarianceSelfSendWhileTrueNonLastReadWrite =>
     self assert: self actorCorpus selfSendWhileTrueNonLastReadWrite equals: MutationCorpusClassMethod selfSendWhileTrueNonLastReadWrite
+
+  // BT-3178 (fixed): the Actor-context "true" branch used to be a
+  // known-broken cell (the self-send's state mutation didn't thread back
+  // through ifTrue:) — see value_type_mutation_matrix_test.bt's
+  // `bt3178ActorSelfSendInConditionalPending`.
+  testContextInvarianceSelfSendIfTrueNonLastReadWriteTrue =>
+    self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: true) equals: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: true)
+
+  testContextInvarianceSelfSendIfTrueNonLastReadWriteFalse =>
+    self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: false) equals: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: false)
 
   // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
   // No context-invariance relation here: `ensureNestedConditionalLastReadWrite`
