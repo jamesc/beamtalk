@@ -2904,6 +2904,7 @@ impl CoreErlangGenerator {
             other => other,
         };
         let Expression::MessageSend {
+            receiver,
             selector: MessageSelector::Keyword(parts),
             arguments,
             ..
@@ -2912,6 +2913,41 @@ impl CoreErlangGenerator {
             return;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+        // BT-3173: ensure:/on:do:/ifNotNil: aren't loops themselves, but a
+        // loop may be nested inside one of their blocks — recurse straight
+        // through (the receiver for ensure:/on:do:, any block arguments for
+        // all three) so a nested loop's outer-local write buried behind one
+        // of these constructs is still found. Mirrors the identical
+        // extension in `control_flow::collect_list_op_cross_scope_mutations`.
+        if crate::state_threading_selectors::is_exception_selector(&sel)
+            || crate::state_threading_selectors::is_conditional_selector(&sel)
+        {
+            let mut blocks: Vec<&crate::ast::Block> = Vec::new();
+            if crate::state_threading_selectors::is_exception_selector(&sel) {
+                if let Expression::Block(b) = receiver.as_ref() {
+                    blocks.push(b);
+                }
+            }
+            for arg in arguments {
+                if let Expression::Block(b) = arg {
+                    blocks.push(b);
+                }
+            }
+            for block in blocks {
+                let mut all_excluded: HashSet<String> = excluded_params.clone();
+                all_excluded.extend(Self::block_param_names(block));
+                for stmt in &block.body {
+                    self.collect_nested_loop_outer_local_writes(
+                        &stmt.expression,
+                        &all_excluded,
+                        out,
+                    );
+                }
+            }
+            return;
+        }
+
         let body_block = match sel.as_str() {
             "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
             | "timesRepeat:" => match arguments.last() {

@@ -4718,6 +4718,20 @@ impl CoreErlangGenerator {
                 if self.needs_mutation_threading(&analysis) {
                     return true;
                 }
+                // BT-3173: a nested list-op/counted-loop inside the try body may
+                // mutate an outer local even when the try body's own top-level
+                // analysis sees no direct mutation (`analyze_block` does not
+                // propagate writes out of a nested, non-conditional block —
+                // same gap BT-2356/BT-1329 already close for conditionals and
+                // ordinary block arguments below). Without this, `[nested-loop]
+                // ensure: [...]`/`on:do:` is classified as pure here even though
+                // the nested loop's own cross-scope collector (this call site's
+                // sibling, `compute_threaded_locals_for_loop`) correctly detects
+                // the mutation — the same "two decision points disagree" shape
+                // as the do:/collect: self-classification gap this issue fixes.
+                if self.body_has_list_op_cross_scope_mutations(block) {
+                    return true;
+                }
             }
         }
 

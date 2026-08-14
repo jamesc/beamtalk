@@ -1943,6 +1943,10 @@ impl CoreErlangGenerator {
                 // nested within collect:/select:/etc. are silently lost.
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("CondResult");
+                // BT-3173: the vars THIS construct itself threads, read before
+                // `generate_expression` below (which may push/pop scopes) so
+                // the lookup reflects this statement's own captured set.
+                let inner_threaded_vars = self.get_control_flow_threaded_vars(expr);
                 let doc = self.generate_expression(expr)?;
                 let new_state = self.next_state_var();
                 docs.push(docvec![
@@ -1956,6 +1960,36 @@ impl CoreErlangGenerator {
                     leaf::var(tuple_var.clone()),
                     ") in ",
                 ]);
+                // BT-3173: a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
+                // statement here only bumps the StateAcc *version pointer* above —
+                // it does NOT rebind the specific local vars it threads. Both
+                // StateAcc (map) mode and tuple-acc mode bind each threaded local
+                // to a FIXED Core Erlang variable once per iteration (see
+                // `generate_unpack_at_iteration_start`/`generate_tuple_unpack_docs`),
+                // not via a live re-lookup through the state pointer — so without
+                // this, any read of the var later in the SAME block invocation
+                // (e.g. the next statement) would see the stale pre-statement
+                // value instead of what this construct just wrote. Mirrors
+                // `conditionals.rs`'s `push_control_flow_threaded_var_rereads`,
+                // which does the same rebind for the `ThreadedIr`-rendered
+                // conditional-arm path.
+                if let Some(inner_vars) = inner_threaded_vars {
+                    for var in &inner_vars {
+                        let core_var = self
+                            .lookup_var(var)
+                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                        docs.push(docvec![
+                            "let ",
+                            leaf::var(core_var.clone()),
+                            " = call 'maps':'get'(",
+                            leaf::atom(Self::local_state_key(var)),
+                            ", ",
+                            leaf::var(new_state.clone()),
+                            ") in ",
+                        ]);
+                        self.bind_var(var, &core_var);
+                    }
+                }
                 if is_last {
                     match kind {
                         BodyKind::FoldlDo => {
@@ -4075,6 +4109,7 @@ impl CoreErlangGenerator {
     ) {
         use crate::ast::MessageSelector;
         let Expression::MessageSend {
+            receiver,
             selector: MessageSelector::Keyword(parts),
             arguments,
             ..
@@ -4083,6 +4118,41 @@ impl CoreErlangGenerator {
             return;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+        // BT-3173: ensure:/on:do:/ifNotNil: aren't list-ops/counted-loops
+        // themselves, but one may be nested inside one of their blocks —
+        // recurse straight through their block(s) (the receiver for
+        // ensure:/on:do:, any block arguments for all three) so a list-op's
+        // cross-scope mutation buried behind one of these constructs is
+        // still found, instead of stopping here (the previous behavior,
+        // which silently dropped such a mutation from the outer loop's own
+        // threaded-locals computation).
+        if crate::state_threading_selectors::is_exception_selector(&sel)
+            || crate::state_threading_selectors::is_conditional_selector(&sel)
+        {
+            let mut blocks: Vec<&crate::ast::Block> = Vec::new();
+            if crate::state_threading_selectors::is_exception_selector(&sel) {
+                if let Expression::Block(b) = receiver.as_ref() {
+                    blocks.push(b);
+                }
+            }
+            for arg in arguments {
+                if let Expression::Block(b) = arg {
+                    blocks.push(b);
+                }
+            }
+            for block in blocks {
+                for stmt in &block.body {
+                    Self::collect_list_op_cross_scope_mutations_recursive(
+                        &stmt.expression,
+                        facts,
+                        out,
+                    );
+                }
+            }
+            return;
+        }
+
         let body_block = match sel.as_str() {
             "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
             // BT-2363: nested counted loops (`timesRepeat:`/`to:do:`/`to:by:do:`)
