@@ -325,10 +325,23 @@ TestCase subclass: MetamorphicThreadingTest
   testContextInvarianceSelfSendIfTrueNonLastReadWriteFalse =>
     self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: false) equals: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: false)
 
-  // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
-  // No context-invariance relation here: `ensureNestedConditionalLastReadWrite`
-  // only compiles in Actor context today (see mutation_corpus_actor.bt and
-  // BT-3177) — a relation needs at least two agreeing contexts to check.
+  // ── on:do:/ensure: + nested conditional / self-send (BT-3176 axis 3) ────────
+  // BT-3177 (fixed): `ensureNestedConditionalLastReadWrite` used to only
+  // compile in Actor context; `onDoSelfSendLastReadWrite` used to only
+  // compile in Actor context for the same reason — see
+  // mutation_corpus_actor.bt/mutation_corpus_value.bt/mutation_corpus_class_method.bt.
+  testContextInvarianceEnsureNestedConditionalLastReadWriteTrue =>
+    self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: true) equals: (self valueCorpus ensureNestedConditionalLastReadWrite: true)
+    self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: true) equals: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: true)
+
+  testContextInvarianceEnsureNestedConditionalLastReadWriteFalse =>
+    self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: false) equals: (self valueCorpus ensureNestedConditionalLastReadWrite: false)
+    self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: false) equals: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: false)
+
+  // Actor vs. class-method only — Value has no mutable field for a self-send
+  // to mutate (same reasoning as the ifTrue: self-send relation above).
+  testContextInvarianceOnDoSelfSendLastReadWrite =>
+    self assert: self actorCorpus onDoSelfSendLastReadWrite equals: MutationCorpusClassMethod onDoSelfSendLastReadWrite
 
   // ════════════════════════════════════════════════════════════════════════
   //  RELATION 2 — Position invariance

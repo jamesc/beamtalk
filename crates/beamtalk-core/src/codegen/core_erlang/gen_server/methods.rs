@@ -4162,6 +4162,12 @@ impl CoreErlangGenerator {
         } else if self.is_conditional_with_vt_local_threading(expr) {
             // BT-1392: Non-last conditional that mutates captured outer locals.
             self.generate_vt_conditional_open(expr)
+        } else if self.is_exception_construct_with_vt_local_threading(expr) {
+            // BT-3177: Non-last on:do:/ensure: that mutates captured outer
+            // locals. Extracts the threaded locals from the returned
+            // `{Result, StateAcc}` tuple, same idiom as the loop/conditional
+            // arms above.
+            self.generate_vt_exception_construct_open(expr)
         } else {
             // BT-1942: Detect open-scope results produced by the expression
             // itself (e.g. a ProtoObject/Object intrinsic whose receiver is a

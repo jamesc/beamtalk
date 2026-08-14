@@ -54,7 +54,7 @@ use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
 use super::super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -309,6 +309,36 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// BT-3177: the real value to seed this construct's `StateAcc` scratch
+    /// map from — the actor's own `State` parameter in Actor context
+    /// (`current_state_var()`, matching `render_state_prefix`'s bare
+    /// `"State"` at version 0), or a fresh empty map everywhere else.
+    ///
+    /// This scratch map's only job is carrying a try/ensure body's own
+    /// local-var mutations (`t := t + 1`) and field/`self`-send-produced
+    /// state across the real Core Erlang `try`/`catch` boundary — Erlang
+    /// bindings made inside `try` are not visible in `catch`/after, so
+    /// *some* map is needed regardless of context. Field writes route
+    /// through this same map in Actor context (reusing the real `State`),
+    /// but class-method class-var mutations
+    /// (`emit_class_var_result_unwrap`'s own `ClassVars` chain) and
+    /// value-type field mutations (`VersionPrefix::SelfVt`) are threaded
+    /// entirely separately — this map never needs to carry them, so an
+    /// empty seed outside Actor context is correct, not just a stopgap.
+    /// Before this fix, both callers unconditionally called
+    /// `current_state_var()`, which at version 0 renders as the bare
+    /// identifier `"State"` regardless of context — valid only in Actor
+    /// context, where a real `State` parameter exists; in class-method or
+    /// value-type context this produced a reference to a nonexistent
+    /// variable (`erlc: unbound variable 'State'`).
+    fn exception_body_outer_state(&mut self) -> String {
+        if self.context == CodeGenContext::Actor {
+            self.current_state_var()
+        } else {
+            "~{}~".to_string()
+        }
+    }
+
     /// BT-410: Generates `on:do:` with state mutation threading.
     ///
     /// Inlines receiver (try body) and handler block bodies with state threading
@@ -362,7 +392,7 @@ impl CoreErlangGenerator {
         // Bind exception class
         let ex_class_code = self.expression_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
-        let current_state = self.current_state_var();
+        let current_state = self.exception_body_outer_state();
         // BT-3160: seed `__local__` keys for outer locals mutated by either the
         // try (receiver) block or the handler block — only one of the two ever
         // runs at a given call, so (mirroring `ifTrue:ifFalse:`'s two branches)
@@ -592,7 +622,7 @@ impl CoreErlangGenerator {
         let state_after_try = self.fresh_temp_var("StateAfterTry");
 
         // Rename current state to StateAcc
-        let current_state = self.current_state_var();
+        let current_state = self.exception_body_outer_state();
         // BT-3160: seed `__local__` keys for outer locals mutated by the try
         // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
         // (see `generate_on_do_with_mutations`) so a local written only
@@ -1098,9 +1128,17 @@ impl CoreErlangGenerator {
                 }
             } else if is_last {
                 if has_direct_field_assignments {
-                    // E6 — has_direct_field_assignments sub-branch.
+                    // E6 — has_direct_field_assignments sub-branch. BT-3177:
+                    // `closed_expression_doc` (BT-2350), not plain
+                    // `expression_doc` — a class-method self-send with no
+                    // enclosing assignment (e.g. `self bump` as this try
+                    // body's last statement) emits an *open* let-chain
+                    // (`emit_class_var_result_unwrap`) ending in `... in `;
+                    // wrapping that directly as `let rv = <open-chain> in`
+                    // leaves a dangling `in` — a `core_parse_error`, the
+                    // exact failure mode this closes.
                     let rv = self.fresh_temp_var("ExResult");
-                    let expr_doc = self.expression_doc(expr)?;
+                    let expr_doc = self.closed_expression_doc(expr)?;
                     stmts.push(ThreadedStmt::Statement(
                         docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
                         span,
@@ -1157,9 +1195,13 @@ impl CoreErlangGenerator {
                         result_var = rv;
                     } else {
                         // E6/E7 — plain expression, no direct field
-                        // assignments in this body.
+                        // assignments in this body. BT-3177: see the E6
+                        // has_direct_field_assignments sub-branch above for
+                        // why this must be `closed_expression_doc`, not
+                        // plain `expression_doc` — same open-scope hazard,
+                        // same fix (BT-2350).
                         let rv = self.fresh_temp_var("ExResult");
-                        let expr_doc = self.expression_doc(expr)?;
+                        let expr_doc = self.closed_expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(
                             docvec!["let ", leaf::var(rv.clone()), " = ", expr_doc, " in"],
                             span,
@@ -1168,12 +1210,35 @@ impl CoreErlangGenerator {
                     }
                 }
             } else {
-                // E7 — non-last plain expression.
-                let expr_doc = self.expression_doc(expr)?;
-                stmts.push(ThreadedStmt::Statement(
-                    docvec!["let _ = ", expr_doc, " in"],
-                    span,
-                ));
+                // E7 — non-last plain expression. BT-3177: unlike the
+                // last-position cases above, a discarded non-last statement
+                // must keep an open class-var chain visible to later
+                // statements in this same try body (a second self-send
+                // later must see the first one's already-bumped
+                // `ClassVarsN`, not roll back to reference an un-mutated
+                // one) — `expression_doc_with_open_scope` + an explicit
+                // discard `let`, mirroring `push_discarded_stmt`'s
+                // established idiom (BT-2350), rather than
+                // `closed_expression_doc`'s scope-closing wrap.
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                match open_scope {
+                    Some(OpenScopeResult::Value(result_var)) => {
+                        stmts.push(ThreadedStmt::Statement(expr_doc, span));
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["let _ = ", leaf::var(result_var), " in "],
+                            span,
+                        ));
+                    }
+                    Some(OpenScopeResult::NoValue) => {
+                        stmts.push(ThreadedStmt::Statement(expr_doc, span));
+                    }
+                    None => {
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec!["let _ = ", expr_doc, " in"],
+                            span,
+                        ));
+                    }
+                }
             }
         }
 

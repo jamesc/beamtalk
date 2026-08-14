@@ -551,19 +551,33 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 3 — on:do:/ensure: combined with a self-send or a nested
   //  conditional in the try body's LAST statement. See BT-3160/BT-3161.
-  //  Actor-only for now: the class-method self-send analogue and the
-  //  value-type/class-method nested-conditional analogue still fail erlc
-  //  (BT-3161 only fixed Actor context) — see mutation_corpus_actor.bt and
-  //  BT-3177.
+  //  The class-method self-send analogue and the value-type/class-method
+  //  nested-conditional analogue were fixed by BT-3177 — see
+  //  mutation_corpus_value.bt/mutation_corpus_class_method.bt.
   // ════════════════════════════════════════════════════════════════════════
   testOnDoSelfSendLastReadWriteActor =>
     self assert: self actorCorpus onDoSelfSendLastReadWrite equals: 1
+
+  testOnDoSelfSendLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod onDoSelfSendLastReadWrite equals: 1
 
   testEnsureNestedConditionalLastReadWriteTrueActor =>
     self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: true) equals: 11
 
   testEnsureNestedConditionalLastReadWriteFalseActor =>
     self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  testEnsureNestedConditionalLastReadWriteTrueValue =>
+    self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: true) equals: 11
+
+  testEnsureNestedConditionalLastReadWriteFalseValue =>
+    self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  testEnsureNestedConditionalLastReadWriteTrueClassMethod =>
+    self assert: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: true) equals: 11
+
+  testEnsureNestedConditionalLastReadWriteFalseClassMethod =>
+    self assert: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: false) equals: 1
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 4 — class-var / state-field mutation, threaded the same
