@@ -3983,19 +3983,22 @@ This is real: `class m:`/`n:`/`p:` are **class-side** methods, and per
 CLAUDE.md, "a class method runs in its class's gen_server process" — so
 `ClassVars` here is that gen_server's own actor state, threaded through a
 vt-conditional's branch tuple exactly the way ADR 0110 threads it elsewhere.
-Addendum 5's "Value objects have no `State` at all" is true for *instance*-side
-Value methods (no gen_server backs a Value instance) but is not the reason
-this particular exclusion holds for the *class-side* vt-conditional path —
+Addendum 5's finding — instance-side vt-conditionals carry no `StateAcc`
+or `{Result, State}` tuple, only plain rebinding (§"Value-type conditionals
+never route here") — is accurate for *instance*-side Value methods (no
+gen_server backs a Value instance) but is not the reason this particular
+exclusion holds for the *class-side* vt-conditional path —
 that path can and does carry `ClassVars`. **This does not change the
 verdict above**: the class-var-carrying tuple still isn't `TupleAcc` shaped
 (it's the same one-shot `case`-result join, just with one more trailing
 element) and is still blocked by the same `select_tuple_acc` guards
 (`has_conditional_threaded_writes`, and separately `has_state_effects` once
 a class-var write is present). It is recorded here only so a future reader
-does not cite "Value objects have no State" as a blanket justification
-broader than the evidence actually supports — the real reason `TupleAcc`
-doesn't apply is the structural mismatch in the four points above, not the
-absence of any state-like value anywhere in this file.
+does not generalize Addendum 5's instance-side no-`StateAcc` finding into a
+blanket "no vt-conditional path ever carries state" justification broader
+than the evidence supports — the real reason `TupleAcc` doesn't apply is
+the structural mismatch in the four points above, not the absence of any
+state-like value anywhere in this file.
 
 ### What a real proposal would need (not evaluated here — out of scope)
 
