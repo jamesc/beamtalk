@@ -11,5 +11,4 @@ TestCase subclass: ActorDelegateTest
   testDelegateOnNonNativeActorRaisesError =>
     self should: [self.counter delegate] raise: #signal
 
-  testDelegateRespondsTo =>
-    self assert: (self.counter respondsTo: #delegate)
+  testDelegateRespondsTo => self assert: (self.counter respondsTo: #delegate)
