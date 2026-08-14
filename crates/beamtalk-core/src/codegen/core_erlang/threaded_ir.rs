@@ -474,6 +474,33 @@
 //! shapes. Byte-identical over the full snapshot corpus + `stdlib`/`BUnit`/
 //! REPL-protocol suites, confirmed before and after.
 //!
+//! ## Status (as of BT-3182 — ADR 0111 Addendum 13: while-direct pilot deleted)
+//!
+//! The BT-3145 `BEAMTALK_THREADED_IR_WHILE_DIRECT` pilot described in the
+//! BT-3145 status entry above has been deleted: `control_flow::while_loops`'s
+//! `threaded_ir_while_direct_enabled`, `try_render_while_direct_via_threaded_ir`,
+//! `while_direct_body_is_bind_representable`, `is_simple_threaded_rhs`, and
+//! the `dual_run_*`/byte-identity test suite are gone, and
+//! `generate_while_loop_direct` no longer gates on the env flag — while/
+//! counted loops stay on BT-3132's side-channel `ThreadedIr` verification
+//! only, same as before BT-3145. The gate's own measurement never cleared
+//! (Addendum 3: wall-clock and CPU-time deltas disagreed by an order of
+//! magnitude on a shared/virtualized runner) and closing the remaining
+//! "gap three" body-shape coverage had no concrete trigger — carrying an
+//! env-flag-gated dual path indefinitely for an architecture-purity win
+//! alone conflicts with CLAUDE.md's "don't use feature flags when you can
+//! just change the code." See ADR 0111 Addendum 13 for the full decision.
+//!
+//! [`ThreadedStmt::ConditionalLoop`], [`ThreadingMode::DirectParams`], and
+//! [`VersionPrefix::Local`] — the IR shapes that pilot's lowering built —
+//! are kept, not deleted, and marked `#[allow(dead_code)]` rather than
+//! removed: `ConditionalLoop`'s own doc comment already named a second,
+//! not-yet-attempted consumer (a real counted-loop migration) at the time
+//! it was designed (Addendum 2), so this is retained, already-scoped
+//! infrastructure ahead of its second use, not the vague "might be useful
+//! later" CLAUDE.md's no-speculative-code rule targets. If a counted-loop
+//! migration is never attempted, revisit deleting these too.
+//!
 //! ## Scope
 //!
 //! Covers state-version bindings (with frame identity), threading-mode
@@ -579,6 +606,15 @@ pub(super) enum VersionPrefix {
     /// by `ThreadingPlan::threaded_locals` in direct-params / hybrid mode.
     /// See module docs §Deviations for why this exists beyond the ADR's
     /// three-prefix sketch.
+    ///
+    /// BT-3182 (ADR 0111 Addendum 13): its one production constructor
+    /// (`while_loops.rs`'s deleted `try_render_while_direct_via_threaded_ir`
+    /// pilot) is gone, so this is currently unconstructed — kept, not
+    /// deleted, because it is the pre-existing representation
+    /// [`ThreadedStmt::ConditionalLoop`]'s own doc comments already name a
+    /// second, not-yet-attempted consumer for (a real counted-loop
+    /// migration); see that variant's doc comment for the same reasoning.
+    #[allow(dead_code)]
     Local(String),
     /// A pre-minted, verbatim Core Erlang name (e.g. `_Sum7`), ADR 0111
     /// Addendum 2 "Gap 2" (`docs/ADR/0111-...md` §Addendum 2, "naming-scheme
@@ -791,6 +827,10 @@ impl VersionCounter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ThreadingMode {
     /// `fun (Var1, ..., VarN)` — no `StateAcc` map at all (BT-1275).
+    ///
+    /// BT-3182: currently unconstructed in production — see
+    /// [`ThreadedStmt::ConditionalLoop`]'s doc comment.
+    #[allow(dead_code)]
     DirectParams,
     /// A flat `{Gate1, ..., GateG, Var1, ..., VarN}` positional-unpack
     /// accumulator (foldl list-ops, BT-1276). The `usize` is `gate_slots` —
@@ -1050,6 +1090,18 @@ pub(super) enum ThreadedStmt {
     /// `version`, so the "reset version to 0" trick bare `Threaded` uses to
     /// derive `param_list`/`outer_args` from the SAME field would not recover
     /// the fun's plain parameter name from a Gensym'd final identity.
+    ///
+    /// BT-3182 (ADR 0111 Addendum 13): this variant's one production
+    /// constructor — `while_loops.rs`'s `try_render_while_direct_via_threaded_ir`
+    /// pilot, gated behind `BEAMTALK_THREADED_IR_WHILE_DIRECT` — was deleted
+    /// (inconclusive measurement gate, no concrete trigger to finish full
+    /// body-shape coverage; see the ADR addendum for the full decision).
+    /// Kept, not deleted, because `counter`'s own doc comment already names
+    /// a second, not-yet-attempted consumer this variant was designed for:
+    /// a real counted-loop (`to:do:`/`timesRepeat:`/`repeat`) migration.
+    /// `#[allow(dead_code)]` on the now-unconstructed `DirectParams`/`Local`
+    /// variants it depends on reflects the same status, not a new one.
+    #[allow(dead_code)]
     ConditionalLoop {
         /// Static per-construct function name — `"while"`, `"loop"`,
         /// `"repeat"` — never gensym'd by `render` (ADR 0111 Addendum 2's
@@ -1658,10 +1710,14 @@ impl Drop for LoopContextGuard<'_, '_> {
 /// returns — nothing after an `NlrCatch` renders a second time outside the
 /// wrap.
 ///
-/// Has a real (non-test) production caller as of BT-3145:
-/// `control_flow::while_loops`'s `try_render_while_direct_via_threaded_ir`,
-/// gated behind `BEAMTALK_THREADED_IR_WHILE_DIRECT=1` — see module docs
-/// §Status (BT-3145).
+/// Has real (non-test) production callers — every later `ThreadedIr`
+/// migration this module's §Status log records (conditionals, exception
+/// handling, `gen_server` state threading, class-var/NLR routing) renders
+/// through this function; see module docs §Status for the full history.
+/// The FIRST such caller, `control_flow::while_loops`'s
+/// `try_render_while_direct_via_threaded_ir` pilot (BT-3145, gated behind
+/// `BEAMTALK_THREADED_IR_WHILE_DIRECT=1`), was deleted by BT-3182 — see
+/// §Status (BT-3182) / ADR 0111 Addendum 13.
 pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
     for (i, stmt) in ir.iter().enumerate() {
@@ -1700,7 +1756,7 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
                 mode,
                 frame,
                 shadow_write_eligible: _, // rendering-irrelevant: verify()-only, see the field's doc comment
-                counter: _counter, // counted-loop rendering: a later migration wires a real counted-loop call site (BT-3145 pilots while-direct only)
+                counter: _counter, // counted-loop rendering: a later migration wires a real counted-loop call site (BT-3182: the while-direct pilot that used `ConditionalLoop` for its own `mode`/`counter: None` shape was deleted — see ADR 0111 Addendum 13)
                 continue_header,
                 body,
                 produces,
@@ -1730,12 +1786,11 @@ pub(super) fn render(ir: &[ThreadedStmt], ctx: &mut RenderCtx) -> Document<'stat
 /// [`CoreErlangGenerator`] (cheap — no I/O) so every existing
 /// `lower_and_render(&ir).to_pretty_string()` test call survives verbatim.
 ///
-/// `#[cfg(test)]`: unlike [`render`] itself (which now has a real
-/// production caller as of BT-3145 — see [`render`]'s doc comment), this
-/// shim remains test-only: `while_loops.rs`'s
-/// `try_render_while_direct_via_threaded_ir` builds its own
-/// [`RenderCtx`] directly against the live generator rather than a
-/// throwaway one, so this convenience wrapper has no production caller.
+/// `#[cfg(test)]`: unlike [`render`] itself (which has real production
+/// callers — see [`render`]'s doc comment), every one of those callers
+/// builds its own [`RenderCtx`] directly against the live generator rather
+/// than a throwaway one, so this convenience wrapper has no production
+/// caller.
 #[cfg(test)]
 pub(super) fn lower_and_render(ir: &[ThreadedStmt]) -> Document<'static> {
     let mut generator = CoreErlangGenerator::new("__threaded_ir_render_shim");
