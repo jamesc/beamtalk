@@ -73,8 +73,8 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   // Pending switch for BT-3178: an Actor self-send that mutates the actor's
   // own state field, called from inside an `ifTrue:` conditional branch
-  // (not a loop), doesn't thread the mutation back — the identical self-send
-  // inside a loop, and a direct field write inside the identical
+  // (not a loop), doesn't thread the mutation back (BT-3178) — the identical
+  // self-send inside a loop, and a direct field write inside the identical
   // conditional, both thread correctly. Discovered by BT-3176.
   bt3178ActorSelfSendInConditionalPending => true
 
