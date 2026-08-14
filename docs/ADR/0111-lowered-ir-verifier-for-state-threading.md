@@ -3770,3 +3770,280 @@ BT-3151); the stale-rejection test sweep found nothing left to flip;
 runtime-correctness regression coverage exists for both the `Letrec` and
 `Foldl*` sides; docs reflect the new, narrower restriction; and the
 cumulative build-time gate is cleared.
+
+## Addendum 11 (2026-08-14): BT-3174 spike — does `value_type_codegen.rs`'s
+vt-conditional family duplicate `ThreadingMode::TupleAcc`? No-go, with a
+structural reason beyond Addendum 5's original exclusion
+
+BT-3174 asked whether `value_type_codegen.rs`'s vt-conditional tuple-threading
+functions (`build_vt_conditional_value_and_mutations_parts`,
+`build_vt_conditional_branch_pieces`/`_inner`, `resolve_mutation_value_docs`,
+`finish_vt_conditional_branch`, `rebind_vt_conditional_mutations`,
+`build_vt_conditional_branch_value`/`_parts`) hand-roll a pattern
+`ThreadingMode::TupleAcc` already formalizes — "thread N mutated locals
+through a branch as a tuple, `element(1, ...)` for the logical value,
+`element(i+2, ...)` per mutated local" — and, if so, whether CLAUDE.md's
+no-duplicate-implementations rule calls for migrating this family onto
+`ThreadedIr`. All line numbers below are against
+`crates/beamtalk-core/src/codegen/core_erlang/` at `main` commit
+`91fe1af8`; resolve by symbol name first, per this ADR's established
+practice.
+
+**Answer: no-go.** Not because the textual shape doesn't match (it does,
+closely) but because `ThreadingMode::TupleAcc` is a fold/loop-accumulator
+construct with invariants this shape structurally cannot satisfy — and the
+compiler's own existing guards already say so, independent of anything this
+spike adds. The most direct evidence is a pre-existing test that answers the
+exact question this issue asks:
+
+```rust
+// control_flow/mod.rs:4756 (existing, unmodified by this spike)
+fn select_tuple_acc_blocked_by_conditional_threaded_writes() {
+    let threaded = vec!["x".to_string()];
+    let analysis = clean_body_analysis();
+    let mut effects = clean_effects();
+    effects.has_conditional_threaded_writes = true;
+    assert!(!ThreadingPlan::select_tuple_acc(
+        true, &threaded, CodeGenContext::Actor, &analysis, &effects
+    ));
+}
+```
+
+`TupleAcc` mode is blocked whenever `has_conditional_threaded_writes` is
+true — **regardless of `CodeGenContext`** (the test passes `Actor`, not
+`ValueType`). `select_tuple_acc`'s guard (`control_flow/mod.rs:649-667`)
+returns `false` if `matches!(context, CodeGenContext::ValueType)` **or**
+`body_analysis.has_state_effects()` **or** `effects.has_cf_mutations` **or**
+`effects.has_conditional_threaded_writes` **or** `effects.last_is_destructure`.
+When the conditional-writes guard trips, `diagnose_guard_failure`
+(`control_flow/mod.rs:766-767`) names the fallback reason explicitly:
+`StateAccFallbackReason::InlineConditionalThreadedWrite` — a loop body
+containing an inline conditional that writes a threaded local falls all the
+way back to the heavyweight `StateAcc`-map mode, skipping `TupleAcc`
+entirely. So even in the one context ADR 0111 already migrated
+(`CodeGenContext::Actor`, `conditionals.rs`'s `generate_conditional_branch_inline`,
+Addendum 5), a conditional-branch tuple join was never routed through
+`TupleAcc` — Addendum 5's own vocabulary (§"The decomposition vocabulary")
+confirms this independently: actor-side conditionals decompose into direct
+`Bind` sequences (rules 2-4, `State`/`ClassVars`-prefixed `maps:put` chains
+and the `Gensym` two-hop), never into a `Threaded{mode: TupleAcc}` node.
+**`TupleAcc` has never been the tool this codebase uses for "thread values
+out of a two-arm branch" in *either* context** — vt-conditional's
+Value-context hand-rolling isn't a parallel implementation of a pattern
+ThreadedIr formalizes elsewhere; the pattern ThreadedIr formalizes is a
+different pattern that happens to render with similar-looking
+`element(N, ...)` syntax.
+
+### Why the two are different constructs, not the same one twice
+
+1. **Cardinality and origin.** `ThreadedStmt::TupleAccUnpack`
+   (`threaded_ir.rs:1018-1024`) unpacks a flat `{Gate1, .., GateG, Var1, ..,
+   VarN}` accumulator from an `AccParam` — the **second parameter of a fold
+   lambda**, re-entered once per collection element
+   (`render_tuple_acc_unpack`, `threaded_ir.rs:2063-2082`: `element(idx,
+   Param)` where `Param` is literally the fold lambda's own bound name, e.g.
+   `"StateAcc"`). `AccParam`'s doc comment (`threaded_ir.rs:656-670`) is
+   explicit: "bound exactly once per lambda invocation... never a
+   `VersionedVar`." vt-conditional's tuple (`_CondAssign3` below) is instead
+   the `let`-bound result of a **two-arm `case` evaluated exactly once** —
+   there is no lambda, no re-entry, no accumulator identity to name as an
+   `AccParam`. The unpack direction is inverted too: `TupleAccUnpack` reads
+   its tuple **at the start of an iteration**, before that iteration's body
+   runs, to seed the next round of mutation; vt-conditional's
+   `element(N, ...)` chain reads its tuple **after both arms have already
+   finished computing**, to merge their two independently-computed results
+   into the enclosing scope. One is "unpack, then compute"; the other is
+   "compute (twice, once per arm), then unpack."
+2. **Gate slots encode operation-specific continuation state, not a generic
+   logical value.** `ThreadingMode::TupleAcc(usize)`'s `gate_slots`
+   (`threaded_ir.rs:792-812`) reserve `0`/`1`/`2` leading tuple positions
+   for `do:`'s (nothing) / `collect:`'s accumulator list / `detect:`'s
+   `{FoundItem, FoundFlag}` pair — each a **list-op-specific** continuation
+   channel read by that op's own post-fold wrapper, never a `VersionedVar`.
+   vt-conditional's leading slot is a completely different thing: the
+   branch's **logical/last-expression value** (compiled evidence below:
+   `element(1, _CondAssign3)` binds `_r`, the conditional's own result, not
+   an operation-specific gate). Reusing `TupleAcc(usize)`'s `gate_slots`
+   field to mean "1, for the branch value" would overload one field with
+   two unrelated meanings the existing `VerifyError::EarlyExitGateSlotMismatch`
+   check (`threaded_ir.rs:1172-1189`) is specifically built to police for
+   its *actual* meaning — list-op gate-slot arithmetic, not conditional
+   value-slot arithmetic.
+3. **The verifier already has a dedicated, regression-pinning check against
+   exactly this reuse.** `VerifyError::TupleAccInValueTypeContext`
+   (`threaded_ir.rs:1191-1206`, `#[cfg(test)]`) exists specifically because
+   `select_tuple_acc`'s `ValueType` exclusion is a structural invariant this
+   ADR already considers worth guarding: "fires if a future change to
+   `select_tuple_acc`'s guard ordering ever lets `use_tuple_acc` become
+   `true` in a `ValueType` context." Adopting `TupleAcc` for
+   vt-conditional's tuple would require *removing or narrowing* this
+   existing guard, not merely adding new code next to it — a real
+   regression-pinning invariant this ADR already ships would have to
+   change, not just an unaddressed gap being filled in.
+4. **No existing `ThreadedStmt` variant models a two-arm branch join at
+   all.** `Threaded` wraps a fold/loop body (`render_threaded`,
+   `threaded_ir.rs:1748-1777`); `ConditionalLoop` (Addendum 2) is a
+   condition-gated *tail-recursive* skeleton, not an if/else; `Bind` is
+   single-source/single-target, with no positional-tuple join semantics.
+   A faithful IR model of vt-conditional's shape — two sibling `Bind`
+   sequences (one per arm, each its own `FrameId`, mirroring
+   `with_branch_context`'s existing per-arm-frame discipline) merged into a
+   positional tuple at the join point — is a **new `ThreadedStmt` variant**,
+   not a reuse of `TupleAcc`. That is a materially different, larger
+   proposal than this issue scoped ("use `TupleAcc`"), and is not evaluated
+   here — see "What a real proposal would need" below.
+
+### Compiled evidence
+
+Two repros compiled with a locally-built `beamtalk` (`cargo build --bin
+beamtalk`, then `beamtalk build <dir>`), read from the real `.core` output.
+Not committed as fixtures (this is a no-go spike, so per this issue's own
+scope no test fixtures are added — see BT-3159's existing
+`stdlib/test/fixtures/class_method_conditional_local_and_class_var.bt` for
+an equivalent, already-landed repro covering the `ClassVars`-carrying
+variant cited below); reproducible directly from the source shown here:
+
+**1 mutated local** (`Value subclass: VtCondOneLocal`, `bump: flag => x :=
+0. _r := flag ifTrue: [x := 5. 42] ifFalse: [0]. x + _r`), routed through
+`emit_vt_conditional_assign_rhs` (`value_type_codegen.rs:2994`) via
+`build_vt_conditional_value_and_mutations_parts` (`:3132`):
+
+```erlang
+let X = 0 in
+let _Cond2 = _flag1 in
+let _CondAssign3 = case _Cond2 of
+  <'true'> when 'true' -> let X = 5 in {42, X}
+  <'false'> when 'true' -> {0, X}
+end in
+let _r = call 'erlang':'element'(1, _CondAssign3) in
+let _x4 = call 'erlang':'element'(2, _CondAssign3) in
+```
+
+**2 mutated locals** (`Value subclass: VtCondTwoLocals`, `bump: flag => a :=
+0. b := 0. _r := flag ifTrue: [a := 1. b := 2. 99] ifFalse: [a := 3. b := 4.
+0]. a + b + _r`), same call path:
+
+```erlang
+let A = 0 in
+let B = 0 in
+let _Cond2 = _flag1 in
+let _CondAssign3 = case _Cond2 of
+  <'true'> when 'true' -> let A = 1 in let B = 2 in {99, A, B}
+  <'false'> when 'true' -> let A = 3 in let B = 4 in {0, A, B}
+end in
+let _r = call 'erlang':'element'(1, _CondAssign3) in
+let _a4 = call 'erlang':'element'(2, _CondAssign3) in
+let _b5 = call 'erlang':'element'(3, _CondAssign3) in
+```
+
+Both confirm the task's framing exactly — `element(1, ...)` for the branch
+value, `element(i+2, ...)` (i.e. `element(2, ...)`, `element(3, ...)`, …)
+for each mutated local, in declaration order. No `StateAcc`, no gate slots,
+no fold lambda anywhere in sight — a plain, one-shot `case`-result
+destructure.
+
+### A refinement to Addendum 5's exclusion rationale (does not change the
+verdict)
+
+Addendum 5 states "Class-var mutations never route here either — by
+construction" for `conditionals.rs`'s **Actor-context**
+`generate_conditional_branch_inline`. That claim is correct as scoped, but
+this spike found a *different*, already-shipped, already-tested code path
+where `value_type_codegen.rs`'s **own** vt-conditional family — the same
+family this issue is about — genuinely does thread a version-counted
+`ClassVarsN` slot through its branch tuple: `build_vt_conditional_branch_pieces`
++ `finish_vt_conditional_branch` (`:3432`) append a trailing `ClassVars`
+tuple element whenever `any_cv_mutated`, and `rebind_vt_conditional_mutations`
+(`:3476`) extracts it via `element(all_mutations.len() + 1, ...)`. Compiled
+proof (`stdlib/test/fixtures/class_method_conditional_local_and_class_var.bt`,
+BT-3159, already a landed regression fixture with its own passing test suite
+— `class_method_conditional_local_and_class_var_test.bt`), `class m: flag =>
+x := 1. flag ifTrue: [x := self bump]. x`:
+
+```erlang
+'class_m:'/3 = fun (ClassSelf, ClassVars, _flag3) ->
+    let X = 1 in
+    let _Cond4 = _flag3 in
+    let _CondResult12 = case _Cond4 of
+      <'true'> when 'true' ->
+        let _CMR5 = call 'bt@...':'class_bump'(ClassSelf, ClassVars) in
+        let ClassVars1 = case _CMR5 of
+          <{'class_var_result', _MR7, _CV6}> when 'true' -> _CV6
+          <_PCV8> when 'true' -> ClassVars
+        end in
+        let _Unwrapped9 = ... in let X = _Unwrapped9 in {X, ClassVars1}
+      <'false'> when 'true' -> {X, ClassVars}
+    end in
+    let X = call 'erlang':'element'(1, _CondResult12) in
+    let ClassVars1 = call 'erlang':'element'(2, _CondResult12) in
+    ...
+```
+
+This is real: `class m:`/`n:`/`p:` are **class-side** methods, and per
+CLAUDE.md, "a class method runs in its class's gen_server process" — so
+`ClassVars` here is that gen_server's own actor state, threaded through a
+vt-conditional's branch tuple exactly the way ADR 0110 threads it elsewhere.
+Addendum 5's "Value objects have no `State` at all" is true for *instance*-side
+Value methods (no gen_server backs a Value instance) but is not the reason
+this particular exclusion holds for the *class-side* vt-conditional path —
+that path can and does carry `ClassVars`. **This does not change the
+verdict above**: the class-var-carrying tuple still isn't `TupleAcc` shaped
+(it's the same one-shot `case`-result join, just with one more trailing
+element) and is still blocked by the same `select_tuple_acc` guards
+(`has_conditional_threaded_writes`, and separately `has_state_effects` once
+a class-var write is present). It is recorded here only so a future reader
+does not cite "Value objects have no State" as a blanket justification
+broader than the evidence actually supports — the real reason `TupleAcc`
+doesn't apply is the structural mismatch in the four points above, not the
+absence of any state-like value anywhere in this file.
+
+### What a real proposal would need (not evaluated here — out of scope)
+
+If a future spike wants to pursue IR-backed verification for this shape
+(not `TupleAcc` reuse, a *different* proposal), it would need: a new
+`ThreadedStmt` variant modeling a two-arm value-and-locals join (per-arm
+`Bind` sequences under sibling `FrameId`s, a join op producing the
+positional tuple, `produces` listing the post-join versions) plus its own
+`render`/`verify` arms — comparable in size to `ConditionalLoop`'s own
+addition (Addendum 2: one variant, ~45 lines of type definition, a
+dedicated render function, no new `VerifyError` — "S" effort) — and would
+need to independently decide whether `element(N, ...)` linearity is worth
+checking at all here, since (per point 4 above and `TupleAccInValueTypeContext`'s
+own reasoning) there is no early-exit, no loop, and no gate-slot arithmetic
+for a `VerifyError` to catch that hand-written `i + 2` index math couldn't
+already get right or wrong on inspection. That is a materially different,
+new-IR-surface proposal, not a migration onto existing `TupleAcc`
+machinery, and is not scoped or recommended by this spike.
+
+### LOC accounting
+
+The current hand-rolled vt-conditional tuple-threading family
+(`value_type_codegen.rs:2739-3536`, doc comments included) is **798
+lines** across nine functions. No rewrite onto `ThreadingMode::TupleAcc`
+was attempted beyond the structural analysis above, because §"Why the two
+are different constructs" (points 1-3) establishes the reuse is blocked at
+the type/invariant level before an LOC comparison would be meaningful — a
+rewrite that must first defeat an existing `#[cfg(test)]` regression guard
+(`TupleAccInValueTypeContext`) and misuse `AccParam`'s per-iteration
+contract is not a fair "would it shrink the code" comparison; it is a
+proposal to weaken an invariant this ADR already ships, evaluated and
+rejected on those grounds above the LOC question.
+
+### Decision
+
+**No-go.** `value_type_codegen.rs`'s vt-conditional family stays
+hand-rolled, AST-directed Core Erlang construction, exactly where ADR 0111
+§Constraints already placed it. The textual similarity to `TupleAcc`'s
+`element(N, ...)` shape is superficial — same rendering idiom, different
+construct: a fold-lambda accumulator threaded across N loop iterations
+versus a two-arm branch's one-shot result join. This is not the
+"Module X sits below Y in the dependency graph" excuse CLAUDE.md's
+duplication rule rejects — it is two different rules that happen to render
+similarly, the case CLAUDE.md's rule is not aimed at. No follow-up
+migration issue is filed. If a future reader wants to reopen this, the new
+evidence needed is not "the shapes look similar" (already true, already
+evaluated here) but either (a) a proposal for the new `ThreadedStmt`
+variant sketched above with its own justification for why `verify()` would
+catch something real for a construct with no loop and no early exit, or (b)
+a change to `select_tuple_acc`'s guards that already-shipped, already-tested
+production code depends on staying as they are.
