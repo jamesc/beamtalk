@@ -1724,27 +1724,82 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// Extracts the body block of `expr`, and which family it belongs to,
-    /// if it is a nested loop/fold send — the `BodyKind::Letrec` shapes
-    /// (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`, see
-    /// this module's `//!` doc comment) or the `BodyKind::Foldl*` shapes
-    /// (`do:`/`collect:`/`select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/
-    /// `inject:into:`/`detect:`/`count:`/`takeWhile:`/`dropWhile:`/
-    /// `partition:`/`groupBy:`). Unlike the analogous local-variable
-    /// cross-scope-mutation analysis in
+    /// BT-3175: Canonical "selector → body-block-argument position" table.
+    /// Shared by every "given a keyword-selector `MessageSend`, extract its
+    /// loop/fold body block" call site in this module
+    /// ([`Self::nested_loop_or_fold_body`],
+    /// [`Self::collect_list_op_cross_scope_mutations`],
+    /// [`Self::list_op_needs_stateacc_fallback`],
+    /// [`Self::expr_has_nested_counted_loop_threading`]) — before this, each
+    /// independently re-matched selector strings against
+    /// `arguments.first()`/`arguments.last()`/`arguments[N]`, and could
+    /// silently drift out of sync (see BT-3175).
+    ///
+    /// This is the canonical/maximal selector set: the `BodyKind::Letrec`
+    /// shapes (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/
+    /// `to:by:do:`, see this module's `//!` doc comment) plus the
+    /// `BodyKind::Foldl*` shapes (`do:`/`collect:`/`select:`/`reject:`/
+    /// `anySatisfy:`/`allSatisfy:`/`inject:into:`/`detect:`/`count:`/
+    /// `takeWhile:`/`dropWhile:`/`partition:`/`groupBy:`) — matching
+    /// [`Self::nested_loop_or_fold_body`]'s pre-BT-3175 coverage, the most
+    /// complete of the four (BT-3172 added the predicate-based shapes
+    /// there only). `detect:ifNone:` is intentionally excluded: its second
+    /// (`ifNone:`) block argument is a separate, not-yet-analyzed risk
+    /// surface no call site here attempts to cover.
+    ///
     /// [`Self::list_op_needs_stateacc_fallback`]/
-    /// [`Self::collect_list_op_cross_scope_mutations`] (which safely omit
-    /// the predicate-based shapes — a narrower, unrelated optimization
-    /// concern), this list must cover every `Foldl*` `BodyKind`: per
-    /// `ThreadingPlan::new_impl`'s `else` branch (~line 607), ALL of them —
-    /// not just `do:`/`collect:`/etc. — share the exact same
-    /// `threads_class_vars` gate (`!Actor && in_class_method() &&
-    /// body_analysis.has_self_sends`) and the same `{ClassVars, tail}` wrap,
-    /// so a class-var self-send nested inside e.g. `detect:` is exactly as
-    /// vulnerable to this predicate's silent-loss/`erlc`-crash bug as one
-    /// nested inside `do:`. `detect:ifNone:` is intentionally excluded: its
-    /// second (`ifNone:`) block argument is a separate, not-yet-analyzed
-    /// risk surface this predicate doesn't attempt to cover. The returned
+    /// [`Self::collect_list_op_cross_scope_mutations`]/
+    /// [`Self::expr_has_nested_counted_loop_threading`] each cover only a
+    /// narrower subset of this table (their own deliberate optimization
+    /// scopes, verified against each site's pre-refactor selector list
+    /// rather than broadened here) — they filter the returned selector
+    /// down to their own subset after calling this.
+    ///
+    /// Takes the already-extracted `sel` (concatenated keyword parts, e.g.
+    /// `"to:by:do:"`) and `arguments` rather than the raw `Expression`, so
+    /// callers that already destructured a `MessageSend` for their own
+    /// purposes (e.g. reading `receiver` for `ensure:`/`on:do:` handling)
+    /// don't have to re-match. Does not itself unwrap parens or an
+    /// assignment RHS — callers that need that (e.g.
+    /// [`Self::nested_loop_or_fold_body`]'s `unwrap_parens`,
+    /// [`Self::expr_has_nested_counted_loop_threading`]'s assignment-RHS
+    /// unwrap) do it before calling, matching each site's pre-existing
+    /// behavior exactly.
+    fn block_arg_for_selector<'a>(
+        sel: &str,
+        arguments: &'a [Expression],
+    ) -> Option<&'a crate::ast::Block> {
+        match sel {
+            "whileTrue:" | "whileFalse:" => match arguments.first() {
+                Some(Expression::Block(block)) => Some(block),
+                _ => None,
+            },
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
+            | "detect:" | "count:" | "takeWhile:" | "dropWhile:" | "partition:" | "groupBy:" => {
+                match arguments.first() {
+                    Some(Expression::Block(block)) => Some(block),
+                    _ => None,
+                }
+            }
+            "timesRepeat:" => match arguments.last() {
+                Some(Expression::Block(block)) => Some(block),
+                _ => None,
+            },
+            "to:do:" | "inject:into:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            },
+            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extracts the body block of `expr`, and which family it belongs to,
+    /// if it is a nested loop/fold send. Selector coverage and argument
+    /// position come from [`Self::block_arg_for_selector`]; the returned
     /// [`NestedLoopShape`] tells [`Self::nested_loop_lost_class_var_mutation`]
     /// which of `ThreadingPlan`'s two `threads_class_vars` gates applies.
     fn nested_loop_or_fold_body(
@@ -1760,36 +1815,14 @@ impl CoreErlangGenerator {
             return None;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        match sel.as_str() {
-            "whileTrue:" | "whileFalse:" => match arguments.first() {
-                Some(Expression::Block(block)) => Some((block, NestedLoopShape::Letrec)),
-                _ => None,
-            },
-            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
-            | "detect:" | "count:" | "takeWhile:" | "dropWhile:" | "partition:" | "groupBy:" => {
-                match arguments.first() {
-                    Some(Expression::Block(block)) => Some((block, NestedLoopShape::Foldl)),
-                    _ => None,
-                }
+        let block = Self::block_arg_for_selector(&sel, arguments)?;
+        let shape = match sel.as_str() {
+            "whileTrue:" | "whileFalse:" | "timesRepeat:" | "to:do:" | "to:by:do:" => {
+                NestedLoopShape::Letrec
             }
-            "timesRepeat:" => match arguments.last() {
-                Some(Expression::Block(block)) => Some((block, NestedLoopShape::Letrec)),
-                _ => None,
-            },
-            "to:do:" if arguments.len() == 2 => match &arguments[1] {
-                Expression::Block(block) => Some((block, NestedLoopShape::Letrec)),
-                _ => None,
-            },
-            "inject:into:" if arguments.len() == 2 => match &arguments[1] {
-                Expression::Block(block) => Some((block, NestedLoopShape::Foldl)),
-                _ => None,
-            },
-            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
-                Expression::Block(block) => Some((block, NestedLoopShape::Letrec)),
-                _ => None,
-            },
-            _ => None,
-        }
+            _ => NestedLoopShape::Foldl,
+        };
+        Some((block, shape))
     }
 
     /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
@@ -4428,41 +4461,28 @@ impl CoreErlangGenerator {
             return;
         }
 
-        let body_block = match sel.as_str() {
-            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
-            // BT-2363: nested counted loops (`timesRepeat:`/`to:do:`/`to:by:do:`)
-            // capture and mutate outer locals just like list ops. Their body block
-            // is the last argument. Including them here makes the *outer* loop's
-            // threaded-locals computation see writes buried in an inner counted loop,
-            // so the outer loop threads them via StateAcc instead of dropping them.
-            | "timesRepeat:" => {
-                if let Some(Expression::Block(block)) = arguments.last() {
-                    block
-                } else {
-                    return;
-                }
-            }
-            "inject:into:" | "to:do:" => {
-                if arguments.len() == 2 {
-                    if let Expression::Block(block) = &arguments[1] {
-                        block
-                    } else {
-                        return;
-                    }
-                } else {
-                    return;
-                }
-            }
-            "to:by:do:" => {
-                if arguments.len() == 3 {
-                    if let Expression::Block(block) = &arguments[2] {
-                        block
-                    } else {
-                        return;
-                    }
-                } else {
-                    return;
-                }
+        // BT-2363: nested counted loops (`timesRepeat:`/`to:do:`/`to:by:do:`)
+        // capture and mutate outer locals just like list ops. Including them
+        // here makes the *outer* loop's threaded-locals computation see
+        // writes buried in an inner counted loop, so the outer loop threads
+        // them via StateAcc instead of dropping them.
+        let body_block = match Self::block_arg_for_selector(&sel, arguments) {
+            Some(block)
+                if matches!(
+                    sel.as_str(),
+                    "do:"
+                        | "collect:"
+                        | "select:"
+                        | "reject:"
+                        | "anySatisfy:"
+                        | "allSatisfy:"
+                        | "timesRepeat:"
+                        | "inject:into:"
+                        | "to:do:"
+                        | "to:by:do:"
+                ) =>
+            {
+                block
             }
             _ => return,
         };
@@ -4532,19 +4552,8 @@ impl CoreErlangGenerator {
             return false;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        let body_block = match sel.as_str() {
-            "timesRepeat:" => match arguments.last() {
-                Some(Expression::Block(block)) => block,
-                _ => return false,
-            },
-            "to:do:" if arguments.len() == 2 => match &arguments[1] {
-                Expression::Block(block) => block,
-                _ => return false,
-            },
-            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
-                Expression::Block(block) => block,
-                _ => return false,
-            },
+        let body_block = match Self::block_arg_for_selector(&sel, arguments) {
+            Some(block) if matches!(sel.as_str(), "timesRepeat:" | "to:do:" | "to:by:do:") => block,
             _ => return false,
         };
 
@@ -4578,24 +4587,20 @@ impl CoreErlangGenerator {
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
         // Identify list ops and their body block argument
-        let body_block = match sel.as_str() {
-            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:" => {
-                if let Some(Expression::Block(block)) = arguments.first() {
-                    block
-                } else {
-                    return false;
-                }
-            }
-            "inject:into:" => {
-                if arguments.len() == 2 {
-                    if let Expression::Block(block) = &arguments[1] {
-                        block
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
+        let body_block = match Self::block_arg_for_selector(&sel, arguments) {
+            Some(block)
+                if matches!(
+                    sel.as_str(),
+                    "do:"
+                        | "collect:"
+                        | "select:"
+                        | "reject:"
+                        | "anySatisfy:"
+                        | "allSatisfy:"
+                        | "inject:into:"
+                ) =>
+            {
+                block
             }
             _ => return false,
         };
