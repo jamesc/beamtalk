@@ -996,11 +996,14 @@ impl CoreErlangGenerator {
     /// through `render_loop_body_statements` (that function separates every
     /// *raw* `ThreadedStmt` entry, which would inject a spurious extra
     /// space inside any shape that itself decomposes into more than one
-    /// entry, e.g. E1's Statement+Bind pair — breaking byte-identity).
+    /// entry, e.g. E1's Statement+Bind pair — a real double-space bug, not
+    /// a cosmetic one).
     /// `verify_and_render_branch_arm`'s plain `render()` has no separator
     /// of its own, so the manually-inserted space is the only one that
-    /// ends up in the output, at exactly the position the legacy
-    /// `if i > 0 { docs.push(" ") }` loop put it.
+    /// ends up in the output, at exactly the position this same
+    /// `if i > 0 { docs.push(" ") }` loop below has always put it — this
+    /// is the loop's own IR-producing form, not a match against some
+    /// other, deleted implementation.
     #[allow(clippy::too_many_lines)]
     fn generate_exception_body_with_threading_inner(
         &mut self,
