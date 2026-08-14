@@ -372,8 +372,9 @@ pub enum CodeGenError {
         "Cannot mutate {mutation} inside a loop nested inside another loop, at {location}.\n\n\
              The inner loop's own mutation would be threaded correctly on its own, but the outer \
              loop (whileTrue:/whileFalse:/timesRepeat:/to:do:/to:by:do:/do:/collect:/select:/\
-             reject:/anySatisfy:/allSatisfy:/inject:into:) has no class-variable mutation of its \
-             own to carry it back out — so it is silently discarded, or fails to compile, once \
+             reject:/anySatisfy:/allSatisfy:/inject:into:/detect:/count:/takeWhile:/dropWhile:/\
+             partition:/groupBy:) has no class-variable mutation of its own to carry it back out \
+             — so it is silently discarded, or fails to compile, once \
              the inner loop finishes.\n\n\
              Fix: Accumulate into a local variable across both loops, then mutate the class variable \
              once after the outer loop finishes:\n\
