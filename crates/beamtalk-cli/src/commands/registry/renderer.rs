@@ -15,17 +15,7 @@ use crate::commands::deps::registry::{RegistryEntry, RegistryRelease, compare_ve
 
 use super::layout::{page_footer, page_header};
 
-/// Escape HTML special characters.
-///
-/// Index entries are third-party data (published by any package author, not
-/// validated beyond TOML syntax), so every field is escaped before it lands
-/// in generated HTML.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
+use crate::commands::util::html_escape;
 
 /// The dependency snippet for a `(name, version)` pair, matching the bare
 /// registry-string `[dependencies]` format `beamtalk.toml` accepts (BT-2978):
