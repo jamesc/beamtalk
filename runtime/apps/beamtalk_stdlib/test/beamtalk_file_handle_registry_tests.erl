@@ -211,3 +211,95 @@ malformed_handle_calls_are_safe_test_() ->
             ?assertNot(has_entry(<<"anything">>, beamtalk_file_handle_registry:open_handles()))
         end)
     end}.
+
+open_handles_no_server_is_safe_test() ->
+    %% Complements no_server_calls_are_safe_test/0: that test covers register/2
+    %% and unregister/1 when the server is absent; this one covers open_handles/0.
+    %% After gen_server:stop the registered name is gone (stop is synchronous);
+    %% open_handles/0 must return [] rather than raise.
+    case whereis(beamtalk_file_handle_registry) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid)
+    end,
+    ?assertEqual([], beamtalk_file_handle_registry:open_handles()).
+
+unknown_call_returns_error_unknown_request_test_() ->
+    %% handle_call/3 has a catch-all clause that replies {error, unknown_request}
+    %% for any message not matching the three known selectors. Verify it without
+    %% crashing the server.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            Pid = whereis(beamtalk_file_handle_registry),
+            ?assertMatch(
+                {error, unknown_request},
+                gen_server:call(Pid, totally_unknown_message)
+            ),
+            %% Registry is still alive after the unknown call.
+            ?assertEqual(ok, sync(ok))
+        end)
+    end}.
+
+unknown_cast_is_safe_test_() ->
+    %% handle_cast/2 catch-all: an unexpected cast must not crash the server.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            gen_server:cast(beamtalk_file_handle_registry, totally_unknown_cast),
+            ?assertEqual(ok, sync(ok))
+        end)
+    end}.
+
+unknown_handle_info_is_safe_test_() ->
+    %% handle_info/2 catch-all: an unexpected message sent directly to the
+    %% process must not crash the server.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            beamtalk_file_handle_registry ! totally_unknown_info,
+            ?assertEqual(ok, sync(ok))
+        end)
+    end}.
+
+multiple_owners_monitor_demonitored_independently_test_() ->
+    %% When two different owners each hold a handle, closing and unregistering
+    %% one owner's handle must demonitor that owner WITHOUT removing the other
+    %% owner's monitor.  This exercises the `(_Ref, _P) -> true` keep-branch
+    %% inside `demonitor_owner/2`'s `maps:filter` — only reached when the
+    %% monitors map contains entries for more than one distinct owner pid.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            Owner1 = spawn_dummy(),
+            Owner2 = spawn_dummy(),
+            {H1, P1} = open_handle(),
+            {H2, P2} = open_handle(),
+            ok = beamtalk_file_handle_registry:register(H1, Owner1),
+            ok = beamtalk_file_handle_registry:register(H2, Owner2),
+
+            %% Explicitly close and unregister H1 (not via Owner1's death).
+            %% This must demonitor Owner1 while leaving Owner2's monitor intact.
+            ok = beamtalk_file_handle:close_handle(H1),
+            ok = beamtalk_file_handle_registry:unregister(H1),
+            ok = sync(ok),
+
+            %% H2 must still be reclaimed when Owner2 dies (its monitor was kept).
+            stop_dummy(Owner2),
+            ok = sync(ok),
+            ?assertNot(beamtalk_file_handle:is_open(H2)),
+            ?assertNot(
+                has_entry(
+                    list_to_binary(P2),
+                    beamtalk_file_handle_registry:open_handles()
+                )
+            ),
+
+            %% Owner1 is still alive but holds no handles — let it exit cleanly.
+            stop_dummy(Owner1),
+            ok = sync(ok),
+            ?assertNot(
+                has_entry(
+                    list_to_binary(P1),
+                    beamtalk_file_handle_registry:open_handles()
+                )
+            ),
+            delete_temp(P1),
+            delete_temp(P2)
+        end)
+    end}.
