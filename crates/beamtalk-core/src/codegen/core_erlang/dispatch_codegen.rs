@@ -2448,6 +2448,18 @@ impl CoreErlangGenerator {
     ///
     /// The caller is responsible for closing the expression (generating the body
     /// that uses the new state).
+    ///
+    /// BT-3180: the plain-`State` branch below carries `ThreadedIr`
+    /// instrumentation (`check_simple_field_bind_invariant`, reused from
+    /// `expressions.rs`) around its `next_state_var()` mint — chosen over
+    /// promoting the mint to a real `Bind` (like the class-var branch
+    /// already does): this function's `Document` is hand-built and returned
+    /// directly to 7 different call sites with their own surrounding glue
+    /// (loop bodies, conditional arms, intrinsics), so replacing it with a
+    /// `ThreadedStmt::Bind` would touch every one of those emission paths
+    /// and require re-verifying the whole snapshot corpus for a version-mint
+    /// site that was never actually producing wrong output — instrumentation
+    /// only, matching BT-3139's precedent for this construct family.
     pub(super) fn generate_field_assignment_open(
         &mut self,
         expr: &Expression,
@@ -2513,9 +2525,24 @@ impl CoreErlangGenerator {
 
                 let val_var = self.fresh_temp_var("Val");
                 let current_state = self.current_state_var();
+                let source_state_version = self.state_version();
                 let val_doc = self.generate_field_assignment_value_doc(value)?;
 
                 let new_state = self.next_state_var();
+                let target_state_version = self.state_version();
+                // BT-3180: this "open" (non-last-position) sibling of
+                // `generate_field_assignment`'s plain-State branch had no
+                // `ThreadedIr` instrumentation around its `next_state_var()`
+                // mint — most of this function's call sites sit outside any
+                // backfilled `Vec<ThreadedStmt>` body sequence, so nothing
+                // else ever isolated-verifies this version step.
+                self.check_simple_field_bind_invariant(
+                    super::threaded_ir::VersionPrefix::State,
+                    source_state_version,
+                    target_state_version,
+                    "actor State open field-assignment version bind",
+                    value.span(),
+                );
 
                 let doc = docvec![
                     "let ",

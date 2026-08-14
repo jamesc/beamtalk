@@ -71,12 +71,12 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // analogue of BT-2359, applied in gen_server/methods.rs).
   bt2360ClassMethodCondAssignRhsPending => false
 
-  // Pending switch for BT-3178: an Actor self-send that mutates the actor's
-  // own state field, called from inside an `ifTrue:` conditional branch
-  // (not a loop), doesn't thread the mutation back (BT-3178) — the identical
-  // self-send inside a loop, and a direct field write inside the identical
-  // conditional, both thread correctly. Discovered by BT-3176.
-  bt3178ActorSelfSendInConditionalPending => true
+  // Pending switch for BT-3178: fixed — conditionals.rs's branch-arm
+  // lowering now Binds a DispatchingSelfSend's returned NewState as a real
+  // Bind (mirroring the SelfFieldAtPut/ControlFlowWithMutations tuple-unpack
+  // pattern) instead of discarding it in the C12 catch-all. Kept as a
+  // switch for documentation/bisection.
+  bt3178ActorSelfSendInConditionalPending => false
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
@@ -551,19 +551,33 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 3 — on:do:/ensure: combined with a self-send or a nested
   //  conditional in the try body's LAST statement. See BT-3160/BT-3161.
-  //  Actor-only for now: the class-method self-send analogue and the
-  //  value-type/class-method nested-conditional analogue still fail erlc
-  //  (BT-3161 only fixed Actor context) — see mutation_corpus_actor.bt and
-  //  BT-3177.
+  //  The class-method self-send analogue and the value-type/class-method
+  //  nested-conditional analogue were fixed by BT-3177 — see
+  //  mutation_corpus_value.bt/mutation_corpus_class_method.bt.
   // ════════════════════════════════════════════════════════════════════════
   testOnDoSelfSendLastReadWriteActor =>
     self assert: self actorCorpus onDoSelfSendLastReadWrite equals: 1
+
+  testOnDoSelfSendLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod onDoSelfSendLastReadWrite equals: 1
 
   testEnsureNestedConditionalLastReadWriteTrueActor =>
     self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: true) equals: 11
 
   testEnsureNestedConditionalLastReadWriteFalseActor =>
     self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  testEnsureNestedConditionalLastReadWriteTrueValue =>
+    self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: true) equals: 11
+
+  testEnsureNestedConditionalLastReadWriteFalseValue =>
+    self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  testEnsureNestedConditionalLastReadWriteTrueClassMethod =>
+    self assert: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: true) equals: 11
+
+  testEnsureNestedConditionalLastReadWriteFalseClassMethod =>
+    self assert: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: false) equals: 1
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 4 — class-var / state-field mutation, threaded the same

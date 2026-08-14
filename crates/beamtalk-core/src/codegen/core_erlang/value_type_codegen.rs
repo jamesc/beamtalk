@@ -52,6 +52,8 @@ enum VtBodyExprKind {
     BlockWithCapturedMutations(Vec<String>),
     /// Non-last `whileTrue:` / `whileFalse:` with local mutations (BT-1609).
     WhileWithLocalThreading,
+    /// Non-last `on:do:`/`ensure:` with local mutations (BT-3177).
+    ExceptionConstructWithLocalThreading,
     /// Regular expression with no special Self-threading needs.
     Pure,
 }
@@ -1166,6 +1168,9 @@ impl CoreErlangGenerator {
         if self.is_conditional_with_vt_local_threading(expr) {
             return VtBodyExprKind::ConditionalWithLocalThreading;
         }
+        if self.is_exception_construct_with_vt_local_threading(expr) {
+            return VtBodyExprKind::ExceptionConstructWithLocalThreading;
+        }
         if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
             return VtBodyExprKind::BlockWithCapturedMutations(mutations);
         }
@@ -1522,6 +1527,20 @@ impl CoreErlangGenerator {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_while_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::ExceptionConstructWithLocalThreading => {
+                // BT-3177: Non-last on:do:/ensure: with captured local
+                // mutations. Last position is not yet wired through the
+                // shared `ThreadedExpr` emitter (`emit_threaded_last` has no
+                // on:do:/ensure: case) — tracked as a follow-up; today's
+                // fixtures/tests only exercise this in non-last position,
+                // same as this issue's two repro shapes.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_exception_construct_open(expr)?;
                     body_parts.push(doc);
                 }
             }
@@ -2974,6 +2993,83 @@ impl CoreErlangGenerator {
             cv_before,
         );
 
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-3177: whether `expr` is an `on:do:`/`ensure:` whose try/handler/
+    /// cleanup blocks mutate an outer local, in value-type or class-method
+    /// context. Unlike [`Self::is_conditional_with_vt_local_threading`] and
+    /// its loop/foldl siblings, `on:do:`/`ensure:`'s own codegen
+    /// (`exception_handling.rs`'s `generate_on_do_with_mutations`/
+    /// `generate_ensure_with_mutations`) is already context-agnostic since
+    /// BT-3177's `exception_body_outer_state` fix — it needs no separate
+    /// vt-specific construction, only its returned `{Result, StateAcc}`
+    /// tuple unpacked here at the non-last-position call site (see
+    /// [`Self::generate_vt_exception_construct_open`]).
+    pub(in crate::codegen::core_erlang) fn is_exception_construct_with_vt_local_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        crate::state_threading_selectors::is_exception_selector(&sel)
+            && self.get_control_flow_threaded_vars(expr).is_some()
+    }
+
+    /// BT-3177: emits a non-last `on:do:`/`ensure:` that mutates captured
+    /// outer locals, in value-type or class-method context, as an open let
+    /// chain — binds the construct's own `{Result, StateAcc}` tuple, then
+    /// rebinds each mutated outer local from `StateAcc`'s `__local__` keys.
+    /// Mirrors `gen_server/methods.rs`'s Actor-context
+    /// `BodyExprKind::ControlFlowWithMutations` non-last handling (the same
+    /// extraction, minus that path's `ThreadedStmt::Bind`/`next_state_var`
+    /// step — there is no ambient `gen_server` `State` to thread into here).
+    pub(in crate::codegen::core_erlang) fn generate_vt_exception_construct_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let tuple_var = self.fresh_temp_var("ExTuple");
+        let expr_doc = self.expression_doc(expr)?;
+        let mut docs: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            expr_doc,
+            " in ",
+        ]];
+        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
+            let state_var = self.fresh_temp_var("ExState");
+            docs.push(docvec![
+                "let ",
+                leaf::var(state_var.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var),
+                ") in ",
+            ]);
+            for var in &threaded_vars {
+                let core_var = self
+                    .lookup_var(var)
+                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                docs.push(docvec![
+                    "let ",
+                    leaf::var(core_var),
+                    " = call 'maps':'get'(",
+                    leaf::atom(Self::local_state_key(var)),
+                    ", ",
+                    leaf::var(state_var.clone()),
+                    ") in ",
+                ]);
+            }
+        }
         Ok(Document::Vec(docs))
     }
 

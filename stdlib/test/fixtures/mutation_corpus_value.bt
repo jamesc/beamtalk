@@ -274,10 +274,18 @@ Value subclass: MutationCorpusValue
       ifFalse: [0]
     x
 
-// ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
-// NOT present here: a nested conditional as the LAST statement of an
-// `ensure:` try body (BT-3161 Flavor B / E5's shape) still fails erlc with
-// "unbound variable 'State'" in value-type context — BT-3161 only fixed the
-// Actor-context analogue. See mutation_corpus_actor.bt's
-// `ensureNestedConditionalLastReadWrite` for the working fragment and
-// BT-3177 for the value-type/class-method gap this discovery filed.
+  // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
+  // A nested conditional as the LAST statement of an `ensure:` try body
+  // (BT-3161 Flavor B / E5's shape) — fixed by BT-3177
+  // (`exception_body_outer_state`, exception_handling.rs): value-type/
+  // class-method context has no ambient `State` to seed this construct's
+  // scratch map from (only Actor context does), so it now seeds from an
+  // empty map instead of the nonexistent `State` identifier BT-3161 left
+  // this context referencing.
+  ensureNestedConditionalLastReadWrite: flag =>
+    t := 0
+    [
+      t := t + 1
+      flag ifTrue: [t := t + 10]
+    ] ensure: [nil]
+    t

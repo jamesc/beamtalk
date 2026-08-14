@@ -279,12 +279,17 @@ Object subclass: MutationCorpusClassMethod
     x
 
   // ── on:do:/ensure: + nested conditional (BT-3176 axis 3) ────────────────────
-  // NOT present here: a nested conditional as the LAST statement of an
-  // `ensure:` try body (BT-3161 Flavor B / E5's shape) still fails erlc with
-  // "unbound variable 'State'" in class-method context (same as value-type
-  // context — see mutation_corpus_value.bt). See mutation_corpus_actor.bt's
-  // `ensureNestedConditionalLastReadWrite` for the working fragment and
-  // BT-3177 for the gap this discovery filed.
+  // A nested conditional as the LAST statement of an `ensure:` try body
+  // (BT-3161 Flavor B / E5's shape) — fixed by BT-3177, same root cause and
+  // fix as mutation_corpus_value.bt's copy of this fragment
+  // (`exception_body_outer_state`, exception_handling.rs).
+  class ensureNestedConditionalLastReadWrite: flag =>
+    t := 0
+    [
+      t := t + 1
+      flag ifTrue: [t := t + 10]
+    ] ensure: [nil]
+    t
 
   // ── self-send as the mutation mechanism (BT-3176 axis 2) ────────────────────
   // A fragment method that calls another class method (a same-class self-send)
@@ -318,13 +323,20 @@ Object subclass: MutationCorpusClassMethod
     self.runs
 
   // ── on:do: + self-send (BT-3176 axis 3) ──────────────────────────────────────
-  // NOT present here: a same-class self-send as the LAST statement of an
-  // `on:do:` try body (BT-3161 Flavor A's shape) still produces invalid Core
-  // Erlang (an empty value fragment before a doubled `in` — erlc
-  // `core_parse_error`) in class-method context; BT-3161 only fixed the
-  // Actor-context analogue. See mutation_corpus_actor.bt's
-  // `onDoSelfSendLastReadWrite` for the working fragment and BT-3177 for the
-  // class-method gap this discovery filed.
+  // A same-class self-send as the LAST statement of an `on:do:` try body
+  // (BT-3161 Flavor A's shape) — fixed by BT-3177: `self bump` here emits an
+  // *open* let-chain (`emit_class_var_result_unwrap`) that
+  // `generate_exception_body_with_threading_inner`'s last-position handling
+  // used to treat as a self-contained expression, producing a dangling `in`
+  // (erlc `core_parse_error`). Now closed via `closed_expression_doc`
+  // (BT-2350's established pattern for this exact hazard).
+  class onDoSelfSendLastReadWrite =>
+    t := 0
+    [
+      t := t + 1
+      self bump
+    ] on: Error do: [:e | nil]
+    t
 
   // ── class-var mutation, threaded like an outer local (BT-3176 axis 4) ───────
   // Every fragment above threads an outer LOCAL; these mirror the same

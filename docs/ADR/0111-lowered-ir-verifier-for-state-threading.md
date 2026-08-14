@@ -4162,3 +4162,81 @@ sentence corrected above** — spot-checked by re-reading Addendum 6 in full
 against `threaded_ir.rs`'s BT-3164/BT-3171 status sections and the three
 PRs' diffs; no other claim in Addendum 6, or elsewhere in this ADR, refers
 to these three issues' scope.
+
+## Addendum 13 (2026-08-14): BT-3182 — `BEAMTALK_THREADED_IR_WHILE_DIRECT` decided: deleted
+
+Addendum 3 left `BEAMTALK_THREADED_IR_WHILE_DIRECT` (the BT-3145 pilot
+routing `generate_while_loop_direct` through `ThreadedIr`) parked in an
+explicitly unresolved state: off by default, not flipped, not deleted,
+pending either a re-measurement on a lower-noise setup or a decision to
+give up on it. Ten addenda later, nothing had revisited it — found during a
+post-ADR-0111 cleanup review as the one place the migration's "legacy paths
+are deleted" premise still didn't hold on `main`.
+
+**The three options, weighed against what actually changed (nothing) since
+Addendum 3:**
+
+1. **Finish it** — scope the "gap three" work (full loop-body coverage:
+   plain-let temporaries, destructuring, list-op RHS) as its own design
+   pass, then re-measure. Rejected: no concrete trigger exists for this
+   investment. The legacy path is not an unverified gap — BT-3132's
+   side-channel checks already run real `ThreadedIr` verification against
+   every while/counted loop body today, flag on or off — so finishing the
+   pilot buys only a narrower dual-computation-drift risk for the subset it
+   would cover, not a correctness fix. Spending a BT-3156-sized design pass
+   to chase an inconclusive ≤3% measurement with no reproduction plan for
+   the noise that made it inconclusive is not a good bet.
+2. **Formally park** — document the flag as a permanent, maintained,
+   opt-in path with an explicit re-open trigger. Rejected: this is what
+   Addendum 3 already did, and the ten-addendum silence since is exactly
+   the failure mode "formally park" predicts — an opt-in path nobody
+   measures, exercises only by its own dual-run tests, accumulating drift
+   risk against the legacy path it was supposed to eventually replace, with
+   no forcing function to ever revisit it. CLAUDE.md is explicit here:
+   "Don't use feature flags or backwards-compatibility shims when you can
+   just change the code" — an env-flag-gated dual path that has sat
+   unflippable for three issues and ten addenda is precisely that.
+3. **Delete** — remove the pilot's gating/lowering layer, leave while/
+   counted loops on side-channel verification only. **Chosen.**
+
+**What was deleted** (`control_flow/while_loops.rs`): the
+`BEAMTALK_THREADED_IR_WHILE_DIRECT` env-flag check
+(`threaded_ir_while_direct_enabled`), `try_render_while_direct_via_threaded_ir`
+(the ~240-line lowering/verify/render attempt), its eligibility gate
+`while_direct_body_is_bind_representable` and RHS allowlist
+`is_simple_threaded_rhs`, the six `dual_run_*`/byte-identity tests, and
+their `codegen_with_threaded_ir_while_direct` harness — `generate_while_loop_direct`
+no longer branches on the flag at all. `generate_loop_condition_body`
+(factored out in Addendum 2 specifically so the pilot and the legacy path
+shared one condition-codegen) stays — it is now the legacy path's only
+caller, not dead.
+
+**What was kept, and why this isn't a partial deletion:**
+`ThreadedStmt::ConditionalLoop`, `ThreadingMode::DirectParams`, and
+`VersionPrefix::Local` — the IR shapes Addendum 2's design introduced for
+this pilot's lowering — are unconstructed by any production code once the
+pilot's lowering is gone (confirmed by the `dead_code` lint after deletion:
+these three, and only these three, of Addendum 2's additions fire it —
+`ValueRef::Doc` and `VersionPrefix::Gensym`, Addendum 2's other two
+additions, remain heavily used by `conditionals.rs`/`exception_handling.rs`/
+`gen_server/methods.rs` and are untouched). Rather than delete these too
+(which would also mean unpicking `render_conditional_loop`,
+`render_loop_skeleton`'s shared plumbing with bare `Threaded`, the
+`verify()` match arms handling `ConditionalLoop`, and their own dedicated
+unit tests — a materially larger, higher-risk change than this issue's
+scope, for a marginal win since the code is inert either way), they are
+marked `#[allow(dead_code)]` with a citation to why: `ConditionalLoop`'s own
+doc comment already named a second, not-yet-attempted consumer for this
+exact shape at design time (Addendum 2) — a real counted-loop
+(`to:do:`/`timesRepeat:`/`repeat`) migration — not a vague "might be useful
+later." If that migration is never attempted, revisiting deletion of these
+three is the honest follow-up, not carrying them forever on the same
+reasoning.
+
+**Outcome:** while/counted loops stay on `ThreadedIr` side-channel
+verification only, identical to their state before BT-3145 — no behavior
+change, confirmed by the full snapshot corpus + `stdlib`/`BUnit` suites
+(`just verify-threaded-ir`) passing unchanged. `threaded_ir.rs`'s own
+module-doc §Status (BT-3182) is the accurate, current record; this addendum
+is the ADR-level pointer to it, per this ADR's own established
+cross-referencing precedent (Addendum 12).
