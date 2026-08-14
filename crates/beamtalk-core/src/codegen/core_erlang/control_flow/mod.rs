@@ -1969,26 +1969,12 @@ impl CoreErlangGenerator {
                 // not via a live re-lookup through the state pointer — so without
                 // this, any read of the var later in the SAME block invocation
                 // (e.g. the next statement) would see the stale pre-statement
-                // value instead of what this construct just wrote. Mirrors
-                // `conditionals.rs`'s `push_control_flow_threaded_var_rereads`,
-                // which does the same rebind for the `ThreadedIr`-rendered
-                // conditional-arm path.
+                // value instead of what this construct just wrote. Shares
+                // `rebind_threaded_vars_from_state` with `conditionals.rs`'s
+                // `push_control_flow_threaded_var_rereads`, which does the same
+                // rebind for the `ThreadedIr`-rendered conditional-arm path.
                 if let Some(inner_vars) = inner_threaded_vars {
-                    for var in &inner_vars {
-                        let core_var = self
-                            .lookup_var(var)
-                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        docs.push(docvec![
-                            "let ",
-                            leaf::var(core_var.clone()),
-                            " = call 'maps':'get'(",
-                            leaf::atom(Self::local_state_key(var)),
-                            ", ",
-                            leaf::var(new_state.clone()),
-                            ") in ",
-                        ]);
-                        self.bind_var(var, &core_var);
-                    }
+                    docs.extend(self.rebind_threaded_vars_from_state(&inner_vars, &new_state));
                 }
                 if is_last {
                     match kind {
@@ -3621,6 +3607,46 @@ impl CoreErlangGenerator {
         format!("__local__{var_name}")
     }
 
+    /// ADR 0111 Addendum 5 (BT-1213/BT-2355/BT-3173 rebind idiom): rebinds
+    /// each of `vars` — a nested control-flow construct's threaded
+    /// `__local__` captured vars — from `state_var`, returning one `let V =
+    /// maps:get(...) in` `Document` per var and updating each var's own
+    /// Core Erlang binding via `bind_var` so later code (in whatever form
+    /// the caller assembles) sees the rebound value rather than the stale
+    /// pre-statement one.
+    ///
+    /// Shared leaf helper for two call sites that both need this same
+    /// rebind after unpacking a nested construct's `{Result, NewState}`
+    /// result, differing only in how they wrap the returned `Document`s:
+    /// `conditionals.rs`'s `push_control_flow_threaded_var_rereads` (the
+    /// `ThreadedIr`-rendered conditional-arm path, wraps as one
+    /// `ThreadedStmt::Statement`) and this module's
+    /// `generate_threaded_loop_body_inner` (the foldl loop-body path,
+    /// pushes directly onto its `docs` vec).
+    pub(super) fn rebind_threaded_vars_from_state(
+        &mut self,
+        vars: &[String],
+        state_var: &str,
+    ) -> Vec<Document<'static>> {
+        let mut docs = Vec::new();
+        for var in vars {
+            let core_var = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            docs.push(docvec![
+                "let ",
+                leaf::var(core_var.clone()),
+                " = call 'maps':'get'(",
+                leaf::atom(Self::local_state_key(var)),
+                ", ",
+                leaf::var(state_var.to_string()),
+                ") in ",
+            ]);
+            self.bind_var(var, &core_var);
+        }
+        docs
+    }
+
     /// BT-598/BT-1053: Compute local variables that need threading through a loop's `StateAcc`.
     ///
     /// For actor methods: returns vars that are both read and written in the block
@@ -4102,6 +4128,7 @@ impl CoreErlangGenerator {
     /// Scans a body expression for list op message sends (do:, collect:, etc.) with literal
     /// blocks, and adds any variables that are captured from the outer scope and written
     /// inside the block to `out`. These variables need threading through the outer loop.
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn collect_list_op_cross_scope_mutations(
         expr: &Expression,
         facts: &crate::semantic_analysis::SemanticFacts,
@@ -4142,12 +4169,31 @@ impl CoreErlangGenerator {
                 }
             }
             for block in blocks {
+                // BT-3173 review follow-up: exclude this wrapping block's own
+                // parameters (e.g. `on:do:`'s exception var, `ifNotNil:`'s bound
+                // value) before merging into `out` — mirrors
+                // `collect_nested_loop_outer_local_writes`'s `all_excluded`
+                // threading for the identical construct shape. Without this, a
+                // nested loop reporting a write to the wrapping block's own
+                // param (e.g. `x ifNotNil: [:v | nested do: [:i | v := v + i]]`)
+                // would be misreported as an outer-scope mutation.
+                let block_params: std::collections::HashSet<String> = block
+                    .parameters
+                    .iter()
+                    .map(|p| p.name.to_string())
+                    .collect();
+                let mut nested = std::collections::HashSet::new();
                 for stmt in &block.body {
                     Self::collect_list_op_cross_scope_mutations_recursive(
                         &stmt.expression,
                         facts,
-                        out,
+                        &mut nested,
                     );
+                }
+                for v in nested {
+                    if !block_params.contains(v.as_str()) {
+                        out.insert(v);
+                    }
                 }
             }
             return;

@@ -1139,22 +1139,7 @@ impl CoreErlangGenerator {
             return;
         };
         let new_state_name = self.current_state_var();
-        let mut re_reads: Vec<Document<'static>> = Vec::new();
-        for var in &threaded_vars {
-            let tv_core = self
-                .lookup_var(var)
-                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-            re_reads.push(docvec![
-                "let ",
-                leaf::var(tv_core.clone()),
-                " = call 'maps':'get'(",
-                leaf::atom(Self::local_state_key(var)),
-                ", ",
-                leaf::var(new_state_name.clone()),
-                ") in ",
-            ]);
-            self.bind_var(var, &tv_core);
-        }
+        let re_reads = self.rebind_threaded_vars_from_state(&threaded_vars, &new_state_name);
         if !re_reads.is_empty() {
             stmts.push(ThreadedStmt::Statement(Document::Vec(re_reads), span));
         }
