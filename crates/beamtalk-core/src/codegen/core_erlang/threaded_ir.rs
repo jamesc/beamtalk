@@ -275,12 +275,12 @@
 //! (`mod.rs`), the same way BT-3164 deleted
 //! `wrap_class_method_body_with_nlr_catch`. `wrap_body_with_nlr_catch`
 //! itself remains live: [`render`]'s `NlrCatch` arm (this module) still
-//! calls it directly to build the real try/catch scaffolding. Deleting the
+//! calls it directly to build the real try/catch scaffolding. The
 //! now-unused rendering-only wrappers these three call sites left behind
 //! (`generate_method_definition_body_with_reply`, `generate_method_body_with_reply`,
 //! and their shared `generate_body_exprs_with_reply` helper — all in
-//! `gen_server/methods.rs`, all with zero remaining callers once the
-//! migration landed) mirrors how BT-3164 renamed away
+//! `gen_server/methods.rs`) were deleted once they had zero remaining
+//! callers, the same way BT-3164 renamed away
 //! `generate_class_method_body` rather than leaving a dead rendering path
 //! beside the lowering one.
 //!
@@ -454,8 +454,11 @@
 //! at each source-statement boundary and renders the whole arm through
 //! plain [`render`] (the same no-separator function `conditionals.rs` uses)
 //! — the manually-placed `Statement`s supply the only separators that end
-//! up in the output, at exactly the positions the legacy `if i > 0 {
-//! docs.push(" ") }` loop put them.
+//! up in the output, at exactly the positions this same per-statement
+//! `if i > 0 { ... }` loop has always put them (it is not a deleted
+//! predecessor being matched — the loop is still live, unchanged in
+//! shape, just now pushing an IR node instead of a `Document` fragment
+//! directly; see `exception_handling.rs`'s own copy of this loop).
 //!
 //! `control_flow/mod.rs`'s `check_branch_frame_linearity` and this file's
 //! `verify_branch_frame_linearity` — the scalar-synthesis scaffolding these
@@ -3892,17 +3895,6 @@ mod tests {
         let rendered = lower_and_render(&ir).to_pretty_string();
         assert_eq!(rendered, "let N1 = call 'erlang':'element'(3, AccSt0) in ");
     }
-
-    // `verify_branch_frame_linearity` (BT-3134) and its coverage above were
-    // deleted by BT-3165 (ADR 0111 Addendum 5) once
-    // `exception_handling.rs`'s `on:do:`/`ensure:` — its last two production
-    // callers via `check_branch_frame_linearity` — moved to real per-arm
-    // `ThreadedIr` (`verify_and_render_branch_arm`, `conditionals.rs`). The
-    // regression coverage proving `NonLinearVersion`/`UnboundVersion` are
-    // live against real exception-arm IR now lives in
-    // `exception_handling.rs`'s own test module, mirroring
-    // `conditionals.rs`'s `test_bt3146_*_detected_via_production_lowering_types`
-    // pattern.
 
     // ── construct_and_verify_class_var_bind (BT-3135/BT-3148, ADR 0110
     // contract) ─────────────────────────────────────────────────────────
