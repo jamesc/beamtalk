@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 TestCase subclass: ActorDelegateTest
+  field: counter = nil
+
+  setUp => self withCounter: Counter spawn
+
+  tearDown => self.counter isNil ifFalse: [self.counter stop]
 
   testDelegateOnNonNativeActorRaisesError =>
-    counter := Counter spawn
-    self should: [counter delegate] raise: #signal
+    self should: [self.counter delegate] raise: #signal
 
   testDelegateRespondsTo =>
-    counter := Counter spawn
-    self assert: (counter respondsTo: #delegate)
+    self assert: (self.counter respondsTo: #delegate)
