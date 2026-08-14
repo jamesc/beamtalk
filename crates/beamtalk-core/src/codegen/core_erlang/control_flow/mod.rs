@@ -1416,6 +1416,22 @@ pub(super) enum BodyKind {
     FoldlSort,
 }
 
+/// BT-3172: which family a [`Self::nested_loop_or_fold_body`] match belongs
+/// to — `ThreadingPlan::threads_class_vars` uses a genuinely different
+/// formula for each (see that field's doc comment), so
+/// [`Self::nested_loop_lost_class_var_mutation`] must apply the matching
+/// one rather than a single one-size-fits-all check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NestedLoopShape {
+    /// `whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:` — the
+    /// `BodyKind::Letrec` shapes, gated by the narrow, top-level-only
+    /// `loop_body_threads_class_vars`.
+    Letrec,
+    /// `do:`/`collect:`/`select:`/... — the `BodyKind::Foldl*` shapes,
+    /// gated by the recursive, Actor-excluded `has_self_sends` formula.
+    Foldl,
+}
+
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
 
 /// Describes the loop-type-specific structure of a counted (`letrec`-based) loop.
@@ -1659,7 +1675,7 @@ impl CoreErlangGenerator {
     /// diagnostic) — so this predicate exists purely to reject the shape,
     /// not to make it work.
     pub(super) fn nested_loop_lost_class_var_mutation(&self, expr: &Expression) -> Option<String> {
-        let body = Self::nested_loop_or_fold_body(expr)?;
+        let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
         if let Some(mutating_stmt) = self.find_class_var_mutating_stmt(body) {
             if Self::is_field_assignment(mutating_stmt)
                 && self.is_class_var_assignment(mutating_stmt)
@@ -1673,14 +1689,34 @@ impl CoreErlangGenerator {
                 return Some(format!("'self {}'", selector.name()));
             }
         }
-        if self.in_class_method() {
+        // BT-3172 review: the recursive self-send fallback must match
+        // `ThreadingPlan::new_impl`'s OWN per-shape gate exactly, not apply
+        // uniformly to both shapes. `Letrec`'s real gate
+        // (`loop_body_threads_class_vars`, already checked above) is
+        // deliberately top-level-only — recursing into a conditional
+        // buried inside a `Letrec` body is EXACTLY the shape that predicate
+        // was narrowed to exclude (the `class_var_subexpr.bt`
+        // `tickInLoopConditional` regression), and it's also the shape
+        // `class_var_subexpr_test.bt`'s `testTickInLoopConditionalCompilesAndRuns`
+        // pins as already-accepted, out-of-scope, silently-non-threading
+        // behavior (BT-2308) at a single loop level — rejecting only the
+        // nested-loop variant of that exact same shape would be an
+        // inconsistent, surprising new restriction this predicate has no
+        // business introducing. Only `Foldl*`'s own real gate
+        // (`!Actor && in_class_method() && body_analysis.has_self_sends`)
+        // is genuinely recursive, so the fallback below applies only when
+        // `shape` is `Foldl` — matching `context` too.
+        if matches!(shape, NestedLoopShape::Foldl)
+            && !matches!(self.context, CodeGenContext::Actor)
+            && self.in_class_method()
+        {
             let analysis = block_analysis::analyze_block(body);
-            // BT-3172 review: `self_send_selectors` is a `HashSet` (default
-            // `RandomState`) — pick the lexicographically-smallest selector
-            // so the diagnostic text is reproducible across runs for
-            // identical source, rather than depending on hash-iteration
-            // order. Which selector is named doesn't affect the
-            // accept/reject decision, only the message.
+            // `self_send_selectors` is a `HashSet` (default `RandomState`) —
+            // pick the lexicographically-smallest selector so the
+            // diagnostic text is reproducible across runs for identical
+            // source, rather than depending on hash-iteration order. Which
+            // selector is named doesn't affect the accept/reject decision,
+            // only the message.
             if let Some(selector) = analysis.self_send_selectors.iter().min() {
                 return Some(format!("'self {selector}'"));
             }
@@ -1688,14 +1724,15 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// Extracts the body block of `expr` if it is a nested loop/fold send —
-    /// the `BodyKind::Letrec` shapes (`whileTrue:`/`whileFalse:`/
-    /// `timesRepeat:`/`to:do:`/`to:by:do:`, see this module's `//!` doc
-    /// comment) or the `BodyKind::Foldl*` shapes (`do:`/`collect:`/
-    /// `select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/`inject:into:`/
-    /// `detect:`/`count:`/`takeWhile:`/`dropWhile:`/`partition:`/
-    /// `groupBy:`). Unlike the analogous local-variable cross-scope-mutation
-    /// analysis in [`Self::list_op_needs_stateacc_fallback`]/
+    /// Extracts the body block of `expr`, and which family it belongs to,
+    /// if it is a nested loop/fold send — the `BodyKind::Letrec` shapes
+    /// (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`, see
+    /// this module's `//!` doc comment) or the `BodyKind::Foldl*` shapes
+    /// (`do:`/`collect:`/`select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/
+    /// `inject:into:`/`detect:`/`count:`/`takeWhile:`/`dropWhile:`/
+    /// `partition:`/`groupBy:`). Unlike the analogous local-variable
+    /// cross-scope-mutation analysis in
+    /// [`Self::list_op_needs_stateacc_fallback`]/
     /// [`Self::collect_list_op_cross_scope_mutations`] (which safely omit
     /// the predicate-based shapes — a narrower, unrelated optimization
     /// concern), this list must cover every `Foldl*` `BodyKind`: per
@@ -1707,8 +1744,12 @@ impl CoreErlangGenerator {
     /// vulnerable to this predicate's silent-loss/`erlc`-crash bug as one
     /// nested inside `do:`. `detect:ifNone:` is intentionally excluded: its
     /// second (`ifNone:`) block argument is a separate, not-yet-analyzed
-    /// risk surface this predicate doesn't attempt to cover.
-    fn nested_loop_or_fold_body(expr: &Expression) -> Option<&crate::ast::Block> {
+    /// risk surface this predicate doesn't attempt to cover. The returned
+    /// [`NestedLoopShape`] tells [`Self::nested_loop_lost_class_var_mutation`]
+    /// which of `ThreadingPlan`'s two `threads_class_vars` gates applies.
+    fn nested_loop_or_fold_body(
+        expr: &Expression,
+    ) -> Option<(&crate::ast::Block, NestedLoopShape)> {
         use crate::ast::MessageSelector;
         let Expression::MessageSend {
             selector: MessageSelector::Keyword(parts),
@@ -1720,22 +1761,31 @@ impl CoreErlangGenerator {
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         match sel.as_str() {
-            "whileTrue:" | "whileFalse:" | "do:" | "collect:" | "select:" | "reject:"
-            | "anySatisfy:" | "allSatisfy:" | "detect:" | "count:" | "takeWhile:"
-            | "dropWhile:" | "partition:" | "groupBy:" => match arguments.first() {
-                Some(Expression::Block(block)) => Some(block),
+            "whileTrue:" | "whileFalse:" => match arguments.first() {
+                Some(Expression::Block(block)) => Some((block, NestedLoopShape::Letrec)),
                 _ => None,
             },
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
+            | "detect:" | "count:" | "takeWhile:" | "dropWhile:" | "partition:" | "groupBy:" => {
+                match arguments.first() {
+                    Some(Expression::Block(block)) => Some((block, NestedLoopShape::Foldl)),
+                    _ => None,
+                }
+            }
             "timesRepeat:" => match arguments.last() {
-                Some(Expression::Block(block)) => Some(block),
+                Some(Expression::Block(block)) => Some((block, NestedLoopShape::Letrec)),
                 _ => None,
             },
-            "to:do:" | "inject:into:" if arguments.len() == 2 => match &arguments[1] {
-                Expression::Block(block) => Some(block),
+            "to:do:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => Some((block, NestedLoopShape::Letrec)),
+                _ => None,
+            },
+            "inject:into:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => Some((block, NestedLoopShape::Foldl)),
                 _ => None,
             },
             "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
-                Expression::Block(block) => Some(block),
+                Expression::Block(block) => Some((block, NestedLoopShape::Letrec)),
                 _ => None,
             },
             _ => None,

@@ -7406,6 +7406,70 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
 }
 
 #[test]
+fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
+    // BT-3172 review follow-up: a same-class self-send buried inside an
+    // `ifTrue:` conditional (NOT a bare top-level statement) within an
+    // inner `whileTrue:` that's itself nested inside an outer `whileTrue:`
+    // must NOT be rejected. `Letrec`'s own real `threads_class_vars` gate
+    // (`loop_body_threads_class_vars`) is narrowly top-level-only by
+    // design — recursing into a conditional buried inside a `Letrec` body
+    // is exactly the shape that predicate was narrowed to exclude (the
+    // `class_var_subexpr.bt` `tickInLoopConditional` regression documented
+    // on `loop_body_threads_class_vars` itself), and it's also the shape
+    // `class_var_subexpr_test.bt`'s
+    // `testTickInLoopConditionalCompilesAndRuns` already pins as
+    // accepted, silently-non-threading behavior at a single loop level
+    // (BT-2308, out of BT-3172's scope). The inner loop was never going to
+    // attempt `ClassVars` threading for this self-send in the first place,
+    // so nothing is "lost" here for the outer loop to fail to recover —
+    // rejecting only the nested-loop variant of this exact same shape
+    // would be an inconsistent new restriction. Mirrors
+    // `tickInLoopConditional` one loop level deeper.
+    let src = "Object subclass: NestedCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class run: n =>\n    j := 0\n    [j < n] whileTrue: [\n      i := 0\n      [i < n] whileTrue: [\n        (i >= 0) ifTrue: [self bump]\n        i := i + 1\n      ]\n      j := j + 1\n    ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedcondselfsend").with_workspace_mode(true),
+    );
+    result.unwrap_or_else(|e| {
+        panic!(
+            "A self-send buried inside a conditional (not a bare top-level statement) \
+             inside a Letrec loop nested inside another Letrec loop must not be rejected \
+             by ClassVarMutationLostAcrossNestedLoop — Letrec's own real threading gate \
+             never attempts to thread it in the first place. Got: {e:?}"
+        )
+    });
+}
+
+#[test]
+fn test_nested_foldl_self_send_buried_in_conditional_is_compile_error() {
+    // BT-3172 review follow-up (contrast case): the same "self-send buried
+    // in a conditional, not a bare top-level statement" shape as the
+    // Letrec test above, but inside a `Foldl*` (`do:`) body instead —
+    // `Foldl*`'s own real `threads_class_vars` gate
+    // (`!Actor && in_class_method() && body_analysis.has_self_sends`) IS
+    // genuinely recursive (unlike Letrec's), so this shape must still be
+    // rejected when nested inside another loop.
+    let src = "Value subclass: NestedFoldCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            (y >= 0) ifTrue: [self bump]\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedfoldcondselfsend").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { .. })
+        ),
+        "Expected ClassVarMutationLostAcrossNestedLoop for a self-send buried in a \
+         conditional inside a do: nested inside another do: — Foldl*'s own real \
+         threading gate is recursive, unlike Letrec's. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
     // BT-3172 review follow-up: `nested_loop_or_fold_body` must also cover
     // the predicate-based `Foldl*` shapes (`detect:`/`count:`/`takeWhile:`/
