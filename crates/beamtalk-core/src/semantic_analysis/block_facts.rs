@@ -622,9 +622,24 @@ fn propagate_inline_block_writes(
     analysis
         .local_reads
         .extend(nested.local_reads.iter().cloned());
-    analysis
-        .local_writes
-        .extend(nested.local_writes.iter().cloned());
+    // BT-3173 review follow-up: exclude this block's own parameters (e.g.
+    // on:do:'s exception var, ifNotNil:'s bound value) before merging
+    // local_writes into the enclosing analysis — a write to the block's own
+    // param (`on: Error do: [:e | e := 1]`) is confined to that param's own
+    // shadowed binding, not a genuine outer-scope mutation. Mirrors the same
+    // exclusion `collect_list_op_cross_scope_mutations`/
+    // `collect_nested_loop_outer_local_writes` apply for the identical
+    // construct shape.
+    let block_params: HashSet<String> = block
+        .parameters
+        .iter()
+        .map(|p| p.name.to_string())
+        .collect();
+    for v in &nested.local_writes {
+        if !block_params.contains(v.as_str()) {
+            analysis.local_writes.insert(v.clone());
+        }
+    }
     // Only propagate captured_reads for vars not yet defined locally.
     for v in &nested.captured_reads {
         if !ctx.local_bindings.contains(v.as_str()) {
@@ -1073,6 +1088,53 @@ mod tests {
         assert!(
             !analysis.captured_reads.contains("e"),
             "on:do:'s handler block param must not leak as a captured read"
+        );
+    }
+
+    #[test]
+    fn test_on_do_handler_param_write_does_not_leak_as_outer_local_write() {
+        // BT-3173 review follow-up: [nil] on: Error do: [:e | e := 1] — the
+        // handler writes its OWN exception param `e`. That write is confined
+        // to the handler's own shadowed binding, not a genuine outer-scope
+        // mutation, so it must NOT propagate into the enclosing block's
+        // local_writes (which would otherwise misclassify the enclosing
+        // block as needing mutation threading for a nonexistent outer `e`,
+        // or spuriously fold into a same-named real outer local via
+        // shadowing).
+        let try_block = Expression::Block(Block::new(vec![], vec![], Span::new(0, 6)));
+        let handler_block = Expression::Block(Block::new(
+            vec![BlockParameter::new("e", Span::new(15, 16))],
+            vec![bare(Expression::Assignment {
+                target: Box::new(make_expr_id("e")),
+                value: Box::new(Expression::Literal(
+                    crate::ast::Literal::Integer(1),
+                    Span::new(23, 24),
+                )),
+                type_annotation: None,
+                span: Span::new(18, 24),
+            })],
+            Span::new(14, 26),
+        ));
+
+        let outer_block = Block::new(
+            vec![],
+            vec![bare(Expression::MessageSend {
+                receiver: Box::new(try_block),
+                selector: MessageSelector::Keyword(vec![
+                    crate::ast::KeywordPart::new("on:", Span::new(7, 10)),
+                    crate::ast::KeywordPart::new("do:", Span::new(19, 22)),
+                ]),
+                arguments: vec![make_expr_id("Error"), handler_block],
+                is_cast: false,
+                span: Span::new(0, 26),
+            })],
+            Span::new(0, 28),
+        );
+
+        let analysis = analyze_block(&outer_block);
+        assert!(
+            !analysis.local_writes.contains("e"),
+            "on:do:'s handler writing its own param must not leak as an outer local_write"
         );
     }
 
