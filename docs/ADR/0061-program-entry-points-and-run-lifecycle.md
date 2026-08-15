@@ -82,6 +82,12 @@ Started otp_tree v0.1.0
 $
 ```
 
+These transcripts show what the operator *sees* on the terminal; they are not a
+stream contract. Status and progress output — `Building...`, the `Started ...`
+banner, `Running ClassName>>selector...`, `Connecting to workspace...` — is
+written to **stderr** in all three run modes (script, connected, service), so
+stdout carries only the dispatched program's own output (BT-2702, BT-2889).
+
 Running a script against a live service:
 ```text
 $ beamtalk run .          # service already running
@@ -126,7 +132,7 @@ beamtalk run .
       → bootstrap loads + registers all bt@*.beam in topo order
   → application:ensure_all_started(app_name)
       → OTP supervisor tree starts; class registry fully populated
-  → print "Started <app> — REPL port <N>"
+  → print "Started <app> — REPL port <N>" (stderr)
   → CLI process exits; BEAM node continues running
 ```
 
