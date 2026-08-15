@@ -143,7 +143,7 @@ _flushDir := _tmpDir ++ "/bt_e2e_flush_" ++ (Erlang erlang) unique_integer asStr
 // => _
 
 (Erlang file) make_dir: _flushDir
-// => _
+// => Result ok: nil
 
 _flushPath := _flushDir ++ "/RoundTripCounter.bt"
 // => _
@@ -417,13 +417,13 @@ Erlang maps get: #flushed with: _emptyKindsFlush
 // ===========================================================================
 
 (Erlang file) delete: _flushPath
-// => _
+// => Result ok: nil
 
 (Erlang file) delete: _newClassPath
-// => _
+// => Result ok: nil
 
 (Erlang file) del_dir: _flushDir
-// => _
+// => Result ok: nil
 
 Workspace changes clear
 // => _
