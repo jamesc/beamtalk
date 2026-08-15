@@ -1,7 +1,7 @@
 # ADR 0112: Method-Level Removal Language Primitive (`Behaviour removeSelector:`)
 
 ## Status
-Proposed
+Accepted (2026-08-15)
 
 ## Context
 
