@@ -297,8 +297,10 @@ fi
 # build cache by content, not by which process triggered the build, so this
 # only reorders that half of the work onto idle time, it never duplicates
 # it. Runs after the hex-bridge setup above so a backgrounded `rebar3
-# compile` inherits this process's already-exported `PATH`/`HEX_CDN`
-# overrides for reaching hex.pm from this sandbox.
+# compile` inherits this process's already-exported `HEX_CDN` override for
+# reaching hex.pm from this sandbox (the `PATH` wrapper above is only
+# exported in the auth-proxy branch, not the cloud-sandbox-only one this
+# warmer actually runs in — nothing downstream needs it either way).
 #
 # The Erlang runtime compile is different: unlike Cargo's content-addressed,
 # locked `target/`, rebar3 has no built-in guard against two processes
@@ -312,6 +314,14 @@ fi
 # `warm-otp-cache` report "not warmed yet" below, which it already treats as
 # non-fatal) rather than stall waiting on an interactive build.
 #
+# `build-erlang`'s own `flock` guard is Linux-only (macOS's CI runner has no
+# `flock` binary, so that recipe's `[macos]` variant skips it — see the
+# Justfile) on the assumption that this background warmer never runs
+# anywhere but Linux. That assumption is enforced right here, not just
+# documented there: `uname -s` must be `Linux`, checked before anything
+# else runs, so a hypothetical non-Linux remote sandbox can't race
+# `build-erlang` under an unenforced assumption.
+#
 # `beamtalk warm-otp-cache` (BT-2471) is the project-agnostic CLI entry
 # point for this — it shares the same `extract_type_specs`/shared-cache code
 # `beamtalk build`/`beamtalk lint` already use
@@ -321,6 +331,7 @@ if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
   nohup bash -c '
     set -eu
     cd "$1" || exit 0
+    [[ "$(uname -s)" == "Linux" ]] || exit 0
     command -v cargo >/dev/null 2>&1 || exit 0
     command -v rebar3 >/dev/null 2>&1 || exit 0
     command -v erl >/dev/null 2>&1 || exit 0
