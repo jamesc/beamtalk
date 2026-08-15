@@ -61,7 +61,7 @@ Every generated project includes a `Justfile` with these targets:
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
 
-**`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`) are written to **stderr**. Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`).
+**`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`, and service mode's `Started <app> v<version> / Supervisor / REPL port` banner) are written to **stderr** in all three run modes — script, connected, and service (`beamtalk run .`). Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`). `beamtalk build --escript` follows the same convention for its `Building...` line.
 
 ## Build System
 

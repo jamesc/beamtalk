@@ -45,7 +45,8 @@ pub fn build_escript(
     force: bool,
 ) -> Result<()> {
     // Compile the project first (produces the project `bt@*.beam`).
-    println!("Building...");
+    // Status output goes to stderr, matching `beamtalk run` (BT-2702, BT-2889).
+    eprintln!("Building...");
     super::build::build(project_root.as_str(), options, force)?;
 
     let pkg = manifest::find_manifest(project_root)?;

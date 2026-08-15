@@ -555,6 +555,9 @@ fn format_program_args_list(program_args: &[String]) -> String {
 ///
 /// If a workspace for this project is already running, prints the existing port
 /// and exits 0 (idempotent, matching `systemctl start` conventions).
+///
+/// All status/progress output goes to stderr, matching script and connected
+/// mode (BT-2702, BT-2889): `beamtalk run`'s stdout is program output only.
 fn run_package_as_otp_application(
     project_root: &Utf8PathBuf,
     pkg: &manifest::PackageManifest,
@@ -564,14 +567,14 @@ fn run_package_as_otp_application(
 
     // Early probe: if the workspace+app is already running, skip building entirely.
     if let Some(port) = probe_running_workspace_app(project_root.as_std_path(), &pkg.name) {
-        println!(
+        eprintln!(
             "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
             pkg.name, pkg.version, port
         );
         return Ok(());
     }
 
-    println!("Building...");
+    eprintln!("Building...");
     super::build::build(
         project_root.as_str(),
         &beamtalk_core::CompilerOptions::default(),
@@ -618,12 +621,12 @@ fn run_package_as_otp_application(
         )?;
 
         if already_running {
-            println!(
+            eprintln!(
                 "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
                 pkg.name, pkg.version, node_info.port
             );
         } else {
-            println!(
+            eprintln!(
                 "\nStarted {} v{} in existing workspace\n  Supervisor : {}\n  REPL port  : {}   (connect with: beamtalk repl)",
                 pkg.name, pkg.version, app_config.supervisor, node_info.port
             );
@@ -631,7 +634,7 @@ fn run_package_as_otp_application(
         return Ok(());
     }
 
-    println!(
+    eprintln!(
         "\nStarted {} v{}\n  Supervisor : {}\n  REPL port  : {}   (connect with: beamtalk repl)",
         pkg.name, pkg.version, app_config.supervisor, node_info.port
     );
