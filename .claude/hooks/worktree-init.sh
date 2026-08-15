@@ -279,6 +279,47 @@ if (( _HAS_AUTH_PROXY || _IN_CLOUD_SANDBOX )); then
   fi
 fi
 
+# --- BT-2471: warm the shared OTP type-spec cache in the background ---
+# Remote (Claude-Code-on-the-web) containers are cloned fresh and reclaimed
+# after inactivity, so the shared, OTP-version-keyed FFI type-spec cache
+# (`<cache>/beamtalk/otp-specs/<otp>-<erts>/`, ADR 0075 / BT-2470) never
+# survives between sessions on its own — without warming it, the session's
+# first `beamtalk build` pays the cost of extracting specs from every OTP
+# `.beam` file (stdlib, kernel, erts, …) on the interactive critical path.
+# Remote-only (`CLAUDE_CODE_REMOTE=true`): local dev already keeps the
+# platform cache dir warm across sessions, so there is nothing to gain here
+# — and no cost either, since `beamtalk warm-otp-cache` is a fast no-op once
+# warm (BT-2470's cache-hit path skips reading any `.beam` file).
+#
+# Backgrounded and detached (`nohup ... & disown`) so it never blocks (or
+# gets killed alongside) session startup. It builds `beamtalk-cli` and the
+# Erlang runtime itself rather than waiting for the session's own `just
+# build` — whichever finishes a given artifact first "wins"; Cargo and
+# rebar3 both key their build cache by content, not by which process
+# triggered the build, so this only reorders work onto idle time, it never
+# duplicates it. Runs after the hex-bridge setup above so a backgrounded
+# `rebar3 compile` inherits this process's already-exported `PATH`/`HEX_CDN`
+# overrides for reaching hex.pm from this sandbox.
+#
+# `beamtalk warm-otp-cache` (BT-2471) is the project-agnostic CLI entry
+# point for this — it shares the same `extract_type_specs`/shared-cache code
+# `beamtalk build`/`beamtalk lint` already use
+# (`crates/beamtalk-core/src/ffi_type_specs.rs`), so there is nothing here
+# to keep in sync. See `docs/development/remote-sessions.md`.
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  nohup bash -c '
+    set -eu
+    cd "$1" || exit 0
+    command -v cargo >/dev/null 2>&1 || exit 0
+    command -v rebar3 >/dev/null 2>&1 || exit 0
+    command -v erl >/dev/null 2>&1 || exit 0
+    cargo build --quiet -p beamtalk-cli --bin beamtalk >/dev/null 2>&1 || exit 0
+    (cd runtime && rebar3 compile >/dev/null 2>&1) || exit 0
+    ./target/debug/beamtalk warm-otp-cache >/dev/null 2>&1 || true
+  ' _ "${CLAUDE_PROJECT_DIR:-${PWD}}" >/dev/null 2>&1 &
+  disown
+fi
+
 GIT_DIR_FILE="${PWD}/.git"
 
 # Only act when we are inside a worktree (.git is a file, not a directory)

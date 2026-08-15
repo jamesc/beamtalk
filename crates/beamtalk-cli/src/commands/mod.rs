@@ -71,4 +71,5 @@ pub mod transcript;
 pub mod type_coverage;
 pub(crate) mod util;
 pub mod version;
+pub mod warm_otp_cache;
 pub mod workspace;

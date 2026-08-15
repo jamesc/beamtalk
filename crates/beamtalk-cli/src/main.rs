@@ -437,6 +437,17 @@ enum Command {
         #[arg(long = "class")]
         class_filter: Option<String>,
     },
+
+    /// Warm the shared OTP type-spec cache, without a project (BT-2471)
+    ///
+    /// Extracts Erlang FFI type specs for the running OTP installation into
+    /// the shared, OTP-version-keyed cache `beamtalk build`/`beamtalk lint`
+    /// read from (ADR 0075, BT-2470) — a no-op when it's already warm for
+    /// the current OTP/ERTS version. Intended for background warming (see
+    /// `.claude/hooks/worktree-init.sh` in remote sessions), not interactive
+    /// use — always exits 0, even if the runtime isn't built yet.
+    #[command(hide = true)]
+    WarmOtpCache,
 }
 
 /// The default stack size (1 MiB on Windows) is too small for deep AST recursion
@@ -708,5 +719,6 @@ fn run() -> Result<()> {
             at_least,
             class_filter,
         } => commands::type_coverage::run(&path, detail, format, at_least, class_filter.as_deref()),
+        Command::WarmOtpCache => commands::warm_otp_cache::run(),
     }
 }
