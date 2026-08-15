@@ -647,4 +647,159 @@ mod tests {
             "Both doWithKey: and keysAndValuesDo: must use maps:to_list. dwk:\n{code_dwk}\nkavd:\n{code_kavd}"
         );
     }
+
+    #[test]
+    fn test_dict_do_wrong_arity_block_is_compile_error() {
+        // validate_block_arity_exact requires a 1-arg block; a 0-arg block must
+        // propagate BlockArityError at compile time (covers line 36 of dict_ops.rs).
+        let src = concat!(
+            "Actor subclass: Ctr\n",
+            "  state: x = 0\n\n",
+            "  run =>\n",
+            "    #{#a => 1} do: [nil]\n",
+        );
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+            ),
+            "dict do: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_key_wrong_arity_block_is_compile_error() {
+        // validate_block_arity_exact requires a 2-arg block; a 1-arg block must
+        // propagate BlockArityError at compile time (covers line 229 of dict_ops.rs).
+        let src = concat!(
+            "Actor subclass: Ctr\n",
+            "  state: x = 0\n\n",
+            "  run: dict =>\n",
+            "    dict doWithKey: [:k | nil]\n",
+        );
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+            ),
+            "doWithKey: with a 1-arg block must be a compile-time BlockArityError. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_pure_no_mutation_falls_through_to_list_handler() {
+        // Pure dict do: (no mutations) — generate_dict_do returns Document::Nil,
+        // dispatcher returns Ok(None), falls through to the list handler which
+        // calls generate_list_do → lists:foreach (covers lines 42-43, 46 of dict_ops.rs).
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: x = 0\n\n",
+            "  run =>\n",
+            "    #{#a => 1, #b => 2} do: [:v | v printString]\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'lists':'foreach'"),
+            "pure dict do: falls through to list handler which uses lists:foreach. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'maps':'values'"),
+            "pure dict do: must NOT use maps:values (dict mutation-threading). Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'lists':'foldl'"),
+            "pure dict do: must NOT use lists:foldl (mutation state threading). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_key_pure_no_mutation_falls_through_to_runtime() {
+        // Pure doWithKey: (no mutations) — generate_dict_do_with_key returns Document::Nil,
+        // dispatcher returns Ok(None) and falls through to runtime dispatch
+        // (covers lines 235-236, 239 of dict_ops.rs).
+        let src = concat!(
+            "Actor subclass: Srv\n",
+            "  state: x = 0\n\n",
+            "  run: dict =>\n",
+            "    dict doWithKey: [:k :v | k printString]\n",
+        );
+        let code = codegen(src);
+        assert!(
+            !code.contains("'maps':'to_list'"),
+            "pure doWithKey: must NOT use maps:to_list (dict mutation-threading). Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'lists':'foldl'"),
+            "pure doWithKey: must NOT use lists:foldl (mutation state threading). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_value_type_with_local_mutation_emits_nil_result() {
+        // ValueType context + dict do: + local mutation uses the map-acc path in
+        // generate_dict_do_with_mutations. When threaded_locals is non-empty and
+        // context is ValueType, the result suffix is the atom 'nil' rather than
+        // {'nil', FoldResult} (covers lines 204-205 of dict_ops.rs).
+        let src = concat!(
+            "Value subclass: V\n",
+            "  state: dummy = 0\n\n",
+            "  run =>\n",
+            "    total := 0\n",
+            "    #{#a => 1, #b => 2} do: [:v | total := total + v]\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'maps':'values'"),
+            "ValueType dict do: with local mutation must use maps:values. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "ValueType dict do: with local mutation must use lists:foldl. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__total'"),
+            "ValueType dict do: map-acc path should extract local via maps:get. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_dict_do_with_key_value_type_with_local_mutation_emits_nil_result() {
+        // ValueType context + doWithKey: + local mutation uses the map-acc path in
+        // generate_dict_do_with_key_mutations. When threaded_locals is non-empty and
+        // context is ValueType, the result suffix is 'nil' rather than {'nil', FoldResult}
+        // (covers lines 428-429 of dict_ops.rs).
+        let src = concat!(
+            "Value subclass: V\n",
+            "  state: dummy = 0\n\n",
+            "  run =>\n",
+            "    total := 0\n",
+            "    #{#a => 1, #b => 2} doWithKey: [:k :v | total := total + v]\n",
+            "    total\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("'maps':'to_list'"),
+            "ValueType doWithKey: with local mutation must use maps:to_list. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "ValueType doWithKey: with local mutation must use lists:foldl. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__total'"),
+            "ValueType doWithKey: map-acc path should extract local via maps:get. Got:\n{code}"
+        );
+    }
 }
