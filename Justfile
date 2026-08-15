@@ -530,7 +530,23 @@ _ensure-hex-bridge:
 [windows]
 _ensure-hex-bridge:
 
-# Build Erlang runtime
+# Build Erlang runtime. Lock-guarded (BT-2471): a fresh remote session's
+# SessionStart hook may be running `rebar3 compile` against this same
+# `runtime/_build/` in the background at the same moment — rebar3, unlike
+# Cargo's locked `target/`, has no built-in guard against two concurrent
+# writers to one output tree. `flock` (blocking, not `-n`) makes this
+# recipe wait for that background warmer rather than race it. Windows has
+# no such background warmer (the hook only backgrounds this on
+# `CLAUDE_CODE_REMOTE=true` Linux sandboxes) and no `flock`, so it skips
+# the lock entirely.
+[unix]
+[working-directory: 'runtime']
+build-erlang: _ensure-hex-bridge
+    @echo "🔨 Building Erlang runtime..."
+    @flock .rebar3-compile.lock rebar3 compile
+    @echo "✅ Erlang build complete"
+
+[windows]
 [working-directory: 'runtime']
 build-erlang: _ensure-hex-bridge
     @echo "🔨 Building Erlang runtime..."

@@ -292,14 +292,25 @@ fi
 # warm (BT-2470's cache-hit path skips reading any `.beam` file).
 #
 # Backgrounded and detached (`nohup ... & disown`) so it never blocks (or
-# gets killed alongside) session startup. It builds `beamtalk-cli` and the
-# Erlang runtime itself rather than waiting for the session's own `just
-# build` — whichever finishes a given artifact first "wins"; Cargo and
-# rebar3 both key their build cache by content, not by which process
-# triggered the build, so this only reorders work onto idle time, it never
-# duplicates it. Runs after the hex-bridge setup above so a backgrounded
-# `rebar3 compile` inherits this process's already-exported `PATH`/`HEX_CDN`
+# gets killed alongside) session startup. It builds `beamtalk-cli` itself
+# rather than waiting for the session's own `just build` — Cargo keys its
+# build cache by content, not by which process triggered the build, so this
+# only reorders that half of the work onto idle time, it never duplicates
+# it. Runs after the hex-bridge setup above so a backgrounded `rebar3
+# compile` inherits this process's already-exported `PATH`/`HEX_CDN`
 # overrides for reaching hex.pm from this sandbox.
+#
+# The Erlang runtime compile is different: unlike Cargo's content-addressed,
+# locked `target/`, rebar3 has no built-in guard against two processes
+# running `rebar3 compile` against the same `runtime/_build/` at once — and
+# an agent's first move in a fresh session is often `just build`, which
+# compiles the same tree. Concurrent, unlocked writers there risk a
+# corrupted or half-compiled `_build/`, not just wasted work. `flock -n`
+# against a lock file scoped to `runtime/` (also taken by `build-erlang` in
+# the Justfile) makes the two mutually exclusive; non-blocking so this
+# background warmer skips the runtime step entirely (and lets
+# `warm-otp-cache` report "not warmed yet" below, which it already treats as
+# non-fatal) rather than stall waiting on an interactive build.
 #
 # `beamtalk warm-otp-cache` (BT-2471) is the project-agnostic CLI entry
 # point for this — it shares the same `extract_type_specs`/shared-cache code
@@ -313,8 +324,9 @@ if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
     command -v cargo >/dev/null 2>&1 || exit 0
     command -v rebar3 >/dev/null 2>&1 || exit 0
     command -v erl >/dev/null 2>&1 || exit 0
+    command -v flock >/dev/null 2>&1 || exit 0
     cargo build --quiet -p beamtalk-cli --bin beamtalk >/dev/null 2>&1 || exit 0
-    (cd runtime && rebar3 compile >/dev/null 2>&1) || exit 0
+    flock -n runtime/.rebar3-compile.lock -c "cd runtime && rebar3 compile" >/dev/null 2>&1 || exit 0
     ./target/debug/beamtalk warm-otp-cache >/dev/null 2>&1 || true
   ' _ "${CLAUDE_PROJECT_DIR:-${PWD}}" >/dev/null 2>&1 &
   disown

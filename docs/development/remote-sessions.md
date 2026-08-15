@@ -33,7 +33,7 @@ BT-2470) in the background:
 nohup bash -c '
   ...
   cargo build --quiet -p beamtalk-cli --bin beamtalk
-  (cd runtime && rebar3 compile)
+  flock -n runtime/.rebar3-compile.lock -c "cd runtime && rebar3 compile"
   ./target/debug/beamtalk warm-otp-cache
 ' _ "${CLAUDE_PROJECT_DIR}" >/dev/null 2>&1 &
 disown
@@ -48,11 +48,21 @@ interactive critical path.
 - **Non-blocking:** `nohup ... & disown` detaches the warmer from the hook's
   own process, so it never delays session startup, and it survives the hook
   process exiting.
-- **No duplicated build work:** it builds `beamtalk-cli` and the Erlang
-  runtime itself rather than waiting for the session's own `just build` —
-  Cargo and rebar3 key their build caches by content, not by which process
+- **Cargo half is duplication-free by construction:** it builds
+  `beamtalk-cli` itself rather than waiting for the session's own `just
+  build` — Cargo keys its build cache by content, not by which process
   triggered the build, so whichever finishes an artifact first "wins" and
   the other reuses it.
+- **Erlang half is `flock`-guarded, not just reordered:** unlike Cargo's
+  locked `target/`, rebar3 has no built-in guard against two processes
+  running `rebar3 compile` against the same `runtime/_build/` at once — and
+  an agent's first move in a fresh session is often `just build`, which
+  compiles that same tree. `flock -n runtime/.rebar3-compile.lock` (also
+  taken by `build-erlang` in the Justfile) makes the two mutually exclusive;
+  non-blocking here so the background warmer skips the runtime step
+  entirely — and lets `warm-otp-cache` report "not warmed yet" below, which
+  it already treats as non-fatal — rather than stall waiting on an
+  interactive build that's already in flight.
 - **Keyed by OTP/ERTS version, idempotent:** `beamtalk warm-otp-cache`
   (`crates/beamtalk-cli/src/commands/warm_otp_cache.rs`) is a thin,
   project-agnostic wrapper around the same

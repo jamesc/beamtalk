@@ -445,7 +445,8 @@ enum Command {
     /// read from (ADR 0075, BT-2470) — a no-op when it's already warm for
     /// the current OTP/ERTS version. Intended for background warming (see
     /// `.claude/hooks/worktree-init.sh` in remote sessions), not interactive
-    /// use — always exits 0, even if the runtime isn't built yet.
+    /// use — exits 0 for every extraction outcome, even if the runtime
+    /// isn't built yet (see `run()`'s doc comment for the one exception).
     #[command(hide = true)]
     WarmOtpCache,
 }
