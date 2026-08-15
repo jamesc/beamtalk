@@ -79,7 +79,7 @@ struct SyntheticAccessorEntries {
 /// (ADR 0087 Phase 6, BT-2304).
 ///
 /// Mirrors `collect_all_type_refs` in
-/// [`crate::queries::references_to_query`] — the walker hand-written-method
+/// [`crate::method_source_walker`] — the walker hand-written-method
 /// `references` rows use — so a synthetic accessor on a typed slot reports the
 /// same referenced class names a hand-written accessor with the same type
 /// signature would. `Singleton` / `Self` / `Self class` annotations carry no
@@ -2593,8 +2593,8 @@ impl CoreErlangGenerator {
     /// methods ETS tables at class-load time.
     ///
     /// The send / reference data comes from the existing AST walkers
-    /// ([`crate::queries::all_sends_query::find_all_sends_in_source`] and
-    /// [`crate::queries::references_to_query::find_all_references_in_source`]).
+    /// ([`crate::method_source_walker::find_all_sends_in_source`] and
+    /// [`crate::method_source_walker::find_all_references_in_source`]).
     /// Those operate on the unparsed bare-method source produced by
     /// [`Self::extract_method_source`] — the *same* source channel and walkers
     /// the `SystemNavigation` miss-policy fallback uses (ADR 0087 §Read path), so
@@ -2753,8 +2753,9 @@ impl CoreErlangGenerator {
         method: &MethodDefinition,
         class_side: bool,
     ) -> Document<'static> {
-        use crate::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
-        use crate::queries::references_to_query::find_all_references_in_source;
+        use crate::method_source_walker::{
+            ReceiverKind, find_all_references_in_source, find_all_sends_in_source,
+        };
 
         // Erlang atoms cap at 255 bytes. A selector / class name longer than
         // that (e.g. a 20-keyword auto-constructor selector) can never exist as
