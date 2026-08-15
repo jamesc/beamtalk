@@ -394,3 +394,9 @@ Considered and deferred, not rejected outright. Symmetric with `compile:source:`
 - Related issues: BT-2191 (this ADR), BT-2192 (destructive workspace flush UX — blocked by this ADR per the Linear issue), BT-785 (shipped `removeFromSystem`), BT-2663 / BT-2665 (ADR 0082's `revert:`-of-an-add — shipped the `beamtalk_repl_eval:remove_method/3` mechanism this ADR's implementation plan generalizes rather than duplicates), BT-3105 / BT-3107 (single class-removal teardown path and metadata write path this ADR's implementation plan reuses)
 - Related ADRs: ADR 0082 (Method-Level Edit and Save in the Live Workspace — this ADR's direct predecessor and deferral source), ADR 0032 (Early Class Protocol — chain-walk dispatch, the mechanism that makes overridden-method re-exposure automatic), ADR 0066 (Open Class Extension Methods — the extension registry this ADR's removal path must also reach), ADR 0036 (Full Metaclass Tower — `Counter class` as an independently-dispatchable receiver, used here to select instance vs class side)
 - Documentation: `docs/beamtalk-language-features.md`, `docs/development/surface-parity.md`
+
+## Implementation Tracking
+
+**Epic:** BT-3183
+**Issues:** BT-3184, BT-3185 (Phase 1 — Foundation), BT-3186 (Phase 2 — Core primitive), BT-3187 (Phase 3 — ChangeLog), BT-3188, BT-3189 (Phase 4 — Tool surfaces), BT-3190 (Phase 5 — Validation)
+**Status:** Planned
