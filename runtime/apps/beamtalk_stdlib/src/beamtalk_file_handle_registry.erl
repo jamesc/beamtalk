@@ -32,11 +32,20 @@ calling `register/2`:
 
 Registering a handle against a pid owner arms a monitor on that owner the
 first time it appears; further handles from the same owner share it. When
-the owner dies, every handle still registered under it is closed (via
-`beamtalk_file_handle:close_handle/1`, already idempotent) and dropped from
-the registry. `unregister/1` (called from `beamtalk_file_handle:close/1` on
+the owner dies, every handle still registered under it is dropped from the
+registry and closed (via `beamtalk_file_handle:close_handle/1`, already
+idempotent). `unregister/1` (called from `beamtalk_file_handle:close/1` on
 every close, whatever opened the handle) removes a handle immediately, so a
 closed handle never lingers and a later owner death can never double-close it.
+
+The bookkeeping half of that reclamation is synchronous — the dead owner's
+handles are gone from `open_handles/0` the moment the `'DOWN'` is handled —
+but the `file:close/1` calls themselves are handed to a transient process
+(BT-3050). Each close is a round-trip to that handle's `file_io_server`, and
+`register/2`, `unregister/1` and `open_handles/0` are all calls to *this*
+process; doing the closes inline would block the registry's mailbox — and so
+every concurrent `File open:mode:` / `close` / `openHandles` node-wide — until
+one dying owner's descriptors finished closing. See `handle_owner_down/3`.
 
 This is a supervised `one_for_one` worker (`beamtalk_runtime_sup`, alongside
 `beamtalk_object_watch` — the same monitor-owner/react-to-'DOWN' shape); if it
@@ -297,28 +306,54 @@ demonitor_owner(Owner, Monitors) ->
         Monitors
     ).
 
+%% Reclaim a dead owner's handles: drop the bookkeeping here and now, close the
+%% descriptors elsewhere. `file:close/1` on a non-raw descriptor is a
+%% round-trip to that handle's `file_io_server` process, so closing inline
+%% would hold this gen_server's mailbox — blocking every concurrent register /
+%% unregister / open_handles call node-wide — for as long as one dying owner's
+%% descriptors take, and indefinitely for a wedged one (BT-3050).
 -spec handle_owner_down(reference(), pid(), #state{}) -> #state{}.
 handle_owner_down(MonRef, Owner, State) ->
     #state{handles = Handles, by_owner = ByOwner, monitors = Monitors} = State,
     Keys = maps:keys(maps:get(Owner, ByOwner, #{})),
-    lists:foreach(fun(Key) -> close_owned_handle(Key, Handles) end, Keys),
+    close_owned_handles_async(owned_handles(Keys, Handles)),
     State#state{
         handles = maps:without(Keys, Handles),
         by_owner = maps:remove(Owner, ByOwner),
         monitors = maps:remove(MonRef, Monitors)
     }.
 
--spec close_owned_handle(handle_key(), map()) -> ok.
-close_owned_handle(Key, Handles) ->
-    case maps:find(Key, Handles) of
-        {ok, {Handle, _Owner}} ->
-            %% close_handle/1 is idempotent (atomics exchange) and does not
-            %% raise on I/O failure — best-effort reclamation on owner death.
-            catch beamtalk_file_handle:close_handle(Handle),
-            ok;
-        error ->
-            ok
-    end.
+-spec owned_handles([handle_key()], map()) -> [beamtalk_file_handle:t()].
+owned_handles(Keys, Handles) ->
+    lists:filtermap(
+        fun(Key) ->
+            case maps:find(Key, Handles) of
+                {ok, {Handle, _Owner}} -> {true, Handle};
+                error -> false
+            end
+        end,
+        Keys
+    ).
+
+%% One transient, unlinked process per dying owner — unlinked so a wedged
+%% descriptor can never take the registry down with it, and per-owner so one
+%% owner's stuck close does not delay another's reclamation. The handles are
+%% already out of the registry's state by the time this runs, so nothing else
+%% will reach for them; a concurrent explicit `close` is harmless because
+%% `close_handle/1` claims its atomics cell exactly once.
+-spec close_owned_handles_async([beamtalk_file_handle:t()]) -> ok.
+close_owned_handles_async([]) ->
+    ok;
+close_owned_handles_async(Handles) ->
+    _ = spawn(fun() -> lists:foreach(fun close_owned_handle/1, Handles) end),
+    ok.
+
+-spec close_owned_handle(beamtalk_file_handle:t()) -> ok.
+close_owned_handle(Handle) ->
+    %% close_handle/1 is idempotent (atomics exchange) and does not
+    %% raise on I/O failure — best-effort reclamation on owner death.
+    catch beamtalk_file_handle:close_handle(Handle),
+    ok.
 
 -spec do_open_handles(#state{}) -> [{binary(), beamtalk_file_handle:mode(), owner()}].
 do_open_handles(#state{handles = Handles}) ->

@@ -17,7 +17,10 @@ Covers the acceptance criteria:
 * `unregister/1` removes a handle immediately, so a closed handle does not
   linger in `open_handles/0` and a later owner `'DOWN'` cannot double-close it;
 * handles sharing an owner share a single monitor, torn down only once the
-  last of them is gone.
+  last of them is gone;
+* owner-death reclamation does not block the registry's mailbox (BT-3050) —
+  an unrelated `register`/`open_handles` is still answered while one owner's
+  `file:close/1` is stuck.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -71,12 +74,52 @@ wait_dead(Pid) ->
             wait_dead(Pid)
     end.
 
+%% A descriptor stand-in that never answers a close request. `file:close/1` on
+%% a pid sends the request and then waits for either a `{file_reply, ...}` or
+%% the descriptor process's death, so a handle wrapping this pid makes
+%% reclamation hang until `release_wedged_fd/1`.
+spawn_wedged_fd() ->
+    spawn(fun() ->
+        receive
+            release -> ok
+        end
+    end).
+
+release_wedged_fd(Fd) ->
+    Fd ! release,
+    wait_dead(Fd).
+
 %% Block until the registry has processed all calls up to this point (calls
 %% are handled in order, so a further sync call flushes prior ones — and
 %% 'DOWN' messages are handled by the same serialised mailbox).
 sync(_) ->
     _ = sys:get_state(beamtalk_file_handle_registry),
     ok.
+
+%% Poll `Pred` until it holds, then return ok; assert (and so fail the test) if
+%% it never does. Owner-death reclamation is only half-synchronous since
+%% BT-3050: `sync/1` proves the registry has dropped its own bookkeeping, but
+%% the descriptor is closed by a transient process shortly afterwards, so
+%% "is the handle shut?" has to be polled rather than assumed.
+wait_until(Pred) ->
+    wait_until(Pred, 400).
+
+wait_until(Pred, 0) ->
+    ?assert(Pred());
+wait_until(Pred, Attempts) ->
+    case Pred() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(5),
+            wait_until(Pred, Attempts - 1)
+    end.
+
+closed(Handle) ->
+    fun() -> not beamtalk_file_handle:is_open(Handle) end.
+
+unlisted(Path) ->
+    fun() -> not has_entry(Path, beamtalk_file_handle_registry:open_handles()) end.
 
 has_entry(Path, Handles) ->
     lists:any(fun({P, _Mode, _Owner}) -> P =:= Path end, Handles).
@@ -98,9 +141,53 @@ owned_handle_closed_and_removed_on_owner_death_test_() ->
             stop_dummy(Owner),
             ok = sync(ok),
 
-            ?assertNot(beamtalk_file_handle:is_open(Handle)),
+            %% Bookkeeping is dropped synchronously with the 'DOWN'; the close
+            %% itself lands a moment later, off the registry process (BT-3050).
             ?assertNot(has_entry(PathBin, beamtalk_file_handle_registry:open_handles())),
+            ok = wait_until(closed(Handle)),
             delete_temp(TmpPath)
+        end)
+    end}.
+
+registry_stays_responsive_while_owner_close_is_in_flight_test_() ->
+    %% BT-3050: owner-death reclamation must not run `file:close/1` inside the
+    %% registry's own handle_info. One owner's handle wraps a descriptor
+    %% stand-in that never answers a close, so its reclamation is stuck for as
+    %% long as the test wants it to be; meanwhile an unrelated register/
+    %% open_handles must still be answered. Both assertions below use a bounded
+    %% timeout, so the inline-close implementation this replaces fails them
+    %% (gen_server:call exits on timeout) rather than merely running slowly.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            Registry = whereis(beamtalk_file_handle_registry),
+            Owner = spawn_dummy(),
+            WedgedFd = spawn_wedged_fd(),
+            WedgedPath = list_to_binary(temp_path("beamtalk_file_handle_registry_wedged")),
+            Wedged = beamtalk_file_handle:new(WedgedFd, write, WedgedPath),
+            ok = beamtalk_file_handle_registry:register(Wedged, Owner),
+
+            stop_dummy(Owner),
+            %% The registry drops its own bookkeeping synchronously, so the
+            %% wedged handle disappearing proves the 'DOWN' was handled...
+            ok = wait_until(unlisted(WedgedPath)),
+            %% ...while its close is genuinely still in flight and stuck.
+            ?assert(is_process_alive(WedgedFd)),
+
+            {Other, OtherPath} = open_handle(),
+            OtherPathBin = list_to_binary(OtherPath),
+            ?assertEqual(ok, gen_server:call(Registry, {register, Other, undefined}, 1000)),
+            ?assert(has_entry(OtherPathBin, gen_server:call(Registry, open_handles, 1000))),
+
+            %% Releasing the stand-in lets the stuck close/1 return and the
+            %% reclaimer finish on its own. (The handle already reads closed:
+            %% close_handle/1 claims its atomics cell before calling
+            %% file:close/1, which is what makes the close idempotent.)
+            release_wedged_fd(WedgedFd),
+            ?assertNot(beamtalk_file_handle:is_open(Wedged)),
+
+            ok = beamtalk_file_handle:close_handle(Other),
+            ok = beamtalk_file_handle_registry:unregister(Other),
+            delete_temp(OtherPath)
         end)
     end}.
 
@@ -171,7 +258,7 @@ shared_owner_monitor_survives_until_last_handle_gone_test_() ->
             stop_dummy(Owner),
             ok = sync(ok),
 
-            ?assertNot(beamtalk_file_handle:is_open(H2)),
+            ok = wait_until(closed(H2)),
             Handles = beamtalk_file_handle_registry:open_handles(),
             ?assertNot(has_entry(list_to_binary(P1), Handles)),
             ?assertNot(has_entry(list_to_binary(P2), Handles)),
@@ -282,7 +369,7 @@ multiple_owners_monitor_demonitored_independently_test_() ->
             %% H2 must still be reclaimed when Owner2 dies (its monitor was kept).
             stop_dummy(Owner2),
             ok = sync(ok),
-            ?assertNot(beamtalk_file_handle:is_open(H2)),
+            ok = wait_until(closed(H2)),
             ?assertNot(
                 has_entry(
                     list_to_binary(P2),
