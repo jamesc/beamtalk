@@ -86,6 +86,8 @@ rebar.lock
 rebar3.crashdump
 # rebar3 checkout deps (local development overrides, not committed)
 runtime/_checkouts/
+# flock lock file guarding concurrent `rebar3 compile` (BT-2471)
+runtime/.rebar3-compile.lock
 
 # Erlang crash dumps
 erl_crash.dump
