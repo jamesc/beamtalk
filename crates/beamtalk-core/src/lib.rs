@@ -24,6 +24,7 @@ pub mod ffi_type_specs;
 pub mod file_walker;
 pub mod language_service;
 pub mod lint;
+pub(crate) mod method_source_walker;
 pub mod project;
 pub mod queries;
 pub mod repl;

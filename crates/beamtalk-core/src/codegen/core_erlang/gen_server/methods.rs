@@ -2753,8 +2753,9 @@ impl CoreErlangGenerator {
         method: &MethodDefinition,
         class_side: bool,
     ) -> Document<'static> {
-        use crate::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
-        use crate::queries::references_to_query::find_all_references_in_source;
+        use crate::method_source_walker::{
+            ReceiverKind, find_all_references_in_source, find_all_sends_in_source,
+        };
 
         // Erlang atoms cap at 255 bytes. A selector / class name longer than
         // that (e.g. a 20-keyword auto-constructor selector) can never exist as
