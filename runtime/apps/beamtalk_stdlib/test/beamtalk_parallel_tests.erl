@@ -8,9 +8,9 @@
 -moduledoc """
 EUnit tests for beamtalk_parallel module (BT-2974).
 
-Focus: the two `'DOWN'` message branches in `gather_all/5` (line 343) and
-`gather_any/5` (line 426) that fire when a worker process is killed externally
-— bypassing `run_worker/4`'s try/catch — before it sends its result. These
+Focus: the `'DOWN'` message branches in `gather_all/5` and `gather_any/5`
+that fire when a worker process is killed externally — bypassing
+`run_worker/4`'s try/catch — before it sends its result. These
 branches are structurally unreachable from BUnit because blocks run inside the
 Parallel infrastructure itself; only a direct EUnit test can externally kill
 a worker with `exit(Pid, kill)`.
@@ -175,11 +175,16 @@ gather_any_down_path_one_killed_winner_succeeds_test() ->
                     timer:sleep(5000)
                 end,
                 fun() ->
-                    %% Brief sleep to ensure block 1 registers before winning,
-                    %% so the test exercises the 'DOWN' path rather than the
-                    %% normal kill_pending path that fires when a winner is found
-                    %% before all losers have even registered.
-                    timer:sleep(50),
+                    %% Sleep long enough that block 1 has registered its Pid
+                    %% (instant) and been killed externally by the test (within
+                    %% ~1ms of registration). Under ordinary scheduling the 'DOWN'
+                    %% message is processed well before this sleep expires, so the
+                    %% test exercises gather_any/5's 'DOWN' branch rather than the
+                    %% ordinary kill_pending branch that fires when a winner is
+                    %% found before a loser has registered. The assertion holds
+                    %% under both interleavings; what changes is which code path
+                    %% is covered.
+                    timer:sleep(200),
                     winner
                 end
             ])
