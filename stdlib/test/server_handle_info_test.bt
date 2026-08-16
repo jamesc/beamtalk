@@ -50,6 +50,7 @@ TestCase subclass: ServerHandleInfoTest
   testHandleInfoErrorDoesNotCrashServer =>
     server := FailingHandleInfoServer spawn
     Erlang erlang send: server pid msg: #crash
+    server getCount  // flush: queues behind #crash in mailbox (FIFO) before isAlive check
     self assert: server isAlive
     server stop
 
@@ -58,6 +59,6 @@ TestCase subclass: ServerHandleInfoTest
     Erlang erlang send: server pid msg: #increment
     self assert: server getCount equals: 1
     Erlang erlang send: server pid msg: #crash
+    self assert: server getCount equals: 1  // getCount queues behind #crash; ensures crash processed before isAlive
     self assert: server isAlive
-    self assert: server getCount equals: 1
     server stop
