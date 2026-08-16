@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
 use super::control_flow::ThreadingPlan;
-use super::document::{Document, concat, join, leaf};
+use super::document::{Document, INDENT, concat, join, leaf, line, nest};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -840,17 +840,14 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             function_head,
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    Self::instantiation_error_expr(class_name, selector, &hint)
+                ]
+            ),
             "\n",
-            "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', ",
-            leaf::atom(class_name.to_string()),
-            ") in\n",
-            "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
-            leaf::atom(selector.to_string()),
-            ") in\n",
-            "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-            leaf::binary_lit(&hint),
-            ") in\n",
-            "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
         ])
     }
@@ -883,17 +880,14 @@ impl CoreErlangGenerator {
 
         docvec![
             function_head,
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    Self::instantiation_error_expr(class_name, selector, &hint)
+                ]
+            ),
             "\n",
-            "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', ",
-            leaf::atom(class_name.to_string()),
-            ") in\n",
-            "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
-            leaf::atom(selector.to_string()),
-            ") in\n",
-            "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-            leaf::binary_lit(&hint),
-            ") in\n",
-            "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
         ]
     }
