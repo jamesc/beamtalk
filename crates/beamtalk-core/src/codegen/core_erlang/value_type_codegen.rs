@@ -840,7 +840,13 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             function_head,
-            nest(INDENT, docvec![line(), Self::instantiation_error_expr(class_name, selector, &hint)]),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    Self::instantiation_error_expr(class_name, selector, &hint)
+                ]
+            ),
             "\n",
             "\n",
         ])
@@ -874,7 +880,13 @@ impl CoreErlangGenerator {
 
         docvec![
             function_head,
-            nest(INDENT, docvec![line(), Self::instantiation_error_expr(class_name, selector, &hint)]),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    Self::instantiation_error_expr(class_name, selector, &hint)
+                ]
+            ),
             "\n",
             "\n",
         ]
