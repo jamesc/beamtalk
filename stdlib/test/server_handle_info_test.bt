@@ -13,7 +13,6 @@ TestCase subclass: ServerHandleInfoTest
   testServerReceivesTickMessage =>
     server := HandleInfoCounter spawn
     Erlang erlang send: server pid msg: #tick
-    Timer sleep: 50
     self assert: server getCount equals: 1
     server stop
 
@@ -22,14 +21,12 @@ TestCase subclass: ServerHandleInfoTest
     Erlang erlang send: server pid msg: #tick
     Erlang erlang send: server pid msg: #tick
     Erlang erlang send: server pid msg: #tick
-    Timer sleep: 50
     self assert: server getCount equals: 3
     server stop
 
   testServerHandlesNonTickMessage =>
     server := HandleInfoCounter spawn
     Erlang erlang send: server pid msg: #something_else
-    Timer sleep: 50
     self assert: server getLastMsg equals: #something_else
     server stop
 
@@ -39,7 +36,6 @@ TestCase subclass: ServerHandleInfoTest
     actor increment
     self assert: actor getCount equals: 1
     Erlang erlang send: actor pid msg: #tick
-    Timer sleep: 50
     self assert: actor getCount equals: 1
     actor stop
 
@@ -47,7 +43,6 @@ TestCase subclass: ServerHandleInfoTest
     server := HandleInfoCounter spawn
     self assert: server isAlive
     Erlang erlang send: server pid msg: #anything
-    Timer sleep: 50
     self assert: server isAlive
     server stop
 
@@ -55,17 +50,14 @@ TestCase subclass: ServerHandleInfoTest
   testHandleInfoErrorDoesNotCrashServer =>
     server := FailingHandleInfoServer spawn
     Erlang erlang send: server pid msg: #crash
-    Timer sleep: 100
     self assert: server isAlive
     server stop
 
   testHandleInfoErrorPreservesPreCallState =>
     server := FailingHandleInfoServer spawn
     Erlang erlang send: server pid msg: #increment
-    Timer sleep: 50
     self assert: server getCount equals: 1
     Erlang erlang send: server pid msg: #crash
-    Timer sleep: 100
     self assert: server isAlive
     self assert: server getCount equals: 1
     server stop
