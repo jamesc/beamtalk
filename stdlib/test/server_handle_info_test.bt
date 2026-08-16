@@ -43,6 +43,7 @@ TestCase subclass: ServerHandleInfoTest
     server := HandleInfoCounter spawn
     self assert: server isAlive
     Erlang erlang send: server pid msg: #anything
+    server getCount  // flush: queues behind #anything in mailbox (FIFO) before isAlive check
     self assert: server isAlive
     server stop
 
