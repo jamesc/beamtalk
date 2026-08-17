@@ -73,6 +73,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     register/4,
     register/5,
     unregister/2,
+    unregister/3,
     purge_class/1,
     lookup/2,
     list/1,
@@ -232,30 +233,75 @@ register(Class, Selector, Fun, Owner, Source) when
     %% `Source`) is re-parsed and indexed; a sourceless one (`register/4`, or
     %% `register/5` with `Source = undefined`) is recorded as a marker row tagged
     %% `unindexed_runtime_fun` (empty sends + references) so navigation knows the
-    %% method exists but cannot be scanned. Extension methods are instance-side,
-    %% so ClassSide = false.
+    %% method exists but cannot be scanned. `index_extension_xref/3` always
+    %% indexes at `ClassSide = false`, even for a class-side extension (`Class`
+    %% is already the metaclass tag in that case) — see its doc (BT-3185).
     index_extension_xref(Class, Selector, Source),
     ok.
 
 -doc """
-Unregister an extension method from a class (ADR 0066 open classes).
+Unregister an instance-side extension method from a class (ADR 0066 open
+classes).
 
-Removes the dispatch entry, any stored source body, and the method's xref
-index rows. Idempotent — unregistering an unknown extension is a no-op.
-
-ADR 0087 Phase 4 (BT-2301): the matching `beamtalk_xref:purge_method/3` call
-drops just this `{Class, false, Selector}` row set (extension methods are
-instance-side); sibling extensions on the same class are untouched.
+Equivalent to `unregister/3` with `ClassSide = false` — the original
+contract, unchanged (BT-3185). See `unregister/3` for the full doc (dispatch
+entry, source body, conflict history, and xref row removal; idempotent).
 """.
 -spec unregister(atom(), atom()) -> ok.
 unregister(Class, Selector) when is_atom(Class), is_atom(Selector) ->
-    Key = {Class, Selector},
+    unregister(Class, Selector, false).
+
+-doc """
+Unregister an extension method from a class, given which side it was
+registered on (ADR 0066 open classes; BT-3185).
+
+`Class` is always the bare class *name* atom (e.g. `'Counter'`) — never
+pre-tagged by the caller. `ClassSide` is `false` for an instance-side
+extension (`Counter >> #foo`) or `true` for a class-side one
+(`Counter class >> #foo`, ADR 0112's `Counter class removeSelector: #foo`).
+This function resolves the literal ETS key itself the same way
+`purge_class/1`'s doc already establishes — the class name atom for
+instance-side, or `beamtalk_class_registry:class_object_tag/1`'s result for
+class-side — so a caller (e.g. the `removeSelector:` primitive) does not have
+to duplicate that tagging.
+
+Removes the dispatch entry, any stored source body, this selector's
+`?CONFLICTS_TABLE` history (BT-3185 — previously only the whole-class sweep
+`purge_class/1` did this, so removing one contested extension left stale
+conflict rows that `conflicts/0` kept surfacing for a method that no longer
+existed), and the method's xref index rows. Idempotent — unregistering an
+unknown extension is a no-op.
+
+ADR 0087 Phase 4 (BT-2301) / BT-3185: the matching `beamtalk_xref:purge_method/3`
+call always passes `ClassSide = false`, regardless of this function's own
+`ClassSide` argument — `index_extension_xref/3` (the write side, unchanged by
+this fix) indexes *every* extension, instance- or class-side, under
+`{Class, false, Selector}`; the class-side distinction lives entirely in
+which `Class` atom is used (the metaclass tag), never in the xref boolean.
+Passing the extension's real side to `purge_method/3` here would silently
+miss the row `index_extension_xref/3` actually wrote. See
+`index_extension_xref/3`'s doc for the related instance-side key-collision
+caveat.
+""".
+-spec unregister(atom(), atom(), boolean()) -> ok.
+unregister(Class, Selector, ClassSide) when
+    is_atom(Class), is_atom(Selector), is_boolean(ClassSide)
+->
+    EtsClass =
+        case ClassSide of
+            true -> beamtalk_class_registry:class_object_tag(Class);
+            false -> Class
+        end,
+    Key = {EtsClass, Selector},
     ets:delete(?EXTENSIONS_TABLE, Key),
     ets:delete(?SOURCES_TABLE, Key),
+    %% BT-3185: clear this selector's conflict history too — previously only
+    %% purge_class/1's whole-class sweep did this.
+    _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
     %% Best-effort: the extension ETS rows are already mutated, so a
     %% dead/restarting beamtalk_xref must not crash unregister. Degrade to a
     %% no-op if the xref gen_server is unavailable (BT-2301).
-    safe_xref(fun() -> beamtalk_xref:purge_method(Class, false, Selector) end),
+    safe_xref(fun() -> beamtalk_xref:purge_method(EtsClass, false, Selector) end),
     ok.
 
 -doc """
@@ -529,8 +575,27 @@ A sourced extension (`Source` is a binary) is re-parsed via
 so its sends become visible to `SystemNavigation sendersOf:` etc. A sourceless
 extension (`Source = undefined`) is recorded as an `unindexed_runtime_fun`
 marker row (empty sends + references) — the method is known to exist but cannot
-be scanned. Provenance is `extension` for both. Extension methods are
-instance-side, so `ClassSide = false`.
+be scanned. Provenance is `extension` for both.
+
+`ClassSide` is always `false` here, for *every* extension — instance-side
+(`Class` is the bare class name) and class-side (`Class` is already the
+metaclass tag, e.g. `'Counter class'`, per ADR 0066/BT-1617's registration
+convention) alike. The class-side/instance-side distinction lives entirely in
+which `Class` atom the caller passed to `register/4,5`, never in the xref
+boolean — `unregister/3` (BT-3185) mirrors this exactly so its
+`beamtalk_xref:purge_method/3` call finds the row this function wrote.
+
+**Key-collision caveat (ADR 0112, not a blocker, documented so it isn't
+rediscovered via a debugger):** an instance-side extension's xref row and a
+*local* instance-side method's xref row share the identical
+`{Class, false, Selector}` key shape — `beamtalk_object_class:put_method_xref/4`
+indexes local methods the same way. In the local-shadowed-by-extension case
+(a class defines `#foo` locally *and* a same-named extension is registered),
+`beamtalk_xref:purge_method/3` on either one's rows will collide with the
+other's — removing the extension can also drop the local method's xref rows
+(and vice versa). The dispatch-visible method (whichever wins per
+`beamtalk_dispatch:lookup/5`'s extension-first order) is unaffected; only its
+own xref bookkeeping can go stale until its next recompile/re-register.
 
 A no-op when `beamtalk_xref` is not running (e.g. early bootstrap, or a minimal
 embedded runtime).
@@ -548,6 +613,9 @@ index_extension_xref(Class, Selector, Source) ->
     Entry = beamtalk_xref:build_method_entry(
         false, Selector, SourceBin, SourceStatus, extension
     ),
+    %% See this function's doc for the key-collision caveat (ADR 0112): this
+    %% {Class, false, Selector} key shape is shared with local instance-side
+    %% methods, so a purge of one can collide with the other.
     safe_xref(fun() -> beamtalk_xref:put_method(Class, false, Selector, Entry) end).
 
 -doc """
