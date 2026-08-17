@@ -125,8 +125,18 @@ jobs:
       # attempts, and an unrelated flake elsewhere in the suite stays visible
       # rather than being absorbed here.
       #
-      # Failing closed on an unrecognised failure also means an upstream rename
-      # of the test degrades to "no retry", never to "silently retry everything".
+      # The failure count is read from the run summary line, not by counting
+      # `FAIL` lines: the two can legitimately disagree (a failing test with no
+      # error field emits no FAIL line, and native EUnit failures come back as
+      # one opaque blob rather than one line per test), so only the summary
+      # count is authoritative. Both formats are pinned by
+      # `summary_line_is_a_ci_contract` / `fail_detail_line_is_a_ci_contract` in
+      # crates/beamtalk-cli/src/commands/test.rs — if those tests fail, the
+      # parsing below needs updating in the same change.
+      #
+      # Anything unrecognised — no summary line at all (compile error, crash,
+      # timeout), a renamed test — fails closed with no retry, never "retry
+      # everything".
       #
       # The durable fix belongs upstream in jamesc/beamtalk-http: point that test
       # at the package's own local test server, or gate it behind an opt-in
@@ -137,22 +147,24 @@ jobs:
           ATTEMPTS: 3
           FLAKY_TEST: testHttpsGetReturnsOkStatus
         run: |
+          set -o pipefail
           log="$RUNNER_TEMP/beamtalk-http-test.log"
           for attempt in $(seq 1 "$ATTEMPTS"); do
-            if beamtalk test >"$log" 2>&1; then
-              cat "$log"
+            # tee, not redirect: keep output streaming live in the Actions UI
+            # while still capturing it for the failure-signature check below.
+            if beamtalk test 2>&1 | tee "$log"; then
               if [ "$attempt" -gt 1 ]; then
                 echo "::warning title=beamtalk-http tests flaked::Suite passed on attempt ${attempt} of ${ATTEMPTS} — ${FLAKY_TEST} failed earlier in this job, likely runner network noise"
               fi
               exit 0
             fi
-            cat "$log"
 
-            # Retry only the known network flake: exactly one failing test, and
-            # that test is FLAKY_TEST. Anything else is treated as a real failure.
-            failures=$(grep -c '^FAIL ' "$log" || true)
-            if [ "$failures" != "1" ] || ! grep -q "^FAIL .*${FLAKY_TEST}" "$log"; then
-              echo "::error title=beamtalk-http tests failed::Failure is not the known network flake (${failures} failing test(s)) — failing without retry"
+            # Retry only the known network flake: the run summary must report
+            # exactly one failure, and the sole FAIL line must name FLAKY_TEST.
+            failed_count=$(sed -nE 's/^[0-9]+ file\(s\), [0-9]+ tests, [0-9]+ passed, ([0-9]+) failed \([0-9.]+s\)$/\1/p' "$log" | tail -1)
+            fail_lines=$(grep -c '^FAIL ' "$log" || true)
+            if [ "$failed_count" != "1" ] || [ "$fail_lines" != "1" ] || ! grep -q "^FAIL .*${FLAKY_TEST}" "$log"; then
+              echo "::error title=beamtalk-http tests failed::Not the known network flake (summary reports '${failed_count:-no}' failure(s), ${fail_lines} FAIL line(s)) — failing without retry"
               exit 1
             fi
 

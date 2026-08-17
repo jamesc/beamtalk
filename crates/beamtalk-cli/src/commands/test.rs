@@ -2017,6 +2017,40 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     })
 }
 
+/// Format one failing-test detail line.
+///
+/// The leading `FAIL ` marker is load-bearing outside this crate: the
+/// cross-repo CI workflow greps for it to identify which test failed. See
+/// [`summary_line`] for the full contract and the tests that pin it.
+fn fail_detail_line(display_name: &str, error: &str) -> String {
+    format!("FAIL {display_name}: {error}")
+}
+
+/// Format the final one-line run summary.
+///
+/// **This line is a CI contract, not just display text.**
+/// `.github/workflows/cross-repo.yml` parses the failure count out of it to
+/// decide whether a red `beamtalk-http` run is the single known network flake
+/// (retryable) or a real regression (fail immediately). It reads the count from
+/// *this* line rather than counting [`fail_detail_line`] outputs because the two
+/// can legitimately disagree: a failing test with no `error` field emits no
+/// `FAIL` line, and native `EUnit` failures are reported as one opaque output
+/// blob rather than one line per test. Only this count is authoritative.
+///
+/// `summary_line_is_a_ci_contract` and `fail_detail_line_is_a_ci_contract` pin
+/// both formats — if you change either, update that workflow's parsing to match.
+fn summary_line(
+    file_count: usize,
+    total_tests: usize,
+    total_passed: usize,
+    total_failed: usize,
+    elapsed_secs: f64,
+) -> String {
+    format!(
+        "{file_count} file(s), {total_tests} tests, {total_passed} passed, {total_failed} failed ({elapsed_secs:.1}s)"
+    )
+}
+
 /// Phase 4: Aggregate and report test results.
 ///
 /// BT-1631: Displays results from `beamtalk_test_runner:run_all/1` with
@@ -2052,7 +2086,7 @@ fn report_results(
                         .as_ref()
                         .map_or(test.name.clone(), |c| format!("{c} {}", test.name));
                     if let Some(error) = &test.error {
-                        failed_details.push(format!("FAIL {display_name}: {error}"));
+                        failed_details.push(fail_detail_line(&display_name, error));
                     }
                 }
                 "skip" => *skipped += 1,
@@ -2115,19 +2149,23 @@ fn report_results(
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
 
+    let summary = summary_line(
+        file_count,
+        total_tests,
+        total_passed,
+        total_failed,
+        elapsed_secs,
+    );
+
     println!();
     if total_failed == 0 {
-        println!(
-            "{file_count} file(s), {total_tests} tests, {total_passed} passed, 0 failed ({elapsed_secs:.1}s)",
-        );
+        println!("{summary}");
     } else {
         for detail in &failed_details {
             eprintln!("{detail}");
         }
         eprintln!();
-        eprintln!(
-            "{file_count} file(s), {total_tests} tests, {total_passed} passed, {total_failed} failed ({elapsed_secs:.1}s)",
-        );
+        eprintln!("{summary}");
         miette::bail!("{total_failed} test(s) failed");
     }
 
@@ -2137,6 +2175,75 @@ fn report_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Extract the failure count from a summary line the way
+    /// `.github/workflows/cross-repo.yml` does, so this test fails if the
+    /// emitted format drifts away from what that workflow can parse.
+    ///
+    /// Mirrors the workflow's sed expression:
+    /// `^[0-9]+ file\(s\), [0-9]+ tests, [0-9]+ passed, ([0-9]+) failed \([0-9.]+s\)$`
+    fn ci_parsed_failure_count(line: &str) -> Option<&str> {
+        let (head, tail) = line.split_once(" failed (")?;
+        if !line.ends_with("s)") || !head.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+        // Elapsed must be numeric, e.g. "39.8s)".
+        let elapsed = tail.strip_suffix("s)")?;
+        if elapsed.is_empty() || !elapsed.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            return None;
+        }
+        let count = head.rsplit(", ").next()?;
+        if count.is_empty() || !count.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        Some(count)
+    }
+
+    /// The cross-repo CI workflow parses this line to tell a retryable network
+    /// flake from a real regression. If this test fails, update the parsing in
+    /// `.github/workflows/cross-repo.yml` in the same change.
+    #[test]
+    fn summary_line_is_a_ci_contract() {
+        let line = summary_line(8, 168, 167, 1, 39.84);
+        assert_eq!(
+            line, "8 file(s), 168 tests, 167 passed, 1 failed (39.8s)",
+            "cross-repo.yml parses this exact shape — update its sed expression too"
+        );
+        assert_eq!(ci_parsed_failure_count(&line), Some("1"));
+
+        // The count the workflow reads must track the real failure total, which
+        // is what makes it safe to gate the retry on "exactly one failure".
+        let two = summary_line(8, 168, 166, 2, 9.1);
+        assert_eq!(ci_parsed_failure_count(&two), Some("2"));
+        let clean = summary_line(8, 168, 168, 0, 1.0);
+        assert_eq!(ci_parsed_failure_count(&clean), Some("0"));
+
+        // Per-class lines must NOT look like the summary, or the workflow would
+        // read a count off the wrong line.
+        assert_eq!(
+            ci_parsed_failure_count("  HTTPTest: 39 tests, 38 passed, 1 failed \u{2717}"),
+            None
+        );
+    }
+
+    /// The workflow matches this line to confirm the single failure is the known
+    /// flaky test. The `FAIL ` prefix must stay at the start of the line.
+    #[test]
+    fn fail_detail_line_is_a_ci_contract() {
+        let line = fail_detail_line(
+            "HTTPTest testHttpsGetReturnsOkStatus",
+            "http_error error in 'get:headers:' on Http",
+        );
+        assert_eq!(
+            line,
+            "FAIL HTTPTest testHttpsGetReturnsOkStatus: http_error error in 'get:headers:' on Http"
+        );
+        assert!(
+            line.starts_with("FAIL "),
+            "cross-repo.yml greps '^FAIL ' — keep the marker line-initial"
+        );
+        assert!(line.contains("testHttpsGetReturnsOkStatus"));
+    }
 
     fn write_bt_file(name: &str, content: &str) -> (tempfile::TempDir, Utf8PathBuf) {
         let temp = tempfile::TempDir::new().unwrap();
