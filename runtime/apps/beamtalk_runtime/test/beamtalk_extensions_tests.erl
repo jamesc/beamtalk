@@ -957,6 +957,199 @@ unregister_unknown_is_noop_test_() ->
     end}.
 
 %%% ============================================================================
+%%% BT-3185: unregister/3 — class-side extension removal + conflict cleanup
+%%% ============================================================================
+
+unregister3_class_side_purges_correct_xref_rows_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% A class-side extension is registered under the metaclass
+                %% tag (ADR 0066/BT-1617's established convention — mirrors
+                %% how codegen emits `Target class >> sel` registrations).
+                InstanceClass = 'BT3185Meta',
+                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+                Fun = fun(_Args, _Self) -> ok end,
+                ok = beamtalk_extensions:register(
+                    ClassSideTag, 'make', Fun, mylib, <<"make => self new">>
+                ),
+                ?assertEqual(
+                    [{ClassSideTag, false}], beamtalk_xref:implementors_of('make')
+                ),
+                ?assert(beamtalk_extensions:has(ClassSideTag, 'make')),
+
+                %% unregister/3 is given the *bare* class name plus
+                %% ClassSide = true — it must resolve the class-side ETS key
+                %% itself via class_object_tag/1, exactly like purge_class/1's
+                %% documented convention, and purge the xref row that was
+                %% actually written under the tag.
+                ok = beamtalk_extensions:unregister(InstanceClass, 'make', true),
+
+                ?assertNot(beamtalk_extensions:has(ClassSideTag, 'make')),
+                ?assertEqual(not_found, beamtalk_extensions:lookup(ClassSideTag, 'make')),
+                ?assertEqual(not_found, beamtalk_extensions:getSource(ClassSideTag, 'make')),
+                ?assertEqual([], beamtalk_xref:implementors_of('make'))
+            end)
+        ]
+    end}.
+
+unregister3_class_side_does_not_touch_instance_side_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Instance-side and class-side extensions of the same
+                %% selector on the same class name are stored under separate
+                %% ETS keys — removing one must not touch the other.
+                InstanceClass = 'BT3185Sided',
+                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+                Fun = fun(_Args, _Self) -> ok end,
+                ok = beamtalk_extensions:register(InstanceClass, 'twin', Fun, mylib),
+                ok = beamtalk_extensions:register(ClassSideTag, 'twin', Fun, mylib),
+
+                ok = beamtalk_extensions:unregister(InstanceClass, 'twin', true),
+
+                ?assertNot(beamtalk_extensions:has(ClassSideTag, 'twin')),
+                ?assert(beamtalk_extensions:has(InstanceClass, 'twin'))
+            end)
+        ]
+    end}.
+
+unregister3_false_matches_unregister2_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Existing instance-side unregister/2 behavior is unchanged
+                %% — it is exactly unregister/3 with ClassSide = false.
+                Fun = fun(_Args, _Self) -> ok end,
+                ok = beamtalk_extensions:register(
+                    'BT3185Plain', 'greet', Fun, mylib, <<"greet => self">>
+                ),
+                ?assert(beamtalk_extensions:has('BT3185Plain', 'greet')),
+
+                ok = beamtalk_extensions:unregister('BT3185Plain', 'greet'),
+
+                ?assertNot(beamtalk_extensions:has('BT3185Plain', 'greet')),
+                ?assertEqual([], beamtalk_xref:implementors_of('greet'))
+            end)
+        ]
+    end}.
+
+unregister3_unknown_class_side_is_noop_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                ?assertEqual(
+                    ok, beamtalk_extensions:unregister('BT3185NeverRegistered', 'nope', true)
+                )
+            end)
+        ]
+    end}.
+
+unregister_clears_conflict_history_for_removed_selector_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                Fun1 = fun(_Args, _Self) -> ok end,
+                Fun2 = fun(_Args, _Self) -> ok end,
+
+                %% Two different owners register the same selector — records a
+                %% conflict. A sibling contested selector on the same class
+                %% must survive the removal below untouched.
+                ok = beamtalk_extensions:register('BT3185Conflict', 'shared', Fun1, lib1),
+                ok = beamtalk_extensions:register('BT3185Conflict', 'shared', Fun2, lib2),
+                ok = beamtalk_extensions:register('BT3185Conflict', 'other', Fun1, lib1),
+                ok = beamtalk_extensions:register('BT3185Conflict', 'other', Fun2, lib2),
+
+                Conflicts = beamtalk_extensions:conflicts(),
+                ?assert(
+                    lists:any(
+                        fun
+                            ({'BT3185Conflict', S, _}) -> S =:= shared;
+                            (_) -> false
+                        end,
+                        Conflicts
+                    )
+                ),
+                ?assert(
+                    lists:any(
+                        fun
+                            ({'BT3185Conflict', S, _}) -> S =:= other;
+                            (_) -> false
+                        end,
+                        Conflicts
+                    )
+                ),
+
+                %% Removing the contested `shared` extension clears its own
+                %% conflict-history row — previously only purge_class/1's
+                %% whole-class sweep did this, leaving conflicts/0 surfacing a
+                %% method that no longer exists.
+                ok = beamtalk_extensions:unregister('BT3185Conflict', 'shared'),
+
+                AfterConflicts = beamtalk_extensions:conflicts(),
+                ?assertNot(
+                    lists:any(
+                        fun
+                            ({'BT3185Conflict', S, _}) -> S =:= shared;
+                            (_) -> false
+                        end,
+                        AfterConflicts
+                    )
+                ),
+                %% The sibling `other` conflict is untouched.
+                ?assert(
+                    lists:any(
+                        fun
+                            ({'BT3185Conflict', S, _}) -> S =:= other;
+                            (_) -> false
+                        end,
+                        AfterConflicts
+                    )
+                )
+            end)
+        ]
+    end}.
+
+unregister3_clears_conflict_history_for_class_side_selector_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                InstanceClass = 'BT3185ClassConflict',
+                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+                Fun1 = fun(_Args, _Self) -> ok end,
+                Fun2 = fun(_Args, _Self) -> ok end,
+
+                ok = beamtalk_extensions:register(ClassSideTag, 'build', Fun1, lib1),
+                ok = beamtalk_extensions:register(ClassSideTag, 'build', Fun2, lib2),
+
+                Conflicts = beamtalk_extensions:conflicts(),
+                ?assert(
+                    lists:any(
+                        fun
+                            ({C, S, _}) -> C =:= ClassSideTag andalso S =:= build;
+                            (_) -> false
+                        end,
+                        Conflicts
+                    )
+                ),
+
+                ok = beamtalk_extensions:unregister(InstanceClass, 'build', true),
+
+                AfterConflicts = beamtalk_extensions:conflicts(),
+                ?assertNot(
+                    lists:any(
+                        fun
+                            ({C, S, _}) -> C =:= ClassSideTag andalso S =:= build;
+                            (_) -> false
+                        end,
+                        AfterConflicts
+                    )
+                )
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
 %%% BT-3105: purge_class/1 — full purge on class removal
 %%% ============================================================================
 
