@@ -110,6 +110,37 @@ jobs:
         working-directory: _packages/beamtalk-http
         run: beamtalk build
 
+      # Part of the beamtalk-http suite reaches the public internet over real
+      # HTTPS (HTTPTest>>testHttpsGetReturnsOkStatus), so runner network noise
+      # reds this canary on its own. Two signatures seen on main, both transient:
+      # a connection/TLS failure surfacing as `http_error error in 'get:headers:'
+      # on Http`, and a non-2xx response surfacing as a bare assertion failure.
+      #
+      # Re-run the suite instead of failing on the first flake. A real compiler
+      # regression still fails every attempt — retries only absorb noise — and a
+      # pass that needed a retry is surfaced as a workflow warning so the flake
+      # stays visible rather than silently masked.
+      #
+      # The durable fix belongs upstream in jamesc/beamtalk-http: point that test
+      # at the package's own local test server, or gate it behind an opt-in
+      # network tag. Drop this retry once the suite is hermetic.
       - name: Test beamtalk-http
         working-directory: _packages/beamtalk-http
-        run: beamtalk test
+        env:
+          ATTEMPTS: 3
+        run: |
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            if beamtalk test; then
+              if [ "$attempt" -gt 1 ]; then
+                echo "::warning title=beamtalk-http tests flaked::Suite passed on attempt ${attempt} of ${ATTEMPTS} — a network-dependent test failed earlier in this job"
+              fi
+              exit 0
+            fi
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then
+              backoff=$((attempt * 10))
+              echo "Attempt ${attempt} of ${ATTEMPTS} failed — retrying in ${backoff}s"
+              sleep "$backoff"
+            fi
+          done
+          echo "::error title=beamtalk-http tests failed::Suite failed all ${ATTEMPTS} attempts — treat as a real regression, not a flake"
+          exit 1

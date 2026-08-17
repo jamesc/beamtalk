@@ -728,6 +728,8 @@ The [cross-repo workflow](../../.github/workflows/cross-repo.yml) tests first-pa
 
 **Adding a new package:** Add a new job to `cross-repo.yml` following the `beamtalk-http` job as a template. Each job checks out the compiler, builds it, installs the binary, then checks out and tests the package.
 
+**Network-dependent tests:** Package suites owned by other repos may reach the public internet — `beamtalk-http` does, via `HTTPTest>>testHttpsGetReturnsOkStatus`. Runner network noise made that single test red the whole workflow intermittently, so the `Test beamtalk-http` step retries the suite up to 3 times with backoff. A retried pass emits a `::warning::` so the flake stays visible in the run summary; a real compiler regression fails all 3 attempts and the step still fails. Remove the retry once the upstream suite is hermetic — the durable fix is for the package to test against its own local test server, or to gate live-network tests behind an opt-in tag.
+
 ---
 
 ## Test Organization Conventions
