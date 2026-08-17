@@ -11,6 +11,12 @@ End-to-end tests for the ChangeLog revert completeness set (ADR 0082):
   - BT-2665: reverting a *class-side* method works symmetrically with instance
     side — a modify re-installs the prior class-side body; an add removes it.
 
+Also covers the stdlib policy `beamtalk_repl_eval:remove_method/3,4` gates on
+(ADR 0112 Phase 1, BT-3184): `remove_method/3` (the revert-of-an-add path
+above) keeps refusing stdlib classes, while `remove_method/4` with
+`allow_stdlib` reaches them — the mechanism the future `removeSelector:`
+primitive (ADR 0112 Phase 2) will drive.
+
 These boot the full stack (compiler port + runtime + workspace_meta + changelog)
 against an isolated, in-project temp tree so the live install / remove and the
 flushable-with-prev-source recording paths run for real, then drive revert
@@ -36,7 +42,10 @@ revert_e2e_test_() ->
             fun revert_modified_instance_method_restores_prior_body/1,
             fun revert_added_class_side_method_removes_it/1,
             fun revert_modified_class_side_method_restores_prior_body/1,
-            fun revert_new_class_removes_the_class/1
+            fun revert_new_class_removes_the_class/1,
+            fun remove_method_default_still_refuses_stdlib/1,
+            fun remove_method_allow_stdlib_removes_from_a_stdlib_class/1,
+            fun remove_method_unknown_policy_fails_closed/1
         ]}}.
 
 %% Start the heavy, node-global apps once for the whole suite (the compiler port
@@ -214,6 +223,65 @@ revert_new_class_removes_the_class(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
+%% BT-3184 — remove_method/3,4 stdlib policy (ADR 0112 Phase 1)
+%%====================================================================
+
+%% remove_method/3 (the arity the revert-of-an-add path above uses) must keep
+%% refusing stdlib classes exactly as before this issue — a real, already-
+%% loaded stdlib class (ErlangModule) is used directly since this path never
+%% reaches the recompile step, so nothing about the live class is mutated.
+remove_method_default_still_refuses_stdlib(_) ->
+    ?assert(beamtalk_runtime_api:whereis_class('ErlangModule') =/= undefined),
+    Result3 = beamtalk_repl_eval:remove_method(
+        <<"ErlangModule">>, <<"doesNotUnderstand:args:">>, instance
+    ),
+    Result4Refuse = beamtalk_repl_eval:remove_method(
+        <<"ErlangModule">>, <<"doesNotUnderstand:args:">>, instance, refuse_stdlib
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result3),
+        ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result4Refuse)
+    ].
+
+%% remove_method/4 with `allow_stdlib` must reach a stdlib class instead of
+%% refusing it up front. Defines a throwaway class under a `stdlib/src/`
+%% subdirectory of the isolated temp tree (real file, `reload_class_file`-
+%% loaded — see `define_stdlib_class/3`) so `is_stdlib_path/1`'s path check
+%% genuinely classifies it stdlib-mode, giving it a real `bt@stdlib@...`
+%% module name — the exact condition `stdlib_class_module/1` checks for. This
+%% never touches a real production stdlib class.
+remove_method_allow_stdlib_removes_from_a_stdlib_class(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3184StdlibProbe" ++ U),
+    {ok, Pid} = define_stdlib_class(
+        Tmp, ClassName, ["  class keep => 1\n", "  class probe => 2\n"]
+    ),
+    AfterAdd = beamtalk_runtime_api:local_class_methods(Pid),
+    Result = beamtalk_repl_eval:remove_method(ClassName, <<"probe">>, class, allow_stdlib),
+    AfterRemove = beamtalk_runtime_api:local_class_methods(Pid),
+    [
+        ?_assert(lists:member(probe, AfterAdd)),
+        ?_assertMatch({ok, _}, Result),
+        ?_assertNot(lists:member(probe, AfterRemove)),
+        %% The pre-existing method is untouched.
+        ?_assert(lists:member(keep, AfterRemove))
+    ].
+
+%% An unrecognised `StdlibPolicy` atom must fail loudly (no matching case
+%% clause) rather than silently falling through to the permissive
+%% `allow_stdlib` path — guards against a future caller's typo reaching a real
+%% stdlib class unintentionally.
+remove_method_unknown_policy_fails_closed(_) ->
+    ?assert(beamtalk_runtime_api:whereis_class('ErlangModule') =/= undefined),
+    [
+        ?_assertError(
+            {case_clause, _},
+            beamtalk_repl_eval:remove_method(
+                <<"ErlangModule">>, <<"doesNotUnderstand:args:">>, instance, bogus_policy
+            )
+        )
+    ].
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -230,6 +298,26 @@ define_project_class(Tmp, ClassNameBin, Methods) ->
     {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
     %% Record the class source in workspace_meta so live patches resolve their
     %% span (the stateful REPL load path does this; the stateless reload does not).
+    ok = beamtalk_workspace_meta:set_class_source(ClassNameBin, binary_to_list(Source)),
+    ClassAtom = binary_to_atom(ClassNameBin, utf8),
+    Pid = wait_for_class(ClassAtom, 50),
+    {ok, Pid}.
+
+%% Like define_project_class/3, but writes the file under a `stdlib/src/`
+%% subdirectory of the temp tree instead of directly in it. `is_stdlib_path/1`
+%% (`beamtalk_repl_loader`) matches on the `/stdlib/src/` path substring alone,
+%% so this drives the real compiler through its stdlib-mode branch and yields
+%% a genuine `bt@stdlib@...` module name (BT-3184) — without writing anything
+%% into the real `stdlib/src/` tree or touching a real stdlib class.
+define_stdlib_class(Tmp, ClassNameBin, Methods) ->
+    Dir = filename:join([Tmp, "stdlib", "src"]),
+    ok = filelib:ensure_path(Dir),
+    Path = filename:join(Dir, binary_to_list(ClassNameBin) ++ ".bt"),
+    Source = iolist_to_binary([
+        <<"Object subclass: ">>, ClassNameBin, <<"\n">>, Methods
+    ]),
+    ok = file:write_file(Path, Source),
+    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
     ok = beamtalk_workspace_meta:set_class_source(ClassNameBin, binary_to_list(Source)),
     ClassAtom = binary_to_atom(ClassNameBin, utf8),
     Pid = wait_for_class(ClassAtom, 50),

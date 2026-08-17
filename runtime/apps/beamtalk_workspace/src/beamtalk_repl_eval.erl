@@ -54,7 +54,11 @@ module loading to beamtalk_repl_loader (BT-863).
 
 %% ADR 0082 revert completeness (BT-2663/BT-2665) — remove a live method (the
 %% *add* revert case) and remove a live class (new-class revert, BT-2664).
--export([remove_method/3, remove_class/1]).
+%% ADR 0112 Phase 1 (BT-3184) — remove_method/4 adds an explicit stdlib policy
+%% so the future `removeSelector:` primitive can reach stdlib classes through
+%% this SAME function rather than a forked copy; remove_method/3 keeps the
+%% revert-of-an-add caller's unchanged refuse-stdlib default.
+-export([remove_method/3, remove_method/4, remove_class/1]).
 
 %% BT-2531 — workspace binding-mutation announcement with an explicit session id.
 %% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
@@ -906,16 +910,51 @@ Remove a live method from a class (BT-2663/BT-2665 *add* revert case).
 `Side` (`instance | class`) selects which side's method to drop. Recompiles the
 class without the method and hot-reloads it; the live image is unchanged on error.
 Returns `{ok, ClassNameBin}` or `{error, Reason}`. Refuses stdlib classes (their
-methods are read-only in the workspace).
+methods are read-only in the workspace) — equivalent to
+`remove_method/4` with `refuse_stdlib`, the policy every caller of this arity
+gets (currently just the revert-of-an-add path, which has no legitimate
+"revert" of a patch that was never flushable in the first place).
 """.
 -spec remove_method(binary(), atom() | binary(), instance | class) ->
     {ok, binary()} | {error, term()}.
 remove_method(ClassNameBin, Selector, Side) ->
+    remove_method(ClassNameBin, Selector, Side, refuse_stdlib).
+
+-doc """
+Remove a live method from a class, with an explicit stdlib policy (ADR 0112
+Phase 1, BT-3184).
+
+Same removal mechanism as `remove_method/3` (recompiles the class without the
+method and hot-reloads it; the live image is unchanged on error), but the
+stdlib gate is now conditional on `StdlibPolicy`:
+
+- `refuse_stdlib` — reject a stdlib class up front with
+  `stdlib_method_read_only_error/2`, matching `remove_method/3`'s behavior
+  (the revert-of-an-add caller keeps this: there is no legitimate "revert" of
+  a patch that was never flushable).
+- `allow_stdlib` — skip the gate and let the removal reach stdlib classes too,
+  matching `compile:source:`'s existing flushability rule (ADR 0082) rather
+  than `removeFromSystem`'s hard block. For the future `removeSelector:`
+  primitive (ADR 0112 Phase 2), which must install in memory even on stdlib
+  classes — flushability, not refusal, is enforced later at the ChangeLog
+  layer, not here.
+
+One shared code path for both policies (CLAUDE.md's no-duplicate-
+implementations rule) — only the gate decision forks. `StdlibPolicy` is
+matched exhaustively (`refuse_stdlib` / `allow_stdlib` only) rather than via a
+catch-all `_` clause, so an unrecognised policy atom fails loudly
+(`case_clause`) instead of silently falling through to the permissive path.
+""".
+-spec remove_method(binary(), atom() | binary(), instance | class, refuse_stdlib | allow_stdlib) ->
+    {ok, binary()} | {error, term()}.
+remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
     SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
-    case stdlib_class_module(ClassNameBin) of
-        {ok, _Module} ->
+    case {StdlibPolicy, stdlib_class_module(ClassNameBin)} of
+        {refuse_stdlib, {ok, _Module}} ->
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
-        none ->
+        {allow_stdlib, _} ->
+            beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side);
+        {refuse_stdlib, none} ->
             beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side)
     end.
 
