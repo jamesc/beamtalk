@@ -34522,6 +34522,24 @@
       "explanation": "SlowE2EActor — E2E fixture that sleeps before responding. Used by actor_timeout.btscript to verify timeout behavior."
     },
     {
+      "id": "tests-repl-protocol-fixtures-stdlib-src-removeselectorstdlibfixture",
+      "title": "RemoveSelectorStdlibFixture",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Object",
+        "RemoveSelectorStdlibFixture",
+        "extends",
+        "inherit",
+        "inheritance",
+        "keep",
+        "object",
+        "probe",
+        "subclassing"
+      ],
+      "source": "// ADR 0112 Phase 2 (BT-3186): a throwaway class loaded from a path containing\n// `/stdlib/src/`, so `beamtalk_repl_loader:is_stdlib_path/1` classifies it\n// stdlib-mode (a genuine `bt@stdlib@...` module name) without touching real\n// production stdlib source — see remove_selector.btscript's stdlib-class\n// removal case. Mirrors the technique\n// beamtalk_workspace_revert_tests:define_stdlib_class/3 uses at the EUnit\n// level (BT-3184).\n\nObject subclass: RemoveSelectorStdlibFixture\n\n  class keep => 1\n\n  class probe => 2",
+      "explanation": "ADR 0112 Phase 2 (BT-3186): a throwaway class loaded from a path containing `/stdlib/src/`, so `beamtalk_repl_loader:is_stdlib_path/1` classifies it stdlib-mode (a genuine `bt@stdlib@...` module name) without touching real production stdlib source — see remove_selector.btscript's stdlib-class removal case. Mirrors the technique beamtalk_workspace_revert_tests:define_stdlib_class/3 uses at the EUnit level (BT-3184)."
+    },
+    {
       "id": "tests-repl-protocol-fixtures-sysnavigation-fixture",
       "title": "SysnavFixture",
       "category": "repl-protocol-fixtures",

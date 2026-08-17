@@ -97,6 +97,11 @@ kind_to_class(not_found) -> 'RuntimeError';
 kind_to_class(class_not_found) -> 'RuntimeError';
 kind_to_class(no_superclass) -> 'RuntimeError';
 kind_to_class(class_already_exists) -> 'RuntimeError';
+%% ADR 0112 (BT-3186): `Behaviour removeSelector:` on an absent selector —
+%% deliberately not `does_not_understand` (the message itself was understood;
+%% only its argument had nothing to remove). See beamtalk_behaviour_intrinsics's
+%% `selector_not_found_error/2`.
+kind_to_class(selector_not_found) -> 'RuntimeError';
 kind_to_class(dispatch_error) -> 'RuntimeError';
 kind_to_class(callback_failed) -> 'RuntimeError';
 kind_to_class(actor_dead) -> 'RuntimeError';

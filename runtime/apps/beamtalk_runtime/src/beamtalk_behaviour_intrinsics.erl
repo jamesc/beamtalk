@@ -40,6 +40,8 @@ that the Behaviour/Class libraries can rely on.
 | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
 | classDocForMethod/2         | Get method doc string for a selector, or nil (BT-991)     |
 | classRemoveFromSystem/1     | Remove class and cleanup runtime state                    |
+| classRemoveSelector/2       | Remove a method selector, raising if absent (ADR 0112)    |
+| classRemoveSelectorIfAbsent/3 | Remove a method selector, running a fallback block if absent (ADR 0112) |
 | classSourceFile/1           | Source file path from beamtalk_source module attr (BT-845)|
 | classReload/1               | Recompile from sourceFile + hot-swap (BT-845)             |
 | classConformsTo/2           | Check if class conforms to a protocol (ADR 0068 Phase 2c) |
@@ -82,6 +84,9 @@ that the Behaviour/Class libraries can rely on.
     classRemoveFromSystem/1,
     %% BT-1239: Programmatic class removal by name (for workspace/MCP unload)
     classRemoveFromSystemByName/1,
+    %% ADR 0112 Phase 2 (BT-3186): method-level removal primitives
+    classRemoveSelector/2,
+    classRemoveSelectorIfAbsent/3,
     %% BT-845: ADR 0040 Phase 2 — class-based reload
     classSourceFile/1,
     classReload/1,
@@ -662,6 +667,189 @@ classRemoveFromSystemByName(ClassName) ->
                     end
             end
     end.
+
+%%% ============================================================================
+%%% Method Removal Primitives (ADR 0112 Phase 2, BT-3186)
+%%% ============================================================================
+
+-doc """
+Remove `Selector` from the receiver, raising if it is not defined locally or
+as an extension.
+
+Backs `@primitive "classRemoveSelector"` (`Behaviour>>removeSelector:`). Side
+follows `classIncludesSelector/2`'s own convention: a `Self` tagged
+`class = 'Metaclass'` (i.e. `Counter class removeSelector: #foo`) touches the
+class-side method table; any other `Self` (`Counter removeSelector: #foo`)
+touches the instance-side table.
+
+Resolution mirrors `beamtalk_dispatch:lookup/5`'s own order (ADR 0112 §
+Extension methods): the extension registry (ADR 0066 open classes) is
+checked first — an extension shadows a same-named local method, so removing
+it re-exposes the local one (a second `removeSelector:` call removes that
+too) — then the local method table. Removing a locally-defined override
+re-exposes whatever the superclass chain supplies with no restart needed
+(ADR 0032's chain-walk dispatch does the work; nothing here invalidates a
+cache because there isn't one).
+
+Installs unconditionally — no receiver-side stdlib/sealed refusal, unlike
+`classRemoveFromSystemByName/1`. What varies is whether the change is
+flushable to disk (a later concern, ADR 0112 Phase 3), not whether it takes
+effect in memory — the same "flushability, not refusal" rule
+`classCompileSource/3` already follows for stdlib/dynamic/dependency classes.
+
+Raises a `selector_not_found` `#beamtalk_error{}` — deliberately not
+`does_not_understand` (see the ADR's *Error behaviour on absent selector*) —
+when the selector resolves nowhere.
+""".
+-spec classRemoveSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{}.
+classRemoveSelector(Self, Selector) ->
+    case remove_selector(Self, Selector) of
+        removed -> Self;
+        absent -> beamtalk_error:raise(selector_not_found_error(Self, Selector))
+    end.
+
+-doc """
+Remove `Selector` from the receiver like `classRemoveSelector/2`, but
+evaluate `AbsentBlock` instead of raising when the selector resolves nowhere.
+
+Backs `@primitive "classRemoveSelectorIfAbsent"`
+(`Behaviour>>removeSelector:ifAbsent:`). `AbsentBlock` arrives as an ordinary
+compiled Block value — a 0-arity Erlang fun (Beamtalk blocks compile to
+funs; see `Block.bt`) — called directly here, exactly as
+`beamtalk_actor.erl`'s `onExit:` callback calls its own block argument.
+
+Unlike a block argument received by a *locally-defined* class method (which
+runs inside that class's own gen_server call, per CLAUDE.md's "Blocks into
+class methods" rule), this primitive — like every `Behaviour` tower
+primitive — is itself reached via the Class -> Behaviour chain-walk
+fallthrough (`beamtalk_dispatch:lookup/5`) when sent to a class object,
+which runs in the *sender's* process, not the receiver's. `AbsentBlock`
+therefore runs there too: messaging the receiver class back from inside it
+is an ordinary cross-process send, not a re-entrant one — verified
+empirically (`tests/repl-protocol/cases/remove_selector.btscript`) rather
+than assumed from the general class-method-block rule, which does not apply
+to this call shape.
+
+Returns the receiver on success, or `AbsentBlock`'s value on absence.
+""".
+-spec classRemoveSelectorIfAbsent(#beamtalk_object{}, atom(), fun(() -> term())) ->
+    #beamtalk_object{} | term().
+classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
+    case remove_selector(Self, Selector) of
+        removed -> Self;
+        absent -> AbsentBlock()
+    end.
+
+%% Shared resolution + removal for classRemoveSelector/2 and
+%% classRemoveSelectorIfAbsent/3. Resolves `Selector` against whichever table
+%% currently supplies dispatch for it on `Self`'s side — extension registry
+%% first, local method table second (ADR 0112 § Extension methods) — removes
+%% it there, and reports whether anything was found. A removal that resolves
+%% but then fails unexpectedly (e.g. a local-method recompile error) raises
+%% directly rather than returning through this function, so its return type
+%% only distinguishes "removed" from "nothing to remove here".
+-spec remove_selector(#beamtalk_object{}, atom()) -> removed | absent.
+remove_selector(Self, Selector) ->
+    {Side, ClassPid} = removal_target(Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    EtsClass = extension_ets_class(ClassName, Side),
+    case beamtalk_extensions:has(EtsClass, Selector) of
+        true ->
+            ok = beamtalk_extensions:unregister(ClassName, Selector, Side =:= class),
+            removed;
+        false ->
+            case classIncludesSelector(Self, Selector) of
+                true ->
+                    remove_local_method(ClassName, Selector, Side),
+                    removed;
+                false ->
+                    absent
+            end
+    end.
+
+%% `Self`'s removal side and class pid. A metaclass-tagged receiver
+%% (`Counter class removeSelector: #foo`) is class-side; any other class
+%% object (`Counter removeSelector: #foo`) is instance-side — the same
+%% branch `classIncludesSelector/2` already makes.
+-spec removal_target(#beamtalk_object{}) -> {instance | class, pid()}.
+removal_target(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
+    {class, ClassPid};
+removal_target(Self) ->
+    {instance, erlang:element(4, Self)}.
+
+%% The `beamtalk_extensions` ETS key for `Side` — BT-3185's established
+%% convention: an instance-side extension is keyed under the bare class name,
+%% a class-side one under the metaclass tag (`unregister/3`'s own `ClassSide`
+%% resolution, mirrored here so a lookup and its matching removal always
+%% agree on the key).
+-spec extension_ets_class(atom(), instance | class) -> atom().
+extension_ets_class(ClassName, instance) -> ClassName;
+extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_tag(ClassName).
+
+%% Remove `Selector` from `ClassName`'s own (non-extension) method table via
+%% the existing revert-of-add removal mechanism (ADR 0082/BT-2663, generalized
+%% by ADR 0112 rather than duplicated — see the ADR's *Implementation*
+%% section), with the stdlib gate relaxed (BT-3184's `allow_stdlib` policy)
+%% since `removeSelector:` installs unconditionally. Routed via
+%% `erlang:apply/3` to avoid a compile-time dependency from `beamtalk_runtime`
+%% to `beamtalk_workspace` — the same indirection `do_compile_source/4` uses.
+%% Raises a structured `runtime_error` if the removal itself fails (recompile
+%% error, or no running workspace to route it through).
+-spec remove_local_method(atom(), atom(), instance | class) -> ok.
+remove_local_method(ClassName, Selector, Side) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    try
+        erlang:apply(beamtalk_repl_eval, remove_method, [
+            ClassNameBin, Selector, Side, allow_stdlib
+        ])
+    of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
+            Msg = iolist_to_binary(
+                io_lib:format("Could not remove method: ~p", [Reason])
+            ),
+            beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
+    catch
+        error:undef ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
+            beamtalk_error:raise(
+                beamtalk_error:with_message(
+                    Error0,
+                    <<
+                        "Workspace not available; removeSelector: requires a "
+                        "running workspace"
+                    >>
+                )
+            )
+    end.
+
+%% Structured `selector_not_found` error for the bare `removeSelector:` form
+%% (ADR 0112 § Error behaviour on absent selector) — deliberately distinct
+%% from `does_not_understand`: the message itself (`removeSelector:`) was
+%% understood and executed; only its *argument* had nothing to act on. Carries
+%% a hint pointing at the discovery/escape-hatch methods a caller most likely
+%% wants next.
+-spec selector_not_found_error(#beamtalk_object{}, atom()) -> #beamtalk_error{}.
+selector_not_found_error(Self, Selector) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    Error0 = beamtalk_error:new(selector_not_found, ClassName, Selector),
+    Msg = iolist_to_binary([
+        atom_to_binary(ClassName, utf8),
+        <<" does not define #">>,
+        atom_to_binary(Selector, utf8),
+        <<" locally (or as an extension)">>
+    ]),
+    Error1 = beamtalk_error:with_message(Error0, Msg),
+    beamtalk_error:with_hint(
+        Error1,
+        <<
+            "Use includesSelector: or whichClassIncludesSelector: to check "
+            "first, or removeSelector:ifAbsent: to supply a fallback."
+        >>
+    ).
 
 -doc """
 Return the source file path for this class, or nil if not set.
