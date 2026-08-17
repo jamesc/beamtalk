@@ -116,31 +116,51 @@ jobs:
       # a connection/TLS failure surfacing as `http_error error in 'get:headers:'
       # on Http`, and a non-2xx response surfacing as a bare assertion failure.
       #
-      # Re-run the suite instead of failing on the first flake. A real compiler
-      # regression still fails every attempt — retries only absorb noise — and a
-      # pass that needed a retry is surfaced as a workflow warning so the flake
-      # stays visible rather than silently masked.
+      # Re-run the suite instead of failing on that flake — but only for that
+      # flake. `beamtalk test` selects by path, not by test name, so the retry
+      # can't run one method in isolation; instead the *trigger* is scoped, by
+      # re-running only when that named test is the single failure. Any other
+      # failing test, or a second failure alongside it, fails the step on the
+      # first attempt with no retries. So a compiler regression never buys free
+      # attempts, and an unrelated flake elsewhere in the suite stays visible
+      # rather than being absorbed here.
+      #
+      # Failing closed on an unrecognised failure also means an upstream rename
+      # of the test degrades to "no retry", never to "silently retry everything".
       #
       # The durable fix belongs upstream in jamesc/beamtalk-http: point that test
       # at the package's own local test server, or gate it behind an opt-in
-      # network tag. Drop this retry once the suite is hermetic.
+      # network tag. Drop this whole step wrapper once the suite is hermetic.
       - name: Test beamtalk-http
         working-directory: _packages/beamtalk-http
         env:
           ATTEMPTS: 3
+          FLAKY_TEST: testHttpsGetReturnsOkStatus
         run: |
+          log="$RUNNER_TEMP/beamtalk-http-test.log"
           for attempt in $(seq 1 "$ATTEMPTS"); do
-            if beamtalk test; then
+            if beamtalk test >"$log" 2>&1; then
+              cat "$log"
               if [ "$attempt" -gt 1 ]; then
-                echo "::warning title=beamtalk-http tests flaked::Suite passed on attempt ${attempt} of ${ATTEMPTS} — a network-dependent test failed earlier in this job"
+                echo "::warning title=beamtalk-http tests flaked::Suite passed on attempt ${attempt} of ${ATTEMPTS} — ${FLAKY_TEST} failed earlier in this job, likely runner network noise"
               fi
               exit 0
             fi
+            cat "$log"
+
+            # Retry only the known network flake: exactly one failing test, and
+            # that test is FLAKY_TEST. Anything else is treated as a real failure.
+            failures=$(grep -c '^FAIL ' "$log" || true)
+            if [ "$failures" != "1" ] || ! grep -q "^FAIL .*${FLAKY_TEST}" "$log"; then
+              echo "::error title=beamtalk-http tests failed::Failure is not the known network flake (${failures} failing test(s)) — failing without retry"
+              exit 1
+            fi
+
             if [ "$attempt" -lt "$ATTEMPTS" ]; then
               backoff=$((attempt * 10))
-              echo "Attempt ${attempt} of ${ATTEMPTS} failed — retrying in ${backoff}s"
+              echo "Attempt ${attempt} of ${ATTEMPTS} failed on ${FLAKY_TEST} only — retrying in ${backoff}s"
               sleep "$backoff"
             fi
           done
-          echo "::error title=beamtalk-http tests failed::Suite failed all ${ATTEMPTS} attempts — treat as a real regression, not a flake"
+          echo "::error title=beamtalk-http tests failed::${FLAKY_TEST} failed all ${ATTEMPTS} attempts — persistent, treat as a real failure rather than network noise"
           exit 1
