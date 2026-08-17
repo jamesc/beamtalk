@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0112 Phase 2 (BT-3186): a throwaway class loaded from a path containing
+// `/stdlib/src/`, so `beamtalk_repl_loader:is_stdlib_path/1` classifies it
+// stdlib-mode (a genuine `bt@stdlib@...` module name) without touching real
+// production stdlib source — see remove_selector.btscript's stdlib-class
+// removal case. Mirrors the technique
+// beamtalk_workspace_revert_tests:define_stdlib_class/3 uses at the EUnit
+// level (BT-3184).
+
+Object subclass: RemoveSelectorStdlibFixture
+
+  class keep => 1
+
+  class probe => 2

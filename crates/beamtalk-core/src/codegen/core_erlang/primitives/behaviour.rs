@@ -93,6 +93,7 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
         | "classDocForMethod"
         | "classSetDoc"
         | "classConformsTo"
+        | "classRemoveSelector"
         | "metaclassIncludesSelector" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
@@ -113,6 +114,21 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
                 leaf::var(sel.clone()),
                 ", ",
                 leaf::var(doc.clone()),
+                ")"
+            ])
+        }
+        // ADR 0112 Phase 2 (BT-3186): removeSelector:ifAbsent: — the selector
+        // Symbol plus the block (a compiled Block passed as a value, evaluated
+        // by the intrinsic directly like any block argument to a Behaviour
+        // primitive).
+        "classRemoveSelectorIfAbsent" => {
+            let sel = params.first()?;
+            let absent_block = params.get(1)?;
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'classRemoveSelectorIfAbsent'(Self, ",
+                leaf::var(sel.clone()),
+                ", ",
+                leaf::var(absent_block.clone()),
                 ")"
             ])
         }
@@ -379,6 +395,36 @@ mod tests {
             result,
             Some(
                 "call 'beamtalk_behaviour_intrinsics':'classPrecheckCompileSource'(Self, Selector, Source)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_class_remove_selector() {
+        let result = doc_to_string(generate_tower_bif(
+            "classRemoveSelector",
+            &["Selector".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classRemoveSelector'(Self, Selector)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_class_remove_selector_if_absent() {
+        let result = doc_to_string(generate_tower_bif(
+            "classRemoveSelectorIfAbsent",
+            &["Selector".to_string(), "AbsentBlock".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classRemoveSelectorIfAbsent'(Self, Selector, AbsentBlock)"
                     .to_string()
             )
         );

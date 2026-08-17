@@ -453,6 +453,59 @@ abstract Object subclass: Behaviour
   sealed precheckCompile: aSelector :: Symbol source: aSource :: String -> Dictionary =>
     @primitive "classPrecheckCompileSource"
 
+  // --- Method removal (ADR 0112) ---
+
+  /// Remove `aSelector` from the receiver, raising if it is not defined
+  /// locally or as an extension.
+  ///
+  /// Follows Pharo's `Behavior>>#removeSelector:`. Side follows the usual
+  /// `Counter` vs `Counter class` convention: sent to a class object this
+  /// touches the instance-side method table; sent to that class's metaclass
+  /// (`Counter class`) it touches the class-side table.
+  ///
+  /// Resolution mirrors dispatch order: the extension registry (ADR 0066
+  /// open classes) is checked before the local method table, since an
+  /// extension shadows a same-named local method — removing it re-exposes
+  /// the local method (a second `removeSelector:` call removes that too).
+  /// Removing a locally-defined override re-exposes the inherited
+  /// implementation with no restart needed (ADR 0032's chain-walk dispatch).
+  ///
+  /// Installs unconditionally, including on stdlib classes — unlike
+  /// `removeFromSystem`, there is no receiver-side refusal. What varies is
+  /// whether the resulting change is flushable to disk, not whether it takes
+  /// effect in memory (the same rule `compile:source:` already follows).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter removeSelector: #increment       // instance-side
+  /// Counter class removeSelector: #ofSize:   // class-side
+  /// Counter removeSelector: #bogus           // => Error: selector not found
+  /// ```
+  sealed removeSelector: aSelector :: Symbol -> Behaviour =>
+    @primitive "classRemoveSelector"
+
+  /// Remove `aSelector` from the receiver like `removeSelector:`, but
+  /// evaluate `absentBlock` instead of raising when the selector is not
+  /// found locally or as an extension.
+  ///
+  /// Mirrors `Dictionary>>at:ifAbsent:`'s shape: returns the receiver on
+  /// success, or `absentBlock`'s value on absence. Like every `Behaviour`
+  /// primitive, `removeSelector:ifAbsent:` sent to a class object runs in
+  /// the *sender's* process (the Class → Behaviour chain-walk fallthrough,
+  /// not the receiver's own gen_server), so `absentBlock` messaging the
+  /// receiver class back is an ordinary cross-process send — no
+  /// `dispatch_error` restriction applies here the way it does for a block
+  /// argument received by a locally-defined class method (see "Passing
+  /// Blocks Through Class Methods").
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter removeSelector: #bogus ifAbsent: ["not found"]   // => "not found"
+  /// Counter removeSelector: #increment ifAbsent: ["not found"]   // => Counter
+  /// ```
+  sealed removeSelector: aSelector :: Symbol ifAbsent: absentBlock :: Block(T) -> Behaviour | T =>
+    @primitive "classRemoveSelectorIfAbsent"
+
   // --- Class removal ---
 
   /// Remove this class from the system, cleaning up all associated state.

@@ -1,0 +1,184 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Behaviour >> removeSelector: / removeSelector:ifAbsent:
+// (ADR 0112 Phase 2, BT-3186).
+//
+// Requires E2E because the local-method-table removal branch routes through
+// the same recompile-based mechanism `compile:source:` uses
+// (`beamtalk_repl_eval:remove_method/4`), which only runs against a live
+// workspace; BUnit executes compiled code with no workspace (same reason
+// compile_source_patch.btscript exists instead of a BUnit test for
+// compile:source:/tryCompile:source:). Extension removal, absent-selector
+// errors, and removeSelector:ifAbsent:'s block execution context do not strictly
+// need the workspace, but are kept here alongside the rest of the surface for
+// one readable end-to-end story.
+
+// ===========================================================================
+// INSTANCE-SIDE REMOVAL — re-exposes the inherited method, no restart needed
+// ===========================================================================
+
+Actor subclass: RemSelParent
+  greet => "parent-greet"
+// => _
+
+RemSelParent subclass: RemSelChild
+  greet => "child-greet"
+// => _
+
+rsc := RemSelChild spawn
+// => Actor(RemSelChild, _)
+
+rsc greet
+// => child-greet
+
+RemSelChild includesSelector: #greet
+// => true
+
+RemSelChild removeSelector: #greet
+// => RemSelChild
+
+RemSelChild includesSelector: #greet
+// => false
+
+// Chain-walk dispatch (ADR 0032): the SAME already-running actor sees the
+// inherited implementation on its very next message — no restart, no
+// re-spawn.
+rsc greet
+// => parent-greet
+
+// ===========================================================================
+// CLASS-SIDE REMOVAL — `Counter class removeSelector:` touches class_methods
+// ===========================================================================
+
+Actor subclass: RemSelClsParent
+  class make => "parent-made"
+// => _
+
+RemSelClsParent subclass: RemSelClsChild
+  class make => "child-made"
+// => _
+
+RemSelClsChild make
+// => child-made
+
+RemSelClsChild class removeSelector: #make
+// => RemSelClsChild class
+
+RemSelClsChild make
+// => parent-made
+
+// ===========================================================================
+// removeSelector: RAISES selector_not_found ON AN ABSENT SELECTOR
+// (not does_not_understand — ADR 0112 § Error behaviour on absent selector)
+// ===========================================================================
+
+[RemSelParent removeSelector: #thisSelectorWasNeverDefined] on: Error do: [:e | e kind]
+// => selector_not_found
+
+[RemSelParent removeSelector: #thisSelectorWasNeverDefined] on: Error do: [:e | e hint]
+// => Use includesSelector: or whichClassIncludesSelector: to check first, or removeSelector:ifAbsent: to supply a fallback.
+
+// #printString is inherited from ProtoObject, not LOCAL to RemSelParent
+// (includesSelector: is false), so removeSelector: still raises.
+RemSelParent includesSelector: #printString
+// => false
+
+[RemSelParent removeSelector: #printString] on: Error do: [:e | e kind]
+// => selector_not_found
+
+// ===========================================================================
+// removeSelector:ifAbsent: — block value on absence, receiver on success
+// ===========================================================================
+
+RemSelParent removeSelector: #thisSelectorWasNeverDefinedEither ifAbsent: ["not found"]
+// => not found
+
+RemSelParent includesSelector: #greet
+// => true
+
+RemSelParent removeSelector: #greet ifAbsent: ["not found"]
+// => RemSelParent
+
+RemSelParent includesSelector: #greet
+// => false
+
+// ===========================================================================
+// removeSelector:ifAbsent:'s AbsentBlock execution context (ADR 0112 §
+// Error behaviour on absent selector) — verified, not assumed.
+//
+// CLAUDE.md's "a block passed into a class method runs inside that class's
+// own gen_server process, so messaging the same class back raises
+// dispatch_error" rule applies to a block argument received by a class
+// method that is itself dispatched *through* that gen_server
+// (`dispatch_class_method` — e.g. a locally-defined `class run: aBlock over:
+// aList => ...`). `removeSelector:ifAbsent:`, sent directly to a class
+// object as every call in this file does, is instead an inherited
+// `Behaviour` primitive resolved via the Class -> Behaviour chain-walk
+// fallthrough (`beamtalk_dispatch:lookup/5`), which runs in the *caller's*
+// process, not the receiver's. AbsentBlock therefore messaging the receiver
+// class back is an ordinary cross-process send, not a re-entrant one —
+// confirmed here rather than assumed: this succeeds and returns a real
+// value instead of raising `dispatch_error`.
+// ===========================================================================
+
+RemSelParent removeSelector: #yetAnotherAbsentSelector ifAbsent: [RemSelParent includesSelector: #greet]
+// => false
+
+// ===========================================================================
+// EXTENSION REMOVAL (ADR 0066 open classes) — plain case
+// ===========================================================================
+
+Value subclass: RemSelExtTarget
+  field: tag = "none"
+// => _
+
+RemSelExtTarget >> shout => "SHOUT"
+// => RemSelExtTarget>>shout
+
+ext := RemSelExtTarget new
+// => RemSelExtTarget(tag: "none")
+
+ext shout
+// => SHOUT
+
+ext respondsTo: #shout
+// => true
+
+RemSelExtTarget removeSelector: #shout
+// => RemSelExtTarget
+
+ext respondsTo: #shout
+// => false
+
+[ext shout] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// The "contested" case — a local method shadowed by a same-named extension,
+// where removal must drop only the dispatch-winning extension and re-expose
+// the local method — is covered in
+// beamtalk_workspace_revert_tests:remove_selector_contested_extension_re_exposes_local_method/1
+// instead of here: constructing a genuine foreign extension that shadows an
+// *existing* same-named local method is not reliably expressible through
+// `>>` syntax (the parser/compiler's own same-file-vs-foreign heuristic
+// takes over), so that test drives `beamtalk_extensions:register/4` directly
+// against a real project class to build the exact contested state.
+
+// ===========================================================================
+// STDLIB-CLASS REMOVAL — installs in memory, no receiver-side refusal
+// (ADR 0112 "Flushability, not refusal" — unlike removeFromSystem)
+// ===========================================================================
+
+// @load tests/repl-protocol/fixtures/stdlib/src/RemoveSelectorStdlibFixture.bt
+
+RemoveSelectorStdlibFixture probe
+// => 2
+
+RemoveSelectorStdlibFixture class removeSelector: #probe
+// => RemoveSelectorStdlibFixture class
+
+[RemoveSelectorStdlibFixture probe] on: Error do: [:e | e kind]
+// => does_not_understand
+
+RemoveSelectorStdlibFixture keep
+// => 1
