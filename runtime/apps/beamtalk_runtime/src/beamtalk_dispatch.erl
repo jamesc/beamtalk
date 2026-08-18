@@ -579,9 +579,7 @@ invoke_extension(Fun, Selector, ClassName, Args, Self, State) ->
     catch
         throw:{beamtalk_script_exit, _} = ScriptExit:ScriptStack ->
             erlang:raise(throw, ScriptExit, ScriptStack);
-        throw:{'$bt_nlr', _, _, _} = Nlr:NlrStack ->
-            erlang:raise(throw, Nlr, NlrStack);
-        throw:{'$bt_nlr', _, _} = Nlr:NlrStack ->
+        throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
             erlang:raise(throw, Nlr, NlrStack);
         Type:Reason:Stack ->
             ?LOG_DEBUG("Erlang error in extension method", #{

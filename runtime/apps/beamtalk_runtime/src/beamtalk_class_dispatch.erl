@@ -37,17 +37,6 @@ Extracted from beamtalk_object_class.erl (BT-704).
 -type selector() :: atom().
 -type class_name() :: atom().
 
-%% BT-3022: a `^` non-local return in flight. Codegen throws the state-carrying
-%% 4-tuple `{'$bt_nlr', Token, Value, State}` (ADR 0041); the 3-tuple is the
-%% pre-BT-854 shape still recognised by `beamtalk_result:'tryDo:'/1`. Both are
-%% control-flow signals aimed at a method frame that may live in another process,
-%% so class dispatch must relay rather than report them.
--define(IS_NLR(T),
-    (is_tuple(T) andalso
-        (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
-        element(1, T) =:= '$bt_nlr')
-).
-
 -doc """
 Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 
