@@ -64,7 +64,8 @@ super(Selector, Args, Self, State, CurrentClass)
     super/5,
     super_value/4,
     responds_to/2,
-    invoke_extension/4
+    invoke_extension/4,
+    check_extension/2
 ]).
 
 -include("beamtalk.hrl").
@@ -574,6 +575,11 @@ Safe extension registry lookup.
 
 Guards against the ETS table not existing (e.g., during early bootstrap).
 Returns {ok, Fun} if found, not_found otherwise.
+
+BT-3192: exported so `beamtalk_class_dispatch:handle_class_method_call/6` can
+share this exact bootstrap guard when checking the extension registry for a
+class-side extension (keyed under the metaclass tag), instead of duplicating
+the `error:badarg` catch.
 """.
 -spec check_extension(class_name(), selector()) -> {ok, fun()} | not_found.
 check_extension(ClassName, Selector) ->

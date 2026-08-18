@@ -579,6 +579,17 @@ to avoid gen_server deadlock.
 ADR 0032 Phase 1: Receives local class_methods (not flattened table).
 Walks the superclass chain if the method is not found locally.
 
+BT-3192: Checks the extension registry (keyed under the metaclass tag,
+`class_object_tag(ClassName)`) BEFORE the local method table / superclass
+chain — mirroring `beamtalk_dispatch:lookup/5`'s own "extension checked
+before local method table" order. Before this, a class-side extension
+(`Target class >> sel => body`, ADR 0066) registered fine but was never read
+back by ANY class-side dispatch path: neither `class_method_call` (an
+ordinary `Target sel` send) nor `metaclass_method_call` (`Target class sel`)
+ever consulted `beamtalk_extensions` — both funnel through this same
+function (`beamtalk_object_class:dispatch_class_method/5`), so this one fix
+covers both.
+
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 """.
 -spec handle_class_method_call(
@@ -590,21 +601,59 @@ Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
     map()
 ) -> {reply, term(), map()} | test_spawn | {error, not_found}.
 handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, ClassVars) ->
-    case maps:is_key(Selector, LocalClassMethods) of
-        true ->
-            %% Local class method found — invoke directly.
-            invoke_class_method(Selector, Args, ClassName, Module, ClassName, Module, ClassVars);
-        false ->
-            %% Not found locally — walk the superclass chain for inherited class methods.
-            case find_class_method_in_chain(Selector, ClassName) of
-                {ok, DefiningClass, DefiningModule} ->
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+        {ok, Fun} ->
+            invoke_class_extension(Fun, Args, ClassTag, Module, ClassVars);
+        not_found ->
+            case maps:is_key(Selector, LocalClassMethods) of
+                true ->
+                    %% Local class method found — invoke directly.
                     invoke_class_method(
-                        Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars
+                        Selector, Args, ClassName, Module, ClassName, Module, ClassVars
                     );
-                not_found ->
-                    {error, not_found}
+                false ->
+                    %% Not found locally — walk the superclass chain for inherited class methods.
+                    case find_class_method_in_chain(Selector, ClassName) of
+                        {ok, DefiningClass, DefiningModule} ->
+                            invoke_class_method(
+                                Selector,
+                                Args,
+                                ClassName,
+                                Module,
+                                DefiningClass,
+                                DefiningModule,
+                                ClassVars
+                            );
+                        not_found ->
+                            {error, not_found}
+                    end
             end
     end.
+
+-doc """
+Invoke a class-side extension method found in the `beamtalk_extensions`
+registry (BT-3192).
+
+Shares `beamtalk_dispatch:invoke_extension/4`'s calling convention — the same
+one instance-side extensions already use — so a class-side extension behaves
+identically once dispatch actually reaches it: a 2-arity fun (value/primitive
+target) ignores `ClassVars` and returns a plain result; a 3-arity fun (actor
+target) threads `ClassVars` exactly like a compiled class method's
+`{class_var_result, ...}` path. `ClassSelf` mirrors the receiver
+`apply_class_method_in_context/6` builds for a local/inherited class method
+— `class = ClassTag` (the metaclass tag), `class_mod = Module` (this call's
+own compiled module; extensions are never inherited, so there is no separate
+"defining class" indirection), `pid = self()` (the class gen_server this
+handler is already running inside).
+""".
+-spec invoke_class_extension(fun(), list(), atom(), atom(), map()) -> {reply, term(), map()}.
+invoke_class_extension(Fun, Args, ClassTag, Module, ClassVars) ->
+    ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
+    {reply, Result, NewClassVars} = beamtalk_dispatch:invoke_extension(
+        Fun, Args, ClassSelf, ClassVars
+    ),
+    {reply, {ok, Result}, NewClassVars}.
 
 -doc "Invoke a class method (local or inherited), handling test execution specially.".
 -spec invoke_class_method(

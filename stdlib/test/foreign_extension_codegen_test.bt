@@ -42,6 +42,13 @@ TestCase subclass: ForeignExtensionCodegenTest
   // A class-side foreign extension registers under the metaclass tag.
   testClassSideForeignExtensionRegistered =>
     self assert: ((Erlang beamtalk_extensions) has: #'String class' selector: #bt2250Banner)
+
+  // BT-3192: a class-side foreign extension is also dispatchable, not just
+  // registered — class-side dispatch (`Target sel`) previously never
+  // consulted the extensions table at all.
+  testClassSideForeignExtensionDispatches =>
+    result := String perform: #bt2250Banner
+    self assert: result equals: "=== bt2250 ==="
 String >> bt2250Shout => self uppercase ++ "!"
 String >> bt2250WrapWith: edge :: String -> String => edge ++ self ++ edge
 String class >> bt2250Banner => "=== bt2250 ==="
