@@ -2419,7 +2419,7 @@ test_metaclass_method_class_side_extension() ->
 %% Code-review regression (BT-3192 PR): a crashing extension body must not
 %% take down the class's own gen_server — every other class-method dispatch
 %% path (apply_class_method_fun/6, apply_compiled_class_method/7) already
-%% guarantees this via catch-and-convert; invoke_class_extension/6 must too.
+%% guarantees this via catch-and-convert; invoke_class_extension/7 must too.
 test_class_extension_crash_does_not_kill_class_process() ->
     ClassName = 'Bt3192ExtCrashClass',
     ClassInfo = #{

@@ -556,14 +556,14 @@ Apply an extension fun given its registered arity, unifying both signatures
 to a plain `{Result, NewState}` pair — the shared "how do I call this fun"
 core behind `invoke_extension/4`.
 
-BT-3192: exported so `beamtalk_class_dispatch:invoke_class_extension/6` can
+BT-3192: exported so `beamtalk_class_dispatch:invoke_class_extension/7` can
 reuse this exact arity convention for class-side extensions instead of
 duplicating it. Deliberately does NOT decide how to handle an error — that is
 context-dependent: `invoke_extension/4` (instance-side dispatch, below)
 re-raises, matching `lookup/5`'s existing contract for a receiver dispatching
 in its own process; class-side dispatch instead needs to catch and convert,
 mirroring every other class-method body's crash-safety (see
-`beamtalk_class_dispatch:apply_class_extension_fun/5`), since the class's own
+`beamtalk_class_dispatch:apply_class_extension_fun/6`), since the class's own
 long-lived gen_server must survive a bad extension body the same way it
 survives a bad compiled/runtime-installed class method.
 """.

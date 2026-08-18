@@ -610,7 +610,7 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
-            invoke_class_extension(Fun, Args, ClassTag, Module, ClassVars, Selector);
+            invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector);
         not_found ->
             case maps:is_key(Selector, LocalClassMethods) of
                 true ->
@@ -654,16 +654,16 @@ gen_server this handler is already running inside).
 Unlike `beamtalk_dispatch:invoke_extension/4` (which re-raises on error —
 correct for instance-side dispatch, where `lookup/5` typically runs in the
 receiver's own process and a `^`/exit should propagate via ordinary
-throw/catch), this catches and converts via `apply_class_extension_fun/5`,
+throw/catch), this catches and converts via `apply_class_extension_fun/6`,
 matching every other class-method dispatch path
 (`apply_class_method_fun/6`, `apply_compiled_class_method/7`): a bad
 extension body must not crash the class's own long-lived gen_server.
 """.
--spec invoke_class_extension(fun(), list(), atom(), atom(), map(), selector()) ->
+-spec invoke_class_extension(fun(), list(), class_name(), atom(), atom(), map(), selector()) ->
     {reply, term(), map()}.
-invoke_class_extension(Fun, Args, ClassTag, Module, ClassVars, Selector) ->
+invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector) ->
     ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
-    case apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, Selector) of
+    case apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) of
         {ok, {Result, NewClassVars}} ->
             {reply, {ok, Result}, NewClassVars};
         {nlr_relay, Nlr, _ST} ->
@@ -686,12 +686,12 @@ Apply a class-side extension fun, classifying the outcome the same way
 a generic catch-all — so a crashing extension body becomes a structured
 `{error, ...}` reply instead of taking down the class gen_server.
 """.
--spec apply_class_extension_fun(fun(), #beamtalk_object{}, map(), list(), selector()) ->
+-spec apply_class_extension_fun(fun(), #beamtalk_object{}, map(), list(), class_name(), selector()) ->
     {ok, {term(), map()}}
     | {nlr_relay, term(), list()}
     | {error, undef_in_body}
     | {error, {raised, atom(), term(), list()}}.
-apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, Selector) ->
+apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
     try beamtalk_dispatch:apply_extension_by_arity(Fun, Args, ClassSelf, ClassVars) of
         ResultAndVars ->
             {ok, ResultAndVars}
@@ -708,9 +708,9 @@ apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, Selector) ->
         error:undef:ST ->
             ?LOG_ERROR(
                 "Class-side extension ~p:~p raised undef internally",
-                [ClassSelf#beamtalk_object.class, Selector],
+                [ClassName, Selector],
                 #{
-                    class => ClassSelf#beamtalk_object.class,
+                    class => ClassName,
                     selector => Selector,
                     stacktrace => ST,
                     domain => [beamtalk, runtime]
@@ -720,9 +720,9 @@ apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, Selector) ->
         ErrClass:Error:ErrST ->
             ?LOG_ERROR(
                 "Class-side extension ~p:~p failed",
-                [ClassSelf#beamtalk_object.class, Selector],
+                [ClassName, Selector],
                 #{
-                    class => ClassSelf#beamtalk_object.class,
+                    class => ClassName,
                     selector => Selector,
                     reason => beamtalk_error:format_reason(ErrClass, Error),
                     stacktrace => ErrST,
