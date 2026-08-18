@@ -3568,14 +3568,19 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
       {:ok, _term, _output, _warnings} ->
+        # `close_tab/2` runs `clear_active/1` when this was the last open tab,
+        # which deliberately wipes `save_result`/`save_error` ("stale result
+        # cleared so the next opened tab starts clean") — so the success
+        # message must be assigned AFTER closing the tab, not before, or
+        # closing the last tab would silently swallow it.
         socket
+        |> close_tab(tab.id)
         |> assign(
           save_result: "Removed #{selector} from #{receiver}",
           save_error: nil,
           flush_result: nil,
           flush_error: nil
         )
-        |> close_tab(tab.id)
         |> assign_changes()
 
       {:error, reason, _output, _warnings} ->

@@ -502,16 +502,18 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     suffix = System.unique_integer([:positive])
     class = "RemoveMe#{suffix}"
 
+    # Inline class bodies support one method per definition (same restriction
+    # every other class_src in this file follows) — the second method rides a
+    # standalone Tonel-style `>>` definition, submitted as its own eval.
     class_src = """
     Actor subclass: #{class}
       state: value = 0
 
       increment => self.value := self.value + 1
-
-      triple => self.value * 3
     """
 
     view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{class} >> triple => self.value * 3"})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
