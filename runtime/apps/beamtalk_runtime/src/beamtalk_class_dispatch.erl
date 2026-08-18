@@ -297,7 +297,7 @@ unwrapped and ready to return to the codegen call site), or `not_found` so
 the caller proceeds to its own next lookup.
 """.
 -spec check_class_self_extension(class_name(), selector(), map(), list()) ->
-    {ok, {class_var_result, term(), map()} | term()} | not_found.
+    {ok, {class_var_result, term(), map()}} | not_found.
 check_class_self_extension(ClassName, Selector, ClassVars, Args) ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
