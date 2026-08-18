@@ -329,5 +329,5 @@ For ADR 0046 (VSCode sidebar): no migration — it consumes `workspace/applyEdit
 ## Implementation Tracking
 
 **Epic:** BT-3205
-**Issues:** BT-3206 (Phase 1 — Foundation), BT-3207 (Phase 2 — Core mechanism), BT-3208 (Phase 3 — Undo), BT-3209, BT-3210 (Phase 4 — Surfaces), BT-3211 (Phase 4 — Validation)
+**Issues:** BT-3206 (Phase 1 — Foundation), BT-3207 (Phase 2 — Core mechanism), BT-3208 (Phase 3 — Undo), BT-3209 (Phase 4 — Surfaces), BT-3210 (Phase 4 — Surfaces), BT-3211 (Phase 4 — Validation)
 **Status:** Planned
