@@ -1,7 +1,7 @@
 # ADR 0113: Destructive Workspace Operations — File Deletion in Flush
 
 ## Status
-Proposed (2026-08-18)
+Accepted (2026-08-18)
 
 ## Context
 
