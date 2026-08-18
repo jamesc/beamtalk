@@ -122,10 +122,11 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
     renamed_target_keys/1,
     announce_flush_completed/1,
     %% ADR 0112 (BT-3187): exercises the `(class, selector, side)` shadow-key
-    %% fix directly, independent of do_flush/1's separate `'remove-method'`
-    %% exclusion (see its doc) — a real Phase-2 flush of a `'remove-method'`
-    %% entry is BT-2192's job, but the shadow-key logic itself is this
-    %% issue's, and is verifiable without going through prepare_splice/2.
+    %% fix directly, independent of run_flush/1's separate `'remove-method'`
+    %% exclusion from `Applied` (see its doc) — a real Phase-2 flush of a
+    %% `'remove-method'` entry is BT-2192's job, but the shadow-key logic
+    %% itself is this issue's, and is verifiable without going through
+    %% prepare_splice/2.
     shadow_duplicates/1,
     target_key/1
 ]).
@@ -341,18 +342,24 @@ do_flush(Filter) ->
     %% ADR 0112 (BT-3187): `'remove-method'` entries CAN be `flushable: true`
     %% (an ordinary in-project class's removal), so they can reach here —
     %% but excising the recorded span from disk is BT-2192's job, not this
-    %% module's (see the ADR's Out of Scope table). Exclude them from what a
-    %% durable flush actually attempts, rather than routing them into
-    %% `prepare_splice/2` (built only for a patch's replace-in-place shape,
-    %% with a `source_ref` body to splice in that a removal never has) and
-    %% aborting the whole batch on a `source_body_error` it was never
-    %% designed to produce.
-    ReadyPending = exclude_remove_method(Pending),
-    case ReadyPending of
+    %% module's (see the ADR's Out of Scope table). They must NOT, however,
+    %% be excluded before `run_flush/1` computes `shadow_duplicates/1`: doing
+    %% so hides the removal from shadowing entirely, so a stale, older patch
+    %% to the same `(class, selector, side)` target is wrongly treated as the
+    %% sole/surviving entry and gets spliced back to disk — resurrecting code
+    %% the user explicitly removed from the live image. Instead, pass the
+    %% *full* Pending set (removals included) into `run_flush/1`, which
+    %% shadows first and only then drops `'remove-method'` entries from what
+    %% actually gets spliced (they were never going to be routed into
+    %% `prepare_splice/2` — built only for a patch's replace-in-place shape,
+    %% with a `source_ref` body to splice in that a removal never has — which
+    %% would abort the whole batch on a `source_body_error` it was never
+    %% designed to produce).
+    case Pending of
         [] ->
             {ok, empty_summary()};
         _ ->
-            run_flush(ReadyPending)
+            run_flush(Pending)
     end.
 
 -spec exclude_remove_method([term()]) -> [term()].
@@ -387,10 +394,24 @@ matches_set(Set, Value) -> lists:member(Value, Set).
 
 -spec run_flush([term()]) -> {ok, map()} | {error, #beamtalk_error{}}.
 run_flush(Pending) ->
-    %% Shadow duplicates: for each (class, selector) keep only the highest-seq
-    %% entry as the "applied" one. Shadowed entries are also marked flushed
-    %% afterwards (their target was reached by a later entry).
-    {Applied, Shadowed} = shadow_duplicates(Pending),
+    %% Shadow duplicates: for each (class, selector, side) keep only the
+    %% highest-seq entry as the "applied" one. Shadowed entries are also
+    %% marked flushed afterwards (their target was reached by a later entry).
+    %%
+    %% `Pending` here includes `'remove-method'` entries on purpose (see the
+    %% comment in `do_flush/1`) so a removal correctly shadows any older,
+    %% now-stale patch to the same target. Only *after* shadowing has decided
+    %% survivorship do we drop `'remove-method'` entries from `Applied` —
+    %% excising the recorded span from disk is BT-2192's job, not this
+    %% module's. Because `Applied0` is filtered before `group_by_file/1`, a
+    %% `'remove-method'` survivor is simply never written; and because
+    %% `filter_shadowed_by_survivor/2` in Phase B only marks a shadowed entry
+    %% flushed when its survivor's key actually appears among the *renamed*
+    %% files, the patch it shadowed correctly stays pending too (matching the
+    %% deferred-to-BT-2192 behavior — neither entry is marked flushed, and
+    %% nothing is resurrected on disk).
+    {Applied0, Shadowed} = shadow_duplicates(Pending),
+    Applied = exclude_remove_method(Applied0),
     Groups = group_by_file(Applied),
     case phase_a(Groups) of
         {ok, Prepared} ->

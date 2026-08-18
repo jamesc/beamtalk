@@ -309,8 +309,8 @@ and is deferred to the future "Destructive Workspace Operations" ADR.
 -spec changeLogRevert(term()) -> term().
 changeLogRevert(Entry) ->
     case extract_revert_target(Entry) of
-        {ok, ClassNameBin, SelectorAtom} ->
-            do_revert(ClassNameBin, SelectorAtom);
+        {ok, ClassNameBin, SelectorAtom, Side} ->
+            do_revert(ClassNameBin, SelectorAtom, Side);
         {error, Err} ->
             beamtalk_error:raise(Err)
     end.
@@ -346,7 +346,15 @@ revert_method(ClassNameBin, SelectorBin) when
     case existing_selector_atom(SelectorBin) of
         {ok, SelectorAtom} ->
             try
-                {ok, do_revert(ClassNameBin, SelectorAtom)}
+                %% This `(Class, Selector)`-only surface has no ChangeEntry to
+                %% read a side from (it is driven by a `Workspace changes` row's
+                %% class/selector, e.g. from the LiveView Attach client), so it
+                %% cannot disambiguate an instance-side vs. class-side entry for
+                %% the same selector name. Pass `undefined` to preserve the
+                %% existing side-agnostic (highest-seq) selection — same as
+                %% `find_revert_target/2`. Callers that know which side they mean
+                %% should go through `changeLogRevert/1` with a ChangeEntry instead.
+                {ok, do_revert(ClassNameBin, SelectorAtom, undefined)}
             catch
                 %% `beamtalk_error:raise/1` wraps the structured error in a
                 %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map
@@ -400,13 +408,13 @@ existing_selector_atom(SelectorBin) ->
         error:badarg -> error
     end.
 
-%% Pull the `(class, selector)` pair out of a ChangeEntry. The argument is
-%% normally the `$beamtalk_class => ChangeEntry`-tagged map produced by the FFI
-%% surface, so the keys are atoms (`className`, `selector`). We also accept the
-%% raw `#beamtalk_object{}` defensively so tests / future Beamtalk-side callers
-%% can synthesise the input from a different shape.
+%% Pull the `(class, selector, side)` triple out of a ChangeEntry. The argument
+%% is normally the `$beamtalk_class => ChangeEntry`-tagged map produced by the
+%% FFI surface, so the keys are atoms (`className`, `selector`, `side`). We
+%% also accept the raw `#beamtalk_object{}` defensively so tests / future
+%% Beamtalk-side callers can synthesise the input from a different shape.
 -spec extract_revert_target(term()) ->
-    {ok, binary(), atom()} | {error, #beamtalk_error{}}.
+    {ok, binary(), atom(), instance | class | undefined} | {error, #beamtalk_error{}}.
 extract_revert_target(#{'$beamtalk_class' := 'ChangeEntry'} = M) ->
     extract_revert_target_from_map(M);
 extract_revert_target(#{className := _} = M) ->
@@ -415,8 +423,17 @@ extract_revert_target(_Other) ->
     {error, revert_type_error(<<"revert: expects a ChangeEntry, got an unrelated value">>)}.
 
 -spec extract_revert_target_from_map(map()) ->
-    {ok, binary(), atom()} | {error, #beamtalk_error{}}.
+    {ok, binary(), atom(), instance | class | undefined} | {error, #beamtalk_error{}}.
 extract_revert_target_from_map(M) ->
+    %% ADR 0112 (BT-3187) required fix: a same-selector instance-side entry and
+    %% class-side entry are otherwise indistinguishable to `find_revert_target/2`
+    %% (which is keyed on `(class, selector)` only) — it would pick whichever has
+    %% the higher `seq`, silently reverting the wrong side. `side` rides the same
+    %% ChangeEntry map (`ChangeEntry.bt`'s `side` field, populated from
+    %% `entry_to_value/2`'s `side_symbol(entry_side(E))`), so extracting it here
+    %% and threading it into `find_revert_target/3` lets the caller-selected
+    %% entry's side (not just its class+selector) constrain which candidate wins.
+    Side = revert_side_field(maps:get(side, M, undefined)),
     case {maps:get(className, M, undefined), maps:get(selector, M, undefined)} of
         {ClassAtom, SelectorAtom} when
             is_atom(ClassAtom),
@@ -424,12 +441,14 @@ extract_revert_target_from_map(M) ->
             SelectorAtom =/= nil,
             SelectorAtom =/= undefined
         ->
-            {ok, atom_to_binary(ClassAtom, utf8), SelectorAtom};
+            {ok, atom_to_binary(ClassAtom, utf8), SelectorAtom, Side};
         {ClassAtom, nil} when is_atom(ClassAtom), ClassAtom =/= nil, ClassAtom =/= undefined ->
             %% A new-class entry carries `selector = nil` (it has no selector). Map
             %% it to the `'new-class'` placeholder so `do_revert`/`find_revert_target`
             %% resolve the class's new-class entry and remove the class (BT-2664).
-            {ok, atom_to_binary(ClassAtom, utf8), 'new-class'};
+            %% A new-class entry is always sideless, so `Side` is `undefined` here
+            %% regardless of what the map carried.
+            {ok, atom_to_binary(ClassAtom, utf8), 'new-class', undefined};
         _ ->
             {error,
                 revert_type_error(
@@ -440,9 +459,23 @@ extract_revert_target_from_map(M) ->
                 )}
     end.
 
--spec do_revert(binary(), atom()) -> term().
-do_revert(ClassNameBin, SelectorAtom) ->
-    case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom) of
+%% Normalise the ChangeEntry `side` field to `find_revert_target/3`'s expected
+%% shape: `nil` (no side, e.g. a new-class entry) and any other non-`instance`/
+%% `class` value both mean "no side constraint" (`undefined`).
+-spec revert_side_field(term()) -> instance | class | undefined.
+revert_side_field(instance) -> instance;
+revert_side_field(class) -> class;
+revert_side_field(_Other) -> undefined.
+
+%% `TargetSide` (ADR 0112, BT-3187) narrows `find_revert_target/3`'s candidate
+%% search to entries on that side, so a same-selector instance-side entry and
+%% class-side entry are not ambiguous by `(class, selector)` alone — see
+%% `extract_revert_target_from_map/1`'s doc. Pass `undefined` (from a caller
+%% with no side information, e.g. `revert_method/2`) to fall back to the
+%% side-agnostic, highest-seq selection.
+-spec do_revert(binary(), atom(), instance | class | undefined) -> term().
+do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
+    case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom, TargetSide) of
         {ok, PrevBody, Entry} ->
             %% A *modify* revert: re-install the recorded prior body on the
             %% entry's side. Instance and class side are both supported

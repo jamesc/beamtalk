@@ -94,7 +94,8 @@ release nodes do not start a workspace, so this code is a no-op there.
     size/0,
     epoch/0,
     clear/0,
-    find_revert_target/2
+    find_revert_target/2,
+    find_revert_target/3
 ]).
 
 %% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
@@ -403,10 +404,32 @@ recorded selector). A `new-class` entry has `selector = undefined`; pass the
 new-class selector placeholder atom `'new-class'` (or the binary `<<"new-class">>`)
 to reach it — `find_revert_target(Class, 'new-class')` resolves the class's
 new-class entry and yields a `{remove, Entry}` outcome.
+
+`find_revert_target/2` matches candidates on `(Class, Selector)` only — the
+highest-seq active candidate wins regardless of side. Use `find_revert_target/3`
+with an explicit `Side` (ADR 0112, BT-3187) when the caller knows which side it
+means to revert: same-selector instance/class-side entries (e.g. an instance-side
+patch and a later class-side `'remove-method'` entry for the same selector name)
+are otherwise indistinguishable by `(Class, Selector)` alone, and the wrong one —
+whichever has the higher `seq` — would be selected.
 """.
 -spec find_revert_target(binary(), atom() | binary()) ->
     {ok, binary(), entry()} | {remove, entry()} | {error, no_entry | no_prev_source}.
-find_revert_target(Class, Selector) when is_binary(Class) ->
+find_revert_target(Class, Selector) ->
+    find_revert_target(Class, Selector, undefined).
+
+-doc """
+Like `find_revert_target/2`, but restricts candidates to the given `Side`
+(`instance` | `class`) when it is not `undefined` (ADR 0112, BT-3187). Side is
+resolved per-entry via `entry_side/1`, so it matches both a `'remove-method'`
+entry's explicit `side` field and a legacy `instance`/`class`-kind patch's
+`kind`-derived side. Passing `undefined` reproduces `find_revert_target/2`'s
+side-agnostic behavior (used by callers, such as `revert_method/2`'s
+`(Class, Selector)`-only surface, that have no side information to give).
+""".
+-spec find_revert_target(binary(), atom() | binary(), side() | undefined) ->
+    {ok, binary(), entry()} | {remove, entry()} | {error, no_entry | no_prev_source}.
+find_revert_target(Class, Selector, Side) when is_binary(Class) ->
     SelectorBin = revert_selector_binary(Selector),
     %% A `new-class` entry records `selector = undefined`; callers reach it with
     %% the `new-class` placeholder selector, which we map back to `undefined` so
@@ -416,6 +439,7 @@ find_revert_target(Class, Selector) when is_binary(Class) ->
         fun(E) ->
             E#entry.class =:= Class andalso
                 E#entry.selector =:= MatchSelector andalso
+                (Side =:= undefined orelse entry_side(E) =:= Side) andalso
                 (not E#entry.prior_epoch) andalso
                 (not E#entry.orphan) andalso
                 (not E#entry.flushed)
@@ -1604,10 +1628,24 @@ log_unknown_enum(Field, Value) ->
 side_json(undefined) -> null;
 side_json(Side) -> atom_to_binary(Side, utf8).
 
+%% `null`/missing is the normal shape for every legacy `instance`/`class`-kind
+%% entry (they never wrote a `side` field at all) — that maps to `undefined`
+%% silently, same as the sibling decoders' `unknown` fallback but without the
+%% warning, since it is not corruption. Any *other* unrecognised binary,
+%% though, means an on-disk value this build doesn't know — mirror
+%% `decode_kind/1`, `decode_intent/1`, `decode_author_kind/1` and log it via
+%% `log_unknown_enum/2` before falling back to `undefined`, so corruption is
+%% distinguishable from the ordinary absent-legacy-field case.
 -spec decode_side(binary() | null) -> side() | undefined.
-decode_side(<<"instance">>) -> instance;
-decode_side(<<"class">>) -> class;
-decode_side(_Other) -> undefined.
+decode_side(null) ->
+    undefined;
+decode_side(<<"instance">>) ->
+    instance;
+decode_side(<<"class">>) ->
+    class;
+decode_side(Other) ->
+    log_unknown_enum(side, Other),
+    undefined.
 
 -spec span_to_json(span() | undefined) -> map() | null.
 span_to_json(undefined) -> null;

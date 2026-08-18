@@ -79,7 +79,8 @@ revert_e2e_test_() ->
             fun remove_selector_extension_logs_remove_method_changelog_entry/1,
             fun remove_selector_and_instance_patch_do_not_shadow_across_sides/1,
             fun revert_remove_method_entry_restores_removed_instance_method/1,
-            fun revert_remove_method_entry_restores_removed_class_side_method/1
+            fun revert_remove_method_entry_restores_removed_class_side_method/1,
+            fun revert_selects_correct_side_entry_when_both_sides_have_entries/1
         ]}}.
 
 %% Start the heavy, node-global apps once for the whole suite (the compiler port
@@ -600,6 +601,57 @@ revert_remove_method_entry_restores_removed_class_side_method(#{tmp := Tmp, uniq
         ?_assertNot(lists:member(build, AfterRemove)),
         ?_assertMatch({ok, _}, RevertResult),
         ?_assert(lists:member(build, AfterRevert))
+    ].
+
+%% The required fix itself, on the revert side: an instance-side durable patch
+%% of `Counter >> #foo` (P1) and a later class-side `Counter class
+%% removeSelector: #foo` (R1, same selector name, higher seq) are
+%% indistinguishable to `find_revert_target/2`'s `(class, selector)`-only key
+%% — it would pick R1 (the higher-seq candidate) regardless of which entry the
+%% caller actually meant to revert. `Workspace changes revert: p1Entry`
+%% (`changeLogRevert/1`) must resolve the entry to revert by
+%% `(class, selector, side)`, using the `side` field carried on the
+%% ChangeEntry the caller passed in — reverting the instance-side patch must
+%% NOT touch the (unrelated, still-live) class-side removal.
+revert_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187RevertPickSide" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  foo => 1\n", "  class foo => 2\n"]
+    ),
+    %% P1: instance-side durable patch to #foo.
+    {ok, _} = beamtalk_repl_eval:compile_method(
+        ClassName, <<"foo">>, <<"^ 99">>, durable, <<"sess">>, human, instance
+    ),
+    %% R1: class-side removal of #foo, logged after P1 (higher seq).
+    ClassSelf = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(ClassSelf, foo),
+    BeforeRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
+    BeforeRevertInstanceMethods = beamtalk_runtime_api:local_instance_methods(Pid),
+    %% Revert P1 via the ChangeEntry-based surface (`Workspace changes revert:
+    %% p1Entry`), passing the instance side explicitly — exactly the map shape
+    %% `entry_to_value/2` builds for a ChangeEntry row.
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    P1Entry = #{
+        '$beamtalk_class' => 'ChangeEntry',
+        className => ClassAtom,
+        selector => foo,
+        side => instance
+    },
+    _ = beamtalk_workspace_interface_primitives:changeLogRevert(P1Entry),
+    AfterRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
+    AfterRevertInstanceMethods = beamtalk_runtime_api:local_instance_methods(Pid),
+    [
+        %% Sanity on the fixture: class-side foo is gone, instance-side foo is
+        %% still there (patched to 99) before the revert.
+        ?_assertNot(lists:member(foo, BeforeRevertClassMethods)),
+        ?_assert(lists:member(foo, BeforeRevertInstanceMethods)),
+        %% The class-side removal (R1) must be untouched by reverting P1 — the
+        %% bug this regression guards against re-installed R1's class-side foo
+        %% instead, because side-blind selection picked the higher-seq entry.
+        ?_assertNot(lists:member(foo, AfterRevertClassMethods)),
+        %% The instance-side method is still present (P1's revert re-installs
+        %% its prior body in place, it does not remove the method).
+        ?_assert(lists:member(foo, AfterRevertInstanceMethods))
     ].
 
 %%====================================================================
