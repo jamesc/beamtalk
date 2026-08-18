@@ -2019,26 +2019,19 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
 
 /// Format one failing-test detail line.
 ///
-/// The leading `FAIL ` marker is load-bearing outside this crate: the
-/// cross-repo CI workflow greps for it to identify which test failed. See
-/// [`summary_line`] for the full contract and the tests that pin it.
+/// See [`summary_line`] for the format's history and the tests that pin it.
 fn fail_detail_line(display_name: &str, error: &str) -> String {
     format!("FAIL {display_name}: {error}")
 }
 
 /// Format the final one-line run summary.
 ///
-/// **This line is a CI contract, not just display text.**
-/// `.github/workflows/cross-repo.yml` parses the failure count out of it to
-/// decide whether a red `beamtalk-http` run is the single known network flake
-/// (retryable) or a real regression (fail immediately). It reads the count from
-/// *this* line rather than counting [`fail_detail_line`] outputs because the two
-/// can legitimately disagree: a failing test with no `error` field emits no
-/// `FAIL` line, and native `EUnit` failures are reported as one opaque output
-/// blob rather than one line per test. Only this count is authoritative.
-///
-/// `summary_line_is_a_ci_contract` and `fail_detail_line_is_a_ci_contract` pin
-/// both formats — if you change either, update that workflow's parsing to match.
+/// Until BT-3191, `.github/workflows/cross-repo.yml` parsed the failure count
+/// out of this line to tell a known `beamtalk-http` network flake from a real
+/// regression; that wrapper is gone now that the flaky test is hermetic by
+/// default, and nothing else parses this output. `summary_line_format` and
+/// `fail_detail_line_format` keep pinning both formats anyway, since they're
+/// still user-facing display text worth a regression test.
 fn summary_line(
     file_count: usize,
     total_tests: usize,
@@ -2176,73 +2169,23 @@ fn report_results(
 mod tests {
     use super::*;
 
-    /// Extract the failure count from a summary line the way
-    /// `.github/workflows/cross-repo.yml` does, so this test fails if the
-    /// emitted format drifts away from what that workflow can parse.
-    ///
-    /// Mirrors the workflow's sed expression:
-    /// `^[0-9]+ file\(s\), [0-9]+ tests, [0-9]+ passed, ([0-9]+) failed \([0-9.]+s\)$`
-    fn ci_parsed_failure_count(line: &str) -> Option<&str> {
-        let (head, tail) = line.split_once(" failed (")?;
-        if !line.ends_with("s)") || !head.starts_with(|c: char| c.is_ascii_digit()) {
-            return None;
-        }
-        // Elapsed must be numeric, e.g. "39.8s)".
-        let elapsed = tail.strip_suffix("s)")?;
-        if elapsed.is_empty() || !elapsed.chars().all(|c| c.is_ascii_digit() || c == '.') {
-            return None;
-        }
-        let count = head.rsplit(", ").next()?;
-        if count.is_empty() || !count.chars().all(|c| c.is_ascii_digit()) {
-            return None;
-        }
-        Some(count)
-    }
-
-    /// The cross-repo CI workflow parses this line to tell a retryable network
-    /// flake from a real regression. If this test fails, update the parsing in
-    /// `.github/workflows/cross-repo.yml` in the same change.
+    /// Pins the summary line's display format. See [`summary_line`] for why
+    /// this format used to matter beyond display (BT-3191).
     #[test]
-    fn summary_line_is_a_ci_contract() {
+    fn summary_line_format() {
         let line = summary_line(8, 168, 167, 1, 39.84);
-        assert_eq!(
-            line, "8 file(s), 168 tests, 167 passed, 1 failed (39.8s)",
-            "cross-repo.yml parses this exact shape — update its sed expression too"
-        );
-        assert_eq!(ci_parsed_failure_count(&line), Some("1"));
+        assert_eq!(line, "8 file(s), 168 tests, 167 passed, 1 failed (39.8s)");
 
-        // The count the workflow reads must track the real failure total, which
-        // is what makes it safe to gate the retry on "exactly one failure".
-        let two = summary_line(8, 168, 166, 2, 9.1);
-        assert_eq!(ci_parsed_failure_count(&two), Some("2"));
         let clean = summary_line(8, 168, 168, 0, 1.0);
-        assert_eq!(ci_parsed_failure_count(&clean), Some("0"));
-
-        // Per-class lines must NOT look like the summary, or the workflow would
-        // read a count off the wrong line.
-        assert_eq!(
-            ci_parsed_failure_count("  HTTPTest: 39 tests, 38 passed, 1 failed \u{2717}"),
-            None
-        );
+        assert_eq!(clean, "8 file(s), 168 tests, 168 passed, 0 failed (1.0s)");
     }
 
-    /// The workflow matches this line to confirm the single failure is the known
-    /// flaky test. The `FAIL ` prefix must stay at the start of the line.
+    /// Pins the failing-test detail line's display format, including the
+    /// leading `FAIL ` marker.
     #[test]
-    fn fail_detail_line_is_a_ci_contract() {
-        let line = fail_detail_line(
-            "HTTPTest testHttpsGetReturnsOkStatus",
-            "http_error error in 'get:headers:' on Http",
-        );
-        assert_eq!(
-            line,
-            "FAIL HTTPTest testHttpsGetReturnsOkStatus: http_error error in 'get:headers:' on Http"
-        );
-        assert!(
-            line.starts_with("FAIL "),
-            "cross-repo.yml greps '^FAIL ' — keep the marker line-initial"
-        );
-        assert!(line.contains("testHttpsGetReturnsOkStatus"));
+    fn fail_detail_line_format() {
+        let line = fail_detail_line("HTTPTest testFoo", "assertion failed");
+        assert_eq!(line, "FAIL HTTPTest testFoo: assertion failed");
     }
 
     fn write_bt_file(name: &str, content: &str) -> (tempfile::TempDir, Utf8PathBuf) {

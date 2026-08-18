@@ -728,13 +728,7 @@ The [cross-repo workflow](../../.github/workflows/cross-repo.yml) tests first-pa
 
 **Adding a new package:** Add a new job to `cross-repo.yml` following the `beamtalk-http` job as a template. Each job checks out the compiler, builds it, installs the binary, then checks out and tests the package.
 
-**Network-dependent tests:** Package suites owned by other repos may reach the public internet — `beamtalk-http` does, via `HTTPTest>>testHttpsGetReturnsOkStatus`. Runner network noise made that single test red the whole workflow intermittently, so the `Test beamtalk-http` step retries the suite up to 3 times with backoff.
-
-The retry is *scoped to that one known flake*: `beamtalk test` selects tests by path, not by name, so the step can't run a single method in isolation — instead it re-runs only when that named test is the sole failure. Any other failing test, or a second failure alongside it, fails the step on the first attempt with no retries, so a compiler regression never buys extra attempts and an unrelated flake stays visible. A retried pass emits a `::warning::` so the absorbed flake still shows in the run summary. Anything unrecognised — a missing summary line from a compile error, crash, or timeout — also fails closed with no retry.
-
-The workflow reads the failure count from the run summary line rather than counting `FAIL` lines, because the two can legitimately disagree: a failing test with no `error` field emits no `FAIL` line, and native EUnit failures arrive as one opaque blob rather than one line per test. Only the summary count is authoritative. Both output formats are a cross-file contract, pinned by `summary_line_is_a_ci_contract` and `fail_detail_line_is_a_ci_contract` in `crates/beamtalk-cli/src/commands/test.rs` — if either test fails, update the workflow's parsing in the same change.
-
-Remove the wrapper once the upstream suite is hermetic — the durable fix is for the package to test against its own local test server, or to gate live-network tests behind an opt-in tag.
+**Network-dependent tests:** Package suites owned by other repos must not reach the public internet by default — a default `beamtalk test` run has to stay hermetic, or runner network noise reds this canary on an unrelated compiler change. `beamtalk-http`'s one live-network case (`HTTPTest>>testHttpsGetReturnsOkStatus`) is opt-in, gated behind the `BEAMTALK_HTTP_LIVE_NETWORK_TESTS` env var and skipped by default (BT-3191); the cross-repo job doesn't set it, so `Test beamtalk-http` is a plain `beamtalk test` with no retry wrapper.
 
 ---
 
