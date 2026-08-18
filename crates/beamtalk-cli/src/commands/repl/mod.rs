@@ -770,15 +770,14 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         CommandAction::Interrupt => handle_interrupt(client),
         // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace flush`.
         CommandAction::Flush => eval_and_display(client, "Workspace flush"),
+        // BT-2287 / ADR 0082 Phase 3 (expression-building extracted to
+        // `beamtalk_cli::repl_meta_exprs` in BT-3196, matching
+        // `:remove-method`'s pattern): `:flush <selector>` desugars to
+        // `Workspace flush: <selector>`.
         CommandAction::FlushArg(selector) => {
-            // BT-2287 / ADR 0082 Phase 3: `:flush <selector>` desugars to
-            // `Workspace flush: <selector>`. The selector is passed through
-            // verbatim so users can pass a Class (`Counter`), a Symbol
-            // (`#'new-class'`), or a Dictionary (`#{ #file => "path" }`).
-            if selector.is_empty() {
-                eprintln!("Usage: :flush [<Class>|#kind|#{{ #file => \"path\" }}]");
-            } else {
-                eval_and_display(client, &format!("Workspace flush: {selector}"));
+            match beamtalk_cli::repl_meta_exprs::flush_expr_for(selector) {
+                Some(expr) => eval_and_display(client, &expr),
+                None => eprintln!("Usage: :flush [<Class>|#kind|#{{ #file => \"path\" }}]"),
             }
         }
         // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes`.
@@ -1833,16 +1832,15 @@ mod tests {
     // them as `evaluate` of a known string. These tests pin the translation.
     // -----------------------------------------------------------------------
 
-    /// Construct the Beamtalk expression a `:flush <selector>` line dispatches
-    /// to. Mirrors the format used in `handle_repl_command` so the tests catch
-    /// translation drift.
+    /// Construct the Beamtalk expression a `:flush <selector>` line
+    /// dispatches to: `commands::FLUSH.arg` extracts the selector exactly as
+    /// `classify_command` does, and `repl_meta_exprs::flush_expr_for` — the
+    /// same shared function `handle_repl_command`'s real dispatch and
+    /// `tests/repl_protocol.rs` call — builds the expression, so this test
+    /// can only drift from production behaviour if that shared function's
+    /// own contract changes (BT-3196).
     fn flush_expr_for(line: &str) -> Option<String> {
-        let selector = commands::FLUSH.arg(line).unwrap_or("");
-        if selector.is_empty() {
-            None
-        } else {
-            Some(format!("Workspace flush: {selector}"))
-        }
+        beamtalk_cli::repl_meta_exprs::flush_expr_for(commands::FLUSH.arg(line).unwrap_or(""))
     }
 
     #[test]

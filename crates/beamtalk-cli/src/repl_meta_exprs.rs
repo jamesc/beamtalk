@@ -8,10 +8,10 @@
 //! These live in the library target (rather than `commands/repl/mod.rs`,
 //! which is private to the binary target) specifically so the integration
 //! test — which links only the library target — can call the real parsing
-//! logic instead of re-implementing it. A hand-copied "mirror" of this
-//! logic in the test harness previously drifted from the real
-//! implementation twice in a row (BT-3189); see BT-3196 for extracting
-//! `:flush <sel>`'s equivalent duplication the same way.
+//! logic instead of re-implementing it. A hand-copied "mirror" of
+//! `remove_method_expr_for`'s logic in the test harness previously drifted
+//! from the real implementation twice in a row (BT-3189); `:flush <sel>`'s
+//! equivalent duplication was extracted the same way in BT-3196.
 
 /// Construct the `<Class> removeSelector: #<selector>` expression a
 /// `:remove-method <Class> <selector>` REPL line dispatches to (ADR 0112
@@ -36,6 +36,31 @@ pub fn remove_method_expr_for(arg: &str) -> Option<String> {
         return None;
     }
     Some(format!("{class} removeSelector: #{selector}"))
+}
+
+/// Construct the `Workspace flush: <selector>` expression a `:flush
+/// <selector>` REPL line dispatches to (ADR 0082 Phase 3, BT-2287).
+///
+/// `selector` is passed through **verbatim** (only trimmed) into the
+/// generated expression, so callers can pass a Class (`Counter`), a Symbol
+/// kind (`#'new-class'`), or a Dictionary (`#{ #file => "path" }`) — unlike
+/// [`remove_method_expr_for`], there is no leading-`#` stripping here since
+/// a `#`-prefixed selector is a legitimate Symbol-kind argument, not a
+/// Symbol-literal-decorated method name.
+///
+/// Returns `None` when `selector` is empty (including a selector that is
+/// only whitespace, once trimmed), so the caller can print a usage hint
+/// instead of evaluating a malformed bare `Workspace flush: ` send — this
+/// emptiness check is exactly the kind of guard a hand-copied test-harness
+/// mirror can silently drop (as `remove_method_expr_for`'s did for its own
+/// `#`-stripping order in BT-3189); routing both callers through this one
+/// function makes that class of drift structurally impossible.
+pub fn flush_expr_for(selector: &str) -> Option<String> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return None;
+    }
+    Some(format!("Workspace flush: {selector}"))
 }
 
 #[cfg(test)]
@@ -109,5 +134,61 @@ mod tests {
             remove_method_expr_for("Counter #  increment"),
             Some("Counter removeSelector: #increment".to_string())
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // flush_expr_for
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flush_class_selector_translates_to_workspace_flush_message() {
+        assert_eq!(
+            flush_expr_for("Counter"),
+            Some("Workspace flush: Counter".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_symbol_kind_selector_translates_verbatim() {
+        // A leading "#" here is a legitimate Symbol-kind argument (not a
+        // decorated method name like `remove_method_expr_for`'s selector),
+        // so it must survive untouched.
+        assert_eq!(
+            flush_expr_for("#'new-class'"),
+            Some("Workspace flush: #'new-class'".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_dictionary_selector_translates_verbatim() {
+        assert_eq!(
+            flush_expr_for("#{ #file => \"src/foo.bt\" }"),
+            Some("Workspace flush: #{ #file => \"src/foo.bt\" }".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_trims_surrounding_whitespace() {
+        assert_eq!(
+            flush_expr_for("  Counter  "),
+            Some("Workspace flush: Counter".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_with_empty_selector_reports_no_expression() {
+        assert_eq!(flush_expr_for(""), None);
+    }
+
+    #[test]
+    fn flush_with_whitespace_only_selector_reports_no_expression() {
+        // The historical-bug-class risk this guards against: a hand-copied
+        // test-harness mirror of `Workspace flush: {selector}` that skips
+        // this emptiness check (as the old `tests/repl_protocol.rs` inline
+        // duplicate did) would blindly eval a malformed bare
+        // `Workspace flush: ` send instead of hitting the usage-error path.
+        // Because both the real dispatch and the test harness now call this
+        // one function, that drift can no longer happen.
+        assert_eq!(flush_expr_for("   "), None);
     }
 }

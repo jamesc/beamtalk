@@ -1360,9 +1360,15 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             // BT-2287 / ADR 0082 Phase 3: `:flush` → `Workspace flush`.
             client.eval("Workspace flush")
         } else if case.expression.starts_with(":flush ") {
-            // BT-2287 / ADR 0082 Phase 3: `:flush <sel>` → `Workspace flush: <sel>`.
-            let selector = case.expression.strip_prefix(":flush ").unwrap().trim();
-            client.eval(&format!("Workspace flush: {selector}"))
+            // BT-2287 / ADR 0082 Phase 3: `:flush <sel>` → `Workspace flush: <sel>`,
+            // via the same `flush_expr_for` the real REPL dispatch calls
+            // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror,
+            // so this harness can't drift from production behavior (BT-3196).
+            let selector = case.expression.strip_prefix(":flush ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::flush_expr_for(selector) {
+                Some(expr) => client.eval(&expr),
+                None => Err("Usage: :flush [<Class>|#kind|#{ #file => \"path\" }]".to_string()),
+            }
         } else if case.expression == ":changes" {
             // BT-2287 / ADR 0082 Phase 3: `:changes` → `Workspace changes`.
             client.eval("Workspace changes")
