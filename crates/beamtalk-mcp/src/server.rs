@@ -2118,7 +2118,7 @@ impl BeamtalkMcp {
 
         let text = {
             let v = response.value_string();
-            if v.is_empty() {
+            if v.is_empty() && params.if_absent.is_none() {
                 format!("Method {}>>#{} removed", params.class, selector)
             } else {
                 v
