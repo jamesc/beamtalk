@@ -6226,8 +6226,8 @@ mod tests {
     #[test]
     fn build_remove_method_with_if_absent_emits_fallback_block() {
         // The third argument is raw Beamtalk code embedded as the fallback
-        // block's body verbatim — not an escaped String value (mirrors
-        // `beamtalk-mcp::remove_method_if_absent_expr`).
+        // block's body verbatim — not an escaped String value (built via
+        // `beamtalk_core::tool_expr::remove_method_if_absent_expr`).
         let expr = build_command_expression(
             CMD_REMOVE_METHOD,
             &[

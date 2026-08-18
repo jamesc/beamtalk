@@ -23,8 +23,28 @@
 //! both already depend on `beamtalk-core` — so this is a *deletable*
 //! duplication. The fix is to give the expression-building logic a single
 //! home here, below both crates, rather than adding a test that just checks
-//! two copies still agree. A single definition can't drift from itself; the
-//! unit tests below are the conformance test BT-3193 asks for.
+//! two copies still agree. MCP and LSP can no longer drift from each other,
+//! since both now call the same definition; the unit tests below are the
+//! conformance test BT-3193 asks for.
+//!
+//! The REPL-CLI surface (`beamtalk-cli`'s `:remove-method`/`:flush <sel>`
+//! meta-commands) still hand-rolls its own copy of the `removeSelector:` and
+//! `flush:` shapes rather than calling into this module — that pre-existing
+//! duplication is tracked separately by BT-3196, not fixed here.
+//!
+//! # Caller responsibility: `class`/`selector`/`kind` are not validated here
+//!
+//! Only the string-*value* arguments (`source`, `path`, `body`) are escaped
+//! via [`escape_string_literal`] before being embedded as Beamtalk string
+//! literals. `class`, `selector`, and `kind` are interpolated **unescaped**
+//! as bare Beamtalk source tokens (class names, symbol literals) — that's
+//! the correct shape for e.g. `Counter removeSelector: #increment`, where
+//! `Counter` must appear as a real identifier, not a quoted string. Passing
+//! attacker-controlled or otherwise unvalidated text through as `class` or
+//! `selector` lets it inject arbitrary Beamtalk source into the expression
+//! that gets evaluated. Both current callers (`beamtalk-mcp`'s tool handlers
+//! and `beamtalk-lsp`'s `validate_class_name`/`validate_selector`) validate
+//! these arguments before calling in here — any new caller must do the same.
 
 use crate::unparse::escape_string_literal;
 
@@ -42,6 +62,9 @@ pub fn save_class_expr(source: &str, path: &str) -> String {
 /// `beamtalk.precheckMethod` command — the pre-save advisory precheck (ADR
 /// 0105 Phase 3, BT-2782). Selector is the bare form (no leading `#`).
 /// Nothing installs; `Behaviour>>precheckCompile:source:` is read-only.
+///
+/// `class` and `selector` are interpolated unescaped — see the module docs'
+/// "Caller responsibility" note; the caller must validate them first.
 pub fn precheck_method_expr(class: &str, selector: &str, body: &str) -> String {
     format!(
         "{} precheckCompile: #{} source: \"{}\"",
@@ -56,6 +79,9 @@ pub fn precheck_method_expr(class: &str, selector: &str, body: &str) -> String {
 /// BT-3188). Selector is the bare form (no leading `#`). Raises
 /// `selector_not_found` if the selector is not defined locally or as an
 /// extension.
+///
+/// `class` and `selector` are interpolated unescaped — see the module docs'
+/// "Caller responsibility" note; the caller must validate them first.
 pub fn remove_method_expr(class: &str, selector: &str) -> String {
     format!("{class} removeSelector: #{selector}")
 }
@@ -68,6 +94,9 @@ pub fn remove_method_expr(class: &str, selector: &str) -> String {
 /// runtime evaluates as code on an absent selector — it is never passed
 /// through a `compile:source:`-style primitive that takes a source string as
 /// data.
+///
+/// `class` and `selector` are interpolated unescaped — see the module docs'
+/// "Caller responsibility" note; the caller must validate them first.
 pub fn remove_method_if_absent_expr(class: &str, selector: &str, if_absent: &str) -> String {
     format!("{class} removeSelector: #{selector} ifAbsent: [{if_absent}]")
 }
@@ -88,6 +117,11 @@ pub enum FlushFilter<'a> {
 ///
 /// Surface map: `Workspace flush` / `Workspace flush: ClassName` /
 /// `Workspace flush: #{ #file => "path" }` / `Workspace flush: #'kind'`.
+///
+/// `FlushFilter::Class` and `FlushFilter::Kind` are interpolated unescaped —
+/// see the module docs' "Caller responsibility" note; the caller must
+/// validate them first (`FlushFilter::File`'s path is a String value and is
+/// escaped).
 pub fn flush_expr(filter: FlushFilter<'_>) -> String {
     match filter {
         FlushFilter::None => "Workspace flush".to_string(),
@@ -106,8 +140,8 @@ mod tests {
 
     // These golden tests are the BT-3193 conformance suite: both
     // `beamtalk-mcp` and `beamtalk-lsp` call these functions directly, so a
-    // single passing suite here is enough to guarantee the two surfaces
-    // agree — there is no second implementation left to drift.
+    // single passing suite here is enough to guarantee those two surfaces
+    // agree with each other.
 
     #[test]
     fn precheck_method_expr_compiles_precheck_compile_source() {
