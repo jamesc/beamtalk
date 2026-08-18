@@ -3909,6 +3909,12 @@ the delete. See [ADR 0113](ADR/0113-destructive-workspace-operations.md) for
 the full design, including the external-edit conflict table and delete
 atomicity.
 
+**Editor integration (LSP):** when a Tier 2 flush deletes a class's file, the
+LSP emits a typed `DeleteFile` `workspace/applyEdit` resource operation
+(rather than a content edit) so the editor closes any open buffer for the
+removed file instead of silently failing to reload stale content. This fires
+regardless of whether the file was open in the editor.
+
 ### `SystemNavigation` — Cross-class code queries
 
 `SystemNavigation` provides Smalltalk-style live-image queries over the loaded

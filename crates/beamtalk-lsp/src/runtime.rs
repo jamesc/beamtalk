@@ -80,10 +80,19 @@ pub enum RuntimeError {
 /// `workspace/applyEdit` per touched file.
 #[derive(Debug, Clone)]
 pub struct FlushEvent {
-    /// Absolute or workspace-relative paths of files that were renamed onto
-    /// disk by the flush. The runtime sends whatever
-    /// `ChangeEntry.sourceFile` carried; the LSP layer canonicalises against
-    /// its workspace roots before lookup.
+    /// Absolute or workspace-relative paths of files touched by the flush —
+    /// written (patch, `new-class`, `remove-method`) *or*, since ADR 0113
+    /// Phase 2 (BT-3207), deleted (`remove-class`, Tier 2 destructive
+    /// flush). The runtime sends whatever `ChangeEntry.sourceFile` carried
+    /// either way; the wire frame does not distinguish written from
+    /// deleted, so the LSP layer canonicalises against its workspace roots
+    /// and classifies each path by whether it still exists on disk at that
+    /// point (`resolve_flushed_path` in `crates/beamtalk-lsp/src/server.rs`)
+    /// — a Tier 2 delete has already unlinked the file by the time this
+    /// event fires (`beamtalk_workspace_flush:complete_flush/5` announces
+    /// after Phase B commits), so "does the path still exist" is a reliable
+    /// oracle for `DeleteFile` vs. an ordinary content edit (ADR 0113 Phase
+    /// 4a, BT-3209).
     pub files: Vec<String>,
 }
 

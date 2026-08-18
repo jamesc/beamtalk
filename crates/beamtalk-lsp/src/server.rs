@@ -42,13 +42,14 @@ use tower_lsp::lsp_types::{
     CallHierarchyPrepareParams, CallHierarchyServerCapability, CodeAction, CodeActionKind,
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DeleteFile, DeleteFileOptions, DiagnosticSeverity, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentChangeOperation, DocumentChanges, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
     ExecuteCommandOptions, ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverContents, HoverParams, HoverProviderCapability, ImplementationProviderCapability,
     InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType,
-    OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams,
+    OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams, ResourceOp,
     ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
     SignatureInformation, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
@@ -3330,20 +3331,38 @@ fn reload_finding_to_lsp_diagnostics(
         .collect()
 }
 
-/// ADR 0082 Phase 3 (BT-2289): consume `FlushEvent`s from the runtime
-/// listener and emit `workspace/applyEdit` per flushed file.
+/// ADR 0082 Phase 3 (BT-2289); ADR 0113 Phase 4a (BT-3209): consume
+/// `FlushEvent`s from the runtime listener and emit `workspace/applyEdit`
+/// per flushed file.
 ///
 /// For each file in the event, the listener:
 /// 1. Resolves the runtime-reported path against the LSP workspace roots to
-///    canonicalise into an absolute filesystem path.
-/// 2. Checks the *live* open-paths handle to see whether the path is
-///    currently open in the editor. Files that aren't open are skipped —
-///    `VSCode` reads them fresh on next `did_open`. The check happens per
-///    event so files opened after the listener started are still picked up.
-/// 3. Reads the new on-disk content and issues `apply_edit` with a single
-///    `TextEdit` covering the whole document, so the open buffer realigns
-///    with the post-flush bytes. `VSCode`'s conflict UX handles unsaved local
-///    edits per the LSP spec.
+///    an absolute filesystem path, and classifies it by whether the leaf
+///    still exists on disk ([`resolve_flushed_path`]) — a Tier 2 destructive
+///    flush (`remove-class`) has already unlinked the file by the time this
+///    event fires, so non-existence is the signal a `remove-class` entry
+///    left behind (the wire frame itself carries only a flat touched-file
+///    list, no per-file operation kind).
+/// 2. **Deleted** (`existed == false`): emits a [`DocumentChangeOperation::Op`]
+///    `DeleteFile` resource operation ([`delete_file_edit`]) — unconditionally,
+///    not gated on the open-paths check below, since a deletion is
+///    project-wide state (an open tab that must close, stale diagnostics)
+///    rather than something only an open buffer cares about.
+/// 3. **Still exists** (`existed == true`, patch / `new-class` /
+///    `remove-method` — unchanged from prior behaviour): checks the *live*
+///    open-paths handle to see whether the path is currently open in the
+///    editor. Files that aren't open are skipped — `VSCode` reads them fresh
+///    on next `did_open`. The check happens per event so files opened after
+///    the listener started are still picked up. Reads the new on-disk
+///    content and issues `apply_edit` with a single `TextEdit` covering the
+///    whole document ([`change_file_edit`]), so the open buffer realigns
+///    with the post-flush bytes. `VSCode`'s conflict UX handles unsaved
+///    local edits per the LSP spec.
+///
+/// `CreateFile` (the ADR's other typed resource operation, for `new-class`)
+/// is out of scope here: distinguishing "freshly created" from "patched
+/// in place" needs a signal this existence check can't produce (both leave
+/// the leaf present) — see ADR 0113's LSP section. Left as a follow-up.
 async fn flush_event_listener(
     client: Client,
     workspace_roots: Vec<PathBuf>,
@@ -3352,14 +3371,46 @@ async fn flush_event_listener(
 ) {
     while let Some(event) = flush_rx.recv().await {
         for raw_path in event.files {
-            let canonical = resolve_flushed_path(&raw_path, &workspace_roots);
-            let Some(abs_path) = canonical else {
+            let resolved = resolve_flushed_path(&raw_path, &workspace_roots);
+            let Some((abs_path, existed)) = resolved else {
                 tracing::debug!(
                     raw_path,
                     "flush_event_listener: could not resolve runtime path against workspace roots"
                 );
                 continue;
             };
+            let Ok(uri) = Url::from_file_path(&abs_path) else {
+                tracing::debug!(
+                    ?abs_path,
+                    "flush_event_listener: could not build file:// URI"
+                );
+                continue;
+            };
+
+            if !existed {
+                let edit = delete_file_edit(uri.clone());
+                match client.apply_edit(edit).await {
+                    Ok(resp) if resp.applied => {
+                        tracing::debug!(%uri, "flush_event_listener: applied DeleteFile");
+                    }
+                    Ok(resp) => {
+                        tracing::info!(
+                            %uri,
+                            failure_reason = ?resp.failure_reason,
+                            "flush_event_listener: client declined DeleteFile applyEdit"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            %uri,
+                            error = %e,
+                            "flush_event_listener: DeleteFile applyEdit failed"
+                        );
+                    }
+                }
+                continue;
+            }
+
             let Ok(utf8_path) = Utf8PathBuf::try_from(abs_path.clone()) else {
                 tracing::debug!(raw_path, "flush_event_listener: resolved path is not UTF-8");
                 continue;
@@ -3378,39 +3429,7 @@ async fn flush_event_listener(
                 );
                 continue;
             };
-            let Ok(uri) = Url::from_file_path(&abs_path) else {
-                tracing::debug!(
-                    %utf8_path,
-                    "flush_event_listener: could not build file:// URI"
-                );
-                continue;
-            };
-            let edit = WorkspaceEdit {
-                changes: Some({
-                    let mut changes = HashMap::new();
-                    changes.insert(
-                        uri.clone(),
-                        vec![TextEdit {
-                            range: Range {
-                                start: Position {
-                                    line: 0,
-                                    character: 0,
-                                },
-                                // u32::MAX/u32::MAX is the LSP convention for "end
-                                // of file" — any line longer than this is unrealistic
-                                // for source code and clients clamp to actual EOF.
-                                end: Position {
-                                    line: u32::MAX,
-                                    character: u32::MAX,
-                                },
-                            },
-                            new_text: content,
-                        }],
-                    );
-                    changes
-                }),
-                ..Default::default()
-            };
+            let edit = change_file_edit(uri.clone(), content);
             match client.apply_edit(edit).await {
                 Ok(resp) if resp.applied => {
                     tracing::debug!(%uri, "flush_event_listener: applied edit");
@@ -3430,32 +3449,127 @@ async fn flush_event_listener(
     }
 }
 
-/// Resolve a path reported by the runtime against the LSP workspace roots.
+/// Build the `workspace/applyEdit` payload for a file that still exists on
+/// disk after the flush (patch / `new-class` / `remove-method` — Tier 1,
+/// unchanged from the behaviour that shipped in ADR 0082 Phase 3): a single
+/// `TextEdit` covering the whole document with the new on-disk content.
+fn change_file_edit(uri: Url, content: String) -> WorkspaceEdit {
+    WorkspaceEdit {
+        changes: Some({
+            let mut changes = HashMap::new();
+            changes.insert(
+                uri,
+                vec![TextEdit {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        // u32::MAX/u32::MAX is the LSP convention for "end
+                        // of file" — any line longer than this is unrealistic
+                        // for source code and clients clamp to actual EOF.
+                        end: Position {
+                            line: u32::MAX,
+                            character: u32::MAX,
+                        },
+                    },
+                    new_text: content,
+                }],
+            );
+            changes
+        }),
+        ..Default::default()
+    }
+}
+
+/// Build the `workspace/applyEdit` payload for a file the flush already
+/// deleted from disk (ADR 0113 Phase 4a, BT-3209: a Tier 2 destructive flush
+/// `remove-class` entry) — a typed `DeleteFile` resource operation via
+/// `documentChanges`, not a text edit, since there is no content left to
+/// send. `ignoreIfNotExists: true` is defensive: some further time has
+/// passed between the existence check that classified this as a deletion
+/// and the client actually receiving this request, so the client's own view
+/// might already agree the file is gone.
+fn delete_file_edit(uri: Url) -> WorkspaceEdit {
+    WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Operations(vec![
+            DocumentChangeOperation::Op(ResourceOp::Delete(DeleteFile {
+                uri,
+                options: Some(DeleteFileOptions {
+                    recursive: Some(false),
+                    ignore_if_not_exists: Some(true),
+                    annotation_id: None,
+                }),
+            })),
+        ])),
+        ..Default::default()
+    }
+}
+
+/// Resolve a path reported by the runtime against the LSP workspace roots,
+/// tolerating an already-deleted target (ADR 0113 Phase 4a, BT-3209): a
+/// Tier 2 destructive flush (`remove-class`) has already unlinked its file
+/// by the time the `flush_completed` push fires
+/// (`beamtalk_workspace_flush:complete_flush/5` announces after Phase B
+/// commits), so `canonicalize()` — which requires the leaf to exist — can't
+/// validate that case the way it does for an ordinary write.
 ///
 /// The runtime stores `ChangeEntry.sourceFile` as whatever was passed at
 /// `compile:source:` hook time — typically a workspace-relative path
 /// (`"src/counter.bt"`) when the workspace was started in the project root.
 /// We try, in order:
 ///
-/// 1. Absolute → use as-is if it exists.
-/// 2. For each workspace root, join + canonicalise.
+/// 1. Absolute → use as-is.
+/// 2. For each workspace root, join.
 ///
-/// Returns the canonicalised absolute path on success, or `None` if we can't
-/// find a real file matching `raw`. Canonicalisation matters because the LSP
-/// stores open documents under canonical paths (`uri_to_path` runs
-/// `canonicalize`); a non-canonical lookup would always miss.
-pub(crate) fn resolve_flushed_path(raw: &str, roots: &[PathBuf]) -> Option<PathBuf> {
+/// For each candidate: canonicalise if the leaf exists (`existed = true`);
+/// otherwise fall back to the literal candidate path if its *parent*
+/// directory is real (`existed = false`) — enough to build a `file://` URI
+/// for a `DeleteFile` resource operation without being able to canonicalise
+/// a path that no longer exists. Canonicalisation matters for the
+/// `existed = true` case because the LSP stores open documents under
+/// canonical paths (`uri_to_path` runs `canonicalize`); a non-canonical
+/// lookup would always miss the open-paths check.
+///
+/// Returns `None` if no root (nor the absolute-path case) finds even a real
+/// parent directory for `raw`.
+///
+/// **Multi-root ambiguity for a deleted leaf:** with `existed = true` the
+/// per-root loop picks the (necessarily unique) root that actually contains
+/// the file. With `existed = false` there is no such tiebreaker — the first
+/// root whose parent directory is real wins, even if a sibling root's same
+/// relative path would *also* have a real parent. Worst case this reports
+/// the deletion against the wrong root's copy of the path; the resulting
+/// `DeleteFile` targets a path the editor never had open, which is a no-op
+/// there, not a wrong deletion (the flush already deleted the *real* file
+/// before this event fired — this function only decides which URI to name
+/// in the notification). Relevant only for multi-root workspaces with a
+/// same-relative-path collision across roots.
+pub(crate) fn resolve_flushed_path(raw: &str, roots: &[PathBuf]) -> Option<(PathBuf, bool)> {
     let candidate = PathBuf::from(raw);
     if candidate.is_absolute() {
-        return candidate.canonicalize().ok();
+        return resolve_candidate(candidate);
     }
     for root in roots {
-        let joined = root.join(&candidate);
-        if let Ok(canon) = joined.canonicalize() {
-            return Some(canon);
+        if let Some(resolved) = resolve_candidate(root.join(&candidate)) {
+            return Some(resolved);
         }
     }
     None
+}
+
+/// Resolve one absolute candidate path — see [`resolve_flushed_path`] for
+/// the existed/deleted classification this implements.
+fn resolve_candidate(candidate: PathBuf) -> Option<(PathBuf, bool)> {
+    if let Ok(canon) = candidate.canonicalize() {
+        return Some((canon, true));
+    }
+    let parent = candidate.parent()?;
+    if parent.exists() {
+        Some((candidate, false))
+    } else {
+        None
+    }
 }
 
 /// ADR 0082 Phase 3 (BT-2289): map a `workspace/executeCommand` invocation
@@ -6359,11 +6473,12 @@ mod tests {
         let bt = temp.join("counter.bt");
         fs::write(&bt, "src").expect("write");
         let raw = bt.to_str().unwrap();
-        let resolved = resolve_flushed_path(raw, &[]).expect("resolved");
+        let (resolved, existed) = resolve_flushed_path(raw, &[]).expect("resolved");
         // canonicalize may resolve symlinks; just verify equality with the
         // canonical form of the same input.
         let canon = bt.canonicalize().expect("canonicalize");
         assert_eq!(resolved, canon);
+        assert!(existed);
         let _ = fs::remove_dir_all(&temp);
     }
 
@@ -6375,16 +6490,126 @@ mod tests {
         let target = root.join("src/counter.bt");
         fs::write(&target, "src").expect("write");
 
-        let resolved =
+        let (resolved, existed) =
             resolve_flushed_path("src/counter.bt", std::slice::from_ref(&root)).expect("resolved");
         assert_eq!(resolved, target.canonicalize().expect("canonicalize"));
+        assert!(existed);
         let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
     fn resolve_flushed_path_returns_none_when_nothing_matches() {
-        // A nonexistent relative path with no roots — nothing to find.
+        // A nonexistent relative path with no roots, and no real parent
+        // directory either — nothing to find, deleted or otherwise.
         assert!(resolve_flushed_path("does/not/exist.bt", &[]).is_none());
+    }
+
+    // ADR 0113 Phase 4a (BT-3209): a Tier 2 destructive flush (`remove-class`)
+    // has already unlinked its file by the time `flush_completed` fires —
+    // `resolve_flushed_path` must still resolve a usable path for it (so the
+    // listener can build a `DeleteFile` URI), just flagged `existed = false`
+    // instead of failing the way plain `canonicalize()` would.
+
+    #[test]
+    fn resolve_flushed_path_falls_back_for_deleted_absolute_file() {
+        let temp = unique_temp_dir("beamtalk_lsp_resolve_deleted_abs");
+        fs::create_dir_all(&temp).expect("create temp");
+        let bt = temp.join("counter.bt");
+        fs::write(&bt, "src").expect("write");
+        fs::remove_file(&bt).expect("delete");
+
+        let raw = bt.to_str().unwrap();
+        let (resolved, existed) = resolve_flushed_path(raw, &[]).expect("resolved");
+        assert!(!existed);
+        // The leaf no longer exists, so we can't canonicalise it — the
+        // literal (still-absolute) candidate path is returned as-is.
+        assert_eq!(resolved, bt);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_flushed_path_falls_back_for_deleted_relative_file() {
+        let temp = unique_temp_dir("beamtalk_lsp_resolve_deleted_rel");
+        let root = temp.join("project");
+        fs::create_dir_all(root.join("src")).expect("dirs");
+        let target = root.join("src/counter.bt");
+        fs::write(&target, "src").expect("write");
+        fs::remove_file(&target).expect("delete");
+
+        let (resolved, existed) =
+            resolve_flushed_path("src/counter.bt", std::slice::from_ref(&root)).expect("resolved");
+        assert!(!existed);
+        assert_eq!(resolved, target);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_flushed_path_returns_none_when_parent_dir_also_missing() {
+        // Not merely a missing leaf — the whole directory tree is fictional,
+        // so there is no real parent to fall back to either.
+        let temp = unique_temp_dir("beamtalk_lsp_resolve_deleted_no_parent");
+        // Note: `temp` itself is never created on disk.
+        let raw = temp.join("src/counter.bt");
+        let raw = raw.to_str().unwrap();
+        assert!(resolve_flushed_path(raw, &[]).is_none());
+    }
+
+    // ADR 0113 Phase 4a (BT-3209): the `WorkspaceEdit` builders the flush
+    // listener dispatches to, tested directly since driving a full
+    // `client.apply_edit` round trip needs a live LSP client on the other
+    // end of the socket.
+
+    #[test]
+    fn delete_file_edit_emits_typed_delete_resource_op() {
+        let uri = Url::parse("file:///workspace/Counter.bt").expect("uri");
+        let edit = delete_file_edit(uri.clone());
+
+        // No plain-text `changes` map — a delete has no content to send.
+        assert!(edit.changes.is_none());
+        match edit.document_changes {
+            Some(DocumentChanges::Operations(ops)) => {
+                assert_eq!(ops.len(), 1);
+                match &ops[0] {
+                    DocumentChangeOperation::Op(ResourceOp::Delete(delete)) => {
+                        assert_eq!(delete.uri, uri);
+                        let options = delete.options.as_ref().expect("delete options");
+                        assert_eq!(options.ignore_if_not_exists, Some(true));
+                        assert_eq!(options.recursive, Some(false));
+                    }
+                    other => panic!("expected a Delete resource op, got {other:?}"),
+                }
+            }
+            other => panic!("expected Operations document_changes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn change_file_edit_emits_whole_document_text_edit() {
+        // Regression coverage (AC: "existing non-destructive flush LSP
+        // behavior... unaffected") — this must keep the exact shape
+        // `flush_event_listener` sent before ADR 0113 Phase 4a: a `changes`
+        // map with one whole-document `TextEdit`, no `documentChanges`.
+        let uri = Url::parse("file:///workspace/Counter.bt").expect("uri");
+        let edit = change_file_edit(uri.clone(), "Object subclass: Counter\n".to_string());
+
+        assert!(edit.document_changes.is_none());
+        let changes = edit.changes.expect("changes map");
+        let edits = changes.get(&uri).expect("edit for uri");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "Object subclass: Counter\n");
+        assert_eq!(
+            edits[0].range,
+            Range {
+                start: Position {
+                    line: 0,
+                    character: 0
+                },
+                end: Position {
+                    line: u32::MAX,
+                    character: u32::MAX
+                },
+            }
+        );
     }
 
     #[test]
