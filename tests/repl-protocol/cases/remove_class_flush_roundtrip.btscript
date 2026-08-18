@@ -1,0 +1,252 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3211 (ADR 0113 Phase 4c, closing the epic BT-3205): required e2e
+// validation for the full destructive-flush flow, per the `plan-adr` skill's
+// phasing principle that the last issue in every epic exercises the feature
+// end-to-end — unit/BUnit coverage alone is not enough for a user-facing
+// feature like this one.
+//
+// Every other Phase-2/4 test either drives the flush mechanism against a
+// ChangeLog entry injected via the `beamtalk_workspace_changelog` FFI
+// (`workspace_flush_destructive.btscript`, to isolate the flush/staged-delete
+// mechanism from entry origin) or drives `removeFromSystem` against a
+// dynamically-declared, never-on-disk class where the resulting entry is
+// deliberately non-flushable (`remove_from_system.btscript`,
+// `repl_remove_class_flush_destructive.btscript`, to isolate the ChangeLog
+// audit-trail fix and the REPL meta-command aliases). Neither exercises the
+// two halves *chained together* against a real, file-backed class — the
+// actual thing a user does. This test is that missing chain, walking ADR
+// 0113's own worked example verbatim:
+//
+//   Workspace flush
+//   => flushed 2 methods across 1 file
+//      skipped: 1 destructive entry (Counter — remove-class) —
+//        use `Workspace flushIncludingDestructive` to include it
+//
+//   Workspace flushIncludingDestructive
+//   => flushed 2 methods + 1 removal across 2 files
+//
+// end to end:
+//   1. a real `.bt` file is written to disk inside the live workspace's
+//      project tree and brought into memory with `Workspace load:` — the same
+//      primitive the test harness's own `@load` directive compiles to (see
+//      `load_file` in `repl_protocol.rs`) — giving a genuinely live,
+//      correctly-named, file-backed "user-defined class"
+//      (`Workspace newClass:at:` also creates a class this way in principle,
+//      but its compiler path disambiguates class names in a package-less
+//      project — as this harness always is — so a class it creates cannot be
+//      addressed by its plain declared name; seeding the file directly and
+//      loading it, exactly as a real edited-on-disk class would arrive,
+//      sidesteps that and matches the acceptance criteria's "user-defined
+//      class" more directly besides)
+//   2. `removeFromSystem` (the real primitive, BT-785) removes it from memory
+//      and logs a durable `remove-class` ChangeEntry (ADR 0113 Phase 1,
+//      BT-3206) — `Workspace changes` shows it
+//   3. `Workspace flush` (Tier 1 only) reports it `skipped: destructive`
+//      without touching the file (ADR 0113 Phase 2, BT-3207)
+//   4. `Workspace flushIncludingDestructive` deletes the backing file
+//   5. neither the live image (bare identifier resolution) nor a fresh read
+//      of the path (what a re-run of the REPL or compiler would see) can
+//      find the class any more
+//
+// Like `workspace_flush_roundtrip.btscript`'s injected entries, this class's
+// file lives inside the *live* workspace project path (read directly from
+// `beamtalk_workspace_meta`, not merely assumed from `File tempDirectory`) —
+// the thing `removeFromSystem`'s own flushability check actually consults —
+// so the resulting `remove-class` entry is genuinely `flushable: true`.
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE A REAL .bt FILE INSIDE THE PROJECT TREE AND LOAD IT
+// ===========================================================================
+
+// Read the *live* workspace project path directly from
+// `beamtalk_workspace_meta` — the thing `removeFromSystem`'s own flushability
+// check (`classify_source_file`) actually consults — rather than merely
+// assuming it matches `File tempDirectory` (true in this harness today, per
+// `repl_protocol.rs`, but reading the live value is the robust source of
+// truth either way).
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_remove_class_roundtrip_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+// `ensure_dir:` (unlike `make_dir:`) creates every missing ancestor and never
+// errors if a segment already exists — the project root itself may or may not
+// already be present on disk depending on how the harness set it up.
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_classPath := _projDir ++ "/RemoveClassRoundTripDemo.bt"
+// => _
+
+// A genuine LF byte, built straight from the Erlang FFI: `(Character value:
+// 10) asString` (the pattern the companion flush tests use) looks right by
+// its doc but empirically returns the two-character string "10" here rather
+// than a single newline — those tests never notice because they only ever
+// use it for consistent byte-offset bookkeeping between an expected and an
+// actual string built the same way, never to produce source text that must
+// actually *parse*. This test does need a real newline (a valid two-line
+// class body), so it sidesteps the mismatch entirely via `unicode:characters_to_binary/1`.
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_classSource := "Value subclass: RemoveClassRoundTripDemo" ++ _nl ++ "  greet => ""hi from the destructive-flush e2e""" ++ _nl
+// => _
+
+File writeAll: _classPath contents: _classSource
+// => Result ok: nil
+
+File exists: _classPath
+// => true
+
+// `Workspace load:` compiles and installs the class exactly as a real,
+// already-on-disk project file would load — the same primitive `@load`
+// directives in every other test in this suite compile to.
+Workspace load: _classPath
+// => _
+
+Object allSubclasses includes: RemoveClassRoundTripDemo
+// => true
+
+RemoveClassRoundTripDemo new greet
+// => hi from the destructive-flush e2e
+
+// ===========================================================================
+// STEP 2 — removeFromSystem LOGS A DURABLE remove-class ENTRY
+// (ADR 0113 Phase 1, BT-3206)
+// ===========================================================================
+
+// Save a reference before removal — removeFromSystem unbinds the class name.
+_removedClassRef := RemoveClassRoundTripDemo
+// => _
+
+RemoveClassRoundTripDemo removeFromSystem
+// => nil
+
+Object allSubclasses includes: _removedClassRef
+// => false
+
+_removeClassEntry := (Workspace changes select: [:e | e className =:= #RemoveClassRoundTripDemo]) first
+// => _
+
+_removeClassEntry isRemoveClass
+// => true
+
+_removeClassEntry isDurable
+// => true
+
+// Real in-project source file → flushable, unlike the dynamically-declared
+// classes `remove_from_system.btscript` / `repl_remove_class_flush_destructive.btscript`
+// exercise.
+_removeClassEntry isFlushable
+// => true
+
+// The in-memory removal does not touch disk — only flush does.
+File exists: _classPath
+// => true
+
+// ===========================================================================
+// STEP 3 — Workspace flush REPORTS IT skipped: destructive, FILE SURVIVES
+// (ADR 0113 Phase 2, BT-3207)
+// ===========================================================================
+
+_tier1Flush := Workspace flush
+// => _
+
+Erlang maps get: #flushed with: _tier1Flush
+// => 0
+
+_skipped := Erlang maps get: #skipped with: _tier1Flush
+// => _
+
+_skipped size
+// => 1
+
+_skippedFirst := _skipped first
+// => _
+
+Erlang maps get: #reason with: _skippedFirst
+// => destructive
+
+File exists: _classPath
+// => true
+
+Workspace changes notEmpty
+// => true
+
+// ===========================================================================
+// STEP 4 — Workspace flushIncludingDestructive DELETES THE BACKING FILE
+// (ADR 0113 Phase 2, BT-3207)
+// ===========================================================================
+
+_destructiveFlush := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _destructiveFlush
+// => 1
+
+Erlang maps get: #removedClasses with: _destructiveFlush
+// => 1
+
+(Erlang maps get: #skipped with: _destructiveFlush) isEmpty
+// => true
+
+(Erlang maps get: #conflicts with: _destructiveFlush) isEmpty
+// => true
+
+File exists: _classPath
+// => false
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 5 — NEITHER THE LIVE IMAGE NOR A FRESH READ OF THE PATH SEES THE
+// CLASS ANY MORE — the end-to-end point of this test.
+// ===========================================================================
+
+// The class registry purge (BT-3105) already happened at removeFromSystem
+// time (Step 2); it is still gone after the file itself is deleted.
+Object allSubclasses includes: _removedClassRef
+// => false
+
+// The bare identifier no longer resolves to a class — a capitalised name
+// that once named a real class gets its own targeted "Class ... not found"
+// error (with a "Define X with: ..." hint) rather than the generic
+// "Undefined variable" a plain unbound local gets (see
+// `lazy_name_resolution.btscript`).
+RemoveClassRoundTripDemo
+// => ERROR: Class 'RemoveClassRoundTripDemo' not found
+
+// And a fresh compiler/REPL re-run against the (now-deleted) source path
+// finds nothing to load — the file-level half of "no longer sees the class".
+File exists: _classPath
+// => false
+
+File readAll: _classPath
+// => Result error: _
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _
