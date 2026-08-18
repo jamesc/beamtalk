@@ -717,6 +717,17 @@ reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
         SourceFile ->
             case beamtalk_repl_eval:revert_remove_class(PrevBody, SourceFile) of
                 {ok, _Objects} ->
+                    %% Mirrors `revert_removal/3`'s "undoing an add emits no new
+                    %% entry" symmetry: undoing this removal doesn't emit one
+                    %% either (`new_class_install/8`'s `no_log` mode), so the
+                    %% original `'remove-class'` entry must be retired here —
+                    %% otherwise it stays active/pending forever even though
+                    %% its effect has been undone (ADR 0113, BT-3208 review
+                    %% fix: a stale `'remove-class'` entry would misreport
+                    %% `skipped: destructive`/block a real future removal).
+                    ok = beamtalk_workspace_changelog:mark_flushed([
+                        beamtalk_workspace_changelog:entry_seq(Entry)
+                    ]),
                     class_object_for(ClassNameBin);
                 {error, Reason} ->
                     beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))

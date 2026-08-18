@@ -110,6 +110,7 @@ revert_e2e_test_() ->
             %% entries, and the post-flush "nothing to revert" degrade for both
             %% `"remove-method"` and `"remove-class"`.
             fun revert_remove_class_entry_reinstalls_the_class/1,
+            fun revert_remove_class_entry_leaves_no_phantom_pending_entry/1,
             fun revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1,
             fun revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_missing/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
@@ -900,6 +901,46 @@ revert_remove_class_entry_reinstalls_the_class(#{tmp := Tmp, unique := U}) ->
         ?_assert(is_pid(LoadedAfterRevert)),
         ?_assert(lists:member(base, AfterRevertMethods)),
         ?_assert(lists:member(greet, AfterRevertMethods))
+    ].
+
+%% Review fix (ADR 0113, BT-3208): reverting a "remove-class" entry must not
+%% leave the class permanently stuck as a phantom pending "new-class" — the
+%% reverted file was never deleted, so its content already matches disk. Before
+%% the fix, `new_class_install/7` unconditionally emitted a fresh 'new-class'
+%% ChangeEntry on every revert, which `method_delta/1` hardcodes as
+%% always-pending and `beamtalk_workspace_flush:prepare_new_class/3` treats any
+%% existing file as an unresolvable `target_exists` conflict — so the class
+%% could never again flush cleanly. Verifies both: no active entry remains for
+%% the class, and an ordinary flush reports nothing pending/no conflicts.
+revert_remove_class_entry_leaves_no_phantom_pending_entry(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3208RevertNoPhantom" ++ U),
+    {ok, _Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    ?assertMatch({ok, _}, RevertResult),
+    ActiveForClass = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassName
+    ],
+    {ok, FlushSummary} = beamtalk_workspace_flush:flush(),
+    FlushSkippedForClass = [
+        S
+     || S <- maps:get(skipped, FlushSummary),
+        maps:get(class, S, undefined) =:= ClassName
+    ],
+    FlushConflictsForClass = [
+        C
+     || C <- maps:get(conflicts, FlushSummary),
+        maps:get(class, C, undefined) =:= ClassName
+    ],
+    [
+        ?_assertEqual([], ActiveForClass),
+        ?_assertEqual([], FlushSkippedForClass),
+        ?_assertEqual([], FlushConflictsForClass)
     ].
 
 %% A dynamically-created class's `"remove-class"` entry has no recorded
