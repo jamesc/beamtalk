@@ -18774,6 +18774,29 @@
       "explanation": "BT-3198: fixture for the class-side extension self-dispatch test.  `callSelfExtension`'s self-send targets a selector that is not defined anywhere in this class or its ancestors — the paired test registers it as a class-side extension (via beamtalk_extensions, ADR 0066) before calling this method, so at runtime the self-send resolves through beamtalk_class_dispatch:class_self_dispatch/4. Before BT-3198, that function never consulted the extensions registry and this always raised does_not_understand.  See test/class_self_dispatch_extension_test.bt for the test."
     },
     {
+      "id": "stdlib-test-fixtures-bt3202-instance-self-extension",
+      "title": "Bt3202SelfExtHost",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Bt3202SelfExtHost",
+        "actor",
+        "async",
+        "bt3202_instance_self_extension",
+        "callSelfExtension",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "process",
+        "subclassing"
+      ],
+      "source": "// BT-3202: fixture for the instance-side extension self-dispatch test.\n//\n// `callSelfExtension`'s self-send targets a selector that is not defined\n// anywhere in this class or its ancestors — the paired test registers it\n// as an instance-side extension (via beamtalk_extensions, ADR 0066) before\n// calling this method, so at runtime the self-send resolves through\n// beamtalk_actor:sync_send/3 -> self_dispatch/2 -> beamtalk_dispatch:lookup/5\n// (the same DNU fallback external sends use — see BT-3202 for why this is\n// a regression test, not a fix: unlike the class-side self-send path\n// BT-3198 found broken, there is no separate instance-side self-send\n// dispatch function to have missed the extension registry).\n//\n// See test/instance_self_dispatch_extension_test.bt for the test.\n\nActor subclass: Bt3202SelfExtHost\n\n  callSelfExtension =>\n    @expect dnu\n    self bt3202SelfExtSel",
+      "explanation": "BT-3202: fixture for the instance-side extension self-dispatch test.  `callSelfExtension`'s self-send targets a selector that is not defined anywhere in this class or its ancestors — the paired test registers it as an instance-side extension (via beamtalk_extensions, ADR 0066) before calling this method, so at runtime the self-send resolves through beamtalk_actor:sync_send/3 -> self_dispatch/2 -> beamtalk_dispatch:lookup/5 (the same DNU fallback external sends use — see BT-3202 for why this is a regression test, not a fix: unlike the class-side self-send path BT-3198 found broken, there is no separate instance-side self-send dispatch function to have missed the extension registry).  See test/instance_self_dispatch_extension_test.bt for the test."
+    },
+    {
       "id": "stdlib-test-fixtures-bt3203-extension-priority-host",
       "title": "Bt3203ExtensionPriorityHost",
       "category": "stdlib-fixtures",
@@ -26154,6 +26177,29 @@
       ],
       "source": "// BT-413: Tests that value-type (Object subclass) instances can read class\n// variables via self class — same BT-413 invariant as actors but for\n// non-actor classes (e.g. ClassVarPoint)\n\nTestCase subclass: InstanceClassVarAccessValueTypeTest\n\n  testValueTypeInstanceAccessToClassVariable =>\n    self assert: ClassVarPoint instanceCount equals: 0\n    // Create a point via class method (increments instanceCount)\n    p1 := ClassVarPoint create: #{#x => 3, #y => 4}\n    // Verify it's a value type (has x field)\n    self assert: p1 x equals: 3\n    // Class variable was incremented\n    self assert: ClassVarPoint instanceCount equals: 1\n    // Instance reads class variable via self class (the key BT-413 feature)\n    self assert: p1 totalPoints equals: 1\n    // Create another point\n    p2 := ClassVarPoint create: #{#x => 1, #y => 2}\n    // Both instances see updated class variable\n    self assert: p1 totalPoints equals: 2\n    self assert: p2 totalPoints equals: 2",
       "explanation": "BT-413: Tests that value-type (Object subclass) instances can read class variables via self class — same BT-413 invariant as actors but for non-actor classes (e.g. ClassVarPoint)"
+    },
+    {
+      "id": "stdlib-test-instance-self-dispatch-extension-test",
+      "title": "InstanceSelfDispatchExtensionTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "InstanceSelfDispatchExtensionTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instance_self_dispatch_extension_test",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testInstanceMethodSelfSendReachesInstanceSideExtension"
+      ],
+      "source": "// BT-3202: instance-side extensions are reachable via `self extensionSel`\n// from inside another instance method of the same class, not just via an\n// external `receiver sel` send. This mirrors class_self_dispatch_extension_test.bt\n// (BT-3198's class-side counterpart) at the instance-side level — unlike the\n// class side, instance self-sends have no separate dispatch function that\n// could have missed the extensions registry (they fall through to the same\n// beamtalk_dispatch:lookup/5 an external send uses), so this is a regression\n// test pinning already-correct behavior rather than a fix.\n//\n// See fixtures/bt3202_instance_self_extension.bt for the host class whose\n// `callSelfExtension` instance method does the self-send.\n\nTestCase subclass: InstanceSelfDispatchExtensionTest\n\n  testInstanceMethodSelfSendReachesInstanceSideExtension =>\n    // Register instance-side: Bt3202SelfExtHost >> bt3202SelfExtSel => 42\n    extFun := [:a :s | 42]\n    Erlang beamtalk_extensions\n      register: #Bt3202SelfExtHost\n      selector: #bt3202SelfExtSel\n      fun: extFun\n      owner: #test\n    host := Bt3202SelfExtHost spawn\n    result := host callSelfExtension\n    extKey := Erlang erlang list_to_tuple: #(#Bt3202SelfExtHost, #bt3202SelfExtSel)\n    Erlang ets delete: #beamtalk_extensions key: extKey\n    self assert: result equals: 42",
+      "explanation": "BT-3202: instance-side extensions are reachable via `self extensionSel` from inside another instance method of the same class, not just via an external `receiver sel` send. This mirrors class_self_dispatch_extension_test.bt (BT-3198's class-side counterpart) at the instance-side level — unlike the class side, instance self-sends have no separate dispatch function that could have missed the extensions registry (they fall through to the same beamtalk_dispatch:lookup/5 an external send uses), so this is a regression test pinning already-correct behavior rather than a fix.  See fixtures/bt3202_instance_self_extension.bt for the host class whose `callSelfExtension` instance method does the self-send."
     },
     {
       "id": "stdlib-test-integer-bitwise-test",
