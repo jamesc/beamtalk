@@ -95,13 +95,16 @@ _classPath := _projDir ++ "/RemoveClassRoundTripDemo.bt"
 // => _
 
 // A genuine LF byte, built straight from the Erlang FFI: `(Character value:
-// 10) asString` (the pattern the companion flush tests use) looks right by
-// its doc but empirically returns the two-character string "10" here rather
-// than a single newline — those tests never notice because they only ever
-// use it for consistent byte-offset bookkeeping between an expected and an
-// actual string built the same way, never to produce source text that must
-// actually *parse*. This test does need a real newline (a valid two-line
-// class body), so it sidesteps the mismatch entirely via `unicode:characters_to_binary/1`.
+// 10) asString` (the pattern the companion flush tests use, correctly
+// parenthesized — not a unary-before-keyword precedence footgun) looks right
+// by its doc but empirically returns the two-character string "10" here
+// rather than a single newline; verified directly (isolated, first in the
+// suite) that the parenthesization isn't the cause. Filed as BT-3214. Those
+// companion tests never notice because they only ever use it for consistent
+// byte-offset bookkeeping between an expected and an actual string built the
+// same way, never to produce source text that must actually *parse*. This
+// test does need a real newline (a valid two-line class body), so it
+// sidesteps the mismatch entirely via `unicode:characters_to_binary/1`.
 _nl := (Erlang unicode) characters_to_binary: #(10)
 // => _
 
@@ -244,6 +247,16 @@ File readAll: _classPath
 // ===========================================================================
 // CLEANUP
 // ===========================================================================
+
+// Defensive: `flushIncludingDestructive` (step 4) already deleted _classPath
+// in the normal case, so this is expected to error `enoent` — tolerated with
+// a wildcard assertion. If the flush step itself regressed and left the file
+// behind (exactly the scenario this e2e test exists to catch), this cleans
+// it up anyway so `del_dir` below doesn't fail with `eexist` and leak the
+// temp directory across CI runs (mirrors workspace_flush_roundtrip.btscript's
+// cleanup, which deletes every constituent file before removing the dir).
+(Erlang file) delete: _classPath
+// => _
 
 (Erlang file) del_dir: _projDir
 // => Result ok: nil
