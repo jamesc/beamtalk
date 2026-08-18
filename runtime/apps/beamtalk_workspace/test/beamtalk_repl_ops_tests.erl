@@ -134,6 +134,14 @@ dispatch_tracing_invalid_arg_returns_error_term_test() ->
     ),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
+dispatch_nav_symbols_returns_value_term_test() ->
+    %% dispatch(<<"nav-symbols">>) delegates to handle_term/4, which always returns
+    %% {value, #{<<"classes">> := List}} — whether the class registry is absent
+    %% (empty list) or running (stdlib classes present).
+    Msg = make_msg(<<"nav-symbols">>),
+    Result = beamtalk_repl_ops:dispatch(<<"nav-symbols">>, #{}, Msg, self()),
+    ?assertMatch({value, #{<<"classes">> := Classes}} when is_list(Classes), Result).
+
 %% BT-2402: round-trip — encoding a dispatched term reproduces the handle_op JSON.
 encode_completions_term_matches_handle_op_json_test() ->
     Msg = make_msg(<<"complete">>),
@@ -187,6 +195,33 @@ encode_describe_term_matches_handle_op_json_test() ->
     Encoded = beamtalk_repl_ops:encode(Term, Msg),
     ViaServer = beamtalk_repl_server:handle_op(<<"describe">>, #{}, Msg, self()),
     ?assertEqual(ViaServer, Encoded).
+
+encode_loaded_term_produces_classes_json_test() ->
+    %% {loaded, Classes, Warnings} → JSON with "classes" list and "status": ["done"].
+    Msg = make_msg(<<"load-source">>),
+    Encoded = beamtalk_repl_ops:encode({loaded, [], []}, Msg),
+    Decoded = json:decode(Encoded),
+    ?assertEqual([], maps:get(<<"classes">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_codegen_term_produces_core_erlang_json_test() ->
+    %% {codegen, CoreErlang, Warnings} → JSON with "core_erlang" field and "status": ["done"].
+    Msg = make_msg(<<"show-codegen">>),
+    CoreErl = <<"module 'Foo' ['new'/0] { }">>,
+    Encoded = beamtalk_repl_ops:encode({codegen, CoreErl, []}, Msg),
+    Decoded = json:decode(Encoded),
+    ?assertEqual(CoreErl, maps:get(<<"core_erlang">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_inspect_binary_produces_state_json_test() ->
+    %% encode({inspect, Bin}) when is_binary(Bin) → binary inspect clause (line 243).
+    %% The binary form carries an already-serialised inspect string from the runtime.
+    Msg = make_msg(<<"inspect">>),
+    StateBin = <<"#Actor<foo> state: #{count => 0}">>,
+    Encoded = beamtalk_repl_ops:encode({inspect, StateBin}, Msg),
+    Decoded = json:decode(Encoded),
+    ?assertEqual(StateBin, maps:get(<<"state">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 %%====================================================================
 %% beamtalk_repl_subscriptions — facade
