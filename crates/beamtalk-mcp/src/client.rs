@@ -1715,6 +1715,124 @@ mod tests {
         result
     }
 
+    // --- ADR 0112 Phase 4 (BT-3188): remove_method MCP tool round-trip ---
+    //
+    // These exercise the same `evaluate` seam and expression shape the
+    // `remove_method` MCP tool builds (`crates/beamtalk-mcp::server::remove_method_expr`
+    // / `remove_method_if_absent_expr`) against a live workspace — the
+    // underlying `removeSelector:` / `removeSelector:ifAbsent:` primitive
+    // itself has full E2E coverage in
+    // `tests/repl-protocol/cases/remove_selector.btscript` (BT-3186); these
+    // tests pin that the MCP tool's constructed expression round-trips
+    // correctly through the same `evaluate` path the tool uses.
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_remove_method_success() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        // `Object subclass:` classes are not instantiable (class-methods-only,
+        // see "Object's Three Roles" in docs/beamtalk-language-features.md) —
+        // use `Actor subclass:` + `spawn` for a real instance to message,
+        // mirroring `remove_selector.btscript`'s instance-side removal case.
+        let resp = client
+            .eval("Actor subclass: McpRemoveMethodTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        let resp = client
+            .eval("mcpRemoveMethodTarget := McpRemoveMethodTarget spawn")
+            .await?;
+        assert!(!resp.is_error(), "spawn should succeed");
+
+        let resp = client.eval("mcpRemoveMethodTarget greet").await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "hi");
+
+        // Mirrors `remove_method_expr("McpRemoveMethodTarget", "greet")`.
+        let resp = client
+            .evaluate_with_options("McpRemoveMethodTarget removeSelector: #greet", false)
+            .await?;
+        assert!(
+            !resp.is_error(),
+            "removeSelector: should succeed: {:?}",
+            resp.error
+        );
+        assert_eq!(resp.value_string(), "McpRemoveMethodTarget");
+
+        let resp = client
+            .eval("McpRemoveMethodTarget includesSelector: #greet")
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "false");
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_remove_method_absent_selector_errors() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        let resp = client
+            .eval("Object subclass: McpRemoveMethodAbsentTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        // Mirrors `remove_method_expr("McpRemoveMethodAbsentTarget", "bogus")`.
+        let resp = client
+            .evaluate_with_options("McpRemoveMethodAbsentTarget removeSelector: #bogus", false)
+            .await?;
+        assert!(resp.is_error(), "removing an absent selector should error");
+        assert!(
+            resp.error_message().is_some(),
+            "should carry an error message"
+        );
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_remove_method_if_absent_returns_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        let resp = client
+            .eval("Object subclass: McpRemoveMethodIfAbsentTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        // Mirrors `remove_method_if_absent_expr("McpRemoveMethodIfAbsentTarget", "bogus", "\"not found\"")`.
+        let resp = client
+            .evaluate_with_options(
+                "McpRemoveMethodIfAbsentTarget removeSelector: #bogus ifAbsent: [\"not found\"]",
+                false,
+            )
+            .await?;
+        assert!(!resp.is_error(), "ifAbsent: fallback should not error");
+        assert_eq!(resp.value_string(), "not found");
+
+        // The defined selector still round-trips through the same shape,
+        // returning the receiver on success rather than running the fallback.
+        let resp = client
+            .evaluate_with_options(
+                "McpRemoveMethodIfAbsentTarget removeSelector: #greet ifAbsent: [\"not found\"]",
+                false,
+            )
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "McpRemoveMethodIfAbsentTarget");
+
+        client.close().await;
+        Ok(())
+    }
+
     /// Cleanup test that runs last (alphabetically after all other `test_*` tests).
     ///
     /// Stops the test workspace so the BEAM node doesn't linger for 5 minutes
