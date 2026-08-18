@@ -14861,6 +14861,29 @@
       "explanation": "BT-510, BT-776, ADR 0032 Phase 2: Tests class method reflection — methods returns only methods defined directly on the class, allMethods returns the full inheritance chain, and respondsTo: works on class objects"
     },
     {
+      "id": "stdlib-test-class-self-dispatch-extension-test",
+      "title": "ClassSelfDispatchExtensionTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ClassSelfDispatchExtensionTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "class_self_dispatch_extension_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testClassMethodSelfSendReachesClassSideExtension"
+      ],
+      "source": "// BT-3198: class-side extensions are reachable via `self extensionSel` from\n// inside another class method of the same class, not just via an external\n// `Target sel` / `Target class sel` send (BT-3192 fixed only the latter).\n//\n// See fixtures/bt3198_class_self_extension.bt for the host class whose\n// `callSelfExtension` class method does the self-send.\n\nTestCase subclass: ClassSelfDispatchExtensionTest\n\n  testClassMethodSelfSendReachesClassSideExtension =>\n    // Register class-side: Bt3198SelfExtHost class >> bt3198SelfExtSel => 42\n    // Before BT-3198, class_self_dispatch/4 never checked the extensions\n    // table, so this self-send raised does_not_understand.\n    extFun := [:a :s | 42]\n    Erlang beamtalk_extensions\n      register: #'Bt3198SelfExtHost class'\n      selector: #bt3198SelfExtSel\n      fun: extFun\n      owner: #test\n    result := Bt3198SelfExtHost callSelfExtension\n    Erlang ets delete: #beamtalk_extensions key: #(#'Bt3198SelfExtHost class', #bt3198SelfExtSel)\n    self assert: result equals: 42",
+      "explanation": "BT-3198: class-side extensions are reachable via `self extensionSel` from inside another class method of the same class, not just via an external `Target sel` / `Target class sel` send (BT-3192 fixed only the latter).  See fixtures/bt3198_class_self_extension.bt for the host class whose `callSelfExtension` class method does the self-send."
+    },
+    {
       "id": "stdlib-test-class-self-dispatch-test",
       "title": "ClassSelfDispatchTest",
       "category": "stdlib-tests",
@@ -18719,6 +18742,24 @@
       ],
       "source": "// BT-3163: BT3163WhileLoopInTryActor — pins the finding that a `whileTrue:`\n// loop as an `ensure:` try body's LAST statement compiles cleanly, even\n// with an earlier field mutation in the same try body forcing the inlined\n// (non-closure) try shape that made BT-3161's two flavors fail. Every\n// non-exhaustive boolean `case` `while_loops.rs` generates lives inside a\n// `letrec`-bound loop `fun`'s own body, entered via `apply` — a genuinely\n// separate BEAM function from the `try`'s own function, structurally unable\n// to trip erlc's `ambiguous_catch_try_state` beam_validator bug. See\n// `control_flow/while_loops.rs`'s module doc comment (BT-3163) for the full\n// analysis.\n\nActor subclass: BT3163WhileLoopInTryActor\n  state: count = 0\n\n  runUnsafe: startFlag =>\n    [\n      self.count := self.count + 1\n      [startFlag] whileTrue: [startFlag := false]\n    ] ensure: [nil]\n\n  getCount => self.count",
       "explanation": "BT-3163: BT3163WhileLoopInTryActor — pins the finding that a `whileTrue:` loop as an `ensure:` try body's LAST statement compiles cleanly, even with an earlier field mutation in the same try body forcing the inlined (non-closure) try shape that made BT-3161's two flavors fail. Every non-exhaustive boolean `case` `while_loops.rs` generates lives inside a `letrec`-bound loop `fun`'s own body, entered via `apply` — a genuinely separate BEAM function from the `try`'s own function, structurally unable to trip erlc's `ambiguous_catch_try_state` beam_validator bug. See `control_flow/while_loops.rs`'s module doc comment (BT-3163) for the full analysis."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3198-class-self-extension",
+      "title": "Bt3198SelfExtHost",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3198SelfExtHost",
+        "Value",
+        "bt3198_class_self_extension",
+        "callSelfExtension",
+        "extends",
+        "inherit",
+        "inheritance",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3198: fixture for the class-side extension self-dispatch test.\n//\n// `callSelfExtension`'s self-send targets a selector that is not defined\n// anywhere in this class or its ancestors — the paired test registers it\n// as a class-side extension (via beamtalk_extensions, ADR 0066) before\n// calling this method, so at runtime the self-send resolves through\n// beamtalk_class_dispatch:class_self_dispatch/4. Before BT-3198, that\n// function never consulted the extensions registry and this always raised\n// does_not_understand.\n//\n// See test/class_self_dispatch_extension_test.bt for the test.\n\nValue subclass: Bt3198SelfExtHost\n\n  class callSelfExtension =>\n    @expect dnu\n    self bt3198SelfExtSel",
+      "explanation": "BT-3198: fixture for the class-side extension self-dispatch test.  `callSelfExtension`'s self-send targets a selector that is not defined anywhere in this class or its ancestors — the paired test registers it as a class-side extension (via beamtalk_extensions, ADR 0066) before calling this method, so at runtime the self-send resolves through beamtalk_class_dispatch:class_self_dispatch/4. Before BT-3198, that function never consulted the extensions registry and this always raised does_not_understand.  See test/class_self_dispatch_extension_test.bt for the test."
     },
     {
       "id": "stdlib-test-fixtures-calculator",
