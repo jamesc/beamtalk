@@ -68,6 +68,10 @@ dispatch_test_() ->
             {"responds_to inherited method", fun test_responds_to_inherited_method/0},
             {"extension error caught and wrapped (BT-3199)",
                 fun test_extension_error_propagation/0},
+            {"BT-3199: a `^` non-local return in flight passes through a value-type extension",
+                fun test_extension_nlr_passthrough/0},
+            {"BT-3199: a connected Program exit: passes through a value-type extension",
+                fun test_extension_script_exit_passthrough/0},
             {"responds_to extension method", fun test_responds_to_extension_method/0},
             {"BT-283: dispatch lookup performance", fun test_dispatch_lookup_performance/0},
             {"BT-283: dynamic method found after put_method",
@@ -406,6 +410,68 @@ test_extension_error_propagation() ->
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', crashExt})
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% BT-3199 follow-up (post-review): a `^` non-local return in flight must
+%% pass through invoke_extension/6 untouched for a value-type (arity-2)
+%% extension, which runs inline in the caller's own process — the throw is a
+%% control-flow signal aimed at a catch further up this *same* call stack,
+%% not a crash to report. Mirrors
+%% beamtalk_class_dispatch_tests:test_invoke_nlr_relay_no_shadow/0 (the
+%% class-side sibling), using the same tagged tuple shape
+%% beamtalk_class_dispatch_test_helper:class_testNlrThrow/2 throws.
+test_extension_nlr_passthrough() ->
+    ok = beamtalk_extensions:init(),
+
+    NlrFun = fun(_Args, _Self) ->
+        throw({'$bt_nlr', bt3199_token, nlr_value, nlr_state})
+    end,
+    ok = beamtalk_extensions:register('Integer', bt3199NlrExt, NlrFun, test_owner),
+
+    State = #{'$beamtalk_class' => 'Integer'},
+    Self = 42,
+
+    try
+        ?assertThrow(
+            {'$bt_nlr', bt3199_token, nlr_value, nlr_state},
+            beamtalk_dispatch:lookup(bt3199NlrExt, [], Self, State, 'Integer')
+        )
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Integer', bt3199NlrExt})
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% BT-3199 follow-up (post-review): a connected `Program exit: N` (ADR 0099
+%% §3) must likewise pass through untouched rather than be reported as a
+%% method failure. Mirrors
+%% beamtalk_class_dispatch_tests:test_invoke_script_exit_passthrough/0 (the
+%% class-side sibling), using the same tagged tuple shape
+%% beamtalk_class_dispatch_test_helper:class_testScriptExit/2 throws.
+test_extension_script_exit_passthrough() ->
+    ok = beamtalk_extensions:init(),
+
+    ScriptExitFun = fun(_Args, _Self) ->
+        throw({beamtalk_script_exit, 7})
+    end,
+    ok = beamtalk_extensions:register('Integer', bt3199ScriptExitExt, ScriptExitFun, test_owner),
+
+    State = #{'$beamtalk_class' => 'Integer'},
+    Self = 42,
+
+    try
+        ?assertThrow(
+            {beamtalk_script_exit, 7},
+            beamtalk_dispatch:lookup(bt3199ScriptExitExt, [], Self, State, 'Integer')
+        )
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Integer', bt3199ScriptExitExt})
         catch
             _:_ -> ok
         end)

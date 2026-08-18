@@ -553,6 +553,22 @@ BT-3192 already established for class-side extensions (`ClassName` is the
 class the extension was registered under — `CurrentClass` from `lookup/5`
 or `SuperclassName` from `super/5` — used for the error's breadcrumb
 context, same role `MethodOwner` plays for `invoke_method/6`).
+
+A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
+flight (ADR 0041/BT-3022, thrown as `{'$bt_nlr', ...}` — see
+`beamtalk_result:'tryDo:'/1` for the same two tuple shapes) must pass through
+this frame untouched rather than be caught by the generic clause below: for a
+value-type extension (arity-2), `apply_extension_by_arity/4` runs the fun
+inline in the caller's own process, so the throw is a control-flow signal
+aimed at a catch further up that *same* call stack, not a crash to report —
+catching and wrapping it here would turn a non-local return into a spurious
+`#beamtalk_error{}` instead of letting it unwind. Mirrors the passthrough
+`beamtalk_class_dispatch:apply_class_extension_fun/6` already has for the
+class-side extension path (that sibling also relays the NLR outward via a
+tagged `{nlr_relay, ...}` return, since a class method crosses its
+gen_server's `handle_call` boundary and BT-3198's shadow-relay machinery
+needs the tag; plain instance dispatch has no such boundary to relay across
+here, so re-raising is enough).
 """.
 -spec invoke_extension(fun(), selector(), class_name(), args(), bt_self(), state()) ->
     dispatch_result().
@@ -561,6 +577,12 @@ invoke_extension(Fun, Selector, ClassName, Args, Self, State) ->
         {Result, NewState} = apply_extension_by_arity(Fun, Args, Self, State),
         {reply, Result, NewState}
     catch
+        throw:{beamtalk_script_exit, _} = ScriptExit:ScriptStack ->
+            erlang:raise(throw, ScriptExit, ScriptStack);
+        throw:{'$bt_nlr', _, _, _} = Nlr:NlrStack ->
+            erlang:raise(throw, Nlr, NlrStack);
+        throw:{'$bt_nlr', _, _} = Nlr:NlrStack ->
+            erlang:raise(throw, Nlr, NlrStack);
         Type:Reason:Stack ->
             ?LOG_DEBUG("Erlang error in extension method", #{
                 selector => Selector,
