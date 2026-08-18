@@ -31,7 +31,8 @@ Extracted from beamtalk_object_class.erl (BT-704).
     class_method_fun_name/1,
     is_test_execution_selector/1,
     handle_class_method_call/6,
-    handle_async_dispatch/5
+    handle_async_dispatch/5,
+    class_understands_class_selector/2
 ]).
 
 -type selector() :: atom().
@@ -1181,6 +1182,66 @@ superclass_from_ets(ClassName) ->
     case beamtalk_class_metadata:lookup_superclass(ClassName) of
         {ok, Super} -> Super;
         not_found -> none
+    end.
+
+-doc """
+BT-3200: Test whether `ClassName`'s own metaclass tag understands `Selector`
+— a class-side extension (ADR 0066), a local or inherited class method, or a
+local runtime-installed (ADR 0084) class method.
+
+Backs `beamtalk_object_ops:responds_to_result/3`'s `respondsTo:` on a
+class-object receiver. `SomeClass respondsTo: #sel` previously always
+answered against the generic `'Class'` protocol only (BT-776), because a
+class's metaclass tag (`'SomeClass class'`) is virtual — never registered
+as its own class in `beamtalk_class_registry`/`beamtalk_class_metadata` —
+so the existing hierarchy-walk reflection helper
+(`beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`) cannot be
+pointed at it directly: there is no such class row to walk from. This
+function instead re-implements "does dispatch find this selector" directly
+against `ClassName`'s own tables, mirroring `handle_class_method_call/6`'s
+priority order (extension, then local, then inherited chain) without
+actually invoking anything.
+
+Extensions are checked via the metaclass tag (matching how they are
+registered, ADR 0066); local and inherited class methods are checked
+against `ClassName` itself (the real registry entry) since class methods
+belong to the class, not a separate metaclass registry row. Returns `false`
+— not an error — for an unregistered `ClassName`, since every per-class
+lookup this function makes already degrades to `not_found`/`error` for a
+missing class; the generic-protocol fallback the caller applies next still
+answers correctly (`Class`/`Behaviour`/`Object` messages are independent of
+whether `ClassName` itself is currently registered).
+""".
+-spec class_understands_class_selector(class_name(), selector()) -> boolean().
+class_understands_class_selector(ClassName, Selector) ->
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+        {ok, _Fun} ->
+            true;
+        not_found ->
+            has_local_class_method(ClassName, Selector) orelse
+                (find_class_method_in_chain(Selector, ClassName) =/= not_found)
+    end.
+
+-doc """
+BT-3200: Does `ClassName` itself (not an ancestor) define `Selector` as a
+class method — either a compiled/static one (`lookup_methods/1`'s local
+selector list) or a runtime-installed one (ADR 0084,
+`lookup_class_method_fun/2`)? Mirrors the same two lookups
+`class_self_dispatch_local/4` already checks for a self-send, so
+`respondsTo:` agrees with what a `self sel` from inside another class
+method would actually resolve.
+""".
+-spec has_local_class_method(class_name(), selector()) -> boolean().
+has_local_class_method(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+        {ok, _Info} ->
+            true;
+        error ->
+            case beamtalk_class_metadata:lookup_methods(ClassName) of
+                {ok, _Module, Selectors} -> lists:member(Selector, Selectors);
+                not_found -> false
+            end
     end.
 
 -doc """

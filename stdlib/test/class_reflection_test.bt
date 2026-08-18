@@ -44,5 +44,36 @@ TestCase subclass: ClassReflectionTest
     // Non-existent methods should return false
     self deny: (Counter respondsTo: #bogus)
 
+  // BT-3200: respondsTo: on a class object now also reflects the class's OWN
+  // class methods (local and inherited) and class-side extensions, not just
+  // the generic Class/Behaviour/Object protocol BT-776 already covered above.
+  // InheritedChild/InheritedParent (fixtures/inherited_class_method*.bt) have
+  // real class methods and a real inheritance relationship to exercise both.
+  testRespondsToLocalClassMethod =>
+    // tagViaSelf is defined directly on InheritedChild.
+    self assert: (InheritedChild respondsTo: #tagViaSelf)
+
+  testRespondsToInheritedClassMethod =>
+    // parentTag is defined on InheritedParent only; InheritedChild inherits it.
+    self assert: (InheritedChild respondsTo: #parentTag)
+    self deny: (InheritedParent respondsTo: #tagViaSelf)
+
+  testRespondsToClassSideExtension =>
+    // Register class-side: InheritedChild class >> bt3200MeaningOfLife => 42
+    extFun := [:a :s | 42]
+    Erlang beamtalk_extensions
+      register: #'InheritedChild class'
+      selector: #bt3200MeaningOfLife
+      fun: extFun
+      owner: #test
+    self assert: (InheritedChild respondsTo: #bt3200MeaningOfLife)
+    // `#(...)` is an Array (Erlang list) literal, not a tuple — the ETS key
+    // beamtalk_extensions:register/4 stores is a 2-tuple, so it must be built
+    // with list_to_tuple: here rather than passed as a bare Array literal.
+    extKey := Erlang erlang list_to_tuple: #(#'InheritedChild class', #bt3200MeaningOfLife)
+    Erlang ets delete: #beamtalk_extensions key: extKey
+    // Gone once unregistered.
+    self deny: (InheritedChild respondsTo: #bt3200MeaningOfLife)
+
   // BT-942: superclass returns correct value via __beamtalk_meta/0 fast path
   testActorSuperclassReflection => self assert: Counter superclass equals: Actor
