@@ -110,6 +110,8 @@ ADR 0082's two-phase protocol (Phase A: validate every target, stage every write
 
 Because `remove-class` targets exactly one file, this ADR needs none of ADR 0082's *multi*-file sequencing complexity — a single staged rename, then a single unlink. A crash between the two leaves a recoverable `.tmp-delete-*` file on disk (nothing lost); a re-flush finishes the unlink. **This staged-rename step is the closest thing this ADR has to a tombstone, and it is intentionally ephemeral, not persistent** — see *Steelman Analysis*.
 
+**Disambiguating a missing `<file>` from a recoverable mid-delete crash.** Phase A's `stat <file>` can fail for two different reasons that look identical from `<file>`'s own absence: (a) this entry's own prior flush attempt already completed the rename-to-`.tmp-delete-*` step and crashed before the unlink, or (b) something else deleted `<file>` externally, unrelated to this entry. These need different handling — (a) must finish the unlink to complete the recorded operation, (b) is the soft-success/prune path below. The tie-breaker: before concluding "externally deleted," Phase A checks for `<file>.tmp-delete-<epoch>-<seq>` using this *entry's own* `epoch`/`seq` (already part of the ChangeLog entry's identity, per ADR 0082's schema). If it exists, this is case (a) — finish the unlink and complete the entry normally, not as a soft success. Only when no matching `.tmp-delete-*` exists does Phase A fall through to the external-deletion path below. This keeps the "a re-flush finishes the unlink" recovery claim actually true, rather than racing against the external-edit conflict table pruning the entry first and orphaning the staged file.
+
 ### Undo story
 
 `Workspace changes revert:` (ADR 0082) extends to both kinds, symmetric with `prev_source_ref`'s existing role:
@@ -128,7 +130,7 @@ Reuses ADR 0082's `(mtime, content-hash)` snapshot-and-compare mechanism verbati
 | Conflict | Detection | Resolution |
 |---|---|---|
 | Target file's content changed since the entry was logged (patch, `remove-method`) | Existing mechanism, unchanged | Existing choices: `flush:force`, `changes clear`, `changes diff:` |
-| Target file for a `remove-class` was already deleted externally | `stat` fails at Phase A | Surfaces as `already gone — nothing to remove`, a soft success: the entry is pruned, the outcome the user wanted already holds |
+| Target file for a `remove-class` was already deleted externally | `stat` fails at Phase A, **and no `<file>.tmp-delete-<epoch>-<seq>` matching this entry's own `epoch`/`seq` exists** (see *Delete atomicity* — that case is a mid-delete crash recovery, not an external deletion, and finishes the unlink instead) | Surfaces as `already gone — nothing to remove`, a soft success: the entry is pruned, the outcome the user wanted already holds |
 
 ### Reproducible-build guarantee
 
