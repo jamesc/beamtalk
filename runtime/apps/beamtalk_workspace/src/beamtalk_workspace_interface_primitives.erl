@@ -335,20 +335,31 @@ recheckImage() ->
     beamtalk_recheck:trigger_image().
 
 -doc """
-Revert a single ChangeEntry (ADR 0082 Phase 4, BT-2290).
+Revert a single ChangeEntry (ADR 0082 Phase 4, BT-2290; `remove-method`/
+`remove-class` extension ADR 0113, BT-3208).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogRevert: anEntry`
 from `ChangeLog>>revert:`. `Entry` is a `ChangeEntry` value-object map (or a
 plain map shaped the same way) carrying at least `className` (Symbol) and
 `selector` (Symbol). Looks up the most recent active entry for that
-`(class, selector)` target and re-installs its recorded `prev_source` via the
-durable `compile:source:` install path. The re-install itself emits a fresh
-`#instance`/`#class` ChangeEntry — per ADR 0082 the revert is "itself a patch,
-not log mutation" — so the original entry's audit history is preserved.
+`(class, selector)` target and, depending on what kind of entry it is:
 
-Reverting a `#'new-class'` entry is rejected with a structured error: deleting
-the in-memory class (and undoing the file creation on flush) is destructive
-and is deferred to the future "Destructive Workspace Operations" ADR.
+  - a *modify* (`instance`/`class` patch, or a `'remove-method'` removal) —
+    re-installs its recorded `prev_source` via the durable `compile:source:`
+    install path, emitting a fresh `#instance`/`#class` ChangeEntry (per ADR
+    0082, revert is "itself a patch, not log mutation", so the original
+    entry's audit history is preserved);
+  - an *add* (`'new-class'`, or a brand-new method) — removes what was added
+    (BT-2663/BT-2664/BT-2665);
+  - a `'remove-class'` removal — recompiles and reinstalls the whole class
+    from `prev_source_ref`, reusing the `newClass:at:` install path (ADR 0113,
+    BT-3208).
+
+Once flushed, an entry drops out of the active view (`is_active/1`) and
+`find_revert_target/3` reports `{error, no_entry}` for it — post-flush revert
+is unsupported by design (ADR 0082/0113: "best-effort, pre-flush semantics
+only"; post-flush undo is git's job, or a fresh corrective operation from the
+archived `prev_source_ref`).
 """.
 -spec changeLogRevert(term()) -> term().
 changeLogRevert(Entry) ->
@@ -583,6 +594,12 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             %% by removing the method (BT-2663/BT-2665) or the new class
             %% (BT-2664). The kind tells us which.
             revert_removal(ClassNameBin, SelectorAtom, Entry);
+        {reinstall_class, PrevBody, Entry} ->
+            %% A `'remove-class'` revert (ADR 0113, BT-3208): the pre-removal
+            %% state was "this class existed", so undo the removal by
+            %% recompiling and reinstalling the whole class from its recorded
+            %% prior source — a class-level target, not a single-method patch.
+            reinstall_reverted_class(ClassNameBin, PrevBody, Entry);
         {error, no_entry} ->
             beamtalk_error:raise(
                 revert_state_error(
@@ -596,12 +613,20 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
                 )
             );
         {error, no_prev_source} ->
+            %% Shared by every kind that can raise it: a method modify/removal
+            %% (the ChangeLog's own `sources/` copy is missing and the on-disk
+            %% span no longer resolves) and a `'remove-class'` removal (the
+            %% ChangeLog copy is missing AND either there is no recorded
+            %% `sourceFile` to fall back to — a dynamically-defined class — or
+            %% that file itself can no longer be read). "Prior body" covers
+            %% both a method body and a whole-file class source without
+            %% picking the wrong noun for either.
             beamtalk_error:raise(
                 revert_state_error(
                     <<
-                        "revert: this entry has no recorded prior body (the on-disk "
-                        "sources/ file is missing). Cannot reconstruct the pre-patch "
-                        "method body"
+                        "revert: this entry's prior body could not be recovered (the "
+                        "ChangeLog's recorded copy is missing, and no readable on-disk "
+                        "fallback exists). Cannot reconstruct the pre-patch state"
                     >>
                 )
             )
@@ -658,6 +683,98 @@ remove_reverted_class(ClassNameBin) ->
             nil;
         {error, Reason} ->
             beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+    end.
+
+-doc """
+Undo a `'remove-class'` entry (ADR 0113, BT-3208): recompile and reinstall the
+whole class from `PrevBody` (the entry's recorded `prev_source_ref`), reusing
+the same `newClass:at:` install chokepoint `new-class` revert already uses
+(ADR 0082, BT-2664) rather than a second whole-class-install mechanism.
+
+`Entry`'s `sourceFile` — the removed class's own recorded absolute path — is
+the reinstall target. A class removed with no recorded source file (a
+dynamically-defined class with nothing on disk to begin with, `flushable:
+false, not_flushable_reason: "dynamic"`) has nothing to reinstall *from*; this
+is a loud structured error rather than a silent no-op, matching this module's
+error contract elsewhere (never guess, never drop a revert silently).
+""".
+-spec reinstall_reverted_class(binary(), binary(), beamtalk_workspace_changelog:entry()) -> term().
+reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
+    case beamtalk_workspace_changelog:entry_source_file(Entry) of
+        undefined ->
+            beamtalk_error:raise(
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: cannot recreate ">>,
+                        ClassNameBin,
+                        <<
+                            "; its removal recorded no source file (a dynamically-defined "
+                            "class has nothing on disk to reinstall from)"
+                        >>
+                    ])
+                )
+            );
+        SourceFile ->
+            case beamtalk_repl_eval:revert_remove_class(PrevBody, SourceFile) of
+                {ok, _Objects} ->
+                    %% Mirrors `revert_removal/3`'s "undoing an add emits no new
+                    %% entry" symmetry: undoing this removal doesn't emit one
+                    %% either (`new_class_install/8`'s `no_log` mode), so the
+                    %% original `'remove-class'` entry must be retired here —
+                    %% otherwise it stays active/pending forever even though
+                    %% its effect has been undone (ADR 0113, BT-3208 review
+                    %% fix: a stale `'remove-class'` entry would misreport
+                    %% `skipped: destructive`/block a real future removal).
+                    retire_reverted_remove_class_entry(ClassNameBin, Entry);
+                {error, Reason} ->
+                    beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+            end
+    end.
+
+%% The class is already reinstalled and live by the time this runs — a
+%% ChangeLog write failure here must never surface as a raw crash (or, worse,
+%% leave the original entry silently stuck active/pending forever, which is
+%% the exact phantom-entry bug this whole revert path exists to avoid).
+%% Mirrors `beamtalk_workspace_flush:complete_flush/5`'s handling of the same
+%% `mark_flushed/1` call: catch a `gen_server` exit (unreachable/timeout) as
+%% well as an explicit `{error, _}`, and raise a structured error either way.
+-spec retire_reverted_remove_class_entry(binary(), beamtalk_workspace_changelog:entry()) ->
+    term().
+retire_reverted_remove_class_entry(ClassNameBin, Entry) ->
+    MarkResult =
+        try
+            beamtalk_workspace_changelog:mark_flushed([
+                beamtalk_workspace_changelog:entry_seq(Entry)
+            ])
+        catch
+            exit:ExitReason -> {error, {changelog_unreachable, ExitReason}}
+        end,
+    case MarkResult of
+        ok ->
+            class_object_for(ClassNameBin);
+        {error, Reason} ->
+            ?LOG_ERROR(
+                "revert: reinstalled class but failed to retire its remove-class entry",
+                #{
+                    class => ClassNameBin,
+                    seq => beamtalk_workspace_changelog:entry_seq(Entry),
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_error:raise(
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: ">>,
+                        ClassNameBin,
+                        <<
+                            " was reinstalled, but its old removal entry could not be "
+                            "retired (ChangeLog unreachable); it may still show as "
+                            "pending until a future flush or manual cleanup"
+                        >>
+                    ])
+                )
+            )
     end.
 
 -spec remove_reverted_method(binary(), atom(), instance | class) -> term().

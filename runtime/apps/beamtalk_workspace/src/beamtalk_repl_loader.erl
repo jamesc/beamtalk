@@ -45,6 +45,11 @@ Extracted from beamtalk_repl_eval (BT-863).
     verify_class_present/3,
     compute_package_module_name/1,
     new_class/2,
+    %% ADR 0113 (BT-3208) — `Workspace changes revert:` extension for a pending
+    %% `'remove-class'` entry: reinstalls the class from its recorded prior
+    %% source, reusing new_class/2's own compile+install chokepoint minus its
+    %% target-must-not-exist check (see revert_remove_class/2's doc for why).
+    revert_remove_class/2,
     %% ADR 0105 Phase 2 (BT-2780): called cross-module by
     %% beamtalk_workspace_shape_recheck_worker — see activate_module/3's doc.
     maybe_trigger_shape_recheck/1,
@@ -1417,11 +1422,61 @@ new_class(Source, TargetPath) when is_list(Source), is_list(TargetPath) ->
 new_class(_Source, _TargetPath) ->
     {error, new_class_type_error(<<"newClass:at: expects String source and path arguments">>)}.
 
+-doc """
+Recompile and reinstall a class from a recorded prior source, reusing the same
+compile+install chokepoint `newClass:at:` uses (ADR 0082, BT-2664) rather than
+a second whole-class-install mechanism (ADR 0113, BT-3208 — `Workspace changes
+revert:` extended to a pending `'remove-class'` entry).
+
+`TargetPath` is the removed class's own recorded `sourceFile` (already an
+absolute path — `class_source_file/1`'s value at removal time), and `Source`
+is the entry's `prev_source_ref` body: the exact whole-file text that was on
+disk immediately before the removal.
+
+Deliberately skips `new_class/2`'s `validate_target_path/1` step: that check
+exists to stop a *fresh* `newClass:at:` from silently overwriting an unrelated
+file, but a revert of a still-*pending* `'remove-class'` entry is restoring a
+file that was never actually deleted — Tier 2 (`flushIncludingDestructive`,
+ADR 0113) is the only thing that unlinks it, and a pending entry never reached
+that step. Requiring the target's *absence* here would reject the exact case
+this function exists to handle. Every other `newClass:at:` validation still
+runs via `new_class_compile/3`'s existing chain (declared name matches
+`TargetPath`'s basename, no class of that name is already loaded).
+
+Installs in `no_log` mode (see `new_class_install/8`): the reinstalled file was
+never actually deleted (revert is pre-flush-only), so its content already
+matches disk — emitting a fresh `'new-class'`-kind ChangeEntry here would
+permanently misrepresent it as a pending brand-new-file addition (that kind's
+`clean` check is hardcoded "always pending", and any later flush would treat
+the never-deleted file as an unresolvable `target_exists` conflict). The
+caller is responsible for retiring the original `'remove-class'` entry (e.g.
+`mark_flushed/1`) once this returns successfully — undoing a removal, like
+undoing an add (`revert_removal/3`'s `'new-class'` case), does not itself
+emit a new ChangeEntry.
+""".
+-spec revert_remove_class(binary() | string(), binary() | string()) ->
+    {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+revert_remove_class(Source, TargetPath) when is_binary(Source) ->
+    revert_remove_class(binary_to_list(Source), TargetPath);
+revert_remove_class(Source, TargetPath) when is_binary(TargetPath) ->
+    revert_remove_class(Source, binary_to_list(TargetPath));
+revert_remove_class(Source, TargetPath) when is_list(Source), is_list(TargetPath) ->
+    new_class_compile(Source, TargetPath, TargetPath, no_log);
+revert_remove_class(_Source, _TargetPath) ->
+    {error,
+        new_class_type_error(<<"revert: remove-class reinstall expects String source and path">>)}.
+
 %% Compile (without installing) to discover the declared class name, validate
-%% (c) name == basename and (d) not already loaded, then install + log.
+%% (c) name == basename and (d) not already loaded, then install (+ log unless
+%% `Mode` is `no_log` — see `new_class_install/8`).
 -spec new_class_compile(string(), string(), string()) ->
     {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_compile(Source, TargetPath, AbsPath) ->
+    new_class_compile(Source, TargetPath, AbsPath, log).
+
+-spec new_class_compile(string(), string(), string(), log | no_log) ->
+    {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+new_class_compile(Source, TargetPath, AbsPath, Mode) ->
     ModuleNameOverride = compute_package_module_name(TargetPath),
     StdlibMode = is_stdlib_path(TargetPath),
     %% `compile_file/4`'s success-typing return here is a class binary or an
@@ -1432,18 +1487,18 @@ new_class_compile(Source, TargetPath, AbsPath) ->
     case beamtalk_repl_compiler:compile_file(Source, TargetPath, StdlibMode, ModuleNameOverride) of
         {ok, Binary, ClassNames, ModuleName} ->
             new_class_validate_and_install(
-                Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName
+                Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, Mode
             );
         {error, Reason} ->
             {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
     end.
 
 %% With a successful compile, finish validation against the declared class name,
-%% then install the already-compiled binary and emit the new-class ChangeEntry.
+%% then install the already-compiled binary (+ log unless `Mode` is `no_log`).
 -spec new_class_validate_and_install(
-    string(), string(), string(), binary(), [map()], atom()
+    string(), string(), string(), binary(), [map()], atom(), log | no_log
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
-new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName) ->
+new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, Mode) ->
     case declared_class_name(ClassNames) of
         {error, _} = NameErr ->
             NameErr;
@@ -1451,7 +1506,14 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
             case validate_new_class(DeclaredName, TargetPath, class_loaded(DeclaredName)) of
                 ok ->
                     new_class_install(
-                        Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName
+                        Source,
+                        TargetPath,
+                        AbsPath,
+                        Binary,
+                        ClassNames,
+                        ModuleName,
+                        DeclaredName,
+                        Mode
                     );
                 {error, _} = ValErr ->
                     ValErr
@@ -1459,12 +1521,16 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
     end.
 
 %% Install the compiled binary in memory (mirrors load_compiled_module/6's
-%% activation path, but stateless) and emit the durable new-class ChangeEntry.
-%% A ChangeLog failure does not undo the install — the class is already live.
+%% activation path, but stateless). In `log` mode (ordinary `newClass:at:`,
+%% ADR 0082) also emits the durable new-class ChangeEntry and autoflushes; a
+%% ChangeLog failure does not undo the install — the class is already live.
+%% In `no_log` mode (a `'remove-class'` revert, ADR 0113 BT-3208 — see
+%% `revert_remove_class/2`'s doc) does neither: the file being reinstalled was
+%% never deleted, so there is nothing new to log or flush.
 -spec new_class_install(
-    string(), string(), string(), binary(), [map()], atom(), binary()
+    string(), string(), string(), binary(), [map()], atom(), binary(), log | no_log
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
-new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName) ->
+new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName, Mode) ->
     %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
     case load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
@@ -1479,11 +1545,19 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
                 end,
                 ClassNames
             ),
-            emit_new_class_entry(DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)),
-            %% ADR 0082 Phase 4: autoflush also covers new-class entries (they
-            %% are durable + flushable by construction). See the analogous
-            %% comment in load_recompiled_method/7 for the failure semantics.
-            maybe_autoflush(durable),
+            case Mode of
+                log ->
+                    emit_new_class_entry(
+                        DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)
+                    ),
+                    %% ADR 0082 Phase 4: autoflush also covers new-class entries
+                    %% (they are durable + flushable by construction). See the
+                    %% analogous comment in load_recompiled_method/7 for the
+                    %% failure semantics.
+                    maybe_autoflush(durable);
+                no_log ->
+                    ok
+            end,
             {ok, loaded_class_objects(ClassNames)};
         {error, LoadReason} ->
             ClassAtoms = class_name_atoms(ClassNames),
