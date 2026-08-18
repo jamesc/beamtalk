@@ -699,8 +699,10 @@ reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
                     iolist_to_binary([
                         <<"revert: cannot recreate ">>,
                         ClassNameBin,
-                        <<" — its removal recorded no source file (a dynamically-defined "
-                            "class has nothing on disk to reinstall from)">>
+                        <<
+                            "; its removal recorded no source file (a dynamically-defined "
+                            "class has nothing on disk to reinstall from)"
+                        >>
                     ])
                 )
             );

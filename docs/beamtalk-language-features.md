@@ -3861,6 +3861,15 @@ For removing a single method while keeping the class, see
 [`removeSelector:` / `removeSelector:ifAbsent:`](#removing-methods--removeselector-and-removeselectorifabsent-adr-0112)
 above.
 
+A pending (unflushed) `#'remove-class'` entry is revertable, same as any other
+ChangeLog entry: `Workspace changes revert: anEntry` recompiles and reinstalls
+the whole class from the entry's recorded prior source, reusing the same
+install path `newClass:at:` uses (ADR 0113 Phase 3). Once flushed — the `.bt`
+file actually deleted — the entry is pruned from the active view and `revert:`
+has nothing left to act on; recovering a flushed removal is git's job.
+`removeSelector:`'s `#'remove-method'` entries are revertable the same way
+(they re-install the removed method's recorded prior body).
+
 #### Destructive flush — `flushIncludingDestructive` and `confirmDestructive` (ADR 0113)
 
 Every flushable ChangeEntry classifies into one of two tiers:
