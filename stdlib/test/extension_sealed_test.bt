@@ -134,6 +134,15 @@ TestCase subclass: ExtensionSealedTest
     self assert: result equals: 30
 
   testExtensionDoesNotOverrideLocalMethod =>
+    // BT-3203: `Integer >> +` is a compiler intrinsic — codegen emits the
+    // BEAM arithmetic op directly and this call never reaches dispatch at
+    // all. So on its own this test only proves that intrinsics can't be
+    // shadowed by extensions; it does NOT by itself demonstrate general
+    // local-method-vs-extension dispatch priority. See
+    // testLocalMethodWinsOverExtensionForGenuinelyDispatchedMethod below,
+    // which confirms empirically that the same "local wins" outcome also
+    // holds for a real, non-intrinsic dispatched method — for a different
+    // reason (see that test's comment).
     // Register an extension with the same name as a local method
     extFun := [:a :s | 999]
     Erlang beamtalk_extensions
@@ -141,10 +150,47 @@ TestCase subclass: ExtensionSealedTest
       selector: #'+'
       fun: extFun
       owner: #test
-    // Local method should still win — extensions cannot override class-body methods
+    // Local method still wins here — but only because #'+' is an intrinsic
+    // that bypasses dispatch entirely, not because extensions generally lose.
     result := 2 + 3
     Erlang ets delete: #beamtalk_extensions key: #(#Integer, #'+')
     self assert: result equals: 5
+
+  testLocalMethodWinsOverExtensionForGenuinelyDispatchedMethod =>
+    // BT-3203: unlike Integer >> + above, Bt3203ExtensionPriorityHost >>
+    // localGreeting (stdlib/test/fixtures/bt3203_extension_priority_host.bt)
+    // is a real, non-intrinsic instance method that does reach compiled
+    // dispatch. Confirm the local method runs first...
+    host := Bt3203ExtensionPriorityHost new
+    self assert: host localGreeting equals: "local"
+    // ...then register an extension for the same selector.
+    //
+    // beamtalk_dispatch.erl's lookup/5 doc comment describes an
+    // extension-before-local-method-table order ("Step 1: check extension
+    // registry... Step 2: check class's own method table"), which might
+    // suggest the extension should win here. Empirically it does NOT:
+    // lookup/5's Step 1/Step 2 order only governs the module-less/
+    // hierarchy-walk fallback path (beamtalk_actor:dispatch_via_hierarchy/4,
+    // used for classes with no compiled module, and the supervisor-tuple
+    // path in beamtalk_message_dispatch:send/3). Every class compiled from
+    // a .bt file — Value, Object, and Actor alike — instead gets a generated
+    // dispatch/3 (or /4) function whose `case Selector of` matches each
+    // locally-defined method as its own clause; the extension registry is
+    // only consulted in the final default/`OtherSelector` arm, for
+    // selectors the class does NOT define locally (see
+    // value_type_codegen.rs generate_primitive_dispatch and
+    // gen_server/dispatch.rs generate_dispatch_default_case). So for every
+    // compiled class, a local method — intrinsic or not — always wins over
+    // a same-selector extension; extensions only ever add new selectors.
+    extFun := [:a :s | "extension"]
+    Erlang beamtalk_extensions
+      register: #Bt3203ExtensionPriorityHost
+      selector: #localGreeting
+      fun: extFun
+      owner: #test
+    result := host localGreeting
+    Erlang ets delete: #beamtalk_extensions key: #(#Bt3203ExtensionPriorityHost, #localGreeting)
+    self assert: result equals: "local"
 
   testRespondsToExtension =>
     // Register an extension and check respondsTo:
