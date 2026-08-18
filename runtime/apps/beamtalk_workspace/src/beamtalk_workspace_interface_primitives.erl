@@ -86,8 +86,11 @@ into REPL session state. Workspace readiness is detected via
 %% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
 -export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1]).
 %% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
-%% 0082 Phase 5, BT-2293).
--export([revert_method/2]).
+%% 0082 Phase 5, BT-2293). `revert_method/3` (ADR 0112, BT-3187) is the
+%% side-aware surface the LiveView `Workspace changes` row now calls with its
+%% own `side`; `revert_method/2` stays side-agnostic (highest-seq selection)
+%% for callers with no side information.
+-export([revert_method/2, revert_method/3]).
 -export([autoflush/0, setAutoflush/1]).
 %% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
 %% REPL identically to a file load.
@@ -319,6 +322,30 @@ changeLogRevert(Entry) ->
 Revert a single method patch by `(Class, Selector)` binaries, returning a
 structured result instead of raising (ADR 0082 Phase 5, BT-2293).
 
+Side-agnostic: falls back to `find_revert_target/3`'s highest-seq selection
+across both sides, same as passing `undefined` to `revert_method/3`. Kept for
+callers with no side information (and for backward compatibility — this was
+the original LiveView-facing surface); the LiveView `Workspace changes` row
+now calls `revert_method/3` with its own `side` instead (ADR 0112, BT-3187),
+since a same-selector instance-side and class-side entry are otherwise
+indistinguishable by `(Class, Selector)` alone and the wrong one — whichever
+has the higher `seq` — would be reverted.
+
+See `revert_method/3` for the full doc (error contract, atom-safety note on
+`SelectorBin`, etc.) — this is `revert_method/3(ClassNameBin, SelectorBin,
+undefined)`.
+""".
+-spec revert_method(binary(), binary()) -> {ok, term()} | {error, #beamtalk_error{}}.
+revert_method(ClassNameBin, SelectorBin) when
+    is_binary(ClassNameBin), is_binary(SelectorBin)
+->
+    revert_method(ClassNameBin, SelectorBin, undefined).
+
+-doc """
+Revert a single method patch by `(Class, Selector, Side)`, returning a
+structured result instead of raising (ADR 0082 Phase 5, BT-2293; side
+parameter added ADR 0112, BT-3187).
+
 The message-send entry point `changeLogRevert/1` `error/1`-raises a wrapped
 `#beamtalk_error{}` on any failure, which crosses an `rpc:call/4` as an opaque
 `{badrpc, {'EXIT', _}}`. The LiveView Attach client (`BtAttach.Workspace`)
@@ -327,6 +354,18 @@ needs the same clean `{ok, _} | {error, #beamtalk_error{}}` contract that
 wrapper catches the wrapped error and returns it directly. The `Selector` is
 the method-name binary carried by a `Workspace changes` row; a new-class entry
 (no selector) is rejected the same way as `changeLogRevert/1`, via `do_revert`.
+
+`Side` disambiguates a same-selector instance-side entry from a class-side one
+(e.g. an unflushed instance-side patch to `#foo` and a later class-side
+`removeSelector: #foo`, both active): without it, `find_revert_target/3` would
+pick whichever has the higher `seq` regardless of which row the owner actually
+clicked "revert" on. `SideArg` accepts the atoms `instance`/`class` (an
+in-node Erlang caller) or the binaries `<<"instance">>`/`<<"class">>` (the
+LiveView row's `phx-value-side`, which rides the LiveSocket as a string);
+`revert_side_field/1` (shared with `changeLogRevert/1`'s ChangeEntry-map path)
+normalises either to `find_revert_target/3`'s expected shape, and anything
+else (`undefined`, `nil`, an empty binary for a sideless new-class row) falls
+back to the side-agnostic highest-seq selection.
 
 `SelectorBin` is owner-controlled (it rides the `phx-value-selector` attribute
 over the LiveSocket), so the binary is resolved with `binary_to_existing_atom/2`
@@ -339,22 +378,15 @@ crash the node.
 (`find_revert_target/2` matches it against each entry's `#entry.class` binary and
 fails early for an unknown class), never converted to an atom.
 """.
--spec revert_method(binary(), binary()) -> {ok, term()} | {error, #beamtalk_error{}}.
-revert_method(ClassNameBin, SelectorBin) when
+-spec revert_method(binary(), binary(), term()) -> {ok, term()} | {error, #beamtalk_error{}}.
+revert_method(ClassNameBin, SelectorBin, SideArg) when
     is_binary(ClassNameBin), is_binary(SelectorBin)
 ->
+    Side = revert_side_field(SideArg),
     case existing_selector_atom(SelectorBin) of
         {ok, SelectorAtom} ->
             try
-                %% This `(Class, Selector)`-only surface has no ChangeEntry to
-                %% read a side from (it is driven by a `Workspace changes` row's
-                %% class/selector, e.g. from the LiveView Attach client), so it
-                %% cannot disambiguate an instance-side vs. class-side entry for
-                %% the same selector name. Pass `undefined` to preserve the
-                %% existing side-agnostic (highest-seq) selection — same as
-                %% `find_revert_target/2`. Callers that know which side they mean
-                %% should go through `changeLogRevert/1` with a ChangeEntry instead.
-                {ok, do_revert(ClassNameBin, SelectorAtom, undefined)}
+                {ok, do_revert(ClassNameBin, SelectorAtom, Side)}
             catch
                 %% `beamtalk_error:raise/1` wraps the structured error in a
                 %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map
@@ -375,6 +407,7 @@ revert_method(ClassNameBin, SelectorBin) when
                             reason => Reason,
                             target_class => ClassNameBin,
                             selector => SelectorAtom,
+                            side => Side,
                             stacktrace => Stacktrace
                         },
                         #{domain => [beamtalk, runtime]}
@@ -459,12 +492,19 @@ extract_revert_target_from_map(M) ->
                 )}
     end.
 
-%% Normalise the ChangeEntry `side` field to `find_revert_target/3`'s expected
-%% shape: `nil` (no side, e.g. a new-class entry) and any other non-`instance`/
-%% `class` value both mean "no side constraint" (`undefined`).
+%% Normalise a caller-supplied side value to `find_revert_target/3`'s expected
+%% shape. Shared by both revert entry points (ADR 0112, BT-3187): a
+%% ChangeEntry map's `side` field arrives as the atom `instance`/`class`/`nil`
+%% (`extract_revert_target_from_map/1`), while a LiveView `phx-value-side`
+%% attribute (`revert_method/3`) arrives as the binary `<<"instance">>`/
+%% `<<"class">>` over the LiveSocket. `nil`/`undefined`/an empty binary (a
+%% sideless new-class row's `side`) and any other unrecognised value all mean
+%% "no side constraint".
 -spec revert_side_field(term()) -> instance | class | undefined.
 revert_side_field(instance) -> instance;
 revert_side_field(class) -> class;
+revert_side_field(<<"instance">>) -> instance;
+revert_side_field(<<"class">>) -> class;
 revert_side_field(_Other) -> undefined.
 
 %% `TargetSide` (ADR 0112, BT-3187) narrows `find_revert_target/3`'s candidate
@@ -480,15 +520,21 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             %% A *modify* revert: re-install the recorded prior body on the
             %% entry's side. Instance and class side are both supported
             %% (BT-2665). This also covers reverting a `'remove-method'` entry
-            %% (ADR 0112, BT-3187) — its `prev_source_ref` is always set (the
-            %% removed method's prior body), so it reaches this branch exactly
+            %% (ADR 0112, BT-3187) — when its `prev_source_ref` is set (the
+            %% removed method's prior body), it reaches this branch exactly
             %% like an ordinary modify, and re-installing that body IS what
-            %% undoes the removal. `revert_side/1` resolves the side for both
-            %% shapes via `entry_side/1` (derived from `kind` for legacy
-            %% instance/class entries, read directly for `'remove-method'`
-            %% ones). A `'new-class'`/`unknown` kind cannot reach this branch:
-            %% new-class yields `{remove, _}`, and any future sideless kind
-            %% fails loudly via `revert_side/1`.
+            %% undoes the removal. `prev_source_ref` is NOT always set, though:
+            %% `beamtalk_repl_loader:resolve_removal_span_entry/6`'s
+            %% `not_on_disk` branch (a live, never-flushed method being
+            %% removed) records no `prev_source`/`source_file` at all, so that
+            %% case never reaches here — `find_revert_target/3` raises a loud
+            %% `no_prev_source` error instead, which is the correct behavior
+            %% (never silently drop the revert). `revert_side/1` resolves the
+            %% side for both shapes via `entry_side/1` (derived from `kind` for
+            %% legacy instance/class entries, read directly for
+            %% `'remove-method'` ones). A `'new-class'`/`unknown` kind cannot
+            %% reach this branch: new-class yields `{remove, _}`, and any
+            %% future sideless kind fails loudly via `revert_side/1`.
             Side = revert_side(Entry),
             install_revert_patch(ClassNameBin, SelectorAtom, PrevBody, Side);
         {remove, Entry} ->

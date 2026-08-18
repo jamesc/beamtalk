@@ -1553,7 +1553,16 @@ defmodule BtAttach.Workspace do
   recent active entry for that target, itself emitting a fresh durable
   ChangeEntry (the original entry stays in the audit log).
 
-  Calls `beamtalk_workspace_interface_primitives:revert_method/2`, the
+  `side` disambiguates a same-selector instance-side entry from a class-side
+  one (ADR 0112, BT-3187) — e.g. an unflushed instance-side patch to `#foo` and
+  a later class-side `removeSelector: #foo`, both active — which are otherwise
+  indistinguishable by `(class, selector)` alone; without it the highest-`seq`
+  entry wins regardless of which row the owner actually clicked "revert" on.
+  Pass the `side` binary (`"instance"` / `"class"`) carried by the
+  `change_history/0` row being reverted, or `nil` when it is not known (a
+  new-class row has no side).
+
+  Calls `beamtalk_workspace_interface_primitives:revert_method/3`, the
   clean-returning wrapper over the FFI `changeLogRevert/1` (which would `error`-
   raise across the dist boundary). `class` and `selector` are the binaries
   carried by a `change_history/0` row.
@@ -1562,8 +1571,8 @@ defmodule BtAttach.Workspace do
   a non-revertable entry (new-class creation, class-side patch, no recorded
   prior body, or no active entry) / an unreachable workspace.
   """
-  def revert(class, selector) when is_binary(class) and is_binary(selector) do
-    case rpc(:beamtalk_workspace_interface_primitives, :revert_method, [class, selector]) do
+  def revert(class, selector, side \\ nil) when is_binary(class) and is_binary(selector) do
+    case rpc(:beamtalk_workspace_interface_primitives, :revert_method, [class, selector, side]) do
       {:ok, _class_object} ->
         {:ok, class}
 
@@ -1932,7 +1941,12 @@ defmodule BtAttach.Workspace do
       flushable: Map.get(entry, :flushable, false) == true,
       flushed: Map.get(entry, :flushed, false) == true,
       author_kind: to_string(Map.get(entry, :authorKind, "")),
-      diff: present_diff(Map.get(entry, :diff))
+      diff: present_diff(Map.get(entry, :diff)),
+      # ADR 0112 (BT-3187): "instance"/"class", or nil for a sideless
+      # (new-class) entry. Threaded back into `revert/3` by the ChangeLog
+      # viewer's per-row revert button so a same-selector instance-side/
+      # class-side pair is not ambiguous.
+      side: present_side(Map.get(entry, :side))
     }
   end
 
@@ -1946,6 +1960,13 @@ defmodule BtAttach.Workspace do
   # a junk value.
   defp present_diff(diff) when is_binary(diff) and diff != "", do: diff
   defp present_diff(_), do: nil
+
+  # ChangeEntry `side` (ADR 0112, BT-3187) arrives as the atom `nil` (a
+  # sideless new-class entry), or `instance`/`class`. Render the atom
+  # verbatim as a binary for the row/`revert/3`; keep `nil` as `nil` (not the
+  # string `"nil"`) so it round-trips as "no side constraint".
+  defp present_side(nil), do: nil
+  defp present_side(side), do: to_string(side)
 
   # Turn a runtime `{error, Reason}` into a structured `#beamtalk_error{}` term so
   # the LiveView renders an actionable message. `ensure_structured_error/1` is the

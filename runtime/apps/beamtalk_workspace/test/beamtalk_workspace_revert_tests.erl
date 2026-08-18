@@ -80,7 +80,10 @@ revert_e2e_test_() ->
             fun remove_selector_and_instance_patch_do_not_shadow_across_sides/1,
             fun revert_remove_method_entry_restores_removed_instance_method/1,
             fun revert_remove_method_entry_restores_removed_class_side_method/1,
-            fun revert_selects_correct_side_entry_when_both_sides_have_entries/1
+            fun revert_selects_correct_side_entry_when_both_sides_have_entries/1,
+            fun revert_method_selects_correct_side_entry_when_both_sides_have_entries/1,
+            fun revert_method_side_agnostic_fallback_still_picks_highest_seq/1,
+            fun recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1
         ]}}.
 
 %% Start the heavy, node-global apps once for the whole suite (the compiler port
@@ -652,6 +655,127 @@ revert_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := Tmp, uni
         %% The instance-side method is still present (P1's revert re-installs
         %% its prior body in place, it does not remove the method).
         ?_assert(lists:member(foo, AfterRevertInstanceMethods))
+    ].
+
+%% ADR 0112 (BT-3187) required fix: `revert_method/2` — the LiveView "Workspace
+%% changes" ChangeLog viewer's *only* revert entry point
+%% (`BtAttach.Workspace.revert/2,3` calls `revert_method/3`) — must resolve the
+%% same way the ChangeEntry-based `changeLogRevert/1` surface above does when
+%% given an explicit side, not stay side-blind. Same fixture as
+%% `revert_selects_correct_side_entry_when_both_sides_have_entries/1` above
+%% (an instance-side durable patch to `#foo`, then a higher-seq class-side
+%% `removeSelector: #foo`), but driven through `revert_method/3` with the
+%% *binary* side a `phx-value-side` attribute arrives as (not a ChangeEntry
+%% map) — exactly the LiveView row → RPC path.
+revert_method_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187RevertMethodPickSide" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  foo => 1\n", "  class foo => 2\n"]
+    ),
+    %% P1: instance-side durable patch to #foo.
+    {ok, _} = beamtalk_repl_eval:compile_method(
+        ClassName, <<"foo">>, <<"^ 99">>, durable, <<"sess">>, human, instance
+    ),
+    %% R1: class-side removal of #foo, logged after P1 (higher seq).
+    ClassSelf = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(ClassSelf, foo),
+    BeforeRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
+    BeforeRevertInstanceMethods = beamtalk_runtime_api:local_instance_methods(Pid),
+    %% Revert P1 via `revert_method/3` with `<<"instance">>` — the (class,
+    %% selector, side) triple the LiveView row's revert button now sends,
+    %% instead of the old side-blind `revert_method/2`.
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"foo">>, <<"instance">>
+    ),
+    AfterRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
+    AfterRevertInstanceMethods = beamtalk_runtime_api:local_instance_methods(Pid),
+    [
+        %% Sanity on the fixture: class-side foo is gone, instance-side foo is
+        %% still there (patched to 99) before the revert.
+        ?_assertNot(lists:member(foo, BeforeRevertClassMethods)),
+        ?_assert(lists:member(foo, BeforeRevertInstanceMethods)),
+        ?_assertMatch({ok, _}, RevertResult),
+        %% The class-side removal (R1) must be untouched by reverting P1 — the
+        %% wrong-side bug this regression guards against re-installed R1's
+        %% class-side foo instead, because side-blind selection picked the
+        %% higher-seq entry regardless of which row was clicked.
+        ?_assertNot(lists:member(foo, AfterRevertClassMethods)),
+        %% The instance-side method is still present (P1's revert re-installs
+        %% its prior body in place, it does not remove the method).
+        ?_assert(lists:member(foo, AfterRevertInstanceMethods))
+    ].
+
+%% `revert_method/2` (no side argument) stays side-agnostic on purpose — it is
+%% `revert_method/3(Class, Selector, undefined)` — for callers with no side
+%% information. Same fixture as the two tests above, but asserts the
+%% *intentional* highest-seq fallback: with no side given, `revert_method/2`
+%% picks R1 (the class-side removal, higher seq) over P1 (the instance-side
+%% patch), re-installing the class-side `foo` R1 removed rather than restoring
+%% P1's prior instance-side body. This documents the still-supported
+%% side-agnostic contract so a future change doesn't silently alter it.
+revert_method_side_agnostic_fallback_still_picks_highest_seq(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187RevertMethodNoSide" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  foo => 1\n", "  class foo => 2\n"]
+    ),
+    %% P1: instance-side durable patch to #foo.
+    {ok, _} = beamtalk_repl_eval:compile_method(
+        ClassName, <<"foo">>, <<"^ 99">>, durable, <<"sess">>, human, instance
+    ),
+    %% R1: class-side removal of #foo, logged after P1 (higher seq).
+    ClassSelf = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(ClassSelf, foo),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"foo">>),
+    AfterRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
+    [
+        ?_assertMatch({ok, _}, RevertResult),
+        %% Side-agnostic fallback picked R1 (highest seq) — the class-side
+        %% removal is undone, re-installing class-side foo.
+        ?_assert(lists:member(foo, AfterRevertClassMethods))
+    ].
+
+%% ADR 0112 (BT-3187) required fix: `recover_prev_from_disk/1` — the fallback
+%% `find_revert_target/3` reaches when an entry's recorded `prev_source_ref`
+%% body file cannot be read (a rotation/cleanup race; here simulated by
+%% deleting it out from under a genuine `'remove-method'` entry) — must resolve
+%% the on-disk method span using `entry_side(Entry)`, not the entry's raw
+%% `kind`. `kind` for a `'remove-method'` entry is the atom `'remove-method'`,
+%% which `beamtalk_compiler:resolve_method_span/4` rejects outright (its `Side`
+%% guard only accepts `instance`/`class`), so pre-fix this always failed with
+%% `bad_argument` — surfacing as `{error, no_prev_source}` — even though the
+%% class-side method `build` is still sitting right there on disk (the removal
+%% was never flushed).
+recover_prev_from_disk_resolves_remove_method_entry_via_entry_side(#{
+    tmp := Tmp, unique := U, workspace_id := WorkspaceId
+}) ->
+    ClassName = list_to_binary("Bt3187RecoverDisk" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  class keep => 1\n", "  class build => 2\n"]
+    ),
+    Self = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    Entry = only_remove_method_entry(ClassName, <<"build">>),
+    %% Sanity on the fixture: the entry recorded a real prior body (the normal
+    %% flow — `resolve_removal_span_entry/6` found `build` on disk and
+    %% captured it), so this test exercises the "body file unreadable" fallback
+    %% specifically, not the (already-covered) "never recorded" one.
+    PrevRef = beamtalk_workspace_changelog:entry_prev_source_ref(Entry),
+    true = is_binary(PrevRef),
+    %% Simulate the rotation/cleanup race: the recorded prior-body file is gone,
+    %% but the class's own on-disk source (still containing `build`, since the
+    %% removal was never flushed) is untouched.
+    SourcesDir = filename:join(beamtalk_workspace_changelog:changes_dir(WorkspaceId), "sources"),
+    PrevBodyPath = filename:join(SourcesDir, binary_to_list(PrevRef)),
+    ok = file:delete(PrevBodyPath),
+    Result = beamtalk_workspace_changelog:find_revert_target(ClassName, <<"build">>),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"build">>),
+    AfterRevert = beamtalk_runtime_api:local_class_methods(Pid),
+    [
+        %% Recovered from disk (the class-side kind resolved via entry_side/1),
+        %% not the `{error, no_prev_source}` the raw-`kind` bug produced.
+        ?_assertMatch({ok, _Body, _Entry}, Result),
+        ?_assertMatch({ok, _}, RevertResult),
+        ?_assert(lists:member(build, AfterRevert))
     ].
 
 %%====================================================================

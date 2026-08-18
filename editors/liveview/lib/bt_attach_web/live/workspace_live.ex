@@ -1719,11 +1719,15 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Revert one pending in-memory method patch (ADR 0082 Phase 5 `Workspace
   # changes revert:`, BT-2293), keyed by the `(class, selector)` carried on the
-  # ChangeLog row's revert button. Refreshes the Changes pane so the fresh
-  # revert entry is visible.
-  def handle_event("revert", %{"class" => class, "selector" => selector}, socket)
+  # ChangeLog row's revert button. `side` (ADR 0112, BT-3187) is the same
+  # row's `side` — required to disambiguate a same-selector instance-side
+  # entry from a class-side one, which are otherwise indistinguishable by
+  # `(class, selector)` alone. Refreshes the Changes pane so the fresh revert
+  # entry is visible.
+  def handle_event("revert", %{"class" => class, "selector" => selector} = params, socket)
       when is_binary(class) and is_binary(selector) do
-    {:noreply, revert_change(socket, class, selector)}
+    side = present_revert_side(Map.get(params, "side"))
+    {:noreply, revert_change(socket, class, selector, side)}
   end
 
   # Malformed payload (missing keys / non-binary values): surface a validation
@@ -3810,12 +3814,20 @@ defmodule BtAttachWeb.WorkspaceLive do
     snake_chars(rest, c >= ?a and c <= ?z, [c | acc])
   end
 
+  # Normalise the `phx-value-side` param (a plain HTML attribute string) to the
+  # `side` the Facade/`revert/3` expect: `""` (a sideless new-class row's
+  # `phx-value-side={c[:side] || ""}`) and a missing/non-binary value both mean
+  # "no side constraint" (ADR 0112, BT-3187).
+  defp present_revert_side(side) when is_binary(side) and side != "", do: side
+  defp present_revert_side(_), do: nil
+
   # Revert one pending method patch (BT-2293). On success the prior body is
   # re-installed (a fresh durable entry) and the Changes pane refreshes; a
   # non-revertable entry (new-class, class-side, no prior body) renders the
-  # structured error the workspace returns.
-  defp revert_change(socket, class, selector) do
-    case Facade.dispatch(:revert, %{class: class, selector: selector}, ctx(socket)) do
+  # structured error the workspace returns. `side` (ADR 0112, BT-3187)
+  # disambiguates a same-selector instance-side entry from a class-side one.
+  defp revert_change(socket, class, selector, side) do
+    case Facade.dispatch(:revert, %{class: class, selector: selector, side: side}, ctx(socket)) do
       {:ok, reverted_class} ->
         socket
         |> assign(
@@ -9203,7 +9215,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                                    kind hides the affordance rather than offering one
                                    that errors. New-class rows carry no selector, so
                                    send the `new-class` placeholder the workspace maps
-                                   back to the class's new-class entry. --%>
+                                   back to the class's new-class entry.
+
+                                   `phx-value-side` (ADR 0112, BT-3187) carries this
+                                   *row's* side (`"instance"`/`"class"`, or `""` for a
+                                   sideless new-class row) into the revert call, so a
+                                   same-selector instance-side and class-side entry —
+                                   otherwise indistinguishable by (class, selector)
+                                   alone — resolve to the one this row actually shows,
+                                   not whichever has the higher seq. --%>
                               <td :if={@role == :owner}>
                                 <button
                                   :if={c.kind in ["instance", "class", "new-class"]}
@@ -9214,6 +9234,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                   phx-value-selector={
                                     if(c.kind == "new-class", do: "new-class", else: c.selector)
                                   }
+                                  phx-value-side={c[:side] || ""}
                                   phx-disable-with="Reverting…"
                                 >
                                   revert

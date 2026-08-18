@@ -496,13 +496,19 @@ match_selector(SelectorBin) -> SelectorBin.
 -spec recover_prev_from_disk(entry()) ->
     {ok, binary(), entry()} | {remove, entry()} | {error, no_prev_source}.
 recover_prev_from_disk(
-    #entry{source_file = File, class = Class, selector = Selector, kind = Kind} = Entry
+    #entry{source_file = File, class = Class, selector = Selector} = Entry
 ) when
     is_binary(File), is_binary(Selector)
 ->
+    %% `resolve_method_span/4` only accepts `instance` | `class` for `Side`; the
+    %% entry's raw `kind` can be `'remove-method'` (ADR 0112, BT-3187), which
+    %% would always fail with `bad_argument` here. `entry_side/1` normalises
+    %% both the legacy `instance`/`class`-kind shape and the explicit `side`
+    %% field a `'remove-method'` entry carries.
+    Side = entry_side(Entry),
     case file:read_file(File) of
         {ok, DiskSource} ->
-            case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Kind) of
+            case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Side) of
                 {ok, _Span, PrevBody} ->
                     %% Selector present on disk → a modify; re-install the body.
                     {ok, PrevBody, Entry};
