@@ -83,6 +83,7 @@ flush_test_() ->
         fun remove_class_flush_including_destructive_deletes_file/1,
         fun remove_class_flush_two_confirm_true_deletes_file/1,
         fun remove_class_flush_two_confirm_false_is_skipped/1,
+        fun filter_by_remove_class_selector/1,
         fun flush_kinds_remove_class_requires_confirm/1,
         fun flush_kinds_remove_class_with_confirm_deletes_file/1,
         fun remove_class_already_gone_is_soft_success/1,
@@ -1487,6 +1488,23 @@ remove_class_flush_two_confirm_false_is_skipped(#{proj_dir := ProjDir}) ->
         ?_assertEqual(0, maps:get(flushed, Summary)),
         ?_assertEqual(1, length(maps:get(skipped, Summary))),
         ?_assertEqual(true, filelib:is_regular(File))
+    ].
+
+%% `flush: #'remove-class' confirmDestructive: true` — the bare-symbol form of
+%% `flush:confirmDestructive:` — filters on kind, not selector (a `'remove-class'`
+%% entry's selector is always null, so matching on entry_selector/1 would
+%% silently match zero entries and report `flushed: 0` with nothing skipped).
+filter_by_remove_class_selector(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush('remove-class', true),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(false, filelib:is_regular(File))
     ].
 
 %% `flushKinds: #{#'remove-class'}` (no confirm) leaves the destructive entry

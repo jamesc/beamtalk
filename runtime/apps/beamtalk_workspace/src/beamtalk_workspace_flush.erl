@@ -485,8 +485,16 @@ filter_entries(Entries, any) ->
     Entries;
 filter_entries(Entries, {class, ClassBin}) ->
     [E || E <- Entries, beamtalk_workspace_changelog:entry_class(E) =:= ClassBin];
-filter_entries(Entries, {selector, 'new-class'}) ->
-    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= 'new-class'];
+filter_entries(Entries, {selector, Sel}) when
+    Sel =:= 'new-class'; Sel =:= 'remove-method'; Sel =:= 'remove-class'
+->
+    %% These three kinds always carry selector: null (BT-3206/BT-3187/ADR
+    %% 0082), so matching on entry_selector/1 would silently return nothing —
+    %% filter on kind instead. Unlike `instance`/`class` (also valid kind()
+    %% values, but ambiguous with real getter selectors of the same name),
+    %% none of these three collides with a plausible method selector, so
+    %% redirecting them to kind-matching is unambiguous.
+    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= Sel];
 filter_entries(Entries, {selector, Sel}) ->
     SelBin = atom_to_binary(Sel, utf8),
     [E || E <- Entries, beamtalk_workspace_changelog:entry_selector(E) =:= SelBin];
