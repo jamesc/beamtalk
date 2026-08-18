@@ -42,6 +42,16 @@ TestCase subclass: WorkspaceInterfaceTest
   testIncludesSelectorFlushColon =>
     self assert: (WorkspaceInterface includesSelector: #flush:)
 
+  // ADR 0113 Phase 2 (BT-3207): destructive-tier flush selectors. Live
+  // tiering behaviour is covered in beamtalk_workspace_flush_tests (EUnit)
+  // and tests/repl-protocol/cases/workspace_flush_destructive.btscript;
+  // BUnit only verifies the selectors are present on the facade.
+  testIncludesSelectorFlushIncludingDestructive =>
+    self assert: (WorkspaceInterface includesSelector: #flushIncludingDestructive)
+
+  testIncludesSelectorFlushConfirmDestructive =>
+    self assert: (WorkspaceInterface includesSelector: #flush:confirmDestructive:)
+
   testIncludesSelectorTest =>
     self assert: (WorkspaceInterface includesSelector: #test)
 

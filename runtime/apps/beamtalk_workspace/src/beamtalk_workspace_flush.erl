@@ -6,12 +6,28 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-`Workspace flush` and `Workspace flush:` implementation (ADR 0082 Phase 2).
+`Workspace flush` and `Workspace flush:` implementation (ADR 0082 Phase 2;
+destructive tiering per ADR 0113 Phase 2).
 
 Writes pending ChangeLog entries to disk via trivia-preserving byte-span splice
 (no AST reprint), atomically (`<file>.tmp` → atomic rename), with external-edit
 conflict detection and post-write pruning of the affected entries from the
 active view.
+
+## Tiers (ADR 0113)
+
+Every flushable entry classifies into one of two tiers (`entry_tier/1`):
+
+  - **Tier 1** — edits a still-existing file: patches (`instance`/`class`),
+    `'new-class'`, and `'remove-method'` (excising a recorded span leaves the
+    file in place, mechanically identical to a patch). Applied by ordinary
+    `flush/0` / `flush/1` / `flush_kinds/1` with no gate.
+  - **Tier 2** — destroys a file: `'remove-class'`. Only applied when the
+    caller passes `ConfirmDestructive = true` (`flush/2`, `flush_kinds/2`) or
+    calls the unscoped `flush_including_destructive/0`. Never silently
+    reached — no workspace setting or environment variable can imply it. A
+    pending Tier 2 entry left out of the applied set is reported in the
+    summary's `skipped` field with `reason => <<"destructive">>`.
 
 ## Selection
 
@@ -67,6 +83,40 @@ This is the strongest atomicity achievable without a filesystem transaction.
 It ensures the failure mode is *recoverable via re-flush*, never silent data
 loss.
 
+## Atomicity (class removal — ADR 0113)
+
+A `'remove-class'` entry targets exactly one file, so it needs none of the
+multi-file sequencing above — a single staged rename, then a single unlink,
+extending the same Phase A (stage) / Phase B (commit) shape patches already
+use:
+
+  - **Phase A**: same-filesystem rename `<file>` → `<file>.tmp-delete-<epoch>-
+    <seq>` (POSIX-atomic; `epoch`/`seq` are the entry's own identity, so a
+    later flush attempt can recognise its own staged file). A crash here
+    before the rename returns leaves the original file untouched (nothing to
+    clean up); a crash *after* leaves the staged `.tmp-delete-*` file, which
+    the next flush attempt recognises and resumes at Phase B.
+  - **Phase B**: `file:delete/1` the staged `.tmp-delete-<epoch>-<seq>` file.
+    A crash between Phase A and Phase B leaves a recoverable `.tmp-delete-*`
+    file on disk (nothing lost) — a re-flush finishes the unlink.
+
+**Disambiguating "already deleted externally" from "my own prior attempt
+already staged this."** Phase A's `stat <file>` can fail with `enoent` for two
+different reasons: (a) *this* entry's own earlier flush attempt already
+completed the rename and crashed before the unlink — recognised by finding
+`<file>.tmp-delete-<epoch>-<seq>` under this entry's own `epoch`/`seq`, in
+which case Phase A resumes at the already-staged file and Phase B finishes
+the unlink normally; or (b) something else deleted `<file>` externally, with
+no matching staged file — surfaced as a soft success (`already gone — nothing
+to remove`, ADR 0113's external-edit-conflict table), and the entry is pruned
+without any further disk I/O (`op = noop` in `prepare_remove_class/3`).
+
+An *aborted* flush (a Phase A conflict on some other file in the same batch)
+undoes only the rename *this* attempt performed — renaming the staged file
+back to `<file>` — never the unlink, and never a stage left behind by a
+different (earlier, crashed) attempt, which stays exactly as found for a
+future flush to resume.
+
 ## Conflict detection
 
 External-edit conflict: the recorded `prev_source` does not byte-match the
@@ -93,15 +143,19 @@ A summary map (the value `Workspace flush` returns to the REPL):
 #{
   '$beamtalk_class' => 'FlushResult',
   flushed => N,                         %% durable entries written
-  files => [<<"path1">>, ...],          %% files written (in rename order)
+  files => [<<"path1">>, ...],          %% files touched (written or removed)
   newClasses => M,                      %% subset of `flushed` for new-class entries
-  skipped => [#{seq, reason}],          %% durable non-flushable entries seen
+  removedClasses => R,                  %% subset of `flushed` for remove-class entries
+  skipped => [#{seq, class, reason}],   %% e.g. reason => <<"destructive">> (ADR 0113)
   conflicts => [#{file, reason, seqs}]  %% Phase A / Phase B conflicts
 }
 ```
 
 A success path returns `flushed > 0` (or `0` when there is nothing to flush),
-zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
+zero conflicts, an empty `skipped` list, and `files` reflecting the touched
+set. A pending `'remove-class'` entry left out of the applied set because
+`ConfirmDestructive` was not given contributes an entry to `skipped` instead
+(`reason => <<"destructive">>`) rather than being silently dropped.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -110,25 +164,36 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
 -export([
     flush/0,
     flush/1,
-    flush_kinds/1
+    %% ADR 0113 Phase 2: `flush/2` threads the `confirmDestructive` filter
+    %% dimension through the existing `flush/1` filter; `flush_including_destructive/0`
+    %% is the unscoped bare-unary form (no filter argument to attach a
+    %% `confirmDestructive:` keyword to).
+    flush/2,
+    flush_including_destructive/0,
+    flush_kinds/1,
+    flush_kinds/2
 ]).
 
 %% Exported for tests.
 -export([
     splice/3,
     group_by_file/1,
-    complete_flush/4,
+    complete_flush/5,
     filter_shadowed_by_survivor/2,
     renamed_target_keys/1,
     announce_flush_completed/1,
     %% ADR 0112 (BT-3187): exercises the `(class, selector, side)` shadow-key
-    %% fix directly, independent of run_flush/1's separate `'remove-method'`
-    %% exclusion from `Applied` (see its doc) — a real Phase-2 flush of a
-    %% `'remove-method'` entry is BT-2192's job, but the shadow-key logic
-    %% itself is this issue's, and is verifiable without going through
-    %% prepare_splice/2.
+    %% fix directly — the shadow-key logic is exercised without going
+    %% through prepare_splice/2.
     shadow_duplicates/1,
-    target_key/1
+    target_key/1,
+    %% ADR 0113 Phase 2: tier classification, exported for direct unit
+    %% coverage independent of a full flush round-trip.
+    entry_tier/1,
+    %% ADR 0113 Phase 2: lets a crash-recovery test construct the exact
+    %% staged path a real flush attempt would have produced, without
+    %% duplicating the naming format in the test module.
+    delete_staging_path/3
 ]).
 
 -type filter() ::
@@ -143,7 +208,13 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
 %%% ----------------------------------------------------------------------------
 
 -doc """
-Flush all pending durable+flushable ChangeEntries (ADR 0082 Phase 2).
+Flush all pending durable+flushable Tier 1 ChangeEntries (ADR 0082 Phase 2;
+Tier 1/2 split per ADR 0113 Phase 2).
+
+Tier 1 only — patches, `'new-class'`, and `'remove-method'`. A pending Tier 2
+(`'remove-class'`) entry is left pending and reported in the summary's
+`skipped` field (`reason => <<"destructive">>`); use
+`flush_including_destructive/0` to also apply it.
 
 Returns the summary map described in the module docs. Never raises on a normal
 conflict — conflicts are reported in the `conflicts` field so the caller can
@@ -153,10 +224,10 @@ server is not running) come back as `{error, #beamtalk_error{}}`.
 """.
 -spec flush() -> {ok, map()} | {error, #beamtalk_error{}}.
 flush() ->
-    do_flush(any).
+    do_flush(any, false).
 
 -doc """
-Flush only the ChangeEntries that match `Filter`.
+Flush only the Tier 1 ChangeEntries that match `Filter` (ADR 0082 Phase 2).
 
 `Filter` is one of:
 
@@ -167,17 +238,52 @@ Flush only the ChangeEntries that match `Filter`.
   - a Beamtalk Dictionary `#{ #file => "..." }` (Symbol-keyed) — filter by
     `sourceFile`
 
-Anything else surfaces a structured error.
+Anything else surfaces a structured error. Equivalent to `flush(Filter, false)`
+— a matching Tier 2 entry is reported in `skipped`, not applied; use `flush/2`
+with `ConfirmDestructive = true` to scope the destructive tier to `Filter`.
 """.
 -spec flush(term()) -> {ok, map()} | {error, #beamtalk_error{}}.
 flush(Filter) ->
-    case normalise_filter(Filter) of
-        {ok, F} -> do_flush(F);
-        {error, _} = Err -> Err
-    end.
+    flush(Filter, false).
 
 -doc """
-Flush only the ChangeEntries whose kind or author_kind is in `Kinds`
+Flush the ChangeEntries that match `Filter`, additionally applying Tier 2
+(`'remove-class'`) entries within that scope when `ConfirmDestructive` is
+`true` (ADR 0113 Phase 2).
+
+Backs `Workspace flush: aClass confirmDestructive: true` and
+`Workspace flush: #{ #file => "..." } confirmDestructive: true` — the class/
+kind/file argument gives `confirmDestructive:` a real keyword partner, so this
+stays an ordinary two-keyword message. `ConfirmDestructive` must be a literal
+Boolean — never read from a workspace setting or environment variable
+(ADR 0113, "the destructive tier is never silently on").
+""".
+-spec flush(term(), boolean()) -> {ok, map()} | {error, #beamtalk_error{}}.
+flush(Filter, ConfirmDestructive) when is_boolean(ConfirmDestructive) ->
+    case normalise_filter(Filter) of
+        {ok, F} -> do_flush(F, ConfirmDestructive);
+        {error, _} = Err -> Err
+    end;
+flush(_Filter, _Other) ->
+    {error,
+        filter_error(<<"flush:confirmDestructive: expects a Boolean for confirmDestructive:">>)}.
+
+-doc """
+Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
+(ADR 0113 Phase 2).
+
+The unscoped destructive-flush entry point — a bare unary selector (backing
+`Workspace flushIncludingDestructive`), not a keyword message, since there is
+no class/kind/file argument to attach a `confirmDestructive:` keyword to once
+the call has no scope. Equivalent to applying both `flush/0`'s Tier 1 set and
+every pending Tier 2 (`'remove-class'`) entry in one pass.
+""".
+-spec flush_including_destructive() -> {ok, map()} | {error, #beamtalk_error{}}.
+flush_including_destructive() ->
+    do_flush(any, true).
+
+-doc """
+Flush only the Tier 1 ChangeEntries whose kind or author_kind is in `Kinds`
 (ADR 0082 Phase 4, BT-2290).
 
 `Kinds` is a list of Symbols (atoms). Each symbol classifies as either an
@@ -194,19 +300,40 @@ Flush only the ChangeEntries whose kind or author_kind is in `Kinds`
 
 Empty `Kinds` is rejected with a structured error (use `flush/0` to flush
 everything). Unknown symbols are rejected with a structured error so a typo
-fails loudly rather than silently flushing the wrong set.
+fails loudly rather than silently flushing the wrong set. Equivalent to
+`flush_kinds(Kinds, false)` — a matching Tier 2 entry (`kind => 'remove-class'`)
+is reported in `skipped`, not applied; use `flush_kinds/2` to also apply it.
 
 Returns the same `FlushResult` summary as `flush/0` / `flush/1`.
 """.
 -spec flush_kinds([atom()]) -> {ok, map()} | {error, #beamtalk_error{}}.
-flush_kinds(Kinds) when is_list(Kinds) ->
+flush_kinds(Kinds) ->
+    flush_kinds(Kinds, false).
+
+-doc """
+Flush the ChangeEntries whose kind or author_kind is in `Kinds`, additionally
+applying Tier 2 (`'remove-class'`) entries within that scope when
+`ConfirmDestructive` is `true` (ADR 0113 Phase 2).
+
+Backs `Workspace changes flushKinds: aSet confirmDestructive: true` —
+`confirmDestructive` composes as one more independent filter dimension on the
+existing `flushKinds:` mechanism, not a special case. See `flush_kinds/1` for
+the `Kinds` contract.
+""".
+-spec flush_kinds([atom()], boolean()) -> {ok, map()} | {error, #beamtalk_error{}}.
+flush_kinds(Kinds, ConfirmDestructive) when is_list(Kinds), is_boolean(ConfirmDestructive) ->
     case classify_kinds(Kinds) of
         {ok, EntryKinds, AuthorKinds} ->
-            do_flush({kinds, EntryKinds, AuthorKinds});
+            do_flush({kinds, EntryKinds, AuthorKinds}, ConfirmDestructive);
         {error, _} = Err ->
             Err
     end;
-flush_kinds(_Other) ->
+flush_kinds(Kinds, _Other) when is_list(Kinds) ->
+    {error,
+        filter_error(
+            <<"flushKinds:confirmDestructive: expects a Boolean for confirmDestructive:">>
+        )};
+flush_kinds(_Other, _ConfirmDestructive) ->
     {error,
         filter_error(
             <<"flushKinds: expects a List or Set of kind Symbols (e.g. #instance, #agent)">>
@@ -249,6 +376,14 @@ classify_kinds([Other | _], _EKs, _AKs, _Unknowns) ->
 classify_kind(instance) -> entry;
 classify_kind(class) -> entry;
 classify_kind('new-class') -> entry;
+%% ADR 0113 Phase 2 (BT-3207): `flushKinds:` accepts both removal kinds too —
+%% `#'remove-method'` (Tier 1) composes exactly like any other entry-kind
+%% filter; `#'remove-class'` (Tier 2) still needs `confirmDestructive: true`
+%% (via `flush_kinds/2`) to actually apply, same as an unfiltered destructive
+%% flush — `flushKinds:` only narrows *which* entries are in scope, tiering
+%% decides whether an in-scope Tier 2 entry is applied or reported skipped.
+classify_kind('remove-method') -> entry;
+classify_kind('remove-class') -> entry;
 classify_kind(human) -> author;
 classify_kind(agent) -> author;
 classify_kind(_) -> unknown.
@@ -261,8 +396,8 @@ unknown_kind_error(Unknowns) ->
             <<"flushKinds: unrecognised kind symbol(s): ">>,
             Joined,
             <<
-                ". Allowed: #instance, #class, #'new-class' (entry kinds); "
-                "#human, #agent (author kinds)"
+                ". Allowed: #instance, #class, #'new-class', #'remove-method', "
+                "#'remove-class' (entry kinds); #human, #agent (author kinds)"
             >>
         ])
     ).
@@ -328,51 +463,43 @@ is_class_name_atom(Atom) ->
 %%% Core flush
 %%% ----------------------------------------------------------------------------
 
--spec do_flush(filter()) -> {ok, map()} | {error, #beamtalk_error{}}.
-do_flush(Filter) ->
+-spec do_flush(filter(), boolean()) -> {ok, map()} | {error, #beamtalk_error{}}.
+do_flush(Filter, ConfirmDestructive) ->
     Pending = filter_entries(beamtalk_workspace_changelog:flushable_pending(), Filter),
     %% `flushable_pending` already excludes non-flushable entries — the
     %% `skipped` field of the response is documentation of what would be
     %% skipped if non-flushable durable entries were in scope, which only
     %% happens when the caller passes a filter that selects them explicitly.
-    %% For Phase 2 the caller-visible "skipped" list is always empty (the
-    %% non-flushable entries are simply not in `flushable_pending`); we keep
-    %% the field for forward-compat with Phase 3's surfaces.
-    %%
-    %% ADR 0112 (BT-3187): `'remove-method'` entries CAN be `flushable: true`
-    %% (an ordinary in-project class's removal), so they can reach here —
-    %% but excising the recorded span from disk is BT-2192's job, not this
-    %% module's (see the ADR's Out of Scope table). They must NOT, however,
-    %% be excluded before `run_flush/1` computes `shadow_duplicates/1`: doing
-    %% so hides the removal from shadowing entirely, so a stale, older patch
-    %% to the same `(class, selector, side)` target is wrongly treated as the
-    %% sole/surviving entry and gets spliced back to disk — resurrecting code
-    %% the user explicitly removed from the live image. Instead, pass the
-    %% *full* Pending set (removals included) into `run_flush/1`, which
-    %% shadows first and only then drops `'remove-method'` entries from what
-    %% actually gets spliced (they were never going to be routed into
-    %% `prepare_splice/2` — built only for a patch's replace-in-place shape,
-    %% with a `source_ref` body to splice in that a removal never has — which
-    %% would abort the whole batch on a `source_body_error` it was never
-    %% designed to produce).
+    %% Non-flushable entries are simply not in `flushable_pending`, so they
+    %% never populate `skipped`; the field's other populated reason (ADR
+    %% 0113) is `"destructive"` — see `run_flush/2`.
     case Pending of
         [] ->
             {ok, empty_summary()};
         _ ->
-            run_flush(Pending)
+            run_flush(Pending, ConfirmDestructive)
     end.
-
--spec exclude_remove_method([term()]) -> [term()].
-exclude_remove_method(Entries) ->
-    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =/= 'remove-method'].
 
 -spec filter_entries([term()], filter()) -> [term()].
 filter_entries(Entries, any) ->
     Entries;
 filter_entries(Entries, {class, ClassBin}) ->
     [E || E <- Entries, beamtalk_workspace_changelog:entry_class(E) =:= ClassBin];
-filter_entries(Entries, {selector, 'new-class'}) ->
-    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= 'new-class'];
+filter_entries(Entries, {selector, Sel}) when
+    Sel =:= 'new-class'; Sel =:= 'remove-method'; Sel =:= 'remove-class'
+->
+    %% `'new-class'`/`'remove-class'` entries carry selector: null; a
+    %% `'remove-method'` entry carries the real removed selector (e.g. #foo),
+    %% not null. Either way, filtering on the bare marker atom is meant to
+    %% mean "all removals/additions of this kind", not a literal selector
+    %% match — matching on entry_selector/1 would return nothing for the
+    %% null-selector kinds and would only ever match a method coincidentally
+    %% named e.g. #'remove-method' for the other, so kind-matching is what
+    %% this filter form is actually for. Unlike `instance`/`class` (also
+    %% valid kind() values, but ambiguous with real getter selectors of the
+    %% same name), none of these three collides with a plausible method
+    %% selector, so redirecting them to kind-matching is unambiguous.
+    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= Sel];
 filter_entries(Entries, {selector, Sel}) ->
     SelBin = atom_to_binary(Sel, utf8),
     [E || E <- Entries, beamtalk_workspace_changelog:entry_selector(E) =:= SelBin];
@@ -392,35 +519,69 @@ entry_matches_kinds(E, EntryKinds, AuthorKinds) ->
 matches_set([], _Value) -> true;
 matches_set(Set, Value) -> lists:member(Value, Set).
 
--spec run_flush([term()]) -> {ok, map()} | {error, #beamtalk_error{}}.
-run_flush(Pending) ->
+-spec run_flush([term()], boolean()) -> {ok, map()} | {error, #beamtalk_error{}}.
+run_flush(Pending, ConfirmDestructive) ->
     %% Shadow duplicates: for each (class, selector, side) keep only the
     %% highest-seq entry as the "applied" one. Shadowed entries are also
     %% marked flushed afterwards (their target was reached by a later entry).
     %%
-    %% `Pending` here includes `'remove-method'` entries on purpose (see the
-    %% comment in `do_flush/1`) so a removal correctly shadows any older,
-    %% now-stale patch to the same target. Only *after* shadowing has decided
-    %% survivorship do we drop `'remove-method'` entries from `Applied` —
-    %% excising the recorded span from disk is BT-2192's job, not this
-    %% module's. Because `Applied0` is filtered before `group_by_file/1`, a
-    %% `'remove-method'` survivor is simply never written; and because
-    %% `filter_shadowed_by_survivor/2` in Phase B only marks a shadowed entry
-    %% flushed when its survivor's key actually appears among the *renamed*
-    %% files, the patch it shadowed correctly stays pending too (matching the
-    %% deferred-to-BT-2192 behavior — neither entry is marked flushed, and
-    %% nothing is resurrected on disk).
+    %% `Pending` here includes every kind — `'remove-method'` and
+    %% `'remove-class'` entries on purpose — so a removal correctly shadows
+    %% any older, now-stale patch (or creation) targeting the same key.
+    %% Tiering (ADR 0113) is applied *after* shadowing has decided
+    %% survivorship, exactly as `'remove-method'` exclusion used to be
+    %% applied post-shadow (ADR 0112, BT-3187): a `(class, selector, side)`
+    %% target's survivor is whichever entry has the highest seq regardless of
+    %% tier, so a stale, older patch never gets spliced back to disk just
+    %% because its newer survivor (a removal) was withheld this round.
     {Applied0, Shadowed} = shadow_duplicates(Pending),
-    Applied = exclude_remove_method(Applied0),
-    Groups = group_by_file(Applied),
+    {Tier1, Tier2} = lists:partition(fun(E) -> entry_tier(E) =:= tier1 end, Applied0),
+    {ToApply, SkippedTier2} =
+        case ConfirmDestructive of
+            true -> {Applied0, []};
+            false -> {Tier1, Tier2}
+        end,
+    Skipped = [skipped_entry(E) || E <- SkippedTier2],
+    Groups = group_by_file(ToApply),
     case phase_a(Groups) of
         {ok, Prepared} ->
-            phase_b(Prepared, Shadowed);
+            phase_b(Prepared, Shadowed, Skipped);
         {error, _} = Err ->
             Err;
         {conflict, Conflicts} ->
-            {ok, conflict_summary(Conflicts)}
+            {ok, conflict_summary(Conflicts, Skipped)}
     end.
+
+%%% ----------------------------------------------------------------------------
+%%% Tiering (ADR 0113 Phase 2)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Classify a ChangeEntry into flush's destructive-confirmation tier.
+
+Tier 1 — edits a still-existing file (`instance`, `class`, `'new-class'`,
+`'remove-method'`) — applies under ordinary `flush/0` / `flush/1` /
+`flush_kinds/1` with no gate. Tier 2 — destroys a file (`'remove-class'`) —
+only applies when the caller passes `ConfirmDestructive = true`.
+""".
+-spec entry_tier(term()) -> tier1 | tier2.
+entry_tier(E) ->
+    case beamtalk_workspace_changelog:entry_kind(E) of
+        'remove-class' -> tier2;
+        _ -> tier1
+    end.
+
+%% The `skipped` entry shape for a Tier 2 entry left pending because
+%% `ConfirmDestructive` was not given — distinct from the (currently unused,
+%% forward-compat) `"ephemeral"` / `"not flushable (...)"` reasons the module
+%% doc's `Return value` section documents.
+-spec skipped_entry(term()) -> map().
+skipped_entry(E) ->
+    #{
+        seq => beamtalk_workspace_changelog:entry_seq(E),
+        class => beamtalk_workspace_changelog:entry_class(E),
+        reason => <<"destructive">>
+    }.
 
 %%% ----------------------------------------------------------------------------
 %%% Shadowing
@@ -517,12 +678,23 @@ group_by_file(Entries) ->
 -record(prepared, {
     %% Absolute target path on disk.
     file :: binary(),
-    %% The `<file>.tmp` we wrote in Phase A.
+    %% The staging path Phase A produced: `<file>.tmp` for `op = write`,
+    %% `<file>.tmp-delete-<epoch>-<seq>` for `op = delete` (ADR 0113), unused
+    %% for `op = noop`.
     tmp :: string(),
-    %% The entries whose patches were merged into this file's new body.
+    %% The entries whose patches were merged into this file's new body (or,
+    %% for `op = delete` / `op = noop`, the single `'remove-class'` entry).
     entries :: [term()],
-    %% Whether the target file existed prior to flush (informational).
-    pre_existing :: boolean()
+    %% Whether the target file existed prior to flush (informational for
+    %% `op = write`; for `op = delete` distinguishes "this attempt performed
+    %% the stage-rename" (`true`) from "a prior attempt already staged it,
+    %% this run only resumed" (`false`) — see `cleanup_one/1`).
+    pre_existing :: boolean(),
+    %% Phase B commit action (ADR 0113): `write` renames `tmp` into `file`
+    %% (patches, `'new-class'`, `'remove-method'`); `delete` unlinks the
+    %% staged `tmp` (class removal); `noop` performs no I/O (the target file
+    %% was already gone — external-edit soft success).
+    op = write :: write | delete | noop
 }).
 
 -spec phase_a([{binary(), [term()]}]) ->
@@ -564,6 +736,7 @@ phase_a_loop([{File, Entries} | Rest], Prepared, Conflicts) ->
 prepare_file(File, [Entry] = Entries) ->
     case beamtalk_workspace_changelog:entry_kind(Entry) of
         'new-class' -> prepare_new_class(File, Entries, Entry);
+        'remove-class' -> prepare_remove_class(File, Entries, Entry);
         _ -> prepare_splice(File, Entries)
     end;
 prepare_file(File, Entries) ->
@@ -585,12 +758,42 @@ prepare_file(File, Entries) ->
                     >>
                 )};
         false ->
-            prepare_splice(File, Entries)
+            case lists:any(fun is_remove_class_entry/1, Entries) of
+                true ->
+                    %% Defensive, ADR 0113: a `'remove-class'` entry shares no
+                    %% target_key with a method-level entry (its own key is
+                    %% `(class, undefined, undefined)`), so an un-shadowed
+                    %% patch against the same class can survive shadowing
+                    %% alongside it and land in the same file group (e.g. an
+                    %% unflushed method patch, then `removeFromSystem`).
+                    %% Applying the patch is pointless (the file is about to
+                    %% be deleted) and reordering write-then-delete within one
+                    %% Phase A/B pass is undesigned — surface as a conflict,
+                    %% same defensive shape as the new-class case above.
+                    {conflict,
+                        conflict_map(
+                            File,
+                            <<"mixed_remove_class_and_splice">>,
+                            Entries,
+                            <<
+                                "Cannot flush a remove-class entry alongside other pending "
+                                "patches against the same class in the same operation; flush "
+                                "or discard the other pending entries first, then re-flush "
+                                "the removal"
+                            >>
+                        )};
+                false ->
+                    prepare_splice(File, Entries)
+            end
     end.
 
 -spec is_new_class_entry(term()) -> boolean().
 is_new_class_entry(E) ->
     beamtalk_workspace_changelog:entry_kind(E) =:= 'new-class'.
+
+-spec is_remove_class_entry(term()) -> boolean().
+is_remove_class_entry(E) ->
+    beamtalk_workspace_changelog:entry_kind(E) =:= 'remove-class'.
 
 %%% ----------------------------------------------------------------------------
 %%% New-class write
@@ -633,6 +836,97 @@ prepare_new_class(File, Entries, Entry) ->
                     "or clear the pending entry"
                 >>)}
     end.
+
+%%% ----------------------------------------------------------------------------
+%%% Class removal (Tier 2) — staged delete (ADR 0113)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Stage a `'remove-class'` entry's Phase A step: same-filesystem rename
+`<file>` → `<file>.tmp-delete-<epoch>-<seq>` (POSIX-atomic).
+
+Three outcomes, matching the ADR's *Delete atomicity* / *External-edit
+conflicts* tables:
+
+  - The target file exists: rename it to the staged path. Phase B unlinks the
+    staged file to commit the delete.
+  - The target file is absent AND a staged file matching this entry's own
+    `epoch`/`seq` already exists: a prior flush attempt already completed
+    Phase A and crashed before Phase B. Resume there — Phase B finishes the
+    unlink — rather than re-attempting a rename against an already-absent
+    source.
+  - The target file is absent AND no matching staged file exists: something
+    else deleted it externally. Soft success (`op = noop`) — Phase B performs
+    no I/O and the entry is still marked flushed, since the outcome the user
+    wanted (the file is gone) already holds.
+
+An I/O error at any step (rename failure, unreadable path) is a hard error,
+mirroring `write_tmp/2`'s failures for the write path.
+""".
+-spec prepare_remove_class(binary(), [term()], term()) ->
+    {ok, #prepared{}} | {error, #beamtalk_error{}}.
+prepare_remove_class(File, Entries, Entry) ->
+    AbsPath = binary_to_list(File),
+    StagedPath = delete_staging_path(
+        AbsPath,
+        beamtalk_workspace_changelog:entry_epoch(Entry),
+        beamtalk_workspace_changelog:entry_seq(Entry)
+    ),
+    case file:read_file_info(AbsPath) of
+        {ok, _Info} ->
+            case file:rename(AbsPath, StagedPath) of
+                ok ->
+                    {ok, #prepared{
+                        file = File,
+                        tmp = StagedPath,
+                        entries = Entries,
+                        pre_existing = true,
+                        op = delete
+                    }};
+                {error, Reason} ->
+                    wrap_io_error({error, Reason}, File)
+            end;
+        {error, enoent} ->
+            resolve_missing_remove_class_target(File, Entries, StagedPath);
+        {error, Reason} ->
+            wrap_io_error({error, Reason}, File)
+    end.
+
+%% Disambiguate a missing target file (ADR 0113, "Disambiguating a missing
+%% <file> from a recoverable mid-delete crash"): a staged file matching this
+%% entry's own epoch/seq means a prior flush attempt already renamed it and
+%% crashed before the unlink — resume at Phase B. No matching staged file
+%% means something else deleted the file externally — a soft success.
+-spec resolve_missing_remove_class_target(binary(), [term()], string()) ->
+    {ok, #prepared{}}.
+resolve_missing_remove_class_target(File, Entries, StagedPath) ->
+    case file:read_file_info(StagedPath) of
+        {ok, _Info} ->
+            {ok, #prepared{
+                file = File,
+                tmp = StagedPath,
+                entries = Entries,
+                pre_existing = false,
+                op = delete
+            }};
+        {error, _} ->
+            %% Already gone — nothing to remove. A soft success: no further
+            %% disk I/O, the entry is still marked flushed in Phase B.
+            {ok, #prepared{
+                file = File,
+                tmp = StagedPath,
+                entries = Entries,
+                pre_existing = false,
+                op = noop
+            }}
+    end.
+
+%% Same-filesystem staging path for a class-removal delete (ADR 0113), keyed
+%% on the entry's own epoch/seq so a resumed flush can recognise its own
+%% prior staging attempt.
+-spec delete_staging_path(string(), non_neg_integer(), non_neg_integer()) -> string().
+delete_staging_path(AbsPath, Epoch, Seq) ->
+    AbsPath ++ ".tmp-delete-" ++ integer_to_list(Epoch) ++ "-" ++ integer_to_list(Seq).
 
 %%% ----------------------------------------------------------------------------
 %%% Method splice
@@ -765,20 +1059,35 @@ splice_with_prev(Body, Entry, Start, End, PrevBody) ->
                             >>
                         )};
                 true ->
-                    case beamtalk_workspace_changelog:read_source_body(Entry) of
-                        {ok, NewSrc} ->
-                            %% BT-2584: the stored `source` is already the on-disk
-                            %% byte-span shape (`source_ref == disk[span]` by
-                            %% construction — the install hook reshaped the
-                            %% compiler's canonical body to the span's base
-                            %% indentation via `reindent_method_source`). The splice
-                            %% is a verbatim byte replacement; no reshaping here.
-                            %% This retires the former cross-layer reconciliation
-                            %% (BT-2577's `reindent/2`).
-                            {ok, splice(Body, {Start, End}, NewSrc)};
-                        {error, Reason} ->
-                            {error, source_body_error(File, Reason)}
-                    end
+                    replacement_for(Entry, Body, Start, End, File)
+            end
+    end.
+
+%% The bytes to splice into `{Start, End}` once the external-edit check has
+%% passed. A `'remove-method'` entry (ADR 0113 Phase 2: Tier 1, no gate — see
+%% module doc) has no `source_ref` — nothing replaces the excised text, so the
+%% replacement is empty, mechanically identical to a patch whose new body
+%% happens to be `<<>>`. Every other kind reads its recorded `source_ref`.
+-spec replacement_for(term(), binary(), non_neg_integer(), non_neg_integer(), binary() | undefined) ->
+    {ok, binary()} | {error, #beamtalk_error{}}.
+replacement_for(Entry, Body, Start, End, File) ->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'remove-method' ->
+            {ok, splice(Body, {Start, End}, <<>>)};
+        _ ->
+            case beamtalk_workspace_changelog:read_source_body(Entry) of
+                {ok, NewSrc} ->
+                    %% BT-2584: the stored `source` is already the on-disk
+                    %% byte-span shape (`source_ref == disk[span]` by
+                    %% construction — the install hook reshaped the
+                    %% compiler's canonical body to the span's base
+                    %% indentation via `reindent_method_source`). The splice
+                    %% is a verbatim byte replacement; no reshaping here.
+                    %% This retires the former cross-layer reconciliation
+                    %% (BT-2577's `reindent/2`).
+                    {ok, splice(Body, {Start, End}, NewSrc)};
+                {error, Reason} ->
+                    {error, source_body_error(File, Reason)}
             end
     end.
 
@@ -811,44 +1120,47 @@ append_method(Body, NewSrc) ->
     <<Trimmed/binary, "\n\n", NewSrcWithNl/binary>>.
 
 %%% ----------------------------------------------------------------------------
-%%% Phase B: rename
+%%% Phase B: commit (rename into place, or unlink a staged delete)
 %%% ----------------------------------------------------------------------------
 
-%% Sequential rename. On the first failure: stop, mark every already-renamed
+%% Sequential commit. On the first failure: stop, mark every already-committed
 %% file's entries as flushed, and surface a per-file status report. Earlier
-%% successes are *not* rolled back — POSIX rename is one-way and the on-disk
-%% state is the new authoritative source for those files.
--spec phase_b([#prepared{}], [term()]) -> {ok, map()}.
-phase_b(Prepared, Shadowed) ->
-    phase_b_loop(Prepared, Shadowed, [], []).
+%% successes are *not* rolled back — POSIX rename/unlink are one-way and the
+%% on-disk state is the new authoritative source for those files. `Skipped`
+%% (ADR 0113: pending Tier 2 entries left out of this flush) passes straight
+%% through to the summary — Phase B does nothing with it but report it.
+-spec phase_b([#prepared{}], [term()], [map()]) -> {ok, map()}.
+phase_b(Prepared, Shadowed, Skipped) ->
+    phase_b_loop(Prepared, Shadowed, [], [], Skipped).
 
-phase_b_loop([], Shadowed, Renamed, Failed) ->
-    Files = lists:reverse([P#prepared.file || P <- Renamed]),
-    RenamedEntries = lists:flatten([P#prepared.entries || P <- Renamed]),
+phase_b_loop([], Shadowed, Committed, Failed, Skipped) ->
+    Files = lists:reverse([P#prepared.file || P <- Committed]),
+    CommittedEntries = lists:flatten([P#prepared.entries || P <- Committed]),
     %% Only mark shadowed entries whose survivor (same class+selector) was
-    %% actually renamed in this Phase B. When Phase B aborts mid-loop, a
+    %% actually committed in this Phase B. When Phase B aborts mid-loop, a
     %% shadowed entry whose survivor never made it to disk must stay pending
     %% — otherwise we silently lose the change from the active view while it
     %% is not on disk. See Copilot review on PR #2325.
-    SurvivorKeys = renamed_target_keys(RenamedEntries),
+    SurvivorKeys = renamed_target_keys(CommittedEntries),
     AppliedShadowed = filter_shadowed_by_survivor(Shadowed, SurvivorKeys),
-    EntriesToMark = RenamedEntries ++ AppliedShadowed,
+    EntriesToMark = CommittedEntries ++ AppliedShadowed,
     Seqs = [beamtalk_workspace_changelog:entry_seq(E) || E <- EntriesToMark],
-    complete_flush(Files, lists:reverse(Renamed), Failed, Seqs);
-phase_b_loop([P | Rest], Shadowed, Renamed, Failed) ->
-    case file:rename(P#prepared.tmp, binary_to_list(P#prepared.file)) of
+    complete_flush(Files, lists:reverse(Committed), Failed, Seqs, Skipped);
+phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped) ->
+    case commit(P) of
         ok ->
-            phase_b_loop(Rest, Shadowed, [P | Renamed], Failed);
+            phase_b_loop(Rest, Shadowed, [P | Committed], Failed, Skipped);
         {error, Reason} ->
             ?LOG_ERROR(
-                "Workspace flush: Phase B rename failed",
+                "Workspace flush: Phase B commit failed",
                 #{
                     file => P#prepared.file,
+                    op => P#prepared.op,
                     reason => Reason,
                     domain => [beamtalk, runtime]
                 }
             ),
-            %% A Phase B failure: stop, but keep the already-renamed files.
+            %% A Phase B failure: stop, but keep the already-committed files.
             FailedHere = #{
                 file => P#prepared.file,
                 reason => <<"rename_failed">>,
@@ -858,8 +1170,24 @@ phase_b_loop([P | Rest], Shadowed, Renamed, Failed) ->
             %% Clean up any unattempted tmps so we do not leave stale files
             %% behind for the next flush to trip over.
             cleanup_tmps([P | Rest]),
-            phase_b_loop([], Shadowed, Renamed, [FailedHere | Failed])
+            phase_b_loop([], Shadowed, Committed, [FailedHere | Failed], Skipped)
     end.
+
+%% Phase B's commit action, dispatched by `P#prepared.op`:
+%%   - `write`  — rename `tmp` (the freshly-written `<file>.tmp`) into `file`.
+%%   - `delete` — unlink the staged `<file>.tmp-delete-<epoch>-<seq>`
+%%     (ADR 0113): `file` is already absent from its original location by this
+%%     point (Phase A's stage-rename already happened, this attempt's or an
+%%     earlier one's), so this is the operation that finally makes the
+%%     removal durable.
+%%   - `noop`   — the external-edit soft success (already gone); no I/O.
+-spec commit(#prepared{}) -> ok | {error, term()}.
+commit(#prepared{op = write, tmp = Tmp, file = File}) ->
+    file:rename(Tmp, binary_to_list(File));
+commit(#prepared{op = delete, tmp = Tmp}) ->
+    file:delete(Tmp);
+commit(#prepared{op = noop}) ->
+    ok.
 
 %% Build a set of {Class, Selector} target keys from the entries whose file
 %% was renamed in Phase B. Used to gate which shadowed entries can be marked
@@ -883,9 +1211,9 @@ filter_shadowed_by_survivor(Shadowed, SurvivorKeys) ->
 %% already been renamed at this point — we never return a hard `{error, _}`
 %% here because on-disk state has moved forward and the caller still needs
 %% to see which files were written.
--spec complete_flush([binary()], [#prepared{}], [map()], [non_neg_integer()]) ->
+-spec complete_flush([binary()], [#prepared{}], [map()], [non_neg_integer()], [map()]) ->
     {ok, map()}.
-complete_flush(Files, Renamed, Failed, Seqs) ->
+complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
     %% ADR 0082 Phase 3 (BT-2289): broadcast flush completion so LSP clients
     %% can emit `workspace/applyEdit` for each touched file. Fire BEFORE
     %% `mark_flushed/1` so editor refresh fires reliably in the mixed-success
@@ -912,7 +1240,7 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
         end,
     case MarkResult of
         ok ->
-            {ok, success_summary(Files, Renamed, Failed)};
+            {ok, success_summary(Files, Renamed, Failed, Skipped)};
         {error, Reason} ->
             ?LOG_ERROR(
                 "Workspace flush: mark_flushed failed after successful rename",
@@ -937,7 +1265,7 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
                     io_lib:format("~p", [Reason])
                 ])
             },
-            {ok, success_summary(Files, Renamed, [MarkerFailure | Failed])}
+            {ok, success_summary(Files, Renamed, [MarkerFailure | Failed], Skipped)}
     end.
 
 %% Announce `FlushCompleted` on the `SystemAnnouncer` bus after a flush has
@@ -976,14 +1304,37 @@ write_tmp(AbsPath, Body) ->
         {error, Reason} -> {error, {write, Reason}}
     end.
 
+%% Undo Phase A staging for every not-yet-committed `Prepared` record, so an
+%% aborted flush (Phase A conflict on another file, or a Phase B failure
+%% partway through) leaves no stale staging artefact behind. Dispatches by
+%% `op` (ADR 0113) since `write` and `delete` staged different things:
 -spec cleanup_tmps([#prepared{}]) -> ok.
 cleanup_tmps(Prepared) ->
-    lists:foreach(
-        fun(#prepared{tmp = Tmp}) ->
-            _ = file:delete(Tmp)
-        end,
-        Prepared
-    ),
+    lists:foreach(fun cleanup_one/1, Prepared),
+    ok.
+
+%% `write` (patch / new-class / remove-method): delete the freshly-written
+%% `<file>.tmp` — the original `file` was never touched, so there is nothing
+%% else to undo.
+cleanup_one(#prepared{op = write, tmp = Tmp}) ->
+    _ = file:delete(Tmp),
+    ok;
+%% `delete` (class removal) whose stage-rename happened *in this flush
+%% attempt* (`pre_existing = true`, per `prepare_remove_class/3`): rename the
+%% staged file back to its original location, undoing our own Phase A step —
+%% Phase A promises "no rename happened" on a whole-flush abort.
+cleanup_one(#prepared{op = delete, tmp = Tmp, file = File, pre_existing = true}) ->
+    _ = file:rename(Tmp, binary_to_list(File)),
+    ok;
+%% `delete` whose stage-rename was already sitting on disk *before* this
+%% flush attempt began (`pre_existing = false` — a resumed mid-delete-crash
+%% recovery, ADR 0113): this attempt did not perform that rename, so aborting
+%% must leave it exactly as found for a future flush to resume, not un-stage
+%% work a different (earlier) attempt already committed to.
+cleanup_one(#prepared{op = delete, pre_existing = false}) ->
+    ok;
+%% `noop` (already-gone soft success): no I/O happened, nothing to undo.
+cleanup_one(#prepared{op = noop}) ->
     ok.
 
 -spec span_start(term()) -> integer().
@@ -1003,26 +1354,30 @@ seq(E) ->
 
 -spec empty_summary() -> map().
 empty_summary() ->
-    base_summary(0, [], 0, [], []).
+    base_summary(0, [], 0, 0, [], []).
 
--spec success_summary([binary()], [#prepared{}], [map()]) -> map().
-success_summary(Files, Renamed, Failed) ->
-    AllEntries = lists:flatten([P#prepared.entries || P <- Renamed]),
+-spec success_summary([binary()], [#prepared{}], [map()], [map()]) -> map().
+success_summary(Files, Committed, Failed, Skipped) ->
+    AllEntries = lists:flatten([P#prepared.entries || P <- Committed]),
     Flushed = length(AllEntries),
     NewClassCount = length([E || E <- AllEntries, is_new_class_entry(E)]),
-    base_summary(Flushed, Files, NewClassCount, [], Failed).
+    RemovedClassCount = length([E || E <- AllEntries, is_remove_class_entry(E)]),
+    base_summary(Flushed, Files, NewClassCount, RemovedClassCount, Skipped, Failed).
 
--spec conflict_summary([map()]) -> map().
-conflict_summary(Conflicts) ->
-    base_summary(0, [], 0, [], Conflicts).
+-spec conflict_summary([map()], [map()]) -> map().
+conflict_summary(Conflicts, Skipped) ->
+    base_summary(0, [], 0, 0, Skipped, Conflicts).
 
--spec base_summary(non_neg_integer(), [binary()], non_neg_integer(), [map()], [map()]) -> map().
-base_summary(Flushed, Files, NewClasses, Skipped, Conflicts) ->
+-spec base_summary(
+    non_neg_integer(), [binary()], non_neg_integer(), non_neg_integer(), [map()], [map()]
+) -> map().
+base_summary(Flushed, Files, NewClasses, RemovedClasses, Skipped, Conflicts) ->
     #{
         '$beamtalk_class' => 'FlushResult',
         flushed => Flushed,
         files => Files,
         newClasses => NewClasses,
+        removedClasses => RemovedClasses,
         skipped => Skipped,
         conflicts => Conflicts
     }.

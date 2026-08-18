@@ -114,6 +114,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% Accessors on the opaque entry type (used by callers and tests).
 -export([
     entry_seq/1,
+    entry_epoch/1,
     entry_class/1,
     entry_selector/1,
     entry_kind/1,
@@ -876,6 +877,18 @@ source_file_value(File) -> File.
 
 -spec entry_seq(entry()) -> non_neg_integer().
 entry_seq(#entry{seq = V}) -> V.
+
+-doc """
+The workspace epoch `Entry` was appended in (ADR 0113, BT-3207).
+
+Used, together with `entry_seq/1`, to name the same-filesystem staging path
+for a `'remove-class'` entry's Phase A rename (`<file>.tmp-delete-<epoch>-<seq>`)
+so a resumed flush can tell "this entry's own prior attempt already staged the
+delete and crashed before the unlink" apart from "something else deleted the
+file externally" — see `beamtalk_workspace_flush`'s delete-atomicity docs.
+""".
+-spec entry_epoch(entry()) -> non_neg_integer().
+entry_epoch(#entry{epoch = V}) -> V.
 
 -spec entry_class(entry()) -> binary().
 entry_class(#entry{class = V}) -> V.

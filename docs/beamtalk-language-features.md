@@ -3321,8 +3321,12 @@ audit trail is exhaustive on purpose.
 
 `Workspace changes` returns a [`ChangeLog`](#changelog) object (see below).
 `Workspace flush` returns a `FlushResult` summary with `#flushed`, `#files`,
-`#newClasses`, and `#conflicts`. A non-empty `#conflicts` list means the listed
-entries remain pending and require manual reconciliation.
+`#newClasses`, `#removedClasses`, `#skipped`, and `#conflicts`. A non-empty
+`#conflicts` list means the listed entries remain pending and require manual
+reconciliation; a non-empty `#skipped` list means a pending destructive
+(Tier 2) entry was withheld — see
+[Destructive flush](#destructive-flush--flushincludingdestructive-and-confirmdestructive-adr-0113)
+below.
 
 #### Targeted flush
 
@@ -3477,7 +3481,7 @@ installs the removal in memory. What varies is whether the resulting
 ChangeEntry is flushable**, exactly mirroring `compile:source:`'s rule (see
 [Flushability](#flushability--what-flush-writes) below) rather than
 `removeFromSystem`'s outright block (see
-[`removeFromSystem`](#removefromsystem--removing-a-whole-class-bt-785)):
+[`removeFromSystem`](#removefromsystem--removing-a-whole-class-bt-785-adr-0113)):
 
 ```beamtalk
 Integer removeSelector: #printString      // installs in memory, no error
@@ -3832,24 +3836,78 @@ Integer reload
 Hot-swap semantics follow BEAM conventions: live actors running the old code
 continue their current message; the next dispatch uses the new code.
 
-#### `removeFromSystem` — removing a whole class (BT-785)
+#### `removeFromSystem` — removing a whole class (BT-785, ADR 0113)
 
 `removeFromSystem` tears a class down entirely: stops its live actors, stops
 the class gen_server, purges the BEAM module, and purges every derived
 registry (xref, extensions, protocol conformance, compiler cache, workspace
 source). Unlike `removeSelector:` (above), it is a hard, unconditional
 refusal for stdlib classes and classes with subclasses — there is no
-in-memory-but-non-flushable escape hatch, and no ChangeLog entry is logged
-(this predates ADR 0082's ChangeLog and is not part of the patch/flush model).
+in-memory-but-non-flushable escape hatch.
 
 ```beamtalk
 Counter removeFromSystem   // => nil (Counter class removed; refuses if Counter has subclasses)
 Integer removeFromSystem   // => Error: cannot remove stdlib class
 ```
 
+A successful removal also logs a durable `kind: #'remove-class'` ChangeEntry
+(ADR 0113 Phase 1) — the same audit-trail-is-unconditional rule every other
+in-memory mutation follows. Flushing that entry deletes the class's `.bt`
+file, which is why it needs its own confirmation gesture — see
+[Destructive flush — `flushIncludingDestructive` and `confirmDestructive`](#destructive-flush--flushincludingdestructive-and-confirmdestructive-adr-0113)
+below.
+
 For removing a single method while keeping the class, see
 [`removeSelector:` / `removeSelector:ifAbsent:`](#removing-methods--removeselector-and-removeselectorifabsent-adr-0112)
 above.
+
+#### Destructive flush — `flushIncludingDestructive` and `confirmDestructive` (ADR 0113)
+
+Every flushable ChangeEntry classifies into one of two tiers:
+
+| Tier | Entries | File survives? | Gate |
+|------|---------|-----------------|------|
+| 1 | patches, `newClass:at:`, `removeSelector:` (`#'remove-method'`) | Yes — excising a recorded span leaves the file in place, mechanically identical to a patch | None — `Workspace flush` applies it directly |
+| 2 | `removeFromSystem` (`#'remove-class'`) | No — the `.bt` file is deleted | Explicit `confirmDestructive` |
+
+`Workspace flush` (no argument) applies only Tier 1. A pending Tier 2 entry is
+left pending and reported in the summary's `#skipped` field
+(`#{#seq, #class, #reason => #destructive}`), distinct from a conflict:
+
+```beamtalk
+Counter removeFromSystem                          // memory step: unconditional, as above
+Workspace flush
+=> _   // FlushResult with #skipped: [#{#reason => #destructive, ...}]
+       // Counter.bt is untouched; the removal stays pending.
+```
+
+Reaching Tier 2 always requires an explicit gesture — never a workspace
+setting or environment variable:
+
+```beamtalk
+Workspace flushIncludingDestructive               // unscoped: applies every pending
+                                                    //   Tier 1 + Tier 2 entry
+Workspace flush: Counter confirmDestructive: true  // scoped to one class
+Workspace changes flushKinds: #( #'remove-class' ) confirmDestructive: true
+                                                    // scoped to one kind
+```
+
+`flushIncludingDestructive` is a bare unary selector rather than a keyword
+message — once the call is unscoped there is no class/kind/file argument left
+to attach a `confirmDestructive:` keyword to. The scoped two-keyword forms
+(`flush:confirmDestructive:`, `flushKinds:confirmDestructive:`) compose
+`confirmDestructive` as one more independent filter dimension on top of the
+existing `flush:` / `flushKinds:` mechanisms, the same way `flushKinds:`
+already composes entry-kind and author-kind filters.
+
+`autoflush: true` never implies `confirmDestructive: true` — Tier 1 still
+autoflushes immediately; a class removal always needs its own, separate
+confirmation regardless of the `autoflush` setting. Class-removal deletion is
+staged (same-filesystem rename, then unlink) so a crash between the two steps
+leaves a recoverable file, never a partial or silent loss; a re-flush finishes
+the delete. See [ADR 0113](ADR/0113-destructive-workspace-operations.md) for
+the full design, including the external-edit conflict table and delete
+atomicity.
 
 ### `SystemNavigation` — Cross-class code queries
 

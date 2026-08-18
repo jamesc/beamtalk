@@ -1,0 +1,304 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0113 Phase 2 (BT-3207): end-to-end gate for the destructive-tier flush
+// mechanism — `Workspace flush` reporting a pending `remove-class` entry as
+// `skipped: destructive`, `Workspace flushIncludingDestructive` actually
+// deleting the file, `flush:confirmDestructive:` / `flushKinds:confirmDestructive:`
+// scoping the same gate, and `remove-method` flushing under ordinary
+// `Workspace flush` with no gate at all (the ADR 0112/BT-3187 backlog this
+// phase finally unblocks). Companion to `workspace_flush_roundtrip.btscript`
+// (ADR 0082 Phase 2/4/5), narrowed to the new Tier 1/Tier 2 split.
+//
+// Like `workspace_flush_roundtrip.btscript`, the shared e2e workspace has no
+// active project context, so live-declared classes are non-flushable. Each
+// scenario below injects a fully-formed ChangeEntry via the ChangeLog FFI
+// against a temp source file we wrote ourselves — same gen_server, same
+// `flushable_pending` selection, same tier classification, same staged-delete
+// path a production `removeFromSystem` → flush round trip uses; only the
+// entry's *origin* (FFI vs `removeFromSystem`'s install hook) differs. That
+// origin is covered separately by `remove_from_system.btscript` (BT-3206).
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — SET UP A REAL SOURCE FILE FOR THE REMOVE-CLASS ENTRY
+// ===========================================================================
+
+_tmpDir := File tempDirectory
+// => _
+
+_destructiveDir := _tmpDir ++ "/bt_e2e_destructive_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang file) make_dir: _destructiveDir
+// => Result ok: nil
+
+_classPath := _destructiveDir ++ "/DestructibleCounter.bt"
+// => _
+
+_nl := (Character value: 10) asString
+// => _
+
+_classBody := "Object subclass: DestructibleCounter" ++ _nl ++ "  tick => 1" ++ _nl
+// => _
+
+File writeAll: _classPath contents: _classBody
+// => Result ok: nil
+
+File exists: _classPath
+// => true
+
+// ===========================================================================
+// STEP 2 — INJECT A remove-class ENTRY VIA THE CHANGELOG FFI
+// ===========================================================================
+
+// Mirrors the shape `beamtalk_repl_loader:do_emit_remove_class_change_entry/4`
+// (BT-3206) actually produces: no selector/side/span/source (a whole-file
+// removal, nothing replaces the deleted text); `prev_source` is the class's
+// full prior body.
+_removeClassInput := #{ #class => "DestructibleCounter", #kind => #'remove-class', #intent => #durable, #author => "e2e-destructive", #'author_kind' => #human, #flushable => true, #'source_file' => _classPath, #'prev_source' => _classBody }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _removeClassInput
+// => _
+
+Workspace changes notEmpty
+// => true
+
+_removeClassEntry := (Workspace changes select: [:e | e className =:= #DestructibleCounter]) first
+// => _
+
+_removeClassEntry isRemoveClass
+// => true
+
+_removeClassEntry isFlushable
+// => true
+
+// ===========================================================================
+// STEP 3 — ORDINARY Workspace flush LEAVES IT PENDING, REPORTED skipped: destructive
+// ===========================================================================
+
+_tier1Flush := Workspace flush
+// => _
+
+Erlang maps get: #flushed with: _tier1Flush
+// => 0
+
+_skipped := Erlang maps get: #skipped with: _tier1Flush
+// => _
+
+_skipped size
+// => 1
+
+_skippedFirst := _skipped first
+// => _
+
+Erlang maps get: #reason with: _skippedFirst
+// => destructive
+
+// The file survives untouched — an ordinary flush never reaches Tier 2.
+File exists: _classPath
+// => true
+
+Workspace changes notEmpty
+// => true
+
+// ===========================================================================
+// STEP 4 — Workspace flushIncludingDestructive DELETES THE FILE
+// ===========================================================================
+
+_destructiveFlush := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _destructiveFlush
+// => 1
+
+Erlang maps get: #removedClasses with: _destructiveFlush
+// => 1
+
+(Erlang maps get: #skipped with: _destructiveFlush) isEmpty
+// => true
+
+(Erlang maps get: #conflicts with: _destructiveFlush) isEmpty
+// => true
+
+// The file is gone; the entry dropped out of the active view.
+File exists: _classPath
+// => false
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 5 — flush:confirmDestructive: SCOPES TIER 2 TO ONE CLASS
+// ===========================================================================
+
+_classPath2 := _destructiveDir ++ "/AnotherDestructible.bt"
+// => _
+
+_classBody2 := "Object subclass: AnotherDestructible" ++ _nl ++ "  tick => 2" ++ _nl
+// => _
+
+File writeAll: _classPath2 contents: _classBody2
+// => Result ok: nil
+
+_removeClassInput2 := #{ #class => "AnotherDestructible", #kind => #'remove-class', #intent => #durable, #author => "e2e-destructive", #'author_kind' => #human, #flushable => true, #'source_file' => _classPath2, #'prev_source' => _classBody2 }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _removeClassInput2
+// => _
+
+// Without confirmDestructive, the two-keyword scoped form behaves exactly
+// like the unscoped `flush:` — Tier 2 stays withheld.
+_scopedNoConfirm := Workspace flush: #AnotherDestructible confirmDestructive: false
+// => _
+
+Erlang maps get: #flushed with: _scopedNoConfirm
+// => 0
+
+File exists: _classPath2
+// => true
+
+// With confirmDestructive: true, the removal for THIS class applies.
+_scopedConfirm := Workspace flush: #AnotherDestructible confirmDestructive: true
+// => _
+
+Erlang maps get: #flushed with: _scopedConfirm
+// => 1
+
+File exists: _classPath2
+// => false
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 6 — flushKinds:confirmDestructive: SCOPES TIER 2 BY KIND
+// ===========================================================================
+
+_classPath3 := _destructiveDir ++ "/ThirdDestructible.bt"
+// => _
+
+_classBody3 := "Object subclass: ThirdDestructible" ++ _nl ++ "  tick => 3" ++ _nl
+// => _
+
+File writeAll: _classPath3 contents: _classBody3
+// => Result ok: nil
+
+_removeClassInput3 := #{ #class => "ThirdDestructible", #kind => #'remove-class', #intent => #durable, #author => "e2e-destructive", #'author_kind' => #human, #flushable => true, #'source_file' => _classPath3, #'prev_source' => _classBody3 }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _removeClassInput3
+// => _
+
+// `flushKinds: #( #'remove-class' )` alone (no confirm) leaves it pending.
+_kindsNoConfirm := Workspace changes flushKinds: #( #'remove-class' )
+// => _
+
+Erlang maps get: #flushed with: _kindsNoConfirm
+// => 0
+
+File exists: _classPath3
+// => true
+
+// `flushKinds: #( #'remove-class' ) confirmDestructive: true` applies it.
+_kindsConfirm := Workspace changes flushKinds: #( #'remove-class' ) confirmDestructive: true
+// => _
+
+Erlang maps get: #flushed with: _kindsConfirm
+// => 1
+
+Erlang maps get: #removedClasses with: _kindsConfirm
+// => 1
+
+File exists: _classPath3
+// => false
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 7 — remove-method FLUSHES UNDER ORDINARY Workspace flush, NO GATE
+// (ADR 0113 unblocks the ADR 0112/BT-3187 backlog: previously stuck forever)
+// ===========================================================================
+
+_methodClassPath := _destructiveDir ++ "/MethodRemovalCounter.bt"
+// => _
+
+_methodClassBody := "Object subclass: MethodRemovalCounter" ++ _nl ++ "  tick => 1" ++ _nl ++ _nl ++ "  other => 2" ++ _nl
+// => _
+
+File writeAll: _methodClassPath contents: _methodClassBody
+// => Result ok: nil
+
+_tickSlice := "  tick => 1" ++ _nl
+// => _
+
+_methodMatch := (Erlang binary) match: _methodClassBody with: _tickSlice
+// => _
+
+_methodStart := _methodMatch at: 1
+// => _
+
+_methodEnd := _methodStart + (_methodMatch at: 2)
+// => _
+
+// Mirrors what `Behaviour>>removeSelector:` logs (ADR 0112, BT-3187): a
+// `'remove-method'` entry with a resolved span and prev_source, no `source`
+// (nothing replaces the excised text).
+_removeMethodInput := #{ #class => "MethodRemovalCounter", #selector => "tick", #kind => #'remove-method', #side => #instance, #intent => #durable, #author => "e2e-destructive", #'author_kind' => #human, #flushable => true, #'source_file' => _methodClassPath, #span => #{ #start => _methodStart, #'end' => _methodEnd }, #'prev_source' => _tickSlice }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _removeMethodInput
+// => _
+
+_removeMethodEntry := (Workspace changes select: [:e | e className =:= #MethodRemovalCounter]) first
+// => _
+
+_removeMethodEntry isRemoveMethod
+// => true
+
+// No confirmDestructive needed — this is Tier 1, same as any patch.
+_methodRemovalFlush := Workspace flush
+// => _
+
+Erlang maps get: #flushed with: _methodRemovalFlush
+// => 1
+
+(Erlang maps get: #skipped with: _methodRemovalFlush) isEmpty
+// => true
+
+_afterMethodRemoval := (File readAll: _methodClassPath) unwrap
+// => _
+
+_afterMethodRemoval includesSubstring: "tick => 1"
+// => false
+
+// The sibling method survives — the splice only touched the recorded span.
+_afterMethodRemoval includesSubstring: "other => 2"
+// => true
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+(Erlang file) delete: _methodClassPath
+// => Result ok: nil
+
+(Erlang file) del_dir: _destructiveDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _

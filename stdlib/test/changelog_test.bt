@@ -315,6 +315,21 @@ TestCase subclass: ChangeLogTest
   testChangeLogIncludesSelectorFlushKinds =>
     self assert: (ChangeLog includesSelector: #flushKinds:)
 
+  // --- ADR 0113 Phase 2 (BT-3207) destructive-tier flush facade ---
+  // Live tiering (skipped:destructive, flushIncludingDestructive applying a
+  // pending remove-class entry, remove-method flushing under ordinary
+  // flush with no gate) requires a live workspace + project tree; that is
+  // covered end-to-end in the beamtalk_workspace_flush_tests EUnit suite and
+  // tests/repl-protocol/cases/workspace_flush_destructive.btscript. BUnit
+  // only verifies the new selectors are present on the facade
+  // (WorkspaceInterface's own flushIncludingDestructive / flush:confirmDestructive:
+  // selectors are checked in workspace_interface_test.bt).
+  testChangeLogIncludesSelectorFlushKindsConfirmDestructive =>
+    self assert: (ChangeLog includesSelector: #flushKinds:confirmDestructive:)
+
+  testChangeEntryIncludesSelectorIsRemoveClass =>
+    self assert: (ChangeEntry includesSelector: #isRemoveClass)
+
   // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---
   testWorkspaceIncludesSelectorAutoflush =>
     self assert: (WorkspaceInterface includesSelector: #autoflush)

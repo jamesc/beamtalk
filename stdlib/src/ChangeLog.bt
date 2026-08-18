@@ -161,11 +161,12 @@ sealed typed Value subclass: ChangeLog
   internal changeLogClear -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogClear
 
-  /// Flush only the ChangeEntries whose kind or author_kind is in `kinds`
-  /// (ADR 0082 Phase 4).
+  /// Flush only the Tier 1 ChangeEntries whose kind or author_kind is in
+  /// `kinds` (ADR 0082 Phase 4).
   ///
   /// `kinds` is a Set (or List) of Symbols. Allowed values:
-  ///   - entry kinds: `#instance`, `#class`, `#'new-class'`
+  ///   - entry kinds: `#instance`, `#class`, `#'new-class'`,
+  ///     `#'remove-method'`, `#'remove-class'`
   ///   - author kinds: `#human`, `#agent`
   ///
   /// When both an entry-kind and an author-kind symbol are present, the entry
@@ -173,7 +174,9 @@ sealed typed Value subclass: ChangeLog
   /// agent-authored new-class entries). Unknown symbols and an empty set are
   /// rejected with a structured error.
   ///
-  /// Returns the same `FlushResult` summary as `Workspace flush`.
+  /// A matching Tier 2 entry (`#'remove-class'`, ADR 0113) is reported in the
+  /// summary's `skipped` field, not applied — use `flushKinds:confirmDestructive:`
+  /// to also apply it. Returns the same `FlushResult` summary as `Workspace flush`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -183,6 +186,22 @@ sealed typed Value subclass: ChangeLog
   /// ```
   flushKinds: kinds :: Object -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds
+
+  /// Flush the ChangeEntries whose kind or author_kind is in `kinds`,
+  /// additionally applying Tier 2 (`#'remove-class'`) entries within that
+  /// scope when `confirmDestructive` is `true` (ADR 0113 Phase 2).
+  ///
+  /// `confirmDestructive` composes as one more independent filter dimension
+  /// on the existing `flushKinds:` mechanism, not a special case — it must
+  /// be a literal `true`/`false`, never read from a workspace setting. See
+  /// `flushKinds:` for the `kinds` contract.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes flushKinds: #( #'remove-class' ) confirmDestructive: true  // => _
+  /// ```
+  flushKinds: kinds :: Object confirmDestructive: confirmDestructive :: Boolean -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds confirmDestructive: confirmDestructive
 
   /// Developer-readable representation, e.g. "ChangeLog with 2 entries".
   ///
