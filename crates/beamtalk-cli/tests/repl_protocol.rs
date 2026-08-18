@@ -1385,7 +1385,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             match arg.split_once(char::is_whitespace) {
                 Some((class, selector)) => {
                     let selector = selector.trim();
-                    let selector = selector.strip_prefix('#').unwrap_or(selector);
+                    let selector = selector.strip_prefix('#').unwrap_or(selector).trim();
                     client.eval(&format!("{} removeSelector: #{selector}", class.trim()))
                 }
                 None => Err("Usage: :remove-method <Class> <selector>".to_string()),
