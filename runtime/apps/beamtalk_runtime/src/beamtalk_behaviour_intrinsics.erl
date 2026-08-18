@@ -926,7 +926,22 @@ capture_class_removal_snapshot(ClassNameBin) ->
     try
         erlang:apply(beamtalk_repl_eval, capture_class_removal_snapshot, [ClassNameBin])
     catch
-        _:_ ->
+        error:undef ->
+            %% Expected when the workspace app isn't running (e.g. plain
+            %% runtime, no live ChangeLog) — not a bug, so no log line.
+            #{flushable => false, not_flushable_reason => <<"dynamic">>};
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "capture_class_removal_snapshot failed unexpectedly for ~p — logging removal as dynamic",
+                [ClassNameBin],
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
             #{flushable => false, not_flushable_reason => <<"dynamic">>}
     end.
 
