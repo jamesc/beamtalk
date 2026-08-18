@@ -59,6 +59,15 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # surfaced by `change_history` so the Changes-pane disclosure caret +
               # structured diff render can be driven without a real workspace.
               change_diffs: %{},
+              # BT-3195: fully custom ChangeLog rows appended to `change_history`'s
+              # derived-from-`changes` list, in insertion order. `save_method/3`'s
+              # 2-arity write path has no `side` concept (real saves don't need one
+              # here), so it can't express two rows sharing `{class, selector}` but
+              # differing by `kind`/`side` — the scenario `save_method/3`'s
+              # `{class, selector}`-keyed `changes` map structurally can't hold twice
+              # over. `seed_change_row/1` seeds one directly instead. `[]` = no extra
+              # rows (the default; every other stub test is unaffected).
+              extra_changes: [],
               # BT-2619: a one-shot barrier for the async mount-load reads. When a
               # test arms the gate (`arm_mount_gate/0`), the FIRST `browse_classes`
               # call (the mount-load task's first read) blocks until the test calls
@@ -305,27 +314,45 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def change_history do
     diffs = get(:change_diffs) || %{}
 
-    get(:changes)
-    |> Enum.map(fn {{class, selector}, _file} ->
-      %{
-        class: class,
-        selector: selector,
-        kind: "method",
-        intent: "durable",
-        flushable: true,
-        flushed: false,
-        author_kind: "liveview",
-        # BT-2636: seeded net-vs-disk diff so a test can drive the Changes-pane
-        # disclosure caret + structured `unified_diff` render. nil by default.
-        diff: Map.get(diffs, {class, selector})
-      }
-    end)
-    |> Enum.reverse()
+    derived =
+      get(:changes)
+      |> Enum.map(fn {{class, selector}, _file} ->
+        %{
+          class: class,
+          selector: selector,
+          kind: "method",
+          intent: "durable",
+          flushable: true,
+          flushed: false,
+          author_kind: "liveview",
+          # BT-2636: seeded net-vs-disk diff so a test can drive the Changes-pane
+          # disclosure caret + structured `unified_diff` render. nil by default.
+          diff: Map.get(diffs, {class, selector})
+        }
+      end)
+      |> Enum.reverse()
+
+    derived ++ get(:extra_changes)
   end
 
   @doc "Test helper: seed the net-vs-disk diff string for a `{class, selector}`."
   def set_change_diff(class, selector, diff) when is_binary(diff) do
     update(:change_diffs, fn diffs -> Map.put(diffs || %{}, {class, selector}, diff) end)
+  end
+
+  @doc """
+  Test helper (BT-3195): append one fully custom ChangeLog row to
+  `change_history`'s result, after the rows derived from `:changes`. `row` must
+  already be in the LiveView's expected shape (the same keys `entry_to_row/1`
+  produces for a real workspace: `class`, `selector`, `kind`, `intent`,
+  `flushable`, `flushed`, `author_kind`, `diff`, and optionally `side`) — this
+  helper does no shaping of its own, unlike `seed_change/2`, so a test can drive
+  scenarios the `{class, selector}`-keyed `:changes` map can't represent, e.g. a
+  same-selector instance-side and class-side row active simultaneously (ADR
+  0112, BT-3187's shadow-key fix).
+  """
+  def seed_change_row(row) when is_map(row) do
+    update(:extra_changes, fn rows -> rows ++ [row] end)
   end
 
   # ADR 0105 Phase 1 (BT-2779): current live snapshot of reload-induced
