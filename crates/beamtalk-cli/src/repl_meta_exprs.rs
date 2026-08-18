@@ -63,6 +63,75 @@ pub fn flush_expr_for(selector: &str) -> Option<String> {
     Some(format!("Workspace flush: {selector}"))
 }
 
+/// Construct the `<Class> removeFromSystem` expression a `:remove-class
+/// <Class>` REPL line dispatches to (ADR 0113 Phase 4, BT-3210).
+///
+/// `arg` is a single class name — trimmed, and returned as `None` when empty
+/// (including whitespace-only) so the caller can print a usage hint instead
+/// of evaluating a malformed bare `removeFromSystem` send. Unlike
+/// [`remove_method_expr_for`], there is no second (selector) token to split
+/// off and no leading-`#` stripping — a class name is never symbol-decorated.
+///
+/// The real REPL dispatch (`commands/repl/mod.rs`) prompts for `y/N`
+/// confirmation before calling this — a destructive, memory-mutating
+/// operation per ADR 0113's Surface section — but that terminal-only
+/// confirmation step is orthogonal to expression construction, so it isn't
+/// modeled here (matching how `flush_expr_for`/`remove_method_expr_for`
+/// don't model any REPL-side confirmation either).
+pub fn remove_class_expr_for(arg: &str) -> Option<String> {
+    let class = arg.trim();
+    if class.is_empty() {
+        return None;
+    }
+    Some(format!("{class} removeFromSystem"))
+}
+
+/// The unscoped `Workspace flushIncludingDestructive` expression a bare
+/// `:flush-destructive` REPL line dispatches to (ADR 0113 Phase 4, BT-3210).
+///
+/// A `const`, not a function, because the bare form takes no argument to
+/// build from — mirroring `Flush`'s own bare-form handling in
+/// `commands/repl/mod.rs` (`"Workspace flush"` is written as a literal there
+/// too; this one is exposed as a shared constant instead purely so the
+/// integration-test harness in `tests/repl_protocol.rs` can reference it by
+/// name rather than re-typing the literal — see the module doc's
+/// no-hand-copied-mirror rationale).
+pub const FLUSH_INCLUDING_DESTRUCTIVE_EXPR: &str = "Workspace flushIncludingDestructive";
+
+/// Construct the `Workspace flush: <selector> confirmDestructive: true`
+/// expression a `:flush-destructive <selector>` REPL line dispatches to
+/// (ADR 0113 Phase 4, BT-3210).
+///
+/// `selector` is passed through **verbatim** (only trimmed), exactly like
+/// [`flush_expr_for`] — a Class, a Symbol kind (`#'remove-class'`), or a
+/// Dictionary (`#{ #file => "path" }`) are all legal scopes for
+/// `WorkspaceInterface.bt`'s `flush: filter confirmDestructive: confirmDestructive`
+/// keyword form. Returns `None` when `selector` is empty (including
+/// whitespace-only), so the caller can print a usage hint instead of
+/// evaluating a malformed bare `Workspace flush: confirmDestructive: true`
+/// send — same emptiness guard `flush_expr_for` uses, for the same reason.
+///
+/// **After `:remove-class <Class>`, scope by `#Class` (a Symbol literal),
+/// not the bare class name.** `removeFromSystem` already unbinds the name —
+/// a bare `<Class>` argument here fails to *evaluate* (an unresolved-class
+/// error) before the `flush:` send ever runs. `beamtalk_workspace_flush`'s
+/// filter normalisation matches a Symbol against the `ChangeLog` entry's
+/// recorded `class` field by name, needing no live class to resolve —
+/// exactly the case a destructive flush of an already-removed class needs.
+/// This is pre-existing `Workspace flush:` behaviour (its Class-vs-Symbol-
+/// kind filter dispatch predates ADR 0113), not something new here; it just
+/// becomes load-bearing for this REPL pairing specifically because
+/// `:remove-class` always runs first.
+pub fn flush_destructive_expr_for(selector: &str) -> Option<String> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Workspace flush: {selector} confirmDestructive: true"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +259,73 @@ mod tests {
         // Because both the real dispatch and the test harness now call this
         // one function, that drift can no longer happen.
         assert_eq!(flush_expr_for("   "), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // remove_class_expr_for
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_class_translates_to_remove_from_system_send() {
+        assert_eq!(
+            remove_class_expr_for("Counter"),
+            Some("Counter removeFromSystem".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_class_trims_surrounding_whitespace() {
+        assert_eq!(
+            remove_class_expr_for("  Counter  "),
+            Some("Counter removeFromSystem".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_class_with_empty_argument_reports_no_expression() {
+        assert_eq!(remove_class_expr_for(""), None);
+        assert_eq!(remove_class_expr_for("   "), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // flush_destructive_expr_for
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flush_destructive_class_selector_appends_confirm_destructive_keyword() {
+        assert_eq!(
+            flush_destructive_expr_for("Counter"),
+            Some("Workspace flush: Counter confirmDestructive: true".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_destructive_symbol_kind_selector_translates_verbatim() {
+        assert_eq!(
+            flush_destructive_expr_for("#'remove-class'"),
+            Some("Workspace flush: #'remove-class' confirmDestructive: true".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_destructive_trims_surrounding_whitespace() {
+        assert_eq!(
+            flush_destructive_expr_for("  Counter  "),
+            Some("Workspace flush: Counter confirmDestructive: true".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_destructive_with_empty_selector_reports_no_expression() {
+        assert_eq!(flush_destructive_expr_for(""), None);
+        assert_eq!(flush_destructive_expr_for("   "), None);
+    }
+
+    #[test]
+    fn flush_including_destructive_expr_is_the_bare_unscoped_selector() {
+        assert_eq!(
+            FLUSH_INCLUDING_DESTRUCTIVE_EXPR,
+            "Workspace flushIncludingDestructive"
+        );
     }
 }

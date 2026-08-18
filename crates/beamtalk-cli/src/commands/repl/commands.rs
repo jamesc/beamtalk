@@ -155,6 +155,20 @@ pub(crate) const REMOVE_METHOD: ReplCommandSpec = ReplCommandSpec {
     takes_class_expr_arg: true,
 };
 
+pub(crate) const REMOVE_CLASS: ReplCommandSpec = ReplCommandSpec {
+    name: ":remove-class",
+    aliases: &[],
+    help: "Remove a class from the running system (prompts for confirmation): `:remove-class <Class>`",
+    takes_class_expr_arg: true,
+};
+
+pub(crate) const FLUSH_DESTRUCTIVE: ReplCommandSpec = ReplCommandSpec {
+    name: ":flush-destructive",
+    aliases: &[],
+    help: "Flush pending destructive (class-removal) ChangeLog entries to disk, deleting files (prompts for confirmation): `:flush-destructive [<Class>|#kind|#{#file => \"path\"}]`",
+    takes_class_expr_arg: true,
+};
+
 /// The full REPL meta-command vocabulary. This is the single source both
 /// `helper.rs` (tab-completion) and `mod.rs` (dispatch, via
 /// `classify_command`) consult — see the module doc for why `:actors`,
@@ -174,6 +188,8 @@ pub(crate) const REPL_COMMAND_TABLE: &[&ReplCommandSpec] = &[
     &DIRTY,
     &RECHECK,
     &REMOVE_METHOD,
+    &REMOVE_CLASS,
+    &FLUSH_DESTRUCTIVE,
 ];
 
 /// All command word forms (canonical name + aliases) flattened, for
@@ -267,6 +283,8 @@ mod tests {
             ":unload ",
             ":flush ",
             ":remove-method ",
+            ":remove-class ",
+            ":flush-destructive ",
         ] {
             assert!(
                 prefixes.iter().any(|p| p == expected),

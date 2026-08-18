@@ -640,6 +640,10 @@ enum CommandAction<'a> {
     RecheckUsage,
     RemoveMethodUsage,
     RemoveMethodArg(&'a str),
+    RemoveClassUsage,
+    RemoveClassArg(&'a str),
+    FlushDestructive,
+    FlushDestructiveArg(&'a str),
 }
 
 /// Classify a line as a known REPL meta-command (or `None` if it isn't one),
@@ -723,6 +727,20 @@ fn classify_command(line: &str) -> Option<CommandAction<'_>> {
             CommandAction::RemoveMethodArg(commands::REMOVE_METHOD.arg(line)?)
         });
     }
+    if commands::REMOVE_CLASS.is_form(word) {
+        return Some(if bare {
+            CommandAction::RemoveClassUsage
+        } else {
+            CommandAction::RemoveClassArg(commands::REMOVE_CLASS.arg(line)?)
+        });
+    }
+    if commands::FLUSH_DESTRUCTIVE.is_form(word) {
+        return Some(if bare {
+            CommandAction::FlushDestructive
+        } else {
+            CommandAction::FlushDestructiveArg(commands::FLUSH_DESTRUCTIVE.arg(line)?)
+        });
+    }
     None
 }
 
@@ -803,9 +821,109 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
                 None => eprintln!("Usage: :remove-method <Class> <selector>"),
             }
         }
+        // ADR 0113 Phase 4 (BT-3210): REPL alias for `Behaviour>>removeFromSystem`
+        // — `:remove-class <Class>` desugars to `<Class> removeFromSystem`,
+        // gated behind a `y/N` terminal confirmation. Memory-only: reaching
+        // disk still requires a later, separately-confirmed
+        // `:flush-destructive` — two prompts for two genuinely separate
+        // decisions, matching the ADR's Surface table. See
+        // `handle_remove_class` for the confirmation prompt.
+        CommandAction::RemoveClassUsage => {
+            eprintln!("Usage: :remove-class <Class>");
+        }
+        CommandAction::RemoveClassArg(arg) => handle_remove_class(arg, client),
+        // ADR 0113 Phase 4 (BT-3210): REPL alias for the Tier-2 (destructive)
+        // flush gate — `:flush-destructive` / `:flush-destructive <selector>`
+        // desugar to `Workspace flushIncludingDestructive` /
+        // `Workspace flush: <selector> confirmDestructive: true`, mirroring
+        // the `:flush`/`:flush <selector>` pair rather than a flag on
+        // `:flush` (the REPL meta-command layer has no `--flag` precedent).
+        // Each gated behind its own `y/N` terminal confirmation, independent
+        // of any `:remove-class` prompt that ran earlier. See
+        // `handle_flush_destructive`/`handle_flush_destructive_arg`.
+        CommandAction::FlushDestructive => handle_flush_destructive(client),
+        CommandAction::FlushDestructiveArg(selector) => {
+            handle_flush_destructive_arg(selector, client);
+        }
     }
 
     CommandResult::Handled
+}
+
+/// `:remove-class <Class>` (ADR 0113 Phase 4, BT-3210): prompts `y/N` at the
+/// terminal (ADR 0113 Surface — the REPL's confirmation gesture for the
+/// memory-mutating half of a destructive removal) before evaluating
+/// `<Class> removeFromSystem`. The file on disk is untouched until a later,
+/// separately-confirmed `:flush-destructive`.
+fn handle_remove_class(arg: &str, client: &mut ReplClient) {
+    match beamtalk_cli::repl_meta_exprs::remove_class_expr_for(arg) {
+        Some(expr) => {
+            let class = arg.trim();
+            if confirm_destructive_action(&format!(
+                "Remove class {class} from the running workspace? This takes effect in memory immediately; the file on disk is untouched until a later `:flush-destructive` (or `Workspace flushIncludingDestructive`)."
+            )) {
+                eval_and_display(client, &expr);
+            } else {
+                println!("Aborted: {class} was not removed.");
+            }
+        }
+        None => eprintln!("Usage: :remove-class <Class>"),
+    }
+}
+
+/// Bare `:flush-destructive` (ADR 0113 Phase 4, BT-3210): prompts `y/N`
+/// before evaluating the unscoped `Workspace flushIncludingDestructive`,
+/// which deletes every pending `.bt` file the workspace's `ChangeLog` has a
+/// `remove-class` entry for.
+fn handle_flush_destructive(client: &mut ReplClient) {
+    if confirm_destructive_action(
+        "This permanently deletes the source file for every pending class removal in the workspace. Continue?",
+    ) {
+        eval_and_display(
+            client,
+            beamtalk_cli::repl_meta_exprs::FLUSH_INCLUDING_DESTRUCTIVE_EXPR,
+        );
+    } else {
+        println!("Aborted: no files were deleted.");
+    }
+}
+
+/// `:flush-destructive <selector>` (ADR 0113 Phase 4, BT-3210): prompts
+/// `y/N` before evaluating the scoped `Workspace flush: <selector>
+/// confirmDestructive: true`.
+fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
+    match beamtalk_cli::repl_meta_exprs::flush_destructive_expr_for(selector) {
+        Some(expr) => {
+            if confirm_destructive_action(&format!(
+                "This permanently deletes the source file for the pending class removal matching `{selector}`. Continue?"
+            )) {
+                eval_and_display(client, &expr);
+            } else {
+                println!("Aborted: no files were deleted.");
+            }
+        }
+        None => {
+            eprintln!("Usage: :flush-destructive [<Class>|#kind|#{{ #file => \"path\" }}]");
+        }
+    }
+}
+
+/// Prompt `message` followed by ` [y/N] ` at the terminal and read a line
+/// from stdin, returning `true` only for an explicit `y`/`yes`
+/// (case-insensitive). Any other input — including a blank line, EOF, or a
+/// read error on a non-interactive/piped stdin — declines, so a destructive
+/// REPL command (`:remove-class`, `:flush-destructive`) never proceeds
+/// without an explicit affirmative (ADR 0113 "Surface": the REPL's
+/// confirmation gesture for a Tier-2/destructive operation).
+fn confirm_destructive_action(message: &str) -> bool {
+    use std::io::{BufRead, Write};
+    print!("{message} [y/N] ");
+    let _ = std::io::stdout().flush();
+    let mut input = String::new();
+    match std::io::stdin().lock().read_line(&mut input) {
+        Ok(0) | Err(_) => false,
+        Ok(_) => matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
+    }
 }
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
@@ -1947,6 +2065,51 @@ mod tests {
         assert_eq!(
             classify_command(":remove-method Counter increment"),
             Some(CommandAction::RemoveMethodArg("Counter increment"))
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0113 Phase 4 (BT-3210) — `:remove-class <Class>` and
+    // `:flush-destructive [<selector>]` meta-command dispatch, matching the
+    // `:remove-method`/`:flush` alias pattern. The expression-building logic
+    // (`remove_class_expr_for`, `flush_destructive_expr_for`,
+    // `FLUSH_INCLUDING_DESTRUCTIVE_EXPR`) lives in
+    // `beamtalk_cli::repl_meta_exprs` — shared with, and tested by,
+    // `tests/repl_protocol.rs` — so only dispatch classification is tested
+    // here; the terminal `y/N` confirmation gate is interactive and not unit
+    // tested (matches how no other REPL command's terminal I/O is unit
+    // tested either).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bare_remove_class_is_usage_error() {
+        assert_eq!(
+            classify_command(":remove-class"),
+            Some(CommandAction::RemoveClassUsage)
+        );
+    }
+
+    #[test]
+    fn remove_class_with_arg_classifies_as_remove_class_arg() {
+        assert_eq!(
+            classify_command(":remove-class Counter"),
+            Some(CommandAction::RemoveClassArg("Counter"))
+        );
+    }
+
+    #[test]
+    fn bare_flush_destructive_classifies_as_flush_destructive() {
+        assert_eq!(
+            classify_command(":flush-destructive"),
+            Some(CommandAction::FlushDestructive)
+        );
+    }
+
+    #[test]
+    fn flush_destructive_with_arg_classifies_as_flush_destructive_arg() {
+        assert_eq!(
+            classify_command(":flush-destructive Counter"),
+            Some(CommandAction::FlushDestructiveArg("Counter"))
         );
     }
 }

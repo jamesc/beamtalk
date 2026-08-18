@@ -568,6 +568,127 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
+  # ── Remove Class (ADR 0113 Phase 4, BT-3210) ────────────────────────────────
+
+  test "class-definition editor: Remove Class removes the class from the system (ADR 0113, BT-3210)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
+    suffix = System.unique_integer([:positive])
+    class = "RemoveClassMe#{suffix}"
+
+    # "New Class" opens + selects the created class's def tab (BT-2645) — the
+    # tab the "Remove Class" button acts on.
+    html =
+      view
+      |> form("#new-class-form")
+      |> render_submit(%{"name" => class, "superclass" => "Actor"})
+
+    assert html =~ "def:#{class}"
+    assert html =~ "Remove Class"
+
+    # Sanity: the class exists and is spawnable before removal.
+    name = "rc_#{suffix}"
+    spawn_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    refute spawn_html =~ "does_not_understand"
+    refute spawn_html =~ "beamtalk_error"
+
+    # Click "Remove Class": dispatches `#{class} removeFromSystem` through the
+    # same `evaluate` op the REPL `:remove-class` meta-command and the MCP
+    # `remove_class` tool use — no dedicated workspace-side op (ADR 0113).
+    remove_html =
+      view
+      |> element(~s(button[phx-click="remove_class"]))
+      |> render_click()
+
+    assert remove_html =~ "Removed #{class} from memory"
+    assert remove_html =~ "not yet flushed to disk"
+    refute remove_html =~ "{:error"
+    refute remove_html =~ "beamtalk_error"
+
+    # The removed class's def tab closes, mirroring Remove Method's success
+    # path (its tab closes too, since the thing it was editing no longer
+    # exists).
+    refute remove_html =~ "def:#{class}"
+
+    # The class is really gone: a fresh spawn attempt fails one way or
+    # another (does_not_understand from Object, or a structured
+    # "unresolved class" error) — exactly which shape depends on how the
+    # runtime reports a fully-removed class name, but either proves removal.
+    name2 = "rc2_#{suffix}"
+    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+
+    assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand" or
+             dnu_html =~ "beamtalk_error" or dnu_html =~ "{:error"
+
+    # The LiveView is still live and interactive after the removal (no crash /
+    # disconnect): a follow-up eval still round-trips.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
+  test "the ChangeLog viewer flags a remove-class entry as destructive and its scoped 'delete file' round-trips (ADR 0113, BT-3210)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "DestructiveBadge#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      greet => "hi"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # `Class removeFromSystem` directly via eval — the same expression the
+    # "Remove Class" button and the REPL `:remove-class` meta-command
+    # dispatch — logs a `remove-class` ChangeLog entry (ADR 0113 Phase 1,
+    # BT-3206).
+    remove_html =
+      view |> form("#eval-form") |> render_submit(%{expr: "#{class} removeFromSystem"})
+
+    refute remove_html =~ "beamtalk_error"
+    refute remove_html =~ "{:error"
+
+    changes_html = render_hook(view, "dock_tab", %{"tab" => "changes"})
+
+    # The row renders the `destructive-row` marker (BT-3210's visual cue —
+    # a tinted border + a CSS `::after` badge on the Kind cell, deliberately
+    # kept off the `<td>`s themselves so `workspace_changes_side_test.exs`'s
+    # exact-match Kind-cell assertions for every other row stay unaffected)
+    # and a scoped "delete file" action instead of "revert" — remove-class
+    # is deliberately absent from the revert button's kind list (BT-3208
+    # owns that follow-up).
+    assert changes_html =~ ~s(class="destructive-row")
+    assert changes_html =~ "remove class"
+
+    assert has_element?(
+             view,
+             ~s(button[phx-click="flush_destructive"][phx-value-class="#{class}"])
+           )
+
+    refute has_element?(
+             view,
+             ~s(button[phx-click="revert"][phx-value-class="#{class}"])
+           )
+
+    # Click "delete file": scoped `Workspace flush: #{class}
+    # confirmDestructive: true`. This class was never backed by an on-disk
+    # file (eval-defined, no project tree in the test workspace), so its
+    # entry is `flushable: false` — a safe no-op to flush, not a real
+    # delete; it must not error.
+    flush_html =
+      view
+      |> element(~s(button[phx-click="flush_destructive"][phx-value-class="#{class}"]))
+      |> render_click()
+
+    assert flush_html =~ "Flushed the pending removal for #{class}"
+    refute flush_html =~ "beamtalk_error"
+    refute flush_html =~ "{:error"
+
+    # The LiveView is still live and interactive afterward.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
   # ── ChangeLog revert for a removed method (ADR 0112, BT-3194) ───────────────
 
   test "the ChangeLog viewer's revert button appears and round-trips for a removed method (ADR 0112, BT-3194)",

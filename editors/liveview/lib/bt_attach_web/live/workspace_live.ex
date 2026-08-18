@@ -1501,6 +1501,32 @@ defmodule BtAttachWeb.WorkspaceLive do
   # the button is rendered only for `:owner`, mirroring `new_method` above.
   def handle_event("remove_method", _params, socket), do: {:noreply, socket}
 
+  # Remove the active class-definition tab's class from the running system
+  # (ADR 0113 Phase 4, BT-3210). Wired the same way "Remove Method" is above
+  # (ADR 0112 Phase 4, BT-3189): an owner-only editor action, `data-confirm`
+  # -gated in the template, that drives a write-surface primitive and
+  # refreshes the Changes pane. There is no dedicated workspace-side op —
+  # this just builds `Class removeFromSystem` and submits it through the
+  # existing `evaluate` op, exactly like the REPL `:remove-class` meta-
+  # command and the MCP `remove_class` tool (ADR 0113's "Surface" table).
+  #
+  # This is the memory-mutating gesture only, matching `autoflush: true`'s
+  # existing "the memory step is not gated" behaviour for ordinary patches
+  # (ADR 0113 Surface, browser row) — the resulting `remove-class` entry
+  # does NOT get silently written to disk by autoflush; it renders in the
+  # Changes pane with a distinct destructive-dirty affordance requiring its
+  # own explicit "Delete file" click (`confirmDestructive: true`) to reach
+  # disk. Two gestures for two genuinely separate decisions, same shape as
+  # the REPL's two independently-confirmed `:remove-class` / `:flush-
+  # destructive` commands.
+  def handle_event("remove_class", _params, %{assigns: %{role: :owner}} = socket) do
+    {:noreply, remove_active_class(socket)}
+  end
+
+  # Non-owner (Observer) or a crafted event with no matching role: a no-op —
+  # the button is rendered only for `:owner`, mirroring `remove_method` above.
+  def handle_event("remove_class", _params, socket), do: {:noreply, socket}
+
   # ── tabbed method editor (BT-2494, epic BT-2482 Phase 2) ────────────────────
 
   # Switch the focused editor tab. Pure view state — no workspace round-trip; an
@@ -1684,9 +1710,39 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Flush all pending durable changes to disk ("Save All to Disk", ADR 0082
   # `Workspace flush`). The summary's conflicts/skipped lists carry recoverable
   # conditions; a hard runtime failure renders as a structured error.
+  #
+  # Deliberately Tier-1-only, unchanged by ADR 0113: a pending `remove-class`
+  # entry is reported in the summary as `skipped: destructive`
+  # (`beamtalk_workspace_flush`'s own vocabulary, unmodified by this
+  # surface — see `format_flush_summary/1`) rather than silently deleted, so
+  # this one button staying textually the same `Workspace flush` call it
+  # always was is itself the safety property ADR 0113 relies on for every
+  # unmodified caller. Reaching Tier 2 is the `flush_destructive` handler
+  # below (per-row "Delete file" button, ADR 0113 Surface: browser row).
   def handle_event("flush", _params, socket) do
     {:noreply, flush_changes(socket)}
   end
+
+  # "Delete file" — the browser's second, independently-confirmed gesture for
+  # one pending `remove-class` ChangeLog row (ADR 0113 Phase 4, BT-3210,
+  # Surface table). Scoped to the one class the row names, mirroring the
+  # REPL's `:flush-destructive <Class>` and the MCP `flush` tool's scoped
+  # `confirm_destructive: true` form — never the unscoped
+  # `flushIncludingDestructive`, since a browser click always targets one
+  # named row, not "every destructive entry in the workspace".
+  def handle_event(
+        "flush_destructive",
+        %{"class" => class},
+        %{assigns: %{role: :owner}} = socket
+      )
+      when is_binary(class) and class != "" do
+    {:noreply, flush_destructive(socket, class)}
+  end
+
+  # Non-owner (Observer), or a crafted event with a missing/blank class: a
+  # no-op — the button is rendered only for `:owner` against a real row's
+  # class, mirroring `remove_class`/`revert` above.
+  def handle_event("flush_destructive", _params, socket), do: {:noreply, socket}
 
   # Toggle the System Browser's "New Class" modal open/closed (BT-2293, BT-2645).
   # Closed by default; the ＋ button in the browser head flips it. Opening the
@@ -3618,6 +3674,68 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # Remove the active class-definition tab's class from the system (ADR 0113
+  # Phase 4, BT-3210). A `:def` tab always names an already-existing class
+  # (unlike a `:method` tab, there is no "new, unsaved class" draft state —
+  # class creation is a separate System Browser form, see the "NEW CLASS"
+  # comment in the template below), so there is no `new: true` guard to
+  # mirror `remove_active_method/1`'s; a crafted event against a non-`:def`
+  # tab is still a graceful no-op, surfaced as a local validation error
+  # rather than evaluating a malformed expression.
+  defp remove_active_class(socket) do
+    case active_tab(socket.assigns) do
+      %{kind: :def, class: class} = tab when is_binary(class) and class != "" ->
+        remove_class(socket, tab, class)
+
+      _ ->
+        status_error(socket, "Open a class definition to remove it.")
+    end
+  end
+
+  # `Class removeFromSystem`, submitted through the same generic `evaluate`
+  # op the REPL `:remove-class` meta-command and the MCP `remove_class` tool
+  # use — no dedicated workspace-side op (ADR 0113's "Surface" table: "every
+  # surface constructs one of the Beamtalk expressions above and submits via
+  # the existing `evaluate` op"). Memory-mutating only: this never flushes.
+  defp remove_class(socket, tab, class) do
+    expr = "#{class} removeFromSystem"
+    pid = socket.assigns[:session_pid]
+
+    if not is_pid(pid) do
+      status_error(socket, "not attached to workspace")
+    else
+      remove_class_eval(socket, tab, class, expr, pid)
+    end
+  end
+
+  defp remove_class_eval(socket, tab, class, expr, pid) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
+        # tab was the active one — mirrors `remove_method_eval/6`'s success
+        # path, so the confirmation message must be assigned AFTER closing
+        # the tab. The message names the still-open second step (ADR 0113's
+        # two-gesture flow) so the owner isn't surprised the file survives
+        # this click.
+        socket
+        |> close_tab(tab.id)
+        |> assign(
+          save_result:
+            "Removed #{class} from memory — not yet flushed to disk. Delete its file from the Changes pane to finish.",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+        |> assign_changes()
+
+      {:error, reason, _output, _warnings} ->
+        status_error(socket, Workspace.render_error(reason))
+
+      {:error, reason} ->
+        status_error(socket, facade_error(reason))
+    end
+  end
+
   # Compile a class-definition tab (BT-2494) by evaluating its definition source
   # against the workspace — exactly the path the e2e tests use to define a class,
   # so "saving a class definition compiles the class" needs no new server op
@@ -3938,6 +4056,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (`beamtalk_workspace_changelog.erl`).
   defp change_kind_label(%{kind: "remove-method"} = c), do: "remove (#{c[:side] || "?"})"
   defp change_kind_label(%{kind: "new-class"}), do: "new class"
+  # ADR 0113 Phase 4 (BT-3210): a Tier-2 (destructive, file-deleting)
+  # `removeFromSystem` entry — kept a distinct label from "remove (...)"
+  # above (Tier 1's `removeSelector:`) since the two carry very different
+  # flush-time consequences; the row's own `.destructive-badge` (see the
+  # template) is the primary visual cue, this is the textual one.
+  defp change_kind_label(%{kind: "remove-class"}), do: "remove class"
   defp change_kind_label(%{kind: kind}), do: kind
 
   # Revert one pending method patch (BT-2293). On success the prior body is
@@ -4000,6 +4124,68 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       {:error, reason} ->
         assign(socket, flush_result: nil, flush_error: facade_error(reason))
+    end
+  end
+
+  # "Delete file" (ADR 0113 Phase 4, BT-3210) — the scoped Tier-2 flush for
+  # one `remove-class` row, submitted as `Workspace flush: #Class
+  # confirmDestructive: true` through the generic `evaluate` op (no
+  # dedicated workspace-side op, matching `remove_class`/`remove_method`
+  # above and mirroring the REPL's `:flush-destructive #Class` / MCP
+  # `flush`'s scoped `confirm_destructive: true` form).
+  #
+  # Scoped by *Symbol* (`#Class`), not the bare class name: this button only
+  # ever appears on an already-`remove-class`'d row, so `removeFromSystem`
+  # has already unbound the class name by the time this fires — a bare
+  # identifier would fail to *evaluate* (unresolved class) before the
+  # `flush:` send ever runs. `beamtalk_workspace_flush`'s filter
+  # normalisation matches a Symbol against the ChangeLog entry's recorded
+  # `class` field by name, needing no live class to resolve — exactly what
+  # scoping a destructive flush to an already-removed class needs.
+  #
+  # `class` rides a `phx-value-*` attribute, so — unlike `remove_class`'s
+  # `class` (read from server-tracked active-tab state) — it is
+  # client-controlled input reaching a raw, textually-interpolated Beamtalk
+  # expression: validated against the same bare-PascalCase-identifier shape
+  # `validate_new_class_name`/`validate_superclass` already enforce for the
+  # New Class modal's class-name fields (`@new_class_name_re`), so a crafted
+  # event cannot inject arbitrary source into the `evaluate` call.
+  defp flush_destructive(socket, class) do
+    if Regex.match?(@new_class_name_re, class) do
+      expr = "Workspace flush: ##{class} confirmDestructive: true"
+      pid = socket.assigns[:session_pid]
+
+      if not is_pid(pid) do
+        status_error(socket, "not attached to workspace")
+      else
+        flush_destructive_eval(socket, class, expr, pid)
+      end
+    else
+      status_error(socket, "Invalid class name.")
+    end
+  end
+
+  defp flush_destructive_eval(socket, class, expr, pid) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        socket
+        |> assign(
+          save_result: nil,
+          save_error: nil,
+          flush_result: "Flushed the pending removal for #{class}",
+          flush_error: nil
+        )
+        |> assign_changes()
+        # BT-2586: a successful destructive flush can delete a tracked file,
+        # so the git panel must reflect it immediately, same as an ordinary
+        # "Save All to Disk" flush.
+        |> maybe_refresh_git()
+
+      {:error, reason, _output, _warnings} ->
+        status_error(socket, Workspace.render_error(reason))
+
+      {:error, reason} ->
+        status_error(socket, facade_error(reason))
     end
   end
 
@@ -9306,7 +9492,21 @@ defmodule BtAttachWeb.WorkspaceLive do
                           <%= for c <- @changes do %>
                             <% expanded =
                               MapSet.member?(@expanded_changes, {c.class, c.selector, c[:side]}) %>
-                            <tr>
+                            <%!-- Destructive-tier row marker (ADR 0113 Phase 4,
+                                 BT-3210): a `remove-class` entry deletes a `.bt`
+                                 file on flush and is deliberately excluded from
+                                 the ordinary "Save All to Disk" write (BT-3207's
+                                 Tier 1/Tier 2 split) — this class drives a purely
+                                 presentational CSS marker (`.destructive-row`, a
+                                 tinted left border + a "destructive" `::after`
+                                 badge on the Kind cell) so the row never reads as
+                                 just another dirty patch. Kept off the `<td>`
+                                 cells themselves (as an attribute or extra child
+                                 node) so the exact-match `<td>#{kind}</td>`
+                                 regex `workspace_changes_side_test.exs` (BT-3195)
+                                 already asserts on every other row's Kind cell
+                                 stays untouched. --%>
+                            <tr class={if c.kind == "remove-class", do: "destructive-row"}>
                               <%!-- Leading disclosure caret (BT-2636): toggles
                                    this row's structured net-vs-disk diff. Only
                                    rendered when the entry carries a diff (the same
@@ -9382,6 +9582,34 @@ defmodule BtAttachWeb.WorkspaceLive do
                                   phx-disable-with="Reverting…"
                                 >
                                   revert
+                                </button>
+                                <%!-- Delete file (ADR 0113 Phase 4, BT-3210):
+                                     the browser's second, independently-
+                                     confirmed gesture for a `remove-class`
+                                     row — "Remove Class" (the editor action
+                                     above) only removed the class from
+                                     memory; this click is what actually
+                                     deletes its `.bt` file, so it gets its
+                                     own `data-confirm` dialog rather than
+                                     silently riding along with "Save All to
+                                     Disk" (which stays Tier-1-only, BT-3207).
+                                     Not revertable (`remove-class` is
+                                     deliberately absent from the `revert`
+                                     button's kind list above — BT-3208 owns
+                                     that follow-up), so this is the row's
+                                     only action. --%>
+                                <button
+                                  :if={c.kind == "remove-class"}
+                                  class="btn-link danger"
+                                  type="button"
+                                  phx-click="flush_destructive"
+                                  phx-value-class={c.class}
+                                  phx-disable-with="Deleting…"
+                                  data-confirm={
+                                    "Permanently delete #{c.class}'s source file from disk? This cannot be undone."
+                                  }
+                                >
+                                  delete file
                                 </button>
                               </td>
                             </tr>
@@ -10380,6 +10608,33 @@ defmodule BtAttachWeb.WorkspaceLive do
                                 }
                               >
                                 Remove Method
+                              </button>
+                              <%!-- Remove Class (ADR 0113 Phase 4, BT-3210): only on a
+                             class-definition tab — a `:def` tab always names an
+                             already-existing class (there is no "new, unsaved
+                             class" draft state, see the NEW CLASS comment
+                             below), so there is no `[:new]` guard to mirror
+                             Remove Method's. Wired the same way: type="button"
+                             so it never submits this form, phx-click drives
+                             `remove_class` (→ `Class removeFromSystem` via the
+                             existing `evaluate` op), and `data-confirm` gates
+                             the destructive action — the browser's required
+                             confirmation gesture per ADR 0113's Surface table.
+                             This click removes the class from memory only; the
+                             resulting `remove-class` ChangeLog entry still
+                             needs its own "Delete file" confirmation in the
+                             Changes pane to reach disk (ADR 0113's two-gesture
+                             flow). --%>
+                              <button
+                                :if={active_tab(assigns).kind == :def}
+                                class="btn btn-sm"
+                                type="button"
+                                phx-click="remove_class"
+                                data-confirm={
+                                  "Remove #{@edit_class} from the running system? This deletes it from memory immediately; the source file is not touched until a separate confirmation to flush the removal. This cannot be undone from the editor."
+                                }
+                              >
+                                Remove Class
                               </button>
                               <button class="btn btn-sm primary" type="submit">
                                 Compile <span class="k">⌘S</span>
