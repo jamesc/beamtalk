@@ -84,6 +84,7 @@ flush_test_() ->
         fun remove_class_flush_two_confirm_true_deletes_file/1,
         fun remove_class_flush_two_confirm_false_is_skipped/1,
         fun filter_by_remove_class_selector/1,
+        fun filter_by_remove_method_selector/1,
         fun flush_kinds_remove_class_requires_confirm/1,
         fun flush_kinds_remove_class_with_confirm_deletes_file/1,
         fun remove_class_already_gone_is_soft_success/1,
@@ -1505,6 +1506,29 @@ filter_by_remove_class_selector(#{proj_dir := ProjDir}) ->
     [
         ?_assertEqual(1, maps:get(flushed, Summary)),
         ?_assertEqual(false, filelib:is_regular(File))
+    ].
+
+%% `flush: #'remove-method'` (Tier 1, no confirm needed) filters on kind, not
+%% selector — unlike `'new-class'`/`'remove-class'`, a `'remove-method'` entry
+%% carries the real removed selector (here `#foo`, not `#'remove-method'`), so
+%% this specifically guards against re-introducing an `entry_selector/1`
+%% match that would only work by the atom-name coincidence, never in practice.
+filter_by_remove_method_selector(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {Start, End, OldBody} = locate(Original, <<"foo => 1\n">>),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        remove_method_input(
+            <<"Counter">>, <<"foo">>, instance, list_to_binary(File), Start, End, OldBody
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush('remove-method'),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(nomatch, binary:match(Final, <<"foo => 1">>)),
+        ?_assert(entry_flushed(Seq))
     ].
 
 %% `flushKinds: #{#'remove-class'}` (no confirm) leaves the destructive entry

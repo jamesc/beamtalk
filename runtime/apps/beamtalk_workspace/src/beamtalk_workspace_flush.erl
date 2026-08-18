@@ -488,12 +488,17 @@ filter_entries(Entries, {class, ClassBin}) ->
 filter_entries(Entries, {selector, Sel}) when
     Sel =:= 'new-class'; Sel =:= 'remove-method'; Sel =:= 'remove-class'
 ->
-    %% These three kinds always carry selector: null (BT-3206/BT-3187/ADR
-    %% 0082), so matching on entry_selector/1 would silently return nothing —
-    %% filter on kind instead. Unlike `instance`/`class` (also valid kind()
-    %% values, but ambiguous with real getter selectors of the same name),
-    %% none of these three collides with a plausible method selector, so
-    %% redirecting them to kind-matching is unambiguous.
+    %% `'new-class'`/`'remove-class'` entries carry selector: null; a
+    %% `'remove-method'` entry carries the real removed selector (e.g. #foo),
+    %% not null. Either way, filtering on the bare marker atom is meant to
+    %% mean "all removals/additions of this kind", not a literal selector
+    %% match — matching on entry_selector/1 would return nothing for the
+    %% null-selector kinds and would only ever match a method coincidentally
+    %% named e.g. #'remove-method' for the other, so kind-matching is what
+    %% this filter form is actually for. Unlike `instance`/`class` (also
+    %% valid kind() values, but ambiguous with real getter selectors of the
+    %% same name), none of these three collides with a plausible method
+    %% selector, so redirecting them to kind-matching is unambiguous.
     [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= Sel];
 filter_entries(Entries, {selector, Sel}) ->
     SelBin = atom_to_binary(Sel, utf8),
