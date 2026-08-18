@@ -57,11 +57,12 @@
 
 use crate::build_layout::BuildLayout;
 use crate::manifest;
+use crate::path_util::normalize_path;
 use beamtalk_core::compilation::{DependencyMap, DependencySource};
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
+use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
@@ -176,50 +177,6 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
     }
 
     (has_package_dependencies, class_infos)
-}
-
-/// Normalize a path by resolving `.` and `..` components without filesystem
-/// access (mirrors `commands::deps::path::normalize_path`, duplicated here
-/// per the module doc's note on the binary/library crate split — BT-2836).
-///
-/// Unlike `std::fs::canonicalize`, this does not require the path to exist
-/// and does not resolve symlinks.
-fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            Utf8Component::CurDir => {
-                // Skip `.`
-            }
-            Utf8Component::ParentDir => match components.last().copied() {
-                // Already at the filesystem root — an extra `..` is a no-op
-                // rather than something to pop or accumulate (BT-2836 review
-                // finding: popping `RootDir` here would turn `/foo/../..`
-                // into `.` instead of `/`).
-                Some(Utf8Component::RootDir) => {}
-                // Nothing to pop yet, or a run of leading `..`s in a
-                // relative path — accumulate.
-                None | Some(Utf8Component::ParentDir) => components.push(component),
-                // A real component precedes it — cancel the two out.
-                Some(_) => {
-                    components.pop();
-                }
-            },
-            _ => {
-                components.push(component);
-            }
-        }
-    }
-
-    if components.is_empty() {
-        return Utf8PathBuf::from(".");
-    }
-
-    let mut result = Utf8PathBuf::new();
-    for component in components {
-        result.push(component.as_str());
-    }
-    result
 }
 
 /// Cheap staleness signal for a dependency's source tree (BT-2837): the
@@ -344,38 +301,6 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, contents).unwrap();
-    }
-
-    // BT-2836: direct unit coverage for the duplicated `normalize_path`
-    // (mirrors `commands::deps::path`'s own `test_normalize_path_*` tests).
-    #[test]
-    fn normalize_path_resolves_parent() {
-        let path = Utf8PathBuf::from("/home/user/project/../dep");
-        assert_eq!(normalize_path(&path), Utf8PathBuf::from("/home/user/dep"));
-    }
-
-    #[test]
-    fn normalize_path_resolves_dot() {
-        let path = Utf8PathBuf::from("/home/user/./project");
-        assert_eq!(
-            normalize_path(&path),
-            Utf8PathBuf::from("/home/user/project")
-        );
-    }
-
-    #[test]
-    fn normalize_path_multiple_parents() {
-        let path = Utf8PathBuf::from("/home/user/project/../../dep");
-        assert_eq!(normalize_path(&path), Utf8PathBuf::from("/home/dep"));
-    }
-
-    #[test]
-    fn normalize_path_parent_at_root() {
-        // A `..` chain that consumes every real component and then hits
-        // root must not pop `RootDir` itself — `/foo/../..` is still `/`,
-        // not `.` (review finding on PR #2989).
-        let path = Utf8PathBuf::from("/foo/../..");
-        assert_eq!(normalize_path(&path), Utf8PathBuf::from("/"));
     }
 
     // BT-2837: `resolve_dependency_class_infos` now reads/writes a

@@ -4,6 +4,9 @@
 // StackFrame introspection tests - migrated from bootstrap/stack_frames.bt (BT-827)
 
 TestCase subclass: StackFrameTest
+  field: frame = nil
+
+  setUp => self withFrame: ([1 / 0] on: Exception do: [:e | e stackTrace first])
 
   testStackTraceExists =>
     // stackTrace returns a list
@@ -58,47 +61,36 @@ TestCase subclass: StackFrameTest
 
   testStackFrameAccessors =>
     // StackFrame accessors return values without error
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self assert: frame class equals: StackFrame
+    self assert: self.frame class equals: StackFrame
     // line, file, moduleName, receiverClass, sourceLocation may return nil or a value
     // Verify they respond without crashing
-    self assert: (frame respondsTo: #line)
-    self assert: (frame respondsTo: #file)
-    self assert: (frame respondsTo: #moduleName)
-    self assert: (frame respondsTo: #receiverClass)
-    self assert: (frame respondsTo: #sourceLocation)
+    self assert: (self.frame respondsTo: #line)
+    self assert: (self.frame respondsTo: #file)
+    self assert: (self.frame respondsTo: #moduleName)
+    self assert: (self.frame respondsTo: #receiverClass)
+    self assert: (self.frame respondsTo: #sourceLocation)
 
   // === BT-1761: Object-inherited methods work after removing module_for_value override ===
   testDisplayString =>
     // displayString is inherited from Object, not defined on StackFrame
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    result := frame displayString
+    result := self.frame displayString
     self assert: (result isKindOf: String)
 
   testRespondsToDisplayString =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self assert: (frame respondsTo: #displayString)
+    self assert: (self.frame respondsTo: #displayString)
 
-  testRespondsToHash =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self assert: (frame respondsTo: #hash)
+  testRespondsToHash => self assert: (self.frame respondsTo: #hash)
 
-  testRespondsToIsNil =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self assert: (frame respondsTo: #isNil)
+  testRespondsToIsNil => self assert: (self.frame respondsTo: #isNil)
 
-  testIsNilReturnsFalse =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self deny: frame isNil
+  testIsNilReturnsFalse => self deny: self.frame isNil
 
   testHash =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    result := frame hash
+    result := self.frame hash
     self assert: (result isKindOf: Integer)
 
   testRespondsToNonExistentMethod =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self deny: (frame respondsTo: #totallyBogusMethod)
+    self deny: (self.frame respondsTo: #totallyBogusMethod)
 
   // BT-3127: the compiled Core Erlang carries a `-|` annotation with this
   // file's real .bt source position, so the runtime stack trace's frame
@@ -107,8 +99,7 @@ TestCase subclass: StackFrameTest
   // shifts, update the expected line number below to match.
   testStackFrameLineMatchesSourcePosition =>
     frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self assert: frame line equals: 109
+    self assert: frame line equals: 101
 
   testStackFrameFileMatchesSourcePosition =>
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
-    self assert: (frame file endsWith: "stack_frame_test.bt")
+    self assert: (self.frame file endsWith: "stack_frame_test.bt")

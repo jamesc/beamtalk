@@ -12,6 +12,7 @@
 //!   resolution shared with `beamtalk-mcp` (BT-2823)
 //! - [`native_type_specs`] — Erlang FFI type-spec extraction shared with
 //!   `beamtalk-mcp` (BT-2858)
+//! - [`path_util`] — shared `normalize_path` utility (filesystem-free `.`/`..` resolution)
 //! - [`pid_liveness`] — cross-platform "is this PID alive?" check, shared
 //!   with `tests/cli_common` (BT-3077)
 //! - [`repl_meta_exprs`] — REPL meta-command → Beamtalk-expression builders,
@@ -22,6 +23,7 @@ pub mod dependency_classes;
 pub mod erlc;
 pub mod manifest;
 pub mod native_type_specs;
+pub mod path_util;
 pub mod pid_liveness;
 pub mod repl_meta_exprs;
 pub mod repl_startup;
