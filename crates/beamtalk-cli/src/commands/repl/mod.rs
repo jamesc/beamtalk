@@ -638,6 +638,8 @@ enum CommandAction<'a> {
     Dirty,
     RecheckImage,
     RecheckUsage,
+    RemoveMethodUsage,
+    RemoveMethodArg(&'a str),
 }
 
 /// Classify a line as a known REPL meta-command (or `None` if it isn't one),
@@ -714,6 +716,13 @@ fn classify_command(line: &str) -> Option<CommandAction<'_>> {
             (false, _) => None,
         };
     }
+    if commands::REMOVE_METHOD.is_form(word) {
+        return Some(if bare {
+            CommandAction::RemoveMethodUsage
+        } else {
+            CommandAction::RemoveMethodArg(commands::REMOVE_METHOD.arg(line)?)
+        });
+    }
     None
 }
 
@@ -782,9 +791,49 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         // Phase 3, BT-2782); bare `:recheck` shows the usage hint.
         CommandAction::RecheckImage => eval_and_display(client, "Workspace recheckImage"),
         CommandAction::RecheckUsage => eprintln!("Usage: :recheck image"),
+        // ADR 0112 Phase 4 (BT-3189): REPL alias for `Behaviour>>removeSelector:`
+        // — `:remove-method <Class> <selector>` desugars to
+        // `<Class> removeSelector: #<selector>`, matching `:flush`/`:changes`'s
+        // existing CLI-side-shortcut pattern (no new workspace-side op).
+        CommandAction::RemoveMethodUsage => {
+            eprintln!("Usage: :remove-method <Class> <selector>");
+        }
+        CommandAction::RemoveMethodArg(arg) => match remove_method_expr_for(arg) {
+            Some(expr) => eval_and_display(client, &expr),
+            None => eprintln!("Usage: :remove-method <Class> <selector>"),
+        },
     }
 
     CommandResult::Handled
+}
+
+/// Construct the `<Class> removeSelector: #<selector>` expression a
+/// `:remove-method <Class> <selector>` line dispatches to (ADR 0112 Phase 4,
+/// BT-3189). `arg` is the already-extracted, trimmed text following the
+/// command word (from `commands::REMOVE_METHOD.arg`).
+///
+/// Splits on the first run of whitespace: the first token is the class, the
+/// remainder (trimmed) is the selector. Returns `None` when either half is
+/// missing, so the caller can print a usage hint instead of evaluating a
+/// malformed expression. A leading `#` on the selector is stripped, mirroring
+/// the MCP `remove_method` tool's `selector` parameter (`beamtalk-mcp/src/server.rs`)
+/// and the LSP `beamtalk.removeMethod` command, so `:remove-method Counter
+/// #increment` and `:remove-method Counter increment` both work.
+///
+/// Used both by production dispatch (`handle_repl_command`) and by this
+/// module's unit tests, so the translation can't drift between the two the
+/// way `flush_expr_for` (below) is a test-only mirror of inline `format!`
+/// logic in the `Flush`/`FlushArg` match arms.
+fn remove_method_expr_for(arg: &str) -> Option<String> {
+    let arg = arg.trim();
+    let mut parts = arg.splitn(2, char::is_whitespace);
+    let class = parts.next().unwrap_or("").trim();
+    let selector = parts.next().unwrap_or("").trim();
+    if class.is_empty() || selector.is_empty() {
+        return None;
+    }
+    let selector = selector.strip_prefix('#').unwrap_or(selector);
+    Some(format!("{class} removeSelector: #{selector}"))
 }
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
@@ -1903,5 +1952,72 @@ mod tests {
         // `:flush ` (trailing space only) is a usage error, not an eval.
         assert_eq!(flush_expr_for(":flush "), None);
         assert_eq!(flush_expr_for(":flush     "), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0112 Phase 4 (BT-3189) — `:remove-method <Class> <selector>`
+    // meta-command dispatch, matching the `:flush`/`:changes` alias pattern.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_method_translates_to_remove_selector_send() {
+        assert_eq!(
+            remove_method_expr_for("Counter increment"),
+            Some("Counter removeSelector: #increment".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_method_preserves_keyword_selectors() {
+        assert_eq!(
+            remove_method_expr_for("Dict at:put:"),
+            Some("Dict removeSelector: #at:put:".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_method_strips_leading_hash_on_selector() {
+        // Mirrors the MCP `remove_method` tool's `selector` param: accepted
+        // with or without a leading `#`.
+        assert_eq!(
+            remove_method_expr_for("Counter #increment"),
+            Some("Counter removeSelector: #increment".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_method_trims_surrounding_whitespace() {
+        assert_eq!(
+            remove_method_expr_for("  Counter   increment  "),
+            Some("Counter removeSelector: #increment".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_method_with_missing_selector_reports_no_expression() {
+        assert_eq!(remove_method_expr_for("Counter"), None);
+        assert_eq!(remove_method_expr_for("Counter "), None);
+    }
+
+    #[test]
+    fn remove_method_with_empty_argument_reports_no_expression() {
+        assert_eq!(remove_method_expr_for(""), None);
+        assert_eq!(remove_method_expr_for("   "), None);
+    }
+
+    #[test]
+    fn bare_remove_method_is_usage_error() {
+        assert_eq!(
+            classify_command(":remove-method"),
+            Some(CommandAction::RemoveMethodUsage)
+        );
+    }
+
+    #[test]
+    fn remove_method_with_args_classifies_as_remove_method_arg() {
+        assert_eq!(
+            classify_command(":remove-method Counter increment"),
+            Some(CommandAction::RemoveMethodArg("Counter increment"))
+        );
     }
 }

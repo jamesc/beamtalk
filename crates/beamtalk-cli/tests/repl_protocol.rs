@@ -1372,6 +1372,24 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         } else if case.expression == ":recheck image" {
             // ADR 0105 Phase 3 (BT-2782): `:recheck image` → `Workspace recheckImage`.
             client.eval("Workspace recheckImage")
+        } else if case.expression.starts_with(":remove-method ") {
+            // ADR 0112 Phase 4 (BT-3189): `:remove-method <Class> <selector>` →
+            // `<Class> removeSelector: #<selector>`. Mirrors
+            // `remove_method_expr_for` in `commands/repl/mod.rs`: splits on the
+            // first run of whitespace, and strips a leading `#` on the selector.
+            let arg = case
+                .expression
+                .strip_prefix(":remove-method ")
+                .unwrap()
+                .trim();
+            match arg.split_once(char::is_whitespace) {
+                Some((class, selector)) => {
+                    let selector = selector.trim();
+                    let selector = selector.strip_prefix('#').unwrap_or(selector);
+                    client.eval(&format!("{} removeSelector: #{selector}", class.trim()))
+                }
+                None => Err("Usage: :remove-method <Class> <selector>".to_string()),
+            }
         } else {
             client.eval(&case.expression)
         };

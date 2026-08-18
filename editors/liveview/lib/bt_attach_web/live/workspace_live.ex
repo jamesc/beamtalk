@@ -1480,6 +1480,23 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, assign(socket, save_result: nil, save_error: "Invalid method form payload.")}
   end
 
+  # Remove the active method tab's method from its class (ADR 0112 Phase 4,
+  # BT-3189). Wired the same way Save is: an owner-only editor action that
+  # drives a write-surface primitive and refreshes the Changes pane. Unlike
+  # `save_method`, there is no dedicated workspace-side op — this just builds
+  # `Class removeSelector: #selector` (or `Class class removeSelector:
+  # #selector` for a class-side tab) and submits it through the existing
+  # `evaluate` op, exactly like the REPL `:remove-method` meta-command, the
+  # MCP `remove_method` tool, and the LSP `beamtalk.removeMethod` command
+  # (ADR 0112's "Beamtalk-level surface to add" — no new dispatcher op).
+  def handle_event("remove_method", _params, %{assigns: %{role: :owner}} = socket) do
+    {:noreply, remove_active_method(socket)}
+  end
+
+  # Non-owner (Observer) or a crafted event with no matching role: a no-op —
+  # the button is rendered only for `:owner`, mirroring `new_method` above.
+  def handle_event("remove_method", _params, socket), do: {:noreply, socket}
+
   # ── tabbed method editor (BT-2494, epic BT-2482 Phase 2) ────────────────────
 
   # Switch the focused editor tab. Pure view state — no workspace round-trip; an
@@ -3514,6 +3531,58 @@ defmodule BtAttachWeb.WorkspaceLive do
             # event from a read-only role, or a workspace #beamtalk_error{}.
             assign(socket, save_result: nil, save_error: facade_error(reason))
         end
+    end
+  end
+
+  # Remove the active method tab's method from its class (ADR 0112 Phase 4,
+  # BT-3189). A new (unsaved) method tab has nothing to remove, and a crafted
+  # event against a non-method tab is a graceful no-op — surfaced as a local
+  # validation error rather than evaluating a malformed expression.
+  defp remove_active_method(socket) do
+    case active_tab(socket.assigns) do
+      %{kind: :method, new: true} ->
+        status_error(socket, "This method hasn't been saved yet — nothing to remove.")
+
+      %{kind: :method, class: class, side: side, selector: selector} = tab
+      when is_binary(selector) and selector != "" ->
+        remove_method(socket, tab, class, side, selector)
+
+      _ ->
+        status_error(socket, "Open an existing method to remove it.")
+    end
+  end
+
+  # `Class removeSelector: #selector` (or `Class class removeSelector:
+  # #selector` for a class-side tab), submitted through the same generic
+  # `evaluate` op the REPL `:remove-method` meta-command, the MCP
+  # `remove_method` tool, and the LSP `beamtalk.removeMethod` command all use —
+  # no dedicated workspace-side op (ADR 0112's "Beamtalk-level surface to
+  # add"). On success the tab is closed (its method no longer exists) and the
+  # Changes pane refreshes, mirroring `save_method_body/5`'s success path; a
+  # raised `selector_not_found` (or any other structured error) renders inline
+  # via the shared status area.
+  defp remove_method(socket, tab, class, side, selector) do
+    receiver = if side == "class", do: "#{class} class", else: class
+    expr = "#{receiver} removeSelector: ##{selector}"
+    pid = socket.assigns[:session_pid]
+
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        socket
+        |> assign(
+          save_result: "Removed #{selector} from #{receiver}",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+        |> close_tab(tab.id)
+        |> assign_changes()
+
+      {:error, reason, _output, _warnings} ->
+        status_error(socket, Workspace.render_error(reason))
+
+      {:error, reason} ->
+        status_error(socket, facade_error(reason))
     end
   end
 
@@ -10219,6 +10288,27 @@ defmodule BtAttachWeb.WorkspaceLive do
                                 <.nav_popover nav={@nav_popover} />
                               </div>
                               <span class="spacer"></span>
+                              <%!-- Remove Method (ADR 0112 Phase 4, BT-3189): only on an
+                             existing (already-saved) method tab — a brand-new,
+                             not-yet-compiled method has no live method to
+                             remove. Wired the same way "Save" is: type="button"
+                             so it never submits this form, phx-click drives
+                             `remove_method` (→ `Class removeSelector: #sel`
+                             via the existing `evaluate` op), and `data-confirm`
+                             gates the destructive action the same way
+                             `git_revert`'s discard button does. --%>
+                              <button
+                                :if={
+                                  active_tab(assigns).kind == :method and
+                                    not active_tab(assigns)[:new]
+                                }
+                                class="btn btn-sm"
+                                type="button"
+                                phx-click="remove_method"
+                                data-confirm={"Remove #{@edit_selector} from #{@edit_class}? This cannot be undone from the editor."}
+                              >
+                                Remove Method
+                              </button>
                               <button class="btn btn-sm primary" type="submit">
                                 Compile <span class="k">⌘S</span>
                               </button>

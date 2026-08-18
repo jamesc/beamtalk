@@ -493,6 +493,79 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
+  # ── Remove Method (ADR 0112 Phase 4, BT-3189) ───────────────────────────────
+
+  test "method editor: Remove Method removes the method from the class (ADR 0112, BT-3189)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RemoveMe#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+
+      triple => self.value * 3
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # Open `triple` as an editable tab (browse-is-edit) — this is the tab the
+    # "Remove Method" button acts on.
+    open_html =
+      view
+      |> element(~s(div[phx-value-selector="triple"]))
+      |> render_click()
+
+    assert open_html =~ ~s(phx-value-id="method:#{class}:instance:triple")
+    assert open_html =~ "Remove Method"
+
+    # Sanity: the method works before removal.
+    name = "rm_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    triple_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} triple"})
+    assert triple_html =~ "3"
+
+    # Click "Remove Method": dispatches `#{class} removeSelector: #triple`
+    # through the same `evaluate` op the REPL `:remove-method` meta-command,
+    # the MCP `remove_method` tool, and the LSP `beamtalk.removeMethod`
+    # command all use — no dedicated workspace-side op (ADR 0112).
+    remove_html =
+      view
+      |> element(~s(button[phx-click="remove_method"]))
+      |> render_click()
+
+    assert remove_html =~ "Removed triple from #{class}"
+    refute remove_html =~ "{:error"
+    refute remove_html =~ "beamtalk_error"
+
+    # The removed method's tab closes — its method no longer exists, mirroring
+    # `save_method_body/5`'s success path (which re-bases the tab rather than
+    # leaving a stale one open).
+    refute remove_html =~ ~s(phx-value-id="method:#{class}:instance:triple")
+
+    # A fresh instance no longer understands `triple`: `Object` (its
+    # superclass) never defined it, so dispatch fails the way any removed
+    # local override does (ADR 0032 chain-walk dispatch).
+    name2 = "rm2_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+
+    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} triple"})
+    assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand"
+
+    # The LiveView is still live and interactive after the removal (no crash /
+    # disconnect): a follow-up eval still round-trips.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
   test "the New Class toggle opens a modal with name + superclass fields (BT-2645)", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
 
