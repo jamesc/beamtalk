@@ -3567,8 +3567,11 @@ pub(crate) fn build_command_expression(
             // `CMD_PRECHECK_METHOD`'s `source`, this is raw Beamtalk
             // expression code embedded as the fallback block's body, not a
             // String value passed to a `compile:source:`-style primitive —
-            // mirrors `beamtalk-mcp::remove_method_if_absent_expr`.
-            if arguments.get(2).is_none() {
+            // mirrors `beamtalk-mcp::remove_method_if_absent_expr`. Missing
+            // and explicit `null` are both treated as "no fallback" — some
+            // JSON-RPC clients pad positional arguments with `null` rather
+            // than omitting the trailing slot.
+            if matches!(arguments.get(2), None | Some(serde_json::Value::Null)) {
                 return Ok(format!("{class} removeSelector: #{selector}"));
             }
             let if_absent = expect_string_arg(arguments, 2, "ifAbsent")?;
@@ -6248,6 +6251,22 @@ mod tests {
             expr,
             "Counter removeSelector: #bogus ifAbsent: [\"not found\"]"
         );
+    }
+
+    #[test]
+    fn build_remove_method_treats_explicit_null_third_argument_as_no_fallback() {
+        // Some JSON-RPC clients pad positional arguments with `null` rather
+        // than omitting the trailing slot entirely.
+        let expr = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("increment"),
+                serde_json::Value::Null,
+            ],
+        )
+        .expect("ok");
+        assert_eq!(expr, "Counter removeSelector: #increment");
     }
 
     #[test]
