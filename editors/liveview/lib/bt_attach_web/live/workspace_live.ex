@@ -9292,8 +9292,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                                    (`revert` is an :execute op). Instance-side and
                                    class-side method patches are revertable (a modify
                                    re-installs the prior body; an add removes the
-                                   method), and a new-class entry is revertable (it
-                                   removes the just-created class). Gate the button on
+                                   method), a new-class entry is revertable (it
+                                   removes the just-created class), and a
+                                   `remove-method` entry is revertable (it restores the
+                                   removed method — BT-3194, reusing `revert_method/3`'s
+                                   side-aware selection from BT-3187). Gate the button on
                                    a positive kind assertion so an unanticipated future
                                    kind hides the affordance rather than offering one
                                    that errors. New-class rows carry no selector, so
@@ -9314,7 +9317,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                    otherwise match both controls. --%>
                               <td :if={@role == :owner}>
                                 <button
-                                  :if={c.kind in ["instance", "class", "new-class"]}
+                                  :if={c.kind in ["instance", "class", "new-class", "remove-method"]}
                                   class="btn-link"
                                   type="button"
                                   phx-click="revert"

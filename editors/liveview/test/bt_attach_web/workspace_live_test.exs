@@ -568,6 +568,83 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
+  # ── ChangeLog revert for a removed method (ADR 0112, BT-3194) ───────────────
+
+  test "the ChangeLog viewer's revert button appears and round-trips for a removed method (ADR 0112, BT-3194)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RevertRemoveMe#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      greeting => "ORIG"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # `Class removeSelector: #greeting` — the same expr the method editor's
+    # "Remove Method" button (BT-3189) and the REPL `:remove-method`
+    # meta-command dispatch — records a `remove-method` ChangeLog entry with
+    # `side: instance` (ADR 0112, BT-3187).
+    remove_html =
+      view |> form("#eval-form") |> render_submit(%{expr: "#{class} removeSelector: #greeting"})
+
+    refute remove_html =~ "beamtalk_error"
+    refute remove_html =~ "{:error"
+
+    # The method is really gone: a fresh instance no longer understands it.
+    name = "rrm_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} greeting"})
+    assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand"
+
+    # BT-3194: before this fix, `"remove-method"` was missing from the revert
+    # button's `c.kind in [...]` gate (workspace_live.ex), so this row rendered
+    # with NO revert affordance at all — this assertion would fail on the
+    # pre-fix code. Scope by class: the workspace ChangeLog is global +
+    # persistent, so entries from earlier runs can share the `greeting`
+    # selector. `phx-value-entry-side="instance"` proves BT-3187's per-row side
+    # (ADR 0112) rides along on a `remove-method` row exactly like the
+    # instance/class/new-class rows already covered above.
+    assert has_element?(
+             view,
+             ~s(button[phx-click="revert"][phx-value-class="#{class}"][phx-value-selector="greeting"][phx-value-entry-side="instance"])
+           )
+
+    # Click it: the button dispatches the owner-gated `:revert` op, which
+    # reaches `revert_method/3` — reusing its existing side-aware selection
+    # from BT-3187, no new backend work needed for this issue.
+    revert_html =
+      view
+      |> element(
+        ~s(button[phx-click="revert"][phx-value-class="#{class}"][phx-value-selector="greeting"])
+      )
+      |> render_click()
+
+    # This class is eval-defined (no on-disk `sources/` file), exactly like
+    # the plain modify-revert e2e above — `revert_method/3` cannot reconstruct
+    # the removed method's prior body from disk, so it returns a structured
+    # "no recorded prior body" explanation rather than silently restoring or
+    # crashing. The point under test is the UI binding BT-3194 fixes: the
+    # `remove-method` row's revert button now exists and its click reaches
+    # `revert_method/3` end-to-end — proven by getting back this specific,
+    # expected domain response — rather than the button being silently absent
+    # (the bug) or the LiveView echoing a raw error tuple/crashing. Body
+    # restoration itself is covered at the domain layer by
+    # `revert_remove_method_entry_restores_removed_instance_method` and
+    # `revert_method_selects_correct_side_entry_when_both_sides_have_entries`
+    # (`beamtalk_workspace_revert_tests.erl`), which use an on-disk project
+    # class so a prior body is actually recorded to restore.
+    assert revert_html =~ "revert:" and revert_html =~ "no recorded prior body"
+    refute revert_html =~ "beamtalk_error"
+    refute revert_html =~ "{:error"
+
+    # The LiveView is still live and interactive after the revert attempt (no
+    # crash/disconnect): a follow-up eval still round-trips.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
   test "the New Class toggle opens a modal with name + superclass fields (BT-2645)", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
 
