@@ -638,6 +638,8 @@ enum CommandAction<'a> {
     Dirty,
     RecheckImage,
     RecheckUsage,
+    RemoveMethodUsage,
+    RemoveMethodArg(&'a str),
 }
 
 /// Classify a line as a known REPL meta-command (or `None` if it isn't one),
@@ -714,6 +716,13 @@ fn classify_command(line: &str) -> Option<CommandAction<'_>> {
             (false, _) => None,
         };
     }
+    if commands::REMOVE_METHOD.is_form(word) {
+        return Some(if bare {
+            CommandAction::RemoveMethodUsage
+        } else {
+            CommandAction::RemoveMethodArg(commands::REMOVE_METHOD.arg(line)?)
+        });
+    }
     None
 }
 
@@ -782,6 +791,19 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         // Phase 3, BT-2782); bare `:recheck` shows the usage hint.
         CommandAction::RecheckImage => eval_and_display(client, "Workspace recheckImage"),
         CommandAction::RecheckUsage => eprintln!("Usage: :recheck image"),
+        // ADR 0112 Phase 4 (BT-3189): REPL alias for `Behaviour>>removeSelector:`
+        // — `:remove-method <Class> <selector>` desugars to
+        // `<Class> removeSelector: #<selector>`, matching `:flush`/`:changes`'s
+        // existing CLI-side-shortcut pattern (no new workspace-side op).
+        CommandAction::RemoveMethodUsage => {
+            eprintln!("Usage: :remove-method <Class> <selector>");
+        }
+        CommandAction::RemoveMethodArg(arg) => {
+            match beamtalk_cli::repl_meta_exprs::remove_method_expr_for(arg) {
+                Some(expr) => eval_and_display(client, &expr),
+                None => eprintln!("Usage: :remove-method <Class> <selector>"),
+            }
+        }
     }
 
     CommandResult::Handled
@@ -1903,5 +1925,30 @@ mod tests {
         // `:flush ` (trailing space only) is a usage error, not an eval.
         assert_eq!(flush_expr_for(":flush "), None);
         assert_eq!(flush_expr_for(":flush     "), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0112 Phase 4 (BT-3189) — `:remove-method <Class> <selector>`
+    // meta-command dispatch, matching the `:flush`/`:changes` alias pattern.
+    // The expression-building logic itself (`remove_method_expr_for`) lives
+    // in `beamtalk_cli::repl_meta_exprs` — shared with, and tested by,
+    // `tests/repl_protocol.rs` — so only dispatch classification is tested
+    // here.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bare_remove_method_is_usage_error() {
+        assert_eq!(
+            classify_command(":remove-method"),
+            Some(CommandAction::RemoveMethodUsage)
+        );
+    }
+
+    #[test]
+    fn remove_method_with_args_classifies_as_remove_method_arg() {
+        assert_eq!(
+            classify_command(":remove-method Counter increment"),
+            Some(CommandAction::RemoveMethodArg("Counter increment"))
+        );
     }
 }

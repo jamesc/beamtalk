@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for the `:remove-method <Class> <selector>` REPL meta-command
+// (ADR 0112 Phase 4, BT-3189).
+//
+// This CLI-side alias desugars to the Beamtalk expression:
+//   :remove-method <Class> <selector>   →   <Class> removeSelector: #<selector>
+//
+// The test verifies the alias dispatches through to the underlying
+// `Behaviour>>removeSelector:` primitive and that the method is actually gone
+// afterward. Primitive semantics (extension resolution, inherited-method
+// re-exposure, error shape) are covered separately in the Erlang EUnit suite
+// (BT-3186).
+//
+// IMPORTANT: meta-commands are dispatched by the REPL/test harness only when
+// the entire line is `:remove-method <Class> <selector>` — see
+// repl_flush_changes_dirty.btscript for the same caveat about composability.
+//
+// A unique inline class name (rather than a shared fixture) avoids
+// interfering with other REPL-protocol cases, which share one long-lived
+// workspace session.
+
+Actor subclass: RemoveMethodDemo
+  state: value = 0
+  increment => self.value := self.value + 1
+// => RemoveMethodDemo
+
+RemoveMethodDemo >> triple => self.value * 3
+// => RemoveMethodDemo>>triple
+
+d := RemoveMethodDemo spawn
+// => Actor(RemoveMethodDemo, _)
+
+d increment
+// => 1
+
+d triple
+// => 3
+
+// :remove-method removes `triple` via `RemoveMethodDemo removeSelector: #triple`
+// (a wildcard assertion: meta-commands aren't composable, so the harness can
+// only verify the call doesn't raise an error — same pattern as :flush/:changes).
+:remove-method RemoveMethodDemo triple
+// => _
+
+// A fresh instance no longer understands `triple` — it was removed, and
+// Object (its superclass, via Actor) never defined it, so dispatch fails.
+// `on: RuntimeError do:` catches only RuntimeError kinds (does_not_understand
+// is RuntimeError).
+[RemoveMethodDemo spawn triple] on: RuntimeError do: [:e | e kind]
+// => does_not_understand
+
+// `increment` (not removed) still works on a fresh instance.
+d2 := RemoveMethodDemo spawn
+// => Actor(RemoveMethodDemo, _)
+
+d2 increment
+// => 1
+
+// A leading `#` on the selector is also accepted (mirrors the MCP
+// `remove_method` tool's `selector` parameter).
+:remove-method RemoveMethodDemo #increment
+// => _
+
+[RemoveMethodDemo spawn increment] on: RuntimeError do: [:e | e kind]
+// => does_not_understand

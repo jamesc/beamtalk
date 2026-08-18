@@ -1372,6 +1372,17 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         } else if case.expression == ":recheck image" {
             // ADR 0105 Phase 3 (BT-2782): `:recheck image` → `Workspace recheckImage`.
             client.eval("Workspace recheckImage")
+        } else if case.expression.starts_with(":remove-method ") {
+            // ADR 0112 Phase 4 (BT-3189): `:remove-method <Class> <selector>` →
+            // `<Class> removeSelector: #<selector>`, via the same
+            // `remove_method_expr_for` the real REPL dispatch calls
+            // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror,
+            // so this harness can't drift from production behavior.
+            let arg = case.expression.strip_prefix(":remove-method ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::remove_method_expr_for(arg) {
+                Some(expr) => client.eval(&expr),
+                None => Err("Usage: :remove-method <Class> <selector>".to_string()),
+            }
         } else {
             client.eval(&case.expression)
         };

@@ -78,6 +78,7 @@ pub(crate) fn print_help() {
     println!("  :flush          Flush pending changes to disk (→ Workspace flush)");
     println!("  :flush <sel>    Flush a subset (→ Workspace flush: <sel>); <sel> is a Class,");
     println!("                  a Symbol like #'new-class', or #{{ #file => \"path\" }}");
+    println!("  :remove-method <Class> <sel>  Remove a method (→ <Class> removeSelector: #<sel>)");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");

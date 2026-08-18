@@ -148,6 +148,13 @@ pub(crate) const RECHECK: ReplCommandSpec = ReplCommandSpec {
     takes_class_expr_arg: false,
 };
 
+pub(crate) const REMOVE_METHOD: ReplCommandSpec = ReplCommandSpec {
+    name: ":remove-method",
+    aliases: &[],
+    help: "Remove a method from a class: `:remove-method <Class> <selector>`",
+    takes_class_expr_arg: true,
+};
+
 /// The full REPL meta-command vocabulary. This is the single source both
 /// `helper.rs` (tab-completion) and `mod.rs` (dispatch, via
 /// `classify_command`) consult — see the module doc for why `:actors`,
@@ -166,6 +173,7 @@ pub(crate) const REPL_COMMAND_TABLE: &[&ReplCommandSpec] = &[
     &CHANGES,
     &DIRTY,
     &RECHECK,
+    &REMOVE_METHOD,
 ];
 
 /// All command word forms (canonical name + aliases) flattened, for
@@ -258,6 +266,7 @@ mod tests {
             ":sc ",
             ":unload ",
             ":flush ",
+            ":remove-method ",
         ] {
             assert!(
                 prefixes.iter().any(|p| p == expected),
