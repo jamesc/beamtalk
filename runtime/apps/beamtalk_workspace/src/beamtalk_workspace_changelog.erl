@@ -47,12 +47,12 @@ Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 | `epoch`                | integer                                                      | bumped each workspace start |
 | `class`                | string                                                       | e.g. `"Counter"` |
 | `selector`             | string \| null                                              | null for `new-class` |
-| `kind`                 | `"instance"`\|`"class"`\|`"new-class"`\|`"remove-method"`   | open enum |
-| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`; legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`) |
-| `source_ref`           | string \| null                                              | null for `"remove-method"` (nothing replaces the deleted text) |
-| `prev_source_ref`      | string \| null                                              | null for `new-class` |
+| `kind`                 | `"instance"`\|`"class"`\|`"new-class"`\|`"remove-method"`\|`"remove-class"` | open enum |
+| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`; legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`); always null for `"remove-class"` (BT-3206 — no method-level target) |
+| `source_ref`           | string \| null                                              | null for `"remove-method"`/`"remove-class"` (nothing replaces the deleted text) |
+| `prev_source_ref`      | string \| null                                              | null for `new-class`; the removed class's full prior source for `"remove-class"` (BT-3206) |
 | `sourceFile`           | string \| null                                              | null for stdlib/dynamic |
-| `span`                 | `{start,end}` \| null                                       | null for `new-class`; the excised span for `"remove-method"` (BT-2192's future flush-excise step) |
+| `span`                 | `{start,end}` \| null                                       | null for `new-class` and `"remove-class"` (BT-3206 — no byte range within a whole-file removal); the excised span for `"remove-method"` (BT-2192's future flush-excise step) |
 | `intent`               | `"durable"`\|`"ephemeral"`                                  | |
 | `flushable`            | boolean                                                      | true iff in-project source |
 | `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"` |
@@ -159,7 +159,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% not know. Decoding maps any unrecognised value to `unknown` so history is
 %% preserved across versions rather than dropped. `'remove-method'` is ADR
 %% 0112's method-removal kind (BT-3187).
--type kind() :: instance | class | 'new-class' | 'remove-method' | unknown.
+-type kind() :: instance | class | 'new-class' | 'remove-method' | 'remove-class' | unknown.
 %% ADR 0112: which method table a `'remove-method'` entry targets. Stored
 %% explicitly only for that kind — legacy `instance`/`class`-kind patch
 %% entries derive their side from `kind` itself (`entry_side/1`), so the field
@@ -1596,6 +1596,8 @@ decode_kind(<<"new-class">>) ->
     'new-class';
 decode_kind(<<"remove-method">>) ->
     'remove-method';
+decode_kind(<<"remove-class">>) ->
+    'remove-class';
 decode_kind(Other) ->
     log_unknown_enum(kind, Other),
     unknown.

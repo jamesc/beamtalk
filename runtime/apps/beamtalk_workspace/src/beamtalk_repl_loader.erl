@@ -27,6 +27,12 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% this is a separate call rather than folded into remove_method/3 itself.
     emit_remove_change_entry/5,
     emit_extension_remove_change_entry/7,
+    %% BT-3206: best-effort snapshot + ChangeLog append for a successful
+    %% `removeFromSystem` (class removal) — see
+    %% capture_class_removal_snapshot/1's doc for why the snapshot is a
+    %% separate call taken before teardown, not folded into the append itself.
+    capture_class_removal_snapshot/1,
+    emit_remove_class_change_entry/4,
     activate_module/2,
     activate_module/3,
     activate_module/4,
@@ -3378,6 +3384,112 @@ maybe_put_extension_source_file(Base, Owner) when is_atom(Owner) ->
         nil -> Base;
         SourceFile -> Base#{source_file => SourceFile}
     end.
+
+%%% ----------------------------------------------------------------------------
+%%% Class-removal ChangeLog entry (BT-3206)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Snapshot a class's current full source and its on-disk flushability
+classification, for a `"remove-class"` ChangeLog entry that will be appended
+later — after `classRemoveFromSystemByName/1`'s teardown has already run.
+
+Must be called BEFORE that teardown starts: `class_source_file/1` needs the
+class's still-live registry pid to resolve its module (teardown stops the
+class gen_server), and `beamtalk_workspace_meta:get_class_source/1` needs the
+`class_sources` entry that `beamtalk_class_lifecycle:class_removed/2` purges
+as part of the same teardown (BT-3105). Capturing here — mirrors the
+"read+parse before mutate" ordering `compile:source:`'s patch hook already
+uses — is what gives `revert:` (BT-3207, later phase) something to restore
+from.
+
+Reuses `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
+— the exact same classification `add_flushability/4` uses for a patch — so a
+dynamically-created (ClassBuilder) class gets `flushable => false,
+not_flushable_reason => <<"dynamic">>` and an ordinary in-project class gets
+`flushable => true, source_file => SourceFile`. `classRemoveFromSystemByName/1`
+already refuses stdlib classes before this is ever called, so the `"stdlib"`
+reason `no_source_reason/1` can also produce never actually reaches here.
+Unlike the method-removal snapshot, there is no span to resolve (a class
+removal excises the whole file entry, not a byte range within it) — the
+ChangeLog entry this feeds always carries `span: null`.
+""".
+-spec capture_class_removal_snapshot(binary()) -> map().
+capture_class_removal_snapshot(ClassNameBin) ->
+    Base = maybe_put_prev_source(#{}, current_class_source(ClassNameBin)),
+    case class_source_file(ClassNameBin) of
+        nil ->
+            Base#{flushable => false, not_flushable_reason => no_source_reason(ClassNameBin)};
+        SourceFile when is_binary(SourceFile) ->
+            case classify_source_file(SourceFile) of
+                {flushable, _AbsPath} ->
+                    Base#{flushable => true, source_file => SourceFile};
+                {not_flushable, Reason} ->
+                    Base#{flushable => false, not_flushable_reason => Reason}
+            end
+    end.
+
+%% The class's current tracked source text (whole-file, per `set_class_source/2`),
+%% or `undefined` when nothing has been recorded for it (mirrors
+%% `beamtalk_workspace_meta:get_class_source/1`'s own `undefined` degrade for
+%% an untracked class). `get_class_source/1` always returns a plain list
+%% (`string()`) or `undefined` per its own spec, never a binary.
+-spec current_class_source(binary()) -> binary() | undefined.
+current_class_source(ClassNameBin) ->
+    case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+        Source when is_list(Source) -> unicode:characters_to_binary(Source);
+        undefined -> undefined
+    end.
+
+-doc """
+Emit a `"remove-class"` ChangeLog entry for a just-completed
+`removeFromSystem` (BT-3206).
+
+Called by `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` at
+its existing success point — immediately after `publish_class_removed/2` —
+with `Snapshot` already captured by `capture_class_removal_snapshot/1` before
+teardown began. Mirrors `emit_remove_change_entry/5`'s placement (ADR 0082's
+"install is authoritative, log is best-effort" ordering) and its
+best-effort/self-swallowing failure handling: a ChangeLog write failure never
+undoes the removal, which is already irreversible in memory by this point.
+
+`selector` and `side` are always absent (`null` in the persisted entry) — a
+class removal has no method-level target (ADR 0082's established schema,
+reused verbatim: `side: null` for every kind but `"remove-method"`).
+""".
+-spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
+emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
+    try
+        do_emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for class removal (removal still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-spec do_emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
+do_emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
+    Base = #{
+        class => ClassNameBin,
+        kind => 'remove-class',
+        intent => durable,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    Entry = maps:merge(
+        Base, maps:with([flushable, not_flushable_reason, source_file, prev_source], Snapshot)
+    ),
+    _ = beamtalk_workspace_changelog:append(Entry),
+    ok.
 
 %% Resolve the class's source file via the BEAM module attribute (the same
 %% source-of-truth `Behaviour>>sourceFile' reads). Returns nil for classes with

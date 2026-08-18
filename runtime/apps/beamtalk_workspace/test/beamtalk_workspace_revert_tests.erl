@@ -17,6 +17,15 @@ above) keeps refusing stdlib classes, while `remove_method/4` with
 `allow_stdlib` reaches them — the mechanism `removeSelector:` (ADR 0112 Phase
 2, BT-3186) drives.
 
+BT-3206 (ADR 0113 Phase 1): also covers `"remove-class"` ChangeLog entries
+appended by `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` —
+an ordinary in-project class's removal (flushable, sourceFile + prev_source
+recovered) and a ClassBuilder (dynamic) class's removal
+(`not_flushable_reason: "dynamic"`). Needs this module's full-stack scaffolding
+for the same reason the `removeSelector:` coverage above does: the append
+routes through `beamtalk_repl_eval`/`beamtalk_workspace_changelog`, both of
+which are no-ops without a running workspace.
+
 BT-3186: also covers `beamtalk_behaviour_intrinsics:classRemoveSelector/2` /
 `classRemoveSelectorIfAbsent/3` themselves for every scenario that needs this
 module's live-workspace scaffolding — the local-method-table removal branch
@@ -77,6 +86,10 @@ revert_e2e_test_() ->
             fun remove_selector_instance_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_class_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_extension_logs_remove_method_changelog_entry/1,
+            %% BT-3206 (ADR 0113 Phase 1): "remove-class" ChangeLog entries
+            %% for `removeFromSystem`.
+            fun remove_from_system_logs_remove_class_changelog_entry/1,
+            fun remove_from_system_dynamic_class_logs_not_flushable_dynamic/1,
             fun remove_selector_and_instance_patch_do_not_shadow_across_sides/1,
             fun revert_remove_method_entry_restores_removed_instance_method/1,
             fun revert_remove_method_entry_restores_removed_class_side_method/1,
@@ -537,6 +550,82 @@ remove_selector_extension_logs_remove_method_changelog_entry(#{tmp := Tmp, uniqu
         ?_assertEqual({ok, ExtSource}, PrevBody)
     ].
 
+%%====================================================================
+%% BT-3206 (ADR 0113 Phase 1) — "remove-class" ChangeLog entries for
+%% `removeFromSystem`.
+%%====================================================================
+
+%% A successful `removeFromSystem` on an ordinary in-project class appends a
+%% "remove-class" entry: no selector/side (class-level, not method-level),
+%% flushable = true, sourceFile pointing at the class's own .bt file, and
+%% prev_source_ref recovering the exact source that was on disk before the
+%% removal (captured before class_removed/2's teardown purged it).
+remove_from_system_logs_remove_class_changelog_entry(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3206RmClass" ++ U),
+    {ok, _Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
+    {ok, ExpectedSource} = file:read_file(project_class_path(Tmp, ClassName)),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    Entry = only_remove_class_entry(ClassName),
+    PrevBody = beamtalk_workspace_changelog:read_prev_source_body(Entry),
+    [
+        ?_assertEqual('remove-class', beamtalk_workspace_changelog:entry_kind(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_selector(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_side(Entry)),
+        ?_assertEqual(durable, beamtalk_workspace_changelog:entry_intent(Entry)),
+        ?_assert(beamtalk_workspace_changelog:entry_flushable(Entry)),
+        ?_assertEqual(
+            project_class_path(Tmp, ClassName),
+            beamtalk_workspace_changelog:entry_source_file(Entry)
+        ),
+        ?_assertEqual({ok, ExpectedSource}, PrevBody),
+        %% The class is really gone — not just logged.
+        ?_assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassAtom))
+    ].
+
+%% A dynamically-created class (no backing `.bt` file — same shape
+%% `beamtalk_behaviour_intrinsics_tests:bt1982_class_remove_success_when_registry_absent_test_/0`
+%% uses: a freshly-compiled, freshly-loaded module registered directly via
+%% `beamtalk_object_class:start/2` rather than compiled from a `.bt` file, so
+%% `code:delete/1` succeeds during teardown but no `beamtalk_source` module
+%% attribute — and therefore no sourceFile — ever exists) logs `flushable:
+%% false, not_flushable_reason: "dynamic"` — never "stdlib" (removeFromSystem's
+%% stdlib refusal, unchanged by this issue, means that case never reaches the
+%% append point) and never a byte-span `sourceFile` that does not exist.
+remove_from_system_dynamic_class_logs_not_flushable_dynamic(_Ctx) ->
+    Unique = erlang:unique_integer([positive]),
+    ModAtom = list_to_atom("bt3206_rm_dynamic_mod_" ++ integer_to_list(Unique)),
+    Forms = [
+        {attribute, 1, module, ModAtom},
+        {attribute, 2, export, []}
+    ],
+    {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+    %% An empty filename (rather than a fake ".erl" path) is what makes
+    %% `code:which/1` answer `[]` — the "loaded from binary with no file"
+    %% signal `no_source_reason/1` reads as `"dynamic"` rather than "stdlib"
+    %% (see that function's doc).
+    {module, ModAtom} = code:load_binary(ModAtom, "", Bin),
+    ClassName = list_to_atom("Bt3206RmDynamic" ++ integer_to_list(Unique)),
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    ClassInfo = #{
+        name => ClassName,
+        module => ModAtom,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    },
+    {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName),
+    Entry = only_remove_class_entry(ClassNameBin),
+    [
+        ?_assertEqual('remove-class', beamtalk_workspace_changelog:entry_kind(Entry)),
+        ?_assertNot(beamtalk_workspace_changelog:entry_flushable(Entry)),
+        ?_assertEqual(
+            <<"dynamic">>, beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+        ),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_source_file(Entry))
+    ].
+
 %% The required fix itself: an instance-side durable patch of `Counter >>
 %% #foo` and a class-side `Counter class removeSelector: #foo` share
 %% `(class, selector)` but target different method tables — the
@@ -835,6 +924,17 @@ only_remove_method_entry(ClassNameBin, SelectorBin) ->
         beamtalk_workspace_changelog:entry_kind(E) =:= 'remove-method',
         beamtalk_workspace_changelog:entry_class(E) =:= ClassNameBin,
         beamtalk_workspace_changelog:entry_selector(E) =:= SelectorBin
+    ],
+    Entry.
+
+%% BT-3206: the sole "remove-class" ChangeLog entry logged for ClassNameBin in
+%% the current (fresh, per-test) workspace.
+only_remove_class_entry(ClassNameBin) ->
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:entries(),
+        beamtalk_workspace_changelog:entry_kind(E) =:= 'remove-class',
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassNameBin
     ],
     Entry.
 

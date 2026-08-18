@@ -610,6 +610,18 @@ classRemoveFromSystemByName(ClassName) ->
                     %% Safety: refuse if class has direct subclasses
                     case beamtalk_class_registry:direct_subclasses(ClassName) of
                         [] ->
+                            %% BT-3206: snapshot the class's current full
+                            %% source and its on-disk flushability
+                            %% classification BEFORE any teardown step below
+                            %% runs — beamtalk_class_lifecycle:class_removed/2
+                            %% purges the very class_sources entry and
+                            %% class-registry pid this reads, so capturing
+                            %% after removal would have nothing left to read
+                            %% (mirrors the "read+parse before mutate"
+                            %% ordering compile:source:'s patch hook already
+                            %% uses).
+                            ClassNameBin = atom_to_binary(ClassName, utf8),
+                            RemovalSnapshot = capture_class_removal_snapshot(ClassNameBin),
                             %% Stop live actors of this class
                             stop_class_actors(ClassName),
                             %% Stop the class gen_server
@@ -646,6 +658,7 @@ classRemoveFromSystemByName(ClassName) ->
                             %% below.
                             ok = beamtalk_class_lifecycle:class_removed(ClassName, Module),
                             publish_class_removed(ClassName, Module),
+                            log_class_removal(ClassNameBin, RemovalSnapshot),
                             nil;
                         Subclasses ->
                             NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
@@ -888,6 +901,44 @@ log_local_removal(ClassNameBin, Selector, Side) ->
     try
         erlang:apply(beamtalk_repl_eval, emit_remove_change_entry, [
             ClassNameBin, Selector, Side, Author, AuthorKind
+        ])
+    catch
+        error:undef -> ok
+    end,
+    ok.
+
+%% BT-3206: best-effort snapshot of a class's current full source and its
+%% on-disk flushability classification, taken by
+%% classRemoveFromSystemByName/1 before its teardown begins (see that call
+%% site's comment for why the ordering matters). Routed via `erlang:apply/3`
+%% to avoid a compile-time dependency from `beamtalk_runtime` to
+%% `beamtalk_workspace` — the same indirection `remove_local_method/3` uses.
+%% Degrades to a not-flushable/`"dynamic"` snapshot when the workspace app is
+%% unreachable — the same answer `no_source_reason/1` gives a class with no
+%% resolvable module — rather than raising: a missing/unavailable workspace
+%% must never block the removal itself.
+-spec capture_class_removal_snapshot(binary()) -> map().
+capture_class_removal_snapshot(ClassNameBin) ->
+    try
+        erlang:apply(beamtalk_repl_eval, capture_class_removal_snapshot, [ClassNameBin])
+    catch
+        error:undef ->
+            #{flushable => false, not_flushable_reason => <<"dynamic">>}
+    end.
+
+%% Best-effort ChangeLog append after a successful class removal (BT-3206),
+%% called at classRemoveFromSystemByName/1's existing success point
+%% (immediately after publish_class_removed/2) with the snapshot captured
+%% before teardown. Mirrors log_local_removal/3's placement and
+%% self-swallowing failure handling: the removal is already complete and
+%% irreversible in memory by this point, so a logging failure must never
+%% surface to the caller.
+-spec log_class_removal(binary(), map()) -> ok.
+log_class_removal(ClassNameBin, Snapshot) ->
+    {Author, AuthorKind} = current_author_context(),
+    try
+        erlang:apply(beamtalk_repl_eval, emit_remove_class_change_entry, [
+            ClassNameBin, Snapshot, Author, AuthorKind
         ])
     catch
         error:undef -> ok

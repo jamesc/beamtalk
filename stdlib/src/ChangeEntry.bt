@@ -64,7 +64,7 @@ sealed typed Value subclass: ChangeEntry
   selector -> Symbol | Nil => self.selector
 
   /// The kind of patch: #instance, #class, #'new-class', #'remove-method',
-  /// or #unknown.
+  /// #'remove-class', or #unknown.
   kind -> Symbol => self.kind
 
   /// Which method table this entry targets: #instance or #class, or nil for
@@ -168,14 +168,21 @@ sealed typed Value subclass: ChangeEntry
   /// Whether this entry removed a method (`removeSelector:`, ADR 0112).
   isRemoveMethod -> Boolean => self.kind =:= #'remove-method'
 
-  /// Developer-readable representation, e.g. "Counter>>increment" or
-  /// "Counter (new-class)".
+  /// Whether this entry removed a class (`removeFromSystem`, ADR 0113).
+  isRemoveClass -> Boolean => self.kind =:= #'remove-class'
+
+  /// Developer-readable representation, e.g. "Counter>>increment",
+  /// "Counter (new-class)", or "Counter (remove-class)".
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Workspace changes select: [:e | true]) first printString   // => _
   /// ```
   printString -> String =>
-    self.selector isNil ifTrue: [
-      self.className asString ++ " (new-class)"
-    ] ifFalse: [self.className asString ++ ">>" ++ self.selector asString]
+    self.selector isNil
+      ifTrue: [
+        self isRemoveClass ifTrue: [
+          self.className asString ++ " (remove-class)"
+        ] ifFalse: [self.className asString ++ " (new-class)"]
+      ]
+      ifFalse: [self.className asString ++ ">>" ++ self.selector asString]
