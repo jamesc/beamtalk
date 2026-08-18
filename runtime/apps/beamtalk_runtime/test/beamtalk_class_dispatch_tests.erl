@@ -2272,7 +2272,9 @@ class_extension_dispatch_test_() ->
             {"class-side extension takes priority over a same-named local class method",
                 fun test_class_extension_priority_over_local/0},
             {"class-side extension receives a ClassSelf tagged with the metaclass atom",
-                fun test_class_extension_receives_class_self/0}
+                fun test_class_extension_receives_class_self/0},
+            {"class-side extension takes priority over a same-named inherited class method",
+                fun test_class_extension_priority_over_inherited/0}
         ]
     end}.
 
@@ -2290,7 +2292,8 @@ teardown_class_extension(_) ->
             {'Bt3192ExtValueClass', valueExt},
             {'Bt3192ExtActorClass', actorExt},
             {'Bt3192ExtPriorityClass', testSuccess},
-            {'Bt3192ExtSelfClass', selfExt}
+            {'Bt3192ExtSelfClass', selfExt},
+            {'Bt3201ExtPriorityChild', shared}
         ]
     ),
     ok.
@@ -2361,6 +2364,59 @@ test_class_extension_receives_class_self() ->
         selfExt, [], ClassName, my_module, #{}, #{}
     ),
     ?assertMatch({reply, {ok, {ClassTag, my_module, true}}, _}, Result).
+
+%% BT-3201: Extension checked before find_class_method_in_chain/2 for an
+%% *external* send too — mirrors test_class_self_dispatch_extension_priority_over_inherited
+%% (section 18's self-send counterpart), but drives handle_class_method_call/6
+%% directly rather than a self-send. A real, invokable inherited class method
+%% (`shared`, defined on the parent) is shadowed once a same-named extension
+%% is registered on the child's own metaclass tag. Needs real class gen_servers
+%% (not just a LocalClassMethods map) so find_class_method_in_chain/2 can walk
+%% ChildName's superclass via beamtalk_class_metadata, populated by
+%% beamtalk_object_class:start_link/2's own init.
+test_class_extension_priority_over_inherited() ->
+    ParentName = 'Bt3201ExtPriorityParent',
+    ChildName = 'Bt3201ExtPriorityChild',
+    InheritedFun = fun(_ClassSelf, _ClassVars) -> from_inherited end,
+    ParentInfo = #{
+        superclass => none,
+        module => bt3201_ext_priority_parent_no_module,
+        class_methods => #{shared => #{block => InheritedFun, arity => 2}},
+        class_state => #{}
+    },
+    ChildInfo = #{
+        superclass => ParentName,
+        module => bt3201_ext_priority_child_no_module,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
+    try
+        %% Sanity: without an extension, the inherited method wins via the chain.
+        ?assertMatch(
+            {reply, {ok, from_inherited}, _},
+            beamtalk_class_dispatch:handle_class_method_call(
+                shared, [], ChildName, bt3201_ext_priority_child_no_module, #{}, #{}
+            )
+        ),
+        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
+        ExtFun = fun(_Args, _Self) -> from_extension end,
+        ok = beamtalk_extensions:register(ChildTag, shared, ExtFun, test),
+        try
+            ?assertMatch(
+                {reply, {ok, from_extension}, _},
+                beamtalk_class_dispatch:handle_class_method_call(
+                    shared, [], ChildName, bt3201_ext_priority_child_no_module, #{}, #{}
+                )
+            )
+        after
+            beamtalk_extensions:unregister(ChildName, shared, true)
+        end
+    after
+        catch gen_server:stop(ChildPid, normal, 5000),
+        catch gen_server:stop(ParentPid, normal, 5000)
+    end.
 
 %% End-to-end via the real gen_server message: an ordinary `Target sel` send
 %% (class_send/3 -> {class_method_call, ...}) reaches a class-side extension.
