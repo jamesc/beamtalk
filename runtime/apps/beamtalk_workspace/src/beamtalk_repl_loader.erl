@@ -45,6 +45,11 @@ Extracted from beamtalk_repl_eval (BT-863).
     verify_class_present/3,
     compute_package_module_name/1,
     new_class/2,
+    %% ADR 0113 (BT-3208) — `Workspace changes revert:` extension for a pending
+    %% `'remove-class'` entry: reinstalls the class from its recorded prior
+    %% source, reusing new_class/2's own compile+install chokepoint minus its
+    %% target-must-not-exist check (see revert_remove_class/2's doc for why).
+    revert_remove_class/2,
     %% ADR 0105 Phase 2 (BT-2780): called cross-module by
     %% beamtalk_workspace_shape_recheck_worker — see activate_module/3's doc.
     maybe_trigger_shape_recheck/1,
@@ -1416,6 +1421,39 @@ new_class(Source, TargetPath) when is_list(Source), is_list(TargetPath) ->
     end;
 new_class(_Source, _TargetPath) ->
     {error, new_class_type_error(<<"newClass:at: expects String source and path arguments">>)}.
+
+-doc """
+Recompile and reinstall a class from a recorded prior source, reusing the same
+compile+install chokepoint `newClass:at:` uses (ADR 0082, BT-2664) rather than
+a second whole-class-install mechanism (ADR 0113, BT-3208 — `Workspace changes
+revert:` extended to a pending `'remove-class'` entry).
+
+`TargetPath` is the removed class's own recorded `sourceFile` (already an
+absolute path — `class_source_file/1`'s value at removal time), and `Source`
+is the entry's `prev_source_ref` body: the exact whole-file text that was on
+disk immediately before the removal.
+
+Deliberately skips `new_class/2`'s `validate_target_path/1` step: that check
+exists to stop a *fresh* `newClass:at:` from silently overwriting an unrelated
+file, but a revert of a still-*pending* `'remove-class'` entry is restoring a
+file that was never actually deleted — Tier 2 (`flushIncludingDestructive`,
+ADR 0113) is the only thing that unlinks it, and a pending entry never reached
+that step. Requiring the target's *absence* here would reject the exact case
+this function exists to handle. Every other `newClass:at:` validation still
+runs via `new_class_compile/3`'s existing chain (declared name matches
+`TargetPath`'s basename, no class of that name is already loaded).
+""".
+-spec revert_remove_class(binary() | string(), binary() | string()) ->
+    {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+revert_remove_class(Source, TargetPath) when is_binary(Source) ->
+    revert_remove_class(binary_to_list(Source), TargetPath);
+revert_remove_class(Source, TargetPath) when is_binary(TargetPath) ->
+    revert_remove_class(Source, binary_to_list(TargetPath));
+revert_remove_class(Source, TargetPath) when is_list(Source), is_list(TargetPath) ->
+    new_class_compile(Source, TargetPath, TargetPath);
+revert_remove_class(_Source, _TargetPath) ->
+    {error,
+        new_class_type_error(<<"revert: remove-class reinstall expects String source and path">>)}.
 
 %% Compile (without installing) to discover the declared class name, validate
 %% (c) name == basename and (d) not already loaded, then install + log.

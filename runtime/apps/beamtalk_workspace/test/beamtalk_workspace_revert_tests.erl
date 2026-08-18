@@ -44,6 +44,15 @@ plus the stdlib-class scenario that needs `define_stdlib_class/3`'s
 `stdlib/src/`-pathed scaffolding — the same reason BT-3184's stdlib coverage
 lives here rather than in a `.bt`/`.btscript` file.
 
+BT-3208 (ADR 0113 Phase 3): also covers `revert:` itself for `"remove-class"`
+entries — recompile+reinstall the whole class from `prev_source_ref`, reusing
+the `newClass:at:` install path (`find_revert_target/3`'s `reinstall_class`
+outcome, `beamtalk_workspace_interface_primitives:reinstall_reverted_class/3`,
+`beamtalk_repl_loader:revert_remove_class/2`) — and the post-flush "nothing to
+revert" degrade for both `"remove-method"` and `"remove-class"` entries (an
+entry drops out of the active ChangeLog view once flushed, matching ADR
+0082/0113's documented "best-effort, pre-flush semantics only" contract).
+
 These boot the full stack (compiler port + runtime + workspace_meta + changelog)
 against an isolated, in-project temp tree so the live install / remove and the
 flushable-with-prev-source recording paths run for real, then drive revert
@@ -96,7 +105,14 @@ revert_e2e_test_() ->
             fun revert_selects_correct_side_entry_when_both_sides_have_entries/1,
             fun revert_method_selects_correct_side_entry_when_both_sides_have_entries/1,
             fun revert_method_side_agnostic_fallback_still_picks_highest_seq/1,
-            fun recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1
+            fun recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1,
+            %% BT-3208 (ADR 0113 Phase 3): `revert:` extended to `"remove-class"`
+            %% entries, and the post-flush "nothing to revert" degrade for both
+            %% `"remove-method"` and `"remove-class"`.
+            fun revert_remove_class_entry_reinstalls_the_class/1,
+            fun revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1,
+            fun revert_remove_method_entry_after_flush_is_unsupported/1,
+            fun revert_remove_class_entry_after_flush_is_unsupported/1
         ]}}.
 
 %% Start the heavy, node-global apps once for the whole suite (the compiler port
@@ -593,28 +609,7 @@ remove_from_system_logs_remove_class_changelog_entry(#{tmp := Tmp, unique := U})
 %% stdlib refusal, unchanged by this issue, means that case never reaches the
 %% append point) and never a byte-span `sourceFile` that does not exist.
 remove_from_system_dynamic_class_logs_not_flushable_dynamic(_Ctx) ->
-    Unique = erlang:unique_integer([positive]),
-    ModAtom = list_to_atom("bt3206_rm_dynamic_mod_" ++ integer_to_list(Unique)),
-    Forms = [
-        {attribute, 1, module, ModAtom},
-        {attribute, 2, export, []}
-    ],
-    {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-    %% An empty filename (rather than a fake ".erl" path) is what makes
-    %% `code:which/1` answer `[]` — the "loaded from binary with no file"
-    %% signal `no_source_reason/1` reads as `"dynamic"` rather than "stdlib"
-    %% (see that function's doc).
-    {module, ModAtom} = code:load_binary(ModAtom, "", Bin),
-    ClassName = list_to_atom("Bt3206RmDynamic" ++ integer_to_list(Unique)),
-    ClassNameBin = atom_to_binary(ClassName, utf8),
-    ClassInfo = #{
-        name => ClassName,
-        module => ModAtom,
-        superclass => none,
-        instance_methods => #{},
-        class_methods => #{}
-    },
-    {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    {ClassName, ClassNameBin} = define_dynamic_class("Bt3206RmDynamic"),
     _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName),
     Entry = only_remove_class_entry(ClassNameBin),
     [
@@ -868,6 +863,95 @@ recover_prev_from_disk_resolves_remove_method_entry_via_entry_side(#{
     ].
 
 %%====================================================================
+%% BT-3208 (ADR 0113 Phase 3) — `revert:` extended to `"remove-class"`
+%% entries, and both `"remove-method"`/`"remove-class"` revert degrading to
+%% "nothing to revert" once flushed.
+%%====================================================================
+
+%% Reverting a pending "remove-class" ChangeEntry recompiles and reinstalls
+%% the whole class from its recorded `prev_source_ref`, reusing the
+%% `newClass:at:` install path (same `new-class` placeholder selector
+%% `revert_new_class_removes_the_class/1` above reaches a `'new-class'` entry
+%% with, since a `'remove-class'` entry is equally selector-less/sideless).
+%% The class comes back with both its methods intact and is live (dispatch-
+%% capable) again — not just present in the ChangeLog.
+revert_remove_class_entry_reinstalls_the_class(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3208RevertClass" ++ U),
+    {ok, _Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
+    ),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    LoadedAfterRemove = beamtalk_class_registry:whereis_class(ClassAtom),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    LoadedAfterRevert = beamtalk_class_registry:whereis_class(ClassAtom),
+    AfterRevertMethods =
+        case LoadedAfterRevert of
+            undefined -> [];
+            Pid -> beamtalk_runtime_api:local_instance_methods(Pid)
+        end,
+    [
+        %% Sanity on the fixture: the class is really gone before the revert.
+        ?_assertEqual(undefined, LoadedAfterRemove),
+        ?_assertMatch({ok, _}, RevertResult),
+        ?_assert(is_pid(LoadedAfterRevert)),
+        ?_assert(lists:member(base, AfterRevertMethods)),
+        ?_assert(lists:member(greet, AfterRevertMethods))
+    ].
+
+%% A dynamically-created class's `"remove-class"` entry has no recorded
+%% `sourceFile` (BT-3206: `flushable: false, not_flushable_reason: "dynamic"`)
+%% — there is nothing on disk to recompile+reinstall from, so revert fails
+%% loudly with a structured error rather than silently no-op'ing.
+revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from(_Ctx) ->
+    {ClassName, ClassNameBin} = define_dynamic_class("Bt3208RmDynamic"),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassNameBin, <<"new-class">>
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%% Once a "remove-method" entry has been flushed (Tier 1 — an ordinary
+%% `flush/0` already applies pending "remove-method" entries, ADR 0113), it
+%% drops out of the active ChangeLog view (`is_active/1`) and `revert:`
+%% reports "nothing to revert" instead of attempting to reconstruct or
+%% reinstall anything — ADR 0082/0113's documented "best-effort, pre-flush
+%% semantics only" contract.
+revert_remove_method_entry_after_flush_is_unsupported(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3208FlushedMethod" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
+    ),
+    Self = instance_self(ClassName, Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    {ok, _Summary} = beamtalk_workspace_flush:flush(),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"greet">>),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%% Same "nothing to revert" degrade for a `"remove-class"` entry once
+%% `flushIncludingDestructive/0` (Tier 2) has actually deleted the file —
+%% post-flush undo is out of scope by design (git, or a fresh corrective
+%% operation from the archived `prev_source_ref`), not a revert responsibility.
+revert_remove_class_entry_after_flush_is_unsupported(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3208FlushedClass" ++ U),
+    {ok, _Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -888,6 +972,40 @@ define_project_class(Tmp, ClassNameBin, Methods) ->
     ClassAtom = binary_to_atom(ClassNameBin, utf8),
     Pid = wait_for_class(ClassAtom, 50),
     {ok, Pid}.
+
+%% BT-3206/BT-3208: a dynamically-created class with no backing `.bt` file — a
+%% freshly-compiled, freshly-loaded module registered directly via
+%% `beamtalk_object_class:start/2` rather than compiled from a `.bt` file, so
+%% `code:delete/1` succeeds during teardown but no `beamtalk_source` module
+%% attribute — and therefore no sourceFile — ever exists (same shape
+%% `beamtalk_behaviour_intrinsics_tests:
+%% bt1982_class_remove_success_when_registry_absent_test_/0` uses). Shared by
+%% the BT-3206 "logs not_flushable: dynamic" test and the BT-3208 "nothing to
+%% reinstall from" revert test below. Returns `{ClassName, ClassNameBin}`.
+define_dynamic_class(NamePrefix) ->
+    Unique = erlang:unique_integer([positive]),
+    ModAtom = list_to_atom("bt_rm_dynamic_mod_" ++ integer_to_list(Unique)),
+    Forms = [
+        {attribute, 1, module, ModAtom},
+        {attribute, 2, export, []}
+    ],
+    {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+    %% An empty filename (rather than a fake ".erl" path) is what makes
+    %% `code:which/1` answer `[]` — the "loaded from binary with no file"
+    %% signal `no_source_reason/1` reads as `"dynamic"` rather than "stdlib"
+    %% (see that function's doc).
+    {module, ModAtom} = code:load_binary(ModAtom, "", Bin),
+    ClassName = list_to_atom(NamePrefix ++ integer_to_list(Unique)),
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    ClassInfo = #{
+        name => ClassName,
+        module => ModAtom,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    },
+    {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    {ClassName, ClassNameBin}.
 
 %% BT-3186: the instance-side #beamtalk_object{} for a class object built by
 %% define_project_class/3 / define_stdlib_class/3 — the receiver shape

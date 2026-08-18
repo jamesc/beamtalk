@@ -35,6 +35,11 @@ module loading to beamtalk_repl_loader (BT-863).
 %% ADR 0082 Phase 1 (BT-2285) — new-class creation backing `Workspace newClass:at:'.
 -export([new_class/2]).
 
+%% ADR 0113 (BT-3208) — `Workspace changes revert:` extension for a pending
+%% `'remove-class'` entry: recompiles and reinstalls the class from its
+%% recorded prior source, reusing new_class/2's own install chokepoint.
+-export([revert_remove_class/2]).
+
 %% ADR 0095 Phase 2 (BT-2503) — stateless evaluate-in-context for the Inspector's
 %% value `evaluate:`. Called via erlang:apply from beamtalk_inspector
 %% (beamtalk_runtime) so the runtime keeps no compile-time dep on beamtalk_workspace.
@@ -677,6 +682,18 @@ validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}
     {ok, [tuple()]} | {error, term()}.
 new_class(Source, TargetPath) ->
     beamtalk_repl_loader:new_class(Source, TargetPath).
+
+-doc """
+Recompile and reinstall a class from a recorded prior source (ADR 0113,
+BT-3208 — `Workspace changes revert:` extension for a pending `'remove-class'`
+entry). Delegates to `beamtalk_repl_loader:revert_remove_class/2`; see there
+for the validation contract (same as `new_class/2` minus the target-must-not-
+exist check). Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
+""".
+-spec revert_remove_class(binary() | string(), binary() | string()) ->
+    {ok, [tuple()]} | {error, term()}.
+revert_remove_class(Source, TargetPath) ->
+    beamtalk_repl_loader:revert_remove_class(Source, TargetPath).
 
 -doc """
 Evaluate `Source` (a Beamtalk expression) with `self` bound to `Self`, returning
