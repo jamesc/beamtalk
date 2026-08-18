@@ -245,6 +245,25 @@ fn save_class_expr(source: &str, path: &str) -> String {
     )
 }
 
+/// Build the Beamtalk expression for the `remove_method` MCP tool — the
+/// no-fallback path (ADR 0112 Phase 4, BT-3188). Selector is the bare form
+/// (no leading `#`). Raises `selector_not_found` if the selector is not
+/// defined locally or as an extension.
+fn remove_method_expr(class: &str, selector: &str) -> String {
+    format!("{class} removeSelector: #{selector}")
+}
+
+/// Build the Beamtalk expression for the `remove_method` MCP tool's
+/// `if_absent` fallback path (ADR 0112 Phase 4, BT-3188). Unlike
+/// `save_method_expr`'s `body`, `if_absent` is raw Beamtalk expression code,
+/// not a String value: it becomes the body of the `ifAbsent:` fallback block
+/// literal, which the runtime evaluates as code on an absent selector — it is
+/// never passed through a `compile:source:`-style primitive that takes a
+/// source string as data.
+fn remove_method_if_absent_expr(class: &str, selector: &str, if_absent: &str) -> String {
+    format!("{class} removeSelector: #{selector} ifAbsent: [{if_absent}]")
+}
+
 /// Scope filter for the `flush` MCP tool (ADR 0082 Phase 3). Mutually
 /// exclusive; the tool wrapper enforces this before constructing the
 /// expression.
@@ -668,6 +687,27 @@ pub struct SaveClassParams {
         description = "Target path for the new class file, typically relative to the project root (e.g. \"src/greeter.bt\" or \"test/greeter_test.bt\"). Must lie inside the project source tree and the basename must match the declared class name."
     )]
     pub path: String,
+}
+
+/// Parameters for the `remove_method` MCP tool (ADR 0112 Phase 4, BT-3188).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RemoveMethodParams {
+    /// Name of the Beamtalk class to remove the method from.
+    #[schemars(
+        description = "Name of the Beamtalk class to remove the method from (e.g. \"Counter\")."
+    )]
+    pub class: String,
+    /// Method selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "Method selector to remove (e.g. \"increment\", \"at:put:\", \"+\"). Accepted with or without a leading '#'."
+    )]
+    pub selector: String,
+    /// Optional fallback expression evaluated instead of raising when the
+    /// selector is not defined locally or as an extension.
+    #[schemars(
+        description = "Optional fallback: a Beamtalk expression (not a string value) evaluated as the body of an 'ifAbsent:' block when the selector is not found, instead of raising a selector_not_found error. Omit to raise on an absent selector."
+    )]
+    pub if_absent: Option<String>,
 }
 
 /// Parameters for the `flush` MCP tool (ADR 0082 Phase 3, BT-2288).
@@ -2033,6 +2073,62 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
+    /// Remove a method from a Beamtalk class (ADR 0112 Phase 4, BT-3188).
+    ///
+    /// Compiles to `aClass removeSelector: #selector` (or `aClass
+    /// removeSelector: #selector ifAbsent: [...]` when `if_absent` is
+    /// supplied), reusing the existing `evaluate` pathway per ADR 0082's
+    /// surface-parity principle — no new workspace-side op. Removal re-exposes
+    /// any inherited implementation (or an extension-shadowed local method)
+    /// immediately, no restart needed, and installs unconditionally including
+    /// on stdlib classes — flushability, not refusal, same as `save_method`.
+    #[tool(
+        description = "Remove a method from a Beamtalk class. Compiles to 'aClass removeSelector: #selector', which raises a selector_not_found error if the selector is not defined locally or as an extension (check first with includesSelector:, or supply 'if_absent'). Removing a locally-defined override re-exposes the inherited implementation immediately, no restart needed; removing an extension that shadows a same-named local method re-exposes that local method. Installs unconditionally, including on stdlib classes — whether the resulting change is flushable to disk (not whether it takes effect in memory) depends on whether the class is backed by an in-project .bt file. 'if_absent', if supplied, is a Beamtalk expression (not a string value) evaluated as a fallback instead of raising. (ADR 0112 Phase 4, BT-3188.)"
+    )]
+    async fn remove_method(
+        &self,
+        Parameters(params): Parameters<RemoveMethodParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("remove_method");
+        validate_class_name(&params.class)?;
+        let selector = params
+            .selector
+            .strip_prefix('#')
+            .unwrap_or(&params.selector);
+        validate_selector(selector)?;
+        tracing::debug!(
+            tool = "remove_method",
+            class = %params.class,
+            selector = %selector,
+            has_if_absent = params.if_absent.is_some(),
+            "tool invoked"
+        );
+
+        let expr = match params.if_absent.as_deref() {
+            Some(if_absent) => remove_method_if_absent_expr(&params.class, selector, if_absent),
+            None => remove_method_expr(&params.class, selector),
+        };
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to remove method");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                format!("Method {}>>#{} removed", params.class, selector)
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
     /// Flush pending `ChangeLog` entries to disk (ADR 0082 Phase 3).
     ///
     /// Compiles to `Workspace flush` or `Workspace flush: <selector>`. The
@@ -2869,6 +2965,7 @@ impl ServerHandler for BeamtalkMcp {
                  'list_packages' to see loaded packages with metadata, \
                  'package_classes' to list classes in a package, \
                  'save_method' / 'try_method' to durably or ephemerally patch a class method (ADR 0082), \
+                 'remove_method' to remove a class method (ADR 0112), \
                  'save_class' to create a new class file pending flush, \
                  'list_changes' / 'dirty_methods' to inspect pending workspace changes, \
                  'flush' to write durable ChangeLog entries to disk, \
@@ -4091,6 +4188,35 @@ mod tests {
         assert_eq!(
             got,
             "Workspace newClass: \"Object subclass: Greeter\n  greet => \\\"hi \\{name}\\\"\" at: \"src/greeter.bt\"",
+        );
+    }
+
+    // --- ADR 0112 Phase 4 (BT-3188): MCP remove_method tool wiring ---
+
+    #[test]
+    fn remove_method_expr_compiles_remove_selector() {
+        // `remove_method` → `aClass removeSelector: #selector`.
+        assert_eq!(
+            remove_method_expr("Counter", "increment"),
+            "Counter removeSelector: #increment",
+        );
+    }
+
+    #[test]
+    fn remove_method_expr_preserves_keyword_selectors() {
+        assert_eq!(
+            remove_method_expr("Dict", "at:put:"),
+            "Dict removeSelector: #at:put:",
+        );
+    }
+
+    #[test]
+    fn remove_method_if_absent_expr_compiles_fallback_block() {
+        // `if_absent` is raw Beamtalk code — it becomes the fallback block's
+        // body verbatim, not an escaped String value.
+        assert_eq!(
+            remove_method_if_absent_expr("Counter", "bogus", "\"not found\""),
+            "Counter removeSelector: #bogus ifAbsent: [\"not found\"]",
         );
     }
 

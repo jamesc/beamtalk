@@ -77,6 +77,10 @@ pub(crate) const CMD_PRECHECK_METHOD: &str = "beamtalk.precheckMethod";
 /// ADR 0105 Phase 3 (BT-2782): the explicit whole-image re-check
 /// (`Workspace recheckImage` / REPL `:recheck image`).
 pub(crate) const CMD_RECHECK_IMAGE: &str = "beamtalk.recheckImage";
+/// ADR 0112 Phase 4 (BT-3188): remove a method from a class
+/// (`Behaviour>>removeSelector:` / `removeSelector:ifAbsent:`), mirroring
+/// MCP's `remove_method` tool.
+pub(crate) const CMD_REMOVE_METHOD: &str = "beamtalk.removeMethod";
 
 /// All commands surfaced via `executeCommand`. Wired into
 /// `ServerCapabilities::execute_command_provider` and used by the LSP→runtime
@@ -89,6 +93,7 @@ pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
     CMD_SAVE_CLASS,
     CMD_PRECHECK_METHOD,
     CMD_RECHECK_IMAGE,
+    CMD_REMOVE_METHOD,
 ];
 
 #[derive(Clone)]
@@ -3550,6 +3555,27 @@ pub(crate) fn build_command_expression(
             }
             Ok("Workspace recheckImage".to_string())
         }
+        CMD_REMOVE_METHOD => {
+            let class = expect_string_arg(arguments, 0, "class")?;
+            validate_class_name(&class)?;
+            let selector = expect_string_arg(arguments, 1, "selector")?;
+            // Accepted with or without a leading '#', mirroring MCP's
+            // `remove_method` tool so both surfaces agree on input shape.
+            let selector = selector.strip_prefix('#').unwrap_or(&selector);
+            validate_selector(selector)?;
+            // Optional third argument: an `ifAbsent:` fallback. Unlike
+            // `CMD_PRECHECK_METHOD`'s `source`, this is raw Beamtalk
+            // expression code embedded as the fallback block's body, not a
+            // String value passed to a `compile:source:`-style primitive —
+            // mirrors `beamtalk-mcp::remove_method_if_absent_expr`.
+            if arguments.get(2).is_none() {
+                return Ok(format!("{class} removeSelector: #{selector}"));
+            }
+            let if_absent = expect_string_arg(arguments, 2, "ifAbsent")?;
+            Ok(format!(
+                "{class} removeSelector: #{selector} ifAbsent: [{if_absent}]"
+            ))
+        }
         _ => Err(format!("unknown LSP command: {command}")),
     }
 }
@@ -6167,6 +6193,102 @@ mod tests {
         assert!(err.contains("expected no arguments"));
     }
 
+    // --- ADR 0112 Phase 4 (BT-3188): beamtalk.removeMethod command wiring ---
+
+    #[test]
+    fn build_remove_method_emits_remove_selector_expression() {
+        let expr = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[serde_json::json!("Counter"), serde_json::json!("increment")],
+        )
+        .expect("ok");
+        assert_eq!(expr, "Counter removeSelector: #increment");
+    }
+
+    #[test]
+    fn build_remove_method_accepts_leading_hash_selector() {
+        // Mirrors MCP's `remove_method`: selectors are accepted with or
+        // without a leading '#'.
+        let expr = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("#increment"),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(expr, "Counter removeSelector: #increment");
+    }
+
+    #[test]
+    fn build_remove_method_preserves_keyword_selectors() {
+        let expr = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[serde_json::json!("Dict"), serde_json::json!("at:put:")],
+        )
+        .expect("ok");
+        assert_eq!(expr, "Dict removeSelector: #at:put:");
+    }
+
+    #[test]
+    fn build_remove_method_with_if_absent_emits_fallback_block() {
+        // The third argument is raw Beamtalk code embedded as the fallback
+        // block's body verbatim — not an escaped String value (mirrors
+        // `beamtalk-mcp::remove_method_if_absent_expr`).
+        let expr = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("bogus"),
+                serde_json::json!("\"not found\""),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(
+            expr,
+            "Counter removeSelector: #bogus ifAbsent: [\"not found\"]"
+        );
+    }
+
+    #[test]
+    fn build_remove_method_rejects_bad_class_name() {
+        let err = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[
+                serde_json::json!("not a class"),
+                serde_json::json!("increment"),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("class name"));
+    }
+
+    #[test]
+    fn build_remove_method_rejects_bad_selector() {
+        let err = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("bad selector!"),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("selector"));
+    }
+
+    #[test]
+    fn build_remove_method_accepts_object_wrapped_arguments() {
+        let expr = build_command_expression(
+            CMD_REMOVE_METHOD,
+            &[
+                serde_json::json!({"class": "Counter"}),
+                serde_json::json!({"selector": "increment"}),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(expr, "Counter removeSelector: #increment");
+    }
+
     #[test]
     fn build_unknown_command_returns_error() {
         let err = build_command_expression("not.a.real.command", &[]).expect_err("err");
@@ -6202,7 +6324,8 @@ mod tests {
         assert!(listed.contains(CMD_SAVE_CLASS));
         assert!(listed.contains(CMD_PRECHECK_METHOD));
         assert!(listed.contains(CMD_RECHECK_IMAGE));
-        assert_eq!(listed.len(), 7);
+        assert!(listed.contains(CMD_REMOVE_METHOD));
+        assert_eq!(listed.len(), 8);
     }
 
     #[test]
