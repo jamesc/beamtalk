@@ -29,6 +29,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
   - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
+  - [Method Removal — `removeSelector:` (ADR 0112)](#method-removal--removeselector-adr-0112)
   - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
   - [Live Re-Checking on Reload (ADR 0105)](#live-re-checking-on-reload-adr-0105)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
@@ -3406,6 +3407,53 @@ module install is not rolled back because live actors may hold references to
 the new closures. The error surfaces with a "memory ahead of disk" warning.
 
 Ephemeral patches via `tryCompile:source:` are never autoflushed.
+
+#### Method Removal — `removeSelector:` (ADR 0112)
+
+`Behaviour >> removeSelector:` removes a method from a class at runtime — the
+removal counterpart to `compile:source:`.
+
+```beamtalk
+Counter removeSelector: #increment       // instance-side
+Counter class removeSelector: #ofSize:   // class-side
+```
+
+Resolution mirrors dispatch order: the extension registry ([ADR 0066](ADR/0066-open-class-extension-methods.md)
+open classes) is checked first — removing an extension re-exposes the local
+method it was shadowing. A second `removeSelector:` call removes that local
+method too. Removing a locally-defined override re-exposes the inherited
+implementation with no restart needed (chain-walk dispatch, [ADR 0032](ADR/0032-early-class-protocol.md)).
+
+Both methods are `sealed` and `@primitive`-backed. Both return the receiver on
+success, chaining like `compile:source:`.
+
+| Method | On absence |
+|--------|------------|
+| `removeSelector: aSelector :: Symbol -> Behaviour` | Raises `selector_not_found` (a `RuntimeError`, distinct from `does_not_understand`) |
+| `removeSelector: aSelector :: Symbol ifAbsent: absentBlock :: Block(T) -> Behaviour \| T` | Evaluates `absentBlock` and returns its value |
+
+```beamtalk
+Counter removeSelector: #bogus
+// => Error: selector_not_found
+//    hint: check with includesSelector:, whichClassIncludesSelector:,
+//    or use removeSelector:ifAbsent:
+
+Counter removeSelector: #bogus ifAbsent: ["not found"]
+// => "not found"
+```
+
+Installs unconditionally, including on stdlib classes — there is no
+receiver-side refusal. What varies is whether the resulting change is flushable
+to disk, not whether it takes effect in memory (the same rule `compile:source:`
+already follows).
+
+> **Process semantics note.** Like every `Behaviour` tower primitive,
+> `removeSelector:ifAbsent:` runs in the *caller's* process (the Class →
+> Behaviour chain-walk fallthrough), not the receiver class's gen_server. The
+> `absentBlock` messaging the receiver class back is an ordinary cross-process
+> send — no `dispatch_error` restriction applies here (unlike a block argument
+> received by a locally-defined class method; see
+> [Passing Blocks Through Class Methods](#passing-blocks-through-class-methods)).
 
 #### Flushability — what `flush` writes
 
