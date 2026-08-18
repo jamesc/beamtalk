@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3198: fixture for the class-side extension self-dispatch test.
+//
+// `callSelfExtension`'s self-send targets a selector that is not defined
+// anywhere in this class or its ancestors — the paired test registers it
+// as a class-side extension (via beamtalk_extensions, ADR 0066) before
+// calling this method, so at runtime the self-send resolves through
+// beamtalk_class_dispatch:class_self_dispatch/4. Before BT-3198, that
+// function never consulted the extensions registry and this always raised
+// does_not_understand.
+//
+// See test/class_self_dispatch_extension_test.bt for the test.
+
+Value subclass: Bt3198SelfExtHost
+
+  class callSelfExtension =>
+    @expect dnu
+    self bt3198SelfExtSel

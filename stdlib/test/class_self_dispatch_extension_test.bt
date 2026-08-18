@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3198: class-side extensions are reachable via `self extensionSel` from
+// inside another class method of the same class, not just via an external
+// `Target sel` / `Target class sel` send (BT-3192 fixed only the latter).
+//
+// See fixtures/bt3198_class_self_extension.bt for the host class whose
+// `callSelfExtension` class method does the self-send.
+
+TestCase subclass: ClassSelfDispatchExtensionTest
+
+  testClassMethodSelfSendReachesClassSideExtension =>
+    // Register class-side: Bt3198SelfExtHost class >> bt3198SelfExtSel => 42
+    // Before BT-3198, class_self_dispatch/4 never checked the extensions
+    // table, so this self-send raised does_not_understand.
+    extFun := [:a :s | 42]
+    Erlang beamtalk_extensions
+      register: #'Bt3198SelfExtHost class'
+      selector: #bt3198SelfExtSel
+      fun: extFun
+      owner: #test
+    result := Bt3198SelfExtHost callSelfExtension
+    Erlang ets delete: #beamtalk_extensions key: #(#'Bt3198SelfExtHost class', #bt3198SelfExtSel)
+    self assert: result equals: 42

@@ -163,12 +163,24 @@ BT-2007: Dispatch an inherited class method from inside a class method body.
 Codegen emits a call to this helper for every class-method self-send
 whose selector is not a local class method, a slot constructor, an
 instantiation intrinsic, or one of the auto-generated 0-arity exports.
-Walks the superclass chain via `find_class_method_in_chain/2`, then
-applies `DefiningModule:class_<Selector>(ClassSelf, ClassVars, Args...)`
-directly in the caller's process — mirroring the gen_server path's
-`invoke_class_method/7` minus the `{reply, ...}` wrapping and the
-`test_spawn` branch (which only fires for `TestCase>>runAll` / `run:`
-dispatched from an external caller, not from inside a class method).
+
+BT-3198: Checks the extension registry (keyed under the metaclass tag,
+`class_object_tag(ClassName)`) BEFORE the superclass chain — mirroring
+`handle_class_method_call/6`'s BT-3192 "extension checked before local
+method table / chain" order, so a class-side extension registered on
+`ClassName`'s own metaclass tag is reachable via `self extensionSel` from
+inside another class method of the same class, not just via an external
+`Target sel` / `Target class sel` send. Extensions are never inherited
+(same rule BT-3192 established for the external paths), so only
+`ClassName`'s own tag is checked here — not walked up the chain.
+
+When the extension registry has no match, walks the superclass chain via
+`find_class_method_in_chain/2`, then applies
+`DefiningModule:class_<Selector>(ClassSelf, ClassVars, Args...)` directly in
+the caller's process — mirroring the gen_server path's `invoke_class_method/7`
+minus the `{reply, ...}` wrapping and the `test_spawn` branch (which only
+fires for `TestCase>>runAll` / `run:` dispatched from an external caller, not
+from inside a class method).
 
 `ClassSelf#beamtalk_object.class_mod` is set to the *defining* module
 so Newspeak-style self-sends inside the inherited method resolve against
@@ -176,13 +188,30 @@ the class that actually contains the code (same rule as the gen_server
 path at line 316).
 
 Returns `{class_var_result, Result, NewClassVars}` when the inherited
-method mutated class vars, or the plain `Result` otherwise — the shape
-codegen already unwraps for local class-method self-sends. Raises
-structured `does_not_understand` if no ancestor defines the selector.
+method or extension mutated class vars, or the plain `Result` otherwise —
+the shape codegen already unwraps for local class-method self-sends. Raises
+structured `does_not_understand` if no ancestor and no extension defines
+the selector.
 """.
 -spec class_self_dispatch(class_name(), selector(), map(), list()) ->
     {class_var_result, term(), map()} | term() | no_return().
 class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
+    case check_class_self_extension(ClassName, Selector, ClassVars, Args) of
+        {ok, Outcome} ->
+            Outcome;
+        not_found ->
+            class_self_dispatch_chain(ClassName, Selector, ClassVars, Args)
+    end.
+
+-doc """
+BT-3198: The superclass-chain half of `class_self_dispatch/4`, factored out
+so `class_self_dispatch_local/4` can fall through to it directly after its
+own single extension check, instead of re-checking the (already-confirmed
+absent) extension a second time via a nested `class_self_dispatch/4` call.
+""".
+-spec class_self_dispatch_chain(class_name(), selector(), map(), list()) ->
+    {class_var_result, term(), map()} | term() | no_return().
+class_self_dispatch_chain(ClassName, Selector, ClassVars, Args) ->
     case find_class_method_in_chain(Selector, ClassName) of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
@@ -208,10 +237,13 @@ class's OWN runtime-installed class method.
 
 Class-method funs created by the programmatic `ClassBuilder` (BT-2267) are
 anonymous funs with no `class_<sel>` module export, so a self-send inside such a
-fun cannot use the compiled direct-call path. It routes here instead: this checks
-the class's own runtime class-method fun (the retrieval store) first, and only
-falls back to `class_self_dispatch/4` (super + inherited, walked from the
-superclass) when the selector is not a local runtime method.
+fun cannot use the compiled direct-call path. It routes here instead.
+
+BT-3198: checks the extension registry first (same tag/priority rule as
+`class_self_dispatch/4` above — extension before local method, mirroring
+BT-3192), then the class's own runtime class-method fun (the retrieval
+store), and only falls back to `class_self_dispatch_chain/4` (super +
+inherited, walked from the superclass) when the selector is neither.
 
 Returns the raw `{class_var_result, Result, NewClassVars}` | plain value — the
 shape the calling fun threads — and raises a structured `does_not_understand`
@@ -221,27 +253,107 @@ ETS read the dispatch hot path already uses (BT-2008).
 -spec class_self_dispatch_local(class_name(), selector(), map(), list()) ->
     {class_var_result, term(), map()} | term() | no_return().
 class_self_dispatch_local(ClassName, Selector, ClassVars, Args) ->
-    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
-        {ok, _Info} ->
-            %% Own runtime class method: dispatch with DefiningClass = ClassName
-            %% so apply_class_method_in_context resolves the fun from the store.
-            DefiningModule =
-                case beamtalk_class_metadata:lookup_module(ClassName) of
-                    {ok, M} -> M;
-                    not_found -> ClassName
-                end,
-            unwrap_self_dispatch_outcome(
-                ClassName,
-                Selector,
-                apply_class_method_in_context(
-                    Selector, Args, ClassName, ClassName, DefiningModule, ClassVars
-                )
-            );
-        error ->
-            %% Not a local runtime method — walk the chain (super + inherited),
-            %% which also resolves inherited runtime funs and compiled methods.
-            class_self_dispatch(ClassName, Selector, ClassVars, Args)
+    case check_class_self_extension(ClassName, Selector, ClassVars, Args) of
+        {ok, Outcome} ->
+            Outcome;
+        not_found ->
+            case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+                {ok, _Info} ->
+                    %% Own runtime class method: dispatch with DefiningClass = ClassName
+                    %% so apply_class_method_in_context resolves the fun from the store.
+                    DefiningModule = self_dispatch_module(ClassName),
+                    unwrap_self_dispatch_outcome(
+                        ClassName,
+                        Selector,
+                        apply_class_method_in_context(
+                            Selector, Args, ClassName, ClassName, DefiningModule, ClassVars
+                        )
+                    );
+                error ->
+                    %% Not a local runtime method — walk the chain (super + inherited),
+                    %% which also resolves inherited runtime funs and compiled methods.
+                    class_self_dispatch_chain(ClassName, Selector, ClassVars, Args)
+            end
     end.
+
+-doc """
+BT-3198: Shared extension-registry probe for both `class_self_dispatch/4`
+and `class_self_dispatch_local/4` — a `self someSelector` send from inside
+another class method, checking whether `ClassName`'s own metaclass tag has a
+matching class-side extension (`beamtalk_extensions`, ADR 0066) before either
+function falls through to its local/inherited-method lookups. Mirrors
+`handle_class_method_call/6`'s BT-3192 priority order (extension before
+local method table).
+
+Reuses `apply_class_extension_fun/5` for the same calling convention and
+crash-safety as the external-dispatch path (a bad extension body must not
+take down the class's own long-lived gen_server, which this self-send also
+runs inside), then adapts the outcome to the self-dispatch caller shape via
+`unwrap_self_dispatch_extension_outcome/3` — raw value/`{class_var_result,
+...}` tuple on success, structured raises on failure.
+
+Returns `{ok, Outcome}` when an extension matched (`Outcome` already
+unwrapped and ready to return to the codegen call site), or `not_found` so
+the caller proceeds to its own next lookup.
+""".
+-spec check_class_self_extension(class_name(), selector(), map(), list()) ->
+    {ok, {class_var_result, term(), map()} | term()} | not_found.
+check_class_self_extension(ClassName, Selector, ClassVars, Args) ->
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+        {ok, Fun} ->
+            Module = self_dispatch_module(ClassName),
+            ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
+            {ok,
+                unwrap_self_dispatch_extension_outcome(
+                    ClassName,
+                    Selector,
+                    apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, Selector)
+                )};
+        not_found ->
+            not_found
+    end.
+
+-doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
+-spec self_dispatch_module(class_name()) -> atom().
+self_dispatch_module(ClassName) ->
+    case beamtalk_class_metadata:lookup_module(ClassName) of
+        {ok, M} -> M;
+        not_found -> ClassName
+    end.
+
+-doc """
+BT-3198: Adapt `apply_class_extension_fun/5`'s outcome to the self-dispatch
+caller shape — mirroring `unwrap_self_dispatch_outcome/3` for compiled/
+runtime-installed class methods, but for the `{ok, {Result, NewClassVars}}`
+2-tuple `apply_extension_by_arity/4` returns rather than the plain `{ok,
+Raw}` a method body returns directly. Always threads `NewClassVars` (via the
+`class_var_result` tuple codegen already unwraps) since, unlike a compiled
+method body, an extension fun has no ADR-0110 shadow-write mechanism to rely
+on instead — the returned tuple is the only way a 3-arity actor extension's
+class-var mutation gets back to the caller.
+""".
+-spec unwrap_self_dispatch_extension_outcome(
+    class_name(),
+    selector(),
+    {ok, {term(), map()}}
+    | {nlr_relay, term(), list()}
+    | {error, undef_in_body}
+    | {error, {raised, atom(), term(), list()}}
+) -> {class_var_result, term(), map()} | no_return().
+unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {ok, {Result, NewClassVars}}) ->
+    {class_var_result, Result, NewClassVars};
+unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {error, undef_in_body}) ->
+    %% Preserve the `error:undef` contract — see unwrap_self_dispatch_outcome/3.
+    erlang:error(undef);
+unwrap_self_dispatch_extension_outcome(
+    _ClassName, _Selector, {error, {raised, ErrClass, Error, ST}}
+) ->
+    erlang:raise(ErrClass, Error, ST);
+unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {nlr_relay, Nlr, ST}) ->
+    %% ADR 0110 / BT-3032: resume the non-local return unwind directly, same
+    %% as unwrap_self_dispatch_outcome/3's nlr_relay clause.
+    erlang:raise(throw, Nlr, ST).
 
 -doc """
 Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
@@ -590,11 +702,11 @@ ever consulted `beamtalk_extensions` — both funnel through this same
 function (`beamtalk_object_class:dispatch_class_method/5`), so this one fix
 covers both.
 
-Scope: this covers only *external* sends (`Target sel` / `Target class
-sel`). A `self someSelector` send from inside another class method of the
-same class — `class_self_dispatch/4` / `class_self_dispatch_local/4`, below
-— still does not check the extension registry; tracked separately as
-BT-3198.
+Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
+`self someSelector` send from inside another class method of the same
+class — `class_self_dispatch/4` / `class_self_dispatch_local/4`, below —
+goes through `check_class_self_extension/4` instead, which checks the same
+registry under the same priority rule (BT-3198).
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 """.
