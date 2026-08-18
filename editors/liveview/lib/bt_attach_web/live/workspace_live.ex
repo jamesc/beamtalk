@@ -955,8 +955,19 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, socket |> assign(dock_tab: "git") |> assign_git()}
   end
 
+  # ADR 0113 (BT-3210): every *dedicated* Changes-affecting action (save,
+  # revert, flush, remove class/method, new class) already refreshes `@changes`
+  # itself via `assign_changes/1` — but a ChangeLog-mutating op run through raw
+  # eval (`#eval-form`), e.g. `SomeClass removeFromSystem` typed directly, has
+  # no such hook to call it. Refresh on open too (lazy first-open, like
+  # Tests/Git above) so opening the tab is always a reliable way to see current
+  # state, not just an implicit side effect of which action you last took.
+  def handle_event("dock_tab", %{"tab" => "changes"}, socket) do
+    {:noreply, socket |> assign(dock_tab: "changes") |> assign_changes()}
+  end
+
   def handle_event("dock_tab", %{"tab" => tab}, socket)
-      when tab in ~w(workspace repl transcript changes) do
+      when tab in ~w(workspace repl transcript) do
     {:noreply, assign(socket, dock_tab: tab)}
   end
 

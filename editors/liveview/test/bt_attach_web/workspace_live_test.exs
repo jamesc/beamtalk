@@ -611,15 +611,19 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # exists).
     refute remove_html =~ "def:#{class}"
 
-    # The class is really gone: a fresh spawn attempt fails one way or
-    # another (does_not_understand from Object, or a structured
-    # "unresolved class" error) — exactly which shape depends on how the
-    # runtime reports a fully-removed class name, but either proves removal.
+    # The class is really gone: a fresh spawn attempt fails. `removeFromSystem`
+    # fully purges the class's BEAM module (BT-785/BT-3105), so referencing the
+    # now-dangling identifier doesn't reach ordinary object dispatch at all —
+    # it surfaces as a raw "Undefined function: ...:spawn/0" from the purged
+    # module, not a structured does_not_understand/beamtalk_error (that shape
+    # gap is itself a candidate follow-up, not this issue's job to fix). Either
+    # way, the class is provably gone — no shape of "it still works" is possible.
     name2 = "rc2_#{suffix}"
     dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
 
     assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand" or
-             dnu_html =~ "beamtalk_error" or dnu_html =~ "{:error"
+             dnu_html =~ "beamtalk_error" or dnu_html =~ "{:error" or
+             dnu_html =~ "Undefined function"
 
     # The LiveView is still live and interactive after the removal (no crash /
     # disconnect): a follow-up eval still round-trips.
