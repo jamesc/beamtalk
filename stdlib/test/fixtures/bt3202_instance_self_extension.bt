@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3202: fixture for the instance-side extension self-dispatch test.
+//
+// `callSelfExtension`'s self-send targets a selector that is not defined
+// anywhere in this class or its ancestors — the paired test registers it
+// as an instance-side extension (via beamtalk_extensions, ADR 0066) before
+// calling this method, so at runtime the self-send resolves through
+// beamtalk_actor:sync_send/3 -> self_dispatch/2 -> beamtalk_dispatch:lookup/5
+// (the same DNU fallback external sends use — see BT-3202 for why this is
+// a regression test, not a fix: unlike the class-side self-send path
+// BT-3198 found broken, there is no separate instance-side self-send
+// dispatch function to have missed the extension registry).
+//
+// See test/instance_self_dispatch_extension_test.bt for the test.
+
+Actor subclass: Bt3202SelfExtHost
+
+  callSelfExtension =>
+    @expect dnu
+    self bt3202SelfExtSel

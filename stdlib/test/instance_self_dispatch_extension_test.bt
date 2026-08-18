@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3202: instance-side extensions are reachable via `self extensionSel`
+// from inside another instance method of the same class, not just via an
+// external `receiver sel` send. This mirrors class_self_dispatch_extension_test.bt
+// (BT-3198's class-side counterpart) at the instance-side level — unlike the
+// class side, instance self-sends have no separate dispatch function that
+// could have missed the extensions registry (they fall through to the same
+// beamtalk_dispatch:lookup/5 an external send uses), so this is a regression
+// test pinning already-correct behavior rather than a fix.
+//
+// See fixtures/bt3202_instance_self_extension.bt for the host class whose
+// `callSelfExtension` instance method does the self-send.
+
+TestCase subclass: InstanceSelfDispatchExtensionTest
+
+  testInstanceMethodSelfSendReachesInstanceSideExtension =>
+    // Register instance-side: Bt3202SelfExtHost >> bt3202SelfExtSel => 42
+    extFun := [:a :s | 42]
+    Erlang beamtalk_extensions
+      register: #Bt3202SelfExtHost
+      selector: #bt3202SelfExtSel
+      fun: extFun
+      owner: #test
+    host := Bt3202SelfExtHost spawn
+    result := host callSelfExtension
+    extKey := Erlang erlang list_to_tuple: #(#Bt3202SelfExtHost, #bt3202SelfExtSel)
+    Erlang ets delete: #beamtalk_extensions key: extKey
+    self assert: result equals: 42
