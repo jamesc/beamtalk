@@ -70,7 +70,16 @@ revert_e2e_test_() ->
             fun remove_selector_if_absent_returns_block_value_on_absence/1,
             fun remove_selector_if_absent_returns_receiver_on_success/1,
             fun remove_selector_allow_stdlib_removes_from_a_stdlib_class/1,
-            fun remove_selector_contested_extension_re_exposes_local_method/1
+            fun remove_selector_contested_extension_re_exposes_local_method/1,
+            %% ADR 0112 Phase 3 (BT-3187): "remove-method" ChangeLog entries +
+            %% the (class, selector, side) flush-shadow-key / revert-side-
+            %% resolution required fix.
+            fun remove_selector_instance_side_logs_remove_method_changelog_entry/1,
+            fun remove_selector_class_side_logs_remove_method_changelog_entry/1,
+            fun remove_selector_extension_logs_remove_method_changelog_entry/1,
+            fun remove_selector_and_instance_patch_do_not_shadow_across_sides/1,
+            fun revert_remove_method_entry_restores_removed_instance_method/1,
+            fun revert_remove_method_entry_restores_removed_class_side_method/1
         ]}}.
 
 %% Start the heavy, node-global apps once for the whole suite (the compiler port
@@ -448,6 +457,152 @@ remove_selector_contested_extension_re_exposes_local_method(#{tmp := Tmp, unique
     ].
 
 %%====================================================================
+%% BT-3187 (ADR 0112 Phase 3) — "remove-method" ChangeLog entries; the
+%% (class, selector, side) flush-shadow-key and revert-side-resolution
+%% required fix to ADR 0082's shipped flush/revert logic.
+%%====================================================================
+
+%% A successful instance-side removeSelector: appends a "remove-method" entry
+%% with side = instance, flushable = true (an ordinary in-project class), and
+%% sourceFile pointing at the class's own .bt file.
+remove_selector_instance_side_logs_remove_method_changelog_entry(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187LogInst" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
+    ),
+    Self = instance_self(ClassName, Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    Entry = only_remove_method_entry(ClassName, <<"greet">>),
+    [
+        ?_assertEqual('remove-method', beamtalk_workspace_changelog:entry_kind(Entry)),
+        ?_assertEqual(instance, beamtalk_workspace_changelog:entry_side(Entry)),
+        ?_assert(beamtalk_workspace_changelog:entry_flushable(Entry)),
+        ?_assertEqual(
+            project_class_path(Tmp, ClassName),
+            beamtalk_workspace_changelog:entry_source_file(Entry)
+        )
+    ].
+
+%% Same as above for the class side: `Counter class removeSelector: #foo`
+%% logs side = class.
+remove_selector_class_side_logs_remove_method_changelog_entry(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187LogCls" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  class keep => 1\n", "  class build => 2\n"]
+    ),
+    Self = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    Entry = only_remove_method_entry(ClassName, <<"build">>),
+    [
+        ?_assertEqual('remove-method', beamtalk_workspace_changelog:entry_kind(Entry)),
+        ?_assertEqual(class, beamtalk_workspace_changelog:entry_side(Entry)),
+        ?_assert(beamtalk_workspace_changelog:entry_flushable(Entry)),
+        ?_assertEqual(
+            project_class_path(Tmp, ClassName),
+            beamtalk_workspace_changelog:entry_source_file(Entry)
+        )
+    ].
+
+%% Extension-side counterpart (ADR 0112 § Extension methods): removing a
+%% genuine EXTENSION method — registered via `beamtalk_extensions:register/5`
+%% with real source text, not the local class table — also logs a
+%% `"remove-method"` entry, but is always `flushable: false,
+%% not_flushable_reason: "extension"` (no reliable byte-span resolver for a
+%% foreign `TargetClass >> selector` definition exists in this codebase — see
+%% `emit_extension_remove_change_entry/7`'s doc). The extension's source text
+%% is still captured as `prev_source` for the audit trail even though nothing
+%% can act on it yet.
+remove_selector_extension_logs_remove_method_changelog_entry(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187Ext" ++ U),
+    {ok, Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    ExtFun = fun(_Args, _Self) -> ext_shout end,
+    ExtSource = <<"shout => ^ 'loud'">>,
+    ok = beamtalk_extensions:register(ClassAtom, shout, ExtFun, bt3187_test_owner, ExtSource),
+    Self = instance_self(ClassName, Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, shout),
+    Entry = only_remove_method_entry(ClassName, <<"shout">>),
+    PrevBody = beamtalk_workspace_changelog:read_prev_source_body(Entry),
+    [
+        ?_assertEqual('remove-method', beamtalk_workspace_changelog:entry_kind(Entry)),
+        ?_assertEqual(instance, beamtalk_workspace_changelog:entry_side(Entry)),
+        ?_assertNot(beamtalk_workspace_changelog:entry_flushable(Entry)),
+        ?_assertEqual(
+            <<"extension">>, beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+        ),
+        ?_assertEqual({ok, ExtSource}, PrevBody)
+    ].
+
+%% The required fix itself: an instance-side durable patch of `Counter >>
+%% #foo` and a class-side `Counter class removeSelector: #foo` share
+%% `(class, selector)` but target different method tables — the
+%% `(class, selector, side)` shadow key must keep both as survivors (neither
+%% shadows the other), unlike the pre-ADR-0112 `(class, selector)`-only key
+%% which would have collapsed them to one.
+remove_selector_and_instance_patch_do_not_shadow_across_sides(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187Shadow" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  foo => 1\n", "  class foo => 2\n"]
+    ),
+    {ok, _} = beamtalk_repl_eval:compile_method(
+        ClassName, <<"foo">>, <<"^ 99">>, durable, <<"sess">>, human, instance
+    ),
+    Self = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, foo),
+    Targeted = [
+        E
+     || E <- beamtalk_workspace_changelog:entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassName,
+        beamtalk_workspace_changelog:entry_selector(E) =:= <<"foo">>
+    ],
+    {Applied, Shadowed} = beamtalk_workspace_flush:shadow_duplicates(Targeted),
+    [
+        ?_assertEqual(2, length(Targeted)),
+        ?_assertEqual(2, length(Applied)),
+        ?_assertEqual([], Shadowed)
+    ].
+
+%% Reverting a "remove-method" ChangeEntry re-installs the removed body on the
+%% SAME side it was removed from — exercising `revert_side/1`'s
+%% `entry_side/1`-based resolution (which no longer only understands
+%% `instance`/`class` kinds) against a real `'remove-method'` entry, not just
+%% the legacy instance/class-kind patches the pre-existing revert tests above
+%% already cover.
+revert_remove_method_entry_restores_removed_instance_method(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187RevertInst" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
+    ),
+    Self = instance_self(ClassName, Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    AfterRemove = beamtalk_runtime_api:local_instance_methods(Pid),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"greet">>),
+    AfterRevert = beamtalk_runtime_api:local_instance_methods(Pid),
+    [
+        ?_assertNot(lists:member(greet, AfterRemove)),
+        ?_assertMatch({ok, _}, RevertResult),
+        ?_assert(lists:member(greet, AfterRevert))
+    ].
+
+%% Class-side counterpart: the removed method is restored as a class-side
+%% method, not accidentally re-installed instance-side.
+revert_remove_method_entry_restores_removed_class_side_method(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3187RevertCls" ++ U),
+    {ok, Pid} = define_project_class(
+        Tmp, ClassName, ["  class keep => 1\n", "  class build => 2\n"]
+    ),
+    Self = metaclass_self(Pid),
+    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    AfterRemove = beamtalk_runtime_api:local_class_methods(Pid),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"build">>),
+    AfterRevert = beamtalk_runtime_api:local_class_methods(Pid),
+    [
+        ?_assertNot(lists:member(build, AfterRemove)),
+        ?_assertMatch({ok, _}, RevertResult),
+        ?_assert(lists:member(build, AfterRevert))
+    ].
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -485,6 +640,27 @@ instance_self(ClassNameBin, Pid) ->
 %% Mirrors `beamtalk_behaviour_intrinsics:classClass/1`'s construction.
 metaclass_self(Pid) ->
     #beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid}.
+
+%% BT-3187: the absolute `.bt` path `define_project_class/3` wrote
+%% `ClassNameBin` to, as the binary a ChangeEntry's `entry_source_file/1`
+%% is expected to record.
+project_class_path(Tmp, ClassNameBin) ->
+    list_to_binary(filename:join(Tmp, binary_to_list(ClassNameBin) ++ ".bt")).
+
+%% BT-3187: the sole `"remove-method"` ChangeLog entry logged for
+%% `(ClassNameBin, SelectorBin)` in the current (fresh, per-test) workspace.
+%% Pattern-matches to exactly one — a test scenario that produces more (or
+%% zero) indicates a bug in the scenario itself, not a case to degrade
+%% gracefully for.
+only_remove_method_entry(ClassNameBin, SelectorBin) ->
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:entries(),
+        beamtalk_workspace_changelog:entry_kind(E) =:= 'remove-method',
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassNameBin,
+        beamtalk_workspace_changelog:entry_selector(E) =:= SelectorBin
+    ],
+    Entry.
 
 %% Like define_project_class/3, but writes the file under a `stdlib/src/`
 %% subdirectory of the temp tree instead of directly in it. `is_stdlib_path/1`

@@ -120,7 +120,14 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
     complete_flush/4,
     filter_shadowed_by_survivor/2,
     renamed_target_keys/1,
-    announce_flush_completed/1
+    announce_flush_completed/1,
+    %% ADR 0112 (BT-3187): exercises the `(class, selector, side)` shadow-key
+    %% fix directly, independent of do_flush/1's separate `'remove-method'`
+    %% exclusion (see its doc) — a real Phase-2 flush of a `'remove-method'`
+    %% entry is BT-2192's job, but the shadow-key logic itself is this
+    %% issue's, and is verifiable without going through prepare_splice/2.
+    shadow_duplicates/1,
+    target_key/1
 ]).
 
 -type filter() ::
@@ -330,12 +337,27 @@ do_flush(Filter) ->
     %% For Phase 2 the caller-visible "skipped" list is always empty (the
     %% non-flushable entries are simply not in `flushable_pending`); we keep
     %% the field for forward-compat with Phase 3's surfaces.
-    case Pending of
+    %%
+    %% ADR 0112 (BT-3187): `'remove-method'` entries CAN be `flushable: true`
+    %% (an ordinary in-project class's removal), so they can reach here —
+    %% but excising the recorded span from disk is BT-2192's job, not this
+    %% module's (see the ADR's Out of Scope table). Exclude them from what a
+    %% durable flush actually attempts, rather than routing them into
+    %% `prepare_splice/2` (built only for a patch's replace-in-place shape,
+    %% with a `source_ref` body to splice in that a removal never has) and
+    %% aborting the whole batch on a `source_body_error` it was never
+    %% designed to produce.
+    ReadyPending = exclude_remove_method(Pending),
+    case ReadyPending of
         [] ->
             {ok, empty_summary()};
         _ ->
-            run_flush(Pending)
+            run_flush(ReadyPending)
     end.
+
+-spec exclude_remove_method([term()]) -> [term()].
+exclude_remove_method(Entries) ->
+    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =/= 'remove-method'].
 
 -spec filter_entries([term()], filter()) -> [term()].
 filter_entries(Entries, any) ->
@@ -383,9 +405,10 @@ run_flush(Pending) ->
 %%% Shadowing
 %%% ----------------------------------------------------------------------------
 
-%% Keep only the most-recent entry for each (class, selector) target. Older
-%% entries with the same target are returned as `Shadowed` and will be marked
-%% flushed at the end (their patch is already on disk via the newer entry).
+%% Keep only the most-recent entry for each (class, selector, side) target.
+%% Older entries with the same target are returned as `Shadowed` and will be
+%% marked flushed at the end (their patch is already on disk via the newer
+%% entry).
 -spec shadow_duplicates([term()]) -> {[term()], [term()]}.
 shadow_duplicates(Entries) ->
     %% Sort newest-first so we encounter the survivor of each target before
@@ -421,9 +444,21 @@ shadow_duplicates(Entries) ->
         Shadowed
     }.
 
--spec target_key(term()) -> {binary(), binary() | undefined}.
+%% ADR 0112 (BT-3187) required fix: keyed on `(class, selector, side)`, not
+%% just `(class, selector)` — once `kind` is spent distinguishing
+%% `'remove-method'` from a patch, it can no longer also carry side, so a
+%% `(class, selector)`-only key could incorrectly shadow an instance-side
+%% patch of `Counter >> #foo` against a class-side `Counter class
+%% removeSelector: #foo` (or vice versa). `entry_side/1` derives side from
+%% `kind` for legacy `instance`/`class` entries and reads it directly for
+%% `'remove-method'` entries, so both shapes key consistently here.
+-spec target_key(term()) -> {binary(), binary() | undefined, instance | class | undefined}.
 target_key(E) ->
-    {beamtalk_workspace_changelog:entry_class(E), beamtalk_workspace_changelog:entry_selector(E)}.
+    {
+        beamtalk_workspace_changelog:entry_class(E),
+        beamtalk_workspace_changelog:entry_selector(E),
+        beamtalk_workspace_changelog:entry_side(E)
+    }.
 
 %%% ----------------------------------------------------------------------------
 %%% Grouping

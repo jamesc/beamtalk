@@ -444,12 +444,19 @@ extract_revert_target_from_map(M) ->
 do_revert(ClassNameBin, SelectorAtom) ->
     case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom) of
         {ok, PrevBody, Entry} ->
-            %% A *modify* revert: re-install the recorded prior body on the entry's
-            %% side. Instance and class side are both supported (BT-2665) — the
-            %% side comes from the entry's `kind`. A `'new-class'`/`unknown` kind
-            %% cannot reach this branch: new-class yields `{remove, _}`, and any
-            %% future kind fails loudly via the side mapping below.
-            Side = revert_side(beamtalk_workspace_changelog:entry_kind(Entry)),
+            %% A *modify* revert: re-install the recorded prior body on the
+            %% entry's side. Instance and class side are both supported
+            %% (BT-2665). This also covers reverting a `'remove-method'` entry
+            %% (ADR 0112, BT-3187) — its `prev_source_ref` is always set (the
+            %% removed method's prior body), so it reaches this branch exactly
+            %% like an ordinary modify, and re-installing that body IS what
+            %% undoes the removal. `revert_side/1` resolves the side for both
+            %% shapes via `entry_side/1` (derived from `kind` for legacy
+            %% instance/class entries, read directly for `'remove-method'`
+            %% ones). A `'new-class'`/`unknown` kind cannot reach this branch:
+            %% new-class yields `{remove, _}`, and any future sideless kind
+            %% fails loudly via `revert_side/1`.
+            Side = revert_side(Entry),
             install_revert_patch(ClassNameBin, SelectorAtom, PrevBody, Side);
         {remove, Entry} ->
             %% An *add* revert: the pre-patch state was "absent", so undo the add
@@ -480,25 +487,32 @@ do_revert(ClassNameBin, SelectorAtom) ->
             )
     end.
 
-%% Map a method ChangeEntry kind to the revert install/remove side. `instance`
-%% and `class` map straight through; any other kind (a future kind, or an
-%% unexpected `'new-class'` reaching the modify path) raises a loud structured
-%% error rather than silently picking a side.
--spec revert_side(beamtalk_workspace_changelog:kind()) -> instance | class.
-revert_side(instance) ->
-    instance;
-revert_side(class) ->
-    class;
-revert_side(Other) ->
-    beamtalk_error:raise(
-        revert_kind_error(
-            iolist_to_binary([
-                <<"revert: cannot revert a ">>,
-                atom_to_binary(Other, utf8),
-                <<" entry as a method patch; use `Workspace changes clear` to discard it">>
-            ])
-        )
-    ).
+%% Resolve a ChangeEntry's revert install/remove side (ADR 0112, BT-3187's
+%% required fix to ADR 0082's shipped revert logic — see
+%% `beamtalk_workspace_changelog:entry_side/1`'s doc). Delegates the actual
+%% instance/class resolution to that single accessor rather than pattern-
+%% matching `kind` here, so this stays correct for both legacy
+%% `instance`/`class`-kind entries (side derived from `kind`) and
+%% `'remove-method'` entries (side read from the entry's own `side` field).
+%% `entry_side/1` returning `undefined` (a `'new-class'`/`unknown` kind, or
+%% any future sideless kind reaching this path unexpectedly) raises a loud
+%% structured error rather than silently picking a side.
+-spec revert_side(beamtalk_workspace_changelog:entry()) -> instance | class.
+revert_side(Entry) ->
+    case beamtalk_workspace_changelog:entry_side(Entry) of
+        undefined ->
+            beamtalk_error:raise(
+                revert_kind_error(
+                    iolist_to_binary([
+                        <<"revert: cannot revert a ">>,
+                        atom_to_binary(beamtalk_workspace_changelog:entry_kind(Entry), utf8),
+                        <<" entry as a method patch; use `Workspace changes clear` to discard it">>
+                    ])
+                )
+            );
+        Side ->
+            Side
+    end.
 
 %% Perform an *add* revert by removing what was added. A `new-class` entry removes
 %% the class (BT-2664); a method entry removes that method on its side
@@ -510,10 +524,11 @@ revert_removal(ClassNameBin, SelectorAtom, Entry) ->
     case beamtalk_workspace_changelog:entry_kind(Entry) of
         'new-class' ->
             remove_reverted_class(ClassNameBin);
-        Kind when Kind =:= instance; Kind =:= class ->
-            remove_reverted_method(ClassNameBin, SelectorAtom, revert_side(Kind));
-        Other ->
-            revert_side(Other)
+        _ ->
+            %% `revert_side/1` resolves instance/class (and raises a loud
+            %% structured error for any other, sideless kind) via
+            %% `entry_side/1` — see its doc.
+            remove_reverted_method(ClassNameBin, SelectorAtom, revert_side(Entry))
     end.
 
 -spec remove_reverted_class(binary()) -> term().

@@ -24,6 +24,7 @@ sealed typed Value subclass: ChangeEntry
   field: className :: Symbol = #unknown
   field: selector :: Symbol | Nil = nil
   field: kind :: Symbol = #unknown
+  field: side :: Symbol | Nil = nil
   field: intent :: Symbol = #unknown
   field: flushable :: Boolean = false
   field: authorKind :: Symbol = #unknown
@@ -62,8 +63,22 @@ sealed typed Value subclass: ChangeEntry
   /// ```
   selector -> Symbol | Nil => self.selector
 
-  /// The kind of patch: #instance, #class, #'new-class', or #unknown.
+  /// The kind of patch: #instance, #class, #'new-class', #'remove-method',
+  /// or #unknown.
   kind -> Symbol => self.kind
+
+  /// Which method table this entry targets: #instance or #class, or nil for
+  /// an entry with no side (#'new-class', #unknown) (ADR 0112).
+  ///
+  /// For a #'remove-method' entry (`removeSelector:`) this is recorded
+  /// explicitly; for a legacy #instance/#class-kind patch entry it mirrors
+  /// `kind` itself (side and kind have always been the same value for those).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes select: [:e | e side =:= #class]
+  /// ```
+  side -> Symbol | Nil => self.side
 
   /// The recorded intent: #durable or #ephemeral.
   intent -> Symbol => self.intent
@@ -149,6 +164,9 @@ sealed typed Value subclass: ChangeEntry
 
   /// Whether this entry created a new class (kind `#'new-class'`, no selector).
   isNewClass -> Boolean => self.kind =:= #'new-class'
+
+  /// Whether this entry removed a method (`removeSelector:`, ADR 0112).
+  isRemoveMethod -> Boolean => self.kind =:= #'remove-method'
 
   /// Developer-readable representation, e.g. "Counter>>increment" or
   /// "Counter (new-class)".
