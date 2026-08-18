@@ -111,6 +111,7 @@ revert_e2e_test_() ->
             %% `"remove-method"` and `"remove-class"`.
             fun revert_remove_class_entry_reinstalls_the_class/1,
             fun revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1,
+            fun revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_missing/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
             fun revert_remove_class_entry_after_flush_is_unsupported/1
         ]}}.
@@ -913,6 +914,47 @@ revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from(_Ctx) ->
     ),
     [
         ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%% Mirrors `recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1`
+%% for a class-level target: when the recorded `prev_source_ref` body for a
+%% "remove-class" entry is unreadable (ChangeLog rotation pruned `sources/`,
+%% or a rare fs race), revert falls back to reading the class's own on-disk
+%% `sourceFile` directly (`recover_class_prev_from_disk/1`) — no span to
+%% resolve, unlike the method case, since a class removal excises the whole
+%% file, not a byte range within it.
+revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_missing(#{
+    tmp := Tmp, unique := U, workspace_id := WorkspaceId
+}) ->
+    ClassName = list_to_binary("Bt3208RecoverDisk" ++ U),
+    {ok, _Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
+    ),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    Entry = only_remove_class_entry(ClassName),
+    %% Sanity on the fixture: the entry recorded a real prior body (the normal
+    %% flow), so this test exercises the "body file unreadable" fallback
+    %% specifically, not the (already-covered) "never recorded" one.
+    PrevRef = beamtalk_workspace_changelog:entry_prev_source_ref(Entry),
+    true = is_binary(PrevRef),
+    %% Simulate the rotation/cleanup race: the recorded prior-body file is
+    %% gone, but the class's own on-disk source (untouched, since the removal
+    %% was never flushed) is still there.
+    SourcesDir = filename:join(beamtalk_workspace_changelog:changes_dir(WorkspaceId), "sources"),
+    PrevBodyPath = filename:join(SourcesDir, binary_to_list(PrevRef)),
+    ok = file:delete(PrevBodyPath),
+    Result = beamtalk_workspace_changelog:find_revert_target(ClassName, <<"new-class">>),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    LoadedAfterRevert = beamtalk_class_registry:whereis_class(ClassAtom),
+    [
+        %% Recovered from disk, not the `{error, no_prev_source}` a missing
+        %% fallback would have produced.
+        ?_assertMatch({reinstall_class, _Body, _Entry}, Result),
+        ?_assertMatch({ok, _}, RevertResult),
+        ?_assert(is_pid(LoadedAfterRevert))
     ].
 
 %% Once a "remove-method" entry has been flushed (Tier 1 — an ordinary

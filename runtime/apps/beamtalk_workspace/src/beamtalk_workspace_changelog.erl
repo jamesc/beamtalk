@@ -397,17 +397,22 @@ must be restored. Returns:
   - `{reinstall_class, PrevBody, Entry}` when the most recent active entry is a
     `'remove-class'` (ADR 0113, BT-3208): the pre-removal state was "this class
     existed", recorded as the whole-file `prev_source_ref` `capture_class_removal_
-    snapshot/1` captures before teardown. Revert recompiles and reinstalls the
-    whole class from `PrevBody`, not a single-method patch.
+    snapshot/1` captures before teardown (falling back to a direct read of the
+    entry's own `sourceFile` — `recover_class_prev_from_disk/1` — when the
+    recorded body itself is unreadable, e.g. pruned by ChangeLog rotation).
+    Revert recompiles and reinstalls the whole class from `PrevBody`, not a
+    single-method patch.
   - `{error, no_entry}` when no active entry targets `(Class, Selector)`
     (nothing to revert: either never patched, or already reverted/flushed).
   - `{error, no_prev_source}` when the most recent entry is a *modify* whose
     prior body is genuinely unrecoverable (the recorded body is missing AND the
     on-disk source exists but the span can no longer be resolved — e.g. the file
-    advanced under us), or a `'remove-class'` entry whose `prev_source_ref` was
-    never recorded or can no longer be read. We must not silently delete/skip a
-    method or class that existed before, so this stays a loud error rather than a
-    removal or a no-op.
+    advanced under us), or a `'remove-class'` entry whose prior body cannot be
+    recovered from either the ChangeLog's recorded copy or the entry's own
+    `sourceFile` (no `sourceFile` recorded at all — a dynamically-defined class
+    — or the file itself can no longer be read). We must not silently delete/skip
+    a method or class that existed before, so this stays a loud error rather than
+    a removal or a no-op.
 
 `Class` is the unsuffixed display name as a binary; `Selector` is an atom or a
 binary (an atom is converted to a binary so the comparison matches the entry's
@@ -474,15 +479,18 @@ find_revert_target(Class, Selector, Side) when is_binary(Class) ->
             {remove, Entry};
         [#entry{kind = 'remove-class'} = Entry | _] ->
             %% Reverting a class removal recompiles and reinstalls the whole
-            %% class from its recorded prior source (ADR 0113, BT-3208) — a
-            %% class-level target, not a method-level one, so there is no
-            %% disk-recovery fallback to attempt here (unlike a modify's
-            %% `recover_prev_from_disk/1`): `prev_source_ref` is the only
-            %% source of truth `capture_class_removal_snapshot/1` ever
-            %% records for a removed class's pre-removal body.
+            %% class from its recorded prior source (ADR 0113, BT-3208). If
+            %% the recorded `prev_source_ref` body is unreadable (ChangeLog
+            %% rotation pruned `sources/`, or a rare fs race), fall back to
+            %% the class's own on-disk file — mirroring the modify path's
+            %% `recover_prev_from_disk/1`, but simpler: a class removal has no
+            %% byte span to resolve, so a direct whole-file read suffices, and
+            %% it IS the pre-removal body whenever the removal itself was
+            %% never flushed (the only case reachable here — a flushed entry
+            %% is inactive and never becomes a candidate above).
             case read_prev_source_body(Entry) of
                 {ok, Body} -> {reinstall_class, Body, Entry};
-                {error, _} -> {error, no_prev_source}
+                {error, _} -> recover_class_prev_from_disk(Entry)
             end;
         [#entry{prev_source_ref = undefined} = Entry | _] ->
             %% No recorded prior body. Either the method existed on disk before
@@ -592,6 +600,31 @@ recover_prev_from_disk(_Entry) ->
     %% add evidence only comes from `selector_not_found` against a readable source
     %% file (handled above), which is the new-method-on-a-project-class case the
     %% LiveView add-revert flow produces.
+    {error, no_prev_source}.
+
+-doc """
+Fallback for a `'remove-class'` entry (ADR 0113, BT-3208) whose recorded
+`prev_source_ref` body could not be read via `read_prev_source_body/1` — the
+ChangeLog's bounded ring (`?MAX_ENTRIES`) rotated `sources/` before the
+revert happened, or a rare fs race. Unlike a method's
+`recover_prev_from_disk/1`, there is no span to resolve: the class's own
+recorded `sourceFile`, read whole-file, IS the pre-removal body whenever the
+removal itself was never flushed — the only case that reaches
+`find_revert_target/3`'s `'remove-class'` branch at all (a flushed entry is
+inactive and never becomes a candidate).
+
+Returns `{error, no_prev_source}` — never a silent no-op — when the entry has
+no recorded `sourceFile` (a dynamically-defined class, nothing on disk to
+begin with) or the file can no longer be read (deleted/moved/permissions).
+""".
+-spec recover_class_prev_from_disk(entry()) ->
+    {reinstall_class, binary(), entry()} | {error, no_prev_source}.
+recover_class_prev_from_disk(#entry{source_file = File} = Entry) when is_binary(File) ->
+    case file:read_file(File) of
+        {ok, Body} -> {reinstall_class, Body, Entry};
+        {error, _} -> {error, no_prev_source}
+    end;
+recover_class_prev_from_disk(_Entry) ->
     {error, no_prev_source}.
 
 %% Normalise the selector argument: callers may pass an atom or a binary.
