@@ -2416,13 +2416,55 @@ test_metaclass_method_class_side_extension() ->
         end)
     end.
 
+%% Code-review regression (BT-3192 PR): a crashing extension body must not
+%% take down the class's own gen_server — every other class-method dispatch
+%% path (apply_class_method_fun/6, apply_compiled_class_method/7) already
+%% guarantees this via catch-and-convert; invoke_class_extension/6 must too.
+test_class_extension_crash_does_not_kill_class_process() ->
+    ClassName = 'Bt3192ExtCrashClass',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testSuccess => <<>>},
+        class_state => #{}
+    },
+    beamtalk_extensions:init(),
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    Fun = fun(_Args, _Self) -> error(bt3192_deliberate_crash) end,
+    ok = beamtalk_extensions:register(ClassTag, crashExt, Fun, test),
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        %% The crash surfaces as a structured error to the caller that
+        %% triggered it...
+        ?assertError(
+            #{error := #beamtalk_error{}},
+            beamtalk_class_dispatch:class_send(Pid, crashExt, [])
+        ),
+        %% ...but the class gen_server itself survives: still alive, and a
+        %% follow-up call succeeds instead of hitting {noproc, ...} (BT-1768
+        %% auto-restart, which would also have dropped ClassVars/hot patches).
+        ?assert(is_process_alive(Pid)),
+        ?assertEqual(
+            test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, [])
+        )
+    after
+        beamtalk_extensions:unregister(ClassName, crashExt, true),
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
 class_send_and_metaclass_extension_e2e_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
             {"class_send (Target sel) dispatches to a class-side extension",
                 fun test_class_send_class_side_extension/0},
             {"metaclass_method_call (Target class sel) dispatches to the same extension",
-                fun test_metaclass_method_class_side_extension/0}
+                fun test_metaclass_method_class_side_extension/0},
+            {"a crashing class-side extension does not kill the class gen_server",
+                fun test_class_extension_crash_does_not_kill_class_process/0}
         ]
     end}.
 

@@ -65,7 +65,8 @@ super(Selector, Args, Self, State, CurrentClass)
     super_value/4,
     responds_to/2,
     invoke_extension/4,
-    check_extension/2
+    check_extension/2,
+    apply_extension_by_arity/4
 ]).
 
 -include("beamtalk.hrl").
@@ -538,19 +539,8 @@ from a single dispatch path.
 -spec invoke_extension(fun(), args(), bt_self(), state()) -> dispatch_result().
 invoke_extension(Fun, Args, Self, State) ->
     try
-        {arity, Arity} = erlang:fun_info(Fun, arity),
-        case Arity of
-            3 ->
-                %% Actor extension: fun(Args, Self, State) -> {Result, NewState}
-                {Result, NewState} = apply(Fun, [Args, Self, State]),
-                {reply, Result, NewState};
-            2 ->
-                %% Value-type extension: fun(Args, Self) -> Result
-                Result = apply(Fun, [Args, Self]),
-                {reply, Result, State};
-            _ ->
-                error({bad_extension_arity, Arity})
-        end
+        {Result, NewState} = apply_extension_by_arity(Fun, Args, Self, State),
+        {reply, Result, NewState}
     catch
         error:Reason:Stacktrace ->
             ?LOG_ERROR("Extension method threw error", #{
@@ -559,6 +549,36 @@ invoke_extension(Fun, Args, Self, State) ->
                 domain => [beamtalk, runtime]
             }),
             erlang:raise(error, Reason, Stacktrace)
+    end.
+
+-doc """
+Apply an extension fun given its registered arity, unifying both signatures
+to a plain `{Result, NewState}` pair — the shared "how do I call this fun"
+core behind `invoke_extension/4`.
+
+BT-3192: exported so `beamtalk_class_dispatch:invoke_class_extension/5` can
+reuse this exact arity convention for class-side extensions instead of
+duplicating it. Deliberately does NOT decide how to handle an error — that is
+context-dependent: `invoke_extension/4` (instance-side dispatch, below)
+re-raises, matching `lookup/5`'s existing contract for a receiver dispatching
+in its own process; class-side dispatch instead needs to catch and convert,
+mirroring every other class-method body's crash-safety (see
+`beamtalk_class_dispatch:apply_class_extension_fun/4`), since the class's own
+long-lived gen_server must survive a bad extension body the same way it
+survives a bad compiled/runtime-installed class method.
+""".
+-spec apply_extension_by_arity(fun(), args(), bt_self(), state()) -> {term(), state()}.
+apply_extension_by_arity(Fun, Args, Self, State) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    case Arity of
+        3 ->
+            %% Actor extension: fun(Args, Self, State) -> {Result, NewState}
+            apply(Fun, [Args, Self, State]);
+        2 ->
+            %% Value-type extension: fun(Args, Self) -> Result
+            {apply(Fun, [Args, Self]), State};
+        _ ->
+            error({bad_extension_arity, Arity})
     end.
 
 -doc """
