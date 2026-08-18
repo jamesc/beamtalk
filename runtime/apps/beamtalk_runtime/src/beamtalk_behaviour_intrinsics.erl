@@ -913,16 +913,20 @@ log_local_removal(ClassNameBin, Selector, Side) ->
 %% site's comment for why the ordering matters). Routed via `erlang:apply/3`
 %% to avoid a compile-time dependency from `beamtalk_runtime` to
 %% `beamtalk_workspace` — the same indirection `remove_local_method/3` uses.
-%% Degrades to a not-flushable/`"dynamic"` snapshot when the workspace app is
-%% unreachable — the same answer `no_source_reason/1` gives a class with no
-%% resolvable module — rather than raising: a missing/unavailable workspace
-%% must never block the removal itself.
+%% Degrades to a not-flushable/`"dynamic"` snapshot on ANY failure — not just
+%% `error:undef` (the missing-workspace-app case `remove_local_method/3`'s own
+%% catch guards) — because unlike that helper's post-mutation logging, this
+%% call runs BEFORE teardown starts: an uncaught exception here (e.g. a
+%% transient `gen_server:call` failure against `beamtalk_workspace_meta`)
+%% would abort the removal itself, not just degrade its audit trail. A
+%% snapshot capture failure must never block the removal it is only trying to
+%% describe.
 -spec capture_class_removal_snapshot(binary()) -> map().
 capture_class_removal_snapshot(ClassNameBin) ->
     try
         erlang:apply(beamtalk_repl_eval, capture_class_removal_snapshot, [ClassNameBin])
     catch
-        error:undef ->
+        _:_ ->
             #{flushable => false, not_flushable_reason => <<"dynamic">>}
     end.
 
