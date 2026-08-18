@@ -68,6 +68,13 @@ module loading to beamtalk_repl_loader (BT-863).
 %% (`class_source_file/1` / `classify_source_file/1`) these functions reuse.
 -export([emit_remove_change_entry/5, emit_extension_remove_change_entry/7]).
 
+%% BT-3206 — best-effort snapshot + ChangeLog append for a successful
+%% `removeFromSystem` (class removal). Called via erlang:apply from
+%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
+%% as emit_remove_change_entry/5 above; both are thin forwarding wrappers
+%% over beamtalk_repl_loader.
+-export([capture_class_removal_snapshot/1, emit_remove_class_change_entry/4]).
+
 %% BT-2531 — workspace binding-mutation announcement with an explicit session id.
 %% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
 %% whose shell gen_server process does not carry `beamtalk_session_id` in its
@@ -1001,6 +1008,29 @@ emit_extension_remove_change_entry(
 ) ->
     beamtalk_repl_loader:emit_extension_remove_change_entry(
         ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
+    ).
+
+-doc """
+Best-effort snapshot of a class's current source + on-disk flushability
+classification, taken before its `removeFromSystem` proceeds (BT-3206). Thin
+forwarding wrapper — see
+`beamtalk_repl_loader:capture_class_removal_snapshot/1` for the full
+contract.
+""".
+-spec capture_class_removal_snapshot(binary()) -> map().
+capture_class_removal_snapshot(ClassNameBin) ->
+    beamtalk_repl_loader:capture_class_removal_snapshot(ClassNameBin).
+
+-doc """
+Best-effort ChangeLog append for a completed `classRemoveFromSystemByName/1`
+call (BT-3206). Thin forwarding wrapper — see
+`beamtalk_repl_loader:emit_remove_class_change_entry/4` for the full
+contract.
+""".
+-spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
+emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
+    beamtalk_repl_loader:emit_remove_class_change_entry(
+        ClassNameBin, Snapshot, Author, AuthorKind
     ).
 
 -doc """

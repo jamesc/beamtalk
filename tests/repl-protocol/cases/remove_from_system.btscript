@@ -48,6 +48,30 @@ Object allSubclasses includes: tempClass
 // => false
 
 // ===========================================================================
+// BT-3206 (ADR 0113 Phase 1) — removeFromSystem logs a "remove-class"
+// ChangeLog entry, so `Workspace changes` shows the removal (previously it
+// showed nothing at all — no audit trail, no way for a future flush to know
+// a .bt file should be deleted). Filtered by className because REPL-protocol
+// cases share one long-lived ChangeLog (same convention as
+// workspace_flush_roundtrip.btscript / remove_selector.btscript).
+// ===========================================================================
+
+_removeClassEntry := (Workspace changes select: [:e | e className =:= #TempClassForRemoval]) first
+// => _
+
+_removeClassEntry isRemoveClass
+// => true
+
+_removeClassEntry selector
+// => nil
+
+_removeClassEntry side
+// => nil
+
+_removeClassEntry isDurable
+// => true
+
+// ===========================================================================
 // Safety checks — stdlib class rejection
 // ===========================================================================
 
