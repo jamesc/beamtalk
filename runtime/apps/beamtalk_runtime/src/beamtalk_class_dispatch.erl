@@ -579,6 +579,23 @@ to avoid gen_server deadlock.
 ADR 0032 Phase 1: Receives local class_methods (not flattened table).
 Walks the superclass chain if the method is not found locally.
 
+BT-3192: Checks the extension registry (keyed under the metaclass tag,
+`class_object_tag(ClassName)`) BEFORE the local method table / superclass
+chain — mirroring `beamtalk_dispatch:lookup/5`'s own "extension checked
+before local method table" order. Before this, a class-side extension
+(`Target class >> sel => body`, ADR 0066) registered fine but was never read
+back by ANY class-side dispatch path: neither `class_method_call` (an
+ordinary `Target sel` send) nor `metaclass_method_call` (`Target class sel`)
+ever consulted `beamtalk_extensions` — both funnel through this same
+function (`beamtalk_object_class:dispatch_class_method/5`), so this one fix
+covers both.
+
+Scope: this covers only *external* sends (`Target sel` / `Target class
+sel`). A `self someSelector` send from inside another class method of the
+same class — `class_self_dispatch/4` / `class_self_dispatch_local/4`, below
+— still does not check the extension registry; tracked separately as
+BT-3198.
+
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 """.
 -spec handle_class_method_call(
@@ -590,20 +607,129 @@ Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
     map()
 ) -> {reply, term(), map()} | test_spawn | {error, not_found}.
 handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, ClassVars) ->
-    case maps:is_key(Selector, LocalClassMethods) of
-        true ->
-            %% Local class method found — invoke directly.
-            invoke_class_method(Selector, Args, ClassName, Module, ClassName, Module, ClassVars);
-        false ->
-            %% Not found locally — walk the superclass chain for inherited class methods.
-            case find_class_method_in_chain(Selector, ClassName) of
-                {ok, DefiningClass, DefiningModule} ->
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+        {ok, Fun} ->
+            invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector);
+        not_found ->
+            case maps:is_key(Selector, LocalClassMethods) of
+                true ->
+                    %% Local class method found — invoke directly.
                     invoke_class_method(
-                        Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars
+                        Selector, Args, ClassName, Module, ClassName, Module, ClassVars
                     );
-                not_found ->
-                    {error, not_found}
+                false ->
+                    %% Not found locally — walk the superclass chain for inherited class methods.
+                    case find_class_method_in_chain(Selector, ClassName) of
+                        {ok, DefiningClass, DefiningModule} ->
+                            invoke_class_method(
+                                Selector,
+                                Args,
+                                ClassName,
+                                Module,
+                                DefiningClass,
+                                DefiningModule,
+                                ClassVars
+                            );
+                        not_found ->
+                            {error, not_found}
+                    end
             end
+    end.
+
+-doc """
+Invoke a class-side extension method found in the `beamtalk_extensions`
+registry (BT-3192).
+
+Reuses `beamtalk_dispatch:apply_extension_by_arity/4` for the calling
+convention — the same one instance-side extensions already use: a 2-arity
+fun (value/primitive target) ignores `ClassVars` and returns a plain result;
+a 3-arity fun (actor target) threads `ClassVars`. `ClassSelf` mirrors the
+receiver `apply_class_method_in_context/6` builds for a local/inherited
+class method — `class = ClassTag` (the metaclass tag), `class_mod = Module`
+(this call's own compiled module; extensions are never inherited, so there
+is no separate "defining class" indirection), `pid = self()` (the class
+gen_server this handler is already running inside).
+
+Unlike `beamtalk_dispatch:invoke_extension/4` (which re-raises on error —
+correct for instance-side dispatch, where `lookup/5` typically runs in the
+receiver's own process and a `^`/exit should propagate via ordinary
+throw/catch), this catches and converts via `apply_class_extension_fun/6`,
+matching every other class-method dispatch path
+(`apply_class_method_fun/6`, `apply_compiled_class_method/7`): a bad
+extension body must not crash the class's own long-lived gen_server.
+""".
+-spec invoke_class_extension(fun(), list(), class_name(), atom(), atom(), map(), selector()) ->
+    {reply, term(), map()}.
+invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector) ->
+    ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
+    case apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) of
+        {ok, {Result, NewClassVars}} ->
+            {reply, {ok, Result}, NewClassVars};
+        {nlr_relay, Nlr, _ST} ->
+            %% ADR 0110 / BT-3032, adapted for extensions: same relay as
+            %% invoke_class_method/7, minus the class-var shadow-key read —
+            %% extension codegen never writes that key (only compiled/
+            %% runtime-installed class-method bodies do), so ClassVars as-is
+            %% is exactly what the shadow read would have fallen back to.
+            {reply, {error, Nlr}, ClassVars};
+        {error, undef_in_body} ->
+            {reply, {error, undef}, ClassVars};
+        {error, {raised, _ErrClass, Error, _ST}} ->
+            {reply, {error, Error}, ClassVars}
+    end.
+
+-doc """
+Apply a class-side extension fun, classifying the outcome the same way
+`apply_class_method_fun/6` does for a runtime-installed class method
+(BT-3192) — script-exit passthrough, NLR relay, `undef` classification, and
+a generic catch-all — so a crashing extension body becomes a structured
+`{error, ...}` reply instead of taking down the class gen_server.
+""".
+-spec apply_class_extension_fun(fun(), #beamtalk_object{}, map(), list(), class_name(), selector()) ->
+    {ok, {term(), map()}}
+    | {nlr_relay, term(), list()}
+    | {error, undef_in_body}
+    | {error, {raised, atom(), term(), list()}}.
+apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
+    try beamtalk_dispatch:apply_extension_by_arity(Fun, Args, ClassSelf, ClassVars) of
+        ResultAndVars ->
+            {ok, ResultAndVars}
+    catch
+        %% BT-2691 (ADR 0099 §3): see apply_class_method_fun/6 — pass a
+        %% connected `Program exit: N` through unlogged as a control-flow
+        %% signal, not a method failure.
+        throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
+            {error, {raised, throw, ScriptExit, ScriptST}};
+        %% BT-3022: see apply_class_method_fun/6 — a `^` unwinding through
+        %% this extension belongs to a frame in the calling process.
+        throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
+            {nlr_relay, Nlr, NlrST};
+        error:undef:ST ->
+            ?LOG_ERROR(
+                "Class-side extension ~p:~p raised undef internally",
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    stacktrace => ST,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {error, undef_in_body};
+        ErrClass:Error:ErrST ->
+            ?LOG_ERROR(
+                "Class-side extension ~p:~p failed",
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    reason => beamtalk_error:format_reason(ErrClass, Error),
+                    stacktrace => ErrST,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {error, {raised, ErrClass, Error, ErrST}}
     end.
 
 -doc "Invoke a class method (local or inherited), handling test execution specially.".

@@ -103,23 +103,18 @@ TestCase subclass: ExtensionSealedTest
     // Register class-side: Integer class >> meaningOfLife => 42
     // Class-side extensions go through the metaclass dispatch chain.
     // The class name in ETS for metaclass dispatch is 'Integer class'.
+    // BT-3192: class-side dispatch now checks the extensions table
+    // (beamtalk_class_dispatch:handle_class_method_call/6), so this reaches
+    // the registered fun instead of raising does_not_understand.
     extFun := [:a :s | 42]
     Erlang beamtalk_extensions
       register: #'Integer class'
       selector: #meaningOfLife
       fun: extFun
       owner: #test
-    // Class-side ETS extensions may not be dispatched yet; catch DNU specifically
-    result := [Integer perform: #meaningOfLife]
-      on: Exception
-      do: [:e |
-        self assert: e selector equals: #meaningOfLife
-        #not_dispatched
-      ]
+    result := Integer perform: #meaningOfLife
     Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #meaningOfLife)
-    // Class-side dispatch does not currently check extensions in ETS —
-    // verify the DNU is caught gracefully. When wired up, change to assert: 42.
-    self assert: result equals: #not_dispatched
+    self assert: result equals: 42
 
   // =========================================================================
   // Verify ETS dispatch properties
