@@ -829,7 +829,7 @@ fn remove_method_expr_for(arg: &str) -> Option<String> {
     let mut parts = arg.splitn(2, char::is_whitespace);
     let class = parts.next().unwrap_or("").trim();
     let selector = parts.next().unwrap_or("").trim();
-    let selector = selector.strip_prefix('#').unwrap_or(selector);
+    let selector = selector.strip_prefix('#').unwrap_or(selector).trim();
     if class.is_empty() || selector.is_empty() {
         return None;
     }
@@ -2010,6 +2010,24 @@ mod tests {
         // A selector of just "#" strips down to empty and must hit the
         // usage-error path, not a malformed `Counter removeSelector: #` eval.
         assert_eq!(remove_method_expr_for("Counter #"), None);
+    }
+
+    #[test]
+    fn remove_method_with_only_whitespace_after_hash_reports_no_expression() {
+        // "#" followed by only whitespace must re-trim to empty and hit the
+        // usage-error path, not just the bare-hash case above.
+        assert_eq!(remove_method_expr_for("Counter #  "), None);
+    }
+
+    #[test]
+    fn remove_method_strips_whitespace_between_hash_and_selector() {
+        // Whitespace right after "#" (before real selector content) must be
+        // trimmed away, producing a clean expression instead of the
+        // malformed `Counter removeSelector: #  increment`.
+        assert_eq!(
+            remove_method_expr_for("Counter #  increment"),
+            Some("Counter removeSelector: #increment".to_string())
+        );
     }
 
     #[test]
