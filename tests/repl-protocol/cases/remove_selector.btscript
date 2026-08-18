@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for Behaviour >> removeSelector: / removeSelector:ifAbsent:
-// (ADR 0112 Phase 2, BT-3186).
+// (ADR 0112 Phase 2, BT-3186; ChangeLog assertions added for Phase 5, BT-3190).
 //
 // Requires E2E because the local-method-table removal branch routes through
 // the same recompile-based mechanism `compile:source:` uses
@@ -12,7 +12,16 @@
 // compile:source:/tryCompile:source:). Extension removal, absent-selector
 // errors, and removeSelector:ifAbsent:'s block execution context do not strictly
 // need the workspace, but are kept here alongside the rest of the surface for
-// one readable end-to-end story.
+// one readable end-to-end story. The stdlib-removal ChangeLog assertions
+// (non-flushable "remove-method" entry, `Workspace flush` skipping it) also
+// need the live workspace's ChangeLog and flush machinery, unreachable from
+// BUnit for the same reason.
+//
+// This file is BT-3190's required e2e coverage for the whole ADR 0112 epic —
+// no separate `tests/e2e/cases/` tree exists in this repo (the e2e convention
+// is `tests/repl-protocol/cases/*.btscript`, run via `just test-repl-protocol`);
+// it already existed from BT-3186 and is extended here rather than duplicated,
+// per CLAUDE.md's no-duplicate-implementations rule.
 
 // ===========================================================================
 // INSTANCE-SIDE REMOVAL — re-exposes the inherited method, no restart needed
@@ -176,6 +185,47 @@ RemoveSelectorStdlibFixture probe
 
 RemoveSelectorStdlibFixture class removeSelector: #probe
 // => RemoveSelectorStdlibFixture class
+
+// ---------------------------------------------------------------------------
+// The removal produced a durable, NON-flushable "remove-method" ChangeLog
+// entry (ADR 0112 "Flushability, not refusal" — a stdlib removal always
+// installs in memory; what varies is only whether the entry can reach disk).
+// Filtered by className because REPL-protocol cases share one long-lived
+// ChangeLog (same convention as workspace_flush_roundtrip.btscript).
+// ---------------------------------------------------------------------------
+
+_stdlibRemoveEntry := (Workspace changes select: [:e | e className =:= #RemoveSelectorStdlibFixture]) first
+// => _
+
+_stdlibRemoveEntry isRemoveMethod
+// => true
+
+_stdlibRemoveEntry selector
+// => probe
+
+_stdlibRemoveEntry side
+// => class
+
+_stdlibRemoveEntry isDurable
+// => true
+
+_stdlibRemoveEntry isFlushable
+// => false
+
+// `Workspace flush` skips the entry: a targeted flush against the fixture
+// class writes nothing back to disk (the fixture is loaded from
+// tests/repl-protocol/fixtures/stdlib, classified stdlib-mode, and per ADR
+// 0112's flushability table stdlib removals are never written by flush).
+_stdlibFlush := Workspace flush: RemoveSelectorStdlibFixture
+// => _
+
+Erlang maps get: #flushed with: _stdlibFlush
+// => 0
+
+// The entry is still pending afterward — flush neither wrote it nor
+// silently dropped it from the active view.
+(Workspace changes select: [:e | e className =:= #RemoveSelectorStdlibFixture]) isEmpty
+// => false
 
 [RemoveSelectorStdlibFixture probe] on: Error do: [:e | e kind]
 // => does_not_understand
