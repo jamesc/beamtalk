@@ -563,6 +563,61 @@ actor_crash_during_processing_test() ->
 
     gen_server:stop(Actor).
 
+%% BT-3199: instance-side extension crash safety at the actor/gen_server level.
+%%
+%% Mirrors beamtalk_class_dispatch_tests:test_class_extension_crash_does_not_kill_class_process/0
+%% and actor_crash_during_processing_test/0 above, but for a crashing
+%% EXTENSION reached via a genuine `gen_server:call/2` send
+%% (beamtalk_dispatch_tests:test_extension_raises_reraised/0 already covers
+%% the same crash one layer down, via a direct beamtalk_dispatch:lookup/5
+%% call with no live actor process involved).
+%%
+%% Before BT-3199, beamtalk_dispatch:invoke_extension/4 re-raised a crashing
+%% extension's bare Erlang exception instead of catching it, and
+%% beamtalk_actor:dispatch_via_hierarchy/4's try/catch only matched `exit:`
+%% patterns from the class-registry lookup itself (noproc/normal/timeout),
+%% never the `error:` class an extension body raises — so the re-raise
+%% escaped uncaught all the way up through handle_call/3 and crashed the
+%% actor's gen_server, unlike an equivalent crash in a regular compiled/
+%% runtime-installed method (already caught by dispatch_user_method/4).
+%% invoke_extension/6 now catches and converts via the same
+%% ensure_wrapped/4 classification invoke_method/6 already uses for a
+%% compiled-method crash reached via the same hierarchy walk, so the
+%% guarantee below matches the class-side one BT-3192 established.
+instance_side_extension_crash_test() ->
+    ok = beamtalk_extensions:init(),
+    {ok, Counter} = test_counter:start_link(0),
+
+    %% Register on 'Counter' — the $beamtalk_class test_counter's __methods__
+    %% map does NOT contain this selector, so dispatch falls through the
+    %% hierarchy walk into the extension registry, mirroring a real
+    %% `Counter extend [ bt3199CrashExt [ ... ] ]` open-class body (ADR 0066).
+    CrashFun = fun(_Args, _Self, _State) -> error(bt3199_deliberate_crash) end,
+    ok = beamtalk_extensions:register('Counter', bt3199CrashExt, CrashFun, test_owner),
+
+    try
+        %% The caller gets a clean structured error, not a raw exit.
+        Result2 = gen_server:call(Counter, {bt3199CrashExt, []}),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}, Result2
+        ),
+
+        %% The actor survives and keeps processing messages normally.
+        ?assert(is_process_alive(Counter)),
+        ?assertEqual(0, gen_server:call(Counter, {getValue, []}))
+    after
+        (try
+            beamtalk_extensions:unregister('Counter', bt3199CrashExt, false)
+        catch
+            _:_ -> ok
+        end),
+        (try
+            gen_server:stop(Counter)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
 large_state_handling_test() ->
     %% Test actor with large state (simulating memory pressure)
     LargeData = lists:duplicate(10000, {data, lists:seq(1, 100)}),
