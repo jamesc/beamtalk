@@ -613,12 +613,20 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
                 )
             );
         {error, no_prev_source} ->
+            %% Shared by every kind that can raise it: a method modify/removal
+            %% (the ChangeLog's own `sources/` copy is missing and the on-disk
+            %% span no longer resolves) and a `'remove-class'` removal (the
+            %% ChangeLog copy is missing AND either there is no recorded
+            %% `sourceFile` to fall back to — a dynamically-defined class — or
+            %% that file itself can no longer be read). "Prior body" covers
+            %% both a method body and a whole-file class source without
+            %% picking the wrong noun for either.
             beamtalk_error:raise(
                 revert_state_error(
                     <<
-                        "revert: this entry has no recorded prior body (the on-disk "
-                        "sources/ file is missing). Cannot reconstruct the pre-patch "
-                        "method body"
+                        "revert: this entry's prior body could not be recovered (the "
+                        "ChangeLog's recorded copy is missing, and no readable on-disk "
+                        "fallback exists). Cannot reconstruct the pre-patch state"
                     >>
                 )
             )
