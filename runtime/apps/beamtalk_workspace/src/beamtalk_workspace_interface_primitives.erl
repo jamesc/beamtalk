@@ -79,12 +79,13 @@ into REPL session state. Workspace readiness is detected via
 -export([sync/0]).
 %% New-class creation (ADR 0082 Phase 1, BT-2285)
 -export([newClass/2]).
-%% Workspace flush (ADR 0082 Phase 2, BT-2286)
--export([flush/0, flush/1]).
+%% Workspace flush (ADR 0082 Phase 2, BT-2286; destructive tiering ADR 0113
+%% Phase 2, BT-3207).
+-export([flush/0, flush/1, flush/2, flushIncludingDestructive/0]).
 %% Whole-image re-check (ADR 0105 Phase 3, BT-2782)
 -export([recheckImage/0]).
 %% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
--export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1]).
+-export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1, changeLogFlushKinds/2]).
 %% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
 %% 0082 Phase 5, BT-2293). `revert_method/3` (ADR 0112, BT-3187) is the
 %% side-aware surface the LiveView `Workspace changes` row now calls with its
@@ -144,6 +145,10 @@ dispatch(flush, [], _Self) ->
     flush();
 dispatch('flush:', [Filter], _Self) ->
     flush(Filter);
+dispatch('flush:confirmDestructive:', [Filter, ConfirmDestructive], _Self) ->
+    flush(Filter, ConfirmDestructive);
+dispatch(flushIncludingDestructive, [], _Self) ->
+    flushIncludingDestructive();
 dispatch(recheckImage, [], _Self) ->
     recheckImage();
 dispatch(autoflush, [], _Self) ->
@@ -246,12 +251,16 @@ new_class_arg_type_error(ArgName, Value) ->
     ).
 
 -doc """
-Flush every pending durable+flushable ChangeEntry to disk (ADR 0082 Phase 2).
+Flush every pending durable+flushable Tier 1 ChangeEntry to disk (ADR 0082
+Phase 2; Tier 1/2 split per ADR 0113 Phase 2).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) flush`. Returns a
 `FlushResult`-tagged map summarising what was written, what was skipped, and
-what conflicted. Hard runtime errors (e.g. the changelog server is missing) are
-raised as structured `#beamtalk_error{}` so they surface at the call site.
+what conflicted — a pending `'remove-class'` (Tier 2) entry is reported in
+`skipped` (`reason => <<"destructive">>`), never applied here; see
+`flushIncludingDestructive/0`. Hard runtime errors (e.g. the changelog server
+is missing) are raised as structured `#beamtalk_error{}` so they surface at
+the call site.
 """.
 -spec flush() -> map().
 flush() ->
@@ -261,16 +270,48 @@ flush() ->
     end.
 
 -doc """
-Flush only the ChangeEntries that match `Filter` (ADR 0082 Phase 2).
+Flush only the Tier 1 ChangeEntries that match `Filter` (ADR 0082 Phase 2).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) flush: filter`.
 `Filter` may be a Class, a Symbol (e.g. `#'new-class'`), or a Dictionary
 `#{ #file => "..." }` (Symbol-keyed). Anything else surfaces a structured
-`#beamtalk_error{}`.
+`#beamtalk_error{}`. Equivalent to `flush(Filter, false)`.
 """.
 -spec flush(term()) -> map().
 flush(Filter) ->
     case beamtalk_workspace_flush:flush(Filter) of
+        {ok, Summary} -> Summary;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
+
+-doc """
+Flush the ChangeEntries that match `Filter`, additionally applying Tier 2
+(`'remove-class'`) entries within that scope when `ConfirmDestructive` is
+`true` (ADR 0113 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) flush: filter
+confirmDestructive: confirmDestructive`, backing `Workspace flush: aClass
+confirmDestructive: true`. `ConfirmDestructive` must be a literal Boolean —
+never read from a workspace setting.
+""".
+-spec flush(term(), term()) -> map().
+flush(Filter, ConfirmDestructive) ->
+    case beamtalk_workspace_flush:flush(Filter, ConfirmDestructive) of
+        {ok, Summary} -> Summary;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
+
+-doc """
+Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
+(ADR 0113 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives)
+flushIncludingDestructive`, backing the unscoped `Workspace
+flushIncludingDestructive` bare-unary selector.
+""".
+-spec flushIncludingDestructive() -> map().
+flushIncludingDestructive() ->
+    case beamtalk_workspace_flush:flush_including_destructive() of
         {ok, Summary} -> Summary;
         {error, Err} -> beamtalk_error:raise(Err)
     end.
@@ -737,23 +778,40 @@ changeLogClear() ->
     nil.
 
 -doc """
-Flush only the ChangeEntries whose kind or author_kind is in `KindsSet`
+Flush only the Tier 1 ChangeEntries whose kind or author_kind is in `KindsSet`
 (ADR 0082 Phase 4, BT-2290).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: aSet`
 from `ChangeLog>>flushKinds:`. `KindsSet` is a Beamtalk `Set` (tagged map)
 or a List of Symbols. Accepted symbols:
 
-  - entry kinds: `#instance`, `#class`, `#'new-class'`
+  - entry kinds: `#instance`, `#class`, `#'new-class'`, `#'remove-method'`,
+    `#'remove-class'`
   - author kinds: `#human`, `#agent`
 
-Returns the same `FlushResult` summary as `Workspace flush`.
+Returns the same `FlushResult` summary as `Workspace flush`. Equivalent to
+`changeLogFlushKinds(KindsSet, false)` — a matching Tier 2 entry
+(`#'remove-class'`) is reported in `skipped`, not applied; see
+`changeLogFlushKinds/2`.
 """.
 -spec changeLogFlushKinds(term()) -> map().
 changeLogFlushKinds(KindsSet) ->
+    changeLogFlushKinds(KindsSet, false).
+
+-doc """
+Flush the ChangeEntries whose kind or author_kind is in `KindsSet`,
+additionally applying Tier 2 (`#'remove-class'`) entries within that scope
+when `ConfirmDestructive` is `true` (ADR 0113 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds:
+aSet confirmDestructive: confirmDestructive` from `ChangeLog>>flushKinds:confirmDestructive:`,
+backing `Workspace changes flushKinds: aSet confirmDestructive: true`.
+""".
+-spec changeLogFlushKinds(term(), term()) -> map().
+changeLogFlushKinds(KindsSet, ConfirmDestructive) ->
     case kinds_to_list(KindsSet) of
         {ok, Kinds} ->
-            case beamtalk_workspace_flush:flush_kinds(Kinds) of
+            case beamtalk_workspace_flush:flush_kinds(Kinds, ConfirmDestructive) of
                 {ok, Summary} -> Summary;
                 {error, Err} -> beamtalk_error:raise(Err)
             end;

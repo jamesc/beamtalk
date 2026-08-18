@@ -221,17 +221,31 @@ sealed typed Object subclass: WorkspaceInterface
   newClass: source :: String at: path :: String -> List(Behaviour) =>
     (Erlang beamtalk_workspace_interface_primitives) newClass: source at: path
 
-  /// Flush every pending durable change to disk (ADR 0082 Phase 2).
+  /// Flush every pending durable Tier 1 change to disk (ADR 0082 Phase 2;
+  /// destructive tiering ADR 0113 Phase 2).
   ///
-  /// Writes each pending ChangeLog entry's patched body back to its source
-  /// file via byte-span splice (trivia-preserving — no AST reprint), atomically
-  /// (`<file>.tmp` + atomic rename), with external-edit conflict detection.
+  /// Writes each pending Tier 1 ChangeLog entry's patched body back to its
+  /// source file via byte-span splice (trivia-preserving — no AST reprint),
+  /// atomically (`<file>.tmp` + atomic rename), with external-edit conflict
+  /// detection. Tier 1 covers every entry that edits a still-existing file:
+  /// patches, `newClass:at:` creations, and `removeSelector:` removals (ADR
+  /// 0112) — excising a recorded span leaves the file in place, the same
+  /// mechanical shape as a patch.
+  ///
+  /// A pending Tier 2 entry (`removeFromSystem`'s `#'remove-class'`, ADR
+  /// 0113) is **not** applied here — it deletes a file, and reaching that
+  /// tier always requires an explicit `confirmDestructive` gesture (see
+  /// `flushIncludingDestructive` / `flush:confirmDestructive:` below). It is
+  /// instead reported in `skipped` with `#reason => #destructive`.
   ///
   /// Returns a `FlushResult` summary recording what was written, what was
   /// skipped, and what conflicted:
   ///   - `flushed` (Integer) — number of durable entries written
-  ///   - `files` (List of String) — files written, in rename order
+  ///   - `files` (List of String) — files touched (written or removed)
   ///   - `newClasses` (Integer) — subset of `flushed` for new-class entries
+  ///   - `removedClasses` (Integer) — subset of `flushed` for remove-class entries
+  ///   - `skipped` (List) — pending entries left out of this flush, e.g.
+  ///     `#{#seq => ..., #class => ..., #reason => #destructive}`
   ///   - `conflicts` (List) — per-file conflict descriptors (`#external_edit`,
   ///     `#target_exists`, `#span_out_of_range`, ...). A non-empty list means the
   ///     listed entries remain pending and require manual reconciliation.
@@ -244,7 +258,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   flush -> Object => (Erlang beamtalk_workspace_interface_primitives) flush
 
-  /// Flush the pending ChangeLog entries matching `filter` (ADR 0082 Phase 2).
+  /// Flush the pending Tier 1 ChangeLog entries matching `filter` (ADR 0082
+  /// Phase 2).
   ///
   /// `filter` is one of:
   ///   - a Class — flush only entries targeting that class
@@ -252,7 +267,9 @@ sealed typed Object subclass: WorkspaceInterface
   ///   - a Dictionary `#{#file => "path"}` — flush only entries against that
   ///     source file
   ///
-  /// Returns the same `FlushResult` shape as `flush`.
+  /// A matching Tier 2 (`#'remove-class'`) entry is reported in `skipped`,
+  /// not applied — use `flush:confirmDestructive:` to also apply it within
+  /// this scope. Returns the same `FlushResult` shape as `flush`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -262,6 +279,42 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   flush: filter :: Object -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) flush: filter
+
+  /// Flush the pending ChangeLog entries matching `filter`, additionally
+  /// applying Tier 2 (`#'remove-class'`) entries within that scope
+  /// (ADR 0113 Phase 2).
+  ///
+  /// `confirmDestructive` must be a literal `true`/`false` — never read from
+  /// a workspace setting or environment variable, so reaching the
+  /// destructive tier always names its own consent at the call site. The
+  /// class/kind/file argument gives `confirmDestructive:` a real keyword
+  /// partner, keeping this an ordinary two-keyword message.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace flush: Counter confirmDestructive: true   // => _
+  /// ```
+  flush: filter :: Object confirmDestructive: confirmDestructive :: Boolean -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) flush: filter confirmDestructive: confirmDestructive
+
+  /// Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
+  /// (ADR 0113 Phase 2).
+  ///
+  /// The unscoped destructive-flush entry point — a bare unary selector, not
+  /// a keyword message, since there is no class/kind/file argument to attach
+  /// a `confirmDestructive:` keyword to once the call has no scope. Applies
+  /// every pending Tier 1 entry (as `flush` does) plus every pending Tier 2
+  /// (`#'remove-class'`) entry, deleting the corresponding `.bt` files.
+  ///
+  /// Returns the same `FlushResult` shape as `flush`, with `skipped` empty
+  /// for every entry this call was able to reach.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace flushIncludingDestructive   // => _
+  /// ```
+  flushIncludingDestructive -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) flushIncludingDestructive
 
   /// Whole-image re-check (ADR 0105 Phase 3): re-check every live class the
   /// workspace has a recorded source for, not just the dependents of one

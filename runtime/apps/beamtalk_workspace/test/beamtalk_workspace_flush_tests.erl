@@ -4,7 +4,8 @@
 -module(beamtalk_workspace_flush_tests).
 
 -moduledoc """
-Unit tests for `beamtalk_workspace_flush` (ADR 0082 Phase 2, BT-2286).
+Unit tests for `beamtalk_workspace_flush` (ADR 0082 Phase 2, BT-2286;
+destructive tiering ADR 0113 Phase 2, BT-3207).
 
 Covers:
 - single-method splice writes via `<file>.tmp` + atomic rename
@@ -16,6 +17,11 @@ Covers:
 - `flush:` filter by class and by file
 - entries are marked flushed after a successful flush (excluded from active view)
 - pure `splice/3` helper round-trip
+- ADR 0113: `'remove-method'` flushes under ordinary `flush/0` with no gate
+  (Tier 1); `'remove-class'` is reported `skipped: destructive` unless
+  `ConfirmDestructive`/`flush_including_destructive/0` is used (Tier 2);
+  staged-delete Phase A/B, including mid-delete crash recovery and the
+  external-deletion soft success; a Phase A abort restores a staged delete
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -70,7 +76,21 @@ flush_test_() ->
         fun missing_prev_source_body_is_hard_error/1,
         %% ADR 0112 (BT-3187) required fix: flush must not resurrect a method
         %% already removed from the live image.
-        fun flush_does_not_resurrect_removed_method_with_stale_patch/1
+        fun flush_does_not_resurrect_removed_method_with_stale_patch/1,
+        %% ADR 0113 Phase 2 (BT-3207): destructive-tier flush
+        fun remove_method_flushes_under_ordinary_flush_with_no_gate/1,
+        fun remove_class_flush_without_confirm_is_skipped_destructive/1,
+        fun remove_class_flush_including_destructive_deletes_file/1,
+        fun remove_class_flush_two_confirm_true_deletes_file/1,
+        fun remove_class_flush_two_confirm_false_is_skipped/1,
+        fun flush_kinds_remove_class_requires_confirm/1,
+        fun flush_kinds_remove_class_with_confirm_deletes_file/1,
+        fun remove_class_already_gone_is_soft_success/1,
+        fun remove_class_mixed_with_patch_is_conflict/1,
+        fun remove_class_abort_restores_staged_file_on_other_file_conflict/1,
+        fun remove_class_staged_delete_crash_recovery/1,
+        fun flush_two_rejects_non_boolean_confirm/1,
+        fun flush_kinds_two_rejects_non_boolean_confirm/1
     ]}.
 
 unit_test_() ->
@@ -80,7 +100,9 @@ unit_test_() ->
         fun splice_at_end_of_file/0,
         fun group_by_file_preserves_seq_order/0,
         fun filter_shadowed_keeps_only_renamed_survivors/0,
-        fun filter_shadowed_drops_unrenamed_survivors/0
+        fun filter_shadowed_drops_unrenamed_survivors/0,
+        fun entry_tier_classifies_remove_class_as_tier2/0,
+        fun entry_tier_classifies_other_kinds_as_tier1/0
     ].
 
 new_class_directory_target_test_() ->
@@ -650,24 +672,25 @@ mark_flushed_failure_is_reported(#{proj_dir := ProjDir, pid := Pid}) ->
         )
     ),
     %% Simulate a marker failure by routing through the exported
-    %% complete_flush/4 helper with seqs that the (live) ChangeLog server
+    %% complete_flush/5 helper with seqs that the (live) ChangeLog server
     %% cannot mark — pass a manually-crafted scenario by killing the
     %% ChangeLog gen_server before calling mark_flushed.
     stop(Pid),
     %% Without a live ChangeLog server, mark_flushed/1 errors via the
-    %% gen_server:call mechanism. complete_flush/4 must wrap that into the
+    %% gen_server:call mechanism. complete_flush/5 must wrap that into the
     %% summary as a flush_marker_failed conflict.
     Files = [list_to_binary(File)],
     Renamed = [],
     Failed = [],
     Seqs = [1],
+    Skipped = [],
     %% Trap exits so the failed gen_server:call does not nuke this test
-    %% process — complete_flush/4 should catch the exit and turn it into
+    %% process — complete_flush/5 should catch the exit and turn it into
     %% the marker conflict.
     process_flag(trap_exit, true),
     Result =
         try
-            beamtalk_workspace_flush:complete_flush(Files, Renamed, Failed, Seqs)
+            beamtalk_workspace_flush:complete_flush(Files, Renamed, Failed, Seqs, Skipped)
         catch
             exit:_ -> caller_did_not_handle
         end,
@@ -1307,23 +1330,25 @@ missing_prev_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjD
     ].
 
 %%====================================================================
-%% BT-3187 (ADR 0112) — flush must not resurrect a removed method
+%% BT-3187 (ADR 0112) / BT-3207 (ADR 0113 Phase 2) — flush must not
+%% resurrect a removed method, and 'remove-method' is Tier 1
 %%====================================================================
 
 %% Regression for the flush-side of ADR 0112's required fix: an older,
 %% never-flushed patch (P1) to `Counter >> #foo` and a later `'remove-method'`
 %% entry (R1, same `(class, selector, side)` target, higher seq) from
 %% `Counter removeSelector: #foo` must shadow correctly — P1 must NOT be
-%% spliced back onto disk just because `exclude_remove_method/1` used to strip
-%% R1 out of the flush set *before* `shadow_duplicates/1` ever saw it (which
-%% left P1 looking like the sole, unshadowed survivor for its target).
+%% spliced back onto disk.
 %%
-%% With the fix, `shadow_duplicates/1` sees both entries, correctly picks R1
-%% (higher seq) as the survivor for the target, and only then drops R1 (a
-%% `'remove-method'` entry) from what actually gets spliced — excising the
-%% recorded span from disk is BT-2192's job, not this module's. The net
-%% effect: the file is untouched (neither P1's stale patch nor R1's removal is
-%% written), and neither entry is marked flushed.
+%% ADR 0113 Phase 2 reclassified `'remove-method'` as Tier 1 (no gate,
+%% unblocking the ADR 0112-era backlog per the ADR's *Migration Path*):
+%% `shadow_duplicates/1` sees both entries, correctly picks R1 (higher seq)
+%% as the survivor for the target, and `flush/0` now actually excises R1's
+%% recorded span — mechanically identical to a patch whose new body is empty.
+%% The net effect: the file loses the `foo` method entirely (neither P1's
+%% stale body nor any trace of the original survives), and *both* entries are
+%% marked flushed — R1 as the applied survivor, P1 as the shadow whose
+%% survivor reached disk.
 flush_does_not_resurrect_removed_method_with_stale_patch(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "counter.bt"]),
     Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
@@ -1346,21 +1371,336 @@ flush_does_not_resurrect_removed_method_with_stale_patch(#{proj_dir := ProjDir})
     {ok, Summary} = beamtalk_workspace_flush:flush(),
     {ok, Final} = file:read_file(File),
     [
-        %% The file is untouched — P1's stale patch was never spliced back in.
-        ?_assertEqual(Original, Final),
+        %% The span is excised — P1's stale body was never spliced back in,
+        %% and R1's removal is now actually applied (Tier 1, no gate). The
+        %% splice is a mechanical byte excision (no reformatting): the
+        %% method's leading two-space indent is left behind, directly
+        %% followed by the class-closing `end`.
+        ?_assertEqual(<<"Object subclass: Counter\n  end\n">>, Final),
         ?_assertEqual(nomatch, binary:match(Final, <<"foo => 2">>)),
+        ?_assertEqual(nomatch, binary:match(Final, <<"foo => 1">>)),
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([list_to_binary(File)], maps:get(files, Summary)),
+        %% Both entries are marked flushed: R1 (the applied survivor) and P1
+        %% (the shadow whose survivor's removal did reach disk this time).
+        ?_assert(entry_flushed(Seq0)),
+        ?_assert(entry_flushed(Seq1))
+    ].
+
+%%====================================================================
+%% ADR 0113 Phase 2 (BT-3207) — destructive-tier flush
+%%====================================================================
+
+%% Tier 1: a bare `remove-method` entry now excises its recorded span under
+%% ordinary `flush/0`, with no gate — the entry is marked flushed and the
+%% method text is gone, but the rest of the file is untouched.
+remove_method_flushes_under_ordinary_flush_with_no_gate(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\n  bar => 2\nend\n">>,
+    ok = file:write_file(File, Original),
+    {Start, End, OldBody} = locate(Original, <<"foo => 1\n">>),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        remove_method_input(
+            <<"Counter">>, <<"foo">>, instance, list_to_binary(File), Start, End, OldBody
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(skipped, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual(nomatch, binary:match(Final, <<"foo => 1">>)),
+        ?_assertNotEqual(nomatch, binary:match(Final, <<"bar => 2">>)),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% Tier 2: an ordinary `flush/0` never applies a pending `remove-class`
+%% entry — it is reported `skipped: destructive` and the file (and the entry)
+%% are left untouched.
+remove_class_flush_without_confirm_is_skipped_destructive(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    Skipped = maps:get(skipped, Summary),
+    [
         ?_assertEqual(0, maps:get(flushed, Summary)),
-        ?_assertEqual([], maps:get(files, Summary)),
-        %% Neither entry is marked flushed: R1 ('remove-method') is never
-        %% flushed by this module (deferred to BT-2192), and P1 — shadowed by
-        %% a survivor that never reached disk — correctly stays pending too.
-        ?_assertNot(entry_flushed(Seq0)),
-        ?_assertNot(entry_flushed(Seq1))
+        ?_assertEqual(1, length(Skipped)),
+        ?_assertEqual(<<"destructive">>, maps:get(reason, hd(Skipped))),
+        ?_assertEqual(Seq, maps:get(seq, hd(Skipped))),
+        ?_assertEqual(<<"Counter">>, maps:get(class, hd(Skipped))),
+        ?_assertEqual({ok, Original}, file:read_file(File)),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% `flush_including_destructive/0` applies a pending `remove-class` entry:
+%% the file is deleted, no `.tmp`/`.tmp-delete-*` artefact is left behind, and
+%% the entry is marked flushed.
+remove_class_flush_including_destructive_deletes_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(1, maps:get(removedClasses, Summary)),
+        ?_assertEqual([], maps:get(skipped, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual([list_to_binary(File)], maps:get(files, Summary)),
+        ?_assertEqual(false, filelib:is_regular(File)),
+        ?_assertEqual([], filelib:wildcard(File ++ ".tmp-delete-*")),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% `flush: aClass confirmDestructive: true` applies Tier 2 scoped to that class.
+remove_class_flush_two_confirm_true_deletes_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush('Counter', true),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(false, filelib:is_regular(File))
+    ].
+
+%% `flush: aClass confirmDestructive: false` is equivalent to `flush: aClass`
+%% — the Tier 2 entry is still withheld and reported skipped.
+remove_class_flush_two_confirm_false_is_skipped(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush('Counter', false),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(maps:get(skipped, Summary))),
+        ?_assertEqual(true, filelib:is_regular(File))
+    ].
+
+%% `flushKinds: #{#'remove-class'}` (no confirm) leaves the destructive entry
+%% pending — `confirmDestructive` composes as an independent filter dimension,
+%% not implied by selecting the kind.
+flush_kinds_remove_class_requires_confirm(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['remove-class']),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(maps:get(skipped, Summary))),
+        ?_assertEqual(true, filelib:is_regular(File))
+    ].
+
+%% `flushKinds: #{#'remove-class'} confirmDestructive: true` applies it.
+flush_kinds_remove_class_with_confirm_deletes_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['remove-class'], true),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(1, maps:get(removedClasses, Summary)),
+        ?_assertEqual(false, filelib:is_regular(File))
+    ].
+
+%% External-edit conflict table (ADR 0113): the target file was already
+%% deleted externally before this flush ran. Phase A's `stat` fails with no
+%% matching staged file, so this is a soft success — the entry is pruned
+%% without any further disk I/O.
+remove_class_already_gone_is_soft_success(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    %% Something else (git, another tool) deletes the file before flush runs.
+    ok = file:delete(File),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual(false, filelib:is_regular(File)),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% Defensive: a `remove-class` entry sharing a `sourceFile` group with an
+%% un-shadowed patch (different target_key — the removal's own key has no
+%% selector) surfaces as a conflict rather than writing a patch to a file
+%% about to be deleted. Both entries stay pending.
+remove_class_mixed_with_patch_is_conflict(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {Start, End, OldBody} = locate(Original, <<"foo => 1\n">>),
+    {ok, PatchSeq} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"foo">>, <<"foo => 2\n">>, OldBody, list_to_binary(File), Start, End
+        )
+    ),
+    {ok, RemoveSeq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(Conflicts)),
+        ?_assertEqual(<<"mixed_remove_class_and_splice">>, maps:get(reason, hd(Conflicts))),
+        ?_assertEqual({ok, Original}, file:read_file(File)),
+        ?_assertNot(entry_flushed(PatchSeq)),
+        ?_assertNot(entry_flushed(RemoveSeq))
+    ].
+
+%% Delete atomicity, abort path: a Phase A conflict on an unrelated file
+%% aborts the whole flush, including the remove-class entry whose own Phase A
+%% step (the stage-rename) already succeeded. The abort must restore the
+%% staged file to its original location — never leave it stuck as
+%% `.tmp-delete-*`, and never proceed to the unlink.
+remove_class_abort_restores_staged_file_on_other_file_conflict(#{proj_dir := ProjDir}) ->
+    File1 = filename:join([ProjDir, "src", "counter.bt"]),
+    File2 = filename:join([ProjDir, "src", "widget.bt"]),
+    Original1 = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    Original2 = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    ok = file:write_file(File1, Original1),
+    ok = file:write_file(File2, Original2),
+    {ok, RemoveSeq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original1, list_to_binary(File1))
+    ),
+    {S2, E2, B2} = locate(Original2, <<"render => nil\n">>),
+    {ok, PatchSeq} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Widget">>, <<"render">>, <<"render => 'x'\n">>, B2, list_to_binary(File2), S2, E2
+        )
+    ),
+    %% External edit on File2 so its Phase A conflicts.
+    ok = file:write_file(File2, <<"Object subclass: Widget\n  render => '!'\nend\n">>),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        %% File1 is restored — the remove-class entry's stage-rename was
+        %% undone, not left as a stray `.tmp-delete-*` file.
+        ?_assertEqual({ok, Original1}, file:read_file(File1)),
+        ?_assertEqual([], filelib:wildcard(File1 ++ ".tmp-delete-*")),
+        ?_assertNot(entry_flushed(RemoveSeq)),
+        ?_assertNot(entry_flushed(PatchSeq))
+    ].
+
+%% Delete atomicity, crash-recovery path (ADR 0113 required EUnit coverage):
+%% simulate a crash between Phase A's stage-rename and Phase B's unlink by
+%% performing the rename a real flush attempt would have done, then calling
+%% flush again. Phase A must recognise the staged file matching this entry's
+%% own epoch/seq and resume directly at the unlink, rather than treating the
+%% missing original path as an external deletion.
+remove_class_staged_delete_crash_recovery(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Counter">>, Original, list_to_binary(File))
+    ),
+    [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+    Epoch = beamtalk_workspace_changelog:entry_epoch(Entry),
+    StagedPath = beamtalk_workspace_flush:delete_staging_path(File, Epoch, Seq),
+    %% Perform the Phase A stage-rename a real flush attempt would have done,
+    %% then stop — no unlink, no mark_flushed. This is the "crash between the
+    %% two phases" scenario from the ADR's delete-atomicity table.
+    ok = file:rename(File, StagedPath),
+    ?assertEqual(false, filelib:is_regular(File)),
+    ?assertEqual(true, filelib:is_regular(StagedPath)),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual(false, filelib:is_regular(File)),
+        ?_assertEqual(false, filelib:is_regular(StagedPath)),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% `confirmDestructive` must be a literal Boolean at both `flush/2` and
+%% `flush_kinds/2` — anything else is a structured type error, never coerced.
+flush_two_rejects_non_boolean_confirm(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush('Counter', not_a_bool),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+flush_kinds_two_rejects_non_boolean_confirm(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush_kinds([instance], not_a_bool),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
     ].
 
 %%====================================================================
 %% Pure helpers
 %%====================================================================
+
+%% Tier classification (ADR 0113): `'remove-class'` is Tier 2; every other
+%% kind (patch, `'new-class'`, `'remove-method'`) is Tier 1.
+entry_tier_classifies_remove_class_as_tier2() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        {ok, _} = beamtalk_workspace_changelog:append(
+            remove_class_input(
+                <<"Counter">>, <<"Object subclass: Counter\nend\n">>, <<"/proj/src/counter.bt">>
+            )
+        ),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(Entry))
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+entry_tier_classifies_other_kinds_as_tier1() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        {ok, _} = beamtalk_workspace_changelog:append(
+            method_input(
+                <<"Counter">>, <<"value">>, <<"new">>, <<"old">>, <<"/proj/src/counter.bt">>, 0, 4
+            )
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(
+            new_class_input(
+                <<"Greeter">>, <<"Object subclass: Greeter\nend\n">>, <<"/proj/src/greeter.bt">>
+            )
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(
+            remove_method_input(
+                <<"Counter">>, <<"foo">>, instance, <<"/proj/src/counter.bt">>, 5, 9, <<"old2">>
+            )
+        ),
+        Entries = beamtalk_workspace_changelog:flushable_pending(),
+        Tiers = [beamtalk_workspace_flush:entry_tier(E) || E <- Entries],
+        ?assertEqual([tier1, tier1, tier1], Tiers)
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
 
 splice_is_pure_byte_replace() ->
     Body = <<"hello world">>,
@@ -1478,6 +1818,24 @@ new_class_input(ClassName, Source, File) ->
         author => <<"sess-test">>,
         author_kind => agent,
         source_file => File
+    }.
+
+%% A flushable `'remove-class'` entry (ADR 0113, BT-3206/BT-3207), shaped like
+%% `beamtalk_repl_loader:do_emit_remove_class_change_entry/4` actually builds:
+%% no `selector`/`side`/`span`/`source` (a whole-file removal, nothing
+%% replaces the deleted text), `prev_source` carries the class's full prior
+%% source for `revert:` (a later phase) and for flush's own `already gone`
+%% soft-success bookkeeping.
+remove_class_input(ClassName, PrevSource, File) ->
+    #{
+        class => ClassName,
+        kind => 'remove-class',
+        intent => durable,
+        flushable => true,
+        author => <<"sess-test">>,
+        author_kind => human,
+        source_file => File,
+        prev_source => PrevSource
     }.
 
 %% Build the sources/ filename for a seq (mirrors the changelog's zero-padded
