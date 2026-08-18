@@ -1374,20 +1374,13 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             client.eval("Workspace recheckImage")
         } else if case.expression.starts_with(":remove-method ") {
             // ADR 0112 Phase 4 (BT-3189): `:remove-method <Class> <selector>` →
-            // `<Class> removeSelector: #<selector>`. Mirrors
-            // `remove_method_expr_for` in `commands/repl/mod.rs`: splits on the
-            // first run of whitespace, and strips a leading `#` on the selector.
-            let arg = case
-                .expression
-                .strip_prefix(":remove-method ")
-                .unwrap()
-                .trim();
-            match arg.split_once(char::is_whitespace) {
-                Some((class, selector)) => {
-                    let selector = selector.trim();
-                    let selector = selector.strip_prefix('#').unwrap_or(selector).trim();
-                    client.eval(&format!("{} removeSelector: #{selector}", class.trim()))
-                }
+            // `<Class> removeSelector: #<selector>`, via the same
+            // `remove_method_expr_for` the real REPL dispatch calls
+            // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror,
+            // so this harness can't drift from production behavior.
+            let arg = case.expression.strip_prefix(":remove-method ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::remove_method_expr_for(arg) {
+                Some(expr) => client.eval(&expr),
                 None => Err("Usage: :remove-method <Class> <selector>".to_string()),
             }
         } else {

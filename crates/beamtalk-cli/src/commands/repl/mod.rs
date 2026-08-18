@@ -798,42 +798,15 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         CommandAction::RemoveMethodUsage => {
             eprintln!("Usage: :remove-method <Class> <selector>");
         }
-        CommandAction::RemoveMethodArg(arg) => match remove_method_expr_for(arg) {
-            Some(expr) => eval_and_display(client, &expr),
-            None => eprintln!("Usage: :remove-method <Class> <selector>"),
-        },
+        CommandAction::RemoveMethodArg(arg) => {
+            match beamtalk_cli::repl_meta_exprs::remove_method_expr_for(arg) {
+                Some(expr) => eval_and_display(client, &expr),
+                None => eprintln!("Usage: :remove-method <Class> <selector>"),
+            }
+        }
     }
 
     CommandResult::Handled
-}
-
-/// Construct the `<Class> removeSelector: #<selector>` expression a
-/// `:remove-method <Class> <selector>` line dispatches to (ADR 0112 Phase 4,
-/// BT-3189). `arg` is the already-extracted, trimmed text following the
-/// command word (from `commands::REMOVE_METHOD.arg`).
-///
-/// Splits on the first run of whitespace: the first token is the class, the
-/// remainder (trimmed) is the selector. Returns `None` when either half is
-/// missing, so the caller can print a usage hint instead of evaluating a
-/// malformed expression. A leading `#` on the selector is stripped, mirroring
-/// the MCP `remove_method` tool's `selector` parameter (`beamtalk-mcp/src/server.rs`)
-/// and the LSP `beamtalk.removeMethod` command, so `:remove-method Counter
-/// #increment` and `:remove-method Counter increment` both work.
-///
-/// Used both by production dispatch (`handle_repl_command`) and by this
-/// module's unit tests, so the translation can't drift between the two the
-/// way `flush_expr_for` (below) is a test-only mirror of inline `format!`
-/// logic in the `Flush`/`FlushArg` match arms.
-fn remove_method_expr_for(arg: &str) -> Option<String> {
-    let arg = arg.trim();
-    let mut parts = arg.splitn(2, char::is_whitespace);
-    let class = parts.next().unwrap_or("").trim();
-    let selector = parts.next().unwrap_or("").trim();
-    let selector = selector.strip_prefix('#').unwrap_or(selector).trim();
-    if class.is_empty() || selector.is_empty() {
-        return None;
-    }
-    Some(format!("{class} removeSelector: #{selector}"))
 }
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
@@ -1957,78 +1930,11 @@ mod tests {
     // -----------------------------------------------------------------------
     // ADR 0112 Phase 4 (BT-3189) — `:remove-method <Class> <selector>`
     // meta-command dispatch, matching the `:flush`/`:changes` alias pattern.
+    // The expression-building logic itself (`remove_method_expr_for`) lives
+    // in `beamtalk_cli::repl_meta_exprs` — shared with, and tested by,
+    // `tests/repl_protocol.rs` — so only dispatch classification is tested
+    // here.
     // -----------------------------------------------------------------------
-
-    #[test]
-    fn remove_method_translates_to_remove_selector_send() {
-        assert_eq!(
-            remove_method_expr_for("Counter increment"),
-            Some("Counter removeSelector: #increment".to_string())
-        );
-    }
-
-    #[test]
-    fn remove_method_preserves_keyword_selectors() {
-        assert_eq!(
-            remove_method_expr_for("Dict at:put:"),
-            Some("Dict removeSelector: #at:put:".to_string())
-        );
-    }
-
-    #[test]
-    fn remove_method_strips_leading_hash_on_selector() {
-        // Mirrors the MCP `remove_method` tool's `selector` param: accepted
-        // with or without a leading `#`.
-        assert_eq!(
-            remove_method_expr_for("Counter #increment"),
-            Some("Counter removeSelector: #increment".to_string())
-        );
-    }
-
-    #[test]
-    fn remove_method_trims_surrounding_whitespace() {
-        assert_eq!(
-            remove_method_expr_for("  Counter   increment  "),
-            Some("Counter removeSelector: #increment".to_string())
-        );
-    }
-
-    #[test]
-    fn remove_method_with_missing_selector_reports_no_expression() {
-        assert_eq!(remove_method_expr_for("Counter"), None);
-        assert_eq!(remove_method_expr_for("Counter "), None);
-    }
-
-    #[test]
-    fn remove_method_with_empty_argument_reports_no_expression() {
-        assert_eq!(remove_method_expr_for(""), None);
-        assert_eq!(remove_method_expr_for("   "), None);
-    }
-
-    #[test]
-    fn remove_method_with_bare_hash_selector_reports_no_expression() {
-        // A selector of just "#" strips down to empty and must hit the
-        // usage-error path, not a malformed `Counter removeSelector: #` eval.
-        assert_eq!(remove_method_expr_for("Counter #"), None);
-    }
-
-    #[test]
-    fn remove_method_with_only_whitespace_after_hash_reports_no_expression() {
-        // "#" followed by only whitespace must re-trim to empty and hit the
-        // usage-error path, not just the bare-hash case above.
-        assert_eq!(remove_method_expr_for("Counter #  "), None);
-    }
-
-    #[test]
-    fn remove_method_strips_whitespace_between_hash_and_selector() {
-        // Whitespace right after "#" (before real selector content) must be
-        // trimmed away, producing a clean expression instead of the
-        // malformed `Counter removeSelector: #  increment`.
-        assert_eq!(
-            remove_method_expr_for("Counter #  increment"),
-            Some("Counter removeSelector: #increment".to_string())
-        );
-    }
 
     #[test]
     fn bare_remove_method_is_usage_error() {

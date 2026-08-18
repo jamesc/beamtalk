@@ -3566,6 +3566,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     expr = "#{receiver} removeSelector: ##{selector}"
     pid = socket.assigns[:session_pid]
 
+    if not is_pid(pid) do
+      status_error(socket, "not attached to workspace")
+    else
+      remove_method_eval(socket, tab, receiver, selector, expr, pid)
+    end
+  end
+
+  defp remove_method_eval(socket, tab, receiver, selector, expr, pid) do
     case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
       {:ok, _term, _output, _warnings} ->
         # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
