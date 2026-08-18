@@ -37,17 +37,6 @@ Extracted from beamtalk_object_class.erl (BT-704).
 -type selector() :: atom().
 -type class_name() :: atom().
 
-%% BT-3022: a `^` non-local return in flight. Codegen throws the state-carrying
-%% 4-tuple `{'$bt_nlr', Token, Value, State}` (ADR 0041); the 3-tuple is the
-%% pre-BT-854 shape still recognised by `beamtalk_result:'tryDo:'/1`. Both are
-%% control-flow signals aimed at a method frame that may live in another process,
-%% so class dispatch must relay rather than report them.
--define(IS_NLR(T),
-    (is_tuple(T) andalso
-        (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
-        element(1, T) =:= '$bt_nlr')
-).
-
 -doc """
 Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 
@@ -763,13 +752,15 @@ class method — `class = ClassTag` (the metaclass tag), `class_mod = Module`
 is no separate "defining class" indirection), `pid = self()` (the class
 gen_server this handler is already running inside).
 
-Unlike `beamtalk_dispatch:invoke_extension/4` (which re-raises on error —
-correct for instance-side dispatch, where `lookup/5` typically runs in the
-receiver's own process and a `^`/exit should propagate via ordinary
-throw/catch), this catches and converts via `apply_class_extension_fun/6`,
-matching every other class-method dispatch path
-(`apply_class_method_fun/6`, `apply_compiled_class_method/7`): a bad
-extension body must not crash the class's own long-lived gen_server.
+Like `beamtalk_dispatch:invoke_extension/6` (BT-3199), this catches and
+converts a crashing extension body rather than letting it escape — but via
+`apply_class_extension_fun/6`'s own finer-grained classification
+(`undef_in_body` vs. generic, plus NLR-relay / script-exit passthrough for
+self-sends inside class methods) rather than the generic
+`ensure_wrapped/4` instance-side dispatch uses, matching every other
+class-method dispatch path (`apply_class_method_fun/6`,
+`apply_compiled_class_method/7`): a bad extension body must not crash the
+class's own long-lived gen_server.
 """.
 -spec invoke_class_extension(fun(), list(), class_name(), atom(), atom(), map(), selector()) ->
     {reply, term(), map()}.

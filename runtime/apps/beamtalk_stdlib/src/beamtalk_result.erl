@@ -208,10 +208,7 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
     catch
         %% BT-754/BT-761: Non-local returns (^ inside blocks) use throw({'$bt_nlr', ...}).
         %% Re-raise so the enclosing method's NLR handler can intercept them.
-        %% The 3-tuple arm is a safety net for backward compatibility.
-        throw:{'$bt_nlr', _, _, _} = NLR ->
-            throw(NLR);
-        throw:{'$bt_nlr', _, _} = NLR ->
+        throw:NLR when ?IS_NLR(NLR) ->
             throw(NLR);
         Class:Reason:Stack ->
             ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),

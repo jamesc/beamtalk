@@ -138,6 +138,24 @@
 %% that Rust test fails.
 -define(BT_CLASS_VARS_SHADOW_KEY_ATOM, '$bt_class_vars_shadow').
 
+%% @doc BT-3022/BT-3199: is `T` an in-flight `^` non-local return signal?
+%%
+%% Codegen throws the state-carrying 4-tuple `{'$bt_nlr', Token, Value,
+%% State}` (ADR 0041); the 3-tuple is the pre-BT-854 shape still recognised
+%% by `beamtalk_result:'tryDo:'/1`. Both are control-flow signals aimed at a
+%% method frame that may live in another process, so any dispatch layer that
+%% might intercept a `throw` (class-side self-sends, instance-side extension
+%% invocation, `tryDo:`) must relay rather than report them. Single source
+%% of truth for the shape check, shared by `beamtalk_class_dispatch.erl`,
+%% `beamtalk_dispatch.erl`, and `beamtalk_result.erl` — per CLAUDE.md's
+%% no-duplicate-implementation rule, a future NLR shape change only needs to
+%% land here.
+-define(IS_NLR(T),
+    (is_tuple(T) andalso
+        (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
+        element(1, T) =:= '$bt_nlr')
+).
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

@@ -64,7 +64,7 @@ super(Selector, Args, Self, State, CurrentClass)
     super/5,
     super_value/4,
     responds_to/2,
-    invoke_extension/4,
+    invoke_extension/6,
     check_extension/2,
     apply_extension_by_arity/4
 ]).
@@ -123,7 +123,7 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
             ?LOG_DEBUG("Found extension method", #{
                 selector => Selector, class => CurrentClass, domain => [beamtalk, runtime]
             }),
-            invoke_extension(Fun, Args, Self, State);
+            invoke_extension(Fun, Selector, CurrentClass, Args, Self, State);
         not_found ->
             %% Step 2: Check class's own method table
             lookup_in_class_chain(Selector, Args, Self, State, CurrentClass)
@@ -180,7 +180,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
                                 class => SuperclassName,
                                 domain => [beamtalk, runtime]
                             }),
-                            invoke_extension(Fun, Args, Self, State);
+                            invoke_extension(Fun, Selector, SuperclassName, Args, Self, State);
                         not_found ->
                             %% Start lookup at superclass (skip current class)
                             lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
@@ -535,37 +535,84 @@ Supports two signatures based on the target class type:
 
 BT-1512: The arity is checked at call time to support both signatures
 from a single dispatch path.
+
+BT-3199: A crashing extension body is caught and converted to a structured
+`#beamtalk_error{}` via `beamtalk_exception_handler:ensure_wrapped/4` +
+`dispatch_context/4` — the exact same pattern `invoke_method/6` already uses
+for a crash inside a compiled/runtime-installed method reached via this same
+hierarchy walk. Before this, a crashing extension was the one dispatch path
+in this module that instead re-raised the bare Erlang exception. For a
+value-type receiver (evaluated inline in the caller's process) that was
+mostly harmless, but for an actor instance — whose `lookup/5` call runs
+inside its own gen_server's `handle_call` (`beamtalk_actor:dispatch_via_hierarchy/4`,
+which only catches `exit:`, not `error:`) — the re-raise escaped uncaught and
+crashed the actor process, unlike an equivalent crash in a regular method
+body (already crash-safe via `dispatch_user_method/4`'s own catch). This
+closes that asymmetry and mirrors the class-side crash-safety guarantee
+BT-3192 already established for class-side extensions (`ClassName` is the
+class the extension was registered under — `CurrentClass` from `lookup/5`
+or `SuperclassName` from `super/5` — used for the error's breadcrumb
+context, same role `MethodOwner` plays for `invoke_method/6`).
+
+A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
+flight (ADR 0041/BT-3022, thrown as `{'$bt_nlr', ...}` — see
+`beamtalk_result:'tryDo:'/1` for the same two tuple shapes) must pass through
+this frame untouched rather than be caught by the generic clause below: for a
+value-type extension (arity-2), `apply_extension_by_arity/4` runs the fun
+inline in the caller's own process, so the throw is a control-flow signal
+aimed at a catch further up that *same* call stack, not a crash to report —
+catching and wrapping it here would turn a non-local return into a spurious
+`#beamtalk_error{}` instead of letting it unwind. Mirrors the passthrough
+`beamtalk_class_dispatch:apply_class_extension_fun/6` already has for the
+class-side extension path (that sibling also relays the NLR outward via a
+tagged `{nlr_relay, ...}` return, since a class method crosses its
+gen_server's `handle_call` boundary and BT-3198's shadow-relay machinery
+needs the tag; plain instance dispatch has no such boundary to relay across
+here, so re-raising is enough).
 """.
--spec invoke_extension(fun(), args(), bt_self(), state()) -> dispatch_result().
-invoke_extension(Fun, Args, Self, State) ->
+-spec invoke_extension(fun(), selector(), class_name(), args(), bt_self(), state()) ->
+    dispatch_result().
+invoke_extension(Fun, Selector, ClassName, Args, Self, State) ->
     try
         {Result, NewState} = apply_extension_by_arity(Fun, Args, Self, State),
         {reply, Result, NewState}
     catch
-        error:Reason:Stacktrace ->
-            ?LOG_ERROR("Extension method threw error", #{
-                reason => Reason,
-                stacktrace => Stacktrace,
+        throw:{beamtalk_script_exit, _} = ScriptExit:ScriptStack ->
+            erlang:raise(throw, ScriptExit, ScriptStack);
+        throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
+            erlang:raise(throw, Nlr, NlrStack);
+        Type:Reason:Stack ->
+            ?LOG_DEBUG("Erlang error in extension method", #{
+                selector => Selector,
+                reason => beamtalk_error:format_reason(Type, Reason),
                 domain => [beamtalk, runtime]
             }),
-            erlang:raise(error, Reason, Stacktrace)
+            Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                Type,
+                Reason,
+                Stack,
+                dispatch_context(Selector, Self, State, ClassName)
+            ),
+            #{error := BtError} = Wrapped,
+            {error, BtError}
     end.
 
 -doc """
 Apply an extension fun given its registered arity, unifying both signatures
 to a plain `{Result, NewState}` pair — the shared "how do I call this fun"
-core behind `invoke_extension/4`.
+core behind `invoke_extension/6`.
 
 BT-3192: exported so `beamtalk_class_dispatch:invoke_class_extension/7` can
 reuse this exact arity convention for class-side extensions instead of
 duplicating it. Deliberately does NOT decide how to handle an error — that is
-context-dependent: `invoke_extension/4` (instance-side dispatch, below)
-re-raises, matching `lookup/5`'s existing contract for a receiver dispatching
-in its own process; class-side dispatch instead needs to catch and convert,
-mirroring every other class-method body's crash-safety (see
-`beamtalk_class_dispatch:apply_class_extension_fun/6`), since the class's own
-long-lived gen_server must survive a bad extension body the same way it
-survives a bad compiled/runtime-installed class method.
+context-dependent: `invoke_extension/6` (instance-side dispatch, below) uses
+the module's shared `ensure_wrapped/4` classification (BT-3199), matching
+every other crash-safe dispatch path in this file; class-side dispatch
+instead needs its own finer-grained classification (`undef_in_body` vs.
+generic, plus NLR-relay / script-exit passthrough for self-sends inside class
+methods — see `beamtalk_class_dispatch:apply_class_extension_fun/6`), since
+the class's own long-lived gen_server must survive a bad extension body the
+same way it survives a bad compiled/runtime-installed class method.
 """.
 -spec apply_extension_by_arity(fun(), args(), bt_self(), state()) -> {term(), state()}.
 apply_extension_by_arity(Fun, Args, Self, State) ->

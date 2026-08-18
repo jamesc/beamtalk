@@ -66,7 +66,12 @@ dispatch_test_() ->
             {"responds_to missing method", fun test_responds_to_missing_method/0},
             {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
             {"responds_to inherited method", fun test_responds_to_inherited_method/0},
-            {"extension error propagation", fun test_extension_error_propagation/0},
+            {"extension error caught and wrapped (BT-3199)",
+                fun test_extension_error_propagation/0},
+            {"BT-3199: a `^` non-local return in flight passes through a value-type extension",
+                fun test_extension_nlr_passthrough/0},
+            {"BT-3199: a connected Program exit: passes through a value-type extension",
+                fun test_extension_script_exit_passthrough/0},
             {"responds_to extension method", fun test_responds_to_extension_method/0},
             {"BT-283: dispatch lookup performance", fun test_dispatch_lookup_performance/0},
             {"BT-283: dynamic method found after put_method",
@@ -107,7 +112,8 @@ dispatch_test_() ->
             {"arity-2 value-type extension via runtime dispatch",
                 fun test_value_type_extension_via_runtime_dispatch/0},
             %% BT-1970: Additional coverage tests
-            {"extension with bad arity raises error", fun test_extension_bad_arity/0},
+            {"extension with bad arity is caught and wrapped (BT-3199)",
+                fun test_extension_bad_arity/0},
             {"non-actor Self uses normal dispatch for displayString",
                 fun test_non_actor_self_displaystring/0},
             {"lookup zero-arity method succeeds", fun test_lookup_zero_arity_method/0},
@@ -118,7 +124,8 @@ dispatch_test_() ->
             %% BT-1981: additional dispatch-pipeline coverage
             {"continue_to_superclass when superclass is not in registry",
                 fun test_continue_to_superclass_missing_registry/0},
-            {"extension method that raises is re-raised", fun test_extension_raises_reraised/0},
+            {"extension method that raises is caught and wrapped (BT-3199)",
+                fun test_extension_raises_reraised/0},
             {"super finds and invokes extension on superclass (arity-3)",
                 fun test_super_extension_invoke/0},
             {"compiled dispatch returning 3-tuple error is normalized to 2-tuple",
@@ -373,7 +380,13 @@ test_responds_to_inherited_method() ->
     %% 'class' is defined in Object (inherited through Actor -> Counter)
     ?assert(beamtalk_dispatch:responds_to(class, 'Counter')).
 
-%% Test extension method error propagation
+%% Test extension method error propagation.
+%% BT-3199: a crashing extension is now caught and converted to a structured
+%% #beamtalk_error{} — matching invoke_method/6's crash-safety for compiled/
+%% inherited methods reached via the same hierarchy walk — instead of
+%% re-raising the bare Erlang exception (the pre-BT-3199 behavior, which left
+%% the caller with a raw crash and, for an actor receiver, could crash the
+%% actor process itself; see beamtalk_actor_tests:instance_side_extension_crash_test/0).
 test_extension_error_propagation() ->
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
@@ -392,14 +405,73 @@ test_extension_error_propagation() ->
     Self = make_ref(),
 
     try
-        %% Extension error should propagate
-        ?assertError(
-            extension_test_crash,
-            beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter')
-        )
+        Result = beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'),
+        ?assertMatch({error, #beamtalk_error{}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', crashExt})
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% BT-3199 follow-up (post-review): a `^` non-local return in flight must
+%% pass through invoke_extension/6 untouched for a value-type (arity-2)
+%% extension, which runs inline in the caller's own process — the throw is a
+%% control-flow signal aimed at a catch further up this *same* call stack,
+%% not a crash to report. Mirrors
+%% beamtalk_class_dispatch_tests:test_invoke_nlr_relay_no_shadow/0 (the
+%% class-side sibling), using the same tagged tuple shape
+%% beamtalk_class_dispatch_test_helper:class_testNlrThrow/2 throws.
+test_extension_nlr_passthrough() ->
+    ok = beamtalk_extensions:init(),
+
+    NlrFun = fun(_Args, _Self) ->
+        throw({'$bt_nlr', bt3199_token, nlr_value, nlr_state})
+    end,
+    ok = beamtalk_extensions:register('Integer', bt3199NlrExt, NlrFun, test_owner),
+
+    State = #{'$beamtalk_class' => 'Integer'},
+    Self = 42,
+
+    try
+        ?assertThrow(
+            {'$bt_nlr', bt3199_token, nlr_value, nlr_state},
+            beamtalk_dispatch:lookup(bt3199NlrExt, [], Self, State, 'Integer')
+        )
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Integer', bt3199NlrExt})
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% BT-3199 follow-up (post-review): a connected `Program exit: N` (ADR 0099
+%% §3) must likewise pass through untouched rather than be reported as a
+%% method failure. Mirrors
+%% beamtalk_class_dispatch_tests:test_invoke_script_exit_passthrough/0 (the
+%% class-side sibling), using the same tagged tuple shape
+%% beamtalk_class_dispatch_test_helper:class_testScriptExit/2 throws.
+test_extension_script_exit_passthrough() ->
+    ok = beamtalk_extensions:init(),
+
+    ScriptExitFun = fun(_Args, _Self) ->
+        throw({beamtalk_script_exit, 7})
+    end,
+    ok = beamtalk_extensions:register('Integer', bt3199ScriptExitExt, ScriptExitFun, test_owner),
+
+    State = #{'$beamtalk_class' => 'Integer'},
+    Self = 42,
+
+    try
+        ?assertThrow(
+            {beamtalk_script_exit, 7},
+            beamtalk_dispatch:lookup(bt3199ScriptExitExt, [], Self, State, 'Integer')
+        )
+    after
+        (try
+            ets:delete(beamtalk_extensions, {'Integer', bt3199ScriptExitExt})
         catch
             _:_ -> ok
         end)
@@ -999,10 +1071,10 @@ test_extension_bad_arity() ->
     Self = make_ref(),
 
     try
-        ?assertError(
-            {bad_extension_arity, 1},
-            beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter')
-        )
+        %% BT-3199: caught and wrapped like any other extension-body crash,
+        %% rather than raising the raw {bad_extension_arity, 1} tuple.
+        Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
+        ?assertMatch({error, #beamtalk_error{selector = badArityExt}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', badArityExt})
@@ -1103,7 +1175,11 @@ test_continue_to_superclass_missing_registry() ->
         code:delete(bt_test_nodisp_leaf)
     end.
 
-%% BT-1981: extension method that raises is re-raised after logging.
+%% BT-1981: extension method that raises is logged.
+%% BT-3199: ... and, since then, caught and converted to a structured
+%% #beamtalk_error{} rather than re-raised — see test_extension_error_propagation/0
+%% above for the fuller explanation; this test pins the same contract via a
+%% second, independently-registered crashing extension.
 test_extension_raises_reraised() ->
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
@@ -1116,10 +1192,8 @@ test_extension_raises_reraised() ->
     State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
     Self = make_ref(),
     try
-        ?assertError(
-            extension_crash,
-            beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter')
-        )
+        Result = beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter'),
+        ?assertMatch({error, #beamtalk_error{}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', throwingExt})

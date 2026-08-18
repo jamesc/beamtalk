@@ -19,7 +19,7 @@
 //! ## Calling convention
 //!
 //! The runtime invokes the registered fun differently depending on the
-//! receiver's kind (see `beamtalk_dispatch:invoke_extension/4` and the
+//! receiver's kind (see `beamtalk_dispatch:invoke_extension/6` and the
 //! generated value-type / actor `dispatch` arms):
 //!
 //! - **Value-type / primitive receivers** (Array, String, Integer, …):
@@ -368,7 +368,7 @@ impl CoreErlangGenerator {
         // The actor method body generator emits a gen_server `{reply, Result,
         // NewState}` 3-tuple. The extension calling convention expects the
         // `{Result, NewState}` 2-tuple (`fun(Args, Self, State) -> {Result,
-        // NewState}` — see beamtalk_dispatch:invoke_extension/4 and the
+        // NewState}` — see beamtalk_dispatch:invoke_extension/6 and the
         // simulation-test funs), so convert the 3-tuple to the 2-tuple.
         let converted_body = docvec![
             "let _ExtReply = ",
