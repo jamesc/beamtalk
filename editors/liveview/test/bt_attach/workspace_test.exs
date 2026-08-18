@@ -136,7 +136,8 @@ defmodule BtAttach.WorkspaceTest do
         active: Keyword.get(opts, :active, true),
         shadowed: Keyword.get(opts, :shadowed, false),
         clean: Keyword.get(opts, :clean, false),
-        diff: Keyword.get(opts, :diff, nil)
+        diff: Keyword.get(opts, :diff, nil),
+        side: Keyword.get(opts, :side, :instance)
       }
     end
 
@@ -188,6 +189,35 @@ defmodule BtAttach.WorkspaceTest do
     test "a row with no computed diff carries nil" do
       [row] = Workspace.pending_rows([entry(0, :increment, [])])
       assert row.diff == nil
+    end
+
+    test "carries the entry's side onto the row (ADR 0112, BT-3187)" do
+      [instance_row] = Workspace.pending_rows([entry(0, :foo, side: :instance)])
+      assert instance_row.side == "instance"
+
+      [class_row] = Workspace.pending_rows([entry(0, :foo, side: :class)])
+      assert class_row.side == "class"
+    end
+
+    test "a sideless (new-class) entry's side is nil, not the string \"nil\"" do
+      [row] = Workspace.pending_rows([entry(0, :foo, side: nil)])
+      assert row.side == nil
+    end
+
+    test "a missing side key (older workspace build) defaults to nil" do
+      raw = %{
+        seq: 0,
+        className: :Counter,
+        selector: :increment,
+        kind: :instance,
+        intent: :durable,
+        flushable: true,
+        flushed: false,
+        authorKind: :human,
+        active: true
+      }
+
+      assert [%{side: nil}] = Workspace.pending_rows([raw])
     end
   end
 
@@ -344,6 +374,11 @@ defmodule BtAttach.WorkspaceTest do
 
     test "revert against an unreachable workspace returns an unreachable error" do
       assert {:error, {:unreachable, _}} = Workspace.revert("Counter", "increment")
+    end
+
+    test "revert/3 with an explicit side against an unreachable workspace returns an unreachable error (ADR 0112, BT-3187)" do
+      assert {:error, {:unreachable, _}} = Workspace.revert("Counter", "foo", "instance")
+      assert {:error, {:unreachable, _}} = Workspace.revert("Counter", "foo", "class")
     end
 
     test "the write wrappers reject non-binary arguments (guard contract)" do

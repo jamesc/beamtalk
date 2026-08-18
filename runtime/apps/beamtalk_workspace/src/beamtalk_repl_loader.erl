@@ -22,6 +22,11 @@ Extracted from beamtalk_repl_eval (BT-863).
     install_method/8,
     install_method/9,
     remove_method/3,
+    %% ADR 0112 Phase 3 (BT-3187): best-effort ChangeLog append after a
+    %% successful `removeSelector:` call — see remove_method/3's doc for why
+    %% this is a separate call rather than folded into remove_method/3 itself.
+    emit_remove_change_entry/5,
+    emit_extension_remove_change_entry/7,
     activate_module/2,
     activate_module/3,
     activate_module/4,
@@ -1106,7 +1111,9 @@ and the remaining class source is recompiled + hot-reloaded. Returns
 `{ok, ClassNameBin}` on success or `{error, Reason}` if the class source is
 unavailable, the selector cannot be located, or the recompile/reload fails (the
 live image is unchanged in the error cases). The removal does NOT itself emit a
-ChangeEntry — the caller curtails the original add entry separately.
+ChangeEntry — the caller curtails the original add entry separately (a
+`revert:`-of-an-add), or, for `removeSelector:` (ADR 0112 Phase 3, BT-3187),
+calls `emit_remove_change_entry/5` afterward.
 """.
 -spec remove_method(binary(), atom() | binary(), instance | class) ->
     {ok, binary()} | {error, term()}.
@@ -3117,6 +3124,260 @@ span_error_entry(Base, _SourceFile, Reason) ->
         not_flushable_reason =>
             iolist_to_binary([<<"span_unresolved:">>, atom_to_binary(Reason, utf8)])
     }.
+
+%%% ----------------------------------------------------------------------------
+%%% Method-removal ChangeLog entry (ADR 0112 Phase 3, BT-3187)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Emit a `"remove-method"` ChangeLog entry for a just-completed LOCAL (non-
+extension) method removal.
+
+Called by `beamtalk_behaviour_intrinsics:remove_selector/2` (backing
+`Behaviour>>removeSelector:` / `removeSelector:ifAbsent:`) *after*
+`remove_method/3` has already spliced the method out and hot-reloaded the
+class — mirrors `emit_change_entry/1`'s placement for a patch (step 3, after
+the memory install; ADR 0082's "install is authoritative, log is best-effort"
+ordering, reused verbatim for removal per ADR 0112 § ChangeLog interaction)
+and its best-effort/self-swallowing failure handling: a ChangeLog write
+failure never undoes the removal, which is already live.
+
+`sourceFile` / `flushable` / `not_flushable_reason` are derived by the exact
+same classification `add_flushability/4` uses for a patch
+(`class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`,
+reused directly rather than re-derived) — stdlib/dynamic/dependency classes
+get `flushable: false` with the matching reason; an in-project class gets
+`flushable: true`. `span` / `prev_source` are resolved against the CURRENT
+on-disk file (not the in-memory source `remove_method/3` just spliced) —
+matching how a patch's span is always resolved against disk rather than
+memory — since that is the byte span BT-2192's future flush-excise step will
+need. A selector already absent from disk (the method being removed was
+itself a live, never-flushed addition) has nothing to excise there either, so
+the entry downgrades to `flushable: false, not_flushable_reason: "not_on_disk"`
+rather than inventing a span. `source_ref` is always absent — a removal has
+no new body to store (ADR 0112 § ChangeLog interaction: `source_ref: null`);
+the append input map below simply carries no `source` key, which
+`beamtalk_workspace_changelog:do_append/2` treats as "no source_ref".
+""".
+-spec emit_remove_change_entry(
+    binary(), atom() | binary(), instance | class, binary(), human | agent
+) ->
+    ok.
+emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
+    try
+        do_emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for method removal (removal still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    selector => Selector,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-spec do_emit_remove_change_entry(
+    binary(), atom() | binary(), instance | class, binary(), human | agent
+) -> ok.
+do_emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
+    SelectorBin = method_selector_binary(Selector),
+    Base = #{
+        class => ClassNameBin,
+        selector => SelectorBin,
+        kind => 'remove-method',
+        side => Side,
+        intent => durable,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    Entry = add_removal_flushability(Base, ClassNameBin, SelectorBin, Side),
+    _ = beamtalk_workspace_changelog:append(Entry),
+    ok.
+
+%% Derive flushability + (when flushable) the on-disk span/prev_source for a
+%% removal entry. Mirrors `add_flushability/4`'s classification exactly (same
+%% helpers, same stdlib/dynamic/dependency table) but never reshapes/stores a
+%% new `source` — a removal has none to reshape.
+-spec add_removal_flushability(map(), binary(), binary(), instance | class) -> map().
+add_removal_flushability(Base, ClassNameBin, SelectorBin, Side) ->
+    case class_source_file(ClassNameBin) of
+        nil ->
+            Base#{flushable => false, not_flushable_reason => no_source_reason(ClassNameBin)};
+        SourceFile when is_binary(SourceFile) ->
+            case classify_source_file(SourceFile) of
+                {flushable, AbsPath} ->
+                    add_removal_span_or_downgrade(
+                        Base, ClassNameBin, SelectorBin, Side, SourceFile, AbsPath
+                    );
+                {not_flushable, Reason} ->
+                    Base#{flushable => false, not_flushable_reason => Reason}
+            end
+    end.
+
+-spec add_removal_span_or_downgrade(
+    map(), binary(), binary(), instance | class, binary(), string()
+) -> map().
+add_removal_span_or_downgrade(Base, ClassNameBin, SelectorBin, Side, SourceFile, AbsPath) ->
+    case file:read_file(AbsPath) of
+        {ok, DiskSource} ->
+            resolve_removal_span_entry(
+                Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
+            );
+        {error, ReadReason} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not read sourceFile for method removal; recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReadReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Base#{flushable => false, not_flushable_reason => <<"disk_read_failed">>}
+    end.
+
+-spec resolve_removal_span_entry(
+    map(), binary(), binary(), instance | class, binary(), binary()
+) -> map().
+resolve_removal_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource) ->
+    case beamtalk_compiler:resolve_method_span(DiskSource, ClassNameBin, SelectorBin, Side) of
+        {ok, Span, PrevSource} ->
+            Base#{
+                flushable => true,
+                source_file => SourceFile,
+                span => Span,
+                prev_source => PrevSource
+            };
+        {error, selector_not_found, _Message} ->
+            %% Nothing on disk to excise (the method was a live, never-flushed
+            %% addition) — nothing for BT-2192's future flush-excise step to
+            %% act on either.
+            Base#{flushable => false, not_flushable_reason => <<"not_on_disk">>};
+        {error, Reason, _Message} ->
+            %% Any other resolution failure (ambiguous / port error / the file
+            %% changed underneath us) downgrades to memory-only, mirroring
+            %% span_error_entry/3's patch-side handling.
+            Base#{
+                flushable => false,
+                not_flushable_reason =>
+                    iolist_to_binary([<<"span_unresolved:">>, atom_to_binary(Reason, utf8)])
+            }
+    end.
+
+-doc """
+Emit a `"remove-method"` ChangeLog entry for a just-completed EXTENSION
+method removal (ADR 0066 open classes; ADR 0112 § Extension methods, §
+ChangeLog interaction).
+
+Unlike `emit_remove_change_entry/5` (a local class-body method, whose
+span/prev_source resolve against the target class's own on-disk file), an
+extension method's source lives in a *different* file than the extended
+class's — `beamtalk_extensions` tracks only the owning package/module atom
+(`Owner`, ADR 0070), not which file registered a given `{Class, Selector}`,
+so this attributes the entry the most it can honestly claim:
+
+  - `sourceFile` resolves iff `Owner` also happens to name a currently-loaded
+    class (the common case: a file with no explicit package declaration
+    registers under its own module-derived name) — reuses
+    `class_source_file/1`, the same resolver an ordinary class uses. Any
+    other `Owner` (a genuine multi-class package, or one that never loaded)
+    leaves `sourceFile` unset rather than guessing wrong.
+  - `span` is always `undefined` — locating a standalone `TargetClass >>
+    selector` definition's byte offsets inside an arbitrary owner file has no
+    resolver in this codebase (`beamtalk_compiler:resolve_method_span/4`
+    looks for a method *inside* a named class's own body, not a foreign
+    extension line); building one is out of this issue's scope.
+  - The entry is always `flushable: false, not_flushable_reason:
+    "extension"` — precise disk attribution/excise for extension removals is
+    unbuilt infrastructure (BT-2192 territory, same boundary as every other
+    `remove-method` flush-excise case), not something this issue invents.
+
+`Owner` and `PrevBody` (the extension's stored source text) must be captured
+by the CALLER before unregistering — `beamtalk_extensions:unregister/3`
+deletes both the moment it returns, so by the time this function runs neither
+is recoverable from the registry itself. `PrevBody` becomes `prev_source` so
+the audit trail at least records what was removed, even though automated
+revert cannot yet act on it (reverting a `sourceFile`-less, `span`-less entry
+has nothing to re-install against).
+""".
+-spec emit_extension_remove_change_entry(
+    binary(),
+    atom() | binary(),
+    instance | class,
+    atom() | undefined,
+    binary() | undefined,
+    binary(),
+    human | agent
+) -> ok.
+emit_extension_remove_change_entry(
+    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
+) ->
+    try
+        do_emit_extension_remove_change_entry(
+            ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
+        )
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for extension removal (removal still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    selector => Selector,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-spec do_emit_extension_remove_change_entry(
+    binary(),
+    atom() | binary(),
+    instance | class,
+    atom() | undefined,
+    binary() | undefined,
+    binary(),
+    human | agent
+) -> ok.
+do_emit_extension_remove_change_entry(
+    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
+) ->
+    SelectorBin = method_selector_binary(Selector),
+    Base0 = #{
+        class => ClassNameBin,
+        selector => SelectorBin,
+        kind => 'remove-method',
+        side => Side,
+        intent => durable,
+        author => Author,
+        author_kind => AuthorKind,
+        flushable => false,
+        not_flushable_reason => <<"extension">>
+    },
+    Base1 = maybe_put_prev_source(Base0, PrevBody),
+    Entry = maybe_put_extension_source_file(Base1, Owner),
+    _ = beamtalk_workspace_changelog:append(Entry),
+    ok.
+
+-spec maybe_put_prev_source(map(), binary() | undefined) -> map().
+maybe_put_prev_source(Base, undefined) -> Base;
+maybe_put_prev_source(Base, PrevBody) when is_binary(PrevBody) -> Base#{prev_source => PrevBody}.
+
+-spec maybe_put_extension_source_file(map(), atom() | undefined) -> map().
+maybe_put_extension_source_file(Base, undefined) ->
+    Base;
+maybe_put_extension_source_file(Base, Owner) when is_atom(Owner) ->
+    case class_source_file(atom_to_binary(Owner, utf8)) of
+        nil -> Base;
+        SourceFile -> Base#{source_file => SourceFile}
+    end.
 
 %% Resolve the class's source file via the BEAM module attribute (the same
 %% source-of-truth `Behaviour>>sourceFile' reads). Returns nil for classes with

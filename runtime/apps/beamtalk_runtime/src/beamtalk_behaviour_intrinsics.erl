@@ -755,7 +755,7 @@ remove_selector(Self, Selector) ->
     EtsClass = extension_ets_class(ClassName, Side),
     case beamtalk_extensions:has(EtsClass, Selector) of
         true ->
-            ok = beamtalk_extensions:unregister(ClassName, Selector, Side =:= class),
+            remove_extension_selector(ClassName, EtsClass, Selector, Side),
             removed;
         false ->
             case classIncludesSelector(Self, Selector) of
@@ -766,6 +766,52 @@ remove_selector(Self, Selector) ->
                     absent
             end
     end.
+
+%% Remove an extension method and best-effort log its removal (ADR 0112 § Extension
+%% methods, § ChangeLog interaction; BT-3187). Captures the extension's owner +
+%% stored source BEFORE unregistering — both are gone from `beamtalk_extensions`'s
+%% ETS tables the instant `unregister/3` returns — so the ChangeLog entry can
+%% still attribute the removal and record what was removed for the audit trail.
+-spec remove_extension_selector(atom(), atom(), atom(), instance | class) -> ok.
+remove_extension_selector(ClassName, EtsClass, Selector, Side) ->
+    Owner = extension_owner(EtsClass, Selector),
+    PrevSource = extension_prev_source(EtsClass, Selector),
+    ok = beamtalk_extensions:unregister(ClassName, Selector, Side =:= class),
+    log_extension_removal(ClassName, Selector, Side, Owner, PrevSource).
+
+-spec extension_owner(atom(), atom()) -> atom() | undefined.
+extension_owner(EtsClass, Selector) ->
+    case beamtalk_extensions:lookup(EtsClass, Selector) of
+        {ok, _Fun, Owner} -> Owner;
+        not_found -> undefined
+    end.
+
+-spec extension_prev_source(atom(), atom()) -> binary() | undefined.
+extension_prev_source(EtsClass, Selector) ->
+    case beamtalk_extensions:getSource(EtsClass, Selector) of
+        {ok, Source} -> Source;
+        not_found -> undefined
+    end.
+
+%% Best-effort ChangeLog append for an extension removal — mirrors
+%% log_local_removal/3's `error:undef` guard below: the extension install
+%% already succeeded above, so a missing/unavailable workspace here must
+%% never surface as a caller-visible error.
+-spec log_extension_removal(
+    atom(), atom(), instance | class, atom() | undefined, binary() | undefined
+) ->
+    ok.
+log_extension_removal(ClassName, Selector, Side, Owner, PrevSource) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    {Author, AuthorKind} = current_author_context(),
+    try
+        erlang:apply(beamtalk_repl_eval, emit_extension_remove_change_entry, [
+            ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
+        ])
+    catch
+        error:undef -> ok
+    end,
+    ok.
 
 %% `Self`'s removal side and class pid. A metaclass-tagged receiver
 %% (`Counter class removeSelector: #foo`) is class-side; any other class
@@ -794,7 +840,9 @@ extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_ta
 %% `erlang:apply/3` to avoid a compile-time dependency from `beamtalk_runtime`
 %% to `beamtalk_workspace` — the same indirection `do_compile_source/4` uses.
 %% Raises a structured `runtime_error` if the removal itself fails (recompile
-%% error, or no running workspace to route it through).
+%% error, or no running workspace to route it through). Best-effort logs a
+%% `"remove-method"` ChangeLog entry after a successful removal (ADR 0112
+%% Phase 3, BT-3187) — see log_local_removal/3.
 -spec remove_local_method(atom(), atom(), instance | class) -> ok.
 remove_local_method(ClassName, Selector, Side) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
@@ -804,6 +852,7 @@ remove_local_method(ClassName, Selector, Side) ->
         ])
     of
         {ok, _} ->
+            log_local_removal(ClassNameBin, Selector, Side),
             ok;
         {error, Reason} ->
             Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
@@ -824,6 +873,26 @@ remove_local_method(ClassName, Selector, Side) ->
                 )
             )
     end.
+
+%% Best-effort ChangeLog append after a successful local-method removal (ADR
+%% 0112 Phase 3, BT-3187) — the install already succeeded above, so a logging
+%% failure must never surface to the caller. `emit_remove_change_entry/5`
+%% already self-swallows every internal failure (mirrors `emit_change_entry/1`
+%% for a patch); the `error:undef` catch here only guards the degenerate case
+%% where the workspace app itself is unreachable, which cannot realistically
+%% happen immediately after the removal above succeeded through the identical
+%% `erlang:apply/3` seam, but is cheap to guard defensively all the same.
+-spec log_local_removal(binary(), atom(), instance | class) -> ok.
+log_local_removal(ClassNameBin, Selector, Side) ->
+    {Author, AuthorKind} = current_author_context(),
+    try
+        erlang:apply(beamtalk_repl_eval, emit_remove_change_entry, [
+            ClassNameBin, Selector, Side, Author, AuthorKind
+        ])
+    catch
+        error:undef -> ok
+    end,
+    ok.
 
 %% Structured `selector_not_found` error for the bare `removeSelector:` form
 %% (ADR 0112 § Error behaviour on absent selector) — deliberately distinct

@@ -475,9 +475,12 @@ defmodule BtAttach.Facade do
 
   # ADR 0082 Phase 5 (BT-2293): revert one pending in-memory method patch by its
   # `(class, selector)` — the binaries carried by a `Workspace changes` row.
-  defp invoke(:revert, %{class: class, selector: selector}, _ctx) do
+  # `side` (ADR 0112, BT-3187) is the same row's `side` field, threaded through
+  # so a same-selector instance-side/class-side pair is not ambiguous; it is
+  # optional (absent/nil reproduces the old side-agnostic behavior).
+  defp invoke(:revert, %{class: class, selector: selector} = params, _ctx) do
     if is_binary(class) and is_binary(selector),
-      do: client().revert(class, selector),
+      do: client().revert(class, selector, Map.get(params, :side)),
       else: {:error, :invalid_params}
   end
 

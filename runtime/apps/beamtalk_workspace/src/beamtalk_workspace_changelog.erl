@@ -40,23 +40,24 @@ size because the bodies live in `sources/` as plain `.bt` files — `cat`, `less
 Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 *ChangeLog format*):
 
-| Field                  | Type                                   | Notes |
-|------------------------|----------------------------------------|-------|
-| `ts`                   | integer (ms since epoch)               | append time |
-| `seq`                  | integer                                | monotonic per workspace |
-| `epoch`                | integer                                | bumped each workspace start |
-| `class`                | string                                 | e.g. `"Counter"` |
-| `selector`             | string \| null                         | null for `new-class` |
-| `kind`                 | `"instance"`\|`"class"`\|`"new-class"` | open enum |
-| `source_ref`           | string                                 | filename in `sources/` |
-| `prev_source_ref`      | string \| null                         | null for `new-class` |
-| `sourceFile`           | string \| null                         | null for stdlib/dynamic |
-| `span`                 | `{start,end}` \| null                  | null for `new-class` |
-| `intent`               | `"durable"`\|`"ephemeral"`             | |
-| `flushable`            | boolean                                | true iff in-project source |
-| `not_flushable_reason` | string \| null                         | `"stdlib"`/`"dynamic"`/`"dependency:<path>"` |
-| `author`               | string                                 | session/tool id |
-| `author_kind`          | `"human"`\|`"agent"`                   | audit metadata |
+| Field                  | Type                                                      | Notes |
+|------------------------|-------------------------------------------------------------|-------|
+| `ts`                   | integer (ms since epoch)                                     | append time |
+| `seq`                  | integer                                                      | monotonic per workspace |
+| `epoch`                | integer                                                      | bumped each workspace start |
+| `class`                | string                                                       | e.g. `"Counter"` |
+| `selector`             | string \| null                                              | null for `new-class` |
+| `kind`                 | `"instance"`\|`"class"`\|`"new-class"`\|`"remove-method"`   | open enum |
+| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`; legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`) |
+| `source_ref`           | string \| null                                              | null for `"remove-method"` (nothing replaces the deleted text) |
+| `prev_source_ref`      | string \| null                                              | null for `new-class` |
+| `sourceFile`           | string \| null                                              | null for stdlib/dynamic |
+| `span`                 | `{start,end}` \| null                                       | null for `new-class`; the excised span for `"remove-method"` (BT-2192's future flush-excise step) |
+| `intent`               | `"durable"`\|`"ephemeral"`                                  | |
+| `flushable`            | boolean                                                      | true iff in-project source |
+| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"` |
+| `author`               | string                                                       | session/tool id |
+| `author_kind`          | `"human"`\|`"agent"`                                        | audit metadata |
 
 ### Restart semantics
 
@@ -93,7 +94,8 @@ release nodes do not start a workspace, so this code is a no-op there.
     size/0,
     epoch/0,
     clear/0,
-    find_revert_target/2
+    find_revert_target/2,
+    find_revert_target/3
 ]).
 
 %% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
@@ -115,8 +117,10 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_class/1,
     entry_selector/1,
     entry_kind/1,
+    entry_side/1,
     entry_intent/1,
     entry_flushable/1,
+    entry_not_flushable_reason/1,
     entry_flushed/1,
     entry_author_kind/1,
     entry_is_orphan/1,
@@ -153,8 +157,14 @@ release nodes do not start a workspace, so this code is a no-op there.
 
 %% `kind` is an open enum (ADR 0082): newer writers may add values this beam does
 %% not know. Decoding maps any unrecognised value to `unknown` so history is
-%% preserved across versions rather than dropped.
--type kind() :: instance | class | 'new-class' | unknown.
+%% preserved across versions rather than dropped. `'remove-method'` is ADR
+%% 0112's method-removal kind (BT-3187).
+-type kind() :: instance | class | 'new-class' | 'remove-method' | unknown.
+%% ADR 0112: which method table a `'remove-method'` entry targets. Stored
+%% explicitly only for that kind — legacy `instance`/`class`-kind patch
+%% entries derive their side from `kind` itself (`entry_side/1`), so the field
+%% is additive, not a breaking schema change (ADR 0112 § ChangeLog interaction).
+-type side() :: instance | class.
 -type intent() :: durable | ephemeral | unknown.
 -type author_kind() :: human | agent | unknown.
 -type span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
@@ -169,7 +179,12 @@ release nodes do not start a workspace, so this code is a no-op there.
     class :: binary(),
     selector :: binary() | undefined,
     kind :: kind(),
-    source_ref :: binary(),
+    %% `undefined` for every entry except a `'remove-method'` one — read via
+    %% `entry_side/1`, never this field directly.
+    side :: side() | undefined,
+    %% `undefined` for a `'remove-method'` entry (ADR 0112: nothing replaces
+    %% the deleted text, so there is no new body to store).
+    source_ref :: binary() | undefined,
     prev_source_ref :: binary() | undefined,
     source_file :: binary() | undefined,
     span :: span() | undefined,
@@ -192,22 +207,27 @@ release nodes do not start a workspace, so this code is a no-op there.
 
 %% Input map accepted by append/1. Bodies (`source`, `prev_source`) are passed
 %% in full; the gen_server writes them to sources/ and stores only the refs.
+%% `source` is optional (ADR 0112): a `'remove-method'` entry has no new body
+%% to store — omitting it leaves `source_ref` (and therefore the on-disk
+%% `sources/<seq>-source.bt` file) absent, matching the ADR's `source_ref:
+%% null` schema bullet.
 -type append_input() :: #{
     class := binary(),
     kind := kind(),
-    source := binary(),
     intent := intent(),
     flushable := boolean(),
     author := binary(),
     author_kind := author_kind(),
     selector => binary() | undefined,
+    side => side(),
+    source => binary() | undefined,
     prev_source => binary() | undefined,
     source_file => binary() | undefined,
     span => span() | undefined,
     not_flushable_reason => binary() | undefined
 }.
 
--export_type([entry/0, append_input/0, kind/0, intent/0, author_kind/0, span/0]).
+-export_type([entry/0, append_input/0, kind/0, side/0, intent/0, author_kind/0, span/0]).
 
 -record(state, {
     %% Absolute path to <workspace>/changes, or undefined in run mode
@@ -384,10 +404,32 @@ recorded selector). A `new-class` entry has `selector = undefined`; pass the
 new-class selector placeholder atom `'new-class'` (or the binary `<<"new-class">>`)
 to reach it — `find_revert_target(Class, 'new-class')` resolves the class's
 new-class entry and yields a `{remove, Entry}` outcome.
+
+`find_revert_target/2` matches candidates on `(Class, Selector)` only — the
+highest-seq active candidate wins regardless of side. Use `find_revert_target/3`
+with an explicit `Side` (ADR 0112, BT-3187) when the caller knows which side it
+means to revert: same-selector instance/class-side entries (e.g. an instance-side
+patch and a later class-side `'remove-method'` entry for the same selector name)
+are otherwise indistinguishable by `(Class, Selector)` alone, and the wrong one —
+whichever has the higher `seq` — would be selected.
 """.
 -spec find_revert_target(binary(), atom() | binary()) ->
     {ok, binary(), entry()} | {remove, entry()} | {error, no_entry | no_prev_source}.
-find_revert_target(Class, Selector) when is_binary(Class) ->
+find_revert_target(Class, Selector) ->
+    find_revert_target(Class, Selector, undefined).
+
+-doc """
+Like `find_revert_target/2`, but restricts candidates to the given `Side`
+(`instance` | `class`) when it is not `undefined` (ADR 0112, BT-3187). Side is
+resolved per-entry via `entry_side/1`, so it matches both a `'remove-method'`
+entry's explicit `side` field and a legacy `instance`/`class`-kind patch's
+`kind`-derived side. Passing `undefined` reproduces `find_revert_target/2`'s
+side-agnostic behavior (used by callers, such as `revert_method/2`'s
+`(Class, Selector)`-only surface, that have no side information to give).
+""".
+-spec find_revert_target(binary(), atom() | binary(), side() | undefined) ->
+    {ok, binary(), entry()} | {remove, entry()} | {error, no_entry | no_prev_source}.
+find_revert_target(Class, Selector, Side) when is_binary(Class) ->
     SelectorBin = revert_selector_binary(Selector),
     %% A `new-class` entry records `selector = undefined`; callers reach it with
     %% the `new-class` placeholder selector, which we map back to `undefined` so
@@ -397,6 +439,7 @@ find_revert_target(Class, Selector) when is_binary(Class) ->
         fun(E) ->
             E#entry.class =:= Class andalso
                 E#entry.selector =:= MatchSelector andalso
+                (Side =:= undefined orelse entry_side(E) =:= Side) andalso
                 (not E#entry.prior_epoch) andalso
                 (not E#entry.orphan) andalso
                 (not E#entry.flushed)
@@ -453,13 +496,19 @@ match_selector(SelectorBin) -> SelectorBin.
 -spec recover_prev_from_disk(entry()) ->
     {ok, binary(), entry()} | {remove, entry()} | {error, no_prev_source}.
 recover_prev_from_disk(
-    #entry{source_file = File, class = Class, selector = Selector, kind = Kind} = Entry
+    #entry{source_file = File, class = Class, selector = Selector} = Entry
 ) when
     is_binary(File), is_binary(Selector)
 ->
+    %% `resolve_method_span/4` only accepts `instance` | `class` for `Side`; the
+    %% entry's raw `kind` can be `'remove-method'` (ADR 0112, BT-3187), which
+    %% would always fail with `bad_argument` here. `entry_side/1` normalises
+    %% both the legacy `instance`/`class`-kind shape and the explicit `side`
+    %% field a `'remove-method'` entry carries.
+    Side = entry_side(Entry),
     case file:read_file(File) of
         {ok, DiskSource} ->
-            case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Kind) of
+            case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Side) of
                 {ok, _Span, PrevBody} ->
                     %% Selector present on disk → a modify; re-install the body.
                     {ok, PrevBody, Entry};
@@ -568,15 +617,22 @@ change_entries() ->
     Survivors = survivor_seqs(All),
     [entry_to_value(E, Survivors) || E <- All].
 
-%% For each `(class, selector)` target, the seq of the most-recent *active*
-%% entry — the "survivor" that `Workspace flush` would apply and that the
-%% pending-changes view shows. Every other active entry for the same target is
-%% *shadowed*: an older patch (or a patch superseded by a revert, since a revert
-%% is itself a patch — ADR 0082 "Undo") that newer state replaced. Mirrors
-%% `beamtalk_workspace_flush:shadow_duplicates/1` so the displayed dirty set
-%% matches what flush actually writes. Inactive entries (prior-epoch / orphan /
-%% flushed) never survive and never shadow.
--spec survivor_seqs([#entry{}]) -> #{{binary(), binary() | undefined} => non_neg_integer()}.
+%% For each `(class, selector, side)` target, the seq of the most-recent
+%% *active* entry — the "survivor" that `Workspace flush` would apply and that
+%% the pending-changes view shows. Every other active entry for the same
+%% target is *shadowed*: an older patch (or a patch superseded by a revert,
+%% since a revert is itself a patch — ADR 0082 "Undo") that newer state
+%% replaced. Mirrors `beamtalk_workspace_flush:target_key/1` /
+%% `shadow_duplicates/1` so the displayed dirty set matches what flush
+%% actually writes. Inactive entries (prior-epoch / orphan / flushed) never
+%% survive and never shadow.
+%%
+%% Keyed on `(class, selector, side)`, not just `(class, selector)` (ADR 0112's
+%% required fix to ADR 0082's shipped shadow key): an instance-side patch of
+%% `Counter >> #foo` and a class-side `Counter class removeSelector: #foo`
+%% share `(class, selector)` but target different method tables and must not
+%% shadow each other.
+-spec survivor_seqs([#entry{}]) -> #{shadow_key() => non_neg_integer()}.
 survivor_seqs(Entries) ->
     lists:foldl(
         fun(E, Acc) ->
@@ -584,7 +640,7 @@ survivor_seqs(Entries) ->
                 false ->
                     Acc;
                 true ->
-                    Key = {E#entry.class, E#entry.selector},
+                    Key = shadow_key(E),
                     case Acc of
                         #{Key := Max} when Max >= E#entry.seq -> Acc;
                         _ -> Acc#{Key => E#entry.seq}
@@ -594,6 +650,12 @@ survivor_seqs(Entries) ->
         #{},
         Entries
     ).
+
+%% The `(class, selector, side)` shadow-key tuple for `E` — shared by
+%% `survivor_seqs/1` and `entry_to_value/2` so both agree on what shadows what.
+-type shadow_key() :: {binary(), binary() | undefined, side() | undefined}.
+-spec shadow_key(#entry{}) -> shadow_key().
+shadow_key(E) -> {E#entry.class, E#entry.selector, entry_side(E)}.
 
 -doc """
 Return the dirty methods derived from the *active* entries as a Beamtalk
@@ -633,14 +695,15 @@ dirty_selector(#entry{selector = Sel}) -> binary_to_atom(Sel, utf8).
 %% the derived `active` flag is `true` iff the entry is current-epoch, not an
 %% orphan, and not flushed (the default dirty view). The derived `shadowed` flag
 %% is `true` iff the entry is active but a *newer* active entry exists for the
-%% same `(class, selector)` — an older patch superseded by a later patch/revert.
-%% `Survivors` maps each `(class, selector)` to its surviving (highest) seq.
+%% same `(class, selector, side)` target — an older patch superseded by a
+%% later patch/revert. `Survivors` maps each `(class, selector, side)` shadow
+%% key (`shadow_key/1`) to its surviving (highest) seq.
 -spec entry_to_value(#entry{}, map()) -> map().
 entry_to_value(#entry{} = E, Survivors) ->
     Active = is_active(E),
     Shadowed =
         Active andalso
-            maps:get({E#entry.class, E#entry.selector}, Survivors, E#entry.seq) =/= E#entry.seq,
+            maps:get(shadow_key(E), Survivors, E#entry.seq) =/= E#entry.seq,
     %% Only the live pending candidates (active, not shadowed) are diffed against
     %% disk — that bounds the file-read + parse work to the dirty set, and the
     %% rest are excluded from the pending view anyway.
@@ -655,6 +718,7 @@ entry_to_value(#entry{} = E, Survivors) ->
         className => binary_to_atom(E#entry.class, utf8),
         selector => selector_symbol(E#entry.selector),
         kind => E#entry.kind,
+        side => side_symbol(entry_side(E)),
         intent => E#entry.intent,
         flushable => E#entry.flushable,
         authorKind => E#entry.author_kind,
@@ -793,6 +857,13 @@ is_blank_line(Line) -> ws_width(Line) =:= byte_size(Line).
 selector_symbol(undefined) -> nil;
 selector_symbol(Sel) -> binary_to_atom(Sel, utf8).
 
+%% `side` is already an atom (`instance` | `class`, a legal Beamtalk Symbol) —
+%% unlike `selector_symbol/1` there is no binary to convert, only the
+%% nil-mapping for "no side" (`'new-class'` / `unknown` entries).
+-spec side_symbol(side() | undefined) -> side() | nil.
+side_symbol(undefined) -> nil;
+side_symbol(Side) -> Side.
+
 -spec source_file_value(binary() | undefined) -> binary() | nil.
 source_file_value(undefined) -> nil;
 source_file_value(File) -> File.
@@ -815,11 +886,35 @@ entry_selector(#entry{selector = V}) -> V.
 -spec entry_kind(entry()) -> kind().
 entry_kind(#entry{kind = V}) -> V.
 
+-doc """
+The side (`instance` | `class`) a method-shaped entry targets, or `undefined`
+for an entry with no side (`'new-class'`, `unknown`) (ADR 0112, BT-3187).
+
+The supported way to read side — never pattern-match `#entry.side` or
+`entry_kind/1` directly for this. A `'remove-method'` entry stores `side`
+explicitly (`kind` alone can no longer double as the side discriminator once
+it is spent distinguishing removal from patch); a legacy `instance`/`class`
+-kind patch entry has no stored `side` — it derives one from its own `kind`,
+exactly as `kind` always doubled for side before this ADR. This single
+accessor is what both the flush shadow-key (`beamtalk_workspace_flush:
+target_key/1`) and `revert:`'s side-resolution
+(`beamtalk_workspace_interface_primitives:revert_side/1`) key/resolve on,
+per ADR 0112's required fix to ADR 0082's `(class, selector)`-only shadow key.
+""".
+-spec entry_side(entry()) -> side() | undefined.
+entry_side(#entry{side = Side}) when Side =/= undefined -> Side;
+entry_side(#entry{kind = instance}) -> instance;
+entry_side(#entry{kind = class}) -> class;
+entry_side(#entry{}) -> undefined.
+
 -spec entry_intent(entry()) -> intent().
 entry_intent(#entry{intent = V}) -> V.
 
 -spec entry_flushable(entry()) -> boolean().
 entry_flushable(#entry{flushable = V}) -> V.
+
+-spec entry_not_flushable_reason(entry()) -> binary() | undefined.
+entry_not_flushable_reason(#entry{not_flushable_reason = V}) -> V.
 
 -spec entry_author_kind(entry()) -> author_kind().
 entry_author_kind(#entry{author_kind = V}) -> V.
@@ -839,7 +934,7 @@ entry_source_file(#entry{source_file = V}) -> V.
 -spec entry_span(entry()) -> span() | undefined.
 entry_span(#entry{span = V}) -> V.
 
--spec entry_source_ref(entry()) -> binary().
+-spec entry_source_ref(entry()) -> binary() | undefined.
 entry_source_ref(#entry{source_ref = V}) -> V.
 
 -spec entry_prev_source_ref(entry()) -> binary() | undefined.
@@ -851,9 +946,14 @@ from `<workspace>/changes/sources/<source_ref>.bt`.
 
 Returns `{ok, Body}` or `{error, Reason}`. Used by `Workspace flush` (ADR 0082
 Phase 2) to splice the patched body back into the on-disk file. In run mode (no
-workspace_id, no `changes/` dir) returns `{error, no_workspace}`.
+workspace_id, no `changes/` dir) returns `{error, no_workspace}`. A
+`'remove-method'` entry (ADR 0112) has no `source_ref` — there is no new body,
+the operation only deletes text — so this returns `{error, no_source}` rather
+than crashing on the missing filename.
 """.
 -spec read_source_body(entry()) -> {ok, binary()} | {error, term()}.
+read_source_body(#entry{source_ref = undefined}) ->
+    {error, no_source};
 read_source_body(#entry{source_ref = Ref}) ->
     read_source_file(Ref).
 
@@ -951,7 +1051,16 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, non_neg_integer(), #state{}} | {error, #beamtalk_error{}}.
 do_append(Input, State) ->
     Seq = State#state.next_seq,
-    SourceRef = source_ref_filename(Seq, source),
+    Source = maps:get(source, Input, undefined),
+    %% ADR 0112: `source` is optional — a `'remove-method'` entry has no new
+    %% body, so it gets no `source_ref` (and therefore no on-disk source file;
+    %% mirrors how `prev_source_ref` already stays `undefined` when there is
+    %% no `prev_source`).
+    SourceRef =
+        case Source of
+            undefined -> undefined;
+            _ -> source_ref_filename(Seq, source)
+        end,
     PrevSource = maps:get(prev_source, Input, undefined),
     PrevSourceRef =
         case PrevSource of
@@ -965,6 +1074,7 @@ do_append(Input, State) ->
         class = maps:get(class, Input),
         selector = maps:get(selector, Input, undefined),
         kind = maps:get(kind, Input),
+        side = maps:get(side, Input, undefined),
         source_ref = SourceRef,
         prev_source_ref = PrevSourceRef,
         source_file = maps:get(source_file, Input, undefined),
@@ -975,7 +1085,7 @@ do_append(Input, State) ->
         author = maps:get(author, Input),
         author_kind = maps:get(author_kind, Input)
     },
-    case persist_append(Entry, maps:get(source, Input), PrevSource, State) of
+    case persist_append(Entry, Source, PrevSource, State) of
         ok ->
             ets:insert(?ETS_TABLE, {Seq, Entry}),
             State1 = State#state{next_seq = Seq + 1},
@@ -1019,7 +1129,7 @@ do_mark_flushed(Seqs, State) ->
 %% orphaned body files (harmless — pruned on rotation) but never a metadata line
 %% pointing at a missing body. In run mode (no changes_dir) this is a no-op and
 %% the entry lives in ETS only.
--spec persist_append(#entry{}, binary(), binary() | undefined, #state{}) ->
+-spec persist_append(#entry{}, binary() | undefined, binary() | undefined, #state{}) ->
     ok | {error, term()}.
 persist_append(_Entry, _Source, _PrevSource, #state{changes_dir = undefined}) ->
     ok;
@@ -1027,10 +1137,11 @@ persist_append(Entry, Source, PrevSource, State) ->
     SourcesDir = filename:join(State#state.changes_dir, "sources"),
     case filelib:ensure_path(SourcesDir) of
         ok ->
-            SourcePath = filename:join(SourcesDir, binary_to_list(Entry#entry.source_ref)),
-            case write_file_atomic(SourcePath, Source) of
+            case write_optional_source(SourcesDir, Entry#entry.source_ref, Source) of
                 ok ->
-                    case write_prev_source(SourcesDir, Entry, PrevSource) of
+                    case
+                        write_optional_source(SourcesDir, Entry#entry.prev_source_ref, PrevSource)
+                    of
                         ok -> append_metadata_line(Entry, State);
                         Err -> Err
                     end;
@@ -1041,12 +1152,18 @@ persist_append(Entry, Source, PrevSource, State) ->
             {error, {ensure_path, SourcesDir, Reason}}
     end.
 
--spec write_prev_source(string(), #entry{}, binary() | undefined) -> ok | {error, term()}.
-write_prev_source(_SourcesDir, #entry{prev_source_ref = undefined}, _PrevSource) ->
+%% Write `Body` to `sources/<Ref>` when `Ref` is present. `Ref` is `undefined`
+%% for a `'remove-method'` entry's `source_ref` (no new body — ADR 0112) and,
+%% independently, for `prev_source_ref` on any entry with no recorded prior
+%% body (e.g. a `new-class` entry, or a patch that added a brand-new method) —
+%% both are legitimate no-ops, not persistence failures.
+-spec write_optional_source(string(), binary() | undefined, binary() | undefined) ->
+    ok | {error, term()}.
+write_optional_source(_SourcesDir, undefined, _Body) ->
     ok;
-write_prev_source(SourcesDir, #entry{prev_source_ref = Ref}, PrevSource) ->
+write_optional_source(SourcesDir, Ref, Body) ->
     Path = filename:join(SourcesDir, binary_to_list(Ref)),
-    write_file_atomic(Path, PrevSource).
+    write_file_atomic(Path, Body).
 
 -spec append_metadata_line(#entry{}, #state{}) -> ok | {error, term()}.
 append_metadata_line(Entry, State) ->
@@ -1292,9 +1409,12 @@ prune_source_members(Members) ->
 source_refs(Entries) ->
     lists:flatten([refs_of(E) || E <- Entries]).
 
+%% Both refs are optional (`source_ref` is `undefined` for a `'remove-method'`
+%% entry; `prev_source_ref` is `undefined` for e.g. a `new-class` entry or a
+%% brand-new-method patch) — only the ones actually present are archived.
 -spec refs_of(#entry{}) -> [binary()].
-refs_of(#entry{source_ref = SR, prev_source_ref = undefined}) -> [SR];
-refs_of(#entry{source_ref = SR, prev_source_ref = PR}) -> [SR, PR].
+refs_of(#entry{source_ref = SR, prev_source_ref = PR}) ->
+    [Ref || Ref <- [SR, PR], Ref =/= undefined].
 
 %% Build erl_tar member list {NameInArchive, AbsolutePath} for refs that exist.
 -spec collect_source_members([binary()], string()) -> [{string(), string()}].
@@ -1411,7 +1531,12 @@ entry_to_json(#entry{} = E) ->
         <<"class">> => E#entry.class,
         <<"selector">> => null_or(E#entry.selector),
         <<"kind">> => atom_to_binary(E#entry.kind, utf8),
-        <<"source_ref">> => E#entry.source_ref,
+        %% ADR 0112: `undefined` for every legacy `instance`/`class`-kind entry
+        %% (side is derived from `kind` for those, never persisted — additive
+        %% field, ADR 0112 § ChangeLog interaction) — only a `'remove-method'`
+        %% entry stores this.
+        <<"side">> => side_json(E#entry.side),
+        <<"source_ref">> => null_or(E#entry.source_ref),
         <<"prev_source_ref">> => null_or(E#entry.prev_source_ref),
         <<"sourceFile">> => null_or(E#entry.source_file),
         <<"span">> => span_to_json(E#entry.span),
@@ -1435,7 +1560,12 @@ entry_from_json(Line) ->
         class = maps:get(<<"class">>, Map),
         selector = from_null(maps:get(<<"selector">>, Map, null)),
         kind = decode_kind(maps:get(<<"kind">>, Map)),
-        source_ref = maps:get(<<"source_ref">>, Map),
+        %% Absent in every metadata line written before this ADR (`side` is a
+        %% new field) — `decode_side/1`'s `null`/missing clause already yields
+        %% `undefined`, which is exactly correct for those legacy lines: their
+        %% side is derived from `kind` at read time via `entry_side/1`.
+        side = decode_side(maps:get(<<"side">>, Map, null)),
+        source_ref = from_null(maps:get(<<"source_ref">>, Map, null)),
         prev_source_ref = from_null(maps:get(<<"prev_source_ref">>, Map, null)),
         source_file = from_null(maps:get(<<"sourceFile">>, Map, null)),
         span = span_from_json(maps:get(<<"span">>, Map, null)),
@@ -1464,6 +1594,8 @@ decode_kind(<<"class">>) ->
     class;
 decode_kind(<<"new-class">>) ->
     'new-class';
+decode_kind(<<"remove-method">>) ->
+    'remove-method';
 decode_kind(Other) ->
     log_unknown_enum(kind, Other),
     unknown.
@@ -1492,6 +1624,34 @@ log_unknown_enum(Field, Value) ->
         "Unknown ChangeLog enum value; preserving entry as 'unknown'",
         #{field => Field, value => Value, domain => [beamtalk, runtime]}
     ).
+
+%% `side` is a small closed set (`instance` | `class`); an unrecognised value
+%% (corruption, a future writer using a value this build doesn't know) is
+%% mapped to `undefined` rather than kept verbatim — `entry_side/1` already
+%% treats `undefined` as "derive from kind", the same safe fallback a
+%% `'remove-method'` entry with a genuinely lost side would need anyway.
+-spec side_json(side() | undefined) -> binary() | null.
+side_json(undefined) -> null;
+side_json(Side) -> atom_to_binary(Side, utf8).
+
+%% `null`/missing is the normal shape for every legacy `instance`/`class`-kind
+%% entry (they never wrote a `side` field at all) — that maps to `undefined`
+%% silently, same as the sibling decoders' `unknown` fallback but without the
+%% warning, since it is not corruption. Any *other* unrecognised binary,
+%% though, means an on-disk value this build doesn't know — mirror
+%% `decode_kind/1`, `decode_intent/1`, `decode_author_kind/1` and log it via
+%% `log_unknown_enum/2` before falling back to `undefined`, so corruption is
+%% distinguishable from the ordinary absent-legacy-field case.
+-spec decode_side(binary() | null) -> side() | undefined.
+decode_side(null) ->
+    undefined;
+decode_side(<<"instance">>) ->
+    instance;
+decode_side(<<"class">>) ->
+    class;
+decode_side(Other) ->
+    log_unknown_enum(side, Other),
+    undefined.
 
 -spec span_to_json(span() | undefined) -> map() | null.
 span_to_json(undefined) -> null;

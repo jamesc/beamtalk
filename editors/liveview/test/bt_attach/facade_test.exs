@@ -21,8 +21,9 @@ defmodule BtAttach.FacadeTest do
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
 
     # ADR 0082 Phase 5 (BT-2293): the New File + ChangeLog revert affordances.
+    # `side` (ADR 0112, BT-3187): the entry's disambiguating side, or nil.
     def new_class(src, path), do: record({:new_class, src, path}) && {:ok, path}
-    def revert(c, s), do: record({:revert, c, s}) && {:ok, c}
+    def revert(c, s, side), do: record({:revert, c, s, side}) && {:ok, c}
 
     def subscribe_transcript(pid), do: record({:sub_t, pid}) && :ok
     def subscribe_bindings(pid), do: record({:sub_b, pid}) && :ok
@@ -678,7 +679,16 @@ defmodule BtAttach.FacadeTest do
       assert Facade.dispatch(:revert, %{class: "Counter", selector: "value"}) == {:ok, "Counter"}
 
       assert {:new_class, "Object subclass: G", "src/g.bt"} in RecordingClient.calls()
-      assert {:revert, "Counter", "value"} in RecordingClient.calls()
+      # No `side` key in params — the client sees `nil` (the old side-agnostic
+      # behavior), not a crash / missing arg.
+      assert {:revert, "Counter", "value", nil} in RecordingClient.calls()
+    end
+
+    test "revert threads a `side` param through to the client (ADR 0112, BT-3187)" do
+      assert Facade.dispatch(:revert, %{class: "Counter", selector: "foo", side: "instance"}) ==
+               {:ok, "Counter"}
+
+      assert {:revert, "Counter", "foo", "instance"} in RecordingClient.calls()
     end
 
     test "non-binary args are invalid params, with no dist call" do

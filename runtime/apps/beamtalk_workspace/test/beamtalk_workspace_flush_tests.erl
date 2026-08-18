@@ -67,7 +67,10 @@ flush_test_() ->
         fun append_into_empty_file/1,
         fun mixed_span_and_appended_method_in_one_file/1,
         fun missing_source_body_is_hard_error/1,
-        fun missing_prev_source_body_is_hard_error/1
+        fun missing_prev_source_body_is_hard_error/1,
+        %% ADR 0112 (BT-3187) required fix: flush must not resurrect a method
+        %% already removed from the live image.
+        fun flush_does_not_resurrect_removed_method_with_stale_patch/1
     ]}.
 
 unit_test_() ->
@@ -1304,6 +1307,58 @@ missing_prev_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjD
     ].
 
 %%====================================================================
+%% BT-3187 (ADR 0112) — flush must not resurrect a removed method
+%%====================================================================
+
+%% Regression for the flush-side of ADR 0112's required fix: an older,
+%% never-flushed patch (P1) to `Counter >> #foo` and a later `'remove-method'`
+%% entry (R1, same `(class, selector, side)` target, higher seq) from
+%% `Counter removeSelector: #foo` must shadow correctly — P1 must NOT be
+%% spliced back onto disk just because `exclude_remove_method/1` used to strip
+%% R1 out of the flush set *before* `shadow_duplicates/1` ever saw it (which
+%% left P1 looking like the sole, unshadowed survivor for its target).
+%%
+%% With the fix, `shadow_duplicates/1` sees both entries, correctly picks R1
+%% (higher seq) as the survivor for the target, and only then drops R1 (a
+%% `'remove-method'` entry) from what actually gets spliced — excising the
+%% recorded span from disk is BT-2192's job, not this module's. The net
+%% effect: the file is untouched (neither P1's stale patch nor R1's removal is
+%% written), and neither entry is marked flushed.
+flush_does_not_resurrect_removed_method_with_stale_patch(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(File, Original),
+    {Start, End, OldBody} = locate(Original, <<"foo => 1\n">>),
+    %% P1: `Counter compile: #foo source: "^ 2"` (durable, flushable) — never
+    %% flushed before the removal below.
+    {ok, Seq0} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"foo">>, <<"foo => 2\n">>, OldBody, list_to_binary(File), Start, End
+        )
+    ),
+    %% R1: `Counter removeSelector: #foo`, logged after P1 (higher seq), same
+    %% (class, selector, side) target.
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        remove_method_input(
+            <<"Counter">>, <<"foo">>, instance, list_to_binary(File), Start, End, OldBody
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    [
+        %% The file is untouched — P1's stale patch was never spliced back in.
+        ?_assertEqual(Original, Final),
+        ?_assertEqual(nomatch, binary:match(Final, <<"foo => 2">>)),
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(files, Summary)),
+        %% Neither entry is marked flushed: R1 ('remove-method') is never
+        %% flushed by this module (deferred to BT-2192), and P1 — shadowed by
+        %% a survivor that never reached disk — correctly stays pending too.
+        ?_assertNot(entry_flushed(Seq0)),
+        ?_assertNot(entry_flushed(Seq1))
+    ].
+
+%%====================================================================
 %% Pure helpers
 %%====================================================================
 
@@ -1375,6 +1430,26 @@ method_input(Class, Selector, NewBody, OldBody, File, Start, End) ->
         author_kind => human,
         source_file => File,
         span => #{start => Start, 'end' => End}
+    }.
+
+%% A flushable `'remove-method'` entry (ADR 0112, BT-3187), shaped like
+%% `beamtalk_repl_loader:do_emit_remove_change_entry/5` +
+%% `resolve_removal_span_entry/6` actually build: `side` explicit, a resolved
+%% `span`/`prev_source` against the on-disk body it would excise (BT-2192's
+%% job, not flush's), and no `source` (a removal has no new body to splice in).
+remove_method_input(Class, Selector, Side, File, Start, End, PrevBody) ->
+    #{
+        class => Class,
+        selector => Selector,
+        kind => 'remove-method',
+        side => Side,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-test">>,
+        author_kind => human,
+        source_file => File,
+        span => #{start => Start, 'end' => End},
+        prev_source => PrevBody
     }.
 
 %% A method entry recorded by the install hook as `selector_not_found`: a

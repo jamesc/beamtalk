@@ -60,6 +60,14 @@ module loading to beamtalk_repl_loader (BT-863).
 %% revert-of-an-add caller's unchanged refuse-stdlib default.
 -export([remove_method/3, remove_method/4, remove_class/1]).
 
+%% ADR 0112 Phase 3 (BT-3187) — best-effort ChangeLog append after a
+%% successful `removeSelector:` call. Called via erlang:apply from
+%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
+%% as remove_method/3,4 above; both are thin forwarding wrappers over
+%% beamtalk_repl_loader, which already owns the classification helpers
+%% (`class_source_file/1` / `classify_source_file/1`) these functions reuse.
+-export([emit_remove_change_entry/5, emit_extension_remove_change_entry/7]).
+
 %% BT-2531 — workspace binding-mutation announcement with an explicit session id.
 %% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
 %% whose shell gen_server process does not carry `beamtalk_session_id` in its
@@ -957,6 +965,43 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
         {refuse_stdlib, none} ->
             beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side)
     end.
+
+-doc """
+Best-effort ChangeLog append for a completed local-method `removeSelector:`
+call (ADR 0112 Phase 3, BT-3187). Thin forwarding wrapper — see
+`beamtalk_repl_loader:emit_remove_change_entry/5` for the full contract.
+Routed through this module (rather than called directly from
+`beamtalk_runtime`) for the same compile-time-dependency reason
+`remove_method/3,4` already are.
+""".
+-spec emit_remove_change_entry(
+    binary(), atom() | binary(), instance | class, binary(), human | agent
+) ->
+    ok.
+emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
+    beamtalk_repl_loader:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
+
+-doc """
+Best-effort ChangeLog append for a completed extension-method `removeSelector:`
+call (ADR 0112 Phase 3, BT-3187). Thin forwarding wrapper — see
+`beamtalk_repl_loader:emit_extension_remove_change_entry/7` for the full
+contract.
+""".
+-spec emit_extension_remove_change_entry(
+    binary(),
+    atom() | binary(),
+    instance | class,
+    atom() | undefined,
+    binary() | undefined,
+    binary(),
+    human | agent
+) -> ok.
+emit_extension_remove_change_entry(
+    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
+) ->
+    beamtalk_repl_loader:emit_extension_remove_change_entry(
+        ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
+    ).
 
 -doc """
 Remove a live class from the system (BT-2664 new-class revert case).

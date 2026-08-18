@@ -352,7 +352,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── New File + Revert ────────────────────────────────────────────────────
 
   def new_class(_source, path), do: {:ok, path}
-  def revert(class, _selector), do: {:ok, class}
+  # `side` (ADR 0112, BT-3187): the entry's disambiguating side, unused by the stub.
+  def revert(class, _selector, _side), do: {:ok, class}
 
   # BT-2598: reload a reverted .bt file from disk into the image. Records the call
   # (so a test can assert the revert reloads) and returns the class name(s) the
