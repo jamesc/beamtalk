@@ -653,9 +653,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign_browser_native_modules()
       |> assign_browser_type_aliases()
       # BT-2636: the set of expanded Changes-pane rows (keyed by the row's
-      # `{class, selector}`), driven by the leading disclosure caret. A row's
-      # structured net-vs-disk diff renders beneath it only while its key is in
-      # this set; collapsed by default so the table stays compact.
+      # `{class, selector, side}` — BT-3195 added `side` so a same-selector
+      # instance-side and class-side entry, both now possible simultaneously
+      # since BT-3187's `(class, selector, side)` shadow-key fix, get
+      # independent toggle state instead of sharing one), driven by the
+      # leading disclosure caret. A row's structured net-vs-disk diff renders
+      # beneath it only while its key is in this set; collapsed by default so
+      # the table stays compact.
       |> assign(:expanded_changes, MapSet.new())
       # BT-2591: the four mount-time workspace reads (browser classes, bindings,
       # the active ChangeLog, the autoflush flag) used to run as *synchronous*
@@ -1743,7 +1747,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # entry is visible.
   def handle_event("revert", %{"class" => class, "selector" => selector} = params, socket)
       when is_binary(class) and is_binary(selector) do
-    side = present_revert_side(Map.get(params, "entry-side"))
+    side = present_side_param(Map.get(params, "entry-side"))
     {:noreply, revert_change(socket, class, selector, side)}
   end
 
@@ -1754,12 +1758,26 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Toggle the structured diff disclosure for one Changes-pane row (BT-2636),
-  # keyed by the row's `{class, selector}` carried on the leading caret. Pure view
-  # state — no workspace round-trip; flips the key in/out of `:expanded_changes`,
-  # showing/hiding that row's `unified_diff` body.
-  def handle_event("toggle_change_diff", %{"class" => class, "selector" => selector}, socket)
+  # keyed by the row's `{class, selector, side}` carried on the leading caret
+  # (`phx-value-entry-side`, BT-3195 — reuses `present_side_param/1`'s `""` →
+  # `nil` normalisation, the same one the revert button's
+  # `phx-value-entry-side` already relies on, so both controls agree on what
+  # "no side" means). Named `entry-side`, not `side`, for the same reason the
+  # revert button is: it doesn't collide with the browser's `phx-value-side`
+  # instance/class toggle (BT-2491), so a `button[phx-value-side=...]`
+  # selector in a test doesn't match this caret too. Pure view state — no
+  # workspace round-trip; flips the key in/out of `:expanded_changes`,
+  # showing/hiding that row's `unified_diff` body. Before BT-3195 this keyed
+  # on `{class, selector}` alone, so a same-selector instance-side and
+  # class-side row (possible since BT-3187's shadow-key fix) shared one
+  # toggle — expanding one flipped the other too.
+  def handle_event(
+        "toggle_change_diff",
+        %{"class" => class, "selector" => selector} = params,
+        socket
+      )
       when is_binary(class) and is_binary(selector) do
-    key = {class, selector}
+    key = {class, selector, present_side_param(Map.get(params, "entry-side"))}
 
     expanded =
       if MapSet.member?(socket.assigns.expanded_changes, key) do
@@ -3897,12 +3915,30 @@ defmodule BtAttachWeb.WorkspaceLive do
     snake_chars(rest, c >= ?a and c <= ?z, [c | acc])
   end
 
-  # Normalise the `phx-value-entry-side` param (a plain HTML attribute string) to
-  # the `side` the Facade/`revert/3` expect: `""` (a sideless new-class row's
-  # `phx-value-entry-side={c[:side] || ""}`) and a missing/non-binary value both
-  # mean "no side constraint" (ADR 0112, BT-3187).
-  defp present_revert_side(side) when is_binary(side) and side != "", do: side
-  defp present_revert_side(_), do: nil
+  # Normalise a `phx-value-entry-side` param (a plain HTML attribute string)
+  # back to the `side` the row's `c[:side]` carries: `""` (a sideless
+  # new-class row's `phx-value-entry-side={c[:side] || ""}`) and a
+  # missing/non-binary value both mean "no side" (ADR 0112, BT-3187). Shared
+  # by the revert button and the diff-toggle caret's `entry-side` param
+  # (BT-3195) so both controls agree on what "no side" means and neither
+  # duplicates the other's normalisation.
+  defp present_side_param(side) when is_binary(side) and side != "", do: side
+  defp present_side_param(_), do: nil
+
+  # Human-readable Kind/Side label for one Changes-pane row (BT-3195): before
+  # this, the table had no column distinguishing an instance-side patch from a
+  # class-side patch/removal of the same selector, so the two rows — both
+  # possible simultaneously since BT-3187's `(class, selector, side)`
+  # shadow-key fix — were visually identical apart from their (also-identical)
+  # Class/Selector/Intent/Flushable/Author cells. `kind: "instance"`/`"class"`
+  # already implies its own side, so only `"remove-method"` (whose kind alone
+  # doesn't say which method table it targets) appends the explicit `side`;
+  # an unrecognised future kind falls back to the raw value rather than
+  # crashing, matching the ChangeLog's own `kind() :: … | unknown` fallback
+  # (`beamtalk_workspace_changelog.erl`).
+  defp change_kind_label(%{kind: "remove-method"} = c), do: "remove (#{c[:side] || "?"})"
+  defp change_kind_label(%{kind: "new-class"}), do: "new class"
+  defp change_kind_label(%{kind: kind}), do: kind
 
   # Revert one pending method patch (BT-2293). On success the prior body is
   # re-installed (a fresh durable entry) and the Changes pane refreshes; a
@@ -4070,8 +4106,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `handle_async(:mount_load, …)` and the sync refresh path.
   defp apply_changes(socket, rows) when is_list(rows) do
     # Prune expanded-diff carets for rows that have left @changes (flush /
-    # revert), so a re-saved method doesn't re-appear already-expanded.
-    live_keys = MapSet.new(rows, &{&1.class, &1.selector})
+    # revert), so a re-saved method doesn't re-appear already-expanded. Keyed
+    # by `{class, selector, side}` (BT-3195), matching the toggle handler and
+    # the template's `expanded` lookup below.
+    live_keys = MapSet.new(rows, &{&1.class, &1.selector, &1[:side]})
     expanded = MapSet.intersection(socket.assigns.expanded_changes, live_keys)
     assign(socket, changes: rows, changes_error: nil, expanded_changes: expanded)
   end
@@ -9250,6 +9288,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <th class="diff-toggle-col"></th>
                             <th>Class</th>
                             <th>Selector</th>
+                            <%!-- Kind/side column (BT-3195): before this, a
+                                 same-selector instance-side patch and a
+                                 class-side patch/removal — both possible
+                                 simultaneously since BT-3187's `(class,
+                                 selector, side)` shadow-key fix — rendered as
+                                 visually identical rows. --%>
+                            <th>Kind</th>
                             <th>Intent</th>
                             <th>Flushable</th>
                             <th>Author</th>
@@ -9259,7 +9304,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </thead>
                         <tbody>
                           <%= for c <- @changes do %>
-                            <% expanded = MapSet.member?(@expanded_changes, {c.class, c.selector}) %>
+                            <% expanded =
+                              MapSet.member?(@expanded_changes, {c.class, c.selector, c[:side]}) %>
                             <tr>
                               <%!-- Leading disclosure caret (BT-2636): toggles
                                    this row's structured net-vs-disk diff. Only
@@ -9267,7 +9313,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                                    defensive `:if={c[:diff]}` guard the old
                                    in-column disclosure used — a method reverted to
                                    its on-disk body has no net change and never
-                                   reaches this pane). --%>
+                                   reaches this pane). `phx-value-entry-side`
+                                   (BT-3195) keys the expand/collapse state on this
+                                   row's side too, alongside `phx-value-class`/
+                                   `-selector` — see `handle_event("toggle_change_diff", …)`
+                                   for why a same-selector instance-side and
+                                   class-side row need independent toggle state. --%>
                               <td class="diff-toggle-col">
                                 <button
                                   :if={c[:diff]}
@@ -9276,6 +9327,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                   phx-click="toggle_change_diff"
                                   phx-value-class={c.class}
                                   phx-value-selector={c.selector}
+                                  phx-value-entry-side={c[:side] || ""}
                                   aria-expanded={to_string(expanded)}
                                   title={if expanded, do: "Hide diff", else: "Show diff"}
                                 >
@@ -9284,6 +9336,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                               </td>
                               <td class="k">{c.class}</td>
                               <td>{c.selector}</td>
+                              <td>{change_kind_label(c)}</td>
                               <td>{c.intent}</td>
                               <td>{if c.flushable, do: "yes", else: "no"}</td>
                               <td>{c.author_kind}</td>
@@ -9338,7 +9391,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                  beneath the row while expanded. Reuses the shared
                                  `unified_diff/1` renderer with the Git pane. --%>
                             <tr :if={c[:diff] && expanded} class="diff-row">
-                              <td colspan={if @role == :owner, do: 7, else: 6}>
+                              <td colspan={if @role == :owner, do: 8, else: 7}>
                                 <.unified_diff diff={c[:diff]} />
                               </td>
                             </tr>
