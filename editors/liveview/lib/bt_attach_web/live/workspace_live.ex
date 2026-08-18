@@ -1726,7 +1726,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # entry is visible.
   def handle_event("revert", %{"class" => class, "selector" => selector} = params, socket)
       when is_binary(class) and is_binary(selector) do
-    side = present_revert_side(Map.get(params, "side"))
+    side = present_revert_side(Map.get(params, "entry-side"))
     {:noreply, revert_change(socket, class, selector, side)}
   end
 
@@ -3814,10 +3814,10 @@ defmodule BtAttachWeb.WorkspaceLive do
     snake_chars(rest, c >= ?a and c <= ?z, [c | acc])
   end
 
-  # Normalise the `phx-value-side` param (a plain HTML attribute string) to the
-  # `side` the Facade/`revert/3` expect: `""` (a sideless new-class row's
-  # `phx-value-side={c[:side] || ""}`) and a missing/non-binary value both mean
-  # "no side constraint" (ADR 0112, BT-3187).
+  # Normalise the `phx-value-entry-side` param (a plain HTML attribute string) to
+  # the `side` the Facade/`revert/3` expect: `""` (a sideless new-class row's
+  # `phx-value-entry-side={c[:side] || ""}`) and a missing/non-binary value both
+  # mean "no side constraint" (ADR 0112, BT-3187).
   defp present_revert_side(side) when is_binary(side) and side != "", do: side
   defp present_revert_side(_), do: nil
 
@@ -9217,13 +9217,18 @@ defmodule BtAttachWeb.WorkspaceLive do
                                    send the `new-class` placeholder the workspace maps
                                    back to the class's new-class entry.
 
-                                   `phx-value-side` (ADR 0112, BT-3187) carries this
-                                   *row's* side (`"instance"`/`"class"`, or `""` for a
-                                   sideless new-class row) into the revert call, so a
-                                   same-selector instance-side and class-side entry —
-                                   otherwise indistinguishable by (class, selector)
-                                   alone — resolve to the one this row actually shows,
-                                   not whichever has the higher seq. --%>
+                                   `phx-value-entry-side` (ADR 0112, BT-3187) carries
+                                   this *row's* side (`"instance"`/`"class"`, or `""`
+                                   for a sideless new-class row) into the revert call,
+                                   so a same-selector instance-side and class-side
+                                   entry — otherwise indistinguishable by (class,
+                                   selector) alone — resolve to the one this row
+                                   actually shows, not whichever has the higher seq.
+                                   Named `entry-side` (not `side`) so it doesn't
+                                   collide with the browser's `phx-value-side`
+                                   instance/class toggle (BT-2491) — a plain
+                                   `button[phx-value-side=...]` selector would
+                                   otherwise match both controls. --%>
                               <td :if={@role == :owner}>
                                 <button
                                   :if={c.kind in ["instance", "class", "new-class"]}
@@ -9234,7 +9239,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                   phx-value-selector={
                                     if(c.kind == "new-class", do: "new-class", else: c.selector)
                                   }
-                                  phx-value-side={c[:side] || ""}
+                                  phx-value-entry-side={c[:side] || ""}
                                   phx-disable-with="Reverting…"
                                 >
                                   revert
