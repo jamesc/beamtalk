@@ -29,7 +29,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
   - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
-  - [Method Removal — `removeSelector:` (ADR 0112)](#method-removal--removeselector-adr-0112)
+  - [Removing methods — `removeSelector:` and `removeSelector:ifAbsent:` (ADR 0112)](#removing-methods--removeselector-and-removeselectorifabsent-adr-0112)
   - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
   - [Live Re-Checking on Reload (ADR 0105)](#live-re-checking-on-reload-adr-0105)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
@@ -3390,6 +3390,105 @@ already exists, lies outside the project tree, the declared class name does
 not match the path basename (ADR 0040 one-class-per-file convention), or a
 class of that name is already loaded.
 
+#### Removing methods — `removeSelector:` and `removeSelector:ifAbsent:` (ADR 0112)
+
+`removeSelector:` completes `Behaviour`'s patch/create/remove trio alongside
+`compile:source:` and `newClass:at:`: it drops a method from the receiver's
+own method table (instance-side) or the receiver's metaclass's method table
+(class-side), then logs a durable `kind: #'remove-method'` ChangeEntry —
+exactly the ChangeLog participation a patch gets, just deleting text instead
+of replacing it.
+
+```beamtalk
+sealed removeSelector: aSelector :: Symbol -> Behaviour
+sealed removeSelector: aSelector :: Symbol ifAbsent: absentBlock :: Block(T) -> Behaviour | T
+```
+
+```beamtalk
+Counter removeSelector: #increment          // instance-side: touches instance_methods
+Counter class removeSelector: #ofSize:      // class-side: touches class_methods
+```
+
+**Receiver side follows the existing `Counter` vs `Counter class` convention**
+already used to pick a side for `>>` extension definitions — there is no
+boolean parameter. Both forms return the receiver (`Behaviour`) on success, so
+removals chain the same way patches do: `Counter removeSelector: #a; removeSelector: #b`.
+
+Because dispatch always walks the class chain live (ADR 0032 — no flattened
+method-table cache), removing an overriding method instantly re-exposes
+whatever the superclass defines, with no restart and no cache to invalidate:
+
+```beamtalk
+Actor >> initialize => Transcript show: 'base init'
+Actor subclass: Counter
+  state: value = 0
+
+  initialize => Transcript show: 'counter init'
+
+Counter new                    // prints 'counter init'
+Counter removeSelector: #initialize
+Counter new                    // prints 'base init' — no restart needed
+```
+
+`removeSelector:` also reaches extension methods (ADR 0066 open classes) —
+sent to the *target* class, the same way an extension is installed via `>>`:
+
+```beamtalk
+String >> shout => self uppercase ++ "!"
+"hi" shout                     // => "HI!"
+String removeSelector: #shout
+"hi" respondsTo: #shout        // => false
+```
+
+**The bare form raises; `removeSelector:ifAbsent:` is the paired escape
+hatch** — mirroring `Dictionary>>at:ifAbsent:` and Pharo's own
+`removeSelector:`/`removeSelector:ifAbsent:` pairing. A selector that is
+absent locally — never defined, already removed, or only *inherited* — raises
+a structured error with kind `selector_not_found`, deliberately distinct from
+`does_not_understand` (the message `removeSelector:` itself was understood
+and executed; only its argument had nothing to act on):
+
+```beamtalk
+[Counter removeSelector: #bogus] on: Error do: [:e | e kind]
+// => selector_not_found
+
+Counter removeSelector: #bogus ifAbsent: ["not found"]
+// => "not found"
+
+// #printString is inherited from Object, not local to Counter, so it still
+// raises — includesSelector: distinguishes "responds to" from "defines locally".
+Counter includesSelector: #printString    // => false
+Counter removeSelector: #printString      // raises selector_not_found
+```
+
+`removeSelector:ifAbsent:`'s block runs only on absence and its value is
+returned instead of the receiver.
+
+> **Process semantics note.** Like every `Behaviour` tower primitive,
+> `removeSelector:ifAbsent:` runs in the *caller's* process (the Class →
+> Behaviour chain-walk fallthrough), not the receiver class's gen_server. The
+> `absentBlock` messaging the receiver class back is an ordinary cross-process
+> send — no `dispatch_error` restriction applies here (unlike a block argument
+> received by a locally-defined class method; see
+> [Passing Blocks Through Class Methods](#passing-blocks-through-class-methods)).
+
+**`removeSelector:` never refuses based on where a class lives — it always
+installs the removal in memory. What varies is whether the resulting
+ChangeEntry is flushable**, exactly mirroring `compile:source:`'s rule (see
+[Flushability](#flushability--what-flush-writes) below) rather than
+`removeFromSystem`'s outright block (see
+[`removeFromSystem`](#removefromsystem--removing-a-whole-class-bt-785)):
+
+```beamtalk
+Integer removeSelector: #printString      // installs in memory, no error
+Workspace changes dirtyMethods             // => #{#Integer => #{#printString}}
+Workspace flush                            // skips it: not flushable (stdlib)
+```
+
+See [ADR 0112](ADR/0112-method-level-removal-language-primitive.md) for the
+full design, including extension-removal edge cases, dangling-sender risk,
+and the `side` field's role in the ChangeLog schema.
+
 #### `autoflush`
 
 For users who want write-through editor semantics, flip a single workspace
@@ -3407,53 +3506,6 @@ module install is not rolled back because live actors may hold references to
 the new closures. The error surfaces with a "memory ahead of disk" warning.
 
 Ephemeral patches via `tryCompile:source:` are never autoflushed.
-
-#### Method Removal — `removeSelector:` (ADR 0112)
-
-`Behaviour >> removeSelector:` removes a method from a class at runtime — the
-removal counterpart to `compile:source:`.
-
-```beamtalk
-Counter removeSelector: #increment       // instance-side
-Counter class removeSelector: #ofSize:   // class-side
-```
-
-Resolution mirrors dispatch order: the extension registry ([ADR 0066](ADR/0066-open-class-extension-methods.md)
-open classes) is checked first — removing an extension re-exposes the local
-method it was shadowing. A second `removeSelector:` call removes that local
-method too. Removing a locally-defined override re-exposes the inherited
-implementation with no restart needed (chain-walk dispatch, [ADR 0032](ADR/0032-early-class-protocol.md)).
-
-Both methods are `sealed` and `@primitive`-backed. Both return the receiver on
-success, chaining like `compile:source:`.
-
-| Method | On absence |
-|--------|------------|
-| `removeSelector: aSelector :: Symbol -> Behaviour` | Raises `selector_not_found` (a `RuntimeError`, distinct from `does_not_understand`) |
-| `removeSelector: aSelector :: Symbol ifAbsent: absentBlock :: Block(T) -> Behaviour \| T` | Evaluates `absentBlock` and returns its value |
-
-```beamtalk
-Counter removeSelector: #bogus
-// => Error: selector_not_found
-//    hint: check with includesSelector:, whichClassIncludesSelector:,
-//    or use removeSelector:ifAbsent:
-
-Counter removeSelector: #bogus ifAbsent: ["not found"]
-// => "not found"
-```
-
-Installs unconditionally, including on stdlib classes — there is no
-receiver-side refusal. What varies is whether the resulting change is flushable
-to disk, not whether it takes effect in memory (the same rule `compile:source:`
-already follows).
-
-> **Process semantics note.** Like every `Behaviour` tower primitive,
-> `removeSelector:ifAbsent:` runs in the *caller's* process (the Class →
-> Behaviour chain-walk fallthrough), not the receiver class's gen_server. The
-> `absentBlock` messaging the receiver class back is an ordinary cross-process
-> send — no `dispatch_error` restriction applies here (unlike a block argument
-> received by a locally-defined class method; see
-> [Passing Blocks Through Class Methods](#passing-blocks-through-class-methods)).
 
 #### Flushability — what `flush` writes
 
@@ -3779,6 +3831,25 @@ Integer reload
 
 Hot-swap semantics follow BEAM conventions: live actors running the old code
 continue their current message; the next dispatch uses the new code.
+
+#### `removeFromSystem` — removing a whole class (BT-785)
+
+`removeFromSystem` tears a class down entirely: stops its live actors, stops
+the class gen_server, purges the BEAM module, and purges every derived
+registry (xref, extensions, protocol conformance, compiler cache, workspace
+source). Unlike `removeSelector:` (above), it is a hard, unconditional
+refusal for stdlib classes and classes with subclasses — there is no
+in-memory-but-non-flushable escape hatch, and no ChangeLog entry is logged
+(this predates ADR 0082's ChangeLog and is not part of the patch/flush model).
+
+```beamtalk
+Counter removeFromSystem   // => nil (Counter class removed; refuses if Counter has subclasses)
+Integer removeFromSystem   // => Error: cannot remove stdlib class
+```
+
+For removing a single method while keeping the class, see
+[`removeSelector:` / `removeSelector:ifAbsent:`](#removing-methods--removeselector-and-removeselectorifabsent-adr-0112)
+above.
 
 ### `SystemNavigation` — Cross-class code queries
 
