@@ -195,9 +195,14 @@ release nodes do not start a workspace, so this code is a no-op there.
     author :: binary(),
     author_kind :: author_kind(),
     %% True once a `Workspace flush` has written this entry's patch to disk
-    %% (ADR 0082 Phase 2). Persisted so the entry stays excluded from the
-    %% active view across workspace restarts: history is preserved in the
-    %% log for audit, but the entry is no longer considered "dirty".
+    %% (ADR 0082 Phase 2) — OR, for a `'remove-class'` entry specifically,
+    %% once `Workspace changes revert:` has undone it (ADR 0113, BT-3208):
+    %% no disk write happened, but the entry's effect is equally resolved and
+    %% must equally drop out of the active/pending view. Persisted so the
+    %% entry stays excluded from the active view across workspace restarts:
+    %% history is preserved in the log for audit, but the entry is no longer
+    %% considered "dirty". Don't read this field alone as "this reached disk"
+    %% — for that, check the entry's `kind` too.
     flushed = false :: boolean(),
     %% Derived, in-memory only — not persisted (recomputed on restart).
     prior_epoch = false :: boolean(),

@@ -725,13 +725,56 @@ reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
                     %% its effect has been undone (ADR 0113, BT-3208 review
                     %% fix: a stale `'remove-class'` entry would misreport
                     %% `skipped: destructive`/block a real future removal).
-                    ok = beamtalk_workspace_changelog:mark_flushed([
-                        beamtalk_workspace_changelog:entry_seq(Entry)
-                    ]),
-                    class_object_for(ClassNameBin);
+                    retire_reverted_remove_class_entry(ClassNameBin, Entry);
                 {error, Reason} ->
                     beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
             end
+    end.
+
+%% The class is already reinstalled and live by the time this runs — a
+%% ChangeLog write failure here must never surface as a raw crash (or, worse,
+%% leave the original entry silently stuck active/pending forever, which is
+%% the exact phantom-entry bug this whole revert path exists to avoid).
+%% Mirrors `beamtalk_workspace_flush:complete_flush/5`'s handling of the same
+%% `mark_flushed/1` call: catch a `gen_server` exit (unreachable/timeout) as
+%% well as an explicit `{error, _}`, and raise a structured error either way.
+-spec retire_reverted_remove_class_entry(binary(), beamtalk_workspace_changelog:entry()) ->
+    term().
+retire_reverted_remove_class_entry(ClassNameBin, Entry) ->
+    MarkResult =
+        try
+            beamtalk_workspace_changelog:mark_flushed([
+                beamtalk_workspace_changelog:entry_seq(Entry)
+            ])
+        catch
+            exit:ExitReason -> {error, {changelog_unreachable, ExitReason}}
+        end,
+    case MarkResult of
+        ok ->
+            class_object_for(ClassNameBin);
+        {error, Reason} ->
+            ?LOG_ERROR(
+                "revert: reinstalled class but failed to retire its remove-class entry",
+                #{
+                    class => ClassNameBin,
+                    seq => beamtalk_workspace_changelog:entry_seq(Entry),
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_error:raise(
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: ">>,
+                        ClassNameBin,
+                        <<
+                            " was reinstalled, but its old removal entry could not be "
+                            "retired (ChangeLog unreachable); it may still show as "
+                            "pending until a future flush or manual cleanup"
+                        >>
+                    ])
+                )
+            )
     end.
 
 -spec remove_reverted_method(binary(), atom(), instance | class) -> term().
