@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3203: fixture host class for the extension-vs-local-method dispatch
+// priority test.
+//
+// `localGreeting` is a real, non-intrinsic instance method that reaches the
+// class's generated dispatch/3 function as an ordinary case clause — unlike
+// `Integer >> +`, which is a compiler intrinsic and never reaches dispatch
+// at all. The paired test registers an ETS extension for the same selector
+// and confirms which one actually wins (empirically: the local method,
+// same as the intrinsic case — see the test's comment for why).
+//
+// See test/extension_sealed_test.bt for the test.
+
+Value subclass: Bt3203ExtensionPriorityHost
+
+  localGreeting => "local"
