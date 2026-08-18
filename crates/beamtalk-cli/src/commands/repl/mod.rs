@@ -829,10 +829,10 @@ fn remove_method_expr_for(arg: &str) -> Option<String> {
     let mut parts = arg.splitn(2, char::is_whitespace);
     let class = parts.next().unwrap_or("").trim();
     let selector = parts.next().unwrap_or("").trim();
+    let selector = selector.strip_prefix('#').unwrap_or(selector);
     if class.is_empty() || selector.is_empty() {
         return None;
     }
-    let selector = selector.strip_prefix('#').unwrap_or(selector);
     Some(format!("{class} removeSelector: #{selector}"))
 }
 
@@ -2003,6 +2003,13 @@ mod tests {
     fn remove_method_with_empty_argument_reports_no_expression() {
         assert_eq!(remove_method_expr_for(""), None);
         assert_eq!(remove_method_expr_for("   "), None);
+    }
+
+    #[test]
+    fn remove_method_with_bare_hash_selector_reports_no_expression() {
+        // A selector of just "#" strips down to empty and must hit the
+        // usage-error path, not a malformed `Counter removeSelector: #` eval.
+        assert_eq!(remove_method_expr_for("Counter #"), None);
     }
 
     #[test]

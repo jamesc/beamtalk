@@ -3568,11 +3568,12 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
       {:ok, _term, _output, _warnings} ->
-        # `close_tab/2` runs `clear_active/1` when this was the last open tab,
-        # which deliberately wipes `save_result`/`save_error` ("stale result
-        # cleared so the next opened tab starts clean") — so the success
-        # message must be assigned AFTER closing the tab, not before, or
-        # closing the last tab would silently swallow it.
+        # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
+        # tab was the active one — via `clear_active/1` if it was the last
+        # open tab, or via `sync_active/2` when focus moves to the next
+        # remaining tab — so the success message must be assigned AFTER
+        # closing the tab, not before, or closing the active tab would
+        # silently swallow it.
         socket
         |> close_tab(tab.id)
         |> assign(
@@ -10310,7 +10311,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                                 class="btn btn-sm"
                                 type="button"
                                 phx-click="remove_method"
-                                data-confirm={"Remove #{@edit_selector} from #{@edit_class}? This cannot be undone from the editor."}
+                                data-confirm={
+                                  "Remove #{@edit_selector} from #{@edit_class}#{if active_tab(assigns).side == "class", do: " class", else: ""}? This cannot be undone from the editor."
+                                }
                               >
                                 Remove Method
                               </button>
