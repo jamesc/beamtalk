@@ -103,8 +103,7 @@ dispatch(class, [], Self, State) ->
     ClassObj = beamtalk_primitive:class_of_object_by_name(ClassName),
     {reply, ClassObj, State};
 dispatch('respondsTo:', [Selector], Self, State) when is_atom(Selector) ->
-    ClassName = class_name_for_responds_to(Self, State),
-    Result = beamtalk_dispatch:responds_to(Selector, ClassName),
+    Result = responds_to_result(Selector, Self, State),
     {reply, Result, State};
 dispatch('fieldNames', [], _Self, State) ->
     {reply, beamtalk_reflection:field_names(State), State};
@@ -301,20 +300,36 @@ class_name(_Self, State, Default) ->
     beamtalk_tagged_map:class_of(State, Default).
 
 -doc """
-Return the class name to use for respondsTo: dispatch.
+Compute the `respondsTo:` result for `Selector` against `Self`.
 
 BT-776: Class objects have a virtual metaclass tag (e.g., 'Counter class')
-that is not registered in the class registry. For class objects, start the
-responds_to chain walk from 'Class' instead.
+that is not registered in the class registry, so the generic hierarchy-walk
+`beamtalk_dispatch:responds_to/2` cannot be pointed at it directly — it is
+instead started from `'Class'`, reflecting the generic Class/Behaviour/
+Object protocol every class object shares.
+
+BT-3200: that generic-protocol answer used to be the *whole* answer for a
+class-object receiver, so `SomeClass respondsTo: #aClassSpecificSelector`
+was always `false` even when `SomeClass` had a matching local/inherited
+class method or class-side extension (ADR 0066/0084). Delegates to
+`beamtalk_primitive:class_responds_to/2` — the same helper the compiled
+`respondsTo:` intrinsic itself calls (`beamtalk_primitive:responds_to/2`) —
+so this reflection-table path (reached via `perform:`/`perform:withArguments:`,
+where the selector is a runtime value the intrinsic codegen can't see) agrees
+with the direct compiled path instead of hand-copying the same
+check-then-fallback logic.
 """.
--spec class_name_for_responds_to(term(), map()) -> atom().
-class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
+-spec responds_to_result(atom(), term(), map()) -> boolean().
+responds_to_result(Selector, Self, State) when is_record(Self, beamtalk_object) ->
     case beamtalk_class_registry:is_class_object(Self) of
-        true -> 'Class';
-        false -> beamtalk_tagged_map:class_of(State)
+        true ->
+            ClassName = beamtalk_primitive:class_name_from_tag(Self#beamtalk_object.class),
+            beamtalk_primitive:class_responds_to(ClassName, Selector);
+        false ->
+            beamtalk_dispatch:responds_to(Selector, beamtalk_tagged_map:class_of(State))
     end;
-class_name_for_responds_to(_Self, State) ->
-    beamtalk_tagged_map:class_of(State).
+responds_to_result(Selector, _Self, State) ->
+    beamtalk_dispatch:responds_to(Selector, beamtalk_tagged_map:class_of(State)).
 
 normalize_dispatch_result({error, Error}, State) ->
     {error, Error, State};

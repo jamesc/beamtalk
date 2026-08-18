@@ -19,6 +19,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     class_of_object_by_name/1,
     send/3,
     responds_to/2,
+    class_responds_to/2,
     class_name_to_module/1,
     class_name_from_tag/1,
     print_string/1,
@@ -587,11 +588,15 @@ responds_to({beamtalk_future, _} = Future, Selector) ->
     %% BT-840: Auto-await tagged futures before protocol checking.
     responds_to(beamtalk_future:await(Future), Selector);
 responds_to(#beamtalk_object{class = Tag} = Obj, Selector) ->
-    %% BT-776: Class objects (e.g., Counter as a value) are instances of 'Class'.
-    %% Walk the Class → Behaviour → Object hierarchy instead of checking class_mod.
+    %% BT-776/BT-3200: Class objects (e.g., Counter as a value) are instances
+    %% of 'Class', so fall back to the Class -> Behaviour -> Object hierarchy
+    %% for generic protocol — but first check the class's OWN class-side
+    %% methods/extensions (class_understands_class_selector/2), since those
+    %% are not reachable via the generic 'Class' walk (the metaclass tag is
+    %% virtual, per BT-776's own doc comment on class_object_tag/1).
     case beamtalk_class_registry:is_class_object(Obj) of
         true ->
-            beamtalk_dispatch:responds_to(Selector, 'Class');
+            class_responds_to(class_name_from_tag(Tag), Selector);
         false ->
             ClassName = class_name_from_tag(Tag),
             beamtalk_dispatch:responds_to(Selector, ClassName)
@@ -600,10 +605,11 @@ responds_to(X, Selector) when is_tuple(X) ->
     %% Handle tuples that might be beamtalk_objects not matching the record pattern
     case tuple_size(X) >= 4 andalso element(1, X) =:= beamtalk_object of
         true ->
-            %% BT-776: Class objects walk Class hierarchy.
+            %% BT-776/BT-3200: Class objects — see the record-pattern clause above.
             case beamtalk_class_registry:is_class_object(X) of
                 true ->
-                    beamtalk_dispatch:responds_to(Selector, 'Class');
+                    Tag = element(2, X),
+                    class_responds_to(class_name_from_tag(Tag), Selector);
                 false ->
                     Tag = element(2, X),
                     ClassName = class_name_from_tag(Tag),
@@ -620,6 +626,27 @@ responds_to(X, Selector) when is_pid(X) ->
 responds_to(X, Selector) ->
     %% All other primitives: route through module_for_value/1
     responds_via_module(X, Selector).
+
+-doc """
+BT-3200: `respondsTo:` on a class-object receiver — checks `ClassName`'s own
+class-side methods/extensions before falling back to the generic
+`Class`/`Behaviour`/`Object` protocol.
+
+`respondsTo:` is a sealed compiler intrinsic (`Object.bt`), so every call
+site compiles directly to `beamtalk_primitive:responds_to/2` — it never
+reaches `beamtalk_dispatch:lookup/5` or a compiled class's own `dispatch/4`.
+Before this, a class object's `respondsTo:` always answered against the
+generic `'Class'` hierarchy only (BT-776), so `SomeClass respondsTo: #foo`
+for a class method or class-side extension `SomeClass` itself defines
+answered `false` even though `SomeClass foo` (or `self foo` from another of
+its class methods) would actually work.
+""".
+-spec class_responds_to(atom(), atom()) -> boolean().
+class_responds_to(ClassName, Selector) ->
+    case beamtalk_class_dispatch:class_understands_class_selector(ClassName, Selector) of
+        true -> true;
+        false -> beamtalk_dispatch:responds_to(Selector, 'Class')
+    end.
 
 -doc """
 Tagged map responds_to — routes through module_for_value/1 for all
