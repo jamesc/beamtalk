@@ -158,7 +158,12 @@ Extending ADR 0082's open `kind` enum exactly where it said it would (`"remove-m
  old_path: "<path>" | null,
  new_path: "<path>" | null,                     % basename derived from new_class, same directory as old_path
  sites: [{sourceFile, span: {start, end}, source_ref, prev_source_ref}, ...],
-   %% sites[0] is always the class's own declaration line; sites[1..] are
+   %% sites[0] is the class's own declaration line, UNLESS the class is
+   %% dynamic (ClassBuilder, no backing file — flushable: false, "dynamic"
+   %% below) — a dynamic class has nothing for sites[0] to point at, so its
+   %% rename entry has sites[0] = null (in-memory identity change only,
+   %% recorded for revert/audit but not a splice target) and sites[1..] are
+   %% whatever in-project references still exist to rewrite. sites[1..] are
    %% every current in-project cross-file reference (constructor/message
    %% sends, type annotations, superclass declarations, extension
    %% declarations) found via the xref index at rename time — same shape
@@ -231,7 +236,7 @@ A Phase A failure (a target span no longer resolves — see *External-edit confl
 |---|---|
 | `remove-method` | Re-installs `prev_source_ref` at the recorded selector/side — the recorded prior body is exactly what `compile:source:` needs, so revert is a patch back to the pre-removal method. Already implied by the schema (ADR 0112 recorded `prev_source_ref` on removal specifically for this); this ADR is the first thing that actually exercises it. |
 | `remove-class` | Recompiles and reinstalls the whole class from `prev_source_ref` (the full pre-removal source, captured at hook time by `removeFromSystem`'s new logging step) via the same `Workspace newClass:at:`-shaped install path `new-class` revert already uses (ADR 0082, BT-2664) — reusing that path rather than inventing a second whole-class-install mechanism. |
-| `rename-class` | Renames back: `renameTo: #<old_class>` (or, for a path-only move, `Workspace moveClass:to:` back to `old_path`) — revert of a rename is just the inverse rename, not a body restore, so no `prev_source_ref` is needed for this kind (consistent with `new-class`'s "add-removal needs no prior body" precedent — a pure identity/path change needs no prior *body* either, only the prior identity/path, which the entry already carries in `old_class`/`old_path`). |
+| `rename-class` | Runs the inverse rename (`renameTo: #<old_class>`, or `Workspace moveClass:to: old_path` for a path-only move) against every site recorded in `sites`, using each site's own `prev_source_ref` to restore that exact site's pre-rename text — the identical reasoning `rename-method` uses below, not the exemption an earlier draft of this row claimed. A blind `renameTo: #<old_class>` call would *recompute* the site list from the class's current (post-rename) state rather than restoring it, which silently diverges from the original rename's site list if any referencing file was independently edited in between (the same risk `rename-method`'s row already treats as decisive). The class's own identity/path (`old_class`/`old_path`) is still enough on its own for the *re-registration* half of the revert — no `prev_source_ref` is needed for that part, matching `new-class`'s "add-removal needs no prior body" precedent — but the per-site reference rewrites need their recorded bodies exactly as `rename-method`'s do. |
 | `rename-method` | Runs the inverse rename (`renameSelector: new_selector to: old_selector`) against every site recorded in `sites`, using each site's own `prev_source_ref` to restore that exact site's pre-rename text — necessary because a sender's surrounding code may have changed between the rename and the revert in ways a blind re-rename wouldn't reproduce byte-for-byte. |
 
 **Once flushed, `revert:` degrades to "best-effort, pre-flush semantics only"** for the same reason ADR 0082 already documents for ordinary flushed patches — the ChangeEntry is pruned on successful flush, so post-flush undo is git's job (for humans, per Amendment 1) or a fresh corrective operation (for agents, who can re-run `newClass:at:` from the same `prev_source_ref` snapshot if they kept it — the ChangeLog's own audit/archive retains it per ADR 0082's rotation policy even after pruning from the active view). This ADR does not add a third undo mechanism beyond "revert before flush" and "git/re-create after flush" — see *Steelman Analysis*, tombstone question.
