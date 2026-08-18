@@ -325,3 +325,9 @@ For ADR 0046 (VSCode sidebar): no migration — it consumes `workspace/applyEdit
 - Related ADRs: ADR 0082 (Method-Level Edit and Save — the flush/ChangeLog/two-phase-atomicity/Amendment-1 foundation this entire ADR builds on), ADR 0112 (Method-Level Removal Language Primitive — the direct predecessor whose `remove-method` kind this ADR finally unblocks)
 - Documentation: `docs/beamtalk-language-features.md`, `docs/development/surface-parity.md`
 - LSP spec: `workspace/applyEdit` with `CreateFile`/`DeleteFile` operations, <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_applyEdit>
+
+## Implementation Tracking
+
+**Epic:** BT-3205
+**Issues:** BT-3206 (Phase 1 — Foundation), BT-3207 (Phase 2 — Core mechanism), BT-3208 (Phase 3 — Undo), BT-3209, BT-3210 (Phase 4 — Surfaces), BT-3211 (Phase 4 — Validation)
+**Status:** Planned
