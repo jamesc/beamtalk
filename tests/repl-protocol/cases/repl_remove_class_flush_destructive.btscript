@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for the `:remove-class <Class>` and `:flush-destructive
+// [<selector>]` REPL meta-commands (ADR 0113 Phase 4, BT-3210).
+//
+// These CLI-side aliases desugar to the Beamtalk expressions:
+//   :remove-class <Class>          → <Class> removeFromSystem
+//   :flush-destructive             → Workspace flushIncludingDestructive
+//   :flush-destructive <selector>  → Workspace flush: <selector> confirmDestructive: true
+//
+// IMPORTANT: once `:remove-class <Class>` has run, scope a following
+// `:flush-destructive` by `#Class` (a Symbol), not the bare class name —
+// `removeFromSystem` already unbound the name, so a bare identifier fails to
+// evaluate before the `flush:` send even happens. See the inline comment
+// below where this matters.
+//
+// The test verifies the aliases dispatch through to the underlying
+// `Behaviour>>removeFromSystem` / `WorkspaceInterface>>flushIncludingDestructive`
+// / `WorkspaceInterface>>flush:confirmDestructive:` primitives. Primitive
+// semantics (ChangeLog logging, staged-delete atomicity, tier
+// classification) are covered separately: `remove_from_system.btscript`
+// (BT-3206) and `workspace_flush_destructive.btscript` (BT-3207).
+//
+// IMPORTANT: meta-commands are dispatched by the REPL/test harness only when
+// the entire line is `:remove-class <Class>` / `:flush-destructive` /
+// `:flush-destructive <selector>` — see repl_flush_changes_dirty.btscript for
+// the same caveat about composability. The interactive `y/N` terminal
+// confirmation the real REPL prompts with is not exercised here — the
+// protocol test harness talks to the workspace directly, bypassing the
+// terminal, the same way it already does for `:remove-method`/`:flush`.
+//
+// A unique inline class name (rather than a shared fixture) avoids
+// interfering with other REPL-protocol cases, which share one long-lived
+// workspace session. Like remove_from_system.btscript, this class is never
+// backed by an on-disk file (no active project context in the shared e2e
+// workspace), so its `remove-class` entry is `flushable: false` — a safe
+// no-op to flush, not a real file delete.
+
+Value subclass: ReplRemoveClassDemo
+  greet => "hi"
+// => _
+
+ReplRemoveClassDemo new greet
+// => hi
+
+Object allSubclasses includes: ReplRemoveClassDemo
+// => true
+
+// Save a reference before removal (`allSubclasses includes:` after removal
+// needs something to compare against — the name itself no longer resolves).
+replRemoveClassDemoRef := ReplRemoveClassDemo
+// => _
+
+// ===========================================================================
+// :remove-class — alias for `<Class> removeFromSystem`
+// ===========================================================================
+
+// :remove-class removes the class from memory (wildcard: meta-commands
+// aren't composable, so the harness can only verify the call doesn't raise
+// an error — same pattern as :remove-method/:flush).
+:remove-class ReplRemoveClassDemo
+// => _
+
+Object allSubclasses includes: replRemoveClassDemoRef
+// => false
+
+// removeFromSystem logged a durable `remove-class` ChangeLog entry
+// (ADR 0113 Phase 1, BT-3206) — filtered by className because REPL-protocol
+// cases share one long-lived ChangeLog (same convention as
+// remove_from_system.btscript).
+_replRemoveClassEntry := (Workspace changes select: [:e | e isRemoveClass and: [e className =:= #ReplRemoveClassDemo]]) last
+// => _
+
+_replRemoveClassEntry isRemoveClass
+// => true
+
+// Dynamically-defined (no on-disk source file) → not flushable.
+_replRemoveClassEntry isFlushable
+// => false
+
+// ===========================================================================
+// :flush-destructive <selector> — alias for
+// `Workspace flush: <selector> confirmDestructive: true`
+// ===========================================================================
+
+// Scoped to the class above by *Symbol*, not bare identifier: `removeFromSystem`
+// already unbound the `ReplRemoveClassDemo` name (see `allSubclasses includes:`
+// above — the bare identifier no longer resolves), so `:flush-destructive
+// ReplRemoveClassDemo` would fail to evaluate its argument expression before
+// the send even happens. `#ReplRemoveClassDemo` is a Symbol *literal* — no
+// resolution needed — and `Workspace flush:`'s filter normalisation
+// (`beamtalk_workspace_flush:normalise_filter/1`) matches it against the
+// ChangeLog entry's recorded `class` field by name, exactly the mechanism a
+// destructive flush of an already-removed class needs. Not flushable, so
+// this is a safe no-op — it must not raise, and must not resurrect or
+// otherwise error on the entry.
+:flush-destructive #ReplRemoveClassDemo
+// => _
+
+// ===========================================================================
+// :flush-destructive — alias for `Workspace flushIncludingDestructive`
+// ===========================================================================
+
+// The unscoped destructive tier reaches every pending entry in the shared
+// workspace ChangeLog. It must not raise even when nothing new is pending
+// for this specific class.
+:flush-destructive
+// => _
+
+// After all the targeted flushes, the ChangeLog is still queryable.
+:changes
+// => _

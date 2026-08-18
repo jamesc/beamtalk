@@ -1064,6 +1064,8 @@ body.col-resizing .cockpit { transition: none; }
   text-underline-offset: 2px;
 }
 .btn-link:hover { color: var(--accent); }
+.btn-link.danger { color: var(--err); }
+.btn-link.danger:hover { color: var(--err); text-decoration-thickness: 2px; }
 
 /* New Class modal (BT-2293, BT-2645): the System Browser's owner-only
    create-a-class wizard. A centered dialog over a dimming scrim with two explicit
@@ -1185,6 +1187,33 @@ body.col-resizing .cockpit { transition: none; }
 }
 .diff-toggle:hover { color: var(--ink); }
 .bt-changes-table .diff-row > td { padding-top: 0; }
+
+/* Destructive-tier ChangeLog row (ADR 0113 Phase 4, BT-3210): flags a
+   `remove-class` row as needing its own "Delete file" confirmation — it
+   does not flush with the rest of the pending set on an ordinary "Save All
+   to Disk" click, so it must read as visibly different from a routine
+   patch row rather than blending in as another dirty entry. Purely
+   presentational (a tinted left border on the row + a badge appended to
+   the Kind cell via `::after`, both driven off the `.destructive-row`
+   class alone) so no `<td>`'s own markup changes — the Kind column
+   (4th `<td>` in the row) is exact-matched verbatim by
+   `workspace_changes_side_test.exs` (BT-3195) for every other row. */
+.bt-changes-table tr.destructive-row {
+  box-shadow: inset 3px 0 0 var(--err);
+}
+.bt-changes-table tr.destructive-row td:nth-child(4)::after {
+  content: "destructive";
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--err);
+  background: color-mix(in oklab, var(--err) 14%, transparent);
+}
 
 /* Reload Checks section (ADR 0105 Phase 1, BT-2779) — shares the Changes tab
    with the ChangeLog table above it; a top margin separates the two. */

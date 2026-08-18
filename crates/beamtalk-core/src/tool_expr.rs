@@ -134,6 +134,67 @@ pub fn flush_expr(filter: FlushFilter<'_>) -> String {
     }
 }
 
+/// Build the Beamtalk expression for the `flush` MCP tool's / LSP
+/// `beamtalk.flush*` command's Tier-2 (destructive) gate (ADR 0113 "Surface",
+/// BT-3207/BT-3210/BT-3209).
+///
+/// `confirm_destructive: false` is textually identical to [`flush_expr`] —
+/// Tier 1 only, unchanged. `confirm_destructive: true` reaches Tier 2:
+/// unscoped (`FlushFilter::None`) routes to the distinct unscoped
+/// `Workspace flushIncludingDestructive` selector, since Smalltalk keyword
+/// messages cannot omit an argument the way an unscoped
+/// `confirmDestructive:` keyword would need to (ADR 0113 "Decision"); every
+/// scoped filter appends ` confirmDestructive: true` to the same
+/// `Workspace flush: <filter>` expression `flush_expr` already builds for
+/// that filter, reusing `WorkspaceInterface.bt`'s
+/// `flush: filter confirmDestructive: confirmDestructive` keyword form.
+///
+/// Per the ADR's Surface section, this is the caller's confirmation gate for
+/// MCP specifically: the tool schema's required boolean argument (no
+/// default) *is* the confirmation, mirroring `try_method` → `save_method`'s
+/// existing two-step promotion idiom — there is no interactive dialog to
+/// gate on at this surface.
+pub fn flush_expr_with_confirm_destructive(
+    filter: FlushFilter<'_>,
+    confirm_destructive: bool,
+) -> String {
+    if !confirm_destructive {
+        return flush_expr(filter);
+    }
+    match filter {
+        FlushFilter::None => "Workspace flushIncludingDestructive".to_string(),
+        _ => format!("{} confirmDestructive: true", flush_expr(filter)),
+    }
+}
+
+/// Build the Beamtalk expression for the `remove_class` MCP tool (ADR 0113
+/// Phase 4, BT-3210) — wraps `Behaviour>>removeFromSystem` (BT-785; gains its
+/// own `kind: #'remove-class'` ChangeLog-logging fix in ADR 0113 Phase 1,
+/// BT-3206).
+///
+/// Two statements, period-separated (`docs/learning/07-blocks.md`'s
+/// statement-separator convention, not block-scoped here): the first removes
+/// the class from memory (refusing stdlib/subclassed classes, per BT-785,
+/// unchanged by ADR 0113); the second looks up and returns the resulting
+/// `remove-class` `ChangeEntry` the removal just appended, so the tool's
+/// response reports the entry's `flushable` state directly rather than the
+/// bare `nil` `removeFromSystem` itself returns. The lookup is unconditional
+/// after a successful removal — ADR 0113 "Fixing `removeFromSystem`'s
+/// missing `ChangeLog` entry" establishes the entry always exists once
+/// `removeFromSystem` succeeds, so `last` never runs against an empty
+/// collection here. Nothing is written to disk by this expression alone —
+/// see `flush_expr_with_confirm_destructive` for the required follow-up
+/// Tier-2 flush step.
+///
+/// `class` is interpolated unescaped — see the module docs' "Caller
+/// responsibility" note; the caller must validate it first.
+pub fn remove_class_expr(class: &str) -> String {
+    format!(
+        "{class} removeFromSystem. \
+         (Workspace changes select: [:e | e isRemoveClass and: [e className =:= #{class}]]) last"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +313,68 @@ mod tests {
         assert_eq!(
             flush_expr(FlushFilter::Kind("new-class")),
             "Workspace flush: #'new-class'",
+        );
+    }
+
+    // --- ADR 0113 Phase 4 (BT-3210/BT-3209): destructive-tier flush +
+    // remove_class / beamtalk.removeClass ---
+
+    #[test]
+    fn flush_expr_with_confirm_destructive_false_matches_flush_expr() {
+        for filter in [
+            FlushFilter::None,
+            FlushFilter::Class("Counter"),
+            FlushFilter::File("src/foo.bt"),
+            FlushFilter::Kind("new-class"),
+        ] {
+            assert_eq!(
+                flush_expr_with_confirm_destructive(filter, false),
+                flush_expr(filter),
+            );
+        }
+    }
+
+    #[test]
+    fn flush_expr_with_confirm_destructive_true_and_no_filter_uses_unscoped_selector() {
+        // No class/kind/file argument to attach a `confirmDestructive:`
+        // keyword to once the call is unscoped (ADR 0113 "Decision") — the
+        // distinct bare `flushIncludingDestructive` selector is required.
+        assert_eq!(
+            flush_expr_with_confirm_destructive(FlushFilter::None, true),
+            "Workspace flushIncludingDestructive",
+        );
+    }
+
+    #[test]
+    fn flush_expr_with_confirm_destructive_true_and_class_filter_appends_keyword() {
+        assert_eq!(
+            flush_expr_with_confirm_destructive(FlushFilter::Class("Counter"), true),
+            "Workspace flush: Counter confirmDestructive: true",
+        );
+    }
+
+    #[test]
+    fn flush_expr_with_confirm_destructive_true_and_file_filter_appends_keyword() {
+        assert_eq!(
+            flush_expr_with_confirm_destructive(FlushFilter::File("src/foo.bt"), true),
+            "Workspace flush: #{ #file => \"src/foo.bt\" } confirmDestructive: true",
+        );
+    }
+
+    #[test]
+    fn flush_expr_with_confirm_destructive_true_and_kind_filter_appends_keyword() {
+        assert_eq!(
+            flush_expr_with_confirm_destructive(FlushFilter::Kind("remove-class"), true),
+            "Workspace flush: #'remove-class' confirmDestructive: true",
+        );
+    }
+
+    #[test]
+    fn remove_class_expr_compiles_remove_from_system_then_entry_lookup() {
+        assert_eq!(
+            remove_class_expr("Counter"),
+            "Counter removeFromSystem. \
+             (Workspace changes select: [:e | e isRemoveClass and: [e className =:= #Counter]]) last",
         );
     }
 }

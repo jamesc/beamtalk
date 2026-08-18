@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::tool_expr::{
-    FlushFilter, flush_expr, precheck_method_expr, remove_method_expr,
-    remove_method_if_absent_expr, save_class_expr,
+    FlushFilter, flush_expr_with_confirm_destructive, precheck_method_expr, remove_class_expr,
+    remove_method_expr, remove_method_if_absent_expr, save_class_expr,
 };
 use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{
@@ -645,6 +645,16 @@ pub struct RemoveMethodParams {
     pub if_absent: Option<String>,
 }
 
+/// Parameters for the `remove_class` MCP tool (ADR 0113 Phase 4, BT-3210).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RemoveClassParams {
+    /// Name of the Beamtalk class to remove from the running system.
+    #[schemars(
+        description = "Name of the Beamtalk class to remove from the running system (e.g. \"Counter\")."
+    )]
+    pub class: String,
+}
+
 /// Parameters for the `flush` MCP tool (ADR 0082 Phase 3, BT-2288).
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FlushParams {
@@ -663,6 +673,14 @@ pub struct FlushParams {
         description = "Optional change-kind symbol to scope the flush, e.g. \"new-class\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class' and 'file'."
     )]
     pub kind: Option<String>,
+    /// Required-when-applicable Tier-2 confirmation (ADR 0113 Phase 2/4,
+    /// BT-3207/BT-3210). Must be `true` to also apply pending `remove-class`
+    /// (destructive, file-deleting) entries; omitted or `false` flushes only
+    /// Tier 1 (patches, new-class, remove-method) exactly as before.
+    #[schemars(
+        description = "Set to true to ALSO apply pending destructive 'remove-class' entries (which delete a .bt file) within this flush's scope — omitted or false flushes only non-destructive Tier-1 entries (patches, new-class, remove-method), and any pending remove-class entry is reported in the result as 'skipped: destructive'. There is no default: an agent cannot delete a file by omission. With no 'class'/'file'/'kind' filter, true compiles to the unscoped 'Workspace flushIncludingDestructive'; with a filter, it compiles to 'Workspace flush: <filter> confirmDestructive: true'. (ADR 0113 Phase 2/4, BT-3207/BT-3210.)"
+    )]
+    pub confirm_destructive: Option<bool>,
 }
 
 // --- MCP Tool implementations ---
@@ -2064,13 +2082,65 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
-    /// Flush pending `ChangeLog` entries to disk (ADR 0082 Phase 3).
+    /// Remove a class from the running Beamtalk system (ADR 0113 Phase 4,
+    /// BT-3210).
     ///
-    /// Compiles to `Workspace flush` or `Workspace flush: <selector>`. The
-    /// optional `class`, `file`, and `kind` filters are mutually exclusive; at
-    /// most one may be supplied.
+    /// Compiles to `aClass removeFromSystem`, then looks up and returns the
+    /// resulting `remove-class` `ChangeEntry`, reusing the existing
+    /// `evaluate` pathway per ADR 0082's surface-parity principle — no new
+    /// workspace-side op. Memory-mutating only: this tool never implicitly
+    /// flushes. Reaching disk requires a distinct, explicit `flush` call with
+    /// `confirm_destructive: true` (or `Workspace flushIncludingDestructive`)
+    /// — the same two-step promotion idiom `try_method` → `save_method`
+    /// already establishes, applied here to memory-removal vs. disk-deletion
+    /// instead of ephemeral-vs-durable intent.
     #[tool(
-        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). Returns a FlushResult summary listing files written and any conflicts. (ADR 0082 Phase 3, BT-2288.)"
+        description = "Remove a class from the running Beamtalk system. DESTRUCTIVE (eventually): compiles to 'aClass removeFromSystem', which stops any live actors of the class, terminates its gen_server, purges the BEAM module, and appends a durable 'remove-class' ChangeLog entry — but does NOT touch disk. Refuses to remove stdlib/sealed classes or a class with live subclasses (remove those first), raising a structured error. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending removal shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the resulting ChangeEntry, reporting whether it is flushable. (ADR 0113 Phase 4, BT-3210.)"
+    )]
+    async fn remove_class(
+        &self,
+        Parameters(params): Parameters<RemoveClassParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("remove_class");
+        validate_class_name(&params.class)?;
+        tracing::debug!(tool = "remove_class", class = %params.class, "tool invoked");
+
+        let expr = remove_class_expr(&params.class);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to remove class");
+
+        let text = {
+            let v = response.value_string();
+            let entry = if v.is_empty() {
+                format!("{} (remove-class)", params.class)
+            } else {
+                v
+            };
+            format!(
+                "{entry} — removed from memory, not yet flushed to disk. Call 'flush' with confirm_destructive: true (or evaluate 'Workspace flushIncludingDestructive') to delete its source file."
+            )
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Flush pending `ChangeLog` entries to disk (ADR 0082 Phase 3;
+    /// destructive tier added ADR 0113 Phase 2/4, BT-3207/BT-3210).
+    ///
+    /// Compiles to `Workspace flush` / `Workspace flush: <selector>` (Tier 1
+    /// only), or — when `confirm_destructive: true` — `Workspace
+    /// flushIncludingDestructive` / `Workspace flush: <selector>
+    /// confirmDestructive: true` (Tier 1 + Tier 2). The optional `class`,
+    /// `file`, and `kind` filters are mutually exclusive; at most one may be
+    /// supplied.
+    #[tool(
+        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)"
     )]
     async fn flush(
         &self,
@@ -2092,11 +2162,13 @@ impl BeamtalkMcp {
                 None,
             ));
         }
+        let confirm_destructive = params.confirm_destructive.unwrap_or(false);
         tracing::debug!(
             tool = "flush",
             class = ?params.class,
             file = ?params.file,
             kind = ?params.kind,
+            confirm_destructive,
             "tool invoked"
         );
 
@@ -2107,9 +2179,11 @@ impl BeamtalkMcp {
         ) {
             (Some(class), None, None) => {
                 validate_class_name(class)?;
-                flush_expr(FlushFilter::Class(class))
+                flush_expr_with_confirm_destructive(FlushFilter::Class(class), confirm_destructive)
             }
-            (None, Some(file), None) => flush_expr(FlushFilter::File(file)),
+            (None, Some(file), None) => {
+                flush_expr_with_confirm_destructive(FlushFilter::File(file), confirm_destructive)
+            }
             (None, None, Some(kind)) => {
                 // Allow either bare `new-class` or `#'new-class'`. We always
                 // emit a quoted-symbol literal so hyphenated kinds parse.
@@ -2127,9 +2201,9 @@ impl BeamtalkMcp {
                         None,
                     ));
                 }
-                flush_expr(FlushFilter::Kind(bare))
+                flush_expr_with_confirm_destructive(FlushFilter::Kind(bare), confirm_destructive)
             }
-            _ => flush_expr(FlushFilter::None),
+            _ => flush_expr_with_confirm_destructive(FlushFilter::None, confirm_destructive),
         };
 
         let response = self

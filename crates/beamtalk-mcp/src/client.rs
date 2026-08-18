@@ -1833,6 +1833,159 @@ mod tests {
         Ok(())
     }
 
+    // --- ADR 0113 Phase 4 (BT-3210): remove_class + destructive-flush MCP
+    // tool round-trip ---
+    //
+    // These exercise the same `evaluate` seam and expression shapes the
+    // `remove_class` MCP tool (`crates/beamtalk-mcp::server::remove_class`,
+    // via `beamtalk_core::tool_expr::remove_class_expr`) and the `flush`
+    // tool's `confirm_destructive` argument
+    // (`flush_expr_with_confirm_destructive`) build against a live
+    // workspace — the underlying `removeFromSystem` ChangeLog-logging and
+    // `flushIncludingDestructive`/`confirmDestructive:` staged-delete
+    // mechanics have full E2E coverage in
+    // `tests/repl-protocol/cases/remove_from_system.btscript` (BT-3206) and
+    // `workspace_flush_destructive.btscript` (BT-3207); these tests pin that
+    // the MCP tools' constructed expressions round-trip correctly through
+    // the same `evaluate` path the tools use.
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_remove_class_success() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        let resp = client
+            .eval("Object subclass: McpRemoveClassTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        // Save a reference before removal, mirroring
+        // `remove_from_system.btscript`'s post-removal check.
+        let resp = client
+            .eval("mcpRemoveClassTargetRef := McpRemoveClassTarget")
+            .await?;
+        assert!(!resp.is_error());
+
+        let resp = client
+            .eval("Object allSubclasses includes: McpRemoveClassTarget")
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "true");
+
+        // Mirrors `remove_class_expr("McpRemoveClassTarget")`.
+        let resp = client
+            .evaluate_with_options(
+                "McpRemoveClassTarget removeFromSystem. \
+                 (Workspace changes select: [:e | e isRemoveClass and: [e className =:= #McpRemoveClassTarget]]) last",
+                false,
+            )
+            .await?;
+        assert!(
+            !resp.is_error(),
+            "removeFromSystem + entry lookup should succeed: {:?}",
+            resp.error
+        );
+        let text = resp.value_string();
+        assert!(
+            text.contains("remove-class"),
+            "result should report the remove-class ChangeEntry: {text}"
+        );
+
+        let resp = client
+            .eval("Object allSubclasses includes: mcpRemoveClassTargetRef")
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "false");
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_remove_class_refuses_stdlib_class() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        // Mirrors `remove_class_expr("Integer")` — `removeFromSystem` raises
+        // before the ChangeLog lookup ever runs, same refusal `remove_method`
+        // does not have (BT-785, unchanged by ADR 0113).
+        let resp = client
+            .evaluate_with_options(
+                "Integer removeFromSystem. \
+                 (Workspace changes select: [:e | e isRemoveClass and: [e className =:= #Integer]]) last",
+                false,
+            )
+            .await?;
+        assert!(resp.is_error(), "removing a stdlib class should error");
+        assert!(
+            resp.error_message().is_some(),
+            "should carry an error message"
+        );
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_flush_confirm_destructive_expressions_round_trip()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        let resp = client
+            .eval("Object subclass: McpFlushDestructiveTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        let resp = client
+            .evaluate_with_options("McpFlushDestructiveTarget removeFromSystem", false)
+            .await?;
+        assert!(!resp.is_error(), "removeFromSystem should succeed");
+
+        // Mirrors `flush_expr_with_confirm_destructive(FlushFilter::Class("McpFlushDestructiveTarget"), true)`.
+        // Scoped by *Symbol* (`#McpFlushDestructiveTarget`), not the bare
+        // class name: `removeFromSystem` above already unbound that name, so
+        // a bare identifier here would fail to evaluate (unresolved class)
+        // before the `flush:` send ever runs. `normalise_filter/1`
+        // (`beamtalk_workspace_flush.erl`) matches a Symbol against the
+        // ChangeLog entry's recorded `class` field by name — no live class
+        // needed — exactly the case scoping a destructive flush to an
+        // already-removed class requires. This class was never backed by an
+        // on-disk file (dynamically defined in this test session), so its
+        // `remove-class` entry is `flushable: false` — a safe no-op to
+        // flush, not a real delete.
+        let resp = client
+            .evaluate_with_options(
+                "Workspace flush: #McpFlushDestructiveTarget confirmDestructive: true",
+                false,
+            )
+            .await?;
+        assert!(
+            !resp.is_error(),
+            "scoped confirmDestructive: true flush should not error: {:?}",
+            resp.error
+        );
+
+        // Mirrors `flush_expr_with_confirm_destructive(FlushFilter::None, true)` — the
+        // unscoped destructive tier reaches every pending entry, including
+        // any left over from other tests in this shared workspace, so it
+        // must not error even when nothing new is pending for this class.
+        let resp = client
+            .evaluate_with_options("Workspace flushIncludingDestructive", false)
+            .await?;
+        assert!(
+            !resp.is_error(),
+            "Workspace flushIncludingDestructive should not error: {:?}",
+            resp.error
+        );
+
+        client.close().await;
+        Ok(())
+    }
+
     /// Cleanup test that runs last (alphabetically after all other `test_*` tests).
     ///
     /// Stops the test workspace so the BEAM node doesn't linger for 5 minutes

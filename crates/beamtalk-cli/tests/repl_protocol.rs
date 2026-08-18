@@ -1389,6 +1389,36 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 Some(expr) => client.eval(&expr),
                 None => Err("Usage: :remove-method <Class> <selector>".to_string()),
             }
+        } else if case.expression.starts_with(":remove-class ") {
+            // ADR 0113 Phase 4 (BT-3210): `:remove-class <Class>` →
+            // `<Class> removeFromSystem`, via the same `remove_class_expr_for`
+            // the real REPL dispatch calls (`beamtalk_cli::repl_meta_exprs`)
+            // — not a hand-copied mirror. The real dispatch also prompts for
+            // `y/N` terminal confirmation first; this harness talks to the
+            // protocol directly (no terminal), so it exercises the
+            // expression construction and evaluation only, same as
+            // `:remove-method`/`:flush` above.
+            let arg = case.expression.strip_prefix(":remove-class ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::remove_class_expr_for(arg) {
+                Some(expr) => client.eval(&expr),
+                None => Err("Usage: :remove-class <Class>".to_string()),
+            }
+        } else if case.expression == ":flush-destructive" {
+            // ADR 0113 Phase 4 (BT-3210): bare `:flush-destructive` →
+            // `Workspace flushIncludingDestructive`.
+            client.eval(beamtalk_cli::repl_meta_exprs::FLUSH_INCLUDING_DESTRUCTIVE_EXPR)
+        } else if case.expression.starts_with(":flush-destructive ") {
+            // ADR 0113 Phase 4 (BT-3210): `:flush-destructive <selector>` →
+            // `Workspace flush: <selector> confirmDestructive: true`, via
+            // the same `flush_destructive_expr_for` the real REPL dispatch
+            // calls.
+            let selector = case.expression.strip_prefix(":flush-destructive ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::flush_destructive_expr_for(selector) {
+                Some(expr) => client.eval(&expr),
+                None => Err(
+                    "Usage: :flush-destructive [<Class>|#kind|#{ #file => \"path\" }]".to_string(),
+                ),
+            }
         } else {
             client.eval(&case.expression)
         };
