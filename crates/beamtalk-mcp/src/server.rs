@@ -13,6 +13,10 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::tool_expr::{
+    FlushFilter, flush_expr, precheck_method_expr, remove_method_expr,
+    remove_method_if_absent_expr, save_class_expr,
+};
 use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{
     ServerHandler,
@@ -211,19 +215,6 @@ fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
     )
 }
 
-/// Build the Beamtalk expression for the `precheck_method` MCP tool — the
-/// pre-save advisory precheck (ADR 0105 Phase 3, BT-2782). Selector is the
-/// bare form (no leading `#`). Nothing installs; `Behaviour>>precheckCompile:
-/// source:` is read-only.
-fn precheck_method_expr(class: &str, selector: &str, body: &str) -> String {
-    format!(
-        "{} precheckCompile: #{} source: \"{}\"",
-        class,
-        selector,
-        escape_string_literal(body),
-    )
-}
-
 /// Build the Beamtalk expression for the `try_method` MCP tool — ephemeral
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
 fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
@@ -233,62 +224,6 @@ fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
         selector,
         escape_string_literal(body),
     )
-}
-
-/// Build the Beamtalk expression for the `save_class` MCP tool — new-class
-/// creation path (ADR 0082 Phase 3).
-fn save_class_expr(source: &str, path: &str) -> String {
-    format!(
-        "Workspace newClass: \"{}\" at: \"{}\"",
-        escape_string_literal(source),
-        escape_string_literal(path),
-    )
-}
-
-/// Build the Beamtalk expression for the `remove_method` MCP tool — the
-/// no-fallback path (ADR 0112 Phase 4, BT-3188). Selector is the bare form
-/// (no leading `#`). Raises `selector_not_found` if the selector is not
-/// defined locally or as an extension.
-fn remove_method_expr(class: &str, selector: &str) -> String {
-    format!("{class} removeSelector: #{selector}")
-}
-
-/// Build the Beamtalk expression for the `remove_method` MCP tool's
-/// `if_absent` fallback path (ADR 0112 Phase 4, BT-3188). Unlike
-/// `save_method_expr`'s `body`, `if_absent` is raw Beamtalk expression code,
-/// not a String value: it becomes the body of the `ifAbsent:` fallback block
-/// literal, which the runtime evaluates as code on an absent selector — it is
-/// never passed through a `compile:source:`-style primitive that takes a
-/// source string as data.
-fn remove_method_if_absent_expr(class: &str, selector: &str, if_absent: &str) -> String {
-    format!("{class} removeSelector: #{selector} ifAbsent: [{if_absent}]")
-}
-
-/// Scope filter for the `flush` MCP tool (ADR 0082 Phase 3). Mutually
-/// exclusive; the tool wrapper enforces this before constructing the
-/// expression.
-#[derive(Clone, Copy)]
-enum FlushFilter<'a> {
-    None,
-    Class(&'a str),
-    File(&'a str),
-    Kind(&'a str),
-}
-
-/// Build the Beamtalk expression for the `flush` MCP tool.
-///
-/// Surface map: `Workspace flush` / `Workspace flush: ClassName` /
-/// `Workspace flush: #{ #file => "path" }` / `Workspace flush: #'kind'`.
-fn flush_expr(filter: FlushFilter<'_>) -> String {
-    match filter {
-        FlushFilter::None => "Workspace flush".to_string(),
-        FlushFilter::Class(class) => format!("Workspace flush: {class}"),
-        FlushFilter::File(file) => format!(
-            "Workspace flush: #{{ #file => \"{}\" }}",
-            escape_string_literal(file)
-        ),
-        FlushFilter::Kind(kind) => format!("Workspace flush: #'{kind}'"),
-    }
 }
 
 /// Check a REPL response for errors and return early with a formatted error result.
@@ -4144,23 +4079,6 @@ mod tests {
     }
 
     #[test]
-    fn precheck_method_expr_compiles_precheck_compile_source() {
-        // `precheck_method` → `aClass precheckCompile: #selector source: body`.
-        assert_eq!(
-            precheck_method_expr("Counter", "getCount", "getCount => \"nope\""),
-            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\"",
-        );
-    }
-
-    #[test]
-    fn precheck_method_expr_preserves_keyword_selectors() {
-        assert_eq!(
-            precheck_method_expr("Dict", "at:put:", "..."),
-            "Dict precheckCompile: #at:put: source: \"...\"",
-        );
-    }
-
-    #[test]
     fn try_method_expr_compiles_ephemeral_patch() {
         // `try_method` → `aClass tryCompile: #selector source: body`.
         assert_eq!(
@@ -4169,95 +4087,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn save_class_expr_compiles_new_class_creation() {
-        // `save_class` → `Workspace newClass: source at: path`.
-        assert_eq!(
-            save_class_expr("Object subclass: Greeter", "src/greeter.bt"),
-            "Workspace newClass: \"Object subclass: Greeter\" at: \"src/greeter.bt\"",
-        );
-    }
-
-    #[test]
-    fn save_class_expr_escapes_source_quotes_and_braces() {
-        // A class source containing string-interpolation literals must come
-        // through as a String value, not as embedded Beamtalk source.
-        // Newlines pass through verbatim — Beamtalk strings are multi-line.
-        let source = "Object subclass: Greeter\n  greet => \"hi {name}\"";
-        let got = save_class_expr(source, "src/greeter.bt");
-        assert_eq!(
-            got,
-            "Workspace newClass: \"Object subclass: Greeter\n  greet => \\\"hi \\{name}\\\"\" at: \"src/greeter.bt\"",
-        );
-    }
-
-    // --- ADR 0112 Phase 4 (BT-3188): MCP remove_method tool wiring ---
-
-    #[test]
-    fn remove_method_expr_compiles_remove_selector() {
-        // `remove_method` → `aClass removeSelector: #selector`.
-        assert_eq!(
-            remove_method_expr("Counter", "increment"),
-            "Counter removeSelector: #increment",
-        );
-    }
-
-    #[test]
-    fn remove_method_expr_preserves_keyword_selectors() {
-        assert_eq!(
-            remove_method_expr("Dict", "at:put:"),
-            "Dict removeSelector: #at:put:",
-        );
-    }
-
-    #[test]
-    fn remove_method_if_absent_expr_compiles_fallback_block() {
-        // `if_absent` is raw Beamtalk code — it becomes the fallback block's
-        // body verbatim, not an escaped String value.
-        assert_eq!(
-            remove_method_if_absent_expr("Counter", "bogus", "\"not found\""),
-            "Counter removeSelector: #bogus ifAbsent: [\"not found\"]",
-        );
-    }
-
-    #[test]
-    fn flush_expr_no_filter() {
-        assert_eq!(flush_expr(FlushFilter::None), "Workspace flush");
-    }
-
-    #[test]
-    fn flush_expr_class_filter() {
-        assert_eq!(
-            flush_expr(FlushFilter::Class("Counter")),
-            "Workspace flush: Counter",
-        );
-    }
-
-    #[test]
-    fn flush_expr_file_filter_uses_file_dict() {
-        // The Beamtalk-side flush: selector accepts a Dictionary
-        // `#{ #file => "..." }` (see Workspace.bt flush: docs).
-        assert_eq!(
-            flush_expr(FlushFilter::File("src/foo.bt")),
-            "Workspace flush: #{ #file => \"src/foo.bt\" }",
-        );
-    }
-
-    #[test]
-    fn flush_expr_file_filter_escapes_path() {
-        assert_eq!(
-            flush_expr(FlushFilter::File("src/\"weird\".bt")),
-            "Workspace flush: #{ #file => \"src/\\\"weird\\\".bt\" }",
-        );
-    }
-
-    #[test]
-    fn flush_expr_kind_filter_uses_quoted_symbol() {
-        // Hyphenated kinds (e.g. `new-class`) require a quoted-symbol literal
-        // — Beamtalk symbol literals without quotes only accept identifiers.
-        assert_eq!(
-            flush_expr(FlushFilter::Kind("new-class")),
-            "Workspace flush: #'new-class'",
-        );
-    }
+    // `save_class_expr`, `precheck_method_expr`, `remove_method_expr`,
+    // `remove_method_if_absent_expr`, and `flush_expr`/`FlushFilter` are
+    // defined in `beamtalk_core::tool_expr` (BT-3193) and golden-tested
+    // there — that suite is the single source of truth both this crate and
+    // `beamtalk-lsp` call into, so there is nothing left to re-test here.
 }

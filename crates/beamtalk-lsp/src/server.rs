@@ -28,7 +28,11 @@ use beamtalk_core::language_service::{
 use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
-use beamtalk_core::unparse::{escape_string_literal, format_source};
+use beamtalk_core::tool_expr::{
+    FlushFilter, flush_expr, precheck_method_expr, remove_method_expr,
+    remove_method_if_absent_expr, save_class_expr,
+};
+use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use tower_lsp::jsonrpc::Result;
@@ -78,8 +82,10 @@ pub(crate) const CMD_PRECHECK_METHOD: &str = "beamtalk.precheckMethod";
 /// (`Workspace recheckImage` / REPL `:recheck image`).
 pub(crate) const CMD_RECHECK_IMAGE: &str = "beamtalk.recheckImage";
 /// ADR 0112 Phase 4 (BT-3188): remove a method from a class
-/// (`Behaviour>>removeSelector:` / `removeSelector:ifAbsent:`), mirroring
-/// MCP's `remove_method` tool.
+/// (`Behaviour>>removeSelector:` / `removeSelector:ifAbsent:`). Its
+/// expression shape is shared with MCP's `remove_method` tool via
+/// `beamtalk_core::tool_expr::remove_method_expr` (BT-3193) — the two can't
+/// drift, since both call the same function.
 pub(crate) const CMD_REMOVE_METHOD: &str = "beamtalk.removeMethod";
 
 /// All commands surfaced via `executeCommand`. Wired into
@@ -3454,9 +3460,12 @@ pub(crate) fn resolve_flushed_path(raw: &str, roots: &[PathBuf]) -> Option<PathB
 
 /// ADR 0082 Phase 3 (BT-2289): map a `workspace/executeCommand` invocation
 /// to the Beamtalk expression that compiles to the same effect on the live
-/// workspace. Mirrors `beamtalk-mcp`'s expression builders one-for-one so
-/// surface parity is preserved (REPL `:flush` ≡ MCP `flush` ≡ LSP
-/// `beamtalk.flush`).
+/// workspace. Delegates the actual expression construction to
+/// `beamtalk_core::tool_expr`, the same shared builders `beamtalk-mcp`'s
+/// typed tools call — a single implementation both surfaces call into, so
+/// REPL `:flush` ≡ MCP `flush` ≡ LSP `beamtalk.flush` can't drift apart
+/// (BT-3193; see `beamtalk_core::tool_expr`'s module docs and unit tests for
+/// the enforcing conformance suite).
 ///
 /// Returns the expression string on success or a human-readable parameter
 /// error on failure (which the LSP layer surfaces as `invalid_params`).
@@ -3473,24 +3482,19 @@ pub(crate) fn build_command_expression(
                     arguments.len()
                 ));
             }
-            Ok("Workspace flush".to_string())
+            Ok(flush_expr(FlushFilter::None))
         }
         CMD_FLUSH_CLASS => {
             let class = expect_string_arg(arguments, 0, "class")?;
             validate_class_name(&class)?;
-            // `Workspace flush: ClassName` — the class is named literally in
-            // the expression (no escaping); validation above prevents any
-            // shape that could parse differently.
-            Ok(format!("Workspace flush: {class}"))
+            // The class is named literally in the expression (no escaping);
+            // validation above prevents any shape that could parse
+            // differently.
+            Ok(flush_expr(FlushFilter::Class(&class)))
         }
         CMD_FLUSH_FILE => {
             let file = expect_string_arg(arguments, 0, "file")?;
-            // `Workspace flush: #{ #file => "path" }` — Symbol-keyed
-            // dictionary; the path is passed as a String value.
-            Ok(format!(
-                "Workspace flush: #{{ #file => \"{}\" }}",
-                escape_string_literal(&file)
-            ))
+            Ok(flush_expr(FlushFilter::File(&file)))
         }
         CMD_FLUSH_KIND => {
             let kind = expect_string_arg(arguments, 0, "kind")?;
@@ -3507,7 +3511,7 @@ pub(crate) fn build_command_expression(
                     "{CMD_FLUSH_KIND}: 'kind' must be an identifier (letters, digits, '-' or '_'); got '{kind}'"
                 ));
             }
-            Ok(format!("Workspace flush: #'{bare}'"))
+            Ok(flush_expr(FlushFilter::Kind(bare)))
         }
         CMD_SAVE_CLASS => {
             let source = expect_string_arg(arguments, 0, "source")?;
@@ -3518,14 +3522,7 @@ pub(crate) fn build_command_expression(
             if path.is_empty() {
                 return Err(format!("{CMD_SAVE_CLASS}: 'path' must not be empty"));
             }
-            // Mirrors `beamtalk-mcp::save_class_expr`: pass body + path as
-            // String values; the workspace primitive takes them as values
-            // rather than re-parsed Beamtalk source.
-            Ok(format!(
-                "Workspace newClass: \"{}\" at: \"{}\"",
-                escape_string_literal(&source),
-                escape_string_literal(&path)
-            ))
+            Ok(save_class_expr(&source, &path))
         }
         CMD_PRECHECK_METHOD => {
             let class = expect_string_arg(arguments, 0, "class")?;
@@ -3539,12 +3536,7 @@ pub(crate) fn build_command_expression(
             if source.is_empty() {
                 return Err(format!("{CMD_PRECHECK_METHOD}: 'source' must not be empty"));
             }
-            // Mirrors `CMD_SAVE_CLASS`'s / `save_method_expr`'s shape:
-            // `ClassName precheckCompile: #selector source: "body"`.
-            Ok(format!(
-                "{class} precheckCompile: #{selector} source: \"{}\"",
-                escape_string_literal(&source)
-            ))
+            Ok(precheck_method_expr(&class, selector, &source))
         }
         CMD_RECHECK_IMAGE => {
             if !arguments.is_empty() {
@@ -3566,18 +3558,15 @@ pub(crate) fn build_command_expression(
             // Optional third argument: an `ifAbsent:` fallback. Unlike
             // `CMD_PRECHECK_METHOD`'s `source`, this is raw Beamtalk
             // expression code embedded as the fallback block's body, not a
-            // String value passed to a `compile:source:`-style primitive —
-            // mirrors `beamtalk-mcp::remove_method_if_absent_expr`. Missing
-            // and explicit `null` are both treated as "no fallback" — some
-            // JSON-RPC clients pad positional arguments with `null` rather
-            // than omitting the trailing slot.
+            // String value passed to a `compile:source:`-style primitive.
+            // Missing and explicit `null` are both treated as "no fallback"
+            // — some JSON-RPC clients pad positional arguments with `null`
+            // rather than omitting the trailing slot.
             if matches!(arguments.get(2), None | Some(serde_json::Value::Null)) {
-                return Ok(format!("{class} removeSelector: #{selector}"));
+                return Ok(remove_method_expr(&class, selector));
             }
             let if_absent = expect_string_arg(arguments, 2, "ifAbsent")?;
-            Ok(format!(
-                "{class} removeSelector: #{selector} ifAbsent: [{if_absent}]"
-            ))
+            Ok(remove_method_if_absent_expr(&class, selector, &if_absent))
         }
         _ => Err(format!("unknown LSP command: {command}")),
     }
@@ -4814,6 +4803,7 @@ mod tests {
     use super::*;
     use beamtalk_core::language_service::HoverInfo;
     use beamtalk_core::test_helpers::unique_temp_dir;
+    use beamtalk_core::unparse::escape_string_literal;
     use camino::Utf8PathBuf;
     use std::fs;
 
