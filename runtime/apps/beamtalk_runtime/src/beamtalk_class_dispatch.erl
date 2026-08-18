@@ -285,7 +285,7 @@ function falls through to its local/inherited-method lookups. Mirrors
 `handle_class_method_call/6`'s BT-3192 priority order (extension before
 local method table).
 
-Reuses `apply_class_extension_fun/5` for the same calling convention and
+Reuses `apply_class_extension_fun/6` for the same calling convention and
 crash-safety as the external-dispatch path (a bad extension body must not
 take down the class's own long-lived gen_server, which this self-send also
 runs inside), then adapts the outcome to the self-dispatch caller shape via
@@ -308,7 +308,7 @@ check_class_self_extension(ClassName, Selector, ClassVars, Args) ->
                 unwrap_self_dispatch_extension_outcome(
                     ClassName,
                     Selector,
-                    apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, Selector)
+                    apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector)
                 )};
         not_found ->
             not_found
@@ -323,7 +323,7 @@ self_dispatch_module(ClassName) ->
     end.
 
 -doc """
-BT-3198: Adapt `apply_class_extension_fun/5`'s outcome to the self-dispatch
+BT-3198: Adapt `apply_class_extension_fun/6`'s outcome to the self-dispatch
 caller shape — mirroring `unwrap_self_dispatch_outcome/3` for compiled/
 runtime-installed class methods, but for the `{ok, {Result, NewClassVars}}`
 2-tuple `apply_extension_by_arity/4` returns rather than the plain `{ok,
