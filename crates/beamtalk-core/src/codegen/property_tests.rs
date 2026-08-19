@@ -16,7 +16,8 @@
 
 use proptest::prelude::*;
 
-use crate::codegen::core_erlang::{CodegenOptions, generate_module, generate_repl_expression};
+use crate::codegen::core_erlang::{CodegenOptions, generate_module};
+use crate::repl::codegen::generate_repl_expression;
 use crate::source_analysis::{lex_with_eof, parse};
 
 // ============================================================================

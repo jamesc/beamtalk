@@ -8,6 +8,9 @@
 //! messages, cast sends, and module-existence warning diagnostics.
 
 use super::*;
+use crate::repl::codegen::{
+    generate_repl_expression, generate_repl_expressions, generate_repl_expressions_with_index,
+};
 
 #[test]
 fn test_generate_unary_message_send_creates_future() {
