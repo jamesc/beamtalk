@@ -80,20 +80,63 @@ pub enum RuntimeError {
 /// `workspace/applyEdit` per touched file.
 #[derive(Debug, Clone)]
 pub struct FlushEvent {
-    /// Absolute or workspace-relative paths of files touched by the flush —
-    /// written (patch, `new-class`, `remove-method`) *or*, since ADR 0113
-    /// Phase 2 (BT-3207), deleted (`remove-class`, Tier 2 destructive
-    /// flush). The runtime sends whatever `ChangeEntry.sourceFile` carried
-    /// either way; the wire frame does not distinguish written from
-    /// deleted, so the LSP layer canonicalises against its workspace roots
-    /// and classifies each path by whether it still exists on disk at that
-    /// point (`resolve_flushed_path` in `crates/beamtalk-lsp/src/server.rs`)
-    /// — a Tier 2 delete has already unlinked the file by the time this
-    /// event fires (`beamtalk_workspace_flush:complete_flush/5` announces
-    /// after Phase B commits), so "does the path still exist" is a reliable
-    /// oracle for `DeleteFile` vs. an ordinary content edit (ADR 0113 Phase
-    /// 4a, BT-3209).
-    pub files: Vec<String>,
+    /// One entry per file touched by the flush — written (patch, `new-class`,
+    /// `remove-method`) *or*, since ADR 0113 Phase 2 (BT-3207), deleted
+    /// (`remove-class`, Tier 2 destructive flush).
+    pub files: Vec<FlushedFile>,
+}
+
+/// One file touched by a flush, paired with its operation kind when the
+/// runtime reported one (ADR 0113 LSP follow-up, BT-3212).
+#[derive(Debug, Clone)]
+pub struct FlushedFile {
+    /// Absolute or workspace-relative path as `ChangeEntry.sourceFile`
+    /// carried it — resolved against the LSP's workspace roots by
+    /// `resolve_flushed_path` (`crates/beamtalk-lsp/src/server.rs`).
+    pub path: String,
+    /// The per-file operation kind from the wire's `fileKinds` companion
+    /// list (`beamtalk_workspace_changelog:entry_kind/1`'s own enum value,
+    /// bucketed into the three shapes the LSP acts on), or `None` when the
+    /// producer predates BT-3212 and sent no `fileKinds` entry for this
+    /// path — the older, filesystem-existence-based classification in
+    /// `resolve_flushed_path` remains the fallback for that case (BT-3209
+    /// backward-compat tolerance).
+    pub kind: Option<FlushFileKind>,
+}
+
+/// The three flush operation shapes the LSP distinguishes on the wire
+/// (ADR 0113 LSP follow-up, BT-3212) — bucketed client-side from the
+/// runtime's own `entry_kind/1` enum value rather than a value this crate
+/// invents: `'new-class'` and `'remove-class'` map straight across, and
+/// every other `entry_kind/1` value (`instance`, `class`,
+/// `'remove-method'`, or an unrecognised future value) buckets to
+/// `Patch` — the ordinary `TextEdit`/`Change` shape, unchanged since ADR
+/// 0082 Phase 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlushFileKind {
+    /// `Workspace newClass:at:` — the file did not exist before this flush.
+    /// Emitted as a `CreateFile` resource operation.
+    NewClass,
+    /// `removeFromSystem` (Tier 2 destructive flush, ADR 0113) — the flush
+    /// already unlinked the file from disk. Emitted as a `DeleteFile`
+    /// resource operation (BT-3209).
+    RemoveClass,
+    /// Everything else: an ordinary method patch or `'remove-method'`
+    /// excision against a file that existed both before and after.
+    /// Emitted as a whole-document `TextEdit`.
+    Patch,
+}
+
+impl FlushFileKind {
+    /// Bucket a raw `entry_kind/1` wire value (e.g. `"new-class"`,
+    /// `"instance"`) into the three LSP-relevant shapes.
+    fn from_wire(kind: &str) -> Self {
+        match kind {
+            "new-class" => Self::NewClass,
+            "remove-class" => Self::RemoveClass,
+            _ => Self::Patch,
+        }
+    }
 }
 
 /// A class-load or class-reload event surfaced to the LSP server so it
@@ -674,8 +717,8 @@ fn handle_push_frame(
     // consumed by the LSP today — fall through and drop silently.
     match (channel, event) {
         (Some("workspace"), Some("flush_completed")) => {
-            let files = value
-                .get("data")
+            let data = value.get("data");
+            let paths = data
                 .and_then(|d| d.get("files"))
                 .and_then(|f| f.as_array())
                 .map(|arr| {
@@ -684,10 +727,35 @@ fn handle_push_frame(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if files.is_empty() {
+            if paths.is_empty() {
                 debug!("runtime: flush_completed with empty files list");
                 return;
             }
+            // BT-3212: per-file operation kind, keyed by path — absent (an
+            // older producer, or a path this list simply omits) leaves that
+            // file's `kind` as `None`, so `flush_event_listener` falls back
+            // to the pre-BT-3212 existence check for it (BT-3209 backward
+            // compat).
+            let kinds_by_path: std::collections::HashMap<&str, FlushFileKind> = data
+                .and_then(|d| d.get("fileKinds"))
+                .and_then(|f| f.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|entry| {
+                            let path = entry.get("file")?.as_str()?;
+                            let kind = entry.get("kind")?.as_str()?;
+                            Some((path, FlushFileKind::from_wire(kind)))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let files = paths
+                .into_iter()
+                .map(|path| {
+                    let kind = kinds_by_path.get(path.as_str()).copied();
+                    FlushedFile { path, kind }
+                })
+                .collect();
             if let Err(e) = flush_tx.send(FlushEvent { files }) {
                 warn!(error = %e, "runtime: flush_tx receiver dropped");
             }
@@ -905,7 +973,50 @@ mod tests {
             &reload_tx,
         );
         let evt = rx.recv().await.expect("flush event");
-        assert_eq!(evt.files, vec!["src/counter.bt", "src/foo.bt"]);
+        let paths: Vec<&str> = evt.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/counter.bt", "src/foo.bt"]);
+        // No `fileKinds` companion on the wire: every file's kind is `None`
+        // (BT-3209 fallback tolerance for a pre-BT-3212 producer shape).
+        assert!(evt.files.iter().all(|f| f.kind.is_none()));
+    }
+
+    #[tokio::test]
+    async fn push_frame_with_file_kinds_is_forwarded() {
+        let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "workspace",
+                "event": "flush_completed",
+                "data": {
+                    "files": ["src/greeter.bt", "src/counter.bt", "src/widget.bt"],
+                    "fileKinds": [
+                        {"file": "src/greeter.bt", "kind": "new-class"},
+                        {"file": "src/counter.bt", "kind": "instance"},
+                        {"file": "src/widget.bt", "kind": "remove-class"}
+                    ]
+                }
+            }),
+            &tx,
+            &class_tx,
+            &reload_tx,
+        );
+        let evt = rx.recv().await.expect("flush event");
+        let kinds: Vec<(&str, Option<FlushFileKind>)> = evt
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("src/greeter.bt", Some(FlushFileKind::NewClass)),
+                ("src/counter.bt", Some(FlushFileKind::Patch)),
+                ("src/widget.bt", Some(FlushFileKind::RemoveClass)),
+            ]
+        );
     }
 
     #[tokio::test]

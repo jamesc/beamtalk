@@ -665,7 +665,9 @@ class_removed_pushes_frame_test() ->
 
 flush_completed_normalises_files_test() ->
     %% Mix of binary, charlist, and invalid entries exercises every
-    %% normalise_files_for_push/1 branch.
+    %% normalise_files_for_push/1 branch. No `fileKinds` key at all — a
+    %% pre-BT-3212 producer shape — must default to an empty list rather than
+    %% crash (BT-3212 backward-compat tolerance).
     Files = [<<"src/a.bt">>, "src/b.bt", 12345, {bad, tuple}],
     Event = #{'$beamtalk_class' => 'FlushCompleted', files => Files},
     {Frames, _State} = beamtalk_ws_handler:websocket_info(
@@ -674,9 +676,45 @@ flush_completed_normalises_files_test() ->
     Decoded = first_text(Frames),
     ?assertEqual(<<"workspace">>, maps:get(<<"channel">>, Decoded)),
     ?assertEqual(<<"flush_completed">>, maps:get(<<"event">>, Decoded)),
-    Out = maps:get(<<"files">>, maps:get(<<"data">>, Decoded)),
+    Data = maps:get(<<"data">>, Decoded),
+    Out = maps:get(<<"files">>, Data),
     %% Only the two valid path entries survive.
-    ?assertEqual([<<"src/a.bt">>, <<"src/b.bt">>], Out).
+    ?assertEqual([<<"src/a.bt">>, <<"src/b.bt">>], Out),
+    ?assertEqual([], maps:get(<<"fileKinds">>, Data)).
+
+%% BT-3212 (ADR 0113 LSP follow-up): `fileKinds` entries round-trip as
+%% `{"file": ..., "kind": ...}` JSON objects, with a malformed entry (missing
+%% key, non-binary file, non-atom kind) dropped rather than crashing the push
+%% frame — mirrors `flush_completed_normalises_files_test`'s coverage of
+%% `normalise_files_for_push/1` for the new `normalise_file_kinds_for_push/1`.
+flush_completed_normalises_file_kinds_test() ->
+    FileKinds = [
+        #{file => <<"src/greeter.bt">>, kind => 'new-class'},
+        #{file => <<"src/widget.bt">>, kind => 'remove-class'},
+        #{file => <<"src/counter.bt">>, kind => instance},
+        %% Malformed: dropped, not surfaced.
+        #{file => <<"src/bad.bt">>, kind => <<"not-an-atom">>},
+        #{kind => instance},
+        not_a_map
+    ],
+    Event = #{
+        '$beamtalk_class' => 'FlushCompleted',
+        files => [<<"src/greeter.bt">>, <<"src/widget.bt">>, <<"src/counter.bt">>],
+        fileKinds => FileKinds
+    },
+    {Frames, _State} = beamtalk_ws_handler:websocket_info(
+        ann('FlushCompleted', Event), authed_state()
+    ),
+    Decoded = first_text(Frames),
+    Out = maps:get(<<"fileKinds">>, maps:get(<<"data">>, Decoded)),
+    ?assertEqual(
+        [
+            #{<<"file">> => <<"src/greeter.bt">>, <<"kind">> => <<"new-class">>},
+            #{<<"file">> => <<"src/widget.bt">>, <<"kind">> => <<"remove-class">>},
+            #{<<"file">> => <<"src/counter.bt">>, <<"kind">> => <<"instance">>}
+        ],
+        Out
+    ).
 
 %% ADR 0105 Phase 1 (BT-2779): the reload_check/completed push frame —
 %% `beamtalk_repl_loader:publish_recheck_outcome/5`'s `'ReloadCheckCompleted'`
