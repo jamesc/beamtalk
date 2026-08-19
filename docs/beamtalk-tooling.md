@@ -421,10 +421,14 @@ for the full model.
 |---------|-------------------|-------------|
 | `:changes` | `Workspace changes` | Show the ChangeLog (returns a `ChangeLog` object) |
 | `:dirty` | `Workspace changes dirtyMethods` | Per-class set of dirty selectors |
-| `:flush` | `Workspace flush` | Write every durable + flushable entry back to its source file |
+| `:flush` | `Workspace flush` | Write every durable + flushable Tier 1 entry back to its source file |
 | `:flush Counter` | `Workspace flush: Counter` | Flush entries targeting one class |
 | `:flush #'new-class'` | `Workspace flush: #'new-class'` | Flush only entries of one kind |
 | `:flush #{ #file => "path" }` | `Workspace flush: #{ #file => "path" }` | Flush entries against one file |
+| `:flush-destructive` | `Workspace flushIncludingDestructive` | Flush all pending entries including Tier 2 (`remove-class` — file deletion); prompts `y/N` |
+| `:flush-destructive Counter` | `Workspace flush: Counter confirmDestructive: true` | Destructive flush scoped to one class; prompts `y/N` |
+| `:remove-method Counter increment` | `Counter removeSelector: #increment` | Remove a method from a class (strips optional `#` from selector) |
+| `:remove-class Counter` | `Counter removeFromSystem` | Remove a class entirely (memory-only; prompts `y/N`). Flush separately to delete the file |
 
 ```beamtalk
 > Counter >> increment => self.value := self.value + 1   // memory patched, logged
@@ -801,7 +805,9 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `save_method` | Durable live patch (ADR 0082): wraps `aClass compile: #sel source: body`; logs a durable ChangeEntry |
 | `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry (not flushable — pruned on workspace restart or via `Workspace changes clear`) |
 | `save_class` | Create a new class file (ADR 0082): wraps `Workspace newClass: source at: path`; logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
-| `flush` | Write pending durable changes to disk (ADR 0082): wraps `Workspace flush` (optional `class` / `file` / `kind` argument selects a subset) |
+| `remove_method` | Remove a method from a class (ADR 0112): wraps `Behaviour>>removeSelector:` with optional `if_absent` fallback |
+| `remove_class` | Remove a class entirely (ADR 0113): wraps `removeFromSystem`, returns the resulting `remove-class` ChangeEntry |
+| `flush` | Write pending durable changes to disk (ADR 0082): wraps `Workspace flush` (optional `class` / `file` / `kind` argument selects a subset). Pass `confirm_destructive: true` to include Tier 2 entries (`remove-class` — file deletion) |
 | `list_changes` | Wraps `Workspace changes` — serialised view of the pending ChangeLog |
 | `dirty_methods` | Wraps `Workspace changes dirtyMethods` — per-class set of dirty selectors |
 | `enable-tracing` | Enable detailed trace event capture for actor dispatch |
@@ -813,7 +819,7 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `recheck_image` | Whole-image re-check (ADR 0105 Phase 3): re-check all live classes for stale callers and broken signatures |
 | `diagnostic_summary` | Aggregated diagnostic counts by category/severity plus type-coverage stats (offline) |
 
-All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)). The live-edit save tools (`save_method`, `try_method`, `save_class`, `flush`, `list_changes`, `dirty_methods`) correspond to the ChangeLog model (see [Language Features — Saving live edits back to disk](beamtalk-language-features.md#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082)); the same operations are exposed to editors via the LSP `executeCommand` handlers `beamtalk.flush`, `beamtalk.flush.class`, `beamtalk.flush.file`, `beamtalk.flush.kind`, and `beamtalk.saveClass`, which emit `workspace/applyEdit` on each flushed file so open buffers refresh automatically.
+All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)). The live-edit save tools (`save_method`, `try_method`, `save_class`, `remove_method`, `remove_class`, `flush`, `list_changes`, `dirty_methods`) correspond to the ChangeLog model (see [Language Features — Saving live edits back to disk](beamtalk-language-features.md#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082)); the same operations are exposed to editors via the LSP `executeCommand` handlers `beamtalk.flush`, `beamtalk.flush.class`, `beamtalk.flush.file`, `beamtalk.flush.kind`, `beamtalk.saveClass`, and `beamtalk.removeMethod`, which emit `workspace/applyEdit` on each flushed file so open buffers refresh automatically. When a destructive flush deletes a `.bt` file, the LSP emits a typed `DeleteFile` resource operation so the editor closes any open buffer for the removed file.
 
 ## VS Code Extension
 
