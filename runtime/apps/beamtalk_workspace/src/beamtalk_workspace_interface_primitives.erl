@@ -697,6 +697,18 @@ dynamically-defined class with nothing on disk to begin with, `flushable:
 false, not_flushable_reason: "dynamic"`) has nothing to reinstall *from*; this
 is a loud structured error rather than a silent no-op, matching this module's
 error contract elsewhere (never guess, never drop a revert silently).
+
+Before reinstalling, `check_no_external_drift/3` compares the file currently
+on disk at `SourceFile` against `PrevBody` (BT-3213, Claude review follow-up
+on BT-3208): a still-*pending* `'remove-class'` entry never touches disk
+(Tier 2 removals only unlink on an explicit `flushIncludingDestructive`), so
+the file this reads is exactly what was there when the class was removed —
+unless someone edited it out-of-band (another session, git, an editor) while
+the removal sat pending. Reinstalling `PrevBody` over that edit, then retiring
+the entry as "cleanly reverted", would silently discard it. On drift, this
+raises a structured error and returns *before* reinstalling or retiring —
+the class stays removed and the original entry stays pending, exactly as if
+revert had never been called.
 """.
 -spec reinstall_reverted_class(binary(), binary(), beamtalk_workspace_changelog:entry()) -> term().
 reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
@@ -715,20 +727,110 @@ reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
                 )
             );
         SourceFile ->
-            case beamtalk_repl_eval:revert_remove_class(PrevBody, SourceFile) of
-                {ok, _Objects} ->
-                    %% Mirrors `revert_removal/3`'s "undoing an add emits no new
-                    %% entry" symmetry: undoing this removal doesn't emit one
-                    %% either (`new_class_install/8`'s `no_log` mode), so the
-                    %% original `'remove-class'` entry must be retired here —
-                    %% otherwise it stays active/pending forever even though
-                    %% its effect has been undone (ADR 0113, BT-3208 review
-                    %% fix: a stale `'remove-class'` entry would misreport
-                    %% `skipped: destructive`/block a real future removal).
-                    retire_reverted_remove_class_entry(ClassNameBin, Entry);
-                {error, Reason} ->
-                    beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+            case check_no_external_drift(SourceFile, PrevBody, ClassNameBin) of
+                ok ->
+                    reinstall_reverted_class_body(ClassNameBin, PrevBody, SourceFile, Entry);
+                {error, Err} ->
+                    beamtalk_error:raise(Err)
             end
+    end.
+
+%% Actually recompile+reinstall and retire the original entry, once
+%% `check_no_external_drift/3` has confirmed disk still matches `PrevBody`.
+-spec reinstall_reverted_class_body(
+    binary(), binary(), binary(), beamtalk_workspace_changelog:entry()
+) ->
+    term().
+reinstall_reverted_class_body(ClassNameBin, PrevBody, SourceFile, Entry) ->
+    case beamtalk_repl_eval:revert_remove_class(PrevBody, SourceFile) of
+        {ok, _Objects} ->
+            %% Mirrors `revert_removal/3`'s "undoing an add emits no new
+            %% entry" symmetry: undoing this removal doesn't emit one
+            %% either (`new_class_install/8`'s `no_log` mode), so the
+            %% original `'remove-class'` entry must be retired here —
+            %% otherwise it stays active/pending forever even though
+            %% its effect has been undone (ADR 0113, BT-3208 review
+            %% fix: a stale `'remove-class'` entry would misreport
+            %% `skipped: destructive`/block a real future removal).
+            retire_reverted_remove_class_entry(ClassNameBin, Entry);
+        {error, Reason} ->
+            beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+    end.
+
+-doc """
+Drift check for a pending `'remove-class'` entry's reinstall (ADR 0113,
+BT-3213 — Claude review follow-up on BT-3208, "revert: of a pending
+remove-class entry can silently discard a concurrent out-of-band edit").
+
+Reads `SourceFile` off disk and compares it byte-for-byte against `PrevBody`
+(the entry's recorded whole-file `prev_source_ref` snapshot), the same
+comparison mechanism `beamtalk_workspace_flush:splice_with_prev/5` uses to
+detect an `external_edit` conflict on the ordinary flush path — just applied
+to a whole file instead of a byte span, since a `'remove-class'` entry
+records the whole prior file rather than a span. Three outcomes:
+
+  - disk bytes == `PrevBody`: no drift, `ok` — the file is exactly what it
+    was when the class was removed, safe to reinstall over.
+  - disk bytes differ: the file was edited out-of-band while the removal sat
+    pending. A structured `external_edit`-flavoured error, naming the
+    mismatch so the caller can reconcile manually.
+  - the file is missing or unreadable: it was deleted or replaced out-of-band
+    (an even bigger divergence than an edit). Also a structured error — never
+    silently treat "gone" as "safe to overwrite with the old snapshot".
+
+Either error case returns *without* reinstalling or retiring the entry, so a
+failed revert leaves the class removed and the original entry pending — the
+caller (`reinstall_reverted_class/3`) never reaches the reinstall step.
+""".
+-spec check_no_external_drift(binary(), binary(), binary()) -> ok | {error, #beamtalk_error{}}.
+check_no_external_drift(SourceFile, PrevBody, ClassNameBin) ->
+    case file:read_file(SourceFile) of
+        {ok, PrevBody} ->
+            ok;
+        {ok, _DiskBody} ->
+            {error,
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: cannot reinstall ">>,
+                        ClassNameBin,
+                        <<
+                            "; its file was edited externally while the removal was "
+                            "pending (the on-disk content no longer matches the "
+                            "recorded pre-removal snapshot): "
+                        >>,
+                        SourceFile,
+                        <<
+                            ". Reconcile the file manually before reverting, or use "
+                            "`Workspace changes clear` to discard this pending removal "
+                            "without reinstalling"
+                        >>
+                    ])
+                )};
+        {error, enoent} ->
+            {error,
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: cannot reinstall ">>,
+                        ClassNameBin,
+                        <<
+                            "; its recorded source file no longer exists on disk (deleted "
+                            "externally while the removal was pending): "
+                        >>,
+                        SourceFile
+                    ])
+                )};
+        {error, Reason} ->
+            {error,
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: cannot reinstall ">>,
+                        ClassNameBin,
+                        <<"; its recorded source file could not be read (">>,
+                        atom_to_binary(Reason, utf8),
+                        <<"): ">>,
+                        SourceFile
+                    ])
+                )}
     end.
 
 %% The class is already reinstalled and live by the time this runs — a

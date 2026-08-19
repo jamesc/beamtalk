@@ -1453,6 +1453,15 @@ caller is responsible for retiring the original `'remove-class'` entry (e.g.
 `mark_flushed/1`) once this returns successfully — undoing a removal, like
 undoing an add (`revert_removal/3`'s `'new-class'` case), does not itself
 emit a new ChangeEntry.
+
+The "its content already matches disk" assumption above holds only absent a
+concurrent out-of-band edit (another session, git, an editor touching the
+file while the removal sat pending) — this function does not itself guard
+against that. The caller,
+`beamtalk_workspace_interface_primitives:reinstall_reverted_class/3`, runs
+`check_no_external_drift/3` first and never calls this function at all if the
+on-disk file has drifted from the recorded `prev_source_ref` snapshot (BT-3213,
+Claude review follow-up on BT-3208) — see that function's doc.
 """.
 -spec revert_remove_class(binary() | string(), binary() | string()) ->
     {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.

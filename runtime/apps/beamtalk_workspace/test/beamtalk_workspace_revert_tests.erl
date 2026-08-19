@@ -53,6 +53,12 @@ revert" degrade for both `"remove-method"` and `"remove-class"` entries (an
 entry drops out of the active ChangeLog view once flushed, matching ADR
 0082/0113's documented "best-effort, pre-flush semantics only" contract).
 
+BT-3213 (Claude review follow-up on BT-3208): also covers
+`check_no_external_drift/3` — the drift check `reinstall_reverted_class/3`
+runs before reinstalling a pending `"remove-class"` entry's snapshot, so a
+concurrent out-of-band edit landing on the recorded `sourceFile` while the
+removal sat pending is detected (and refused) instead of silently discarded.
+
 These boot the full stack (compiler port + runtime + workspace_meta + changelog)
 against an isolated, in-project temp tree so the live install / remove and the
 flushable-with-prev-source recording paths run for real, then drive revert
@@ -113,6 +119,12 @@ revert_e2e_test_() ->
             fun revert_remove_class_entry_leaves_no_phantom_pending_entry/1,
             fun revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1,
             fun revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_missing/1,
+            %% BT-3213 (Claude review follow-up on BT-3208): drift detection
+            %% between the recorded `prev_source_ref` snapshot and the current
+            %% on-disk file before a pending "remove-class" entry is treated
+            %% as cleanly reverted.
+            fun revert_remove_class_entry_no_drift_reverts_as_before/1,
+            fun revert_remove_class_entry_detects_external_drift_and_refuses_to_reinstall/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
             fun revert_remove_class_entry_after_flush_is_unsupported/1
         ]}}.
@@ -996,6 +1008,100 @@ revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_mis
         ?_assertMatch({reinstall_class, _Body, _Entry}, Result),
         ?_assertMatch({ok, _}, RevertResult),
         ?_assert(is_pid(LoadedAfterRevert))
+    ].
+
+%%====================================================================
+%% BT-3213 (Claude review follow-up on BT-3208) — `reinstall_reverted_class/3`
+%% must detect drift between the recorded `prev_source_ref` snapshot and the
+%% current on-disk file before treating a pending "remove-class" entry as
+%% cleanly reverted (`check_no_external_drift/3`).
+%%====================================================================
+
+%% Regression: with no out-of-band edit, revert behaves exactly as it did
+%% before BT-3213 — the class comes back live and the original "remove-class"
+%% entry is retired (no phantom pending entry left behind). Same shape as
+%% `revert_remove_class_entry_reinstalls_the_class/1` /
+%% `revert_remove_class_entry_leaves_no_phantom_pending_entry/1` above, but
+%% named explicitly for this issue's acceptance criteria: "no drift -> revert
+%% succeeds as before".
+revert_remove_class_entry_no_drift_reverts_as_before(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3213NoDrift" ++ U),
+    {ok, _Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
+    ),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    LoadedAfterRemove = beamtalk_class_registry:whereis_class(ClassAtom),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    LoadedAfterRevert = beamtalk_class_registry:whereis_class(ClassAtom),
+    AfterRevertMethods =
+        case LoadedAfterRevert of
+            undefined -> [];
+            Pid -> beamtalk_runtime_api:local_instance_methods(Pid)
+        end,
+    ActiveForClass = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassName
+    ],
+    [
+        ?_assertEqual(undefined, LoadedAfterRemove),
+        ?_assertMatch({ok, _}, RevertResult),
+        ?_assert(is_pid(LoadedAfterRevert)),
+        ?_assert(lists:member(base, AfterRevertMethods)),
+        ?_assert(lists:member(greet, AfterRevertMethods)),
+        %% The original "remove-class" entry was retired, not left phantom.
+        ?_assertEqual([], ActiveForClass)
+    ].
+
+%% Drift detected: the recorded `sourceFile` was edited out-of-band (another
+%% session, git, an editor) while the "remove-class" removal sat pending.
+%% `classRemoveFromSystemByName` never touches disk itself (Tier 2 deletion
+%% only happens on an explicit `flushIncludingDestructive`, ADR 0113), so
+%% writing to the same path here genuinely simulates a concurrent external
+%% edit landing on the still-present file. Revert must fail loudly instead of
+%% silently reinstalling the stale `prev_source_ref` snapshot over that edit:
+%% the class stays removed, the external edit on disk is untouched, and the
+%% original entry stays pending (not retired) so nothing is lost.
+revert_remove_class_entry_detects_external_drift_and_refuses_to_reinstall(#{
+    tmp := Tmp, unique := U
+}) ->
+    ClassName = list_to_binary("Bt3213Drift" ++ U),
+    {ok, _Pid} = define_project_class(
+        Tmp, ClassName, ["  base => 1\n"]
+    ),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    Path = project_class_path(Tmp, ClassName),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    LoadedAfterRemove = beamtalk_class_registry:whereis_class(ClassAtom),
+    ExternalEdit = iolist_to_binary([
+        <<"Actor subclass: ">>, ClassName, <<"\n  base => 999\n">>
+    ]),
+    ok = file:write_file(Path, ExternalEdit),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    LoadedAfterRevert = beamtalk_class_registry:whereis_class(ClassAtom),
+    OnDiskAfterRevert = file:read_file(Path),
+    ActiveForClass = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassName
+    ],
+    [
+        ?_assertEqual(undefined, LoadedAfterRemove),
+        %% The revert fails loudly instead of silently discarding the edit.
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult),
+        %% The class stays removed — the stale snapshot was NOT reinstalled
+        %% over the external edit.
+        ?_assertEqual(undefined, LoadedAfterRevert),
+        %% The external edit on disk is untouched — nothing was overwritten.
+        ?_assertEqual({ok, ExternalEdit}, OnDiskAfterRevert),
+        %% The original "remove-class" entry stays pending/active — revert
+        %% did not succeed, so it must not be retired.
+        ?_assertEqual(1, length(ActiveForClass))
     ].
 
 %% Once a "remove-method" entry has been flushed (Tier 1 — an ordinary
