@@ -17,7 +17,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::runtime::{
-    ClassChangedEvent, FlushEvent, ReloadCheckEvent, ReloadFinding, RuntimeClient, RuntimeError,
+    ClassChangedEvent, FlushEvent, FlushFileKind, FlushedFile, ReloadCheckEvent, ReloadFinding,
+    RuntimeClient, RuntimeError,
 };
 
 use beamtalk_core::language_service::{
@@ -42,20 +43,20 @@ use tower_lsp::lsp_types::{
     CallHierarchyPrepareParams, CallHierarchyServerCapability, CodeAction, CodeActionKind,
     CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    DeleteFile, DeleteFileOptions, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentChangeOperation, DocumentChanges, DocumentFormattingParams,
+    CreateFile, CreateFileOptions, DeleteFile, DeleteFileOptions, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, DocumentChangeOperation, DocumentChanges, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
     ExecuteCommandOptions, ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverContents, HoverParams, HoverProviderCapability, ImplementationProviderCapability,
     InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType,
-    OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams, ResourceOp,
-    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Url, WorkDoneProgressOptions, WorkspaceEdit,
-    WorkspaceSymbolParams,
+    OneOf, OptionalVersionedTextDocumentIdentifier, ParameterInformation, ParameterLabel, Position,
+    Range, ReferenceParams, ResourceOp, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind, TextDocumentEdit,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkDoneProgressOptions,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -3331,38 +3332,44 @@ fn reload_finding_to_lsp_diagnostics(
         .collect()
 }
 
-/// ADR 0082 Phase 3 (BT-2289); ADR 0113 Phase 4a (BT-3209): consume
-/// `FlushEvent`s from the runtime listener and emit `workspace/applyEdit`
-/// per flushed file.
+/// ADR 0082 Phase 3 (BT-2289); ADR 0113 Phase 4a (BT-3209) and LSP follow-up
+/// (BT-3212): consume `FlushEvent`s from the runtime listener and emit
+/// `workspace/applyEdit` per flushed file.
 ///
 /// For each file in the event, the listener:
 /// 1. Resolves the runtime-reported path against the LSP workspace roots to
-///    an absolute filesystem path, and classifies it by whether the leaf
-///    still exists on disk ([`resolve_flushed_path`]) — a Tier 2 destructive
-///    flush (`remove-class`) has already unlinked the file by the time this
-///    event fires, so non-existence is the signal a `remove-class` entry
-///    left behind (the wire frame itself carries only a flat touched-file
-///    list, no per-file operation kind).
-/// 2. **Deleted** (`existed == false`): emits a [`DocumentChangeOperation::Op`]
-///    `DeleteFile` resource operation ([`delete_file_edit`]) — unconditionally,
-///    not gated on the open-paths check below, since a deletion is
-///    project-wide state (an open tab that must close, stale diagnostics)
-///    rather than something only an open buffer cares about.
-/// 3. **Still exists** (`existed == true`, patch / `new-class` /
-///    `remove-method` — unchanged from prior behaviour): checks the *live*
-///    open-paths handle to see whether the path is currently open in the
-///    editor. Files that aren't open are skipped — `VSCode` reads them fresh
-///    on next `did_open`. The check happens per event so files opened after
-///    the listener started are still picked up. Reads the new on-disk
-///    content and issues `apply_edit` with a single `TextEdit` covering the
-///    whole document ([`change_file_edit`]), so the open buffer realigns
-///    with the post-flush bytes. `VSCode`'s conflict UX handles unsaved
-///    local edits per the LSP spec.
-///
-/// `CreateFile` (the ADR's other typed resource operation, for `new-class`)
-/// is out of scope here: distinguishing "freshly created" from "patched
-/// in place" needs a signal this existence check can't produce (both leave
-/// the leaf present) — see ADR 0113's LSP section. Left as a follow-up.
+///    an absolute filesystem path ([`resolve_flushed_path`]), which also
+///    reports whether the leaf still exists on disk — the fallback signal
+///    used only when the wire carried no per-file `kind` (see below).
+/// 2. Decides the `workspace/applyEdit` shape via [`classify_flush_action`]:
+///    the wire's per-file `kind` (BT-3212) drives the decision directly when
+///    present — `new-class` -> `CreateFile`, `remove-class` -> `DeleteFile`,
+///    anything else -> an ordinary patch — with no filesystem probing
+///    needed. A producer that predates BT-3212 sends no `kind` for a path;
+///    that case still falls back to BT-3209's original existence heuristic
+///    (gone -> `DeleteFile`, still there -> patch), so `CreateFile` is only
+///    ever reachable via an explicit wire `kind` — the existence check alone
+///    can never tell "freshly created" from "patched in place" (both leave
+///    the leaf present).
+/// 3. **`DeleteFile`**: emits a [`DocumentChangeOperation::Op`] `DeleteFile`
+///    resource operation ([`delete_file_edit`]) — unconditionally, not gated
+///    on the open-paths check below, since a deletion is project-wide state
+///    (an open tab that must close, stale diagnostics) rather than something
+///    only an open buffer cares about.
+/// 4. **`CreateFile`**: reads the freshly-written file (it already exists on
+///    disk by the time this fires — Phase B already committed) and emits a
+///    `CreateFile` resource operation paired with a `TextDocumentEdit`
+///    carrying the full content ([`create_file_edit`]) — also unconditional,
+///    since a brand-new file was by definition never open before this flush.
+/// 5. **Patch** (an ordinary content edit, unchanged since ADR 0082 Phase 3):
+///    checks the *live* open-paths handle to see whether the path is
+///    currently open in the editor. Files that aren't open are skipped —
+///    `VSCode` reads them fresh on next `did_open`. The check happens per
+///    event so files opened after the listener started are still picked up.
+///    Reads the new on-disk content and issues `apply_edit` with a single
+///    `TextEdit` covering the whole document ([`change_file_edit`]), so the
+///    open buffer realigns with the post-flush bytes. `VSCode`'s conflict UX
+///    handles unsaved local edits per the LSP spec.
 async fn flush_event_listener(
     client: Client,
     workspace_roots: Vec<PathBuf>,
@@ -3370,7 +3377,11 @@ async fn flush_event_listener(
     mut flush_rx: tokio::sync::mpsc::UnboundedReceiver<FlushEvent>,
 ) {
     while let Some(event) = flush_rx.recv().await {
-        for raw_path in event.files {
+        for FlushedFile {
+            path: raw_path,
+            kind,
+        } in event.files
+        {
             let resolved = resolve_flushed_path(&raw_path, &workspace_roots);
             let Some((abs_path, existed)) = resolved else {
                 tracing::debug!(
@@ -3387,65 +3398,120 @@ async fn flush_event_listener(
                 continue;
             };
 
-            if !existed {
-                let edit = delete_file_edit(uri.clone());
-                match client.apply_edit(edit).await {
-                    Ok(resp) if resp.applied => {
-                        tracing::debug!(%uri, "flush_event_listener: applied DeleteFile");
-                    }
-                    Ok(resp) => {
-                        tracing::info!(
-                            %uri,
-                            failure_reason = ?resp.failure_reason,
-                            "flush_event_listener: client declined DeleteFile applyEdit"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            %uri,
-                            error = %e,
-                            "flush_event_listener: DeleteFile applyEdit failed"
-                        );
-                    }
-                }
-                continue;
-            }
-
-            let Ok(utf8_path) = Utf8PathBuf::try_from(abs_path.clone()) else {
-                tracing::debug!(raw_path, "flush_event_listener: resolved path is not UTF-8");
-                continue;
-            };
-            if !open_paths.contains(&utf8_path) {
-                tracing::debug!(
-                    %utf8_path,
-                    "flush_event_listener: skipping closed file"
-                );
-                continue;
-            }
-            let Ok(content) = tokio::fs::read_to_string(&abs_path).await else {
-                tracing::warn!(
-                    %utf8_path,
-                    "flush_event_listener: failed to read flushed file from disk"
-                );
-                continue;
-            };
-            let edit = change_file_edit(uri.clone(), content);
-            match client.apply_edit(edit).await {
-                Ok(resp) if resp.applied => {
-                    tracing::debug!(%uri, "flush_event_listener: applied edit");
-                }
-                Ok(resp) => {
-                    tracing::info!(
-                        %uri,
-                        failure_reason = ?resp.failure_reason,
-                        "flush_event_listener: client declined applyEdit"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(%uri, error = %e, "flush_event_listener: applyEdit failed");
+            match classify_flush_action(kind, existed) {
+                FlushAction::Delete => apply_delete_file(&client, uri).await,
+                FlushAction::Create => apply_create_file(&client, &abs_path, uri).await,
+                FlushAction::Patch => {
+                    apply_patch_file(&client, &abs_path, &raw_path, uri, &open_paths).await;
                 }
             }
         }
+    }
+}
+
+/// Send `edit` via `client.apply_edit` and log the outcome uniformly — shared
+/// by the three `flush_event_listener` branches (`Delete`/`Create`/`Patch`,
+/// ADR 0113 LSP follow-up BT-3212) so the three near-identical response-match
+/// arms exist in exactly one place.
+async fn apply_flush_edit(client: &Client, uri: &Url, edit: WorkspaceEdit, op_name: &str) {
+    match client.apply_edit(edit).await {
+        Ok(resp) if resp.applied => {
+            tracing::debug!(%uri, op_name, "flush_event_listener: applied");
+        }
+        Ok(resp) => {
+            tracing::info!(
+                %uri,
+                op_name,
+                failure_reason = ?resp.failure_reason,
+                "flush_event_listener: client declined applyEdit"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(%uri, op_name, error = %e, "flush_event_listener: applyEdit failed");
+        }
+    }
+}
+
+/// `FlushAction::Delete` (BT-3209): unconditional — a deletion is
+/// project-wide state, not gated on the open-paths check the patch branch
+/// uses.
+async fn apply_delete_file(client: &Client, uri: Url) {
+    let edit = delete_file_edit(uri.clone());
+    apply_flush_edit(client, &uri, edit, "DeleteFile").await;
+}
+
+/// `FlushAction::Create` (ADR 0113 LSP follow-up, BT-3212): also
+/// unconditional — a brand-new file was by definition never open before
+/// this flush. The file already exists on disk (Phase B already committed
+/// by the time this event fires) so the read is expected to succeed.
+async fn apply_create_file(client: &Client, abs_path: &Path, uri: Url) {
+    let Ok(content) = tokio::fs::read_to_string(abs_path).await else {
+        tracing::warn!(
+            %uri,
+            "flush_event_listener: failed to read newly-created file from disk"
+        );
+        return;
+    };
+    let edit = create_file_edit(uri.clone(), content);
+    apply_flush_edit(client, &uri, edit, "CreateFile").await;
+}
+
+/// `FlushAction::Patch` (an ordinary content edit, unchanged since ADR 0082
+/// Phase 3): gated on the file being open — `VSCode` reads a closed file fresh
+/// on next `did_open`.
+async fn apply_patch_file(
+    client: &Client,
+    abs_path: &Path,
+    raw_path: &str,
+    uri: Url,
+    open_paths: &OpenPathsHandle,
+) {
+    let Ok(utf8_path) = Utf8PathBuf::try_from(abs_path.to_path_buf()) else {
+        tracing::debug!(raw_path, "flush_event_listener: resolved path is not UTF-8");
+        return;
+    };
+    if !open_paths.contains(&utf8_path) {
+        tracing::debug!(%utf8_path, "flush_event_listener: skipping closed file");
+        return;
+    }
+    let Ok(content) = tokio::fs::read_to_string(abs_path).await else {
+        tracing::warn!(
+            %utf8_path,
+            "flush_event_listener: failed to read flushed file from disk"
+        );
+        return;
+    };
+    let edit = change_file_edit(uri.clone(), content);
+    apply_flush_edit(client, &uri, edit, "Change").await;
+}
+
+/// The `workspace/applyEdit` shape to emit for one flushed file (ADR 0113
+/// LSP follow-up, BT-3212).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlushAction {
+    /// `CreateFile` + a `TextDocumentEdit` carrying the new content.
+    Create,
+    /// `DeleteFile` (BT-3209).
+    Delete,
+    /// A whole-document `TextEdit`, gated on the file being open.
+    Patch,
+}
+
+/// Decide the [`FlushAction`] for one flushed file (ADR 0113 LSP follow-up,
+/// BT-3212). When the wire reported a `kind`, it drives the decision
+/// directly — no filesystem probing needed. When `kind` is `None` (a
+/// producer that predates BT-3212, or omits this one path), falls back to
+/// BT-3209's original existence heuristic: gone -> `Delete`, still there ->
+/// `Patch`. That fallback can never produce `Create` — a `new-class` file on
+/// a pre-BT-3212 producer degrades to `Patch` (its exact previous
+/// behaviour), since post-flush existence alone cannot distinguish "freshly
+/// created" from "patched in place".
+fn classify_flush_action(kind: Option<FlushFileKind>, existed: bool) -> FlushAction {
+    match kind {
+        Some(FlushFileKind::NewClass) => FlushAction::Create,
+        Some(FlushFileKind::Patch) => FlushAction::Patch,
+        None if existed => FlushAction::Patch,
+        Some(FlushFileKind::RemoveClass) | None => FlushAction::Delete,
     }
 }
 
@@ -3501,6 +3567,55 @@ fn delete_file_edit(uri: Url) -> WorkspaceEdit {
                     annotation_id: None,
                 }),
             })),
+        ])),
+        ..Default::default()
+    }
+}
+
+/// Build the `workspace/applyEdit` payload for a file the flush just wrote
+/// to disk for the first time (ADR 0113 LSP follow-up, BT-3212: a
+/// `new-class` entry) — a typed `CreateFile` resource operation via
+/// `documentChanges`, paired with a `TextDocumentEdit` carrying the new
+/// file's full content (ADR 0113's LSP section: "`Workspace newClass:at:`
+/// flush should also switch from the generic `Change` shape to
+/// `CreateFile`"). Both operations live in the same `documentChanges` array
+/// (the LSP spec does not allow mixing the plain `changes` map with
+/// `documentChanges` in one edit) so a client applies the create and the
+/// content atomically as one workspace edit.
+///
+/// The physical file already exists on disk by the time this fires
+/// (`beamtalk_workspace_flush:complete_flush/5` announces after Phase B
+/// commits) — `ignoreIfExists: true` is defensive for exactly that reason:
+/// the client's own `CreateFile` step must not fail just because the flush
+/// beat it to the write, and the paired `TextDocumentEdit` still supplies
+/// the correct content for the client's in-memory buffer either way.
+fn create_file_edit(uri: Url, content: String) -> WorkspaceEdit {
+    WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Operations(vec![
+            DocumentChangeOperation::Op(ResourceOp::Create(CreateFile {
+                uri: uri.clone(),
+                options: Some(CreateFileOptions {
+                    overwrite: None,
+                    ignore_if_exists: Some(true),
+                }),
+                annotation_id: None,
+            })),
+            DocumentChangeOperation::Edit(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
+                edits: vec![OneOf::Left(TextEdit {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: u32::MAX,
+                            character: u32::MAX,
+                        },
+                    },
+                    new_text: content,
+                })],
+            }),
         ])),
         ..Default::default()
     }
@@ -6617,6 +6732,106 @@ mod tests {
                 },
             }
         );
+    }
+
+    // BT-3212 (ADR 0113 LSP follow-up): the `CreateFile` builder and the
+    // `classify_flush_action` dispatch, tested the same way the BT-3209
+    // `DeleteFile`/`Change` builders above are — directly, since driving a
+    // full `client.apply_edit` round trip needs a live LSP client.
+
+    #[test]
+    fn create_file_edit_emits_typed_create_resource_op_with_content() {
+        let uri = Url::parse("file:///workspace/Greeter.bt").expect("uri");
+        let edit = create_file_edit(uri.clone(), "Object subclass: Greeter\n".to_string());
+
+        // No plain-text `changes` map — `CreateFile` + its content edit both
+        // live in `documentChanges` (the LSP spec forbids mixing the two).
+        assert!(edit.changes.is_none());
+        match edit.document_changes {
+            Some(DocumentChanges::Operations(ops)) => {
+                assert_eq!(ops.len(), 2);
+                match &ops[0] {
+                    DocumentChangeOperation::Op(ResourceOp::Create(create)) => {
+                        assert_eq!(create.uri, uri);
+                        let options = create.options.as_ref().expect("create options");
+                        assert_eq!(options.ignore_if_exists, Some(true));
+                        assert_eq!(options.overwrite, None);
+                    }
+                    other => panic!("expected a Create resource op, got {other:?}"),
+                }
+                match &ops[1] {
+                    DocumentChangeOperation::Edit(text_edit) => {
+                        assert_eq!(text_edit.text_document.uri, uri);
+                        assert_eq!(text_edit.edits.len(), 1);
+                        match &text_edit.edits[0] {
+                            OneOf::Left(edit) => {
+                                assert_eq!(edit.new_text, "Object subclass: Greeter\n");
+                                assert_eq!(
+                                    edit.range,
+                                    Range {
+                                        start: Position {
+                                            line: 0,
+                                            character: 0
+                                        },
+                                        end: Position {
+                                            line: u32::MAX,
+                                            character: u32::MAX
+                                        },
+                                    }
+                                );
+                            }
+                            other @ OneOf::Right(_) => {
+                                panic!("expected a plain TextEdit, got {other:?}")
+                            }
+                        }
+                    }
+                    other @ DocumentChangeOperation::Op(_) => {
+                        panic!("expected a TextDocumentEdit, got {other:?}")
+                    }
+                }
+            }
+            other => panic!("expected Operations document_changes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_flush_action_uses_wire_kind_when_present() {
+        // A present `kind` drives the decision directly, regardless of the
+        // (otherwise-irrelevant) existence flag.
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::NewClass), true),
+            FlushAction::Create
+        );
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::NewClass), false),
+            FlushAction::Create
+        );
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::RemoveClass), true),
+            FlushAction::Delete
+        );
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::RemoveClass), false),
+            FlushAction::Delete
+        );
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::Patch), true),
+            FlushAction::Patch
+        );
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::Patch), false),
+            FlushAction::Patch
+        );
+    }
+
+    #[test]
+    fn classify_flush_action_falls_back_to_existence_when_kind_absent() {
+        // BT-3209 backward compat: no wire `kind` (a pre-BT-3212 producer)
+        // falls back to the existence heuristic — and can never produce
+        // `Create`, since existence alone cannot distinguish "freshly
+        // created" from "patched in place".
+        assert_eq!(classify_flush_action(None, true), FlushAction::Patch);
+        assert_eq!(classify_flush_action(None, false), FlushAction::Delete);
     }
 
     #[test]

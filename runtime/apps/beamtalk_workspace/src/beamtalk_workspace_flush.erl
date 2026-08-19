@@ -181,7 +181,7 @@ set. A pending `'remove-class'` entry left out of the applied set because
     complete_flush/5,
     filter_shadowed_by_survivor/2,
     renamed_target_keys/1,
-    announce_flush_completed/1,
+    announce_flush_completed/2,
     %% ADR 0112 (BT-3187): exercises the `(class, selector, side)` shadow-key
     %% fix directly — the shadow-key logic is exercised without going
     %% through prepare_splice/2.
@@ -1226,7 +1226,12 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
     %% `beamtalk_flush_events` broadcast was retired). Fire-and-forget: the
     %% announcer swallows missing-bus errors so flush never fails on a downstream
     %% subscriber issue.
-    announce_flush_completed(Files),
+    %%
+    %% BT-3212: alongside the flat `Files` list, also announce each file's
+    %% per-entry operation kind (`file_kind_map/1`) so a `CreateFile`-vs-patch
+    %% consumer (the LSP) no longer has to infer "freshly created" from
+    %% filesystem existence — see `announce_flush_completed/2`.
+    announce_flush_completed(Files, [file_kind_map(P) || P <- Renamed]),
     %% Catch any failure mode from the ChangeLog server — explicit {error, _}
     %% returns *or* gen_server crashes (the call exits with noproc/timeout
     %% when the server is unreachable). Files have already been written so
@@ -1271,25 +1276,51 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
 %% Announce `FlushCompleted` on the `SystemAnnouncer` bus after a flush has
 %% written files to disk (ADR 0093 §2, BT-2530). `files` carries the absolute
 %% binary paths, matching the legacy `{flush_completed, Files}` broadcast.
+%%
+%% `FileKinds` (BT-3212, ADR 0113 LSP follow-up) is the per-file companion:
+%% one `#{file => Path, kind => Kind}` map per entry in `Files`, where `Kind`
+%% is `beamtalk_workspace_changelog:entry_kind/1`'s own enum value verbatim
+%% (`'new-class'`, `'remove-class'`, `instance`, `class`, `'remove-method'`,
+%% `unknown`) — forwarded as-is rather than collapsed into a new taxonomy, so
+%% a consumer buckets it itself (the LSP: `'new-class'` -> `CreateFile`,
+%% `'remove-class'` -> `DeleteFile`, anything else -> an ordinary patch).
+%% `file_kind_map/1` builds each entry from the Phase B `#prepared{}` record.
+%%
 %% Skipped for an empty file list (parity with `on_files_flushed/1`). Guarded
 %% by a `whereis` check (the announcements worker may be absent on a minimal
 %% runtime) and wrapped in try/catch: announcing is a best-effort observability
 %% side effect and must never fail the flush.
--spec announce_flush_completed([binary()]) -> ok.
-announce_flush_completed([]) ->
+-spec announce_flush_completed([binary()], [map()]) -> ok.
+announce_flush_completed([], _FileKinds) ->
     ok;
-announce_flush_completed(Files) ->
+announce_flush_completed(Files, FileKinds) ->
     case erlang:whereis(beamtalk_announcements) of
         undefined ->
             ok;
         _Pid ->
             try
-                beamtalk_announcements:system_announce('FlushCompleted', #{files => Files})
+                beamtalk_announcements:system_announce('FlushCompleted', #{
+                    files => Files,
+                    fileKinds => FileKinds
+                })
             catch
                 _:_ -> ok
             end
     end,
     ok.
+
+%% The `#{file => Path, kind => Kind}` wire entry for one committed
+%% `#prepared{}` record (BT-3212). A `'new-class'`/`'remove-class'` file
+%% group is always single-entry (`prepare_file/2`'s mixing guards forbid
+%% combining either with sibling patches); a splice group may hold several
+%% entries but they are always `instance`/`class`/`'remove-method'` — never
+%% mixed with `'new-class'`/`'remove-class'` — so any entry in the group
+%% yields the same LSP-relevant bucket ("an ordinary patch"). Taking the
+%% first entry's `entry_kind/1` is therefore always representative, not just
+%% a convenient default.
+-spec file_kind_map(#prepared{}) -> map().
+file_kind_map(#prepared{file = File, entries = [Entry | _]}) ->
+    #{file => File, kind => beamtalk_workspace_changelog:entry_kind(Entry)}.
 
 %%% ----------------------------------------------------------------------------
 %%% Helpers

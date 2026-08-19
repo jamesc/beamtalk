@@ -247,10 +247,19 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% ADR 0082 Phase 3 (BT-2289): Flush-completion push — broadcast after a
-%% `Workspace flush` writes one or more `.bt` source files. LSP clients use
-%% this to emit `workspace/applyEdit` so open editor buffers refresh against
-%% the new on-disk state. `files` is the list of absolute paths renamed.
+%% ADR 0082 Phase 3 (BT-2289); ADR 0113 LSP follow-up (BT-3212): Flush-
+%% completion push — broadcast after a `Workspace flush` writes one or more
+%% `.bt` source files. LSP clients use this to emit `workspace/applyEdit` so
+%% open editor buffers refresh against the new on-disk state. `files` is the
+%% list of absolute paths touched (written or removed); `fileKinds` is the
+%% BT-3212 per-file companion — one `{file, kind}` object per touched file,
+%% `kind` being `beamtalk_workspace_changelog:entry_kind/1`'s own wire value
+%% (`"new-class"`, `"remove-class"`, `"instance"`, `"class"`,
+%% `"remove-method"`) — so a consumer can classify `CreateFile` vs.
+%% `DeleteFile` vs. an ordinary patch before touching the filesystem, rather
+%% than inferring it from post-flush existence. Absent/empty on a producer
+%% that predates BT-3212 (defensive default `[]`), so an older runtime still
+%% degrades to the pre-BT-3212 existence-check fallback client-side.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'FlushCompleted', _Handler, Event},
     State = #ws_state{authenticated = true}
@@ -261,7 +270,8 @@ websocket_info(
             <<"channel">> => <<"workspace">>,
             <<"event">> => <<"flush_completed">>,
             <<"data">> => #{
-                <<"files">> => normalise_files_for_push(maps:get(files, Event, []))
+                <<"files">> => normalise_files_for_push(maps:get(files, Event, [])),
+                <<"fileKinds">> => normalise_file_kinds_for_push(maps:get(fileKinds, Event, []))
             }
         })
     ),
@@ -926,6 +936,39 @@ normalise_files_for_push(Files) when is_list(Files) ->
         end,
         Files
     ).
+
+-doc """
+BT-3212 (ADR 0113 LSP follow-up): normalise the per-file `{file, kind}` list
+shipped on a `flush_completed` WS push frame. `beamtalk_workspace_flush`
+forwards `[#{file => Path, kind => KindAtom}]`, where `Path` is a binary
+(`ChangeEntry.sourceFile`'s own shape) and `KindAtom` is
+`beamtalk_workspace_changelog:entry_kind/1`'s own enum value verbatim — not a
+parallel taxonomy invented here. Each valid entry becomes a JSON object
+`{"file": ..., "kind": ...}`; a malformed entry (not a map, missing/non-binary
+`file`, non-atom `kind`) is dropped with a warning so one bad entry cannot
+break the whole push frame — mirrors `normalise_files_for_push/1`'s
+defensiveness. Defaults to `[]` for a producer that predates BT-3212 (the
+`Event` map simply has no `fileKinds` key), so an older runtime still degrades
+gracefully to an empty list here (the LSP's own existence-check fallback then
+takes over).
+""".
+-spec normalise_file_kinds_for_push([term()]) -> [map()].
+normalise_file_kinds_for_push(FileKinds) when is_list(FileKinds) ->
+    lists:filtermap(fun normalise_file_kind_entry/1, FileKinds);
+normalise_file_kinds_for_push(_Other) ->
+    [].
+
+-spec normalise_file_kind_entry(term()) -> {true, map()} | false.
+normalise_file_kind_entry(#{file := File, kind := Kind}) when
+    is_binary(File), is_atom(Kind)
+->
+    {true, #{<<"file">> => File, <<"kind">> => atom_to_binary(Kind, utf8)}};
+normalise_file_kind_entry(Other) ->
+    ?LOG_WARNING(
+        "flush_completed push: dropping malformed fileKinds entry",
+        #{entry => Other, domain => [beamtalk, runtime]}
+    ),
+    false.
 
 -doc """
 BT-2531: Encode an `ActorSpawned` announcement payload for the `actors`/`spawned`

@@ -92,7 +92,10 @@ flush_test_() ->
         fun remove_class_abort_restores_staged_file_on_other_file_conflict/1,
         fun remove_class_staged_delete_crash_recovery/1,
         fun flush_two_rejects_non_boolean_confirm/1,
-        fun flush_kinds_two_rejects_non_boolean_confirm/1
+        fun flush_kinds_two_rejects_non_boolean_confirm/1,
+        %% BT-3212 (ADR 0113 LSP follow-up): per-file operation kind on the
+        %% `FlushCompleted` wire payload
+        fun flush_announces_file_kinds_for_mixed_entries/1
     ]}.
 
 unit_test_() ->
@@ -1940,11 +1943,12 @@ del_tree(Path) ->
 %% FlushCompleted announcement (ADR 0093 §2, BT-2530)
 %%====================================================================
 
-%% `announce_flush_completed/1` publishes the typed FlushCompleted event on the
-%% SystemAnnouncer bus with the flushed files — the sole flush-completion push
-%% source since BT-2531 retired the legacy `beamtalk_flush_events` broadcast.
-%% Subscribed with a fun handler so the veneer async dispatch invokes it and we
-%% can assert on the typed event map.
+%% `announce_flush_completed/2` publishes the typed FlushCompleted event on the
+%% SystemAnnouncer bus with the flushed files and their per-file kinds
+%% (BT-3212) — the sole flush-completion push source since BT-2531 retired the
+%% legacy `beamtalk_flush_events` broadcast. Subscribed with a fun handler so
+%% the veneer async dispatch invokes it and we can assert on the typed event
+%% map.
 announce_flush_completed_emits_typed_event_test() ->
     ok = beamtalk_announcements:ensure_started(),
     Collector = self(),
@@ -1952,16 +1956,88 @@ announce_flush_completed_emits_typed_event_test() ->
         'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
     ),
     Files = [<<"/ws/src/Foo.bt">>, <<"/ws/src/Bar.bt">>],
+    FileKinds = [
+        #{file => <<"/ws/src/Foo.bt">>, kind => 'new-class'},
+        #{file => <<"/ws/src/Bar.bt">>, kind => instance}
+    ],
     try
-        ok = beamtalk_workspace_flush:announce_flush_completed(Files),
+        ok = beamtalk_workspace_flush:announce_flush_completed(Files, FileKinds),
         receive
             {flush_evt, Event} ->
                 ?assertMatch(
-                    #{'$beamtalk_class' := 'FlushCompleted', files := Files},
+                    #{
+                        '$beamtalk_class' := 'FlushCompleted',
+                        files := Files,
+                        fileKinds := FileKinds
+                    },
                     Event
                 )
         after 1000 -> ?assert(false)
         end
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% End-to-end (BT-3212, ADR 0113 LSP follow-up): a real `flush_including_
+%% destructive/0` round trip covering all three LSP-relevant buckets in one
+%% pass — a `new-class` creation, an ordinary `instance` patch, and a
+%% (confirmed) `remove-class` deletion — announces a `fileKinds` entry per
+%% file whose `kind` matches that file's own `ChangeEntry.kind` verbatim, so
+%% a subscriber (the LSP) can bucket `CreateFile`/`DeleteFile`/patch without
+%% an on-disk existence check.
+flush_announces_file_kinds_for_mixed_entries(#{proj_dir := ProjDir}) ->
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
+    ),
+    NewClassFile = filename:join([ProjDir, "src", "greeter.bt"]),
+    NewSource = <<"Object subclass: Greeter\n  hi => 'hello'\nend\n">>,
+    PatchFile = filename:join([ProjDir, "src", "counter.bt"]),
+    PatchOriginal = <<"Object subclass: Counter\n  foo => 1\nend\n">>,
+    ok = file:write_file(PatchFile, PatchOriginal),
+    RemoveFile = filename:join([ProjDir, "src", "widget.bt"]),
+    RemoveOriginal = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    ok = file:write_file(RemoveFile, RemoveOriginal),
+    {Start, End, OldBody} = locate(PatchOriginal, <<"foo => 1\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        new_class_input(<<"Greeter">>, NewSource, list_to_binary(NewClassFile))
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"foo">>,
+            <<"foo => 2\n">>,
+            OldBody,
+            list_to_binary(PatchFile),
+            Start,
+            End
+        )
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Widget">>, RemoveOriginal, list_to_binary(RemoveFile))
+    ),
+    try
+        {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+        Event =
+            receive
+                {flush_evt, E} -> E
+            after 1000 -> ?assert(false)
+            end,
+        FileKinds = maps:get(fileKinds, Event),
+        KindOf = fun(FilePath) ->
+            [Kind] = [
+                maps:get(kind, M)
+             || M <- FileKinds, maps:get(file, M) =:= list_to_binary(FilePath)
+            ],
+            Kind
+        end,
+        [
+            ?_assertEqual(3, maps:get(flushed, Summary)),
+            ?_assertEqual('new-class', KindOf(NewClassFile)),
+            ?_assertEqual(instance, KindOf(PatchFile)),
+            ?_assertEqual('remove-class', KindOf(RemoveFile))
+        ]
     after
         beamtalk_announcements:unsubscribe(SubRef)
     end.
@@ -1975,7 +2051,7 @@ announce_flush_completed_empty_is_silent_test() ->
         'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt_empty, E} end, false
     ),
     try
-        ok = beamtalk_workspace_flush:announce_flush_completed([]),
+        ok = beamtalk_workspace_flush:announce_flush_completed([], []),
         receive
             {flush_evt_empty, _} -> ?assert(false)
         after 200 -> ok
