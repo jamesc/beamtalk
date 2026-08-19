@@ -42,6 +42,79 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, 
 use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
+/// Strips any number of `Parenthesized` wrappers to expose the syntactic
+/// shape underneath — `(expr)`, `((expr))`, etc. all see through to `expr`.
+///
+/// Parentheses carry no runtime meaning (they only affect parse-time
+/// precedence), so any codegen specialization that pattern-matches on the
+/// *syntactic shape* of an expression (as [`is_character_typed_receiver`]
+/// does) must look past them or a receiver as simple as `(Character value:
+/// 10) asString` — parenthesized only to disambiguate the keyword send from
+/// the trailing unary `asString` — would silently miss the fast path.
+fn unwrap_parens(expr: &Expression) -> &Expression {
+    let mut current = expr;
+    while let Expression::Parenthesized { expression, .. } = current {
+        current = expression;
+    }
+    current
+}
+
+/// BT-3214 (extends BT-2095): true if `expr`'s static type is Character,
+/// determined purely from its syntactic shape — no general static type
+/// inference exists in codegen, so this recognizes exactly the syntactic
+/// forms that `Character.bt` declares as producing a Character: a Character
+/// literal (`$A`), the class factory `Character value:`, and the two
+/// instance methods with a `-> Character` return type, `uppercase` and
+/// `lowercase` (applied recursively, since their own receiver must itself
+/// be Character-typed — e.g. `$a uppercase lowercase`).
+///
+/// This distinction matters because Character values are bare integers at
+/// the BEAM level (`Character` is declared `Integer subclass:`), so the
+/// runtime `beamtalk_primitive:class_of/1` and `module_for_value/1` both
+/// match `is_integer/1` unconditionally and route to `Integer`'s BIF module
+/// — they cannot tell a Character-tagged integer from a `SmallInteger`,
+/// because there is no runtime tag to tell them apart. BT-2095 fixed this
+/// for the literal case (`$A asString`) by special-casing the receiver's
+/// AST shape at codegen. `(Character value: 10) asString` and `$a uppercase
+/// asString` are the same problem: the receiver is statically Character
+/// (per the sender's declared `-> Character` return type) but was not
+/// recognized because it isn't a literal, so it fell through to the generic
+/// runtime-dispatch path and was misrouted to `Integer>>asString`,
+/// producing `"10"` instead of a genuine 1-byte LF string. Recognizing
+/// these additional shapes closes that gap without requiring general
+/// static type inference in codegen.
+fn is_character_typed_receiver(expr: &Expression) -> bool {
+    match unwrap_parens(expr) {
+        Expression::Literal(Literal::Character(_), _) => true,
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            let is_value_factory_call = arguments.len() == 1
+                && matches!(
+                    selector,
+                    MessageSelector::Keyword(parts)
+                        if parts.len() == 1 && parts[0].keyword == "value:"
+                )
+                && matches!(
+                    unwrap_parens(receiver),
+                    Expression::ClassReference { name, package: None, .. }
+                        if name.name == "Character"
+                );
+            let is_character_returning_unary_send = arguments.is_empty()
+                && matches!(
+                    selector,
+                    MessageSelector::Unary(name) if name == "uppercase" || name == "lowercase"
+                )
+                && is_character_typed_receiver(receiver);
+            is_value_factory_call || is_character_returning_unary_send
+        }
+        _ => false,
+    }
+}
+
 impl CoreErlangGenerator {
     /// BT-2816: Generates the `<{'error', ..., _}>` case clauses shared by all
     /// self-dispatch call sites (`safe_dispatch`/`dispatch` error branches).
@@ -683,16 +756,18 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // BT-2095: Reflective and class-introspection sends on a Character literal
-        // must honour the static type, not fall into the protoobject/object
+        // BT-2095 / BT-3214: Reflective and class-introspection sends on a
+        // Character-typed receiver (a Character literal, or a `Character
+        // value:` factory call — see `is_character_typed_receiver`) must
+        // honour the static type, not fall into the protoobject/object
         // handlers that key on runtime `class_of/1` (which returns `'Integer'`
         // for any integer receiver):
         //   * `$A class`            → must return `'Character'`
         //   * `$A respondsTo: #foo` → must consult Character's `has_method/1`
         //   * `$A perform: #foo`    → must dispatch through Character
         // The protoobject/object handlers run earlier than the general
-        // Character-literal fallback below, so intercept them here.
-        if matches!(receiver, Expression::Literal(Literal::Character(_), _)) {
+        // Character-typed fallback below, so intercept them here.
+        if is_character_typed_receiver(receiver) {
             match selector.well_known() {
                 Some(WellKnownSelector::Class) => {
                     // BT-1937: Hoist any side effects in the receiver expression
@@ -729,7 +804,7 @@ impl CoreErlangGenerator {
                     | WellKnownSelector::PerformWithArgs
                     | WellKnownSelector::PerformLocallyWithArgs,
                 ) => {
-                    return self.generate_character_literal_dispatch(receiver, selector, arguments);
+                    return self.generate_character_typed_dispatch(receiver, selector, arguments);
                 }
                 _ => {}
             }
@@ -803,27 +878,34 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // BT-2095: Character literals have static type Character, but at the BEAM
-        // level they are integers — runtime `class_of/1` returns `'Integer'` and
-        // routes them to `bt@stdlib@integer:dispatch/3`. Specialize at codegen so
-        // `$A asInteger`, `$A printString`, `$A uppercase`, etc. reach the
+        // BT-2095 / BT-3214: Character-typed receivers (literals like `$A`,
+        // and `Character value: N` factory calls) have static type Character,
+        // but at the BEAM level they are plain integers — runtime `class_of/1`
+        // returns `'Integer'` and routes them to `bt@stdlib@integer:dispatch/3`.
+        // Specialize at codegen so `$A asInteger`, `$A printString`, `$A
+        // uppercase`, `(Character value: 10) asString`, etc. reach the
         // Character module's dispatch (which delegates to Integer for inherited
         // methods like `+`, `-`, `bitAnd:`).
-        if matches!(receiver, Expression::Literal(Literal::Character(_), _)) {
-            return self.generate_character_literal_dispatch(receiver, selector, arguments);
+        if is_character_typed_receiver(receiver) {
+            return self.generate_character_typed_dispatch(receiver, selector, arguments);
         }
 
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         self.generate_runtime_dispatch(receiver, selector, arguments)
     }
 
-    /// BT-2095: Routes a non-binary message to the Character module's `dispatch/3`.
+    /// BT-2095 / BT-3214: Routes a non-binary message to the Character module's
+    /// `dispatch/3`, for any receiver `is_character_typed_receiver` recognizes
+    /// (a Character literal or a `Character value:` factory call).
     ///
-    /// At the BEAM level, character literals are plain integers, so the default
+    /// At the BEAM level, Character values are plain integers, so the default
     /// runtime dispatch path (keyed on `is_integer/1`) sends them to the Integer
     /// module. This codegen specialization restores the static type by emitting
-    /// a direct call to `bt@stdlib@character:dispatch/3` instead.
-    fn generate_character_literal_dispatch(
+    /// a direct call to `bt@stdlib@character:dispatch/3` instead. The receiver
+    /// expression itself is compiled normally (`capture_subexpr_sequence`), so
+    /// this works whether the receiver is a bare literal or an arbitrary
+    /// expression statically known to produce a Character.
+    fn generate_character_typed_dispatch(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
@@ -3775,10 +3857,17 @@ pub(super) fn class_self_send_reflective_primitive(
 
 #[cfg(test)]
 mod tests {
-    use super::{class_self_send_reflective_primitive, is_class_auto_export_selector};
-    use crate::ast::{Expression, Identifier, KeywordPart, Literal, MessageSelector};
+    use super::{
+        class_self_send_reflective_primitive, is_character_typed_receiver,
+        is_class_auto_export_selector,
+    };
+    use crate::ast::{
+        Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition,
+        TypeAnnotation,
+    };
     use crate::codegen::core_erlang::CoreErlangGenerator;
-    use crate::source_analysis::Span;
+    use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
+    use std::collections::BTreeSet;
 
     fn s() -> Span {
         Span::new(0, 0)
@@ -4103,6 +4192,287 @@ mod tests {
         assert!(
             !output.contains("safe_dispatch"),
             "self cast inside block must NOT use safe_dispatch. Got: {output}"
+        );
+    }
+
+    /// BT-3214: `is_character_typed_receiver` must recognize both syntactic
+    /// shapes that statically produce a Character — a literal (`$A`) and a
+    /// `Character value:` factory call — including through any number of
+    /// parenthesizations, since `(Character value: 10) asString` parses the
+    /// factory call as `Parenthesized(MessageSend(..))`. Everything else
+    /// (plain integers, other class factory methods, a package-qualified
+    /// `Character`) must NOT match, or the codegen would incorrectly route
+    /// an actual Integer/other-class receiver through Character's dispatch.
+    #[test]
+    fn is_character_typed_receiver_matches_literal_and_value_factory() {
+        let char_literal = Expression::Literal(Literal::Character('A'), s());
+        assert!(is_character_typed_receiver(&char_literal));
+
+        let character_value_call = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Character", s()),
+                package: None,
+                span: s(),
+            }),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
+            arguments: vec![Expression::Literal(Literal::Integer(10), s())],
+            is_cast: false,
+            span: s(),
+        };
+        assert!(is_character_typed_receiver(&character_value_call));
+
+        // The reported bug's exact shape: `(Character value: 10)` as a
+        // parenthesized receiver of a further send (`asString`).
+        let parenthesized_once = Expression::Parenthesized {
+            expression: Box::new(character_value_call.clone()),
+            span: s(),
+        };
+        assert!(is_character_typed_receiver(&parenthesized_once));
+
+        // Nested parens must also see through.
+        let parenthesized_twice = Expression::Parenthesized {
+            expression: Box::new(parenthesized_once),
+            span: s(),
+        };
+        assert!(is_character_typed_receiver(&parenthesized_twice));
+
+        // A parenthesized literal must match too (`($A) asString`).
+        let parenthesized_literal = Expression::Parenthesized {
+            expression: Box::new(char_literal),
+            span: s(),
+        };
+        assert!(is_character_typed_receiver(&parenthesized_literal));
+    }
+
+    /// BT-3214: `uppercase`/`lowercase` also have a declared `-> Character`
+    /// return type (`Character.bt`), so a chain like `$a uppercase asString`
+    /// hits the identical bug as `(Character value: 10) asString` — the
+    /// receiver of `asString` (`$a uppercase`) is statically Character but
+    /// isn't a literal or a `value:` call. The check must recurse: applying
+    /// `uppercase`/`lowercase` to an already Character-typed receiver stays
+    /// Character-typed, however deep the chain (`$a uppercase lowercase`).
+    #[test]
+    fn is_character_typed_receiver_recurses_through_uppercase_lowercase() {
+        fn unary_send(receiver: Expression, selector: &str) -> Expression {
+            Expression::MessageSend {
+                receiver: Box::new(receiver),
+                selector: MessageSelector::Unary(selector.into()),
+                arguments: vec![],
+                is_cast: false,
+                span: s(),
+            }
+        }
+
+        let char_literal = Expression::Literal(Literal::Character('a'), s());
+        let uppercased = unary_send(char_literal.clone(), "uppercase");
+        assert!(is_character_typed_receiver(&uppercased));
+
+        // Chains recurse arbitrarily deep.
+        let round_tripped = unary_send(uppercased, "lowercase");
+        assert!(is_character_typed_receiver(&round_tripped));
+
+        // Also recognized on a `Character value:` receiver, not just a literal.
+        let value_call = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Character", s()),
+                package: None,
+                span: s(),
+            }),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
+            arguments: vec![Expression::Literal(Literal::Integer(97), s())],
+            is_cast: false,
+            span: s(),
+        };
+        assert!(is_character_typed_receiver(&unary_send(
+            value_call,
+            "uppercase"
+        )));
+
+        // A non-Character-returning unary selector on a Character receiver
+        // must NOT match — only `uppercase`/`lowercase` are Character-typed.
+        assert!(!is_character_typed_receiver(&unary_send(
+            char_literal.clone(),
+            "asInteger"
+        )));
+
+        // `uppercase` on a receiver that is NOT itself Character-typed must
+        // not match — recursion must terminate on a real Character source,
+        // not accept any arbitrarily nested `uppercase` send.
+        let int_literal = Expression::Literal(Literal::Integer(97), s());
+        assert!(!is_character_typed_receiver(&unary_send(
+            int_literal,
+            "uppercase"
+        )));
+    }
+
+    /// BT-3214: enforces the invariant `is_character_typed_receiver` depends
+    /// on — that its hardcoded selector set (`value:` as the class factory,
+    /// `uppercase`/`lowercase` as the Character-returning instance methods)
+    /// is *exactly* the set of methods `stdlib/src/Character.bt` declares
+    /// with a `-> Character` return type. This is the enforcing test
+    /// architecture-principles.md requires for any "must stay in sync"
+    /// coupling: parses the real `Character.bt` off disk and fails loudly if
+    /// a future edit adds, removes, or renames a Character-returning method
+    /// there without updating the codegen recognizer to match — silent drift
+    /// here would silently reopen the exact bug this issue fixes for the new
+    /// method (dispatch misrouted to Integer's BIF module).
+    #[test]
+    fn character_bt_character_returning_methods_match_codegen_recognizer() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        let character_bt_path = repo_root.join("stdlib/src/Character.bt");
+        let Ok(source) = std::fs::read_to_string(&character_bt_path) else {
+            eprintln!(
+                "skipping: {} not present in this checkout",
+                character_bt_path.display()
+            );
+            return;
+        };
+
+        let tokens = lex_with_eof(&source);
+        let (module, diags) = parse(tokens);
+        assert!(
+            diags.iter().all(|d| d.severity != Severity::Error),
+            "Character.bt must parse without errors: {diags:?}"
+        );
+
+        let character_class = module
+            .classes
+            .iter()
+            .find(|c| c.name.name == "Character")
+            .expect("Character.bt must define the Character class");
+
+        let returns_character = |method: &MethodDefinition| -> bool {
+            matches!(
+                &method.return_type,
+                Some(TypeAnnotation::Simple(id)) if id.name == "Character"
+            )
+        };
+
+        let class_side: BTreeSet<String> = character_class
+            .class_methods
+            .iter()
+            .filter(|m| returns_character(m))
+            .map(|m| m.selector.name().to_string())
+            .collect();
+        let instance_side: BTreeSet<String> = character_class
+            .methods
+            .iter()
+            .filter(|m| returns_character(m))
+            .map(|m| m.selector.name().to_string())
+            .collect();
+
+        assert_eq!(
+            class_side,
+            BTreeSet::from(["value:".to_string()]),
+            "is_character_typed_receiver's class-side factory-method list \
+             (\"value:\") no longer matches Character.bt's actual \
+             `-> Character` class methods — update the recognizer in \
+             dispatch_codegen.rs to match"
+        );
+        assert_eq!(
+            instance_side,
+            BTreeSet::from(["uppercase".to_string(), "lowercase".to_string()]),
+            "is_character_typed_receiver's instance-side selector list \
+             (\"uppercase\", \"lowercase\") no longer matches Character.bt's \
+             actual `-> Character` instance methods — update the recognizer \
+             in dispatch_codegen.rs to match"
+        );
+    }
+
+    #[test]
+    fn is_character_typed_receiver_rejects_non_character_shapes() {
+        // A bare integer literal is not Character-typed.
+        assert!(!is_character_typed_receiver(&Expression::Literal(
+            Literal::Integer(10),
+            s()
+        )));
+
+        // A different class's factory method must not match.
+        let other_factory = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Integer", s()),
+                package: None,
+                span: s(),
+            }),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
+            arguments: vec![Expression::Literal(Literal::Integer(10), s())],
+            is_cast: false,
+            span: s(),
+        };
+        assert!(!is_character_typed_receiver(&other_factory));
+
+        // A different selector on Character itself must not match — only
+        // the `value:` factory is statically known to return Character.
+        let wrong_selector = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Character", s()),
+                package: None,
+                span: s(),
+            }),
+            selector: MessageSelector::Unary("someOtherMethod".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: s(),
+        };
+        assert!(!is_character_typed_receiver(&wrong_selector));
+
+        // A package-qualified `Character` is a different, user-defined class
+        // that merely shares the name — must not be special-cased.
+        let package_qualified = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Character", s()),
+                package: Some(Identifier::new("mylib", s())),
+                span: s(),
+            }),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
+            arguments: vec![Expression::Literal(Literal::Integer(10), s())],
+            is_cast: false,
+            span: s(),
+        };
+        assert!(!is_character_typed_receiver(&package_qualified));
+    }
+
+    /// BT-3214: codegen for `(Character value: 10) asString` must emit a
+    /// direct call to `bt@stdlib@character:dispatch/3`, not fall through to
+    /// the generic runtime-dispatch path (which would key on `is_integer/1`
+    /// and misroute to `bt@stdlib@integer`, producing `"10"` instead of a
+    /// genuine 1-byte LF string).
+    #[test]
+    fn character_value_factory_receiver_dispatches_to_character_module() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let receiver = Expression::Parenthesized {
+            expression: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::ClassReference {
+                    name: Identifier::new("Character", s()),
+                    package: None,
+                    span: s(),
+                }),
+                selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
+                arguments: vec![Expression::Literal(Literal::Integer(10), s())],
+                is_cast: false,
+                span: s(),
+            }),
+            span: s(),
+        };
+        let selector = MessageSelector::Unary("asString".into());
+        let output = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap()
+            .to_pretty_string();
+
+        assert!(
+            output.contains("'bt@stdlib@character':'dispatch'"),
+            "expected direct Character dispatch, got: {output}"
+        );
+        assert!(
+            !output.contains("beamtalk_message_dispatch"),
+            "must not fall through to generic runtime dispatch (which would \
+             misroute via is_integer/1 to Integer). Got: {output}"
         );
     }
 }

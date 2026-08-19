@@ -5,6 +5,8 @@
 // predicates (isLetter, isDigit, isUppercase, isLowercase, isWhitespace),
 // arithmetic on char codes, and conversions (asString, asFloat).
 // BT-2095: Character-literal receivers dispatch to Character primitives.
+// BT-3214: `Character value: N` factory-call receivers (not just literals)
+// dispatch to Character primitives, for non-printable codepoints too.
 
 TestCase subclass: CharacterTest
 
@@ -77,3 +79,62 @@ TestCase subclass: CharacterTest
     self assert: ($A respondsTo: #lowercase)
     self assert: ($A respondsTo: #asInteger)
     self deny: ($A respondsTo: #bogusMethod)
+
+  // BT-3214: `(Character value: N) asString` for a non-printable codepoint
+  // (LF, CR, TAB) must return a genuine 1-byte string containing that
+  // codepoint — not the 2-character decimal string "10"/"13"/"9".
+  //
+  // Root cause: Character is `Integer subclass:` (Character.bt), so a
+  // Character value is a bare, untagged integer at the BEAM level — the
+  // runtime `beamtalk_primitive:class_of/1` and `module_for_value/1` both
+  // match `is_integer/1` unconditionally and cannot distinguish a
+  // Character-tagged integer from a plain SmallInteger. BT-2095 already
+  // worked around this for *literal* receivers (`$A asString`) by
+  // recognizing the literal's AST shape at codegen and routing it directly
+  // to `bt@stdlib@character:dispatch/3`. `(Character value: 10) asString`
+  // has the same underlying ambiguity but a different AST shape (a class
+  // factory-method call, not a literal) — BT-2095's fix didn't cover it,
+  // so it fell through to the generic runtime-dispatch path and was
+  // misrouted to `Integer>>asString`, producing `"10"` (the codepoint's
+  // decimal digits) instead of a real LF byte.
+  //
+  // This affects BOTH compiled code (this test) and REPL/eval expressions
+  // identically: the REPL's `beamtalk_repl_eval`/`beamtalk_repl_compiler`
+  // pipeline compiles expressions through the exact same
+  // `generate_message_send` codegen this test exercises (see
+  // `crates/beamtalk-core/src/repl/codegen.rs`, which delegates expression
+  // compilation to `CoreErlangGenerator`) — there is no separate REPL-only
+  // dispatch path. The printable case (`$A asString`) never exhibited this
+  // bug because `$A` is already a literal, which BT-2095 covered; the gap
+  // was specific to non-literal Character-typed receivers regardless of
+  // surface, not specific to REPL/eval.
+  testCharacterValueFactoryNonPrintableAsString =>
+    self assert: (Character value: 10) asString size equals: 1
+    self assert: (Character value: 13) asString size equals: 1
+    self assert: (Character value: 9) asString size equals: 1
+    self assert: (Character value: 10) asString equals: ((Erlang unicode) characters_to_binary: #(10))
+    self assert: (Character value: 13) asString equals: ((Erlang unicode) characters_to_binary: #(13))
+    self assert: (Character value: 9) asString equals: ((Erlang unicode) characters_to_binary: #(9))
+    self assert: (Character value: 10) equals: $\n
+    self assert: (Character value: 9) equals: $\t
+
+  // BT-3214: `printString` on a non-printable-codepoint Character built via
+  // the `value:` factory must also dispatch through Character (`$<byte>`
+  // format), not fall through to Integer's `printString` ("10").
+  testCharacterValueFactoryNonPrintablePrintString =>
+    self assert: (Character value: 10) printString size equals: 2
+    self assert: (Character value: 10) printString equals: ((Erlang unicode) characters_to_binary: #(36, 10))
+    self assert: (Character value: 9) printString equals: ((Erlang unicode) characters_to_binary: #(36, 9))
+
+  // BT-3214: `uppercase`/`lowercase` (Character.bt: `-> Character`) chained
+  // into a further send hits the identical bug as `Character value:` —
+  // `$a uppercase`'s receiver is a MessageSend, not a literal, so
+  // `$a uppercase asString` was misrouted to Integer>>asString the same way
+  // `(Character value: 10) asString` was, producing "65" (2 chars) instead
+  // of a genuine 1-byte "A". Chains recurse arbitrarily deep.
+  testCharacterUppercaseLowercaseChainDispatch =>
+    self assert: $a uppercase asString size equals: 1
+    self assert: $a uppercase asString equals: "A"
+    self assert: $A lowercase asString equals: "a"
+    self assert: $a uppercase lowercase asString equals: "a"
+    self assert: (Character value: 97) uppercase asString equals: "A"
