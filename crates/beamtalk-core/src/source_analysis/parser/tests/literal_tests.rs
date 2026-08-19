@@ -923,7 +923,7 @@ fn parse_match_with_guard() {
 fn codegen_simple_match() {
     let module = parse_ok("42 match: [_ -> 99]");
     let expr = &module.expressions[0].expression;
-    let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+    let result = crate::repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
     let code = result.unwrap();
     eprintln!("Generated code:\n{code}");
@@ -934,7 +934,7 @@ fn codegen_simple_match() {
 fn codegen_match_with_arms() {
     let module = parse_ok("1 match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]");
     let expr = &module.expressions[0].expression;
-    let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+    let result = crate::repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
     let code = result.unwrap();
     eprintln!("Generated code:\n{code}");
@@ -945,7 +945,7 @@ fn codegen_match_with_arms() {
 fn codegen_empty_match_errors() {
     let module = parse_ok("42 match: []");
     let expr = &module.expressions[0].expression;
-    let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+    let result = crate::repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_err(), "Empty match should fail codegen");
 }
 

@@ -8,6 +8,7 @@
 //! state-variable field access patterns.
 
 use super::*;
+use crate::repl::codegen::{generate_repl_expression, generate_test_expression};
 
 #[test]
 fn test_generate_literal_integer() {

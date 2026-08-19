@@ -8,6 +8,7 @@
 //! hierarchy actor/value classification, and type-annotation writeback.
 
 use super::*;
+use crate::repl::codegen::{generate_repl_expression, generate_repl_expressions};
 
 /// Extract a Core Erlang function body from generated code by cutting at the
 /// next function header rather than relying on blank-line formatting.
