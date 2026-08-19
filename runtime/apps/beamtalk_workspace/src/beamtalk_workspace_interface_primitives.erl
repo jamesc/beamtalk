@@ -701,14 +701,20 @@ error contract elsewhere (never guess, never drop a revert silently).
 Before reinstalling, `check_no_external_drift/3` compares the file currently
 on disk at `SourceFile` against `PrevBody` (BT-3213, Claude review follow-up
 on BT-3208): a still-*pending* `'remove-class'` entry never touches disk
-(Tier 2 removals only unlink on an explicit `flushIncludingDestructive`), so
-the file this reads is exactly what was there when the class was removed —
-unless someone edited it out-of-band (another session, git, an editor) while
-the removal sat pending. Reinstalling `PrevBody` over that edit, then retiring
-the entry as "cleanly reverted", would silently discard it. On drift, this
-raises a structured error and returns *before* reinstalling or retiring —
-the class stays removed and the original entry stays pending, exactly as if
-revert had never been called.
+itself (Tier 2 removals only unlink on an explicit
+`flushIncludingDestructive`), so in the common case the file this reads is
+exactly what was there when the class was removed — unless someone edited it
+out-of-band (another session, git, an editor) while the removal sat pending,
+in which case reinstalling `PrevBody` over that edit and retiring the entry
+as "cleanly reverted" would silently discard it. (`PrevBody` is the class's
+*tracked in-memory* source at removal time, not necessarily a fresh disk
+read — an earlier durable-but-unflushed patch to this same class, still
+pending independently, would also make disk legitimately differ; the check
+below cannot distinguish that case from a genuine external edit, so it
+raises the same structured error either way rather than guessing, and the
+error message says so.) On any mismatch, this raises a structured error and
+returns *before* reinstalling or retiring — the class stays removed and the
+original entry stays pending, exactly as if revert had never been called.
 """.
 -spec reinstall_reverted_class(binary(), binary(), beamtalk_workspace_changelog:entry()) -> term().
 reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
@@ -771,9 +777,14 @@ records the whole prior file rather than a span. Three outcomes:
 
   - disk bytes == `PrevBody`: no drift, `ok` — the file is exactly what it
     was when the class was removed, safe to reinstall over.
-  - disk bytes differ: the file was edited out-of-band while the removal sat
-    pending. A structured `external_edit`-flavoured error, naming the
-    mismatch so the caller can reconcile manually.
+  - disk bytes differ: the on-disk content no longer matches the recorded
+    pre-removal snapshot — either an out-of-band edit (another session, git,
+    an editor) landed while the removal sat pending, or the class had an
+    earlier durable-but-unflushed patch that was never written to disk (both
+    look identical from here: a content mismatch with no further signal to
+    tell them apart). A structured error either way, naming the mismatch so
+    the caller can reconcile manually rather than risk losing either kind of
+    change silently.
   - the file is missing or unreadable: it was deleted or replaced out-of-band
     (an even bigger divergence than an edit). Also a structured error — never
     silently treat "gone" as "safe to overwrite with the old snapshot".
@@ -798,15 +809,17 @@ check_no_external_drift(SourceFile, PrevBody, ClassNameBin) ->
                         <<"revert: cannot reinstall ">>,
                         ClassNameBin,
                         <<
-                            "; its file was edited externally while the removal was "
-                            "pending (the on-disk content no longer matches the "
-                            "recorded pre-removal snapshot): "
+                            "; its file's current on-disk content no longer matches "
+                            "the class's recorded pre-removal snapshot: "
                         >>,
                         SourceFile,
                         <<
-                            ". Reconcile the file manually before reverting, or use "
-                            "`Workspace changes clear` to discard this pending removal "
-                            "without reinstalling"
+                            ". This means either the file was edited externally "
+                            "(another session, git, an editor) while the removal was "
+                            "pending, or the class had an earlier durable patch that "
+                            "was never flushed to disk. Reconcile the file manually "
+                            "before reverting, or use `Workspace changes clear` to "
+                            "discard this pending removal without reinstalling"
                         >>
                     ])
                 )};

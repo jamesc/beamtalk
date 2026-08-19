@@ -125,6 +125,7 @@ revert_e2e_test_() ->
             %% as cleanly reverted.
             fun revert_remove_class_entry_no_drift_reverts_as_before/1,
             fun revert_remove_class_entry_detects_external_drift_and_refuses_to_reinstall/1,
+            fun revert_remove_class_entry_detects_drift_from_unflushed_patch_too/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
             fun revert_remove_class_entry_after_flush_is_unsupported/1
         ]}}.
@@ -1102,6 +1103,53 @@ revert_remove_class_entry_detects_external_drift_and_refuses_to_reinstall(#{
         %% The original "remove-class" entry stays pending/active — revert
         %% did not succeed, so it must not be retired.
         ?_assertEqual(1, length(ActiveForClass))
+    ].
+
+%% Not every disk/snapshot mismatch `check_no_external_drift/3` catches is a
+%% *genuine* external edit: `capture_class_removal_snapshot/1` records
+%% `prev_source_ref` from the class's *tracked in-memory* source
+%% (`beamtalk_workspace_meta:get_class_source/1`), not a fresh disk read at
+%% removal time. Autoflush defaults to `false` (`autoflush/0`'s doc), so a
+%% durable method patch does NOT reach disk until an explicit flush — if such
+%% a patch landed on this class before it was removed, `prev_source_ref`
+%% captures the *patched* (still-unflushed) content while disk still has the
+%% pre-patch content, with nobody having touched the file externally at all.
+%% The drift check cannot tell this apart from a real external edit (both are
+%% a content mismatch with no further signal), so it raises the same
+%% structured error either way — documented behaviour, not an oversight (see
+%% `check_no_external_drift/3`'s doc): the revert is conservatively refused
+%% rather than guessing which of the two divergent sources is "correct," and
+%% nothing is lost — the class stays removed, the pending patch's own
+%% ChangeEntry is untouched, and the removal entry stays pending so revert
+%% can be retried (e.g. after flushing the patch first).
+revert_remove_class_entry_detects_drift_from_unflushed_patch_too(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3213UnflushedPatch" ++ U),
+    {ok, _Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
+    ?assertEqual(false, beamtalk_workspace_interface_primitives:autoflush()),
+    %% Durable patch, autoflush off — memory now has `base => 2`, disk still
+    %% has `base => 1`. No external edit occurred.
+    {ok, _} = beamtalk_repl_eval:compile_method(
+        ClassName, <<"base">>, <<"^ 2">>, durable, <<"sess">>, human
+    ),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    LoadedAfterRevert = beamtalk_class_registry:whereis_class(ClassAtom),
+    ActiveForClass = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassName
+    ],
+    [
+        %% The revert fails loudly instead of silently picking one source.
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult),
+        %% The class stays removed — nothing was reinstalled.
+        ?_assertEqual(undefined, LoadedAfterRevert),
+        %% Both the pending method-patch entry and the remove-class entry are
+        %% still there, untouched — nothing was silently dropped.
+        ?_assertEqual(2, length(ActiveForClass))
     ].
 
 %% Once a "remove-method" entry has been flushed (Tier 1 — an ordinary
