@@ -126,6 +126,7 @@ revert_e2e_test_() ->
             fun revert_remove_class_entry_no_drift_reverts_as_before/1,
             fun revert_remove_class_entry_detects_external_drift_and_refuses_to_reinstall/1,
             fun revert_remove_class_entry_detects_drift_from_unflushed_patch_too/1,
+            fun revert_remove_class_entry_detects_file_deleted_externally/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
             fun revert_remove_class_entry_after_flush_is_unsupported/1
         ]}}.
@@ -1150,6 +1151,42 @@ revert_remove_class_entry_detects_drift_from_unflushed_patch_too(#{tmp := Tmp, u
         %% Both the pending method-patch entry and the remove-class entry are
         %% still there, untouched — nothing was silently dropped.
         ?_assertEqual(2, length(ActiveForClass))
+    ].
+
+%% The `enoent` branch of `check_no_external_drift/3`: the recorded
+%% `sourceFile` was deleted out-of-band (not via `flushIncludingDestructive`,
+%% since the removal never reached that step) while the removal sat pending.
+%% An even bigger divergence than an edited-but-present file — must also be a
+%% loud structured error, never "file's gone, so there's nothing to conflict
+%% with, just recreate it silently".
+revert_remove_class_entry_detects_file_deleted_externally(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("Bt3213DeletedExternally" ++ U),
+    {ok, _Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
+    ClassAtom = binary_to_atom(ClassName, utf8),
+    Path = project_class_path(Tmp, ClassName),
+    _ = beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassAtom),
+    LoadedAfterRemove = beamtalk_class_registry:whereis_class(ClassAtom),
+    %% Simulate the file being deleted out-of-band (not via `flush`/
+    %% `flushIncludingDestructive` — the removal never reached that step).
+    ok = file:delete(Path),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"new-class">>
+    ),
+    LoadedAfterRevert = beamtalk_class_registry:whereis_class(ClassAtom),
+    ActiveForClass = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= ClassName
+    ],
+    [
+        ?_assertEqual(undefined, LoadedAfterRemove),
+        %% The revert fails loudly instead of silently recreating the file
+        %% from the stale snapshot with no trace anything was amiss.
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult),
+        ?_assertEqual(undefined, LoadedAfterRevert),
+        %% The original "remove-class" entry stays pending — revert did not
+        %% succeed, so it must not be retired.
+        ?_assertEqual(1, length(ActiveForClass))
     ].
 
 %% Once a "remove-method" entry has been flushed (Tier 1 — an ordinary
