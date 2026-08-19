@@ -29,11 +29,11 @@
 
 Actor subclass: RemSelParent
   greet => "parent-greet"
-// => _
+// => RemSelParent
 
 RemSelParent subclass: RemSelChild
   greet => "child-greet"
-// => _
+// => RemSelChild
 
 rsc := RemSelChild spawn
 // => Actor(RemSelChild, _)
@@ -62,11 +62,11 @@ rsc greet
 
 Actor subclass: RemSelClsParent
   class make => "parent-made"
-// => _
+// => RemSelClsParent
 
 RemSelClsParent subclass: RemSelClsChild
   class make => "child-made"
-// => _
+// => RemSelClsChild
 
 RemSelClsChild make
 // => child-made
@@ -140,7 +140,7 @@ RemSelParent removeSelector: #yetAnotherAbsentSelector ifAbsent: [RemSelParent i
 
 Value subclass: RemSelExtTarget
   field: tag = "none"
-// => _
+// => RemSelExtTarget
 
 RemSelExtTarget >> shout => "SHOUT"
 // => RemSelExtTarget>>shout
