@@ -1,0 +1,35 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("typed"), span: Span { start: 183, end: 188 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test native: actor facade codegen (ADR 0056)."), Whitespace("\n"), LineComment("// Exercises generate_native_facade_module in native_facade.rs."), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Actor"), span: Span { start: 189, end: 194 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 195, end: 204 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("NativeWorker"), span: Span { start: 205, end: 217 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("native:"), span: Span { start: 218, end: 225 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("some_worker_module"), span: Span { start: 226, end: 244 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("doWork"), span: Span { start: 248, end: 254 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 255, end: 257 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Nil"), span: Span { start: 258, end: 261 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 262, end: 264 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 265, end: 269 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("delegate"), span: Span { start: 270, end: 278 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("compute:"), span: Span { start: 281, end: 289 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 290, end: 295 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: DoubleColon, span: Span { start: 296, end: 298 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 299, end: 306 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 307, end: 309 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 310, end: 317 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 318, end: 320 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 321, end: 325 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("delegate"), span: Span { start: 326, end: 334 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("ping:"), span: Span { start: 337, end: 342 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("msg"), span: Span { start: 343, end: 346 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: DoubleColon, span: Span { start: 347, end: 349 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 350, end: 356 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 357, end: 359 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 360, end: 366 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 367, end: 369 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 370, end: 374 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("delegate"), span: Span { start: 375, end: 383 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 384, end: 384 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

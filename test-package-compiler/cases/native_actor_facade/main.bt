@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test native: actor facade codegen (ADR 0056).
+// Exercises generate_native_facade_module in native_facade.rs.
+typed Actor subclass: NativeWorker native: some_worker_module
+
+  doWork -> Nil => self delegate
+  compute: value :: Integer -> Integer => self delegate
+  ping: msg :: String -> String => self delegate
