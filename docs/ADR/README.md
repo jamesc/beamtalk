@@ -141,6 +141,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Accepted | 2026-08-15 |
 | [0113](0113-destructive-workspace-operations.md) | Destructive Workspace Operations — File Deletion in Flush | Accepted | 2026-08-18 |
 | [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Proposed | 2026-08-18 |
+| [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Proposed | 2026-08-19 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
