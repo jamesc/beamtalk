@@ -1,0 +1,359 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "NativeWorker",
+                span: Span {
+                    start: 205,
+                    end: 217,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 189,
+                        end: 194,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: true,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "doWork",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 265,
+                                            end: 269,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "delegate",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 265,
+                                    end: 278,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Nil",
+                                span: Span {
+                                    start: 258,
+                                    end: 261,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 248,
+                        end: 278,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "compute:",
+                                span: Span {
+                                    start: 281,
+                                    end: 289,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "value",
+                                span: Span {
+                                    start: 290,
+                                    end: 295,
+                                },
+                            },
+                            type_annotation: Some(
+                                Simple(
+                                    Identifier {
+                                        name: "Integer",
+                                        span: Span {
+                                            start: 299,
+                                            end: 306,
+                                        },
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 321,
+                                            end: 325,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "delegate",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 321,
+                                    end: 334,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 310,
+                                    end: 317,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 281,
+                        end: 334,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "ping:",
+                                span: Span {
+                                    start: 337,
+                                    end: 342,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "msg",
+                                span: Span {
+                                    start: 343,
+                                    end: 346,
+                                },
+                            },
+                            type_annotation: Some(
+                                Simple(
+                                    Identifier {
+                                        name: "String",
+                                        span: Span {
+                                            start: 350,
+                                            end: 356,
+                                        },
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 370,
+                                            end: 374,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "delegate",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 370,
+                                    end: 383,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "String",
+                                span: Span {
+                                    start: 360,
+                                    end: 366,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 337,
+                        end: 383,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 183,
+                            end: 188,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 183,
+                            end: 188,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Test native: actor facade codegen (ADR 0056).",
+                        span: Span {
+                            start: 183,
+                            end: 188,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "Exercises generate_native_facade_module in native_facade.rs.",
+                        span: Span {
+                            start: 183,
+                            end: 188,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
+            },
+            doc_comment: None,
+            backing_module: Some(
+                Identifier {
+                    name: "some_worker_module",
+                    span: Span {
+                        start: 226,
+                        end: 244,
+                    },
+                },
+            ),
+            handle_scope: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 183,
+                end: 383,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    type_aliases: [],
+    expressions: [],
+    span: Span {
+        start: 183,
+        end: 383,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}
