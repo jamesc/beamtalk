@@ -784,7 +784,11 @@ caller (`reinstall_reverted_class/3`) never reaches the reinstall step.
 """.
 -spec check_no_external_drift(binary(), binary(), binary()) -> ok | {error, #beamtalk_error{}}.
 check_no_external_drift(SourceFile, PrevBody, ClassNameBin) ->
-    case file:read_file(SourceFile) of
+    %% `binary_to_list/1` here mirrors `beamtalk_workspace_flush:prepare_splice/2`'s
+    %% / `prepare_remove_class/3`'s own `file:read_file(binary_to_list(File))`
+    %% convention for a ChangeEntry's recorded `sourceFile` binary, rather than
+    %% passing the binary straight through.
+    case file:read_file(binary_to_list(SourceFile)) of
         {ok, PrevBody} ->
             ok;
         {ok, _DiskBody} ->

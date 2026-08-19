@@ -131,6 +131,7 @@ Reuses ADR 0082's `(mtime, content-hash)` snapshot-and-compare mechanism verbati
 |---|---|---|
 | Target file's content changed since the entry was logged (patch, `remove-method`) | Existing mechanism, unchanged | Existing choices: `flush:force`, `changes clear`, `changes diff:` |
 | Target file for a `remove-class` was already deleted externally | `stat` fails at Phase A, **and no `<file>.tmp-delete-<epoch>-<seq>` matching this entry's own `epoch`/`seq` exists** (see *Delete atomicity* — that case is a mid-delete crash recovery, not an external deletion, and finishes the unlink instead) | Surfaces as `already gone — nothing to remove`, a soft success: the entry is pruned, the outcome the user wanted already holds |
+| Target file for a still-*pending* `remove-class` entry was edited externally before `revert:` (BT-3213, review follow-up) | `reinstall_reverted_class/3` reads the current on-disk `sourceFile` and compares it byte-for-byte against the entry's `prev_source_ref` snapshot before reinstalling (`check_no_external_drift/3`) — the same comparison the flush-path row above uses, applied to a whole file instead of a byte span, since a pending `remove-class` entry never touches disk itself (only an explicit `flushIncludingDestructive` does) | Structured error, revert refused: the class stays removed, the external edit on disk is untouched, and the original `remove-class` entry stays pending (not retired) rather than silently discarding the edit under the stale snapshot |
 
 ### Reproducible-build guarantee
 
