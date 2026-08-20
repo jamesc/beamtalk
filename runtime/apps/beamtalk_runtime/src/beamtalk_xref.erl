@@ -1398,7 +1398,8 @@ insert_one_method(Class, Entry, Gen) ->
                 %% `recv_kind`/`target_module` already default for legacy
                 %% rows, resolves identically to Phase 3's "always relevant"
                 %% read-time default for a genuinely absent key (both
-                %% `is_relevant/3` clauses agree).
+                %% `is_relevant/3` clauses agree — Phase 3, not yet
+                %% implemented as of this module).
                 recv_type => maps:get(recv_type, Send, dynamic),
                 gen => Gen
             },

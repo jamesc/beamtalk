@@ -2857,10 +2857,19 @@ impl CoreErlangGenerator {
         // `source_analysis::method_span_corpus_tests`, not merely asserted
         // by this comment.
         let receiver_spans = collect_receiver_spans(method);
+        // Defensive fallback for a divergence shape the corpus test doesn't
+        // cover (see the comment above): a length mismatch means the
+        // pre-order-ordinal pairing can't be trusted for *any* entry in this
+        // method, so degrade the whole method to `dynamic` rather than risk
+        // silently attributing a `recv_type` to the wrong selector.
+        let spans_aligned = sends.len() == receiver_spans.len();
         let recv_types: Vec<RecvType> = sends
             .iter()
             .enumerate()
             .map(|(i, _hit)| {
+                if !spans_aligned {
+                    return RecvType::Dynamic;
+                }
                 receiver_spans
                     .get(i)
                     .and_then(|span_hit| self.type_map.get(span_hit.span))
