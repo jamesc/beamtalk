@@ -1,7 +1,7 @@
 # ADR 0115: Receiver-Type Key for `senders_of/1` Lookup
 
 ## Status
-Proposed (2026-08-19)
+Accepted (2026-08-20)
 
 ## Context
 
