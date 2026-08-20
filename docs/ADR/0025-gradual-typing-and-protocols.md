@@ -1,7 +1,7 @@
 # ADR 0025: Gradual Typing and Protocols
 
 ## Status
-Implemented (Phases 1–2, 2026-02-15) — Phase 3 (Protocols) planned
+Implemented (Phases 1–2, 2026-02-15). Phase 3 (Protocols) was implemented under [ADR 0068: Parametric Types and Protocols](0068-parametric-types-and-protocols.md) (2026-03-20) rather than as a direct continuation of this ADR — see that ADR for the shipped `Protocol define:` syntax, structural conformance checking, and `respondsTo:`-based narrowing to protocol types. Phase 3 as sketched below (§"Phase 3: Protocols") predates and differs in some syntax details from what actually shipped (ADR 0068 §"Related issues" notes "ADR 0025's earlier `<>` examples predate the current syntax decisions and are not binding").
 
 ## Context
 
@@ -572,8 +572,8 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 |-------|-------|-------------|------|--------|
 | 1 | BT-587, BT-671, BT-672 | Type inference from class definitions; argument/return/state checks | M-L | Done |
 | 2 | BT-673 | Optional type annotations syntax + user-facing coverage (stdlib/docs/examples); Dialyzer spec generation pending. Note: parameter type syntax updated to `::` per [ADR 0053](0053-double-colon-type-annotation-syntax.md) (BT-1134) | M | Done |
-| 3 | TBD | Protocol definitions and structural conformance | L | Planned |
-| 4 | TBD | Advanced types (union, generic, singleton, narrowing) | XL | Future |
+| 3 | [BT-1157](https://linear.app/beamtalk/issue/BT-1157) | Protocol definitions and structural conformance — shipped under [ADR 0068](0068-parametric-types-and-protocols.md), not as a direct continuation of this ADR | L | Done (via ADR 0068) |
+| 4 | TBD | Advanced types (union, generic, singleton, narrowing) — union types shipped under [ADR 0102](0102-set-theoretic-type-operators.md); generics and `respondsTo:` narrowing shipped under [ADR 0068](0068-parametric-types-and-protocols.md); singleton types not independently verified as of this note | XL | Partially done (via ADR 0068/0102) |
 
 ## Migration Path
 
