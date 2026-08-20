@@ -31,7 +31,10 @@
 //! subtracting the prefix line count. Callers treat parse errors as empty
 //! results — any sub-trees that parsed successfully still contribute results.
 
-use crate::ast::{Expression, MessageSelector, Pattern, StringSegment, TypeAnnotation};
+use crate::ast::{
+    CascadeMessage, Expression, MessageSelector, MethodDefinition, Pattern, StringSegment,
+    TypeAnnotation,
+};
 use crate::source_analysis::{Span, lex_with_eof, parse};
 
 // ---------------------------------------------------------------------------
@@ -397,6 +400,240 @@ fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u3
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)
+}
+
+// ---------------------------------------------------------------------------
+// Receiver-span extraction (BT-3217, ADR 0115 Phase 2)
+// ---------------------------------------------------------------------------
+
+/// One send/cascade-message hit discovered by [`collect_receiver_spans`]: the
+/// selector name (identical to what [`push_send`] would record in a
+/// [`SendHit`] at the same pre-order position — used by the corpus
+/// conformance test to assert selector-sequence identity between the two
+/// walks) and the receiver's file-absolute [`Span`] (used by codegen's
+/// `TypeMap` join).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiverSpanHit {
+    /// The selector name, exactly as [`SendHit::selector`] would record it.
+    pub selector: String,
+    /// File-absolute span of the message's receiver expression.
+    pub span: Span,
+}
+
+/// Walks the original, already-parsed `&MethodDefinition` in the exact same
+/// pre-order as [`find_all_sends_in_source`]'s reparsed walk, collecting the
+/// **receiver span** of each send/cascade-message hit — file-absolute
+/// coordinates, since this walks the real AST directly rather than a
+/// re-unparsed synthetic copy.
+///
+/// Codegen (`gen_server/methods.rs::build_method_xref_entry`) joins this
+/// function's output against `find_all_sends_in_source`'s `SendHit` stream
+/// **by pre-order ordinal** (index `i` here pairs with `SendHit`s\[i\]) to
+/// recover each send's receiver type from the type checker's `TypeMap`
+/// (keyed by file-absolute span) — the coordinate-space join the ADR 0115
+/// Phase 1 spike (`docs/internal/adr-0115-phase1-spike-findings.md` §1c/§1d)
+/// identified as the real blocker, since `find_all_sends_in_source`'s
+/// `SendHit`s carry no span into a re-unparsed copy's source.
+///
+/// **This walk must stay structurally identical to [`collect_sends`]** (same
+/// hit count, same order, same cascade-expansion rule) or the ordinal join
+/// silently misaligns. `source_analysis::method_span_corpus_tests` asserts
+/// this holds — hit-count and selector-sequence identity — over the full
+/// stdlib+examples corpus, per this project's no-"keep-in-sync"-comment-
+/// without-a-test rule.
+///
+/// Unlike `find_all_sends_in_source`, this needs no synthetic-class
+/// wrapping, re-lex/re-parse, or coordinate translation: the input
+/// `MethodDefinition` already carries file-absolute spans. Depends only on
+/// `crate::ast`/`crate::source_analysis` — no `semantic_analysis` dependency
+/// (this module's leaf position, ADR 0115 Constraint 3, is unchanged).
+#[must_use]
+pub fn collect_receiver_spans(method: &MethodDefinition) -> Vec<ReceiverSpanHit> {
+    let mut hits = Vec::new();
+    for stmt in &method.body {
+        collect_receiver_spans_expr(&stmt.expression, &mut hits);
+    }
+    hits
+}
+
+/// Mirrors [`collect_sends`] arm-for-arm, pushing a [`ReceiverSpanHit`]
+/// instead of a [`SendHit`] at each site `collect_sends` would call
+/// `push_send`.
+fn collect_receiver_spans_expr(expr: &Expression, hits: &mut Vec<ReceiverSpanHit>) {
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            if !receiver_rooted_in_error(receiver) {
+                hits.push(ReceiverSpanHit {
+                    selector: selector.name().to_string(),
+                    span: receiver.span(),
+                });
+            }
+            collect_receiver_spans_expr(receiver, hits);
+            for arg in arguments {
+                collect_receiver_spans_expr(arg, hits);
+            }
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => collect_cascade_receiver_spans(receiver, messages, hits),
+        Expression::Assignment { target, value, .. } => {
+            collect_receiver_spans_expr(target, hits);
+            collect_receiver_spans_expr(value, hits);
+        }
+        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+            collect_receiver_spans_expr(value, hits);
+        }
+        Expression::Block(block) => {
+            for stmt in &block.body {
+                collect_receiver_spans_expr(&stmt.expression, hits);
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            collect_receiver_spans_expr(expression, hits);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            collect_receiver_spans_expr(receiver, hits);
+        }
+        Expression::Match { value, arms, .. } => {
+            collect_receiver_spans_expr(value, hits);
+            for arm in arms {
+                collect_pattern_receiver_spans(&arm.pattern, hits);
+                if let Some(guard) = &arm.guard {
+                    collect_receiver_spans_expr(guard, hits);
+                }
+                collect_receiver_spans_expr(&arm.body, hits);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for segment in segments {
+                if let StringSegment::Interpolation(inner) = segment {
+                    collect_receiver_spans_expr(inner, hits);
+                }
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for element in elements {
+                collect_receiver_spans_expr(element, hits);
+            }
+            if let Some(tail_expr) = tail {
+                collect_receiver_spans_expr(tail_expr, hits);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_receiver_spans_expr(element, hits);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_receiver_spans_expr(&pair.key, hits);
+                collect_receiver_spans_expr(&pair.value, hits);
+            }
+        }
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. }
+        | Expression::Error { .. } => {}
+    }
+}
+
+/// Mirrors [`collect_cascade_sends`]: one hit per cascade message (the
+/// shared receiver's span, computed once), plus a recursive descent into the
+/// receiver subtree and each message's arguments.
+fn collect_cascade_receiver_spans(
+    receiver: &Expression,
+    messages: &[CascadeMessage],
+    hits: &mut Vec<ReceiverSpanHit>,
+) {
+    let shared_span = cascade_receiver_span(receiver);
+    let error_rooted = receiver_rooted_in_error(receiver);
+    collect_receiver_spans_expr(receiver, hits);
+    for msg in messages {
+        if !error_rooted {
+            hits.push(ReceiverSpanHit {
+                selector: msg.selector.name().to_string(),
+                span: shared_span,
+            });
+        }
+        for arg in &msg.arguments {
+            collect_receiver_spans_expr(arg, hits);
+        }
+    }
+}
+
+/// Mirrors [`cascade_receiver_kind`]'s receiver-unwrapping rule: a cascade's
+/// `receiver` field holds the *first* cascaded message's full send tree (the
+/// parser folds `a foo: 1; bar: 2` into `Cascade { receiver: (a foo: 1),
+/// messages: [bar: 2] }`), so the span every cascade message shares is the
+/// *inner* receiver of that send (`a`), not the send tree itself.
+fn cascade_receiver_span(receiver: &Expression) -> Span {
+    if let Expression::MessageSend {
+        receiver: inner, ..
+    } = receiver
+    {
+        inner.span()
+    } else {
+        receiver.span()
+    }
+}
+
+/// Mirrors [`collect_pattern_sends`] arm-for-arm.
+fn collect_pattern_receiver_spans(pattern: &Pattern, hits: &mut Vec<ReceiverSpanHit>) {
+    match pattern {
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                collect_pattern_receiver_spans(&segment.value, hits);
+                if let Some(size) = &segment.size {
+                    collect_receiver_spans_expr(size, hits);
+                }
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                collect_pattern_receiver_spans(element, hits);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                collect_pattern_receiver_spans(element, hits);
+            }
+            if let Some(rest_pattern) = rest {
+                collect_pattern_receiver_spans(rest_pattern, hits);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                collect_pattern_receiver_spans(element, hits);
+            }
+            if let Some(tail_pattern) = tail {
+                collect_pattern_receiver_spans(tail_pattern, hits);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_pattern_receiver_spans(&pair.value, hits);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_selector, inner) in keywords {
+                collect_pattern_receiver_spans(inner, hits);
+            }
+        }
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
+    }
 }
 
 // ---------------------------------------------------------------------------

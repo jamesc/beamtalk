@@ -24,8 +24,10 @@ use crate::ast::{
 };
 use crate::docvec;
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
+use crate::semantic_analysis::{InferredType, TypeProvenance};
 use crate::source_analysis::Span;
 use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
+use ecow::EcoString;
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
@@ -43,6 +45,74 @@ pub(crate) struct MetaProvenance<'a> {
     pub beamtalk_version: Option<&'a str>,
     /// The producing compound OTP version (`<release>-<erts>`).
     pub otp_release: Option<&'a str>,
+}
+
+/// BT-3217 (ADR 0115 Phase 2): the xref `recv_type` write-path vocabulary a
+/// message send's receiver `InferredType` projects onto — see
+/// [`project_recv_type`] and `build_method_xref_entry`'s doc for the full
+/// rule, and this PR's description for the `Meta{C}` decision.
+enum RecvType {
+    /// A concrete class-or-protocol name — `Known` resolving to exactly one
+    /// name whose provenance the read path can trust (`Declared`,
+    /// `Inferred`, or `Substituted`; ADR 0068's protocol names resolve
+    /// through the same `Known` variant as classes).
+    Name(EcoString),
+    /// A class-object (metaclass) receiver (`InferredType::Meta{C}`, e.g.
+    /// `Counter spawn`), rendered with the same `'<C> class'` convention as
+    /// `beamtalk_class_registry:class_object_tag/1` rather than falling into
+    /// the "otherwise unresolved" bucket by omission (spike §1e).
+    ClassObject(EcoString),
+    /// Everything else: `Union`/`Intersection`/`Negation`/`Dynamic`/`Never`,
+    /// no `TypeMap` entry at all, or a `Known` whose provenance is
+    /// `Extracted` (native/FFI, ADR 0075) or `Aliased` (ADR 0108) — neither
+    /// of those two names has a `beamtalk_class_metadata` row, so coarsening
+    /// them here (rather than deferring to the read path, which has no way
+    /// to tell them apart from a genuine class) is the spike §4 fix.
+    Dynamic,
+}
+
+/// BT-3217 (ADR 0115 Phase 2) write-path projection rule (spike §1e/§4):
+/// projects one message send's receiver `InferredType` — looked up from the
+/// type checker's `TypeMap` by the receiver's span — onto [`RecvType`].
+fn project_recv_type(ty: &InferredType) -> RecvType {
+    match ty {
+        InferredType::Known {
+            class_name,
+            provenance,
+            ..
+        } => match provenance {
+            // Neither an FFI/native type name nor an alias display name has
+            // a `beamtalk_class_metadata` row the Phase 3 read path could
+            // resolve — coarsen to `dynamic` at write time rather than let
+            // the read path discover an unresolvable name (spike §4).
+            TypeProvenance::Extracted | TypeProvenance::Aliased { .. } => RecvType::Dynamic,
+            TypeProvenance::Declared(_)
+            | TypeProvenance::Inferred(_)
+            | TypeProvenance::Substituted(_) => RecvType::Name(class_name.clone()),
+        },
+        InferredType::Meta { class_name, .. } => RecvType::ClassObject(class_name.clone()),
+        InferredType::Union { .. }
+        | InferredType::Dynamic(_)
+        | InferredType::Never
+        | InferredType::Negation { .. }
+        | InferredType::Intersection { .. } => RecvType::Dynamic,
+    }
+}
+
+/// Renders a [`RecvType`] as the Core Erlang atom literal baked into a
+/// `method_xref` send entry's `recv_type` field, falling back to `'dynamic'`
+/// for a name that would exceed Erlang's 255-byte atom cap (mirrors the
+/// `MAX_ATOM_BYTES` guard `build_method_xref_entry` already applies to
+/// selectors and class references).
+fn recv_type_atom(recv_type: &RecvType) -> Document<'static> {
+    const MAX_ATOM_BYTES: usize = 255;
+    match recv_type {
+        RecvType::Name(name) if name.len() <= MAX_ATOM_BYTES => leaf::atom(name.to_string()),
+        RecvType::ClassObject(name) if name.len() + " class".len() <= MAX_ATOM_BYTES => {
+            leaf::atom(format!("{name} class"))
+        }
+        RecvType::Name(_) | RecvType::ClassObject(_) | RecvType::Dynamic => leaf::atom("dynamic"),
+    }
 }
 
 /// BT-2734: Compiler-derived `__signature__` / `__doc__` selector-map entries
@@ -2754,7 +2824,8 @@ impl CoreErlangGenerator {
         class_side: bool,
     ) -> Document<'static> {
         use crate::method_source_walker::{
-            ReceiverKind, find_all_references_in_source, find_all_sends_in_source,
+            ReceiverKind, collect_receiver_spans, find_all_references_in_source,
+            find_all_sends_in_source,
         };
 
         // Erlang atoms cap at 255 bytes. A selector / class name longer than
@@ -2774,11 +2845,35 @@ impl CoreErlangGenerator {
         let def_line = Self::method_def_line(&source);
 
         let sends = find_all_sends_in_source(&source);
+
+        // BT-3217 (ADR 0115 Phase 2): a second, span-carrying walk over the
+        // *original* `method` (file-absolute spans, unlike `sends` above,
+        // which comes from a re-unparsed/re-parsed synthetic copy — see the
+        // ADR 0115 Phase 1 spike, docs/internal/adr-0115-phase1-spike-findings.md
+        // §1c). Joined to `sends` **by pre-order ordinal**, before the
+        // `MAX_ATOM_BYTES` filter below (a filter afterward would skew the
+        // pairing) — the two walks are required to stay structurally
+        // identical, verified by the corpus conformance test in
+        // `source_analysis::method_span_corpus_tests`, not merely asserted
+        // by this comment.
+        let receiver_spans = collect_receiver_spans(method);
+        let recv_types: Vec<RecvType> = sends
+            .iter()
+            .enumerate()
+            .map(|(i, _hit)| {
+                receiver_spans
+                    .get(i)
+                    .and_then(|span_hit| self.type_map.get(span_hit.span))
+                    .map_or(RecvType::Dynamic, project_recv_type)
+            })
+            .collect();
+
         let sends_doc = {
             let send_docs: Vec<Document<'static>> = sends
                 .iter()
-                .filter(|hit| hit.selector.len() <= MAX_ATOM_BYTES)
-                .map(|hit| {
+                .zip(recv_types.iter())
+                .filter(|(hit, _)| hit.selector.len() <= MAX_ATOM_BYTES)
+                .map(|(hit, recv_type)| {
                     let recv_kind = match hit.receiver {
                         ReceiverKind::SelfReceiver => "self_recv",
                         ReceiverKind::SuperReceiver => "super_recv",
@@ -2792,6 +2887,8 @@ impl CoreErlangGenerator {
                         leaf::int_lit(i64::from(hit.line)),
                         ", 'recv_kind' => ",
                         leaf::atom(recv_kind),
+                        ", 'recv_type' => ",
+                        recv_type_atom(recv_type),
                         "}~",
                     ]
                 })
@@ -5487,12 +5584,16 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeclaredType, MetaProvenance, MetaTypeRepr, extract_package_from_module_name};
+    use super::{
+        DeclaredType, MetaProvenance, MetaTypeRepr, RecvType, extract_package_from_module_name,
+        project_recv_type,
+    };
     use crate::ast::{
         ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, KeywordPart,
         Literal, MessageSelector, MethodDefinition, Module, ParameterDefinition, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
+    use crate::semantic_analysis::{DynamicReason, InferredType, TypeProvenance};
     use crate::source_analysis::Span;
     use crate::test_helpers::test_support::make_actor_class;
 
@@ -5511,6 +5612,133 @@ mod tests {
             vec![bare(Expression::Literal(Literal::Integer(42), s()))],
             s(),
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-3217 (ADR 0115 Phase 2): `project_recv_type` unit coverage.
+    //
+    // The codegen fixture matrix (`codegen/core_erlang/tests/recv_type.rs`)
+    // exercises this rule end-to-end through real `.bt` source for every case
+    // reachable from actual inference (typed/protocol/dynamic/union/native/
+    // alias locals, `Meta{C}`, self-send, FFI receiver). `Intersection` and
+    // `Negation` are not reachable that way without substantially more
+    // fixture machinery (ADR 0068 protocol composition, ADR 0102 negation
+    // narrowing) for a result this rule treats identically to `Union` —
+    // tested directly here instead, alongside every other variant, as a
+    // complete case-by-case pin of the write-path projection rule.
+    // -----------------------------------------------------------------------
+
+    fn known(class_name: &str, provenance: TypeProvenance) -> InferredType {
+        InferredType::Known {
+            class_name: class_name.into(),
+            type_args: vec![],
+            provenance,
+        }
+    }
+
+    #[test]
+    fn project_recv_type_known_declared_yields_name() {
+        let ty = known("Counter", TypeProvenance::Declared(s()));
+        assert!(matches!(project_recv_type(&ty), RecvType::Name(n) if n == "Counter"));
+    }
+
+    #[test]
+    fn project_recv_type_known_inferred_yields_name() {
+        let ty = known("Counter", TypeProvenance::Inferred(s()));
+        assert!(matches!(project_recv_type(&ty), RecvType::Name(n) if n == "Counter"));
+    }
+
+    #[test]
+    fn project_recv_type_known_substituted_yields_name() {
+        let ty = known("Counter", TypeProvenance::Substituted(s()));
+        assert!(matches!(project_recv_type(&ty), RecvType::Name(n) if n == "Counter"));
+    }
+
+    #[test]
+    fn project_recv_type_known_with_type_args_drops_them() {
+        // `Collection(Integer)` still keys `recv_type: 'Collection'` — the
+        // generic parameter doesn't change which class/protocol a reader
+        // needs to reason about (ADR 0115 §Write path).
+        let ty = InferredType::Known {
+            class_name: "Collection".into(),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(project_recv_type(&ty), RecvType::Name(n) if n == "Collection"));
+    }
+
+    #[test]
+    fn project_recv_type_known_extracted_native_type_coarsens_to_dynamic() {
+        // ADR 0075 native/FFI type name — no `beamtalk_class_metadata` row.
+        let ty = known("List", TypeProvenance::Extracted);
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
+    }
+
+    #[test]
+    fn project_recv_type_known_aliased_coarsens_to_dynamic() {
+        // ADR 0108 alias display name — no `beamtalk_class_metadata` row.
+        let ty = known(
+            "RestartStrategy",
+            TypeProvenance::Aliased {
+                name: "RestartStrategy".into(),
+                span: s(),
+            },
+        );
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
+    }
+
+    #[test]
+    fn project_recv_type_meta_yields_class_object() {
+        let ty = InferredType::Meta {
+            class_name: "Counter".into(),
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(project_recv_type(&ty), RecvType::ClassObject(n) if n == "Counter"));
+    }
+
+    #[test]
+    fn project_recv_type_dynamic_coarsens_to_dynamic() {
+        let ty = InferredType::Dynamic(DynamicReason::Unknown);
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
+    }
+
+    #[test]
+    fn project_recv_type_never_coarsens_to_dynamic() {
+        assert!(matches!(
+            project_recv_type(&InferredType::Never),
+            RecvType::Dynamic
+        ));
+    }
+
+    #[test]
+    fn project_recv_type_union_coarsens_to_dynamic() {
+        let ty = InferredType::simple_union(&["Integer", "String"]);
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
+    }
+
+    #[test]
+    fn project_recv_type_intersection_coarsens_to_dynamic() {
+        // ADR 0068 protocol composition (`Collection(Object) & Comparable`) —
+        // deferred to `dynamic` in v1 (ADR 0115 Alternatives Considered;
+        // precise keying tracked separately as BT-3215).
+        let ty = InferredType::Intersection {
+            members: vec![
+                known("Comparable", TypeProvenance::Inferred(s())),
+                known("Printable", TypeProvenance::Inferred(s())),
+            ],
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
+    }
+
+    #[test]
+    fn project_recv_type_negation_coarsens_to_dynamic() {
+        let ty = InferredType::Negation {
+            base: Box::new(known("Symbol", TypeProvenance::Inferred(s()))),
+            excluded: Box::new(known("#foo", TypeProvenance::Inferred(s()))),
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
     }
 
     #[test]

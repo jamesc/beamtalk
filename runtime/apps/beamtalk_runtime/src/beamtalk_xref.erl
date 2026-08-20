@@ -99,6 +99,18 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -type provenance() :: class_body | extension | class_builder | put_method.
 -type recv_kind() :: self_recv | super_recv | erlang_ffi | other.
 
+%% BT-3217 (ADR 0115 Phase 2): a message send's receiver, projected onto
+%% either a resolved class-or-protocol name or `dynamic` (unresolved). Same
+%% atom space for both — `beamtalk_protocol_registry:is_protocol/1`
+%% disambiguates a nominal class from a structural protocol at read time
+%% (Phase 3), since the type checker's `Known{class_name}` represents both
+%% identically. A class-object (metaclass) receiver (`InferredType::Meta{C}`)
+%% renders as `'<C> class'` — the same convention
+%% `beamtalk_class_registry:class_object_tag/1` already uses — rather than
+%% falling into `dynamic` by omission.
+-type name() :: atom().
+-type recv_type() :: name() | dynamic.
+
 -type send_entry() :: #{
     selector := selector(),
     line := pos_integer(),
@@ -107,7 +119,14 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     %% (the `M` in `(Erlang M) fun: …`). `undefined` for non-FFI sends and for
     %% FFI chains whose module receiver is not a static `Erlang <module>` form.
     %% Backs the reverse "callers of a native module" query (BT-2669).
-    target_module => module() | undefined
+    target_module => module() | undefined,
+    %% BT-3217 (ADR 0115 Phase 2): the receiver's compile-time-resolved
+    %% class/protocol name, or `dynamic`. Populated only by the compile-time
+    %% write path (`build_method_xref_entry` in
+    %% `crates/.../gen_server/methods.rs`) — the runtime live-patch path
+    %% (`build_method_entry/5` below) always emits `dynamic`, matching its
+    %% existing `references => []` precedent (ADR 0115 Constraint 4).
+    recv_type => recv_type()
 }.
 
 -type reference_entry() :: #{
@@ -143,6 +162,12 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     %% For `erlang_ffi` send sites, the native module targeted (BT-2669).
     %% Absent / `undefined` for non-FFI sites.
     target_module => module() | undefined,
+    %% BT-3217 (ADR 0115 Phase 2): the receiver's compile-time-resolved
+    %% class/protocol name, or `dynamic`. Absent on legacy (unmigrated) rows
+    %% — `senders_of/2`'s Phase 3 read path defaults a missing key to
+    %% "always relevant", identically to how `recv_kind`/`target_module` are
+    %% already defaulted for legacy rows.
+    recv_type => recv_type(),
     gen := gen()
 }.
 
@@ -220,7 +245,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     bt_recv_kind/0,
     source_status/0,
     provenance/0,
-    recv_kind/0
+    recv_kind/0,
+    recv_type/0
 ]).
 
 -record(state, {}).
@@ -389,7 +415,13 @@ send_hit_to_entry(#{selector := SelBin, line := Line} = Hit) when
                 selector => Selector,
                 line => Line,
                 recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other)),
-                target_module => target_module_atom(maps:get(target_module, Hit, <<>>))
+                target_module => target_module_atom(maps:get(target_module, Hit, <<>>)),
+                %% BT-3217 (ADR 0115 Phase 2, Constraint 4): the runtime
+                %% live-patch path has no type-checker access and this ADR
+                %% does not add one — every send it indexes gets `dynamic`
+                %% unconditionally, matching the existing `references => []`
+                %% precedent for the identical reason.
+                recv_type => dynamic
             }}
     catch
         error:badarg -> false
@@ -1360,6 +1392,14 @@ insert_one_method(Class, Entry, Gen) ->
                 line => maps:get(line, Send, Line),
                 recv_kind => maps:get(recv_kind, Send, other),
                 target_module => maps:get(target_module, Send, undefined),
+                %% BT-3217: a `Send` map from a pre-ADR-0115 compiled module
+                %% (or the runtime live-patch path) carries no `recv_type`
+                %% key at all — defaulting to `dynamic` here, exactly like
+                %% `recv_kind`/`target_module` already default for legacy
+                %% rows, resolves identically to Phase 3's "always relevant"
+                %% read-time default for a genuinely absent key (both
+                %% `is_relevant/3` clauses agree).
+                recv_type => maps:get(recv_type, Send, dynamic),
                 gen => Gen
             },
             true = ets:insert(?SENDERS_TABLE, {SendSelector, Site})

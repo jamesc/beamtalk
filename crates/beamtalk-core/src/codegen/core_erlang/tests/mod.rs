@@ -15,6 +15,9 @@
 //!   cross-boundary ADR 0110 shadow-write key conformance fixture, asserted
 //!   against `runtime/apps/beamtalk_runtime/include/beamtalk.hrl` and the
 //!   `beamtalk_class_dispatch_tests.erl` `EUnit` suite
+//! - [`recv_type`] — BT-3217 (ADR 0115 Phase 2): the xref `recv_type`
+//!   write-path fixture matrix (typed/protocol/dynamic/union/native/alias
+//!   locals, `Meta{C}`, self-send, FFI receiver)
 
 pub use super::*;
 pub use crate::ast::*;
@@ -103,4 +106,5 @@ mod dispatch;
 mod expressions;
 mod gen_server;
 mod primitives;
+mod recv_type;
 mod supervisor;

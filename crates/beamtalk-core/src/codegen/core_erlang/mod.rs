@@ -868,6 +868,11 @@ pub fn generate_module_with_warnings(
     let (mut hierarchy, analysis_handed_off, driver_method_return_types) =
         if let Some(analysis) = options.analysis {
             generator.semantic_facts = analysis.semantic_facts;
+            // BT-3217: carry the driver's already-computed `TypeMap` through
+            // for `recv_type` projection. May be superseded below if this
+            // generation's own cross-file enrichment invalidates the
+            // hand-off and forces a fuller re-inference pass.
+            generator.type_map = analysis.type_map;
             (
                 analysis.class_hierarchy,
                 true,
@@ -941,11 +946,20 @@ pub fn generate_module_with_warnings(
                 written_by,
             );
         }
-        let method_return_types = crate::semantic_analysis::type_checker::infer_method_return_types(
-            &module_owned,
-            &hierarchy,
-            options.native_type_registry.as_deref(),
-        );
+        // BT-3217 (ADR 0115 Phase 2 spike §1d): `infer_types_and_returns`
+        // returns both `TypeMap` and `method_return_types` from the same
+        // single `TypeChecker` pass `infer_method_return_types` already ran
+        // — zero extra inference. Refreshes `generator.type_map` for this
+        // (possibly fuller, re-inferred) hierarchy, superseding whatever the
+        // `Some(analysis)` branch above set from the driver's now-stale
+        // hand-off.
+        let (type_map, method_return_types) =
+            crate::semantic_analysis::type_checker::infer_types_and_returns(
+                &module_owned,
+                &hierarchy,
+                options.native_type_registry.as_deref(),
+            );
+        generator.type_map = type_map;
         crate::semantic_analysis::lower_module_for_codegen(
             &mut module_owned,
             &hierarchy,
@@ -1816,6 +1830,19 @@ pub(crate) struct CoreErlangGenerator {
     /// so every downstream `Some(&self.alias_registry)` call site is a
     /// no-op for the common case.
     pub(super) alias_registry: crate::semantic_analysis::alias_registry::AliasRegistry,
+    /// BT-3217 (ADR 0115 Phase 2): per-expression inferred types (keyed by
+    /// file-absolute `Span`), sourced from the driver's handed-off
+    /// `AnalysisResult::type_map` when `CodegenOptions::with_analysis` was
+    /// used, or from `infer_types_and_returns` in the self-sufficient path
+    /// (`generate_module_with_warnings`, `mod.rs:944`). Consumed by
+    /// `gen_server/methods.rs::build_method_xref_entry` to project each
+    /// send's receiver type onto the xref `recv_type` field — see
+    /// `docs/internal/adr-0115-phase1-spike-findings.md` §1 for why this
+    /// field previously had no plumbing path into codegen. Empty (not
+    /// populated) for codegen contexts that never ran type inference (rare
+    /// unit-test-only paths); `recv_type` degrades safely to `dynamic` in
+    /// that case, matching the runtime live-patch path's precedent.
+    pub(super) type_map: crate::semantic_analysis::TypeMap,
 }
 
 impl CoreErlangGenerator {
@@ -1863,6 +1890,7 @@ impl CoreErlangGenerator {
             beamtalk_version: None,
             otp_release: None,
             alias_registry: crate::semantic_analysis::alias_registry::AliasRegistry::new(),
+            type_map: crate::semantic_analysis::TypeMap::new(),
         }
     }
 

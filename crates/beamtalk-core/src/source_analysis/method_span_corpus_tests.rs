@@ -603,3 +603,187 @@ fn corpus_methods_round_trip_byte_identical() {
         "expected >100 methods to validate the pipeline against, only found {checked}"
     );
 }
+
+/// Enumerates every `&MethodDefinition` in `module` alongside a
+/// human-readable label (`Class.selector (side)`) — unlike [`enumerate_methods`],
+/// which returns identity-only `MethodTarget`s for `resolve_in_module`
+/// round-tripping, this hands back the actual method AST the BT-3217
+/// conformance test below needs to run both walkers against.
+fn corpus_method_definitions(module: &Module) -> Vec<(String, &crate::ast::MethodDefinition)> {
+    let mut out = Vec::new();
+    for class_def in &module.classes {
+        for m in &class_def.methods {
+            out.push((
+                format!("{}.{} (instance)", class_def.name.name, m.selector.name()),
+                m,
+            ));
+        }
+        for m in &class_def.class_methods {
+            out.push((
+                format!("{}.{} (class)", class_def.name.name, m.selector.name()),
+                m,
+            ));
+        }
+    }
+    for standalone in &module.method_definitions {
+        let side = if standalone.is_class_method {
+            "class"
+        } else {
+            "instance"
+        };
+        out.push((
+            format!(
+                "{}.{} ({side})",
+                standalone.class_name.name,
+                standalone.method.selector.name()
+            ),
+            &standalone.method,
+        ));
+    }
+    out
+}
+
+/// BT-3217 (ADR 0115 Phase 2): `build_method_xref_entry` joins
+/// `method_source_walker::collect_receiver_spans`'s span-carrying walk of the
+/// *original* AST to `find_all_sends_in_source`'s syntactic walk of a
+/// re-unparsed/re-parsed copy **by pre-order ordinal** — the two walks must
+/// find the same number of hits, in the same order, sending the same
+/// selectors, or the join silently misaligns a send with the wrong
+/// receiver's inferred type.
+///
+/// This is the corpus conformance test the ADR 0115 Phase 1 spike
+/// (`docs/internal/adr-0115-phase1-spike-findings.md` §1d) called for: proof
+/// that the ordinal-join assumption holds for every method in the
+/// stdlib + `examples/` corpus, not just an asserted invariant in a comment
+/// (this project's no-"keep-in-sync"-comment-without-a-test rule).
+///
+/// **Known exceptions (BT-3223, tracked separately — not a BT-3217 defect):**
+/// two `SystemNavigation.bt` methods trip a *pre-existing* parser edge case
+/// unrelated to either walk here — `is_at_declaration_level_expect`
+/// (`source_analysis/parser/declarations.rs`) misclassifies a body-level
+/// `@expect` as declaration-level when the enclosing method is rendered at
+/// column 0 (`unparse_method`'s bare-method shape, exactly what
+/// `find_all_sends_in_source`'s synthetic-wrap reparse uses), truncating the
+/// *syntactic* walk's method body early and silently dropping its trailing
+/// sends — a real, independent completeness gap in `find_all_sends_in_source`
+/// itself, not something `collect_receiver_spans` (which walks the original,
+/// correctly-parsed AST directly) reproduces. `KNOWN_DIVERGENT_METHODS` is
+/// this test's explicit, narrow acknowledgment of that gap: any divergence
+/// *not* in this list still fails the test, and BT-3223's own acceptance
+/// criteria require this list emptied once the parser bug is fixed.
+const KNOWN_DIVERGENT_METHODS: &[(&str, &str)] = &[
+    (
+        "SystemNavigation.bt",
+        "SystemNavigation.isAnnouncementClass: (instance)",
+    ),
+    (
+        "SystemNavigation.bt",
+        "SystemNavigation.extensionTargets:names: (instance)",
+    ),
+];
+
+#[test]
+fn corpus_receiver_span_walk_matches_syntactic_send_walk() {
+    use crate::method_source_walker::{collect_receiver_spans, find_all_sends_in_source};
+    use crate::unparse::unparse_method;
+
+    if !corpus_present() {
+        return;
+    }
+    let files = corpus_files();
+    let mut total_methods = 0usize;
+    let mut total_hits = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    let mut known_divergences_seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+
+    for path in &files {
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
+        let (module, _diags) = parse(tokens);
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        for (label, method) in corpus_method_definitions(&module) {
+            total_methods += 1;
+
+            // The exact same source channel `build_method_xref_entry` feeds
+            // `find_all_sends_in_source` (via `extract_method_source`).
+            let bare_source = unparse_method(method);
+            let syntactic_hits = find_all_sends_in_source(&bare_source);
+            let span_hits = collect_receiver_spans(method);
+
+            let known_entry = KNOWN_DIVERGENT_METHODS
+                .iter()
+                .find(|&&(f, l)| f == file_name && l == label);
+
+            let mut case_failures: Vec<String> = Vec::new();
+
+            if syntactic_hits.len() == span_hits.len() {
+                for (i, (syn_hit, span_hit)) in
+                    syntactic_hits.iter().zip(span_hits.iter()).enumerate()
+                {
+                    if syn_hit.selector != span_hit.selector {
+                        case_failures.push(format!(
+                            "{}: {label}: selector mismatch at pre-order ordinal {i} — \
+                             syntactic walk: {:?}, span walk: {:?}",
+                            path.display(),
+                            syn_hit.selector,
+                            span_hit.selector,
+                        ));
+                    }
+                }
+            } else {
+                case_failures.push(format!(
+                    "{}: {label}: hit count mismatch — syntactic walk found {}, \
+                     span walk found {}",
+                    path.display(),
+                    syntactic_hits.len(),
+                    span_hits.len(),
+                ));
+            }
+
+            if !case_failures.is_empty() {
+                if let Some(&entry) = known_entry {
+                    known_divergences_seen.insert(entry);
+                } else {
+                    failures.extend(case_failures);
+                }
+            }
+
+            total_hits += syntactic_hits.len();
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "receiver-span walk diverged from the syntactic send walk for {} case(s) \
+         (of {} methods, {} total hits, across {} files):\n{}",
+        failures.len(),
+        total_methods,
+        total_hits,
+        files.len(),
+        failures.join("\n")
+    );
+    assert!(
+        total_methods > 100,
+        "expected the corpus to contain >100 methods, found {total_methods} — \
+         the walk may have silently failed"
+    );
+    assert!(
+        total_hits > 100,
+        "expected the corpus to contain >100 message sends, found {total_hits} — \
+         the walk may have silently failed"
+    );
+    // Every `KNOWN_DIVERGENT_METHODS` entry must still actually diverge — if
+    // BT-3223's parser fix lands, this fails loudly rather than letting a
+    // stale exception silently mask a *new*, different divergence at the
+    // same (file, label) key.
+    assert_eq!(
+        known_divergences_seen.len(),
+        KNOWN_DIVERGENT_METHODS.len(),
+        "KNOWN_DIVERGENT_METHODS lists {} entries but only {} were observed to \
+         actually diverge this run — if BT-3223 is fixed, remove the \
+         now-stale entries from KNOWN_DIVERGENT_METHODS",
+        KNOWN_DIVERGENT_METHODS.len(),
+        known_divergences_seen.len(),
+    );
+}

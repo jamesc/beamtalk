@@ -158,6 +158,21 @@ pub struct AnalysisResult {
     /// to the `_with_alias_deps` variant, or its class silently drops out of
     /// `beamtalk_alias_xref` and a live redefinition stops re-checking it.
     pub referenced_aliases: Vec<EcoString>,
+
+    /// Per-expression inferred types (ADR 0025), keyed by file-absolute
+    /// `Span`. Recovered from the same [`TypeChecker`] pass that already
+    /// computes `method_return_types` above — `analyse_full` destructures
+    /// the `Analyser` at the end of analysis to recover it (rather than a
+    /// consuming accessor mid-pass, since `analyser.result` is still
+    /// consumed afterward for `block_info`/`diagnostics`).
+    ///
+    /// Consumed by codegen (via `CodegenOptions::with_analysis` /
+    /// `CoreErlangGenerator::type_map`) to project a message send's receiver
+    /// type onto the xref `recv_type` field (BT-3217, ADR 0115 Phase 2) —
+    /// see `docs/internal/adr-0115-phase1-spike-findings.md` §1a/§1d for why
+    /// this field was previously computed and discarded rather than plumbed
+    /// through.
+    pub type_map: TypeMap,
 }
 
 impl AnalysisResult {
@@ -173,6 +188,7 @@ impl AnalysisResult {
             semantic_facts: facts::SemanticFacts::default(),
             method_return_types: HashMap::new(),
             referenced_aliases: Vec::new(),
+            type_map: TypeMap::new(),
         }
     }
 }
@@ -724,8 +740,18 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         Some(&result.alias_registry),
         &mut result.diagnostics,
     );
-    result.diagnostics.extend(analyser.result.diagnostics);
-    result.block_info = analyser.result.block_info;
+    // BT-3217 (ADR 0115 Phase 2): recover the `TypeMap` by destructuring
+    // `analyser` here — a consuming accessor mid-pass isn't viable since
+    // `analyser.result` is still read/moved-from below (`diagnostics`, then
+    // `block_info`), per the ADR 0115 Phase 1 spike's §1d plumbing note.
+    let Analyser {
+        result: analyser_result,
+        type_map: analyser_type_map,
+        ..
+    } = analyser;
+    result.diagnostics.extend(analyser_result.diagnostics);
+    result.block_info = analyser_result.block_info;
+    result.type_map = analyser_type_map;
 
     // Phase 4: Abstract instantiation check (BT-105)
     validators::check_abstract_instantiation(

@@ -190,6 +190,11 @@ register_and_read_test_() ->
                 ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
                 ?assertEqual(17, maps:get(line, PlusSite)),
                 ?assertEqual(1, maps:get(gen, PlusSite)),
+                %% BT-3217: `counter_xref/0`'s `+` send carries no `recv_type`
+                %% key at all (a pre-BT-3217 shape) — `insert_one_method`
+                %% must default it to `dynamic`, exactly like `recv_kind`
+                %% already defaults to `other` for legacy rows.
+                ?assertEqual(dynamic, maps:get(recv_type, PlusSite)),
 
                 BasicNewSites = beamtalk_xref:senders_of('basicNew'),
                 ?assertEqual(1, length(BasicNewSites)),
@@ -204,6 +209,65 @@ register_and_read_test_() ->
                 ?assertEqual('Counter', maps:get(owner, IntRef)),
                 ?assertEqual('increment', maps:get(method, IntRef)),
                 ?assertEqual([], beamtalk_xref:references_to('NoSuchClass'))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-3217 (ADR 0115 Phase 2): recv_type propagation
+%%====================================================================
+
+%% A compile-time-populated `sends` entry (mimicking `build_method_xref_entry`'s
+%% Core Erlang output) carrying explicit `recv_type` values, covering a
+%% resolved class name, a class-object (`'Foo class'`) shape, and an explicit
+%% `dynamic` — the write path's three outcomes.
+typed_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => 'run:',
+            line => 3,
+            sends => [
+                #{selector => 'ping', line => 4, recv_kind => other, recv_type => 'Widget'},
+                #{selector => 'new', line => 5, recv_kind => other, recv_type => 'Widget class'},
+                #{selector => 'foo', line => 6, recv_kind => other, recv_type => dynamic}
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+recv_type_propagates_through_senders_of_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                ok = beamtalk_xref:register_class('Runner', typed_xref()),
+
+                [PingSite] = beamtalk_xref:senders_of('ping'),
+                ?assertEqual('Widget', maps:get(recv_type, PingSite)),
+
+                [NewSite] = beamtalk_xref:senders_of('new'),
+                ?assertEqual('Widget class', maps:get(recv_type, NewSite)),
+
+                [FooSite] = beamtalk_xref:senders_of('foo'),
+                ?assertEqual(dynamic, maps:get(recv_type, FooSite))
+            end)
+        ]
+    end}.
+
+%% A `put_method/4` single-method patch (the ADR 0082 live-edit path) carries
+%% the same compile-time-populated `recv_type` through, identically to a
+%% whole-class `register_class/2`.
+recv_type_propagates_through_put_method_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                [Entry] = typed_xref(),
+                ok = beamtalk_xref:put_method('Runner', false, 'run:', Entry),
+
+                [PingSite] = beamtalk_xref:senders_of('ping'),
+                ?assertEqual('Widget', maps:get(recv_type, PingSite))
             end)
         ]
     end}.
@@ -1066,6 +1130,31 @@ build_method_entry_indexed_shape_test_() ->
             ?assertEqual(put_method, maps:get(provenance, Entry)),
             ?assert(is_list(maps:get(sends, Entry))),
             ?assertEqual([], maps:get(references, Entry))
+        end)
+    ].
+
+%% BT-3217 (ADR 0115 Phase 2, Constraint 4): the runtime live-patch path has
+%% no type-checker access, so every send it indexes carries `recv_type =>
+%% dynamic` unconditionally — never a resolved name, regardless of how many
+%% sends the source contains or what they look like. Degrades gracefully to
+%% an empty `sends` list (no entries to check) when the compiler app is
+%% absent, matching `build_method_entry_indexed_shape_test_`'s own note.
+build_method_entry_sends_always_carry_dynamic_recv_type_test_() ->
+    [
+        ?_test(begin
+            Entry = beamtalk_xref:build_method_entry(
+                false,
+                'run',
+                <<"run => self ping. Widget new. anArg foo">>,
+                indexed,
+                class_body
+            ),
+            Sends = maps:get(sends, Entry),
+            ?assert(is_list(Sends)),
+            lists:foreach(
+                fun(Send) -> ?assertEqual(dynamic, maps:get(recv_type, Send)) end,
+                Sends
+            )
         end)
     ].
 
