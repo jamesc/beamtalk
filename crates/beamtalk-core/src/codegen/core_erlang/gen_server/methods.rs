@@ -109,7 +109,7 @@ fn recv_type_atom(recv_type: &RecvType) -> Document<'static> {
     match recv_type {
         RecvType::Name(name) if name.len() <= MAX_ATOM_BYTES => leaf::atom(name.to_string()),
         RecvType::ClassObject(name) if name.len() + " class".len() <= MAX_ATOM_BYTES => {
-            leaf::atom(format!("{name} class"))
+            leaf::atom(super::super::util::metaclass_tag(name))
         }
         RecvType::Name(_) | RecvType::ClassObject(_) | RecvType::Dynamic => leaf::atom("dynamic"),
     }
