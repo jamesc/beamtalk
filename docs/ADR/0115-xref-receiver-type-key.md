@@ -242,6 +242,12 @@ What genuinely remains deferred is narrower: `InferredType::Intersection` (e.g. 
 
 Total: ~M across 5 phases — materially smaller than ADR 0114, since this ADR adds a query filter over already-existing infrastructure rather than a new mutating primitive with cross-file rewrite/atomicity concerns. Phase 1 is still the load-bearing risk: if `InferredType` proves expensive or unavailable at the needed pipeline point, the design may need to fall back to computing types lazily/on-demand at xref-entry-construction time rather than assuming they're already there — a real cost increase, not a design change, so worth confirming before Phase 2 commits to the schema shape above.
 
+## Implementation Tracking
+
+**Epic:** BT-2798
+**Issues:** BT-3216 (Phase 1 spike) → BT-3217 (Phase 2 schema/write path) → BT-3218 (Phase 3 read path) → BT-3219 (Phase 4 recheck integration) → BT-3220 (Phase 5 benchmarks/e2e/docs), sequentially blocked in that order. BT-3215 (precise `Union`/`Intersection` keying) tracked separately, deliberately out of this epic's scope.
+**Status:** Planned
+
 ## References
 - Related issues: BT-2798 (this ADR), BT-2781 (the fan-out benchmark and non-blocking-follow-up decision that produced this issue), BT-2778 (the re-check orchestration this optimises), BT-2780 / BT-2782 / BT-2783 (remaining ADR 0105 phases — not blocked on this ADR)
 - Related ADRs: ADR 0105 (Live Image Re-Checking on Hot Reload — the direct predecessor and origin of this follow-up), ADR 0087 (Maintained Selector→Sites Cross-Reference Index — the schema this ADR extends), ADR 0025 (Gradual Typing and Protocols — `InferredType`/`Dynamic` sentinel this ADR reuses), ADR 0068 (Parametric Types and Protocols — shipped `Protocol define:`/structural conformance/`beamtalk_protocol_registry:conforms_to/2` this ADR's protocol branch reuses directly, and the source of the `Union`/`Intersection` composed-type shapes this ADR coarsens to `dynamic` in v1), ADR 0114 (Class and Method Rename in the Live Workspace — the sibling problem this ADR was explicitly flagged as follow-up work for, and the direct source of the hierarchy-closure/`direct_subclasses:` reuse pattern)
