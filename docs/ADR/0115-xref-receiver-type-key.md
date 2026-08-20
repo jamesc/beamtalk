@@ -37,12 +37,13 @@ BT-2781's fan-out benchmark (`docs/development/benchmarks.md`, "Reload re-check 
 
 ## Decision
 
-**Add `recv_type :: class_name() | dynamic` to the `beamtalk_xref_senders` `Site` schema, populated at compile time from the type checker's already-computed `InferredType` (coarsened to `dynamic` for anything not resolved to exactly one concrete class), left as `dynamic` for runtime live-patched sends. Add `senders_of/2`, a receiver-type-aware extension of `senders_of/1` that filters results to sites whose `recv_type` is hierarchy-related to the queried class (ancestor, descendant, or self) or unresolved (`dynamic`) — never an exact-match filter, per Constraint 1. Wire `beamtalk_recheck`'s dependent lookup to call `senders_of/2`, keeping the existing numeric cap as a backstop rather than the primary defense.**
+**Add `recv_type :: name() | dynamic` to the `beamtalk_xref_senders` `Site` schema, populated at compile time from the type checker's already-computed `InferredType` (coarsened to `dynamic` for anything not resolved to exactly one concrete class-or-protocol name), left as `dynamic` for runtime live-patched sends. `name()` covers both nominal classes and structural protocols (ADR 0068) — the type checker resolves both through the same `Known{class_name}` representation, and the runtime already exposes `beamtalk_protocol_registry:is_protocol/1` to tell them apart at read time. Add `senders_of/2`, a receiver-type-aware extension of `senders_of/1` that filters results to sites whose `recv_type` is relevant to the queried class — hierarchy-related (ancestor, descendant, or self) for a class-typed site, protocol-conformant (via the already-shipped `beamtalk_protocol_registry:conforms_to/2`) for a protocol-typed site — or unresolved (`dynamic`); never an exact-match filter, per Constraint 1. Wire `beamtalk_recheck`'s dependent lookup to call `senders_of/2`, keeping the existing numeric cap as a backstop rather than the primary defense.**
 
 ### Schema extension
 
 ```erlang
--type recv_type() :: class_name() | dynamic.
+-type recv_type() :: name() | dynamic.
+-type name() :: class_name() | protocol_name().  %% same atom space; is_protocol/1 disambiguates
 
 -type site() :: #{
     owner := class_name(),
@@ -52,7 +53,8 @@ BT-2781's fan-out benchmark (`docs/development/benchmarks.md`, "Reload re-check 
     recv_kind => recv_kind(),
     recv_type => recv_type(),        %% NEW — orthogonal to recv_kind; recv_kind is
                                       %% receiver *syntactic form* (self/super/ffi/other),
-                                      %% recv_type is the receiver's *static class*, when known
+                                      %% recv_type is the receiver's *static class or protocol*,
+                                      %% when resolved to exactly one name
     target_module => module() | undefined,
     gen := gen()
 }.
@@ -64,14 +66,14 @@ BT-2781's fan-out benchmark (`docs/development/benchmarks.md`, "Reload re-check 
 
 `build_method_xref_entry` (`methods.rs`) gains access to the type checker's per-expression `InferredType` results for the method being indexed (exact plumbing — new parameter vs. an already-available shared analysis result — is the Phase 1 spike question below). For each `SendHit`, project its receiver's `InferredType`:
 
-- Resolves to exactly one concrete class → `recv_type: <that class name>`.
-- `Dynamic(_)`, a union/protocol-width result, or unresolved → `recv_type: dynamic`.
+- `Known{class_name, type_args}` — resolves to exactly one class-or-protocol name (the same variant represents both; ADR 0068's protocol names resolve through it identically to class names) → `recv_type: <that name>`, dropping `type_args`. A receiver typed `Collection(Integer)` still gets `recv_type: 'Collection'` — the generic parameter doesn't change which class or protocol the read path needs to reason about (Constraint 1's soundness argument), it only constrains what's *inside* the collection, which this ADR's site-relevance question never depends on.
+- `Union`, `Intersection` (e.g. `Collection(Object) & Comparable`, ADR 0068 §Protocol Composition), `Negation`, `Dynamic(_)`, or otherwise unresolved → `recv_type: dynamic`. Composed/intersected types are a real, deliberate v1 simplification, not an oversight — see *Alternatives Considered*.
 
 No new "unknown" vocabulary is introduced — `Dynamic` is the same sentinel ADR 0025 already established project-wide, reused rather than reinvented (per the project's leaf-module/no-duplication rule).
 
 `build_method_entry/5` (the runtime live-patch path) is **not** extended to consult type-checker results — every send it indexes gets `recv_type: dynamic`, unconditionally, matching its own existing `references => []` precedent and for the identical reason (Constraint 4). This is a real, accepted asymmetry: receiver-type narrowing only benefits classes compiled through the normal pipeline, not the interval between a live patch and its next full recompile.
 
-### Read path — `senders_of/2`, hierarchy-related-or-unresolved, never exact-match
+### Read path — `senders_of/2`, hierarchy-related / protocol-conformant / unresolved, never exact-match
 
 ```erlang
 -spec senders_of(selector(), class_name()) -> [site()].
@@ -82,14 +84,28 @@ senders_of(Selector, ChangedClass) ->
                                                           %%   registry's existing superclass-chain-walk
                                                           %%   and direct_subclasses/1 closure — no new
                                                           %%   hierarchy algorithm
-    [S || S <- AllSites, is_relevant(S, Related)].
+    [S || S <- AllSites, is_relevant(S, ChangedClass, Related)].
 
-is_relevant(#{recv_type := dynamic}, _Related) -> true;
-is_relevant(#{recv_type := T}, Related) -> sets:is_element(T, Related);
-is_relevant(#{}, _Related) -> true.  %% no recv_type field at all (unmigrated legacy row) — safe default
+is_relevant(#{recv_type := dynamic}, _ChangedClass, _Related) ->
+    true;
+is_relevant(#{recv_type := T}, ChangedClass, Related) ->
+    case beamtalk_protocol_registry:is_protocol(T) of
+        true ->
+            %% Protocol-typed receiver: any class conforming to T is a possible
+            %% runtime type, so this site is relevant iff ChangedClass itself
+            %% conforms — reuses the already-shipped runtime conformance check
+            %% (ADR 0068), not a new algorithm.
+            beamtalk_protocol_registry:conforms_to(ChangedClass, T);
+        false ->
+            sets:is_element(T, Related)
+    end;
+is_relevant(#{}, _ChangedClass, _Related) ->
+    true.  %% no recv_type field at all (unmigrated legacy row) — safe default
 ```
 
-`senders_of/1` is unchanged and remains the general-purpose query every existing consumer (`referencesTo:`-adjacent tooling, LSP, `SystemNavigation>>sendersOf:`) keeps using; `senders_of/2` is strictly additive, matching the issue's own framing ("new query or `senders_of/1` extension") and the project's "extend, don't duplicate" rule — `hierarchy_related_classes/1` itself is assembled from two already-shipped registry queries (ancestor-chain walk, `direct_subclasses/1` transitive closure — the same closure ADR 0114 already reuses), not a new traversal.
+`senders_of/1` is unchanged and remains the general-purpose query every existing consumer (`referencesTo:`-adjacent tooling, LSP, `SystemNavigation>>sendersOf:`) keeps using; `senders_of/2` is strictly additive, matching the issue's own framing ("new query or `senders_of/1` extension") and the project's "extend, don't duplicate" rule. Both branches of `is_relevant/3` reuse existing infrastructure rather than inventing new traversals: `hierarchy_related_classes/1` composes the registry's existing superclass-chain-walk and `direct_subclasses/1` transitive closure (the same closure ADR 0114 already reuses); the protocol branch calls `beamtalk_protocol_registry:conforms_to/2`, already shipped and already invoked at class-load time for the runtime `conformsTo:`/`protocols` queries (ADR 0068).
+
+**Why "conforms" is the correct protocol-relevance test, by the same soundness argument as Constraint 1.** A receiver statically typed as protocol `P` may hold, at runtime, any instance of any class that structurally conforms to `P` — that's what protocol typing means (ADR 0068's "Automatic Conformance"). A send on that receiver can possibly resolve to `ChangedClass`'s implementation of the changed selector if and only if `ChangedClass` is one of the classes `P` admits — i.e., `ChangedClass` conforms to `P`. If it doesn't, no valid runtime instance of a `P`-typed variable can ever be a `ChangedClass` instance, so the site is safe to exclude — structurally the same "possible-runtime-type" reasoning as the nominal case, just against protocol conformance instead of the class hierarchy.
 
 ### `beamtalk_recheck` integration
 
@@ -100,7 +116,7 @@ is_relevant(#{}, _Related) -> true.  %% no recv_type field at all (unmigrated le
 Per Constraint's precedent (`beamtalk_xref.erl`'s generation-counter/atomic-install protocol), no distinct backfill module or migration script is needed:
 
 - A class's rows pick up populated `recv_type` values the next time it's compiled/recompiled through `register_class/2` — which every hot-reload already does.
-- Classes that haven't reloaded since this ships keep emitting rows with no `recv_type` field; `is_relevant/2`'s third clause defaults those to "always relevant," identically to how `recv_kind`/`target_module` are already defaulted for legacy rows. This is a **safe** default in exactly the sense Constraint 2 requires — a stale row never gets silently excluded, only fails to benefit from narrowing until its owner next reloads.
+- Classes that haven't reloaded since this ships keep emitting rows with no `recv_type` field; `is_relevant/3`'s third clause defaults those to "always relevant," identically to how `recv_kind`/`target_module` are already defaulted for legacy rows. This is a **safe** default in exactly the sense Constraint 2 requires — a stale row never gets silently excluded, only fails to benefit from narrowing until its owner next reloads.
 - `beamtalk_xref_senders`'s row *shape* changes (one more optional map key); its key structure (`{Selector, Site}` bag) does not, so no ETS table recreation or `register_class/2` call-site signature change beyond the payload's own new field is required.
 
 ## Prior Art
@@ -156,7 +172,7 @@ No new surface. `senders_of/2` is an internal query, not exposed as a new Beamta
 
 ### Tension points
 
-- **Coverage ceiling is real and not fully resolved:** live-patched sends and `Dynamic`-typed/`other`-kind sends against widely-shared protocol selectors (`printOn:`, `size`) get no narrowing benefit at all — the cap remains load-bearing for exactly that residual case, honestly scoped in *Consequences* rather than implied away.
+- **Coverage ceiling is real and not fully resolved:** live-patched sends and `Dynamic`-typed/`other`-kind sends against widely-shared, commonly-implemented selectors (`printOn:`, `size`) get no narrowing benefit at all — the cap remains load-bearing for exactly that residual case, honestly scoped in *Consequences* rather than implied away.
 - **New codegen ↔ semantic_analysis coupling is a genuine implementation risk**, not a design tension between cohorts — flagged as the Phase 1 spike, not resolved by this document.
 
 ## Alternatives Considered
@@ -169,9 +185,11 @@ Already evaluated and explicitly deferred (not rejected) by ADR 0105 itself, pen
 
 Considered: reparse each candidate's call site for an obvious type annotation or class-literal pattern at recheck time, instead of indexing receiver type at compile time. Rejected: this re-derives, per reload, information the type checker already computes once at compile time — strictly more expensive per trigger than a persisted field, with no persistent index to short-circuit repeated reloads of the same unchanged code, and it doesn't satisfy the issue's own acceptance criteria (extend ADR 0087's schema, extend the write path) — it would leave `senders_of/1` exactly as imprecise as today for every other consumer of the xref index, not just `beamtalk_recheck`.
 
-### Structural/protocol-width keying (index by every protocol a type satisfies, not just its nominal class)
+### Precise composed/intersected-type keying (index `Collection(Object) & Comparable`-style intersections precisely, instead of coarsening to `dynamic`)
 
-Considered, given ADR 0025's typing is structural/protocol-based rather than strictly nominal. Rejected for this ADR: ADR 0025 Phase 3 (Protocols) is planned but not shipped — designing a receiver-type key against unshipped typing infrastructure would be speculative. Nominal-class keying with a hierarchy-relatedness read filter already captures the common case (inheritance-based polymorphism) soundly; protocol-width narrowing is flagged as natural follow-up once Phase 3 ships, not designed here.
+An earlier draft of this ADR rejected protocol-aware keying entirely, on the premise that ADR 0025 Phase 3 (Protocols) was still unshipped. That premise was wrong: Phase 3 shipped under [ADR 0068](0068-parametric-types-and-protocols.md) some time ago (`Protocol define:`, structural conformance, `beamtalk_protocol_registry:conforms_to/2` — all live, and already invoked at class-load time for the runtime `conformsTo:`/`protocols` queries). Single-protocol-typed receivers are therefore **not** deferred — see *Decision*, which keys and narrows them with the same precision as nominal classes, reusing `conforms_to/2` rather than inventing anything.
+
+What genuinely remains deferred is narrower: `InferredType::Intersection` (e.g. `Collection(Object) & Comparable`, ADR 0068's protocol-composition syntax) and `Union` both coarsen to `recv_type: dynamic` in this ADR's v1 (see *Write path*), rather than being stored and matched precisely. Considered storing the full member set and requiring conformance to *all* of them (or membership in the union), which would narrow further than single-name coarsening does. Rejected for v1: it's a real, bounded schema change (a list-valued `recv_type` variant instead of a single atom, plus a set-comparison read path) for a narrower slice of real code than the single-name case already covers — most receivers resolve to one class or protocol, not an explicit intersection or union annotation. Coarsening to `dynamic` here is the same safe, over-inclusive fallback this ADR already uses for every other unresolved case (Constraint 2) — it costs precision, never correctness. Flagged as natural follow-up if usage data shows composed-type receivers are common enough to matter, not designed here.
 
 ## Consequences
 
@@ -179,7 +197,8 @@ Considered, given ADR 0025's typing is structural/protocol-based rather than str
 
 - Closes ADR 0105's explicitly flagged follow-up with the quantified fan-out benchmark (BT-2781) as direct justification, rather than a speculative optimization.
 - Makes `beamtalk_recheck`'s candidate filtering sound-by-construction for typed code instead of relying entirely on an acknowledged non-relevance-ranked cap.
-- Reuses four pieces of already-shipped infrastructure rather than inventing new ones: the type checker's `Dynamic` sentinel, the generation-counter migration mechanism, the registry's ancestor-chain-walk and `direct_subclasses/1` closure (the same closure ADR 0114 already reuses for its own hierarchy reasoning).
+- Covers protocol-typed receivers with the same precision as nominal classes, not just as a deferred follow-up — `beamtalk_protocol_registry:conforms_to/2` (ADR 0068) was already shipped and already invoked at class-load time, so this is reuse, not new scope.
+- Reuses five pieces of already-shipped infrastructure rather than inventing new ones: the type checker's `Dynamic` sentinel, the generation-counter migration mechanism, the registry's ancestor-chain-walk and `direct_subclasses/1` closure (the same closure ADR 0114 already reuses for its own hierarchy reasoning), and `beamtalk_protocol_registry:conforms_to/2`.
 - `senders_of/1` and every existing consumer are untouched — purely additive.
 
 ### Negative
@@ -205,7 +224,7 @@ Considered, given ADR 0025's typing is structural/protocol-based rather than str
 |---|---|
 | `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` | `build_method_xref_entry`/`build_method_xref_list` gain access to per-send `InferredType` results and emit `recv_type` in the generated xref map literal, alongside the existing `recv_kind`. |
 | `crates/beamtalk-core/src/semantic_analysis/type_checker/` | No behavior change — this ADR *consumes* already-computed `InferredType` results; if they are not already retained/accessible at the xref-entry-construction point in the pipeline, the Phase 1 spike determines what minimal plumbing exposes them without re-running inference. |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` | `site()` type gains `recv_type`; new `senders_of/2`; new `hierarchy_related_classes/1` helper composing existing registry ancestor-walk + `direct_subclasses/1`. `build_method_entry/5` (runtime live-patch path) explicitly emits `recv_type: dynamic` for every send, unchanged otherwise. |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` | `site()` type gains `recv_type`; new `senders_of/2`; new `hierarchy_related_classes/1` helper composing existing registry ancestor-walk + `direct_subclasses/1`; `is_relevant/3` branches on `beamtalk_protocol_registry:is_protocol/1` and calls `beamtalk_protocol_registry:conforms_to/2` for protocol-typed sites (both already shipped, ADR 0068 — no new dependency). `build_method_entry/5` (runtime live-patch path) explicitly emits `recv_type: dynamic` for every send, unchanged otherwise. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl` | `do_trigger/4`/`do_trigger_shape/2` call `senders_of/2` instead of `senders_of/1`, passing the changed class name. `apply_cap/2` unchanged — remains the backstop over the now-narrower candidate set. |
 | `runtime/perf/bench_senders_xref.escript`, `runtime/perf/bench_recheck_fanout.escript` | Extended to exercise `senders_of/2` and confirm (a) no regression to `senders_of/1`'s existing profile, (b) the BT-2781 synthetic 90%-loss scenario is fixed for typed candidates. |
 | `docs/ADR/0087-maintained-xref-index-for-system-navigation.md` | Schema note: `Site` gains `recv_type`. |
@@ -216,8 +235,8 @@ Considered, given ADR 0025's typing is structural/protocol-based rather than str
 | Phase | Scope | Effort | Tests |
 |---|---|---|---|
 | **1** | **Validation spike**: confirm whether `InferredType` results are already accessible at `build_method_xref_list`'s call site without re-running inference, and at what cost if not; confirm `hierarchy_related_classes/1`'s ancestor+descendant closure cost against real stdlib hierarchy depth/breadth; confirm the generation-bump default-fallback correctly leaves unmigrated rows "always relevant" rather than silently narrowing them. This is the load-bearing new assumption, in ADR 0114 Phase 1's spirit. | M | Spike report; no code change gated on it yet. |
-| **2** | If the spike holds: schema extension (`recv_type` field) + compile-time write path only (runtime live-patch path ships `dynamic` unconditionally from the start, no separate phase needed for it). | M | EUnit: `recv_type` correctness against a small fixture graph (typed local, untyped/`Dynamic` local, self-send, FFI receiver) at both instance and class side. |
-| **3** | `senders_of/2` read path + `hierarchy_related_classes/1`. | M | EUnit: relatedness predicate against a fixture hierarchy — same class, direct subclass, transitive subclass, direct/transitive ancestor, unrelated sibling branch, `dynamic` always-included. |
+| **2** | If the spike holds: schema extension (`recv_type` field) + compile-time write path only (runtime live-patch path ships `dynamic` unconditionally from the start, no separate phase needed for it). | M | EUnit: `recv_type` correctness against a small fixture graph (typed local, protocol-typed local, untyped/`Dynamic` local, `Union`/`Intersection`-typed local, self-send, FFI receiver) at both instance and class side. |
+| **3** | `senders_of/2` read path + `hierarchy_related_classes/1` + protocol-conformance branch. | M | EUnit: relatedness predicate against a fixture hierarchy — same class, direct subclass, transitive subclass, direct/transitive ancestor, unrelated sibling branch, `dynamic` always-included; separately, protocol-conformance predicate against a fixture with a conforming class, a non-conforming class, and a class conforming via inheritance from `Object`'s default methods. |
 | **4** | Wire `beamtalk_recheck:do_trigger/4`/`do_trigger_shape/2` to `senders_of/2`. | S | Integration test: a synthetic fan-out fixture mirroring BT-2781's benchmark shape (10% real/90% false-positive by unrelated type) shows the false-positive share dropping out of the candidate set pre-cap. |
 | **5** | Benchmark validation + docs update. | S | `bench_senders_xref.escript`/`bench_recheck_fanout.escript` show no regression on `senders_of/1` and a measured improvement on the BT-2781 synthetic scenario; ADR 0087/0105 doc updates land. |
 
@@ -225,5 +244,5 @@ Total: ~M across 5 phases — materially smaller than ADR 0114, since this ADR a
 
 ## References
 - Related issues: BT-2798 (this ADR), BT-2781 (the fan-out benchmark and non-blocking-follow-up decision that produced this issue), BT-2778 (the re-check orchestration this optimises), BT-2780 / BT-2782 / BT-2783 (remaining ADR 0105 phases — not blocked on this ADR)
-- Related ADRs: ADR 0105 (Live Image Re-Checking on Hot Reload — the direct predecessor and origin of this follow-up), ADR 0087 (Maintained Selector→Sites Cross-Reference Index — the schema this ADR extends), ADR 0025 (Gradual Typing and Protocols — `InferredType`/`Dynamic` sentinel this ADR reuses, and the future Protocols phase the structural-keying alternative defers to), ADR 0114 (Class and Method Rename in the Live Workspace — the sibling problem this ADR was explicitly flagged as follow-up work for, and the direct source of the hierarchy-closure/`direct_subclasses:` reuse pattern)
+- Related ADRs: ADR 0105 (Live Image Re-Checking on Hot Reload — the direct predecessor and origin of this follow-up), ADR 0087 (Maintained Selector→Sites Cross-Reference Index — the schema this ADR extends), ADR 0025 (Gradual Typing and Protocols — `InferredType`/`Dynamic` sentinel this ADR reuses), ADR 0068 (Parametric Types and Protocols — shipped `Protocol define:`/structural conformance/`beamtalk_protocol_registry:conforms_to/2` this ADR's protocol branch reuses directly, and the source of the `Union`/`Intersection` composed-type shapes this ADR coarsens to `dynamic` in v1), ADR 0114 (Class and Method Rename in the Live Workspace — the sibling problem this ADR was explicitly flagged as follow-up work for, and the direct source of the hierarchy-closure/`direct_subclasses:` reuse pattern)
 - Documentation: `docs/development/benchmarks.md` ("Reload re-check fan-out" section, BT-2781's data)
