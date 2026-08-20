@@ -153,15 +153,7 @@ fn ensure_runtime_built(
 /// Returns `true` when the selector is the arity-1 keyword form (carries args),
 /// `false` for the unary form.
 pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> Result<bool> {
-    if class_name.is_empty()
-        || !class_name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_uppercase())
-        || class_name
-            .chars()
-            .any(|c| !c.is_ascii_alphanumeric() && c != '_')
-    {
+    if !beamtalk_core::source_analysis::is_valid_class_name(class_name) {
         miette::bail!(
             "Invalid class name '{class_name}': class names must start with an ASCII uppercase \
              letter and contain only ASCII alphanumeric characters and underscores"
