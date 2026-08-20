@@ -20,12 +20,15 @@ This directory contains internal implementation documentation, design decisions,
 | [Coverage Analysis](coverage-analysis.md) | Core Erlang compilation verification test coverage analysis |
 | [Class-Keyed ETS Tables Investigation](class-keyed-ets-tables-investigation.md) | BT-2222 survey + decision on consolidating the six class-keyed ETS tables |
 
-### Implementation Tracking
+### Spike Findings
+
+Validation spikes run ahead of an ADR's implementation phases — each records
+what held, what broke, and what the following phase must change as a result.
 
 | Document | Description |
 |----------|-------------|
-| [Operator Implementation Status](OPERATOR_IMPLEMENTATION_STATUS.md) | Cross-reference of documented vs. implemented binary operators |
-| [Coverage Analysis](COVERAGE_ANALYSIS.md) | Core Erlang compilation verification test coverage analysis |
+| [ADR 0105 Phase 0](adr-0105-phase0-spike-findings.md) | BT-2776: live image re-checking — signature capture, dependent lookup, batched port re-check |
+| [ADR 0115 Phase 1](adr-0115-phase1-spike-findings.md) | BT-3216: xref receiver-type key — `InferredType` reachability, hierarchy-closure and `conforms_to/2` cost, default-fallback soundness |
 
 ## When to Add Documents Here
 

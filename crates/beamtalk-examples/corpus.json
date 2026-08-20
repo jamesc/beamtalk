@@ -17,7 +17,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-1",
-      "title": "Character Literal Methods (beamtalk-language-features)",
+      "title": "Character Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features",
@@ -29,7 +29,7 @@
         "toString",
         "to_string"
       ],
-      "source": "$A asInteger              // => 65\n$A asString               // => \"A\"\n$A printString            // => \"$A\"\n$A uppercase              // => 65\n$A lowercase              // => 97\n$A class                  // => Character\n$A respondsTo: #uppercase // => true\nCharacter value: 65       // => $A",
+      "source": "$A asInteger              // => 65\n$A asString               // => \"A\"\n$A printString            // => \"$A\"\n$A uppercase              // => 65\n$A lowercase              // => 97\n$A class                  // => Character\n$A respondsTo: #uppercase // => true\nCharacter value: 65       // => $A\n(Character value: 10) asString   // => \"\\n\" (LF, not \"10\")\n$a uppercase asString            // => \"A\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
