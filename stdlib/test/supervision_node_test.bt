@@ -12,7 +12,6 @@
 TestCase subclass: SupervisionNodeTest
 
   // --- Fixture helpers ---
-
   dbSupervisorNode =>
     SupervisionNode
       pid: nil
@@ -81,8 +80,7 @@ TestCase subclass: SupervisionNodeTest
   testKindOtpProcess =>
     self assert: self otpProcessNode kind equals: #otpProcess
 
-  testChildCountZero =>
-    self assert: self otpProcessNode childCount equals: 0
+  testChildCountZero => self assert: self otpProcessNode childCount equals: 0
 
   // === isSupervisor: true for both supervisor kinds ===
   testIsSupervisorBeamtalkSupervisor =>
