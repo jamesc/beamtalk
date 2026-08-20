@@ -1446,3 +1446,94 @@ format_error_message_invalid_module_test() ->
     %% Falls through to generic formatter
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
+
+%%% ============================================================================
+%%% Catch-block coverage tests (BT-nightly-20260820)
+%%% ============================================================================
+
+%% format_error/1 catch branch (lines 88, 94-95).
+%% A tagged-exception map whose `error` field is not a #beamtalk_error{} record
+%% causes beamtalk_error:format/1 to throw function_clause inside
+%% format_error_message/1.  The outer try/catch in format_error/1 produces a
+%% fallback error response instead of crashing.
+format_error_catch_test() ->
+    Reason = #{'$beamtalk_class' => 'TestClass', error => not_a_beamtalk_error_record},
+    Result = beamtalk_repl_json:format_error(Reason),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"message">>, Decoded))).
+
+%% format_error_with_warnings/2 catch branch (lines 136, 142-143).
+%% Same trigger as above; the with-warnings variant has its own catch block.
+format_error_with_warnings_catch_test() ->
+    Reason = #{'$beamtalk_class' => 'TestClass', error => not_a_beamtalk_error_record},
+    Result = beamtalk_repl_json:format_error_with_warnings(Reason, []),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"message">>, Decoded))).
+
+%%% ============================================================================
+%%% encode_reloaded/5 with warnings (line 231)
+%%% ============================================================================
+
+%% maybe_add_warnings_reloaded/2 second clause fires when Warnings is non-empty.
+encode_reloaded_with_warnings_test() ->
+    Classes = [#{name => "Counter"}],
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"reload\",\"id\":\"wtest1\",\"session\":\"sess1\"}">>
+    ),
+    Warnings = [<<"reload triggered">>, <<"state migration skipped">>],
+    Result = beamtalk_repl_json:encode_reloaded(Classes, 0, [], Msg, Warnings),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)),
+    ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
+
+%%% ============================================================================
+%%% encode_error/2, /4, /5 (lines 236, 241, 251)
+%%% ============================================================================
+
+encode_error_2_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"eval\",\"id\":\"eid1\",\"session\":\"sess1\"}">>
+    ),
+    Result = beamtalk_repl_json:encode_error(some_error, Msg),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assert(is_binary(maps:get(<<"error">>, Decoded))),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+encode_error_4_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"eval\",\"id\":\"eid2\",\"session\":\"sess1\"}">>
+    ),
+    Result = beamtalk_repl_json:encode_error(some_error, Msg, <<"stdout">>, []),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assert(is_binary(maps:get(<<"error">>, Decoded))),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+encode_error_5_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"eval\",\"id\":\"eid3\",\"session\":\"sess1\"}">>
+    ),
+    Result = beamtalk_repl_json:encode_error(some_error, Msg, <<"stdout">>, [], #{
+        <<"hint">> => <<"check syntax">>
+    }),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assert(is_binary(maps:get(<<"error">>, Decoded))),
+    ?assertEqual(<<"check syntax">>, maps:get(<<"hint">>, Decoded)).
+
+%%% ============================================================================
+%%% term_to_json_future_pid/1 completed path (line 383)
+%%% ============================================================================
+
+%% The `false` branch of is_process_alive/1 in term_to_json_future_pid/1 fires
+%% when the underlying future process has already exited.  Monitor guarantees
+%% the process is gone before the assertion.
+term_to_json_future_completed_test() ->
+    Pid = spawn(fun() -> ok end),
+    MRef = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    after 1000 -> error(timeout)
+    end,
+    Result = beamtalk_repl_json:term_to_json({beamtalk_future, Pid}),
+    ?assertEqual(<<"#Future<completed>">>, Result).
