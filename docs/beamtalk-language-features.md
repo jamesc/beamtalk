@@ -78,9 +78,9 @@ dialog := "She said ""hello"""  // → She said "hello"
 | Grapheme cluster | Via `:string` module | `"👨‍👩‍👧‍👦"` is one grapheme, multiple codepoints |
 | `$a` | `97` (codepoint) | Character literal = Unicode codepoint |
 
-### Character Literal Methods
+### Character Methods
 
-Character literals dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values:
+Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, and chained `uppercase`/`lowercase` sends — all statically Character-typed forms:
 
 ```beamtalk
 $A asInteger              // => 65
@@ -91,6 +91,8 @@ $A lowercase              // => 97
 $A class                  // => Character
 $A respondsTo: #uppercase // => true
 Character value: 65       // => $A
+(Character value: 10) asString   // => "\n" (LF, not "10")
+$a uppercase asString            // => "A"
 ```
 
 ### String Operations (Grapheme-Aware)
@@ -3864,11 +3866,17 @@ above.
 A pending (unflushed) `#'remove-class'` entry is revertable, same as any other
 ChangeLog entry: `Workspace changes revert: anEntry` recompiles and reinstalls
 the whole class from the entry's recorded prior source, reusing the same
-install path `newClass:at:` uses (ADR 0113 Phase 3). Once flushed — the `.bt`
-file actually deleted — the entry is pruned from the active view and `revert:`
-has nothing left to act on; recovering a flushed removal is git's job.
-`removeSelector:`'s `#'remove-method'` entries are revertable the same way
-(they re-install the removed method's recorded prior body).
+install path `newClass:at:` uses (ADR 0113 Phase 3). Before reinstalling, the
+runtime compares the current on-disk file against the entry's recorded
+`prev_source_ref` snapshot byte-for-byte; if the file was edited externally
+(another session, git, an editor) while the removal sat pending, `revert:`
+raises a structured error instead of silently discarding the external edit —
+the class stays removed and the original entry stays pending (BT-3213). Once
+flushed — the `.bt` file actually deleted — the entry is pruned from the
+active view and `revert:` has nothing left to act on; recovering a flushed
+removal is git's job. `removeSelector:`'s `#'remove-method'` entries are
+revertable the same way (they re-install the removed method's recorded prior
+body).
 
 #### Destructive flush — `flushIncludingDestructive` and `confirmDestructive` (ADR 0113)
 
@@ -3918,11 +3926,13 @@ the delete. See [ADR 0113](ADR/0113-destructive-workspace-operations.md) for
 the full design, including the external-edit conflict table and delete
 atomicity.
 
-**Editor integration (LSP):** when a Tier 2 flush deletes a class's file, the
-LSP emits a typed `DeleteFile` `workspace/applyEdit` resource operation
-(rather than a content edit) so the editor closes any open buffer for the
-removed file instead of silently failing to reload stale content. This fires
-regardless of whether the file was open in the editor.
+**Editor integration (LSP):** flush uses typed `workspace/applyEdit` resource
+operations for structural file changes: a `Workspace newClass:at:` flush emits
+a `CreateFile` operation (BT-3212), and a Tier 2 destructive flush emits a
+`DeleteFile` operation (BT-3209), so the editor can distinguish file creation
+and deletion from ordinary content edits. Both fire regardless of whether the
+file was open in the editor. Ordinary method patches continue to use the
+generic `TextEdit` shape, gated on the file being open.
 
 ### `SystemNavigation` — Cross-class code queries
 
