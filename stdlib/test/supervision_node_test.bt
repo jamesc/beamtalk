@@ -11,80 +11,82 @@
 
 TestCase subclass: SupervisionNodeTest
 
-  // === Accessors return the stored field values ===
-  testKindAccessor =>
-    node := SupervisionNode
+  // --- Fixture helpers ---
+
+  dbSupervisorNode =>
+    SupervisionNode
       pid: nil
       registeredName: #db
       kind: #beamtalkSupervisor
       behaviourClass: nil
       childCount: 3
-    self assert: node kind equals: #beamtalkSupervisor
 
-  testRegisteredNameAccessor =>
-    node := SupervisionNode
+  otpProcessNode =>
+    SupervisionNode
       pid: nil
-      registeredName: #db
+      registeredName: nil
+      kind: #otpProcess
+      behaviourClass: nil
+      childCount: 0
+
+  beamtalkSupervisorNode =>
+    SupervisionNode
+      pid: nil
+      registeredName: nil
       kind: #beamtalkSupervisor
       behaviourClass: nil
-      childCount: 3
-    self assert: node registeredName equals: #db
+      childCount: 0
 
-  testChildCountAccessor =>
-    node := SupervisionNode
+  beamtalkActorNode =>
+    SupervisionNode
       pid: nil
-      registeredName: #db
-      kind: #beamtalkSupervisor
+      registeredName: nil
+      kind: #beamtalkActor
       behaviourClass: nil
-      childCount: 3
-    self assert: node childCount equals: 3
+      childCount: 0
 
-  testBehaviourClassAccessor =>
-    node := SupervisionNode
+  beamtalkActorWithCounterNode =>
+    SupervisionNode
       pid: nil
       registeredName: nil
       kind: #beamtalkActor
       behaviourClass: Counter
       childCount: 0
-    self assert: node behaviourClass equals: Counter
 
-  testPidAccessorNilForRestarting =>
-    node := SupervisionNode
+  restartingNode =>
+    SupervisionNode
       pid: nil
       registeredName: nil
       kind: #restarting
       behaviourClass: nil
       childCount: 0
-    self assert: node pid equals: nil
+
+  // === Accessors return the stored field values ===
+  testKindAccessor =>
+    self assert: self dbSupervisorNode kind equals: #beamtalkSupervisor
+
+  testRegisteredNameAccessor =>
+    self assert: self dbSupervisorNode registeredName equals: #db
+
+  testChildCountAccessor =>
+    self assert: self dbSupervisorNode childCount equals: 3
+
+  testBehaviourClassAccessor =>
+    self assert: self beamtalkActorWithCounterNode behaviourClass equals: Counter
+
+  testPidAccessorNilForRestarting =>
+    self assert: self restartingNode pid equals: nil
 
   // === Accessor values ===
   testKindOtpProcess =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #otpProcess
-      behaviourClass: nil
-      childCount: 0
-    self assert: node kind equals: #otpProcess
+    self assert: self otpProcessNode kind equals: #otpProcess
 
   testChildCountZero =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #otpProcess
-      behaviourClass: nil
-      childCount: 0
-    self assert: node childCount equals: 0
+    self assert: self otpProcessNode childCount equals: 0
 
   // === isSupervisor: true for both supervisor kinds ===
   testIsSupervisorBeamtalkSupervisor =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #beamtalkSupervisor
-      behaviourClass: nil
-      childCount: 0
-    self assert: node isSupervisor equals: true
+    self assert: self beamtalkSupervisorNode isSupervisor equals: true
 
   testIsSupervisorOtpSupervisor =>
     node := SupervisionNode
@@ -96,60 +98,24 @@ TestCase subclass: SupervisionNodeTest
     self assert: node isSupervisor equals: true
 
   testIsSupervisorFalseForActor =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #beamtalkActor
-      behaviourClass: nil
-      childCount: 0
-    self assert: node isSupervisor equals: false
+    self assert: self beamtalkActorNode isSupervisor equals: false
 
   // === isBeamtalk: true only for the #beamtalk* kinds ===
   testIsBeamtalkActor =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #beamtalkActor
-      behaviourClass: nil
-      childCount: 0
-    self assert: node isBeamtalk equals: true
+    self assert: self beamtalkActorNode isBeamtalk equals: true
 
   testIsBeamtalkSupervisor =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #beamtalkSupervisor
-      behaviourClass: nil
-      childCount: 0
-    self assert: node isBeamtalk equals: true
+    self assert: self beamtalkSupervisorNode isBeamtalk equals: true
 
   testIsBeamtalkFalseForForeign =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #otpProcess
-      behaviourClass: nil
-      childCount: 0
-    self assert: node isBeamtalk equals: false
+    self assert: self otpProcessNode isBeamtalk equals: false
 
   testIsBeamtalkFalseForRestarting =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #restarting
-      behaviourClass: nil
-      childCount: 0
-    self assert: node isBeamtalk equals: false
+    self assert: self restartingNode isBeamtalk equals: false
 
   // === printString shape ===
   testPrintStringActorFormat =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #beamtalkActor
-      behaviourClass: Counter
-      childCount: 0
-    self assert: node printString equals: "#SupervisionNode<#beamtalkActor Counter restarting>"
+    self assert: self beamtalkActorWithCounterNode printString equals: "#SupervisionNode<#beamtalkActor Counter restarting>"
 
   testPrintStringSupervisorShowsChildCount =>
     node := SupervisionNode
@@ -161,10 +127,4 @@ TestCase subclass: SupervisionNodeTest
     self assert: node printString equals: "#SupervisionNode<#beamtalkSupervisor appSup restarting children: 3>"
 
   testPrintStringRestartingShowsRestarting =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #restarting
-      behaviourClass: nil
-      childCount: 0
-    self assert: node printString equals: "#SupervisionNode<#restarting restarting>"
+    self assert: self restartingNode printString equals: "#SupervisionNode<#restarting restarting>"
