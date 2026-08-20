@@ -18,7 +18,11 @@ pub(super) struct Analyser {
     pub(super) result: AnalysisResult,
     pub(super) scope: scope::Scope,
     method_validators: method_validators::MethodValidatorRegistry,
-    type_map: TypeMap,
+    /// `pub(super)` (not private) so `analyse_full` can recover it by
+    /// destructuring `Analyser` at the end of analysis (BT-3217) — see
+    /// `AnalysisResult::type_map`'s doc for why this is a destructure rather
+    /// than a consuming accessor mid-pass.
+    pub(super) type_map: TypeMap,
 }
 
 impl Analyser {

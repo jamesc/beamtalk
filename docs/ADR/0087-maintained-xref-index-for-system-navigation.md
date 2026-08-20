@@ -169,6 +169,12 @@ beamtalk_xref_senders :: bag of
         method         := atom(),        %% the calling method's selector
         line           := pos_integer(), %% line of the send within the method
         recv_kind      := self_recv | super_recv | erlang_ffi | other,
+        recv_type      => atom() | dynamic,
+            %% ADR 0115 Phase 2 (BT-3217): the receiver's compile-time-resolved
+            %% class/protocol name, or `dynamic` when unresolved or produced by
+            %% the runtime live-patch path. Additive — absent on rows written
+            %% before this field existed, defaulting to "always relevant" at
+            %% read time (ADR 0115 Phase 3, BT-3218).
         gen            := pos_integer()
       }
     }.
