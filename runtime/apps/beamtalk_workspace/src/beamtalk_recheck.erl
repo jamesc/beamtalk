@@ -14,23 +14,32 @@ finds the change's known dependents and re-checks them, producing findings at
 ADR 0100 severities. Generalises the Phase 0 spike
 (`docs/internal/adr-0105-phase0-spike-findings.md`) to production.
 
-## Mechanism (ADR 0105 §Mechanism steps 2-3)
+## Mechanism (ADR 0105 §Mechanism steps 2-3, receiver-type narrowing ADR 0115)
 
-1. **Dependent lookup.** `beamtalk_xref:senders_of/1` is selector-keyed —
-   sites carry a caller (`owner`/`method`/`line`) and a receiver *kind*
-   (self/super/ffi/other), but never a receiver *class* (ADR 0087). So a
-   `size` sender on an unrelated `List` comes back alongside the real
-   `Counter` dependent; xref cannot separate them.
-2. **The receiver-type filter is not a pre-filter — it is what re-checking
-   itself does.** Each candidate caller's *whole class* is re-checked through
-   the compiler with the changed class's *current* (already-live,
-   post-install) signature. A site whose receiver resolves to a different
-   type simply re-checks clean against that signature, because the checker
-   only applies `Counter>>getCount`'s new interface to sends whose receiver
-   it infers as `Counter`. This is why the **caller cap is load-bearing**:
-   every candidate is paid for with a compile before its relevance is known
-   (ADR 0105 Alternatives — the xref receiver-type-key extension is the
-   follow-up if this proves hot).
+1. **Dependent lookup.** `beamtalk_xref:senders_of/2` (ADR 0115 Phase 4,
+   BT-3219 — `senders_of/1` before this) is selector-keyed and, since Phase
+   4, also filtered against the changed class's receiver-type relatedness:
+   sites carry a caller (`owner`/`method`/`line`), a receiver *kind*
+   (self/super/ffi/other), and — for compile-time-indexed sites — a receiver
+   *type* (`recv_type`, ADR 0087/0115). A `size` sender on an unrelated
+   `List` is now dropped by `senders_of/2` itself, before this module ever
+   sees it, *if* that site's `recv_type` was resolved at compile time;
+   `dynamic`-typed and legacy (pre-Phase-2) rows still come back alongside
+   the real `Counter` dependent — xref cannot separate those, by design
+   (ADR 0115 Constraint 2: never exclude what cannot be narrowed).
+2. **The receiver-type filter narrows the pool up front for typed code, but
+   is not a substitute for re-checking.** `senders_of/2` only excludes sites
+   it can *prove* unrelated (a resolved `recv_type` outside the changed
+   class's hierarchy/protocol-conformance set); every site it keeps —
+   including every `dynamic`-typed or legacy one — still goes through the
+   same full re-check this step always did: each surviving candidate
+   caller's *whole class* is re-checked through the compiler with the
+   changed class's *current* (already-live, post-install) signature, and a
+   site whose receiver resolves to a different type at that point simply
+   re-checks clean. This is why the **caller cap remains load-bearing** even
+   post-Phase-4: it is the backstop over the residual, unnarrowable
+   candidates `senders_of/2` cannot rule out, not a replacement for it (ADR
+   0115 §Decision).
 3. **Re-check unit is the caller's whole class**, read from the *live image*
    (`beamtalk_workspace_meta:get_class_source/1`), never disk — a flagged
    caller may itself carry unflushed edits (ADR 0082). One
@@ -198,7 +207,9 @@ covering all three "never actually re-verified" cases.
     relevant_diagnostic_leaf_change/2,
     class_name_mentioned/2,
     relevant_diagnostic_alias_change/1,
-    alias_change_candidates/1
+    alias_change_candidates/1,
+    changed_class_tag/2,
+    selector_side/1
 ]).
 -endif.
 
@@ -293,12 +304,14 @@ reload's own success/reply on this.
 -spec trigger(binary(), binary(), instance | class, classification()) -> result().
 trigger(ClassNameBin, SelectorBin, Side, Classification) ->
     try
-        %% `Side` is accepted (matching the signature store's capture/4 key)
-        %% but not threaded into do_trigger/3: beamtalk_xref:senders_of/1 is
-        %% selector-keyed only, with no instance/class-side component, so it
-        %% cannot narrow the dependent lookup. Kept in scope here purely for
-        %% the ?LOG_WARNING context below on a caught failure.
-        do_trigger(ClassNameBin, SelectorBin, Classification)
+        %% ADR 0115 Phase 4 (BT-3219): `Side` now threads all the way to
+        %% `beamtalk_xref:senders_of/2`'s `ChangedClass` argument via
+        %% `changed_class_tag/2` — it is the "which side changed" axis
+        %% Amendment 3's relatedness test needs (a class-object receiver only
+        %% ever dispatches through the metaclass chain, an instance-typed one
+        %% only through the instance chain), not merely `?LOG_WARNING` context
+        %% as it was pre-Phase-4.
+        do_trigger(ClassNameBin, SelectorBin, Side, Classification)
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
@@ -553,11 +566,12 @@ nothing to catch it, the first instance of the new subclass to reach that
 
 ## Why this cannot reuse `trigger/4`/`trigger_shape/2`'s xref-based lookup
 
-Both existing triggers query `beamtalk_xref:senders_of/1` — a **selector**-
-keyed index of message-send call sites. There is no selector a
-`matchExhaustive:`/`Type`-pattern site "sends" that names the class it
-tests, so xref has nothing to look up here (confirmed: no such index exists
-anywhere in this codebase as of BT-2856). Absent a purpose-built index
+Both existing triggers query `beamtalk_xref:senders_of/1` (or, since ADR 0115
+Phase 4, its receiver-type-narrowed `senders_of/2` extension) — a
+**selector**-keyed index of message-send call sites, either way. There is no
+selector a `matchExhaustive:`/`Type`-pattern site "sends" that names the
+class it tests, so xref has nothing to look up here (confirmed: no such
+index exists anywhere in this codebase as of BT-2856). Absent a purpose-built index
 (a real follow-up — see the moduledoc note below), the only currently-shippable
 way to find every affected site is `trigger_image/0`'s own strategy: recompile
 every live class's own recorded source against the current (now-updated)
@@ -753,10 +767,10 @@ do_trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSigna
             %% BT-3109: the overlay is a plain local map, never written to
             %% `beamtalk_compiler_server` state — every other ambient class
             %% stays exactly as installed; only this one request's view of
-            %% `ClassAtom` is hypothetical. Threaded through do_trigger/4 as
+            %% `ClassAtom` is hypothetical. Threaded through do_trigger/5 as
             %% each candidate's `diagnostics/3` `class_hierarchy` option.
             Overlay = AmbientClasses#{ClassAtom => PendingMeta},
-            do_trigger(ClassNameBin, SelectorBin, Classification, Overlay)
+            do_trigger(ClassNameBin, SelectorBin, Side, Classification, Overlay)
     end.
 
 -doc """
@@ -899,33 +913,47 @@ image_finding(
         'end' => End
     }.
 
--spec do_trigger(binary(), binary(), classification()) -> result().
-do_trigger(ClassNameBin, SelectorBin, Classification) ->
+-spec do_trigger(binary(), binary(), instance | class, classification()) -> result().
+do_trigger(ClassNameBin, SelectorBin, Side, Classification) ->
     %% `trigger/4`'s path: no pending overlay, so each candidate's
     %% `diagnostics/3` call opts into the *ambient* class-hierarchy cache
     %% (`class_hierarchy => true`), exactly as before BT-3109.
-    do_trigger(ClassNameBin, SelectorBin, Classification, true).
+    do_trigger(ClassNameBin, SelectorBin, Side, Classification, true).
 
 -doc """
-`do_trigger/3` generalised to accept `ClassHierarchy` — the `class_hierarchy`
+`do_trigger/4` generalised to accept `ClassHierarchy` — the `class_hierarchy`
 option value (`beamtalk_compiler_server:diagnostics/3`) each candidate's
-diagnostics round-trip is run with. `true` (the `do_trigger/3`/`trigger/4`
+diagnostics round-trip is run with. `true` (the `do_trigger/4`/`trigger/4`
 path) opts into the ambient cache; a map (`do_trigger_pending/5`'s path, BT-
 3109) threads that exact map as a per-request overlay instead — see
 `trigger_pending/5`'s moduledoc for why this replaces the previous
 ambient-cache mutate-then-restore mechanism.
+
+ADR 0115 Phase 4 (BT-3219): the dependent lookup now calls
+`beamtalk_xref:senders_of/2`, not `/1` — `ChangedClass`
+(`changed_class_tag/2` applied to `ClassNameBin`'s atom and `Side`) narrows
+the candidate pool to sites whose receiver could actually dispatch to the
+changed method *before* `group_by_owner/1`/`apply_cap/2` ever see it, rather
+than only discovering irrelevance the expensive way, at full re-check (see
+this module's moduledoc, step 2). `apply_cap/2` itself is unchanged — it
+remains the backstop over this now-narrower candidate set: `dynamic`-typed
+and cross-hierarchy-ambiguous sends still flow through unfiltered, per ADR
+0115 Constraint 2.
 """.
--spec do_trigger(binary(), binary(), classification(), true | #{atom() => map()}) -> result().
-do_trigger(ClassNameBin, SelectorBin, Classification, ClassHierarchy) ->
+-spec do_trigger(
+    binary(), binary(), instance | class, classification(), true | #{atom() => map()}
+) -> result().
+do_trigger(ClassNameBin, SelectorBin, Side, Classification, ClassHierarchy) ->
     %% `binary_to_existing_atom/2`, not `binary_to_atom/2`: by the time a
-    %% reload reaches this trigger the selector was just compiled into a live
-    %% class, so its atom already exists — using the existing-only conversion
-    %% fails fast (caught by trigger/4) instead of ever minting a fresh atom
-    %% from what is, transitively, patch-source-derived text (atom-table
-    %% exhaustion is a standing concern for `binary_to_atom` on
-    %% externally-influenced input).
+    %% reload reaches this trigger both the selector and its containing class
+    %% were just compiled into a live class, so both atoms already exist —
+    %% using the existing-only conversion fails fast (caught by `trigger/4`)
+    %% instead of ever minting a fresh atom from what is, transitively,
+    %% patch-source-derived text (atom-table exhaustion is a standing concern
+    %% for `binary_to_atom` on externally-influenced input).
     Selector = binary_to_existing_atom(SelectorBin, utf8),
-    Sites = beamtalk_xref:senders_of(Selector),
+    ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
+    Sites = beamtalk_xref:senders_of(Selector, changed_class_tag(ClassAtom, Side)),
     OwnerGroups = group_by_owner(Sites),
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
@@ -963,10 +991,33 @@ do_trigger(ClassNameBin, SelectorBin, Classification, ClassHierarchy) ->
         not_verified_owners => not_verified_owners(NotCheckedOwners, Outcomes)
     }.
 
+-doc """
+ADR 0115 Phase 4 (BT-3219): each shape-dependent selector is filtered through
+`beamtalk_xref:senders_of/2` against `ClassNameBin`, individually tagged by
+its own side — `shape_dependent_selectors/1`'s selector set mixes
+`spawnWith:` (a **class-side** message, sent to the class object itself:
+`Counter spawnWith: #{...}`, per the "class-side" constructor table in
+`docs/beamtalk-language-features.md`) with the field getter / `with*:`
+copy-setter selectors (**instance-side**, sent to an already-spawned
+instance). Using one `Side` for the whole `flatmap` would be wrong for
+whichever half it didn't match — Amendment 3's side-gating in `senders_of/2`
+excludes a site outright on a side mismatch, so a class-side `ChangedClass`
+tag applied to an instance-side selector's lookup (or vice versa) would
+silently drop every real dependent of that selector, not just narrow it.
+`selector_side/1` picks the correct tag per selector, not per class.
+""".
 -spec do_trigger_shape(binary(), [shape_field_change()]) -> result().
 do_trigger_shape(ClassNameBin, FieldChanges) ->
+    ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
     Selectors = shape_dependent_selectors(FieldChanges),
-    Sites = lists:flatmap(fun beamtalk_xref:senders_of/1, Selectors),
+    Sites = lists:flatmap(
+        fun(Selector) ->
+            beamtalk_xref:senders_of(
+                Selector, changed_class_tag(ClassAtom, selector_side(Selector))
+            )
+        end,
+        Selectors
+    ),
     OwnerGroups = group_by_owner(Sites),
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
@@ -1027,6 +1078,42 @@ not_verified_owners(NotCheckedOwners, Outcomes) ->
      || {Owner, {Status, _}} <- Outcomes, Status =/= ok
     ],
     lists:usort(NotCheckedOwners ++ UnverifiedFromOutcomes).
+
+-doc """
+ADR 0115 Phase 4 (BT-3219): the `ChangedClass` argument `beamtalk_xref:
+senders_of/2` expects — `ClassAtom` unchanged for an instance-side reload, or
+its class-object tag (`'<C> class'`, via `beamtalk_runtime_api:
+class_object_tag/1`) for a class-side one. This is the identical convention
+`recv_type` itself uses for a `Meta{C}` receiver (BT-3217's write path) — the
+ADR reuses it here for `ChangedClass` rather than inventing a third parameter
+or a wider tuple type, and it is exactly what lets `senders_of/2`'s Amendment
+3 side-gating (a class-object receiver only ever dispatches through the
+metaclass chain, an instance-typed one only through the instance chain)
+apply correctly to a class-side reload.
+""".
+-spec changed_class_tag(atom(), instance | class) -> atom().
+changed_class_tag(ClassAtom, instance) ->
+    ClassAtom;
+changed_class_tag(ClassAtom, class) ->
+    beamtalk_runtime_api:class_object_tag(ClassAtom).
+
+-doc """
+Which side (`instance | class`) a shape-dependent selector
+(`shape_dependent_selectors/1`) is sent on — `do_trigger_shape/2`'s per-
+selector input to `changed_class_tag/2`. `spawnWith:` is sent to the class
+object itself (`Counter spawnWith: #{...}`, the "class-side" row of
+`docs/beamtalk-language-features.md`'s constructor table); every other
+shape-dependent selector (a field's getter or `with*:` copy-setter) is sent
+to an already-spawned instance. Getting this wrong in either direction would
+make `senders_of/2` wrongly *exclude* real dependents of that selector
+(Amendment 3 side-gates on an exact match, not a permissive superset) — not
+merely under-narrow the pool, so this is not a soft default.
+""".
+-spec selector_side(atom()) -> instance | class.
+selector_side('spawnWith:') ->
+    class;
+selector_side(_Selector) ->
+    instance.
 
 -doc """
 The selector set whose senders are candidate dependents of a shape change:
