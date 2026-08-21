@@ -181,22 +181,11 @@ fn validate_erlang_module_name(name: &str) -> Result<(), rmcp::ErrorData> {
 /// Validate that a string is a valid Beamtalk selector.
 ///
 /// Accepts keyword/unary selectors (`increment`, `at:put:`) and binary operator
-/// selectors (`+`, `>=`, `**`). The canonical shape check is
-/// `beamtalk_core::source_analysis::is_valid_selector`.
+/// selectors (`+`, `>=`, `**`). Delegates to the canonical implementation in
+/// `beamtalk_core::source_analysis::validate_selector_input`.
 fn validate_selector(sel: &str) -> Result<(), rmcp::ErrorData> {
-    if sel.is_empty() {
-        return Err(rmcp::ErrorData::invalid_params(
-            "Selector must not be empty.",
-            None,
-        ));
-    }
-    if !beamtalk_core::source_analysis::is_valid_selector(sel) {
-        return Err(rmcp::ErrorData::invalid_params(
-            format!("Invalid selector: '{sel}'."),
-            None,
-        ));
-    }
-    Ok(())
+    beamtalk_core::source_analysis::validate_selector_input(sel)
+        .map_err(|e| rmcp::ErrorData::invalid_params(e, None))
 }
 
 /// Pretty-print a JSON value, falling back to `Display` on serialization error.

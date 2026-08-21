@@ -3870,16 +3870,10 @@ fn validate_class_name(name: &str) -> std::result::Result<(), String> {
 
 /// Validate a Beamtalk selector (unary, keyword, or binary) before splicing
 /// it unescaped into a `#selector` literal in a built expression (ADR 0105
-/// Phase 3, BT-2782's `CMD_PRECHECK_METHOD`). The canonical shape check is
-/// `beamtalk_core::source_analysis::is_valid_selector`.
+/// Phase 3, BT-2782's `CMD_PRECHECK_METHOD`). Delegates to the canonical
+/// implementation in `beamtalk_core::source_analysis::validate_selector_input`.
 fn validate_selector(sel: &str) -> std::result::Result<(), String> {
-    if sel.is_empty() {
-        return Err("selector must not be empty".to_string());
-    }
-    if !beamtalk_core::source_analysis::is_valid_selector(sel) {
-        return Err(format!("invalid selector: '{sel}'"));
-    }
-    Ok(())
+    beamtalk_core::source_analysis::validate_selector_input(sel)
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
