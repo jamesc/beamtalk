@@ -338,6 +338,7 @@
 
 ### Internal
 
+- **xref `recv_type` schema + compile-time write path (ADR 0115 Phase 2)** — the `beamtalk_xref` send-entry schema gains a `recv_type` field recording the inferred receiver type at each message-send site. Populated at compile time from the existing `TypeMap`; the runtime live-patch path emits `dynamic` unconditionally (no type-checker access). `Meta{C}` receivers render as `'<C> class'` (reusing `class_object_tag/1`'s convention). A corpus conformance test verifies the new receiver-span walk against the syntactic send walk across stdlib + examples. No user-visible behavior change yet — the read path (`senders_of/2` narrowing) ships in Phase 3 (BT-3217, #3446).
 - Deduplicate MCP/LSP tool expression builders (`save_class_expr`, `flush_expr`, `remove_method_expr`, etc.) into `beamtalk_core::tool_expr` (BT-3193, #3415).
 - Extract shared REPL `:flush` meta-command argument parsing into `repl_meta_exprs` module (BT-3196, #3418).
 - Extract `normalize_path` to shared `path_util` module in beamtalk-cli (#3409).
