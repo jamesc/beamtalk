@@ -827,6 +827,165 @@ trigger_never_raises_on_unknown_selector_test_() ->
         end}}.
 
 %%====================================================================
+%% Receiver-type-aware dependent lookup (ADR 0115 Phase 4, BT-3219)
+%%====================================================================
+
+%% Pure helpers — changed_class_tag/2, selector_side/1.
+
+changed_class_tag_instance_side_is_bare_class_test() ->
+    ?assertEqual(
+        'ReCheckCounter', beamtalk_recheck:changed_class_tag('ReCheckCounter', instance)
+    ).
+
+changed_class_tag_class_side_uses_class_object_tag_test() ->
+    ?assertEqual(
+        'ReCheckCounter class', beamtalk_recheck:changed_class_tag('ReCheckCounter', class)
+    ).
+
+selector_side_spawn_with_is_class_side_test() ->
+    ?assertEqual(class, beamtalk_recheck:selector_side('spawnWith:')).
+
+selector_side_accessor_is_instance_side_test() ->
+    ?assertEqual(instance, beamtalk_recheck:selector_side(count)),
+    ?assertEqual(instance, beamtalk_recheck:selector_side('withCount:')).
+
+%% xref payload for the fan-out fixture below: one send of `Selector`, typed
+%% (`recv_type`) at `RecvType` — mirrors the compile-time write path BT-3217
+%% populates for real code (unlike `dashboard_xref/0`/`listview_xref/0`
+%% above, which deliberately omit `recv_type` to exercise the pre-Phase-2
+%% legacy-row default elsewhere in this file).
+fanout_candidate_xref(Selector, RecvType) ->
+    [
+        #{
+            class_side => false,
+            selector => 'go:',
+            line => 2,
+            sends => [
+                #{selector => Selector, line => 2, recv_kind => other, recv_type => RecvType}
+            ],
+            references => [#{class => RecvType, line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+fanout_candidate_source(NameBin, ReceiverBin, SelectorBin) ->
+    <<
+        "Object subclass: ",
+        NameBin/binary,
+        "\n  go: c :: ",
+        ReceiverBin/binary,
+        " -> Integer => (c ",
+        SelectorBin/binary,
+        ") + 1\n"
+    >>.
+
+-spec register_fanout_candidate(atom(), atom(), atom()) -> ok.
+register_fanout_candidate(Name, Selector, RecvType) ->
+    NameBin = atom_to_binary(Name, utf8),
+    ReceiverBin = atom_to_binary(RecvType, utf8),
+    SelectorBin = atom_to_binary(Selector, utf8),
+    ok = beamtalk_xref:register_class(Name, fanout_candidate_xref(Selector, RecvType)),
+    ok = beamtalk_workspace_meta:set_class_source(
+        NameBin, fanout_candidate_source(NameBin, ReceiverBin, SelectorBin)
+    ).
+
+%% BT-3219 AC4: a synthetic fan-out fixture mirroring BT-2781's benchmark
+%% shape (real dependents interleaved with same-selector, unrelated-type
+%% false positives) for one selector, all comfortably under the default
+%% caller cap (20) so the cap plays no part in this result — proving the
+%% unrelated-type candidates are dropped from the pool by `senders_of/2`
+%% itself, *before* `apply_cap/2` ever runs, rather than merely re-checked
+%% and discarded afterward the way `signature_change_finding_and_receiver_
+%% filter_test_` above demonstrates for legacy (`recv_type`-less) rows.
+receiver_type_filter_narrows_pool_before_cap_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    ChangedClass = 'ReCheckFanoutCounter',
+                    UnrelatedClass = 'ReCheckFanoutUnrelated',
+                    Selector = fanoutSel,
+                    SelectorBin = <<"fanoutSel">>,
+                    %% A small synthetic hierarchy, written directly into
+                    %% `beamtalk_class_metadata` (mirrors
+                    %% `beamtalk_xref_tests.erl`'s BT-3218
+                    %% `bt3218_hierarchy_setup/0` pattern) — both classes must
+                    %% be *known* to `beamtalk_class_metadata` for
+                    %% `senders_of/2`'s relatedness check to actually run the
+                    %% hierarchy-membership test rather than fall through to
+                    %% Amendment 2's "unresolvable name, default relevant"
+                    %% branch, which would defeat this test's whole point.
+                    ok = beamtalk_class_metadata:insert(
+                        ChangedClass, undefined, undefined, none, undefined
+                    ),
+                    ok = beamtalk_class_metadata:insert(
+                        UnrelatedClass, undefined, undefined, none, undefined
+                    ),
+                    try
+                        beamtalk_compiler_server:register_class(
+                            ChangedClass,
+                            counter_hierarchy(#{
+                                Selector => #{
+                                    arity => 0, param_types => [], return_type => 'String'
+                                }
+                            })
+                        ),
+
+                        RealNames = ['ReCheckFanoutReal1', 'ReCheckFanoutReal2'],
+                        UnrelatedNames = [
+                            'ReCheckFanoutFalse1',
+                            'ReCheckFanoutFalse2',
+                            'ReCheckFanoutFalse3'
+                        ],
+                        lists:foreach(
+                            fun(Name) ->
+                                register_fanout_candidate(Name, Selector, ChangedClass)
+                            end,
+                            RealNames
+                        ),
+                        lists:foreach(
+                            fun(Name) ->
+                                register_fanout_candidate(Name, Selector, UnrelatedClass)
+                            end,
+                            UnrelatedNames
+                        ),
+
+                        Result = beamtalk_recheck:trigger(
+                            atom_to_binary(ChangedClass, utf8),
+                            SelectorBin,
+                            instance,
+                            signature_change
+                        ),
+                        #{
+                            checked := Checked,
+                            total_candidates := Total,
+                            not_checked := NotChecked,
+                            checked_owners := CheckedOwners
+                        } = Result,
+
+                        %% `total_candidates` is `length(group_by_owner(Sites))`
+                        %% computed straight from `senders_of/2`'s
+                        %% already-filtered result, before `apply_cap/2` runs
+                        %% — if the unrelated-type candidates had merely been
+                        %% re-checked and discarded (the pre-Phase-4 behaviour),
+                        %% `Total` would be 5 (2 real + 3 unrelated), not 2.
+                        ?assertEqual(length(RealNames), Total),
+                        ?assertEqual(length(RealNames), Checked),
+                        ?assertEqual(0, NotChecked),
+                        ?assertEqual(
+                            lists:sort([atom_to_binary(N, utf8) || N <- RealNames]),
+                            lists:sort(CheckedOwners)
+                        )
+                    after
+                        beamtalk_class_metadata:delete(ChangedClass),
+                        beamtalk_class_metadata:delete(UnrelatedClass)
+                    end
+                end)
+            ]
+        end}}.
+
+%%====================================================================
 %% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
 %%====================================================================
 
