@@ -657,30 +657,14 @@ fn corpus_method_definitions(module: &Module) -> Vec<(String, &crate::ast::Metho
 /// stdlib + `examples/` corpus, not just an asserted invariant in a comment
 /// (this project's no-"keep-in-sync"-comment-without-a-test rule).
 ///
-/// **Known exceptions (BT-3223, tracked separately — not a BT-3217 defect):**
-/// two `SystemNavigation.bt` methods trip a *pre-existing* parser edge case
-/// unrelated to either walk here — `is_at_declaration_level_expect`
-/// (`source_analysis/parser/declarations.rs`) misclassifies a body-level
-/// `@expect` as declaration-level when the enclosing method is rendered at
-/// column 0 (`unparse_method`'s bare-method shape, exactly what
-/// `find_all_sends_in_source`'s synthetic-wrap reparse uses), truncating the
-/// *syntactic* walk's method body early and silently dropping its trailing
-/// sends — a real, independent completeness gap in `find_all_sends_in_source`
-/// itself, not something `collect_receiver_spans` (which walks the original,
-/// correctly-parsed AST directly) reproduces. `KNOWN_DIVERGENT_METHODS` is
-/// this test's explicit, narrow acknowledgment of that gap: any divergence
-/// *not* in this list still fails the test, and BT-3223's own acceptance
-/// criteria require this list emptied once the parser bug is fixed.
-const KNOWN_DIVERGENT_METHODS: &[(&str, &str)] = &[
-    (
-        "SystemNavigation.bt",
-        "SystemNavigation.isAnnouncementClass: (instance)",
-    ),
-    (
-        "SystemNavigation.bt",
-        "SystemNavigation.extensionTargets:names: (instance)",
-    ),
-];
+/// Was non-empty for two `SystemNavigation.bt` methods until BT-3223 fixed
+/// the underlying parser bug (`is_at_declaration_level_expect` misclassified
+/// a body-level `@expect` as declaration-level when the enclosing method was
+/// rendered at column 0 — exactly `find_all_sends_in_source`'s synthetic-wrap
+/// shape). Kept empty-but-present rather than removed: any *new* divergence
+/// still fails the test outright, and a future one gets the same narrow,
+/// documented allowlist entry this one did rather than silently masking it.
+const KNOWN_DIVERGENT_METHODS: &[(&str, &str)] = &[];
 
 #[test]
 fn corpus_receiver_span_walk_matches_syntactic_send_walk() {

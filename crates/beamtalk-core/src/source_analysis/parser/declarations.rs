@@ -636,7 +636,16 @@ impl Parser {
     /// method/state-declaration keeps `expect: None` — the suppression
     /// silently fails and the swallowed directive itself gets reported stale.
     /// Statement-level `@expect` inside a body (e.g. as the first statement
-    /// of a method) sits deeper than col 2 and is unaffected.
+    /// of a method) sits deeper than the enclosing method's own header
+    /// indentation and is unaffected.
+    ///
+    /// The boundary column is the *current* method's own header indentation
+    /// (`current_method_header_indent`), not a hardcoded `2`: a canonically
+    /// nested method has its header at col 2, but `method_source_walker`'s
+    /// synthetic-wrap strategy (used for xref/LSP send-collection queries)
+    /// puts a bare method's header at col 0, so its body sits at col 2 —
+    /// a hardcoded `col <= 2` would misidentify a body-level `@expect` there
+    /// as declaration-level and silently truncate the body (BT-3223).
     ///
     /// Unlike `is_at_method_definition()`, this is gated on `in_class_body`
     /// alone (no `!self.in_class_body` fallback): declaration-level `@expect`
@@ -650,7 +659,7 @@ impl Parser {
             && self
                 .current_token()
                 .indentation_after_newline()
-                .is_none_or(|col| col <= 2)
+                .is_none_or(|col| col <= self.current_method_header_indent.unwrap_or(2))
             && matches!(self.current_kind(), TokenKind::AtExpect)
     }
 
@@ -1461,6 +1470,12 @@ impl Parser {
     /// - `internal methodName => body` (ADR 0071)
     pub(super) fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
+        // BT-3223: capture this method's own header indentation before any
+        // tokens are consumed, so `parse_method_body` can tell a genuine
+        // class-member declaration boundary apart from body content at the
+        // same column a differently-indented header would produce (see
+        // `current_method_header_indent`'s doc comment).
+        let header_indent = self.current_token().indentation_after_newline();
         let doc_comment = self.collect_doc_comment();
         let comments = self.collect_comment_attachment();
         let method_kind = MethodKind::Primary;
@@ -1511,7 +1526,13 @@ impl Parser {
         // infer it (BT-2724).
         let previous_method_selector = self.current_method_selector.take();
         self.current_method_selector = Some(selector.name());
+        // BT-3223: thread this method's own header indentation through for
+        // the duration of its body — see `current_method_header_indent`'s
+        // doc comment and `parse_method_body`'s declaration-boundary checks.
+        let previous_method_header_indent = self.current_method_header_indent.take();
+        self.current_method_header_indent = Some(header_indent.unwrap_or(2));
         let body = self.parse_method_body();
+        self.current_method_header_indent = previous_method_header_indent;
         self.current_method_selector = previous_method_selector;
         self.in_method_body = false;
 
@@ -1645,11 +1666,15 @@ impl Parser {
         // indentation check. This is safe because `= expr` is not a valid
         // Beamtalk binary expression, so the `type Uppercase =` pattern cannot
         // appear as a legitimate statement start outside declaration position.
+        //
+        // BT-3223: the boundary column is the current method's own header
+        // indentation, not a hardcoded `2` — see
+        // `current_method_header_indent`'s doc comment.
         (!self.in_class_body
             || self
                 .current_token()
                 .indentation_after_newline()
-                .is_none_or(|col| col <= 2))
+                .is_none_or(|col| col <= self.current_method_header_indent.unwrap_or(2)))
             && self.is_at_type_alias_definition()
     }
 
@@ -1672,6 +1697,10 @@ impl Parser {
         // the body early and treats continuation keywords as a new method selector.
         // When `in_class_body` is true, canonical class members start at col 2;
         // any token deeper than col 2 is part of an expression, never a member.
+        // BT-3223: the boundary column is the *current* method's own header
+        // indentation (`current_method_header_indent`), not a hardcoded `2` —
+        // see that field's doc comment for why a hardcoded literal is wrong
+        // for `method_source_walker`'s synthetic-wrap strategy.
         #[allow(clippy::nonminimal_bool)]
         while !self.is_at_end()
             && !self.is_at_class_definition()
@@ -1679,13 +1708,14 @@ impl Parser {
             && !self.is_at_type_alias_boundary()
             && !(
                 // Only test is_at_method_definition when the token could plausibly
-                // be a class member (indentation <= 2). Deeper tokens are continuation
-                // expressions and must not trigger early exit from the method body.
+                // be a class member (indentation <= header indent). Deeper tokens
+                // are continuation expressions and must not trigger early exit
+                // from the method body.
                 (!self.in_class_body
                     || self
                         .current_token()
                         .indentation_after_newline()
-                        .is_none_or(|col| col <= 2))
+                        .is_none_or(|col| col <= self.current_method_header_indent.unwrap_or(2)))
                     && self.is_at_method_definition()
             )
             // BT-2829: a declaration-level `@expect` must end the body of the

@@ -1159,6 +1159,56 @@ fn standalone_method_statement_level_expect_inside_body_still_works() {
 }
 
 #[test]
+fn synthetic_wrap_shape_body_level_expect_is_not_declaration_level() {
+    // Regression test for BT-3223: `method_source_walker::find_all_sends_in_source`
+    // (and `find_all_references_in_source`) reparse a method's bare,
+    // unparsed source through a synthetic wrapper —
+    // `Object subclass: __SyntheticAllSendsScope\n<method text>` — where the
+    // method header sits at col 0 instead of the canonical col 2, so its
+    // entire body (including any `@expect`) sits at col 2: the same column
+    // `is_at_declaration_level_expect`'s old hardcoded `col <= 2` check used
+    // to treat as "declaration-level", causing it to end the body early and
+    // silently drop every statement after the `@expect` from the syntactic
+    // send/reference walk — a real completeness gap in the xref index and
+    // any LSP query riding the same source channel, not a cosmetic
+    // diagnostic. Mirrors the issue's minimal repro exactly.
+    let module = parse_ok(
+        "Object subclass: __SyntheticAllSendsScope\n\
+         bar: x =>\n\
+         \x20\x20x isNil ifTrue: [^false]\n\
+         \x20\x20// comment\n\
+         \x20\x20@expect dnu\n\
+         \x20\x20x superclassChain includes: x",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let method = &class.methods[0];
+    assert_eq!(
+        method.body.len(),
+        3,
+        "expected all 3 statements (ifTrue:, @expect, superclassChain includes:) \
+         retained in the body, got: {:?}",
+        method.body
+    );
+    assert!(
+        matches!(
+            method.body[1].expression,
+            Expression::ExpectDirective { .. }
+        ),
+        "expected the @expect to be swallowed as a body-level statement, not \
+         treated as a declaration boundary: {:?}",
+        method.body[1]
+    );
+    assert!(
+        matches!(method.body[2].expression, Expression::MessageSend { .. }),
+        "expected the final statement (`x superclassChain includes: x`) to \
+         survive, not be dropped/misattached as trailing class-body content: {:?}",
+        method.body[2]
+    );
+}
+
+#[test]
 fn declaration_level_expect_does_not_strand_preceding_doc_comment() {
     // Companion regression to the swallowing bug above: a `/// ...` doc
     // comment written directly above a declaration-level `@expect` sits in
