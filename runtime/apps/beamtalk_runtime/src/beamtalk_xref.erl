@@ -707,26 +707,25 @@ compute_relatedness(T, BaseChanged, Related) ->
 is_known_class(Name) ->
     beamtalk_class_metadata:lookup_superclass(Name) =/= not_found.
 
--define(CLASS_OBJECT_TAG_SUFFIX, " class").
-
 %% Split a `recv_type`/`ChangedClass` name into its base class name and
 %% whether it carried the `' class'` class-object-tag suffix
 %% (`beamtalk_class_registry:class_object_tag/1`'s own convention, reused —
 %% not reinvented — by BT-3217's write path for `Meta{C}` receivers).
-%% `is_class_name/1` is the same suffix test the runtime already uses
-%% elsewhere to recognise a class-object tag.
+%% `is_class_name/1`/`class_display_name/1` are the same suffix test and
+%% strip the runtime already uses elsewhere to recognise a class-object tag
+%% — reused here rather than re-deriving the `" class"`-suffix offset.
 -spec split_class_object_tag(name()) -> {name(), boolean()}.
 split_class_object_tag(Name) ->
     case beamtalk_class_registry:is_class_name(Name) of
         true ->
-            Str = atom_to_list(Name),
-            BaseStr = lists:sublist(Str, length(Str) - length(?CLASS_OBJECT_TAG_SUFFIX)),
-            % elp:fixme W0023 intentional atom creation — `Name` is already an
-            % atom (a compiler-emitted `recv_type` or a caller-supplied
+            % elp:fixme W0023 intentional atom creation — `Name` is already
+            % an atom (a compiler-emitted `recv_type` or a caller-supplied
             % `ChangedClass`), never raw external text, so re-interning its
             % base mirrors `class_object_tag/1`'s own precedent for the
-            % inverse operation.
-            {list_to_atom(BaseStr), true};
+            % inverse operation. `class_display_name/1` never interns an
+            % atom itself (it returns a binary), so this call site is the
+            % only place that does.
+            {binary_to_atom(beamtalk_class_registry:class_display_name(Name), utf8), true};
         false ->
             {Name, false}
     end.
