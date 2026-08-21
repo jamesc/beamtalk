@@ -92,8 +92,8 @@ pub fn is_valid_class_name(name: &str) -> bool {
 /// contains alphanumerics) are rejected.
 ///
 /// This is the canonical definition; tools that validate user-supplied
-/// selectors (LSP, MCP) must delegate their boolean check here so the rule
-/// stays in one place.
+/// selectors (LSP, MCP) must use [`validate_selector_input`] (which delegates
+/// here) so both the boolean rule and its error messages stay in one place.
 pub fn is_valid_selector(sel: &str) -> bool {
     fn is_binary_selector_char(c: char) -> bool {
         matches!(
@@ -110,6 +110,39 @@ pub fn is_valid_selector(sel: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':'),
     }
+}
+
+/// Validates a user-supplied selector string, returning an error description
+/// on failure.
+///
+/// Returns `Ok(())` for valid selectors. Returns `Err(message)` with a
+/// human-readable description for two failure modes:
+/// - empty input
+/// - a non-empty string that fails the shape rules of [`is_valid_selector`]
+///
+/// This is the single source of truth for selector validation error messages.
+/// Callers (LSP, MCP) convert the `String` error into their own error type:
+///
+/// ```text
+/// // LSP (returns Result<(), String>):
+/// beamtalk_core::source_analysis::validate_selector_input(sel)?;
+///
+/// // MCP (returns Result<(), rmcp::ErrorData>):
+/// beamtalk_core::source_analysis::validate_selector_input(sel)
+///     .map_err(|e| rmcp::ErrorData::invalid_params(e, None))?;
+/// ```
+///
+/// # Errors
+///
+/// Returns `Err(message)` when `sel` is empty or fails [`is_valid_selector`].
+pub fn validate_selector_input(sel: &str) -> Result<(), String> {
+    if sel.is_empty() {
+        return Err("selector must not be empty".to_string());
+    }
+    if !is_valid_selector(sel) {
+        return Err(format!("invalid selector: '{sel}'"));
+    }
+    Ok(())
 }
 
 /// Returns `true` if `c` should be treated as part of a completion "word" —
