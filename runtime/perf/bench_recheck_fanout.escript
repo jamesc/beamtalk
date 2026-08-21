@@ -28,7 +28,28 @@
 %%   overloaded common selector, e.g. `size`/`at:`). Measures wall-clock at
 %%   the default caller cap (20) and uncapped, so the cost of the current
 %%   "pay for a compile to find out a candidate isn't a real dependent"
-%%   design (moduledoc, beamtalk_recheck) is directly visible.
+%%   design (moduledoc, beamtalk_recheck) is directly visible. Every
+%%   candidate site here is a **legacy row** — `sends` carries no `recv_type`
+%%   (mirrors pre-ADR-0115 code, or a class that has not recompiled since):
+%%   `senders_of/2`'s Amendment 2 default treats an absent `recv_type` as
+%%   always-relevant, so Part B's numbers are deliberately unchanged by
+%%   ADR 0115 — the receiver-type filter has nothing to narrow here. This is
+%%   the "coverage ceiling" ADR 0115 §Consequences names directly: untyped/
+%%   legacy code keeps paying the pre-Phase-4 cost, and the cap remains the
+%%   only guard for it.
+%%
+%%   Part C ("typed fan-out", BT-3220 / ADR 0115 Phase 5) — the identical
+%%   10%/90% synthetic shape and driver as Part B, but every candidate site
+%%   now carries a `recv_type` (mirroring what the real compile-time write
+%%   path, BT-3217, populates for actual compiled code): real dependents are
+%%   typed at the changed class, false positives at a hierarchy-unrelated
+%%   class that happens to implement the same selector name. This is BT-2781's
+%%   synthetic scenario, now run against `senders_of/2`'s receiver-type
+%%   filter (wired into `beamtalk_recheck` by BT-3219/Phase 4) instead of
+%%   `senders_of/1` — the false-positive share is expected to be excluded
+%%   from `total_candidates` *before* `apply_cap/2` ever runs, not merely
+%%   re-checked and discarded afterward, fixing the 90%-loss failure mode
+%%   Part B still exhibits for legacy rows.
 %%
 %% Run from the `runtime/` directory after `just build`:
 %%
@@ -56,6 +77,7 @@ main(_) ->
 
     part_a_large_image_survey(),
     part_b_controlled_fanout(),
+    part_c_typed_fanout(),
     ok.
 
 %%====================================================================
@@ -163,6 +185,166 @@ part_b_controlled_fanout() ->
         fun(N) -> run_round(N, N) end,
         Fanouts
     ),
+    ok.
+
+%%====================================================================
+%% Part C: typed fan-out via senders_of/2 (ADR 0115 Phase 5, BT-3220)
+%%====================================================================
+
+part_c_typed_fanout() ->
+    io:format(
+        "~n=== Part C: typed fan-out (senders_of/2 pre-cap filtering, ADR 0115, BT-3220) ===~n",
+        []
+    ),
+    restart_workspace_meta(),
+
+    DefaultCap = 20,
+    %% 400 (not just 5/20/50/200, matching Part B) is included specifically
+    %% to push the *filtered* real-dependent count (40, at the fixed 10%
+    %% split) past the cap — proving the cap remains a real backstop for
+    %% typed candidates too, just over the now-narrowed pool `senders_of/2`
+    %% hands it (40 candidates, not 400).
+    Fanouts = [5, 20, 50, 200, 400],
+
+    io:format(
+        "~nDefault cap (~w) -- same 10%%-real/90%%-false-positive shape as Part B, but every~n",
+        [DefaultCap]
+    ),
+    io:format(
+        "candidate site now carries recv_type (mirrors real compiled code, BT-3217):~n", []
+    ),
+    io:format("~-8s ~-10s ~-10s ~-12s ~-12s ~-14s ~-12s~n", [
+        "fanout", "checked", "dropped", "findings", "wall_ms", "ms/checked", "cap_note"
+    ]),
+    lists:foreach(
+        fun(N) -> run_round_typed(N, DefaultCap) end,
+        Fanouts
+    ),
+    ok.
+
+%% Typed counterpart of `run_round/2`: identical 10%-real/90%-false-positive
+%% shape and driver (`beamtalk_recheck:trigger/4`), but every registered
+%% candidate site's `sends` entry carries `recv_type` — real dependents typed
+%% at `ChangedClass`, false positives typed at a hierarchy-unrelated
+%% `UnrelatedClass`, both registered in `beamtalk_class_metadata` (not just
+%% `beamtalk_xref`) so `senders_of/2`'s relatedness test actually runs the
+%% hierarchy-membership check rather than falling through to Amendment 2's
+%% "unresolvable name, default relevant" branch — which would silently
+%% defeat this benchmark's whole point, exactly as
+%% `beamtalk_recheck_tests:receiver_type_filter_narrows_pool_before_cap_test_`
+%% (BT-3219 AC4) already guards against at the EUnit level.
+-spec run_round_typed(pos_integer(), pos_integer()) -> ok.
+run_round_typed(N, Cap) ->
+    PrevCap = application:get_env(beamtalk_workspace, recheck_caller_cap, 20),
+    application:set_env(beamtalk_workspace, recheck_caller_cap, Cap),
+    Tag = integer_to_list(N) ++ "_typed_cap" ++ integer_to_list(Cap),
+    Selector = list_to_atom("benchTypedFanoutSel" ++ Tag),
+    SelectorBin = atom_to_binary(Selector, utf8),
+    ChangedClass = list_to_atom("BenchTypedChanged" ++ Tag),
+    ChangedClassBin = atom_to_binary(ChangedClass, utf8),
+    UnrelatedClass = list_to_atom("BenchTypedUnrelated" ++ Tag),
+    try
+        %% Both classes must be *known* to beamtalk_class_metadata for
+        %% senders_of/2's hierarchy-relatedness test to run at all (see the
+        %% moduledoc note above) — a small standalone hierarchy, not related
+        %% to each other beyond both subclassing (the implicit) Object.
+        ok = beamtalk_class_metadata:insert(ChangedClass, undefined, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert(UnrelatedClass, undefined, undefined, none, undefined),
+
+        beamtalk_compiler_server:register_class(ChangedClass, #{
+            superclass => 'Object',
+            method_info => #{Selector => #{arity => 0, param_types => [], return_type => 'String'}}
+        }),
+        beamtalk_compiler_server:register_class(UnrelatedClass, #{
+            superclass => 'Object',
+            method_info => #{Selector => #{arity => 0, param_types => [], return_type => 'Integer'}}
+        }),
+
+        PadWidth = length(integer_to_list(N)),
+        lists:foreach(
+            fun(I) ->
+                Receiver =
+                    case I rem 10 =:= 1 of
+                        true -> ChangedClass;
+                        false -> UnrelatedClass
+                    end,
+                register_typed_candidate(
+                    "BenchTypedCand" ++ Tag ++ "_" ++ pad_index(I, PadWidth),
+                    Selector,
+                    Receiver
+                )
+            end,
+            lists:seq(1, N)
+        ),
+
+        {WallUs, Result} = timer:tc(fun() ->
+            beamtalk_recheck:trigger(ChangedClassBin, SelectorBin, instance, signature_change)
+        end),
+        #{
+            findings := Findings,
+            checked := Checked,
+            not_checked := NotChecked,
+            cap_note := CapNote
+        } = Result,
+        WallMs = WallUs / 1000,
+        MsPerChecked =
+            case Checked of
+                0 -> 0.0;
+                _ -> WallMs / Checked
+            end,
+        io:format("~8p ~10p ~10p ~12p ~12.2f ~14.2f ~12s~n", [
+            N,
+            Checked,
+            NotChecked,
+            length(Findings),
+            WallMs,
+            MsPerChecked,
+            format_cap_note(CapNote)
+        ])
+    after
+        application:set_env(beamtalk_workspace, recheck_caller_cap, PrevCap),
+        beamtalk_class_metadata:delete(ChangedClass),
+        beamtalk_class_metadata:delete(UnrelatedClass)
+    end.
+
+%% Typed counterpart of `register_candidate/3`: the site's `sends` entry
+%% carries `recv_type => ReceiverClass` (BT-3217's write-path shape for a
+%% typed local receiver), instead of omitting the field entirely.
+-spec register_typed_candidate(string(), atom(), atom()) -> ok.
+register_typed_candidate(NameStr, Selector, ReceiverClass) ->
+    Name = list_to_atom(NameStr),
+    NameBin = list_to_binary(NameStr),
+    ReceiverBin = atom_to_binary(ReceiverClass, utf8),
+    SelectorBin = atom_to_binary(Selector, utf8),
+    XrefEntry = [
+        #{
+            class_side => false,
+            selector => 'go:',
+            line => 2,
+            sends => [
+                #{
+                    selector => Selector,
+                    line => 2,
+                    recv_kind => other,
+                    recv_type => ReceiverClass
+                }
+            ],
+            references => [#{class => ReceiverClass, line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ],
+    Source = <<
+        "Object subclass: ",
+        NameBin/binary,
+        "\n  go: c :: ",
+        ReceiverBin/binary,
+        " -> Integer => (c ",
+        SelectorBin/binary,
+        ") + 1\n"
+    >>,
+    ok = beamtalk_xref:register_class(Name, XrefEntry),
+    ok = beamtalk_workspace_meta:set_class_source(NameBin, Source),
     ok.
 
 restart_workspace_meta() ->

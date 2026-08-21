@@ -326,6 +326,35 @@ both a latency and a completeness win once that threshold is crossed.
 **Decision: not implemented now, filed as a proactive (non-blocking)
 follow-up — [BT-2798](https://linear.app/beamtalk/issue/BT-2798).**
 
+**Update (BT-2798 / [ADR 0115](0115-xref-receiver-type-key.md), implemented
+2026-08-21):** the extension recorded above as a non-blocking follow-up is
+now shipped. `beamtalk_xref_senders` rows gained an additive `recv_type`
+field (Phase 2, BT-3217); `beamtalk_xref:senders_of/2` filters a selector's
+candidate sites to those hierarchy-related (or protocol-conformant) to the
+changed class, never an unsound exact-match (Phase 3, BT-3218); and
+`beamtalk_recheck`'s dependent lookup calls `senders_of/2` instead of
+`senders_of/1` before `group_by_owner/1`/`apply_cap/2` run (Phase 4,
+BT-3219) — the numeric caller cap above remains in place as the backstop
+for `dynamic`-typed and legacy (pre-migration) sites, exactly as ADR 0115
+specifies, rather than being replaced.
+
+Phase 5 (BT-3220) re-ran this section's benchmark methodology against the
+shipped mechanism (`runtime/perf/bench_recheck_fanout.escript` Part C; full
+numbers in `docs/development/benchmarks.md` "Reload re-check fan-out") and
+confirmed the fix: at 10x the cap (200 synthetic candidates, the fixed
+10%-real/90%-false-positive split this section's benchmark used), the
+false-positive share is now excluded from `total_candidates` by
+`senders_of/2` itself, before `apply_cap/2` ever runs — 20/20 real
+dependents found stale (0% loss), against 2/20 (90% loss) for the identical
+shape run through the untyped/legacy path this section originally measured.
+Phase 5 also added an E2E REPL-protocol test
+(`tests/repl-protocol/cases/adr_0115_recv_type_recheck_fanout.btscript`)
+proving the filter is reachable end to end from a real compiled program via
+the REPL surface, not just at the EUnit level — this project's own general
+lesson that Erlang-level correctness and REPL-surface reachability are
+separate claims, each needing its own test (`docs/development/testing-
+strategy.md`).
+
 ### Static-only (no runtime trigger)
 Let the LSP re-check open files on edit, ignore the live image. Rejected: the
 whole point is the *image* — callers in files nobody has open are exactly the

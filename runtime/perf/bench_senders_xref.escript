@@ -15,6 +15,16 @@
 %%   - "after"  — the migrated path: a single `beamtalk_xref:senders_of_bt/1`
 %%     ETS read.
 %%
+%% Also measures `senders_of/2` (ADR 0115, BT-3220) against the same
+%% `senders_of/1` baseline above, over the real loaded stdlib workspace, to
+%% confirm two things ahead of shipping the receiver-type filter more widely:
+%% (a) `senders_of/1` itself is completely unchanged (recv_type is additive —
+%% no shared code path was touched), and (b) `senders_of/2`'s added
+%% hierarchy-relatedness computation (`hierarchy_related_classes/1`) costs a
+%% small, bounded overhead on top of it, not a regression that scales with
+%% candidate-set size the way the fan-out problem `bench_recheck_fanout.escript`
+%% measures would.
+%%
 %% Run from the `runtime/` directory after `just build`:
 %%
 %%   escript perf/bench_senders_xref.escript
@@ -76,6 +86,50 @@ main(_) ->
         true -> io:format("speedup: ~.1fx~n", [BeforeUs / AfterUs]);
         false -> io:format("speedup: (after too fast to measure)~n")
     end,
+
+    %% BT-3220 (ADR 0115 Phase 5): senders_of/2 against the same selector and
+    %% workspace, keyed on a real loaded class (the first entry of the same
+    %% `Classes` list `part_a`-style surveys already use), so the hierarchy
+    %% walk has real ancestor/descendant structure to traverse rather than a
+    %% synthetic single-class fixture.
+    {ChangedClassName, _Mod, _Pid} = hd(Classes),
+    Senders1Iters = 1000,
+    {Senders1Us, Senders1Count} = time_avg(
+        fun() -> length(beamtalk_xref:senders_of(Selector)) end, Senders1Iters
+    ),
+    {Senders2Us, Senders2Count} = time_avg(
+        fun() -> length(beamtalk_xref:senders_of(Selector, ChangedClassName)) end, Senders1Iters
+    ),
+    io:format("~n=== senders_of/1 vs senders_of/2 (ADR 0115, BT-3220) ===~n", []),
+    io:format("selector: #~p, ChangedClass: ~p~n", [Selector, ChangedClassName]),
+    io:format("senders_of/1 (~p iters): ~.3f ms/op  (~p sites)~n", [
+        Senders1Iters, Senders1Us / 1000, Senders1Count
+    ]),
+    io:format("senders_of/2 (~p iters): ~.3f ms/op  (~p sites)~n", [
+        Senders1Iters, Senders2Us / 1000, Senders2Count
+    ]),
+    case Senders1Us > 0 of
+        true ->
+            io:format("senders_of/2 overhead vs senders_of/1: ~.2fx~n", [Senders2Us / Senders1Us]);
+        false ->
+            io:format("senders_of/2 overhead vs senders_of/1: (senders_of/1 too fast to measure)~n")
+    end,
+    %% senders_of/1's own cost, measured again immediately after senders_of/2
+    %% has run against the identical selector/workspace: an apples-to-apples
+    %% before/after pair (both raw senders_of/1 calls, same iteration count)
+    %% confirming senders_of/2 (a separate function, an additive `recv_type`
+    %% field, no shared mutable state beyond ETS reads) leaves senders_of/1's
+    %% own cost unchanged — not a regression, per this issue's acceptance
+    %% criterion 1. (The "after" figure in the speedup comparison above
+    %% measures `senders_of_bt/1`, a different, heavier wrapper — not
+    %% comparable to this pair.)
+    {Senders1RepeatUs, _} = time_avg(
+        fun() -> length(beamtalk_xref:senders_of(Selector)) end, Senders1Iters
+    ),
+    io:format("senders_of/1 before senders_of/2 ran (above): ~.3f ms/op~n", [Senders1Us / 1000]),
+    io:format("senders_of/1 after senders_of/2 ran:          ~.3f ms/op~n", [
+        Senders1RepeatUs / 1000
+    ]),
 
     %% BT-2384: isolate the loaded-class-set computation that the miss-policy
     %% partition depends on. The old path (`live_class_entries/0`) issues one

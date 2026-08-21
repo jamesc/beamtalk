@@ -1,0 +1,175 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for ADR 0115 (xref receiver-type key, Epic BT-2798, this issue
+// BT-3220 — Phase 5, the final phase): proves the receiver-type-aware
+// dependent lookup (`beamtalk_xref:senders_of/2`, wired into
+// `beamtalk_recheck` by BT-3219/Phase 4) actually excludes a false-positive
+// candidate and actually keeps a real one, **from the REPL surface** — not
+// just at the EUnit level (`beamtalk_xref_tests.erl`,
+// `beamtalk_recheck_tests.erl`'s `receiver_type_filter_narrows_pool_before_
+// cap_test_`, BT-3219 AC4).
+//
+// This is exactly the gap ADR 0105 itself names as a cautionary precedent
+// (`docs/ADR/0105-live-image-recheck-on-reload.md`): "7 PRs once passed CI
+// but were non-functional from the REPL because no e2e test existed." The
+// mechanism here is unit-tested thoroughly already; this file is the proof
+// it is actually reachable and correct through a real compiled program.
+//
+// Mirrors BT-2781's fan-out benchmark shape (`runtime/perf/
+// bench_recheck_fanout.escript` Part C, BT-3220) at REPL scale: one selector
+// implemented identically by two hierarchy-unrelated classes, and one caller
+// typed at each. Unlike the benchmark's synthetic xref-map fixtures, every
+// class here is a real `.bt` definition compiled through the normal REPL
+// pipeline, so `recv_type` is populated by the real compile-time write path
+// (BT-3217) end to end — nothing here is hand-constructed.
+//
+// Surface used: `Behaviour>>precheckCompile:source:` (ADR 0105 Phase 3,
+// BT-2782), the same pre-save advisory `recheck_image_and_precheck.btscript`
+// already exercises. It runs the identical dependent-lookup step the
+// automatic per-`>>`-reload trigger uses (`beamtalk_recheck:trigger_pending/
+// 5` -> `do_trigger/5` -> `beamtalk_xref:senders_of/2`), but returns its
+// report synchronously as a Dictionary — the automatic trigger's own report
+// only ever reaches the CLI as an asynchronous `reload_check` push frame,
+// which this protocol-test harness discards (no `// =>`-assertable request/
+// response pair for a push), exactly the constraint
+// `adr_0105_killer_demo.btscript`'s header note explains and works around
+// the same way.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session
+// (see `repl_flush_changes_dirty.btscript`'s note) — every class/selector
+// name here is unique to this file (`Bt3220Rt*` / `bt3220RtProbe`) so the
+// candidate counts below are exact, not diluted or inflated by unrelated
+// senders of a common selector name elsewhere in the shared image.
+
+// ===========================================================================
+// SETUP
+// ===========================================================================
+
+// The class whose method is about to change — the ADR 0105 `Counter`.
+Actor subclass: Bt3220RtChanged
+  bt3220RtProbe -> Integer => 1
+// => Bt3220RtChanged
+
+// A hierarchy-UNRELATED class (only Object in common) that happens to
+// implement the identical selector name — the "common selector, unrelated
+// implementer" shape BT-2781's benchmark modelled as the 90%-false-positive
+// case. `senders_of/2` must never treat a send to THIS class's
+// `bt3220RtProbe` as a dependent of `Bt3220RtChanged`'s signature change
+// (ADR 0115 Constraint 1: an exact-match filter is unsound in general, but a
+// truly unrelated branch of the hierarchy can never dispatch to the other
+// branch's method either way).
+Actor subclass: Bt3220RtUnrelated
+  bt3220RtProbe -> Integer => 2
+// => Bt3220RtUnrelated
+
+// The real dependent: its receiver parameter is typed at the changed class
+// itself (hierarchy-related by definition) — the ADR 0105 `Dashboard`.
+Object subclass: Bt3220RtRealDependent
+  refresh: c :: Bt3220RtChanged -> Integer => (c bt3220RtProbe) + 1
+// => Bt3220RtRealDependent
+
+// The false positive: same selector, same shape, but its receiver parameter
+// is typed at the UNRELATED class — not `Bt3220RtChanged`, not one of its
+// ancestors or descendants.
+Object subclass: Bt3220RtFalsePositive
+  refresh: u :: Bt3220RtUnrelated -> Integer => (u bt3220RtProbe) + 1
+// => Bt3220RtFalsePositive
+
+// Sanity: the live behaviour before any edit.
+Bt3220RtChanged spawn bt3220RtProbe
+// => 1
+
+Bt3220RtUnrelated spawn bt3220RtProbe
+// => 2
+
+// ===========================================================================
+// THE PRECHECK — pending signature change: bt3220RtProbe: Integer -> String,
+// on Bt3220RtChanged only. Bt3220RtUnrelated's own `bt3220RtProbe` is
+// untouched throughout this file.
+// ===========================================================================
+
+precheckResult := Bt3220RtChanged precheckCompile: #bt3220RtProbe source: "bt3220RtProbe -> String => 99 printString"
+// => _
+
+precheckResult isKindOf: Dictionary
+// => true
+
+// Exactly ONE real candidate: `senders_of/2` excluded the false-positive
+// site from the candidate pool itself, before `apply_cap/2` (the numeric
+// caller cap, ADR 0105 §Mechanism step 2) ever runs — not merely
+// re-checked-and-discarded after. Pre-ADR-0115 (`senders_of/1`), this would
+// read 2 (both RealDependent and FalsePositive are syntactic senders of
+// `#bt3220RtProbe`).
+(precheckResult at: #totalCandidates)
+// => 1
+
+(precheckResult at: #checked)
+// => 1
+
+(precheckResult at: #notChecked)
+// => 0
+
+// The one checked owner is the real dependent...
+(precheckResult at: #checkedOwners) size
+// => 1
+
+((precheckResult at: #checkedOwners) first) includesSubstring: "Bt3220RtRealDependent"
+// => true
+
+// ...and the false positive appears nowhere in the report at all — not
+// checked, not capped-and-dropped, not found stale. It genuinely was never
+// a candidate.
+((precheckResult at: #checkedOwners) first) includesSubstring: "Bt3220RtFalsePositive"
+// => false
+
+// The real dependent surfaces exactly one finding: the pending `String`
+// return breaks its own `+ 1` assumption (same Dnu wording as
+// adr_0105_killer_demo.btscript's identical scenario).
+(precheckResult at: #findings) size
+// => 1
+
+((precheckResult at: #findings) first at: #owner) includesSubstring: "Bt3220RtRealDependent"
+// => true
+
+((precheckResult at: #findings) first at: #message) includesSubstring: "does not understand"
+// => true
+
+((precheckResult at: #findings) first at: #category) printString includesSubstring: "Dnu"
+// => true
+
+// ===========================================================================
+// NEVER INSTALLED — a precheck is read-only (ADR 0105 Phase 3): both
+// classes' real methods are untouched by the precheck above.
+// ===========================================================================
+
+Bt3220RtChanged spawn bt3220RtProbe
+// => 1
+
+Bt3220RtUnrelated spawn bt3220RtProbe
+// => 2
+
+// ===========================================================================
+// CONTROL — precheck Bt3220RtUnrelated's OWN method instead: now
+// Bt3220RtFalsePositive (typed at Bt3220RtUnrelated) is the real dependent,
+// and Bt3220RtRealDependent (typed at Bt3220RtChanged) is the false
+// positive — the filter follows the receiver's type, not fixed class names.
+// ===========================================================================
+
+precheckResultControl := Bt3220RtUnrelated precheckCompile: #bt3220RtProbe source: "bt3220RtProbe -> String => 7 printString"
+// => _
+
+(precheckResultControl at: #totalCandidates)
+// => 1
+
+((precheckResultControl at: #checkedOwners) first) includesSubstring: "Bt3220RtFalsePositive"
+// => true
+
+((precheckResultControl at: #checkedOwners) first) includesSubstring: "Bt3220RtRealDependent"
+// => false
+
+(precheckResultControl at: #findings) size
+// => 1
+
+((precheckResultControl at: #findings) first at: #owner) includesSubstring: "Bt3220RtFalsePositive"
+// => true

@@ -271,6 +271,88 @@ re-run alongside this benchmark, unaffected (~1400x speedup vs source-scan,
 consistent with prior measurement; workspace grew from 81 to 103 classes in
 the interim, expected).
 
+### Update — `senders_of/2` implemented and measured (ADR 0115 Phase 5, BT-3220)
+
+The receiver-type-key extension the Decision above recorded as a warranted,
+non-urgent follow-up is now shipped: `recv_type` on the xref schema (Phase 2,
+BT-3217), `beamtalk_xref:senders_of/2` (Phase 3, BT-3218), and
+`beamtalk_recheck` wired to call it (Phase 4, BT-3219). This phase (BT-3220)
+extended both harnesses to measure the shipped mechanism directly, against
+this section's own methodology and numbers, rather than re-deciding whether
+to build it.
+
+**`bench_senders_xref.escript`** (workspace regrown to **109 classes, 2184
+indexed send sites, 478 distinct sent selectors** at measurement time) adds a
+`senders_of/1` vs `senders_of/2` comparison over the same `#asString`
+selector the source-scan-vs-xref comparison above already uses, keyed on a
+real loaded class (`Printable`):
+
+| query | sites returned | ms/op (1000 iters) |
+|---|---|---|
+| `senders_of/1` | 37 | 0.029 |
+| `senders_of/2` (`ChangedClass = 'Printable'`) | 6 | 0.050 |
+
+`senders_of/2` costs **~1.7x** `senders_of/1` here — the added
+`hierarchy_related_classes/1` walk (ancestor-chain + `direct_subclasses/1`
+closure) — while narrowing 37 candidate sites down to 6 relevant ones for
+this selector/class pair. Critically, **`senders_of/1` itself is
+unaffected**: measured again immediately after `senders_of/2` runs against
+the identical selector, its own cost is unchanged (0.029 ms/op before,
+0.030 ms/op after — noise-level difference, not a regression), confirming
+acceptance criterion 1 (`recv_type` is additive; `senders_of/1`'s code path
+is untouched).
+
+**`bench_recheck_fanout.escript`** adds **Part C**, the identical 10%-real/
+90%-false-positive synthetic shape as Part B above, but every candidate
+site now carries `recv_type` (mirroring what the real compile-time write
+path populates for actual compiled code, instead of Part B's deliberately
+untyped/legacy rows) — this is BT-2781's synthetic scenario, now run
+through the shipped `senders_of/2` filter instead of `senders_of/1`:
+
+**Part C — typed fan-out, default cap (20):**
+
+| candidates | checked | dropped | real findings | wall-clock | ms/checked | total candidates (post-filter) |
+|---|---|---|---|---|---|---|
+| 5 | 1 | 0 | 1 of 1 | ~25 ms | ~25 ms | 1 |
+| 20 | 2 | 0 | 2 of 2 | ~53 ms | ~26 ms | 2 |
+| 50 | 5 | 0 | 5 of 5 | ~130 ms | ~26 ms | 5 |
+| 200 | 20 | 0 | 20 of 20 | ~520 ms | ~26 ms | 20 |
+| 400 | 20 | 20 | 20 of 40 | ~590 ms | ~29 ms | 40 |
+
+Compare directly against Part B's identical-shape, default-cap row at the
+same fan-out sizes:
+
+| fan-out | Part B (untyped, pre-existing) findings | Part C (typed, BT-3220) findings | loss eliminated |
+|---|---|---|---|
+| 50 | 2 of 5 (60% loss) | 5 of 5 (0% loss) | yes |
+| 200 | 2 of 20 (**90% loss**) | 20 of 20 (**0% loss**) | yes |
+
+At 200 candidates (10x the cap) — the exact scenario this section's Decision
+quantified as a 90% loss — the false-positive share is now excluded from
+`total_candidates` by `senders_of/2` itself, **before** `apply_cap/2` ever
+runs: `total_candidates` reads 20 (the true real-dependent count), not 200,
+so every real dependent is checked and every one is found stale. This
+confirms acceptance criterion 2: the fix is a pre-cap filter, not a
+re-check-and-discard step — Part B's own numbers (unchanged, still showing
+the 90% loss for untyped/legacy candidates) are the direct control for this
+comparison, and remain accurate documentation of the residual gap ADR 0115
+Constraint 2 leaves for `dynamic`-typed and legacy rows.
+
+The 400-candidate row additionally confirms the cap remains a real backstop
+for typed code too, once the *narrowed* pool itself exceeds it: 40 real
+candidates (10% of 400) survive `senders_of/2`'s filter, and the cap (20)
+then drops half of *those* — a materially different, much smaller-scale
+problem than dropping 180 of 200 raw candidates the untyped path faces at
+the same fan-out.
+
+**E2E coverage:** `tests/repl-protocol/cases/adr_0115_recv_type_recheck_fanout.btscript`
+exercises the identical false-positive/real-dependent shape end to end from
+the REPL, via `Behaviour>>precheckCompile:source:` against real compiled
+`.bt` classes (not synthetic xref fixtures, unlike the escripts above) —
+proving `senders_of/2`'s filtering is reachable from the actual REPL
+surface, not just correct at the EUnit level (`docs/development/
+testing-strategy.md`'s "REPL command testing — use E2E" guidance).
+
 ## Leaf-change re-check fan-out (ADR 0107 Phase A, BT-2856 follow-up, BT-2873)
 
 BT-2856 added `beamtalk_recheck:trigger_leaf_change/1`: when a live
