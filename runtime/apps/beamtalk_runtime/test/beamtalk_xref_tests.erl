@@ -1710,6 +1710,554 @@ log(LogEvent, #{capture_pid := Pid}) ->
     ok.
 
 %%====================================================================
+%% BT-3218 (ADR 0115 Phase 3): senders_of/2 read path
+%%====================================================================
+
+%% A small synthetic class hierarchy, written directly into
+%% `beamtalk_class_metadata` — pure ETS, no live class gen_server needed,
+%% since `hierarchy_related_classes/1` only ever does ETS reads:
+%%
+%%   Bt3218SuperRoot
+%%     -> Bt3218Root
+%%          -> Bt3218Mid
+%%               -> Bt3218Leaf
+%%                    -> Bt3218GrandLeaf
+%%          -> Bt3218Sibling      (a sibling branch of Mid — NOT related to it)
+bt3218_hierarchy_classes() ->
+    [
+        {'Bt3218SuperRoot', none},
+        {'Bt3218Root', 'Bt3218SuperRoot'},
+        {'Bt3218Mid', 'Bt3218Root'},
+        {'Bt3218Leaf', 'Bt3218Mid'},
+        {'Bt3218GrandLeaf', 'Bt3218Leaf'},
+        {'Bt3218Sibling', 'Bt3218Root'}
+    ].
+
+bt3218_hierarchy_setup() ->
+    lists:foreach(
+        fun({Name, Super}) ->
+            ok = beamtalk_class_metadata:insert(Name, undefined, undefined, Super, undefined)
+        end,
+        bt3218_hierarchy_classes()
+    ).
+
+bt3218_hierarchy_cleanup() ->
+    lists:foreach(
+        fun({Name, _Super}) -> beamtalk_class_metadata:delete(Name) end,
+        bt3218_hierarchy_classes()
+    ).
+
+%% EUnit: hierarchy-relatedness predicate against a fixture hierarchy — same
+%% class, direct subclass, transitive subclass, direct/transitive ancestor,
+%% unrelated sibling branch.
+hierarchy_related_classes_relatedness_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            Pid
+        end,
+        fun(Pid) ->
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    Related = beamtalk_xref:hierarchy_related_classes('Bt3218Mid'),
+                    %% Same class.
+                    ?assert(sets:is_element('Bt3218Mid', Related)),
+                    %% Direct subclass.
+                    ?assert(sets:is_element('Bt3218Leaf', Related)),
+                    %% Transitive subclass.
+                    ?assert(sets:is_element('Bt3218GrandLeaf', Related)),
+                    %% Direct ancestor.
+                    ?assert(sets:is_element('Bt3218Root', Related)),
+                    %% Transitive ancestor.
+                    ?assert(sets:is_element('Bt3218SuperRoot', Related)),
+                    %% Unrelated sibling branch.
+                    ?assertNot(sets:is_element('Bt3218Sibling', Related))
+                end)
+            ]
+        end}.
+
+%% A protocol-conformance fixture: a class defining the required method
+%% directly (conforms), a class defining nothing at all and with no
+%% conforming ancestor (does not conform), and a class that only conforms via
+%% an *inherited* method from its superclass (mirrors ADR 0115 Phase 3's own
+%% phased-rollout note: "a class conforming via inheritance from Object's
+%% default methods"). Live class gen_server processes (not full stdlib —
+%% `beamtalk_object_class:start_link/2` directly, mirroring
+%% `beamtalk_class_dispatch_tests.erl`'s `start_test_class/2`), since
+%% instance-side conformance (`classCanUnderstandFromName/2`) walks real
+%% class processes, unlike the class-method/extension path.
+bt3218_protocol_fixture_setup() ->
+    ok = beamtalk_protocol_registry:init(),
+    RootInfo = #{
+        superclass => none,
+        module => bt3218_xref_test_nonexistent_module,
+        instance_methods => #{'bt3218ProtoMethod' => #{arity => 0}},
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, RootPid} = beamtalk_object_class:start_link('Bt3218ProtoRoot', RootInfo),
+    ConformsInfo = #{
+        superclass => 'Bt3218ProtoRoot',
+        module => bt3218_xref_test_nonexistent_module,
+        instance_methods => #{},
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, ConformsPid} = beamtalk_object_class:start_link('Bt3218ProtoInherits', ConformsInfo),
+    NonConformsInfo = #{
+        superclass => none,
+        module => bt3218_xref_test_nonexistent_module,
+        instance_methods => #{},
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, NonConformsPid} = beamtalk_object_class:start_link(
+        'Bt3218ProtoNonConforming', NonConformsInfo
+    ),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'Bt3218TestProtocol',
+        module => bt3218_test_protocol_mod,
+        required_methods => [#{selector => 'bt3218ProtoMethod', arity => 0}],
+        required_class_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+    [RootPid, ConformsPid, NonConformsPid].
+
+bt3218_protocol_fixture_cleanup(Pids) ->
+    lists:foreach(
+        fun(Pid) ->
+            (try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end)
+        end,
+        Pids
+    ),
+    ok.
+
+%% EUnit: protocol-conformance predicate against a fixture — a conforming
+%% class, a non-conforming class, a class conforming via inherited default
+%% methods.
+protocol_conformance_predicate_test_() ->
+    {setup,
+        fun() ->
+            setup(),
+            bt3218_protocol_fixture_setup()
+        end,
+        fun(Pids) ->
+            bt3218_protocol_fixture_cleanup(Pids),
+            cleanup(Pids)
+        end,
+        fun(_Pids) ->
+            [
+                {timeout, 30,
+                    ?_test(begin
+                        %% Root itself defines the required method — conforms.
+                        ?assert(
+                            beamtalk_protocol_registry:conforms_to(
+                                'Bt3218ProtoRoot', 'Bt3218TestProtocol'
+                            )
+                        ),
+                        %% Inherits the method from Root — conforms via
+                        %% inheritance.
+                        ?assert(
+                            beamtalk_protocol_registry:conforms_to(
+                                'Bt3218ProtoInherits', 'Bt3218TestProtocol'
+                            )
+                        ),
+                        %% Defines nothing and has no conforming ancestor —
+                        %% does not conform.
+                        ?assertNot(
+                            beamtalk_protocol_registry:conforms_to(
+                                'Bt3218ProtoNonConforming', 'Bt3218TestProtocol'
+                            )
+                        ),
+
+                        %% Exercised through beamtalk_xref's own read path: a
+                        %% protocol-typed site is included in senders_of/2 only
+                        %% for classes that actually conform.
+                        ok = beamtalk_xref:register_class('Bt3218ProtoSiteOwner', [
+                            #{
+                                class_side => false,
+                                selector => 'probeConforms',
+                                line => 1,
+                                sends => [
+                                    #{
+                                        selector => 'bt3218ProtoProbeSel',
+                                        line => 2,
+                                        recv_kind => other,
+                                        recv_type => 'Bt3218TestProtocol'
+                                    }
+                                ],
+                                references => [],
+                                source_status => indexed,
+                                provenance => class_body
+                            }
+                        ]),
+                        try
+                            ?assertEqual(
+                                1,
+                                length(
+                                    beamtalk_xref:senders_of(
+                                        'bt3218ProtoProbeSel', 'Bt3218ProtoInherits'
+                                    )
+                                )
+                            ),
+                            ?assertEqual(
+                                0,
+                                length(
+                                    beamtalk_xref:senders_of(
+                                        'bt3218ProtoProbeSel', 'Bt3218ProtoNonConforming'
+                                    )
+                                )
+                            )
+                        after
+                            ok = beamtalk_xref:purge_class('Bt3218ProtoSiteOwner')
+                        end
+                    end)}
+            ]
+        end}.
+
+%% EUnit: legacy row (no `recv_type` field) always included, regardless of
+%% `ChangedClass`.
+legacy_row_always_included_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            Pid
+        end,
+        fun(Pid) ->
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_xref:register_class('Bt3218LegacyOwner', [
+                        #{
+                            class_side => false,
+                            selector => 'legacyMethod',
+                            line => 1,
+                            sends => [
+                                #{selector => 'bt3218LegacySel', line => 2, recv_kind => other}
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]),
+                    try
+                        %% Hierarchy-related ChangedClass.
+                        ?assertEqual(
+                            1,
+                            length(beamtalk_xref:senders_of('bt3218LegacySel', 'Bt3218Mid'))
+                        ),
+                        %% A totally unrelated / unresolvable ChangedClass.
+                        ?assertEqual(
+                            1,
+                            length(
+                                beamtalk_xref:senders_of(
+                                    'bt3218LegacySel', 'Bt3218NoSuchChangedClassAtAll'
+                                )
+                            )
+                        )
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3218LegacyOwner')
+                    end
+                end)
+            ]
+        end}.
+
+%% EUnit: unresolvable-name defaults to relevant (Amendment 2) — both cases
+%% from the spike's fixture table: a name unknown to both registries, and a
+%% protocol not currently registered.
+unresolvable_name_defaults_to_relevant_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            Pid
+        end,
+        fun(Pid) ->
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_xref:register_class('Bt3218UnresolvableOwner', [
+                        #{
+                            class_side => false,
+                            selector => 'mUnknownClass',
+                            line => 1,
+                            sends => [
+                                #{
+                                    selector => 'bt3218UnresolvableSel',
+                                    line => 2,
+                                    recv_kind => other,
+                                    %% A name unknown to both registries (native/
+                                    %% FFI type, alias display name, or simply
+                                    %% never registered).
+                                    recv_type => 'NoSuchBt3218ClassXYZ'
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        },
+                        #{
+                            class_side => false,
+                            selector => 'mUnloadedProto',
+                            line => 3,
+                            sends => [
+                                #{
+                                    selector => 'bt3218UnresolvableSel',
+                                    line => 4,
+                                    recv_kind => other,
+                                    %% A protocol name not currently registered
+                                    %% (defining module not loaded yet).
+                                    recv_type => 'Bt3218UnloadedProto'
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]),
+                    try
+                        Sites = beamtalk_xref:senders_of('bt3218UnresolvableSel', 'Bt3218Mid'),
+                        Methods = lists:sort([maps:get(method, S) || S <- Sites]),
+                        ?assertEqual(['mUnknownClass', 'mUnloadedProto'], Methods)
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3218UnresolvableOwner')
+                    end
+                end)
+            ]
+        end}.
+
+%% EUnit: the `Meta{C}` read-path case (Amendment 3) — a `'Counter class'`-
+%% shaped site is relevant for a class-side change to `Counter` (or an
+%% ancestor/descendant class-side method), and NOT relevant for an
+%% instance-side change to the same class name.
+meta_class_object_receiver_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            Pid
+        end,
+        fun(Pid) ->
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_xref:register_class('Bt3218MetaOwner', [
+                        #{
+                            class_side => false,
+                            selector => 'mMetaSelf',
+                            line => 1,
+                            sends => [
+                                #{
+                                    selector => 'bt3218MetaSel',
+                                    line => 2,
+                                    recv_kind => other,
+                                    recv_type => 'Bt3218Mid class'
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        },
+                        #{
+                            class_side => false,
+                            selector => 'mMetaDescendant',
+                            line => 3,
+                            sends => [
+                                #{
+                                    selector => 'bt3218MetaSel',
+                                    line => 4,
+                                    recv_kind => other,
+                                    recv_type => 'Bt3218Leaf class'
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        },
+                        #{
+                            class_side => false,
+                            selector => 'mPlainSelf',
+                            line => 5,
+                            sends => [
+                                #{
+                                    selector => 'bt3218MetaSel',
+                                    line => 6,
+                                    recv_kind => other,
+                                    recv_type => 'Bt3218Mid'
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]),
+                    try
+                        %% A class-side change to Mid ('Bt3218Mid class'): the
+                        %% Meta{C} sites (self, and a class-side descendant) are
+                        %% relevant; the plain instance-typed site is not.
+                        ClassSideSites = beamtalk_xref:senders_of(
+                            'bt3218MetaSel', 'Bt3218Mid class'
+                        ),
+                        ClassSideMethods = lists:sort([
+                            maps:get(method, S)
+                         || S <- ClassSideSites
+                        ]),
+                        ?assertEqual(['mMetaDescendant', 'mMetaSelf'], ClassSideMethods),
+
+                        %% An instance-side change to the SAME class name: the
+                        %% Meta{C} sites are now excluded (never collapse to the
+                        %% plain instance-side test) — only the plain site is
+                        %% relevant.
+                        InstanceSideSites = beamtalk_xref:senders_of(
+                            'bt3218MetaSel', 'Bt3218Mid'
+                        ),
+                        InstanceSideMethods = lists:sort([
+                            maps:get(method, S)
+                         || S <- InstanceSideSites
+                        ]),
+                        ?assertEqual(['mPlainSelf'], InstanceSideMethods)
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3218MetaOwner')
+                    end
+                end)
+            ]
+        end}.
+
+%% EUnit: memoization call-count assertion (Amendment 1) — N sites sharing
+%% the SAME protocol-typed `recv_type` must cost exactly one
+%% `conforms_to/2`/`is_protocol/1` call each, not one per site. Asserted via
+%% plain OTP call tracing (`erlang:trace/3` + `erlang:trace_pattern/3`) on a
+%% dedicated worker process — no mocking library in this project's deps — so
+%% this is a call-count reduction, not a timing measurement (timings are
+%% noisy; this is a correctness-of-caching property).
+memoization_call_count_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 30,
+                ?_test(begin
+                    ok = beamtalk_protocol_registry:init(),
+                    ProtoName = 'Bt3218MemoProto',
+                    %% Empty required-method lists: conforms_to/2 is trivially
+                    %% true for any class name without needing a live class
+                    %% process, isolating the assertion to purely "how many
+                    %% times was conforms_to/2 (and is_protocol/1) actually
+                    %% invoked".
+                    ok = beamtalk_protocol_registry:register_protocol(#{
+                        name => ProtoName,
+                        module => bt3218_memo_proto_test_mod,
+                        required_methods => [],
+                        required_class_methods => [],
+                        type_params => [],
+                        extending => undefined
+                    }),
+                    N = 5,
+                    MethodXref = [
+                        #{
+                            class_side => false,
+                            selector => list_to_atom("bt3218MemoMethod" ++ integer_to_list(I)),
+                            line => I,
+                            sends => [
+                                #{
+                                    selector => 'bt3218MemoSel',
+                                    line => I,
+                                    recv_kind => other,
+                                    recv_type => ProtoName
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                     || I <- lists:seq(1, N)
+                    ],
+                    ok = beamtalk_xref:register_class('Bt3218MemoOwner', MethodXref),
+                    try
+                        Self = self(),
+                        Worker = spawn(fun() ->
+                            receive
+                                go -> ok
+                            end,
+                            Result = beamtalk_xref:senders_of(
+                                'bt3218MemoSel', 'Bt3218MemoAnyChangedClass'
+                            ),
+                            Self ! {bt3218_memo_result, Result}
+                        end),
+                        1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
+                        1 = erlang:trace_pattern(
+                            {beamtalk_protocol_registry, conforms_to, 2}, true, [global]
+                        ),
+                        1 = erlang:trace_pattern(
+                            {beamtalk_protocol_registry, is_protocol, 1}, true, [global]
+                        ),
+                        Worker ! go,
+                        Sites =
+                            receive
+                                {bt3218_memo_result, R} -> R
+                            after 5000 ->
+                                erlang:error(bt3218_memo_worker_timeout)
+                            end,
+                        _ = erlang:trace_pattern(
+                            {beamtalk_protocol_registry, conforms_to, 2}, false, [global]
+                        ),
+                        _ = erlang:trace_pattern(
+                            {beamtalk_protocol_registry, is_protocol, 1}, false, [global]
+                        ),
+                        %% The worker may already have exited by the time we
+                        %% get here (it sends its result then terminates) —
+                        %% disabling a dead pid's trace flags raises `badarg`
+                        %% and is a no-op anyway (flags die with the process).
+                        (try
+                            erlang:trace(Worker, false, [call])
+                        catch
+                            error:badarg -> ok
+                        end),
+
+                        ?assertEqual(N, length(Sites)),
+
+                        {ConformsCalls, IsProtocolCalls} = bt3218_drain_trace_counts(),
+                        ?assertEqual(1, ConformsCalls),
+                        ?assertEqual(1, IsProtocolCalls)
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3218MemoOwner')
+                    end
+                end)}
+        ]
+    end}.
+
+bt3218_drain_trace_counts() ->
+    bt3218_drain_trace_counts(0, 0).
+
+bt3218_drain_trace_counts(Conforms, IsProtocol) ->
+    receive
+        {trace, _Pid, call, {beamtalk_protocol_registry, conforms_to, _Args}} ->
+            bt3218_drain_trace_counts(Conforms + 1, IsProtocol);
+        {trace, _Pid, call, {beamtalk_protocol_registry, is_protocol, _Args}} ->
+            bt3218_drain_trace_counts(Conforms, IsProtocol + 1)
+    after 200 ->
+        {Conforms, IsProtocol}
+    end.
+
+%%====================================================================
 %% Internal helpers
 %%====================================================================
 

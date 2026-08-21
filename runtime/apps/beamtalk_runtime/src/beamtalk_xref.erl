@@ -36,6 +36,10 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 """.
 
 -include_lib("kernel/include/logger.hrl").
+%% BT-3218 (ADR 0115 Phase 3): ?MAX_HIERARCHY_DEPTH, for the ancestor-chain
+%% walk `hierarchy_related_classes/1` composes from the registry's existing
+%% primitives.
+-include("beamtalk.hrl").
 
 %% API — write path
 -export([
@@ -49,6 +53,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% API — read path
 -export([
     senders_of/1,
+    senders_of/2,
+    hierarchy_related_classes/1,
     senders_of_bt/1,
     references_to/1,
     references_to_bt/1,
@@ -487,6 +493,241 @@ senders_of(Selector) when is_atom(Selector) ->
                 [Site || {_Sel, Site} <- ets:lookup(?SENDERS_TABLE, Selector)]
             end),
             live_gen_sites(Sites, Snapshot)
+    end.
+
+-doc """
+Receiver-type-aware extension of `senders_of/1` (ADR 0115 Phase 3, BT-3218):
+filters `Selector`'s candidate sender sites to those whose `recv_type` could
+actually dispatch to `ChangedClass`, rather than the unsound exact-match a
+naive filter would apply. Never excludes a site whose relatedness cannot be
+determined — the whole point of this filter is to narrow `senders_of/1`'s
+already-correct-but-unfiltered result, never to silently drop a real
+dependent (ADR 0115 Constraint 1 / Constraint 2).
+
+`ChangedClass` names either the class itself (an **instance-side** change —
+a plain `class_name()` such as `'Counter'`) or its class-object (a
+**class-side** change — the same `'<C> class'` tag `recv_type` itself uses
+for a `Meta{C}` receiver, e.g. `'Counter class'`, per BT-3217's write-path
+convention). This lets one two-argument signature carry the "which side
+changed" axis Amendment 3's relatedness test needs, without a third
+parameter or a wider tuple type — `senders_of/2` and `recv_type` already
+share one atom-space convention (BT-3217's reuse of
+`beamtalk_class_registry:class_object_tag/1`), so extending it to
+`ChangedClass` is reuse, not new vocabulary.
+
+Relevance, per site (folded once per call, never re-evaluated per query —
+Amendment 1):
+
+- No `recv_type` field at all (unmigrated legacy row) → always relevant.
+- `recv_type: dynamic` → always relevant (Constraint 2 — nothing rules out
+  any class).
+- `recv_type: T` whose class-object-ness (whether it carries the `' class'`
+  suffix) disagrees with `ChangedClass`'s → never relevant. A `Meta{C}`
+  (class-object) receiver only ever dispatches through the metaclass chain
+  (class-side methods); a plain instance-typed receiver only ever dispatches
+  through the instance chain. Conflating the two would be unsound in the
+  *unsafe* direction (Amendment 3, spike §1e / BT-3217 PR #3446's
+  description) — this is a hard boundary, not a soft default.
+- Otherwise, `T` (with any `' class'` suffix stripped, on both `T` and
+  `ChangedClass`) is tested for relatedness to `ChangedClass`'s base name:
+  protocol-conformant (`beamtalk_protocol_registry:conforms_to/2`) if `T` is
+  a registered protocol, hierarchy-related (`hierarchy_related_classes/1`
+  membership) if `T` is a registered class, or — Amendment 2 — **relevant**
+  if `T` resolves to neither (an unloaded protocol module, a native/alias
+  display name that slipped past Phase 2's write-time coarsening, or a
+  genuinely unknown name). The spike
+  (`docs/internal/adr-0115-phase1-spike-findings.md` §4) found the ADR's own
+  three-clause sketch silently *excluded* this case instead — a correctness
+  bug, not a precision gap.
+
+**Amendment 1 — memoization.** `is_protocol/1` and `conforms_to/2` (the
+protocol branch) cost 59-135 µs/call (spike §3) with no memoisation of their
+own; re-evaluating them per site turns an all-protocol-typed 70-site query
+into a 3.3-16.3 ms outlier — a 100-400x regression on the hot-reload path
+this ADR exists to speed up. The fold below carries a `#{name() =>
+boolean()}` cache keyed by the (suffix-stripped) receiver name, built once
+per call and shared across every site — a repeat `recv_type` (the
+overwhelmingly common case: a handful of nominal/protocol types shared by
+many call sites) costs one cache hit instead of one registry round trip.
+""".
+-spec senders_of(selector(), class_name()) -> [site()].
+senders_of(Selector, ChangedClass) when is_atom(Selector), is_atom(ChangedClass) ->
+    AllSites = senders_of(Selector),
+    {BaseChanged, ChangedIsClassSide} = split_class_object_tag(ChangedClass),
+    Related = hierarchy_related_classes(BaseChanged),
+    {KeptRev, _Cache} = lists:foldl(
+        fun(Site, {Acc, Cache}) ->
+            case is_relevant(Site, BaseChanged, ChangedIsClassSide, Related, Cache) of
+                {true, Cache1} -> {[Site | Acc], Cache1};
+                {false, Cache1} -> {Acc, Cache1}
+            end
+        end,
+        {[], #{}},
+        AllSites
+    ),
+    lists:reverse(KeptRev).
+
+-doc """
+`{ChangedClass} ∪ ancestors(ChangedClass) ∪ subclasses(ChangedClass)` — the
+set of class names a `ChangedClass`-typed (or subtype/supertype-typed)
+receiver could actually be at runtime, per ADR 0115 Constraint 1's
+chain-walk-dispatch soundness argument (an exact-class filter would silently
+drop every subclass-inherited or ancestor-narrowed dependent).
+
+Composed entirely from already-shipped hierarchy primitives — no new
+traversal: `beamtalk_class_registry:all_subclasses/1`'s existing transitive
+`direct_subclasses/1` closure for the descendant half, and
+`beamtalk_hierarchy:walk_ancestors/3` (BT-2786, the same generic
+depth-guarded superclass-chain walker `beamtalk_class_dispatch:
+find_class_method_in_chain/2` already uses) over `beamtalk_class_metadata:
+lookup_superclass/1` reads for the ancestor half — pure ETS, no
+`gen_server:call`.
+
+The descendant half is a full-table `ets:match/2` per node in the subtree
+(`beamtalk_class_metadata:match_subclasses/1` is unindexed on the
+superclass column) — O(N²) in loaded-class count for a root-class change,
+~500 µs at today's 109-class stdlib scale (spike §2). Accepted as-is for
+this issue; indexing that column is the separate follow-up BT-3221.
+""".
+-spec hierarchy_related_classes(class_name()) -> sets:set(class_name()).
+hierarchy_related_classes(ChangedClass) ->
+    sets:from_list(
+        [ChangedClass | ancestor_classes(ChangedClass)] ++
+            beamtalk_class_registry:all_subclasses(ChangedClass),
+        [{version, 2}]
+    ).
+
+%% Every strict ancestor of `ClassName` (order not significant — set
+%% membership is all `hierarchy_related_classes/1` needs). A thin
+%% `beamtalk_hierarchy:walk_ancestors/3` wrapper (BT-2786) over
+%% `beamtalk_class_metadata:lookup_superclass/1`, riding the accumulator
+%% inside the walked node per the walker's own documented pattern (see e.g.
+%% `beamtalk_behaviour_intrinsics:walk_hierarchy/3`).
+-spec ancestor_classes(class_name()) -> [class_name()].
+ancestor_classes(ClassName) ->
+    StepFun = fun({Ancestor, Acc}, _Depth) ->
+        case Ancestor of
+            none -> {found, Acc};
+            _ -> {next, {class_superclass_or_none(Ancestor), [Ancestor | Acc]}}
+        end
+    end,
+    StartNode = {class_superclass_or_none(ClassName), []},
+    case beamtalk_hierarchy:walk_ancestors(StartNode, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, Acc} ->
+            Acc;
+        {max_depth_exceeded, {_LastAncestor, Acc}} ->
+            ?LOG_WARNING(
+                "hierarchy_related_classes: max hierarchy depth ~p exceeded walking ancestors of ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            Acc
+    end.
+
+-spec class_superclass_or_none(class_name()) -> class_name() | none.
+class_superclass_or_none(ClassName) ->
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
+        {ok, Super} -> Super;
+        not_found -> none
+    end.
+
+%% BT-3218 (ADR 0115 Phase 3): fold state for `is_relevant/5` — memoises the
+%% hierarchy/protocol relatedness decision for a given (suffix-stripped)
+%% receiver name, since it is invariant across every site in one
+%% `senders_of/2` call sharing that name (Amendment 1).
+-type relevance_cache() :: #{name() => boolean()}.
+
+%% One fold step of `senders_of/2`'s filter. `BaseChanged`/`ChangedIsClassSide`
+%% and `Related` are fixed for the whole fold (computed once by
+%% `senders_of/2`); only `Cache` threads.
+-spec is_relevant(site(), class_name(), boolean(), sets:set(class_name()), relevance_cache()) ->
+    {boolean(), relevance_cache()}.
+is_relevant(Site, BaseChanged, ChangedIsClassSide, Related, Cache) ->
+    case maps:find(recv_type, Site) of
+        error ->
+            %% Legacy row (pre-BT-3217, or a class that hasn't reloaded since
+            %% Phase 2 shipped): always relevant, identically to how
+            %% `recv_kind`/`target_module` already default for legacy rows.
+            {true, Cache};
+        {ok, dynamic} ->
+            {true, Cache};
+        {ok, T} ->
+            {BaseT, SiteIsClassSide} = split_class_object_tag(T),
+            case SiteIsClassSide =:= ChangedIsClassSide of
+                false ->
+                    %% Amendment 3: a class-object (`Meta{C}`) receiver only
+                    %% ever dispatches through the metaclass (class-side)
+                    %% chain, and a plain instance-typed receiver only
+                    %% through the instance chain — never collapse the two.
+                    {false, Cache};
+                true ->
+                    relatedness(BaseT, BaseChanged, Related, Cache)
+            end
+    end.
+
+-spec relatedness(name(), class_name(), sets:set(class_name()), relevance_cache()) ->
+    {boolean(), relevance_cache()}.
+relatedness(T, BaseChanged, Related, Cache) ->
+    case maps:find(T, Cache) of
+        {ok, Result} ->
+            {Result, Cache};
+        error ->
+            Result = compute_relatedness(T, BaseChanged, Related),
+            {Result, Cache#{T => Result}}
+    end.
+
+%% Amendment 1's actual cost: `is_protocol/1` gates the branch and
+%% `conforms_to/2` (59-135 µs/call, spike §3) does the real work — both land
+%% inside `relatedness/4`'s cache, so this runs at most once per distinct `T`
+%% per `senders_of/2` call, never once per site.
+-spec compute_relatedness(name(), class_name(), sets:set(class_name())) -> boolean().
+compute_relatedness(T, BaseChanged, Related) ->
+    case beamtalk_protocol_registry:is_protocol(T) of
+        true ->
+            beamtalk_protocol_registry:conforms_to(BaseChanged, T);
+        false ->
+            case is_known_class(T) of
+                true ->
+                    sets:is_element(T, Related);
+                false ->
+                    %% Amendment 2 (spike §4): `T` names neither a registered
+                    %% protocol nor a registered class — an unloaded protocol
+                    %% module (intermittent, reload-order-dependent) or a
+                    %% genuinely unknown name. The ADR's own three-clause
+                    %% sketch fell through to `sets:is_element/2` here, which
+                    %% silently excludes an unresolvable name instead of
+                    %% treating it as unnarrowable — a correctness bug per
+                    %% Constraint 2 ("cannot be narrowed and must never be
+                    %% excluded"), not a hypothetical.
+                    true
+            end
+    end.
+
+-spec is_known_class(class_name()) -> boolean().
+is_known_class(Name) ->
+    beamtalk_class_metadata:lookup_superclass(Name) =/= not_found.
+
+%% Split a `recv_type`/`ChangedClass` name into its base class name and
+%% whether it carried the `' class'` class-object-tag suffix
+%% (`beamtalk_class_registry:class_object_tag/1`'s own convention, reused —
+%% not reinvented — by BT-3217's write path for `Meta{C}` receivers).
+%% `is_class_name/1`/`class_display_name/1` are the same suffix test and
+%% strip the runtime already uses elsewhere to recognise a class-object tag
+%% — reused here rather than re-deriving the `" class"`-suffix offset.
+-spec split_class_object_tag(name()) -> {name(), boolean()}.
+split_class_object_tag(Name) ->
+    case beamtalk_class_registry:is_class_name(Name) of
+        true ->
+            % elp:fixme W0023 intentional atom creation — `Name` is already
+            % an atom (a compiler-emitted `recv_type` or a caller-supplied
+            % `ChangedClass`), never raw external text, so re-interning its
+            % base mirrors `class_object_tag/1`'s own precedent for the
+            % inverse operation. `class_display_name/1` never interns an
+            % atom itself (it returns a binary), so this call site is the
+            % only place that does.
+            {binary_to_atom(beamtalk_class_registry:class_display_name(Name), utf8), true};
+        false ->
+            {Name, false}
     end.
 
 -doc """
@@ -1396,10 +1637,9 @@ insert_one_method(Class, Entry, Gen) ->
                 %% (or the runtime live-patch path) carries no `recv_type`
                 %% key at all — defaulting to `dynamic` here, exactly like
                 %% `recv_kind`/`target_module` already default for legacy
-                %% rows, resolves identically to Phase 3's "always relevant"
-                %% read-time default for a genuinely absent key (both
-                %% `is_relevant/3` clauses agree — Phase 3, not yet
-                %% implemented as of this module).
+                %% rows, resolves identically to `senders_of/2`'s (BT-3218,
+                %% Phase 3) "always relevant" read-time default for a
+                %% genuinely absent key — both routes agree.
                 recv_type => maps:get(recv_type, Send, dynamic),
                 gen => Gen
             },
