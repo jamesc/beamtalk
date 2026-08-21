@@ -750,6 +750,23 @@ pub(super) struct Parser {
     /// Whether the parser is currently inside a class body.
     /// Used to detect trailing expressions via indentation (BT-903).
     pub(super) in_class_body: bool,
+    /// The indentation column of the method definition currently being
+    /// parsed's own header token (the selector, or a leading `sealed`/
+    /// `internal`/`class` modifier) — `None` outside a method body.
+    ///
+    /// A class member declaration boundary (a fresh state/method/`@expect`
+    /// terminating the current method's body) sits at *this* column, not a
+    /// hardcoded `2`: a canonically-nested method has its header at col 2,
+    /// but `method_source_walker`'s synthetic-wrap strategy
+    /// (`Object subclass: __SyntheticAllSendsScope\n<bare method text>`)
+    /// puts the header at col 0, so its body's own statements sit at col 2 —
+    /// indistinguishable from a *canonical* declaration boundary if that
+    /// were hardcoded (BT-3223). Set in `parse_method_definition` from the
+    /// header's own first token, before any doc-comment/modifier tokens are
+    /// consumed, and restored on return so nesting (a class body found
+    /// inside a method body's own class definition) can't leak a stale
+    /// value to the outer method.
+    pub(super) current_method_header_indent: Option<usize>,
     /// Current expression nesting depth (guards against stack overflow).
     nesting_depth: usize,
     /// Indices of tokens whose leading trivia contains at least one `DocComment`.
@@ -806,6 +823,7 @@ impl Parser {
             in_method_body: false,
             current_method_selector: None,
             in_class_body: false,
+            current_method_header_indent: None,
             nesting_depth: 0,
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
