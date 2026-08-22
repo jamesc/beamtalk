@@ -62,7 +62,21 @@ enum RecvType {
     /// `beamtalk_class_registry:class_object_tag/1` rather than falling into
     /// the "otherwise unresolved" bucket by omission (spike §1e).
     ClassObject(EcoString),
-    /// Everything else: `Union`/`Intersection`/`Negation`/`Dynamic`/`Never`,
+    /// BT-3215: a `Union{members}` receiver where *every* member itself
+    /// resolves to a single name or class-object tag (never `Dynamic`) —
+    /// the already-rendered atoms, sorted and deduplicated. The read path's
+    /// `is_relevant/3` treats this with OR-semantics: relevant iff *any*
+    /// member is relevant, since the receiver could be any one of them at
+    /// runtime.
+    Union(Vec<EcoString>),
+    /// BT-3215: same resolution rule as [`RecvType::Union`], for
+    /// `Intersection{members}`. The read path uses AND-semantics: relevant
+    /// only if *every* member is relevant, since the receiver must
+    /// simultaneously satisfy all of them.
+    Intersection(Vec<EcoString>),
+    /// Everything else: `Negation`/`Dynamic`/`Never`, a `Union`/
+    /// `Intersection` with at least one member that doesn't resolve to a
+    /// single name (nested composed type, `Dynamic`, oversized atom, …),
     /// no `TypeMap` entry at all, or a `Known` whose provenance is
     /// `Extracted` (native/FFI, ADR 0075) or `Aliased` (ADR 0108) — neither
     /// of those two names has a `beamtalk_class_metadata` row, so coarsening
@@ -91,19 +105,62 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
             | TypeProvenance::Substituted(_) => RecvType::Name(class_name.clone()),
         },
         InferredType::Meta { class_name, .. } => RecvType::ClassObject(class_name.clone()),
-        InferredType::Union { .. }
-        | InferredType::Dynamic(_)
-        | InferredType::Never
-        | InferredType::Negation { .. }
-        | InferredType::Intersection { .. } => RecvType::Dynamic,
+        // BT-3215: project each member the same way a single-name receiver
+        // would be projected; if every member resolves cleanly, key on the
+        // member list instead of coarsening the whole composed type away.
+        InferredType::Union { members, .. } => project_composed(members, RecvType::Union),
+        InferredType::Intersection { members, .. } => {
+            project_composed(members, RecvType::Intersection)
+        }
+        InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {
+            RecvType::Dynamic
+        }
     }
 }
 
-/// Renders a [`RecvType`] as the Core Erlang atom literal baked into a
-/// `method_xref` send entry's `recv_type` field, falling back to `'dynamic'`
-/// for a name that would exceed Erlang's 255-byte atom cap (mirrors the
-/// `MAX_ATOM_BYTES` guard `build_method_xref_entry` already applies to
-/// selectors and class references).
+/// BT-3215: shared `Union`/`Intersection` projection — resolves each member
+/// to the same single atom [`recv_type_atom`] would render for it as a
+/// standalone receiver, via [`project_recv_type`] recursively. A nested
+/// composed type or anything else that isn't a clean single name (`Dynamic`,
+/// an oversized atom, a native/alias-coarsened `Known`, …) makes any member
+/// unresolvable — per Constraint 2 ("cannot be narrowed and must never be
+/// excluded"), a *partial* member list would be unsound: dropping an
+/// unresolvable member and keying on only the resolvable ones would make the
+/// read path wrongly exclude a real dependent whose receiver happens to be
+/// typed as that dropped member at runtime. So any unresolvable member
+/// coarsens the *entire* composed type to `dynamic`, exactly like a
+/// single-name receiver that doesn't resolve.
+fn project_composed(members: &[InferredType], make: fn(Vec<EcoString>) -> RecvType) -> RecvType {
+    const MAX_ATOM_BYTES: usize = 255;
+    let mut names: Vec<EcoString> = Vec::with_capacity(members.len());
+    for member in members {
+        let resolved = match project_recv_type(member) {
+            RecvType::Name(name) if name.len() <= MAX_ATOM_BYTES => name,
+            RecvType::ClassObject(name) if name.len() + " class".len() <= MAX_ATOM_BYTES => {
+                EcoString::from(super::super::util::metaclass_tag(&name))
+            }
+            RecvType::Name(_)
+            | RecvType::ClassObject(_)
+            | RecvType::Union(_)
+            | RecvType::Intersection(_)
+            | RecvType::Dynamic => return RecvType::Dynamic,
+        };
+        names.push(resolved);
+    }
+    names.sort();
+    names.dedup();
+    make(names)
+}
+
+/// Renders a [`RecvType`] as the Core Erlang literal baked into a
+/// `method_xref` send entry's `recv_type` field: a bare atom for
+/// `Name`/`ClassObject`/`Dynamic`, or a `{'union' | 'intersection',
+/// [Atom, ...]}` tuple for a composed type (BT-3215). Falls back to
+/// `'dynamic'` for a name that would exceed Erlang's 255-byte atom cap
+/// (mirrors the `MAX_ATOM_BYTES` guard `build_method_xref_entry` already
+/// applies to selectors and class references) — `project_composed` already
+/// enforces this per member, so `Union`/`Intersection` never reach here with
+/// an oversized member atom.
 fn recv_type_atom(recv_type: &RecvType) -> Document<'static> {
     const MAX_ATOM_BYTES: usize = 255;
     match recv_type {
@@ -111,8 +168,21 @@ fn recv_type_atom(recv_type: &RecvType) -> Document<'static> {
         RecvType::ClassObject(name) if name.len() + " class".len() <= MAX_ATOM_BYTES => {
             leaf::atom(super::super::util::metaclass_tag(name))
         }
+        RecvType::Union(names) => docvec!["{'union', ", recv_type_name_list_doc(names), "}"],
+        RecvType::Intersection(names) => {
+            docvec!["{'intersection', ", recv_type_name_list_doc(names), "}"]
+        }
         RecvType::Name(_) | RecvType::ClassObject(_) | RecvType::Dynamic => leaf::atom("dynamic"),
     }
+}
+
+/// Renders a `[Atom, ...]` Core Erlang list of already-resolved member
+/// names for a `Union`/`Intersection` `recv_type` (BT-3215) — the shared
+/// bracket/comma-join helper the two `recv_type_atom` composed-type arms
+/// use, mirroring `meta_type_repr_list_doc`'s bracket/join pattern.
+fn recv_type_name_list_doc(names: &[EcoString]) -> Document<'static> {
+    let parts: Vec<Document<'static>> = names.iter().map(|n| leaf::atom(n.to_string())).collect();
+    docvec!["[", join(parts, &Document::Str(", ")), "]"]
 }
 
 /// BT-2734: Compiler-derived `__signature__` / `__doc__` selector-map entries
@@ -5605,6 +5675,7 @@ mod tests {
     use crate::semantic_analysis::{DynamicReason, InferredType, TypeProvenance};
     use crate::source_analysis::Span;
     use crate::test_helpers::test_support::make_actor_class;
+    use ecow::EcoString;
 
     fn s() -> Span {
         Span::new(0, 0)
@@ -5720,20 +5791,88 @@ mod tests {
     }
 
     #[test]
-    fn project_recv_type_union_coarsens_to_dynamic() {
-        let ty = InferredType::simple_union(&["Integer", "String"]);
+    fn project_recv_type_union_of_resolvable_members_yields_union() {
+        // BT-3215: every member resolves to a clean single name, so the
+        // whole union keys precisely instead of coarsening to `dynamic`.
+        let ty = InferredType::simple_union(&["String", "Integer"]);
+        assert!(matches!(
+            project_recv_type(&ty),
+            RecvType::Union(names) if names == vec![EcoString::from("Integer"), EcoString::from("String")]
+        ));
+    }
+
+    #[test]
+    fn project_recv_type_union_dedupes_members() {
+        // Two members that resolve to the same name (e.g. distinct
+        // provenance for the same class) must not double up in the list.
+        let ty = InferredType::Union {
+            members: vec![
+                known("Foo", TypeProvenance::Inferred(s())),
+                known("Foo", TypeProvenance::Declared(s())),
+            ],
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(
+            project_recv_type(&ty),
+            RecvType::Union(names) if names == vec![EcoString::from("Foo")]
+        ));
+    }
+
+    #[test]
+    fn project_recv_type_union_with_unresolvable_member_coarsens_to_dynamic() {
+        // BT-3215: a partial member list would be unsound (Constraint 2) —
+        // one member that can't resolve to a clean name (here, `Dynamic`)
+        // must coarsen the *whole* union, not just drop that member.
+        let ty = InferredType::Union {
+            members: vec![
+                known("Foo", TypeProvenance::Inferred(s())),
+                InferredType::Dynamic(DynamicReason::Unknown),
+            ],
+            provenance: TypeProvenance::Inferred(s()),
+        };
         assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
     }
 
     #[test]
-    fn project_recv_type_intersection_coarsens_to_dynamic() {
-        // ADR 0068 protocol composition (`Collection(Object) & Comparable`) —
-        // deferred to `dynamic` in v1 (ADR 0115 Alternatives Considered;
-        // precise keying tracked separately as BT-3215).
+    fn project_recv_type_union_with_nested_composed_member_coarsens_to_dynamic() {
+        // A member that is itself a `Union`/`Intersection` never resolves
+        // to a single name (`project_composed` only builds one level of
+        // member list), so it coarsens the outer union too.
+        let ty = InferredType::Union {
+            members: vec![
+                known("Foo", TypeProvenance::Inferred(s())),
+                InferredType::simple_union(&["Bar", "Baz"]),
+            ],
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(project_recv_type(&ty), RecvType::Dynamic));
+    }
+
+    #[test]
+    fn project_recv_type_intersection_of_resolvable_members_yields_intersection() {
+        // BT-3215: ADR 0068 protocol composition
+        // (`Collection(Object) & Comparable`) now keys precisely instead of
+        // deferring to `dynamic`.
+        let ty = InferredType::Intersection {
+            members: vec![
+                known("Printable", TypeProvenance::Inferred(s())),
+                known("Comparable", TypeProvenance::Inferred(s())),
+            ],
+            provenance: TypeProvenance::Inferred(s()),
+        };
+        assert!(matches!(
+            project_recv_type(&ty),
+            RecvType::Intersection(names)
+                if names == vec![EcoString::from("Comparable"), EcoString::from("Printable")]
+        ));
+    }
+
+    #[test]
+    fn project_recv_type_intersection_with_unresolvable_member_coarsens_to_dynamic() {
         let ty = InferredType::Intersection {
             members: vec![
                 known("Comparable", TypeProvenance::Inferred(s())),
-                known("Printable", TypeProvenance::Inferred(s())),
+                known("List", TypeProvenance::Extracted),
             ],
             provenance: TypeProvenance::Inferred(s()),
         };

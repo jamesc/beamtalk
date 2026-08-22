@@ -91,10 +91,18 @@ fn find_send_entry<'a>(code: &'a str, selector: &str) -> &'a str {
 }
 
 fn assert_recv_type(entry: &str, expected: &str) {
-    let needle = format!("'recv_type' => '{expected}'");
+    assert_recv_type_raw(entry, &format!("'{expected}'"));
+}
+
+/// Like [`assert_recv_type`], but `expected_raw` is the exact literal text
+/// after `'recv_type' => ` — for a composed `{'union', [...]}`/
+/// `{'intersection', [...]}` tuple (BT-3215), which isn't a single quoted
+/// atom.
+fn assert_recv_type_raw(entry: &str, expected_raw: &str) {
+    let needle = format!("'recv_type' => {expected_raw}");
     assert!(
         entry.contains(&needle),
-        "expected recv_type {expected:?}, got entry:\n{entry}"
+        "expected recv_type {expected_raw}, got entry:\n{entry}"
     );
 }
 
@@ -155,11 +163,13 @@ fn untyped_local_receiver_coarsens_to_dynamic_class_side() {
 }
 
 // ---------------------------------------------------------------------------
-// Union-typed local — coarsens to dynamic (write-path v1, ADR 0115 Alternatives)
+// Union-typed local — resolves to a composed `{'union', [...]}` recv_type
+// when every member resolves cleanly (BT-3215; write-path v1 coarsened this
+// to `dynamic`, see ADR 0115 Alternatives Considered).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn union_typed_local_receiver_coarsens_to_dynamic() {
+fn union_typed_local_receiver_resolves_to_composed_union() {
     let code = codegen_self_sufficient(concat!(
         "Object subclass: Widget\n",
         "  ping => 1\n\n",
@@ -170,8 +180,19 @@ fn union_typed_local_receiver_coarsens_to_dynamic() {
         "    w ping\n",
     ));
     let entry = find_send_entry(&code, "ping");
-    assert_recv_type(entry, "dynamic");
+    assert_recv_type_raw(entry, "{'union', ['Gadget', 'Widget']}");
 }
+
+// A union with an unresolvable member (e.g. a native/FFI type with no
+// `beamtalk_class_metadata` row) coarsening the whole union to `dynamic` is
+// covered directly at the unit level
+// (`project_recv_type_union_with_unresolvable_member_coarsens_to_dynamic` in
+// `gen_server/methods.rs`) rather than fixtured here — same call the
+// original PR made for `Intersection`/`Negation` above: constructing a
+// `::`-annotated local whose *member* type resolves through
+// `TypeProvenance::Extracted` needs native-registry fixture machinery this
+// file doesn't otherwise exercise, for a result the unit test already pins
+// precisely.
 
 // ---------------------------------------------------------------------------
 // Self-send — instance and class side both resolve to the method's own

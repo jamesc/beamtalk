@@ -2258,6 +2258,240 @@ bt3218_drain_trace_counts(Conforms, IsProtocol) ->
     end.
 
 %%====================================================================
+%% BT-3215 (ADR 0115 follow-up): composed Union/Intersection recv_type
+%%====================================================================
+
+%% EUnit: `{union, Names}` — relevant iff *any* member matches (OR-semantics).
+%% `'Bt3218Sibling'` and `'Bt3218Leaf'` sit on different branches of the
+%% `bt3218_hierarchy_setup/0` tree (Sibling is a direct child of Root; Leaf is
+%% two levels down the Mid branch), so a `ChangedClass` can be related to
+%% exactly one, the other, both, or neither.
+union_recv_type_relevant_iff_any_member_matches_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            ok = beamtalk_class_metadata:insert(
+                'Bt3215Standalone', undefined, undefined, none, undefined
+            ),
+            Pid
+        end,
+        fun(Pid) ->
+            beamtalk_class_metadata:delete('Bt3215Standalone'),
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_xref:register_class('Bt3215UnionOwner', [
+                        #{
+                            class_side => false,
+                            selector => 'mUnion',
+                            line => 1,
+                            sends => [
+                                #{
+                                    selector => 'bt3215UnionSel',
+                                    line => 2,
+                                    recv_kind => other,
+                                    recv_type => {union, ['Bt3218Sibling', 'Bt3218Leaf']}
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]),
+                    try
+                        %% Only the second member (`Leaf`, an ancestor of
+                        %% GrandLeaf) matches — still relevant.
+                        ?assertEqual(
+                            1,
+                            length(
+                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218GrandLeaf')
+                            )
+                        ),
+                        %% Only the first member (`Sibling`, matching itself)
+                        %% matches — still relevant.
+                        ?assertEqual(
+                            1,
+                            length(
+                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218Sibling')
+                            )
+                        ),
+                        %% Both members match (SuperRoot is ancestor of, and
+                        %% therefore hierarchy-related to, everything).
+                        ?assertEqual(
+                            1,
+                            length(
+                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218SuperRoot')
+                            )
+                        ),
+                        %% Neither member matches — a standalone class related
+                        %% to nothing in the fixture hierarchy.
+                        ?assertEqual(
+                            0,
+                            length(
+                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3215Standalone')
+                            )
+                        )
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3215UnionOwner')
+                    end
+                end)
+            ]
+        end}.
+
+%% EUnit: `{intersection, Names}` — relevant iff *all* members match
+%% (AND-semantics). `'Bt3218Root'` is an ancestor of every fixture class;
+%% `'Bt3218Sibling'` is related only to itself, `Root`, and `SuperRoot`, so a
+%% `ChangedClass` matching `Root` alone (without also matching `Sibling`) is
+%% the case that distinguishes AND from OR.
+intersection_recv_type_relevant_iff_all_members_match_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            ok = beamtalk_class_metadata:insert(
+                'Bt3215Standalone', undefined, undefined, none, undefined
+            ),
+            Pid
+        end,
+        fun(Pid) ->
+            beamtalk_class_metadata:delete('Bt3215Standalone'),
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_xref:register_class('Bt3215IntersectionOwner', [
+                        #{
+                            class_side => false,
+                            selector => 'mIntersection',
+                            line => 1,
+                            sends => [
+                                #{
+                                    selector => 'bt3215IntersectionSel',
+                                    line => 2,
+                                    recv_kind => other,
+                                    recv_type => {intersection, ['Bt3218Root', 'Bt3218Sibling']}
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]),
+                    try
+                        %% Both members match: Sibling is itself, and Root is
+                        %% its ancestor.
+                        ?assertEqual(
+                            1,
+                            length(
+                                beamtalk_xref:senders_of(
+                                    'bt3215IntersectionSel', 'Bt3218Sibling'
+                                )
+                            )
+                        ),
+                        %% Only `Root` matches (Mid is unrelated to Sibling's
+                        %% branch) — the intersection as a whole is NOT
+                        %% relevant, proving this is AND, not OR.
+                        ?assertEqual(
+                            0,
+                            length(
+                                beamtalk_xref:senders_of('bt3215IntersectionSel', 'Bt3218Mid')
+                            )
+                        ),
+                        %% Neither member matches.
+                        ?assertEqual(
+                            0,
+                            length(
+                                beamtalk_xref:senders_of(
+                                    'bt3215IntersectionSel', 'Bt3215Standalone'
+                                )
+                            )
+                        )
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3215IntersectionOwner')
+                    end
+                end)
+            ]
+        end}.
+
+%% EUnit regression: the pre-existing single-name and `dynamic` `recv_type`
+%% paths are unaffected by the `{union, _}`/`{intersection, _}` clauses added
+%% to `is_relevant/5`.
+single_name_and_dynamic_recv_type_unaffected_by_composed_types_test_() ->
+    {setup,
+        fun() ->
+            Pid = setup(),
+            bt3218_hierarchy_setup(),
+            Pid
+        end,
+        fun(Pid) ->
+            bt3218_hierarchy_cleanup(),
+            cleanup(Pid)
+        end,
+        fun(_Pid) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_xref:register_class('Bt3215RegressionOwner', [
+                        #{
+                            class_side => false,
+                            selector => 'mPlainName',
+                            line => 1,
+                            sends => [
+                                #{
+                                    selector => 'bt3215RegressionSel',
+                                    line => 2,
+                                    recv_kind => other,
+                                    recv_type => 'Bt3218Leaf'
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        },
+                        #{
+                            class_side => false,
+                            selector => 'mDynamic',
+                            line => 3,
+                            sends => [
+                                #{
+                                    selector => 'bt3215RegressionSel',
+                                    line => 4,
+                                    recv_kind => other,
+                                    recv_type => dynamic
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]),
+                    try
+                        %% Plain single-name: relevant for a related class...
+                        RelatedMethods = lists:sort([
+                            maps:get(method, S)
+                         || S <- beamtalk_xref:senders_of('bt3215RegressionSel', 'Bt3218Mid')
+                        ]),
+                        ?assertEqual(['mDynamic', 'mPlainName'], RelatedMethods),
+                        %% ...and NOT relevant for an unrelated one, while
+                        %% `dynamic` is always relevant regardless.
+                        UnrelatedMethods = lists:sort([
+                            maps:get(method, S)
+                         || S <- beamtalk_xref:senders_of('bt3215RegressionSel', 'Bt3218Sibling')
+                        ]),
+                        ?assertEqual(['mDynamic'], UnrelatedMethods)
+                    after
+                        ok = beamtalk_xref:purge_class('Bt3215RegressionOwner')
+                    end
+                end)
+            ]
+        end}.
+
+%%====================================================================
 %% Internal helpers
 %%====================================================================
 
