@@ -12,34 +12,49 @@
 -define(TABLE, beamtalk_class_metadata).
 %% BT-2266: sibling table holding runtime class-method funs.
 -define(FUN_TABLE, beamtalk_class_method_funs).
+%% BT-3221: reverse-edge index backing match_subclasses/1.
+-define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 
 %% Save/clear/restore the shared table around each test so the live runtime's
-%% rows (if any) are not disturbed.
+%% rows (if any) are not disturbed. BT-3221: insert/5 and friends also write
+%% ?SUBCLASS_INDEX, so it must be cleared/restored in lockstep with ?TABLE —
+%% otherwise edges from one test's classes (e.g. 'Object' -> 'Actor') leak
+%% into the next test's match_subclasses/1 assertions via the index table,
+%% which ets:delete_all_objects(?TABLE) alone does not touch.
 with_clean_table(Fun) ->
     beamtalk_class_metadata:new(),
     Saved = ets:tab2list(?TABLE),
+    SavedIndex = ets:tab2list(?SUBCLASS_INDEX),
     ets:delete_all_objects(?TABLE),
+    ets:delete_all_objects(?SUBCLASS_INDEX),
     try
         Fun()
     after
         ets:delete_all_objects(?TABLE),
-        ets:insert(?TABLE, Saved)
+        ets:delete_all_objects(?SUBCLASS_INDEX),
+        ets:insert(?TABLE, Saved),
+        ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
-%% BT-2266: clean both the metadata table and the funs sibling table.
+%% BT-2266 / BT-3221: clean the metadata table, the funs sibling table, and
+%% the subclass index together.
 with_clean_tables(Fun) ->
     beamtalk_class_metadata:new(),
     SavedMeta = ets:tab2list(?TABLE),
     SavedFuns = ets:tab2list(?FUN_TABLE),
+    SavedIndex = ets:tab2list(?SUBCLASS_INDEX),
     ets:delete_all_objects(?TABLE),
     ets:delete_all_objects(?FUN_TABLE),
+    ets:delete_all_objects(?SUBCLASS_INDEX),
     try
         Fun()
     after
         ets:delete_all_objects(?TABLE),
         ets:delete_all_objects(?FUN_TABLE),
+        ets:delete_all_objects(?SUBCLASS_INDEX),
         ets:insert(?TABLE, SavedMeta),
-        ets:insert(?FUN_TABLE, SavedFuns)
+        ets:insert(?FUN_TABLE, SavedFuns),
+        ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
 %%====================================================================
@@ -194,6 +209,94 @@ match_subclasses_test() ->
         ?assertEqual(
             ['Counter', 'Timer'], lists:sort(beamtalk_class_metadata:match_subclasses('Actor'))
         )
+    end).
+
+%%====================================================================
+%% BT-3221: subclass index invalidation — register, re-register (same and
+%% changed superclass), and removal.
+%%====================================================================
+
+%% insert/5 (row creation, the class gen_server's init/1 path) publishes a
+%% reverse edge immediately.
+match_subclasses_reflects_insert_test() ->
+    with_clean_table(fun() ->
+        ?assertEqual([], beamtalk_class_metadata:match_subclasses('Object')),
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Object', undefined),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object'))
+    end).
+
+%% merge_identity/5 (the reload path) re-registering a class under the SAME
+%% superclass must not duplicate the edge or disturb it.
+match_subclasses_reflects_reregister_same_superclass_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Object', undefined),
+        ok = beamtalk_class_metadata:merge_identity('Widget', m2, [], 'Object', true),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object')),
+        %% Field update still landed.
+        ?assertEqual({ok, m2}, beamtalk_class_metadata:lookup_module('Widget'))
+    end).
+
+%% merge_identity/5 re-registering a class under a DIFFERENT superclass must
+%% drop the stale edge from the old superclass and publish one under the new
+%% superclass — the core invalidation case a naive cache would get wrong.
+match_subclasses_reflects_reregister_changed_superclass_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert('Value', undefined, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Object', undefined),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object')),
+        ?assertEqual([], beamtalk_class_metadata:match_subclasses('Value')),
+
+        ok = beamtalk_class_metadata:merge_identity('Widget', m, [], 'Value', undefined),
+
+        ?assertEqual(
+            [], beamtalk_class_metadata:match_subclasses('Object')
+        ),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Value'))
+    end).
+
+%% insert/5 called on an already-existing row (a full-row overwrite, not the
+%% documented usage but defensively covered — e.g. a crash-recovery re-init)
+%% must also invalidate a stale edge from the row's previous superclass.
+match_subclasses_reflects_insert_changed_superclass_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Object', undefined),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object')),
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Value', undefined),
+        ?assertEqual([], beamtalk_class_metadata:match_subclasses('Object')),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Value'))
+    end).
+
+%% delete/1 (class teardown / classRemoveFromSystem) removes the edge from
+%% its (former) superclass so the deleted class stops appearing as a subclass.
+match_subclasses_reflects_delete_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Object', undefined),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object')),
+        ok = beamtalk_class_metadata:delete('Widget'),
+        ?assertEqual([], beamtalk_class_metadata:match_subclasses('Object'))
+    end).
+
+%% delete/1 on a class that itself has (still-registered) subclasses must not
+%% disturb the edges those children published — deleting a row only removes
+%% the row's own out-edge to its superclass, never edges keyed on the row's
+%% own name. (classRemoveFromSystem already refuses removal while direct
+%% subclasses exist, but the index must not rely on that guard for
+%% correctness — see beamtalk_class_metadata module doc.)
+match_subclasses_survives_parent_delete_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert('Widget', m, [], 'Object', undefined),
+        ok = beamtalk_class_metadata:delete('Object'),
+        ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object'))
+    end).
+
+%% delete/1 on a class with no row (never registered, or already deleted) is
+%% a no-op on the index too.
+match_subclasses_delete_missing_is_ok_test() ->
+    with_clean_table(fun() ->
+        ?assertEqual(ok, beamtalk_class_metadata:delete('NeverRegistered')),
+        ?assertEqual([], beamtalk_class_metadata:match_subclasses('Object'))
     end).
 
 foldl_collects_entries_with_superclass_test() ->
@@ -381,7 +484,10 @@ merge_identity_creates_row_when_absent_test() ->
         ok = beamtalk_class_metadata:merge_identity('Fresh', m, [a], 'Object', false),
         ?assertEqual({ok, m}, beamtalk_class_metadata:lookup_module('Fresh')),
         ?assertEqual({ok, m, [a]}, beamtalk_class_metadata:lookup_methods('Fresh')),
-        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Fresh'))
+        ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Fresh')),
+        %% BT-3221: the create-fallback path also publishes the subclass
+        %% index edge — it must not require a row to have pre-existed.
+        ?assertEqual(['Fresh'], beamtalk_class_metadata:match_subclasses('Object'))
     end).
 
 %% reset_runtime_class_methods/1 explicitly clears the gate without touching
@@ -477,21 +583,27 @@ all_builtins_includes_core_classes_test() ->
 %%====================================================================
 
 %% Helper: delete the main metadata table, run Fun, restore state.
-%% Used by the three tests below that exercise the "table absent" return
-%% values of match_subclasses/1, foldl/2, and lookup_methods/1.
+%% Used by the tests below that exercise the "table absent" return
+%% values of foldl/2, foldl_modules/2, and lookup_methods/1. BT-3221: also
+%% clears/restores ?SUBCLASS_INDEX for isolation, even though none of these
+%% read it, since it is populated by the same insert/5 calls that seed ?TABLE.
 with_no_main_table(Fun) ->
     beamtalk_class_metadata:new(),
     SavedMeta = ets:tab2list(?TABLE),
     SavedFuns = ets:tab2list(?FUN_TABLE),
+    SavedIndex = ets:tab2list(?SUBCLASS_INDEX),
     ets:delete(?TABLE),
+    ets:delete_all_objects(?SUBCLASS_INDEX),
     try
         Fun()
     after
         beamtalk_class_metadata:new(),
         ets:delete_all_objects(?TABLE),
         ets:delete_all_objects(?FUN_TABLE),
+        ets:delete_all_objects(?SUBCLASS_INDEX),
         ets:insert(?TABLE, SavedMeta),
-        ets:insert(?FUN_TABLE, SavedFuns)
+        ets:insert(?FUN_TABLE, SavedFuns),
+        ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
 %% Helper: delete the fun table, run Fun, restore state.
@@ -504,6 +616,7 @@ with_no_fun_table(Fun) ->
     beamtalk_class_metadata:new(),
     SavedMeta = ets:tab2list(?TABLE),
     SavedFuns = ets:tab2list(?FUN_TABLE),
+    SavedIndex = ets:tab2list(?SUBCLASS_INDEX),
     ets:delete(?FUN_TABLE),
     try
         Fun()
@@ -511,13 +624,36 @@ with_no_fun_table(Fun) ->
         beamtalk_class_metadata:new(),
         ets:delete_all_objects(?TABLE),
         ets:delete_all_objects(?FUN_TABLE),
+        ets:delete_all_objects(?SUBCLASS_INDEX),
         ets:insert(?TABLE, SavedMeta),
-        ets:insert(?FUN_TABLE, SavedFuns)
+        ets:insert(?FUN_TABLE, SavedFuns),
+        ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
-%% match_subclasses/1 returns [] when the metadata table does not exist.
+%% Helper: delete the subclass index table, run Fun, restore state. BT-3221:
+%% match_subclasses/1 now reads ?SUBCLASS_INDEX, not ?TABLE, so its
+%% "table absent" contract is exercised against the table it actually reads.
+with_no_subclass_index_table(Fun) ->
+    beamtalk_class_metadata:new(),
+    SavedMeta = ets:tab2list(?TABLE),
+    SavedFuns = ets:tab2list(?FUN_TABLE),
+    SavedIndex = ets:tab2list(?SUBCLASS_INDEX),
+    ets:delete(?SUBCLASS_INDEX),
+    try
+        Fun()
+    after
+        beamtalk_class_metadata:new(),
+        ets:delete_all_objects(?TABLE),
+        ets:delete_all_objects(?FUN_TABLE),
+        ets:delete_all_objects(?SUBCLASS_INDEX),
+        ets:insert(?TABLE, SavedMeta),
+        ets:insert(?FUN_TABLE, SavedFuns),
+        ets:insert(?SUBCLASS_INDEX, SavedIndex)
+    end.
+
+%% match_subclasses/1 returns [] when the subclass index table does not exist.
 match_subclasses_when_table_absent_test() ->
-    with_no_main_table(fun() ->
+    with_no_subclass_index_table(fun() ->
         ?assertEqual([], beamtalk_class_metadata:match_subclasses('Object'))
     end).
 
