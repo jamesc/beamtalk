@@ -59,6 +59,16 @@ runs before reinstalling a pending `"remove-class"` entry's snapshot, so a
 concurrent out-of-band edit landing on the recorded `sourceFile` while the
 removal sat pending is detected (and refused) instead of silently discarded.
 
+BT-3231: also covers the method-level `no_prev_source` revert path for an
+EVAL-defined class (no on-disk `sources/` file at all — the LiveView
+Workspace eval-form scenario), asserting on `do_revert/3`'s error message
+text. BT-3208 generalized that message's wording (it used to name "method
+body" specifically; the shared arm now also serves a `'remove-class'`
+whole-file revert) without any EUnit coverage of the literal text, so a
+LiveView e2e test (`workspace_live_test.exs`, BT-3194) that asserted on the
+old wording broke silently — `liveview-e2e.yml`'s path-scoping never re-ran
+it for runtime-only PRs. This test closes that gap at the fast Erlang layer.
+
 These boot the full stack (compiler port + runtime + workspace_meta + changelog)
 against an isolated, in-project temp tree so the live install / remove and the
 flushable-with-prev-source recording paths run for real, then drive revert
@@ -128,7 +138,12 @@ revert_e2e_test_() ->
             fun revert_remove_class_entry_detects_drift_from_unflushed_patch_too/1,
             fun revert_remove_class_entry_detects_file_deleted_externally/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
-            fun revert_remove_class_entry_after_flush_is_unsupported/1
+            fun revert_remove_class_entry_after_flush_is_unsupported/1,
+            %% BT-3231: `"remove-method"` revert on an eval-defined class (no
+            %% on-disk `sources/` file at all) — the `do_revert/3`
+            %% `no_prev_source` message-wording regression the LiveView e2e
+            %% test caught, uncovered by any EUnit test until now.
+            fun revert_remove_method_entry_on_eval_defined_class_has_no_source_to_recover_from/1
         ]}}.
 
 %% Start the heavy, node-global apps once for the whole suite (the compiler port
@@ -969,6 +984,55 @@ revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from(_Ctx) ->
     ),
     [
         ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%% BT-3231: the method-level counterpart of
+%% `revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1`
+%% above — a `"remove-method"` entry on an EVAL-defined class (no on-disk
+%% `sources/` file at all, exactly the LiveView Workspace eval-form scenario:
+%% `handle_class_definition/7` installs the class via `load_class_module/3`
+%% with an empty `""` path, so `class_source_file/1` returns `nil` and
+%% `emit_remove_change_entry/5` records no `source_file`/`prev_source` on the
+%% entry). `find_revert_target/3` has no recorded prior body and no on-disk
+%% file to recover it from, so `do_revert/3` reaches its `{error,
+%% no_prev_source}` arm and raises loudly rather than silently no-op'ing or
+%% restoring the wrong thing.
+%%
+%% This is a regression guard for the exact break BT-3231 diagnosed: fca7c19f
+%% (BT-3208, ADR 0113 Phase 3) generalized this arm's message wording from
+%% "this entry has no recorded prior body ... method body" to "this entry's
+%% prior body could not be recovered ... pre-patch state" (so the same message
+%% reads correctly for a `'remove-class'` whole-file revert too) — a
+%% deliberate, correct change, but the LiveView e2e test asserting on the old
+%% literal substring broke silently because `liveview-e2e.yml`'s path-scoping
+%% never re-ran it for a runtime-only PR. Asserting on the message text here
+%% means the next wording change is caught by the fast Erlang suite instead of
+%% only a path-scoped e2e lane.
+revert_remove_method_entry_on_eval_defined_class_has_no_source_to_recover_from(#{unique := U}) ->
+    ClassName = list_to_binary("Bt3231EvalRm" ++ U),
+    ClassSrc = binary_to_list(
+        iolist_to_binary([<<"Actor subclass: ">>, ClassName, <<"\n  greeting => 1\n">>])
+    ),
+    {ok, _ClassNameOut, _DefOutput, _DefWarnings, State1} =
+        beamtalk_repl_eval:do_eval(ClassSrc, beamtalk_repl_state:new(undefined, 0)),
+    RemoveExpr = binary_to_list(
+        iolist_to_binary([ClassName, <<" removeSelector: #greeting">>])
+    ),
+    {ok, _RemoveValue, _RemoveOutput, _RemoveWarnings, _State2} =
+        beamtalk_repl_eval:do_eval(RemoveExpr, State1),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        ClassName, <<"greeting">>, instance
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult),
+        ?_assert(
+            case RevertResult of
+                {error, #beamtalk_error{message = Msg}} ->
+                    binary:match(Msg, <<"prior body could not be recovered">>) =/= nomatch;
+                _ ->
+                    false
+            end
+        )
     ].
 
 %% Mirrors `recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1`

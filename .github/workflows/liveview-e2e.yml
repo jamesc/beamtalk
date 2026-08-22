@@ -23,16 +23,26 @@ name: LiveView IDE e2e (workspace + browser)
 # only `:playwright`-tagged tests. We piggyback the `:workspace` suite here, on the
 # job that already builds the toolchain and boots a workspace, rather than paying a
 # second Rust build in liveview.yml or deferring coverage to a nightly leg.
+#
+# BT-3231: also scoped to `runtime/apps/beamtalk_workspace/**` — the
+# `:workspace` suite's `workspace_live_test.exs` exercises ChangeLog/revert/
+# flush behavior owned entirely by that app, over real RPCs to a live
+# workspace node. A runtime-only PR touching it (e.g. fca7c19f/BT-3208's
+# `do_revert/3` error-message rewording) can silently change what this suite
+# asserts on without ever re-running it, since it previously had no
+# runtime-side trigger at all.
 on:
   push:
     branches: [main]
     paths:
       - 'editors/liveview/**'
+      - 'runtime/apps/beamtalk_workspace/**'
       - '.github/workflows/liveview-e2e.yml'
   pull_request:
     branches: [main]
     paths:
       - 'editors/liveview/**'
+      - 'runtime/apps/beamtalk_workspace/**'
       - '.github/workflows/liveview-e2e.yml'
 
 concurrency:
