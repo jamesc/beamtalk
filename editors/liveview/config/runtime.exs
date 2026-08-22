@@ -62,6 +62,16 @@ if config_env() == :prod do
       _ -> {"http", "localhost", port}
     end
 
+  # Session (and OIDC handshake) cookies are `Secure` exactly when the IDE is
+  # reached over TLS — i.e. the same PHX_HOST posture that picked `url_scheme`
+  # above. The desktop/local-trial mode (PHX_HOST unset) serves plain
+  # http://localhost, where WKWebView (Tauri) silently drops Secure cookies —
+  # no localhost exception like Chrome/Firefox — leaving every LiveView join
+  # session-less ("stale" refusal → full-page reload → infinite reload loop,
+  # BT-3233). Read at runtime by BtAttachWeb.Endpoint.session_options/0 and
+  # BtAttachWeb.OidcHandshake.
+  config :bt_attach, :secure_session, url_scheme == "https"
+
   config :bt_attach, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   # ADR 0097 Implementation §1b: the desktop-attach broker needs to pin this
