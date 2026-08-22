@@ -48,6 +48,39 @@ via `beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`.
 
 See also: docs/ADR/0068-parametric-types-and-protocols.md — Stage 2
 See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
+
+## Conformance Cache (BT-3222)
+
+`conforms_to/2` is a structural check: for every required selector it walks
+the ancestor chain via `classCanUnderstandFromName/2`, which is a
+`gen_server:call` per level — measured at 59-135 µs/call on a live 109-class
+workspace (`docs/internal/adr-0115-phase1-spike-findings.md` §3), four orders
+of magnitude above the ETS lookups around it. Results are cached in a second
+ETS table (`beamtalk_protocol_conforms_cache`) keyed by `{ClassName,
+ProtocolName}`, so a repeated pair is an ETS lookup with no `gen_server:call`
+at all.
+
+Invalidation is a conservative whole-table flush (`invalidate_conforms_cache/0`)
+rather than fine-grained per-class/per-protocol tracking — conformance depends
+on the *transitive* method set, so a `put_method` on an ancestor invalidates
+every descendant's conformance, not just the class it was called on; proving a
+fine-grained scheme sound is materially harder than proving "flush everything"
+sound, and the flush itself is O(1) (`ets:delete_all_objects/1`). Flushed on:
+
+- `register_protocol/1` / `unregister_protocol/1` (this module)
+- class registration and hot reload — `beamtalk_object_class:init/1` and its
+  `{update_class, _}` handler (a class's method set can change on either)
+- live method patches — `beamtalk_object_class`'s `{put_method, ...}` and
+  `{put_class_method, ...}` handlers (hot-patch / `classRemoveSelector` on a
+  local method routes through `update_class`, already covered above)
+- class removal — `beamtalk_class_lifecycle:class_removed/2` calls
+  `unregister_protocol/1` unconditionally, which flushes regardless of
+  whether the removed class's module defined any protocols itself
+
+Every cache read/write/flush is `ets:info/1`-guarded and try/catch-wrapped
+around `badarg`, matching every other table in this module — the cache is
+simply skipped (never crashes a caller) if the table is absent or torn down
+concurrently (e.g. during test teardown).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -62,10 +95,12 @@ See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
     conforming_classes/1,
     protocol_info/1,
     is_protocol/1,
-    all_protocol_names/0
+    all_protocol_names/0,
+    invalidate_conforms_cache/0
 ]).
 
 -define(PROTOCOL_TABLE, beamtalk_protocol_registry).
+-define(CONFORMS_CACHE_TABLE, beamtalk_protocol_conforms_cache).
 
 %%% ============================================================================
 %%% Initialization
@@ -80,9 +115,19 @@ any compiled modules load their protocol definitions.
 BT-3105: Carries `beamtalk_class_registry:heir_option/0` (the runtime
 supervisor, once it is alive) so an owner crash hands the table off instead
 of destroying every registered protocol.
+
+BT-3222: Also creates the `conforms_to/2` result cache table (see this
+module's "Conformance Cache" doc), heir-protected the same way.
 """.
 -spec init() -> ok.
 init() ->
+    ensure_protocol_table(),
+    ensure_conforms_cache_table(),
+    ok.
+
+-doc "Idempotently create the protocol definitions ETS table.".
+-spec ensure_protocol_table() -> ok.
+ensure_protocol_table() ->
     case ets:info(?PROTOCOL_TABLE) of
         undefined ->
             ets:new(?PROTOCOL_TABLE, [
@@ -95,6 +140,30 @@ init() ->
             ok;
         _ ->
             %% Table already exists (e.g., re-init after hot reload)
+            ok
+    end.
+
+-doc """
+Idempotently create the `conforms_to/2` result cache ETS table (BT-3222).
+
+Keyed by `{ClassName, ProtocolName}` -> `boolean()`. Separate from
+`?PROTOCOL_TABLE` so a whole-cache flush (`invalidate_conforms_cache/0`) never
+touches registered protocol definitions.
+""".
+-spec ensure_conforms_cache_table() -> ok.
+ensure_conforms_cache_table() ->
+    case ets:info(?CONFORMS_CACHE_TABLE) of
+        undefined ->
+            ets:new(?CONFORMS_CACHE_TABLE, [
+                named_table,
+                set,
+                public,
+                {read_concurrency, true},
+                {write_concurrency, true}
+                | beamtalk_class_registry:heir_option()
+            ]),
+            ok;
+        _ ->
             ok
     end.
 
@@ -121,6 +190,10 @@ Duplicate registrations overwrite the previous entry (idempotent for hot reload)
 -spec register_protocol(map()) -> ok.
 register_protocol(#{name := Name} = Info) ->
     ets:insert(?PROTOCOL_TABLE, {Name, Info}),
+    %% BT-3222: A (re-)registered protocol can change required_methods /
+    %% extending for Name, so every cached conforms_to/2 result naming it —
+    %% for any class — is potentially stale.
+    invalidate_conforms_cache(),
     ?LOG_DEBUG(
         "Registered protocol ~p",
         [Name],
@@ -163,7 +236,14 @@ unregister_protocol(Module) when is_atom(Module) ->
                 {{'_', #{module => '$1'}}, [{'=:=', '$1', {const, Module}}], [true]}
             ]),
             ok
-    end.
+    end,
+    %% BT-3222: Unconditional, not just on an actual match — this is also the
+    %% single call `beamtalk_class_lifecycle:class_removed/2` makes for every
+    %% class removal, and a removed class's conformance results (as well as
+    %% every descendant re-walked through it) must not survive as stale
+    %% cache entries even when the removed class's own module defined no
+    %% protocol.
+    invalidate_conforms_cache().
 
 %%% ============================================================================
 %%% Query API
@@ -183,9 +263,30 @@ Returns `true` if:
 Returns `false` if:
 - The protocol is not registered (unknown or non-protocol names)
 - The class is missing one or more required selectors (instance or class)
+
+BT-3222: Results are cached in `?CONFORMS_CACHE_TABLE`, keyed by
+`{ClassName, ProtocolName}` — a repeated pair is a plain ETS lookup with no
+`gen_server:call` to any class process. See this module's "Conformance
+Cache" doc for the full invalidation list; a stale entry is never returned
+across a class or protocol mutation because every mutation site flushes the
+whole cache table.
 """.
 -spec conforms_to(atom(), atom()) -> boolean().
 conforms_to(ClassName, ProtocolName) ->
+    CacheKey = {ClassName, ProtocolName},
+    case cache_lookup(CacheKey) of
+        {ok, Cached} ->
+            Cached;
+        miss ->
+            Result = compute_conforms_to(ClassName, ProtocolName),
+            cache_store(CacheKey, Result),
+            Result
+    end.
+
+%% The uncached structural check — exactly what conforms_to/2 did before
+%% BT-3222; the caching wrapper above is the only change to its call sites.
+-spec compute_conforms_to(atom(), atom()) -> boolean().
+compute_conforms_to(ClassName, ProtocolName) ->
     case protocol_info(ProtocolName) of
         undefined ->
             %% Unknown protocol — cannot conform to something that isn't a protocol
@@ -219,6 +320,81 @@ conforms_to(ClassName, ProtocolName) ->
                     ),
                     false
             end
+    end.
+
+%%% ============================================================================
+%%% Conformance Cache (BT-3222)
+%%% ============================================================================
+
+-doc """
+Look up a cached `conforms_to/2` result.
+
+`badarg`-safe: a missing table (never initialised, or torn down
+concurrently — e.g. mid test-teardown) reports a cache miss rather than
+raising, exactly like every other lookup in this module.
+""".
+-spec cache_lookup({atom(), atom()}) -> {ok, boolean()} | miss.
+cache_lookup(Key) ->
+    try
+        case ets:info(?CONFORMS_CACHE_TABLE) of
+            undefined ->
+                miss;
+            _ ->
+                case ets:lookup(?CONFORMS_CACHE_TABLE, Key) of
+                    [{_, Result}] -> {ok, Result};
+                    [] -> miss
+                end
+        end
+    catch
+        error:badarg -> miss
+    end.
+
+-doc """
+Store a `conforms_to/2` result in the cache.
+
+`badarg`-safe (see `cache_lookup/1`) — a failed store just means the next
+call recomputes, never a crash.
+""".
+-spec cache_store({atom(), atom()}, boolean()) -> ok.
+cache_store(Key, Result) ->
+    try
+        case ets:info(?CONFORMS_CACHE_TABLE) of
+            undefined ->
+                ok;
+            _ ->
+                ets:insert(?CONFORMS_CACHE_TABLE, {Key, Result}),
+                ok
+        end
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Flush every cached `conforms_to/2` result (BT-3222).
+
+A conservative whole-table flush rather than fine-grained per-class/
+per-protocol invalidation — conformance depends on the *transitive* method
+set, so a mutation on one class can change the cached result for every
+descendant, not just itself; proving "flush everything" correct is far
+simpler than proving a fine-grained scheme tracks every such dependency, and
+the flush itself is a single O(1) `ets:delete_all_objects/1`. Call sites are
+listed in this module's "Conformance Cache" doc.
+
+`badarg`-safe: a missing or concurrently-torn-down table is a no-op, matching
+`cache_lookup/1` / `cache_store/2`.
+""".
+-spec invalidate_conforms_cache() -> ok.
+invalidate_conforms_cache() ->
+    try
+        case ets:info(?CONFORMS_CACHE_TABLE) of
+            undefined ->
+                ok;
+            _ ->
+                ets:delete_all_objects(?CONFORMS_CACHE_TABLE),
+                ok
+        end
+    catch
+        error:badarg -> ok
     end.
 
 -doc """

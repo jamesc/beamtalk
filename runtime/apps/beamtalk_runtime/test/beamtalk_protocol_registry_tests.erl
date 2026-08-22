@@ -27,7 +27,55 @@ setup() ->
         undefined -> ok;
         _ -> ets:delete_all_objects(beamtalk_protocol_registry)
     end,
+    %% BT-3222: Also clear the conforms_to/2 cache so a result cached by one
+    %% test can never leak into the next.
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
     ok.
+
+-doc """
+`setup/0` plus the scaffolding needed to start real class gen_server
+processes (BT-3222 cache tests exercise class registration/hot-reload/
+put_method/removal, which `setup/0` alone doesn't need). Mirrors
+`beamtalk_object_class_tests:setup/0`.
+""".
+rt_setup() ->
+    setup(),
+    case whereis(pg) of
+        undefined ->
+            {ok, _} = pg:start_link();
+        _ ->
+            ok
+    end,
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_class_registry:ensure_loaded_classes_table(),
+    ok.
+
+-doc "Start a class registered under ClassName with a single `ping` method (arity 0).".
+-spec start_class_with_ping(atom()) -> {ok, pid()}.
+start_class_with_ping(ClassName) ->
+    ClassInfo = #{
+        name => ClassName,
+        module => list_to_atom("bt3222_mod_" ++ atom_to_list(ClassName)),
+        instance_methods => #{ping => #{block => fun() -> pong end, arity => 0}}
+    },
+    beamtalk_object_class:start(ClassName, ClassInfo).
+
+-doc "Kill a class process and wait for it to fully exit (name auto-unregisters).".
+-spec stop_class_process(pid()) -> ok.
+stop_class_process(Pid) ->
+    case is_process_alive(Pid) of
+        true ->
+            MRef = monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 1000 -> ok
+            end;
+        false ->
+            ok
+    end.
 
 %%% ============================================================================
 %%% Registration Tests
@@ -487,4 +535,215 @@ unregister_protocol_before_init_test() ->
             beamtalk_protocol_registry:init();
         _ ->
             ?assertEqual(ok, beamtalk_protocol_registry:unregister_protocol('bt3105_any_mod'))
+    end.
+
+%%% ============================================================================
+%%% BT-3222: conforms_to/2 result cache + invalidation
+%%% ============================================================================
+
+%% ADR 0112 note: classRemoveSelector/2's local-method-removal branch (the
+%% only branch that can change conforms_to/2's answer — extension removal
+%% does not, since classCanUnderstandFromName/2 never consults the extension
+%% registry) recompiles the class and hot-reloads it via
+%% beamtalk_repl_eval:remove_method/4 -> ... -> beamtalk_object_class's own
+%% {update_class, _} handler (see that module's `remove_method/4` doc). It is
+%% therefore covered by conforms_to_invalidated_by_update_class_test/0 below
+%% rather than duplicated with the heavier beamtalk_workspace live-source
+%% scaffolding beamtalk_workspace_revert_tests.erl needs to drive the
+%% primitive end to end.
+
+-doc """
+Base case: a repeated `{ClassName, ProtocolName}` pair returns the cached
+result instead of re-walking the hierarchy. Proven by killing the class
+process between the two calls — a live recompute would hit `noproc` and flip
+to `false` (mirroring `compute_conforms_to/2`'s own `catch -> false`), so the
+second call only reads `true` if it came from the cache, not a fresh walk.
+""".
+conforms_to_caches_result_across_process_death_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222PingProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    {ok, Pid} = start_class_with_ping('BT3222CacheHitClass'),
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3222CacheHitClass', 'BT3222PingProto')),
+    stop_class_process(Pid),
+    %% The class process is gone; a fresh walk would fail — the cache must
+    %% still answer `true`.
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3222CacheHitClass', 'BT3222PingProto')).
+
+-doc "register_protocol/1 must invalidate a stale cached `false`.".
+conforms_to_invalidated_by_protocol_registration_test() ->
+    rt_setup(),
+    {ok, Pid} = start_class_with_ping('BT3222ProtoRegClass'),
+    %% Protocol not registered yet — cannot conform (and this gets cached).
+    ?assertNot(
+        beamtalk_protocol_registry:conforms_to('BT3222ProtoRegClass', 'BT3222LatePingProto')
+    ),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222LatePingProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ?assert(
+        beamtalk_protocol_registry:conforms_to('BT3222ProtoRegClass', 'BT3222LatePingProto')
+    ),
+    stop_class_process(Pid).
+
+-doc "unregister_protocol/1 must invalidate a stale cached `true`.".
+conforms_to_invalidated_by_unregister_protocol_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222UnregProto',
+        module => bt3222_unreg_proto_mod,
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    {ok, Pid} = start_class_with_ping('BT3222UnregClass'),
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3222UnregClass', 'BT3222UnregProto')),
+    ok = beamtalk_protocol_registry:unregister_protocol(bt3222_unreg_proto_mod),
+    ?assertNot(beamtalk_protocol_registry:conforms_to('BT3222UnregClass', 'BT3222UnregProto')),
+    stop_class_process(Pid).
+
+-doc """
+Class registration (`beamtalk_object_class:init/1`) must invalidate a stale
+cached `false` recorded before the class existed.
+""".
+conforms_to_invalidated_by_class_registration_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222RegLaterProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    %% Class doesn't exist yet.
+    ?assertNot(
+        beamtalk_protocol_registry:conforms_to('BT3222RegLaterClass', 'BT3222RegLaterProto')
+    ),
+    {ok, Pid} = start_class_with_ping('BT3222RegLaterClass'),
+    ?assert(
+        beamtalk_protocol_registry:conforms_to('BT3222RegLaterClass', 'BT3222RegLaterProto')
+    ),
+    stop_class_process(Pid).
+
+-doc """
+Class re-registration / hot reload (`{update_class, _}`) must invalidate a
+stale cached result — this is also the mechanism
+`classRemoveSelector:`/`removeSelector:` uses to remove a *local* method (see
+this section's note above).
+""".
+conforms_to_invalidated_by_update_class_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222HotReloadProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ClassInfo = #{
+        name => 'BT3222HotReloadClass',
+        module => bt3222_hot_reload_mod,
+        instance_methods => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start('BT3222HotReloadClass', ClassInfo),
+    ?assertNot(
+        beamtalk_protocol_registry:conforms_to('BT3222HotReloadClass', 'BT3222HotReloadProto')
+    ),
+    NewInfo = ClassInfo#{instance_methods => #{ping => #{block => fun() -> pong end}}},
+    {ok, _Fields} = beamtalk_object_class:update_class('BT3222HotReloadClass', NewInfo),
+    ?assert(
+        beamtalk_protocol_registry:conforms_to('BT3222HotReloadClass', 'BT3222HotReloadProto')
+    ),
+    stop_class_process(Pid).
+
+-doc "put_method/4 (instance-side hot patch) must invalidate a stale cached `false`.".
+conforms_to_invalidated_by_put_method_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222PutMethodProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ClassInfo = #{
+        name => 'BT3222PutMethodClass',
+        module => bt3222_put_method_mod,
+        instance_methods => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start('BT3222PutMethodClass', ClassInfo),
+    ?assertNot(
+        beamtalk_protocol_registry:conforms_to('BT3222PutMethodClass', 'BT3222PutMethodProto')
+    ),
+    ok = beamtalk_object_class:put_method(Pid, ping, fun() -> pong end, <<"ping => pong">>),
+    ?assert(
+        beamtalk_protocol_registry:conforms_to('BT3222PutMethodClass', 'BT3222PutMethodProto')
+    ),
+    stop_class_process(Pid).
+
+-doc "put_class_method/4 (class-side hot patch) must invalidate a stale cached `false`.".
+conforms_to_invalidated_by_put_class_method_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222PutClassMethodProto',
+        required_methods => [],
+        required_class_methods => [#{selector => make, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ClassInfo = #{
+        name => 'BT3222PutClassMethodClass',
+        module => bt3222_put_class_method_mod,
+        instance_methods => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start('BT3222PutClassMethodClass', ClassInfo),
+    ?assertNot(
+        beamtalk_protocol_registry:conforms_to(
+            'BT3222PutClassMethodClass', 'BT3222PutClassMethodProto'
+        )
+    ),
+    ok = beamtalk_object_class:put_class_method(Pid, make, fun() -> ok end, <<"make => ok">>),
+    ?assert(
+        beamtalk_protocol_registry:conforms_to(
+            'BT3222PutClassMethodClass', 'BT3222PutClassMethodProto'
+        )
+    ),
+    stop_class_process(Pid).
+
+-doc """
+Class removal (`beamtalk_class_lifecycle:class_removed/2`, the single
+teardown path `classRemoveFromSystemByName/1` drives) must invalidate a stale
+cached `true` for the removed class — proven the same way as the base-case
+test above: the cache still answers `true` immediately after the process
+dies (nothing has flushed it yet), and only flips to `false` once
+`class_removed/2` runs.
+""".
+conforms_to_invalidated_by_class_removal_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222RemovalProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    {ok, Pid} = start_class_with_ping('BT3222RemovalClass'),
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')),
+    stop_class_process(Pid),
+    %% Not yet flushed — still cached `true`.
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')),
+    ok = beamtalk_class_lifecycle:class_removed('BT3222RemovalClass', bt3222_removal_class_mod),
+    ?assertNot(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')).
+
+-doc "invalidate_conforms_cache/0 is a no-op (never raises) when the cache table doesn't exist.".
+invalidate_conforms_cache_before_init_test() ->
+    case ets:info(beamtalk_protocol_conforms_cache) of
+        undefined ->
+            ?assertEqual(ok, beamtalk_protocol_registry:invalidate_conforms_cache()),
+            beamtalk_protocol_registry:init();
+        _ ->
+            ?assertEqual(ok, beamtalk_protocol_registry:invalidate_conforms_cache())
     end.
