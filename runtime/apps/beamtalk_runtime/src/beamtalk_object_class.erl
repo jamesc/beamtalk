@@ -655,6 +655,10 @@ init({ClassName, ClassInfo}) ->
     %% class hierarchy during dispatch sees a consistent view (announce-after-
     %% commit). Fire-and-forget; never fails class creation.
     announce_class_lifecycle('ClassLoaded', ClassName),
+    %% BT-3222: A newly-registered class may change conforms_to/2 results for
+    %% ClassName itself (a prior call, made before this class existed, could
+    %% have cached `false`) — flush so the next query re-walks live state.
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
 
     {ok, State}.
 
@@ -960,6 +964,10 @@ handle_call(
     %% from the live class_state record instead.  Return types are cleared for
     %% hot-patched methods — the compiler treats them as dynamic.
     notify_hot_patch(NewState),
+    %% BT-3222: A hot-patched instance method changes what ClassName (and
+    %% every subclass inheriting through it) understands, invalidating any
+    %% cached conforms_to/2 result for either.
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
     {reply, ok, NewState};
 %% ADR 0084 / BT-2266: Install or replace a class-side method with a runtime fun.
 %% Class-side mirror of {put_method, ...}. The fun is stored in the class_methods
@@ -994,6 +1002,10 @@ handle_call(
     %% is unavailable.
     put_method_xref(ClassName, true, Selector, Source),
     notify_hot_patch(NewState),
+    %% BT-3222: A hot-patched class-side method changes conforms_to/2's
+    %% class-method check (class_has_class_method/2) for ClassName and every
+    %% descendant walked through it.
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).
 %% BT-737/BT-738: Validation (shadowing + collision) delegated to beamtalk_class_registry.
@@ -1042,6 +1054,12 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% announced from the handle_call reply path after the refreshed
             %% metadata is committed.
             announce_class_lifecycle('ClassLoaded', ClassName),
+            %% BT-3222: Hot reload can change ClassName's method set (and this
+            %% is also the path classRemoveSelector/2 takes for a local-method
+            %% removal, via beamtalk_repl_eval:remove_method/4's recompile),
+            %% which changes conforms_to/2 for ClassName and every descendant
+            %% re-walked through it — flush rather than tracking descendants.
+            beamtalk_protocol_registry:invalidate_conforms_cache(),
             {reply, {ok, NewState#class_state.fields}, NewState}
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
