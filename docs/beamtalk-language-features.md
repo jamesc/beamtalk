@@ -3653,14 +3653,26 @@ Workspace recheckImage
 // => _  (checked/stale summary across the whole live image)
 ```
 
-The dependent lookup is selector-keyed (ADR 0087's xref schema has no
-receiver-class component), so it re-checks every candidate caller and lets
+The dependent lookup is keyed by selector *and* the receiver's inferred type
+(ADR 0115): a candidate sender is dropped before it is ever re-checked when
+its recorded receiver type could not dispatch to the changed class — an
+unrelated class hierarchy, a protocol the changed class does not conform to,
+or the wrong side (a `Counter class` receiver is a dependent of a change to
+`Counter`'s class-side methods, never its instance-side ones).
+
+Narrowing is permissive by construction: a send the compiler could not type
+(`dynamic`), a send indexed by the runtime live-patch path (which has no
+type-checker access and records `dynamic` unconditionally), a row compiled
+before ADR 0115, and a receiver type that resolves to no loaded class or
+protocol are all kept as candidates. Those still re-check and let
 the checker's own type inference decide relevance — a `size` sender on an
 unrelated class simply re-checks clean. Fan-out is capped per reload (with a
-"N more not checked" note); one level of fan-out only, not transitive; and
-proxy-routed calls (ADR 0104 §4 forwarding) are invisible to xref, so a
-proxy-wrapped caller can go unflagged — see
-[ADR 0105](ADR/0105-live-image-recheck-on-reload.md) for the full mechanism,
+"N more not checked" note), now as a backstop over the narrowed pool rather
+than over every syntactic sender of the selector; one level of fan-out only,
+not transitive; and proxy-routed calls (ADR 0104 §4 forwarding) are invisible
+to xref, so a proxy-wrapped caller can go unflagged — see
+[ADR 0105](ADR/0105-live-image-recheck-on-reload.md) and
+[ADR 0115](ADR/0115-xref-receiver-type-key.md) for the full mechanism,
 severity rules, and accepted gaps.
 
 ---
