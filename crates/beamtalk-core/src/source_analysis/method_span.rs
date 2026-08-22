@@ -263,11 +263,16 @@ fn definition_span(source: &str, method_span: Span) -> Span {
 
 /// Returns the byte offset of the start of the line containing `offset` — the
 /// byte just after the preceding newline, or 0 at the start of the file.
+///
+/// `pub(crate)`: also used by [`crate::source_analysis::method_category`] to
+/// locate a `// === Name ===` divider comment's own line when walking
+/// backward from a method's header line (BT-2601) — the same backward-walk
+/// shape as [`doc_block_start`] below, just hunting for a different line kind.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "source files over 4GB are not supported (Span uses u32)"
 )]
-fn line_start(source: &str, offset: u32) -> u32 {
+pub(crate) fn line_start(source: &str, offset: u32) -> u32 {
     let bytes = source.as_bytes();
     let mut i = (offset as usize).min(bytes.len());
     while i > 0 && bytes[i - 1] != b'\n' {
@@ -300,11 +305,15 @@ fn doc_block_start(source: &str, method_line_start: u32) -> u32 {
 /// Returns the byte offset just past the next newline at or after `offset`,
 /// clamped to the source length. If there is no newline before EOF (the final
 /// line lacks a trailing newline), returns the source length.
+///
+/// `pub(crate)`: also used by [`crate::source_analysis::method_category`]
+/// (BT-2601) to compute a divider comment line's own span once
+/// [`line_start`] has located its start.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "source files over 4GB are not supported (Span uses u32)"
 )]
-fn extend_to_line_end(source: &str, offset: u32) -> u32 {
+pub(crate) fn extend_to_line_end(source: &str, offset: u32) -> u32 {
     let bytes = source.as_bytes();
     let len = bytes.len();
     let mut i = (offset as usize).min(len);
