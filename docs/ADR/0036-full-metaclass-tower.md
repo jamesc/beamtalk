@@ -494,6 +494,8 @@ The process-count argument ("doubles the process count") is acknowledged as weak
 
 The "class variables serve the same purpose" argument also does not fully hold: class variables are inherited by subclasses, whereas per-metaclass instance variables are per-class and non-inherited. They are not equivalent. Deferred to a future ADR when bootstrap sequencing is better understood.
 
+> **Correction (2026-08-22)**: The claim above that "class variables are inherited by subclasses" contradicts both ADR 0013 and the implementation. ADR 0013 §1 specifies class variables as **not inherited** — "each class has its own class variables (class instance variables in Pharo terminology)" — and the runtime matches: each class gen_server holds its own `#class_state.class_state` map, and class-method dispatch threads the *receiver's own* map through inherited class methods (`dispatch_class_method/5`, `class_self_dispatch/4` in `beamtalk_class_dispatch.erl`). Beamtalk `classVar:` therefore already has Pharo class-instance-variable semantics (per-class storage, inherited accessor methods). The residual gap versus per-metaclass instance variables is only *dynamic* addition (`addInstVarNamed:`), which needs a storage namespace, not a separate metaclass process. This further weakens the case for the per-class metaclass gen_server alternative; see BT-3236 for the supervision groundwork that would precede any revisit.
+
 ### Alternative: Pharo-Style `addInstVarNamed:` (Per-Metaclass Variables)
 
 Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on the metaclass.
