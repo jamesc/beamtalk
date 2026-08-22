@@ -69,7 +69,12 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     record_loaded_class/2,
     forget_loaded_class/2,
     loaded_class_names/0,
-    loaded_class_entries/0
+    loaded_class_entries/0,
+    meta_backing_module/1,
+    ensure_backing_module_index_table/0,
+    record_backing_module_entry/3,
+    forget_backing_module_entries/2,
+    classes_backing_module/1
 ]).
 
 -export_type([
@@ -921,6 +926,138 @@ loaded_class_entries() ->
              || {Name, Pid} <- ets:tab2list(beamtalk_loaded_classes),
                 is_process_alive(Pid)
             ]
+    end.
+
+%%====================================================================
+%% Backing-Module → Class Reverse Index (BT-2736)
+%%====================================================================
+
+-doc """
+Extract the native backing-module atom from a class's `__beamtalk_meta/0` map
+(ADR 0056), or `none` if the class is not native-backed (no `backing_module`
+key, or a non-atom / `undefined` / `none` value).
+
+Single authority for this guard: the write side
+(`beamtalk_object_class:init/1` and `apply_class_info/2`, which already hold
+the class's `Meta` map) and the read side
+(`beamtalk_repl_ops_browse:delegate_rows_for_class_name/2`, which re-derives
+one class's backing module for its per-class isolation check) both call this
+instead of each re-implementing the same three-way guard.
+""".
+-spec meta_backing_module(map()) -> atom() | none.
+meta_backing_module(Meta) ->
+    case maps:get(backing_module, Meta, none) of
+        M when is_atom(M), M =/= none, M =/= undefined -> M;
+        _ -> none
+    end.
+
+-doc """
+Ensure the backing-module → class-name reverse index table exists (idempotent).
+
+BT-2736: This `bag` table holds one `{BackingModule, ClassName, Pid}` row per
+native-backed class (ADR 0056), maintained by the class lifecycle:
+`record_backing_module_entry/3` (called from `beamtalk_object_class:init/1`
+and `apply_class_info/2`) and `forget_backing_module_entries/2` (called from
+`terminate/2`, guarded on the pid exactly like `forget_loaded_class/2`). It
+exists so `beamtalk_repl_ops_browse:delegate_callers_of_native_module/1` (the
+LiveView "Callers" op on a native module) can resolve the delegating classes
+with a single ETS `lookup/2` keyed by the native module, instead of walking
+every loaded class via `all_classes/0` and probing `erlang:function_exported/3`
+per class.
+
+The table is `public` so any class process can write its own rows, and
+heir-protected (BT-1888) so it survives the owner's death.
+""".
+-spec ensure_backing_module_index_table() -> ok.
+ensure_backing_module_index_table() ->
+    case ets:info(beamtalk_backing_module_index) of
+        undefined ->
+            try
+                ets:new(
+                    beamtalk_backing_module_index,
+                    [
+                        bag,
+                        public,
+                        named_table,
+                        {read_concurrency, true},
+                        {write_concurrency, true}
+                        | heir_option()
+                    ]
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            maybe_set_heir(beamtalk_backing_module_index),
+            ok
+    end.
+
+-doc """
+Record (or clear) a class's row in the backing-module reverse index.
+
+Called from `beamtalk_object_class:init/1` and `apply_class_info/2` with the
+class's own `Meta` map (ADR 0056's `__beamtalk_meta/0`) and its pid. Any
+existing rows for `ClassName` are removed first, unconditionally — mirrors
+`record_loaded_class/2`'s unconditional overwrite — so a hot reload that
+changes (or drops) the class's backing module never leaves a stale row behind.
+A fresh row is inserted only when `Meta` names a real backing module.
+""".
+-spec record_backing_module_entry(atom(), map(), pid()) -> ok.
+record_backing_module_entry(ClassName, Meta, Pid) when
+    is_atom(ClassName), is_map(Meta), is_pid(Pid)
+->
+    ensure_backing_module_index_table(),
+    _ = ets:match_delete(beamtalk_backing_module_index, {'_', ClassName, '_'}),
+    case meta_backing_module(Meta) of
+        none ->
+            ok;
+        BackingModule ->
+            ets:insert(beamtalk_backing_module_index, {BackingModule, ClassName, Pid}),
+            ok
+    end.
+
+-doc """
+Remove a class's row(s) from the backing-module reverse index, guarded on the
+pid (graceful shutdown only).
+
+Called from `beamtalk_object_class:terminate/2`, mirroring
+`forget_loaded_class/2`: only rows still pointing at `Pid` are removed, so a
+dying old process cannot clobber a row a replacement process already recorded
+for the same class name. On a hard crash `terminate/2` does not run, so a
+stale row can linger — harmless, since `classes_backing_module/1`'s caller
+re-verifies each class name via a live process lookup before use, and
+`record_backing_module_entry/3` clears any stale row unconditionally the next
+time the class (re)registers.
+""".
+-spec forget_backing_module_entries(atom(), pid()) -> ok.
+forget_backing_module_entries(ClassName, Pid) when is_atom(ClassName), is_pid(Pid) ->
+    case ets:info(beamtalk_backing_module_index) of
+        undefined ->
+            ok;
+        _ ->
+            _ = ets:match_delete(beamtalk_backing_module_index, {'_', ClassName, Pid}),
+            ok
+    end.
+
+-doc """
+Return the class names whose `__beamtalk_meta/0` names `BackingModule` as
+their native backing module (ADR 0056), via a single ETS `lookup/2` against
+the reverse index instead of scanning `all_classes/0`.
+
+Returns `[]` (not an error) if the index table has not been created yet
+(early bootstrap, or a runtime with no native-backed classes loaded).
+""".
+-spec classes_backing_module(atom()) -> [atom()].
+classes_backing_module(BackingModule) when is_atom(BackingModule) ->
+    case ets:info(beamtalk_backing_module_index) of
+        undefined ->
+            [];
+        _ ->
+            lists:usort([
+                ClassName
+             || {_, ClassName, _} <- ets:lookup(beamtalk_backing_module_index, BackingModule)
+            ])
     end.
 
 %%====================================================================

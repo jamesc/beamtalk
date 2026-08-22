@@ -578,7 +578,8 @@ browse_class_definition(ClassName) ->
                 <<"state">> => State,
                 <<"comment">> => class_doc(ClassPid),
                 <<"native">> => meta_is_native(NativeMeta),
-                <<"backing_module">> => atom_or_null(meta_backing_module(NativeMeta)),
+                <<"backing_module">> =>
+                    atom_or_null(beamtalk_class_registry:meta_backing_module(NativeMeta)),
                 %% BT-2605: reflected class modifiers for the IDE's editor-header
                 %% modifier badges. The synthesized `definition` skeleton above
                 %% carries no leading modifier keywords, so these come from the
@@ -586,7 +587,8 @@ browse_class_definition(ClassName) ->
                 %% string parse.
                 <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
                 <<"typed">> => safe_bool(fun() -> beamtalk_runtime_api:is_typed(ClassPid) end),
-                <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
+                <<"abstract">> =>
+                    safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
                 %% BT-2639: a structural reflection boolean (not a header
                 %% string-sniff) so the System Browser can reliably render the
                 %% protocol-definition action row (Required methods / Conforming
@@ -697,7 +699,7 @@ browse_native_source(ClassName, Selector) ->
         ClassPid ->
             ModName = beamtalk_runtime_api:module_name(ClassPid),
             NativeMeta = native_meta_of(ModName),
-            case meta_backing_module(NativeMeta) of
+            case beamtalk_class_registry:meta_backing_module(NativeMeta) of
                 none ->
                     arg_error(
                         <<"browse-native-source">>,
@@ -1259,13 +1261,6 @@ native_meta_of(ModName) when is_atom(ModName) ->
 meta_is_native(Meta) ->
     maps:get(native, Meta, false) =:= true.
 
--spec meta_backing_module(map()) -> atom() | none.
-meta_backing_module(Meta) ->
-    case maps:get(backing_module, Meta, none) of
-        M when is_atom(M), M =/= none, M =/= undefined -> M;
-        _ -> none
-    end.
-
 %% True when `Selector` (instance side) is a `self delegate` method on the native
 %% facade `ModName`. The compiler emits a `dispatch_<selector>` function ONLY for
 %% a `self delegate` method (native_facade.rs collects `is_self_delegate()` methods
@@ -1316,39 +1311,53 @@ Class-side selectors are never delegated this way, so every row is instance-side
 Returns `[]` for a module that backs no loaded class (or the unresolved-module
 sentinel), so a module with neither FFI callers nor delegating classes keeps the
 honest empty state.
+
+BT-2736: The candidate class names come from `beamtalk_class_registry`'s
+backing-module reverse index — an O(1) ETS `lookup/2` keyed by `Module`,
+populated at class registration/reload time — instead of walking every loaded
+class via `all_classes/0` and probing `erlang:function_exported/3` on each.
 """.
 -spec delegate_callers_of_native_module(atom()) -> [beamtalk_xref:native_caller_row()].
 delegate_callers_of_native_module(none) ->
     %% `none` is `meta_backing_module/1`'s "no backing module" sentinel, never a
     %% real native module name. Guarding it here keeps a `module="none"` query
-    %% from match-binding against that sentinel in `delegate_rows_for_class/2` and
-    %% mis-attributing the delegates of a class that reports no backing module.
+    %% from match-binding against that sentinel in `delegate_rows_for_class_name/2`
+    %% and mis-attributing the delegates of a class that reports no backing module.
     [];
 delegate_callers_of_native_module(Module) when is_atom(Module) ->
-    ClassPids =
+    ClassNames =
         try
-            beamtalk_runtime_api:all_classes()
+            beamtalk_class_registry:classes_backing_module(Module)
         catch
             _:_ -> []
         end,
-    lists:flatmap(fun(Pid) -> delegate_rows_for_class(Pid, Module) end, ClassPids).
+    lists:flatmap(
+        fun(ClassName) -> delegate_rows_for_class_name(ClassName, Module) end, ClassNames
+    ).
 
-%% One `native_caller_row()` per `self delegate` instance method of the class
-%% behind `Pid`, but only when that class's backing native module is `Module`.
-%% Any reflection failure on a single class degrades to `[]` for that class — the
-%% Callers view must still list the other classes' delegates — mirroring
-%% `class_row/2`'s per-class isolation.
--spec delegate_rows_for_class(pid(), atom()) -> [beamtalk_xref:native_caller_row()].
-delegate_rows_for_class(Pid, Module) ->
+%% One `native_caller_row()` per `self delegate` instance method of `ClassName`,
+%% but only when that class's backing native module is still `Module`. The
+%% index in `beamtalk_class_registry:classes_backing_module/1` only narrows the
+%% candidate set — this re-verifies against a live process (a class name in the
+%% index can be a stale row left by a hard crash, per
+%% `forget_backing_module_entries/2`'s doc) and degrades to `[]` on any
+%% reflection failure, mirroring `class_row/2`'s per-class isolation so the
+%% Callers view still lists the other classes' delegates.
+-spec delegate_rows_for_class_name(atom(), atom()) -> [beamtalk_xref:native_caller_row()].
+delegate_rows_for_class_name(ClassName, Module) ->
     try
-        ModName = beamtalk_runtime_api:module_name(Pid),
-        case meta_backing_module(native_meta_of(ModName)) of
-            Module ->
-                ClassName = beamtalk_runtime_api:class_name(Pid),
-                Exports = safe_module_exports(ModName),
-                [delegate_row(ClassName, Sel) || Sel <- self_delegate_selectors(Exports)];
-            _ ->
-                []
+        case beamtalk_runtime_api:whereis_class(ClassName) of
+            undefined ->
+                [];
+            Pid ->
+                ModName = beamtalk_runtime_api:module_name(Pid),
+                case beamtalk_class_registry:meta_backing_module(native_meta_of(ModName)) of
+                    Module ->
+                        Exports = safe_module_exports(ModName),
+                        [delegate_row(ClassName, Sel) || Sel <- self_delegate_selectors(Exports)];
+                    _ ->
+                        []
+                end
         end
     catch
         _:_ -> []
