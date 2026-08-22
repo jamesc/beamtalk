@@ -165,36 +165,36 @@ eager_restart_test_() ->
                 {timeout, 30, fun() ->
                     OldLevel = add_capture_handler(),
                     try
-                    {ok, OldPid} = beamtalk_object_class:start(
-                        'SupTest3236C', minimal_class_info()
-                    ),
-                    kill_and_wait(OldPid),
-                    %% No send to the class here — the monitor's 'DOWN' handler
-                    %% must bring it back on its own.
-                    ?assertEqual(
-                        ok,
-                        wait_until(fun() ->
-                            case beamtalk_class_registry:whereis_class('SupTest3236C') of
-                                undefined -> false;
-                                NewPid -> NewPid =/= OldPid
-                            end
-                        end)
-                    ),
-                    NewPid = beamtalk_class_registry:whereis_class('SupTest3236C'),
-                    %% Re-registered in the pid reverse index and pg group.
-                    ?assertEqual(
-                        {ok, 'SupTest3236C'},
-                        beamtalk_class_registry:class_name_for_pid(NewPid)
-                    ),
-                    ?assert(lists:member(NewPid, pg:get_members(beamtalk_classes))),
-                    %% The restarted child is supervised again.
-                    Children = [
-                        P
-                     || {_, P, _, _} <- supervisor:which_children(beamtalk_class_sup)
-                    ],
-                    ?assert(lists:member(NewPid, Children)),
-                    %% restart_class's warning about dropped hot patches /
-                    %% class-var state was logged.
+                        {ok, OldPid} = beamtalk_object_class:start(
+                            'SupTest3236C', minimal_class_info()
+                        ),
+                        kill_and_wait(OldPid),
+                        %% No send to the class here — the monitor's 'DOWN' handler
+                        %% must bring it back on its own.
+                        ?assertEqual(
+                            ok,
+                            wait_until(fun() ->
+                                case beamtalk_class_registry:whereis_class('SupTest3236C') of
+                                    undefined -> false;
+                                    NewPid -> NewPid =/= OldPid
+                                end
+                            end)
+                        ),
+                        NewPid = beamtalk_class_registry:whereis_class('SupTest3236C'),
+                        %% Re-registered in the pid reverse index and pg group.
+                        ?assertEqual(
+                            {ok, 'SupTest3236C'},
+                            beamtalk_class_registry:class_name_for_pid(NewPid)
+                        ),
+                        ?assert(lists:member(NewPid, pg:get_members(beamtalk_classes))),
+                        %% The restarted child is supervised again.
+                        Children = [
+                            P
+                         || {_, P, _, _} <- supervisor:which_children(beamtalk_class_sup)
+                        ],
+                        ?assert(lists:member(NewPid, Children)),
+                        %% restart_class's warning about dropped hot patches /
+                        %% class-var state was logged.
                         ?assertEqual(
                             ok, wait_until(fun restart_warning_received/0)
                         )
@@ -225,35 +225,35 @@ restart_budget_test_() ->
         [
             {"crash-looping class is dropped after the budget, others unaffected",
                 {timeout, 30, fun() ->
-                {ok, PidA} = beamtalk_object_class:start('SupTest3236E', minimal_class_info()),
-                {ok, PidB} = beamtalk_object_class:start('SupTest3236F', minimal_class_info()),
-                %% First crash: within budget → eagerly restarted.
-                kill_and_wait(PidA),
-                ?assertEqual(
-                    ok,
-                    wait_until(fun() ->
-                        case beamtalk_class_registry:whereis_class('SupTest3236E') of
-                            undefined -> false;
-                            P -> P =/= PidA
-                        end
-                    end)
-                ),
-                Pid2 = beamtalk_class_registry:whereis_class('SupTest3236E'),
-                %% Second crash inside the window: budget exhausted → stays down.
-                kill_and_wait(Pid2),
-                timer:sleep(300),
-                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236E')),
-                %% The budget is per class: an unrelated class still restarts.
-                kill_and_wait(PidB),
-                ?assertEqual(
-                    ok,
-                    wait_until(fun() ->
-                        case beamtalk_class_registry:whereis_class('SupTest3236F') of
-                            undefined -> false;
-                            P -> P =/= PidB
-                        end
-                    end)
-                )
+                    {ok, PidA} = beamtalk_object_class:start('SupTest3236E', minimal_class_info()),
+                    {ok, PidB} = beamtalk_object_class:start('SupTest3236F', minimal_class_info()),
+                    %% First crash: within budget → eagerly restarted.
+                    kill_and_wait(PidA),
+                    ?assertEqual(
+                        ok,
+                        wait_until(fun() ->
+                            case beamtalk_class_registry:whereis_class('SupTest3236E') of
+                                undefined -> false;
+                                P -> P =/= PidA
+                            end
+                        end)
+                    ),
+                    Pid2 = beamtalk_class_registry:whereis_class('SupTest3236E'),
+                    %% Second crash inside the window: budget exhausted → stays down.
+                    kill_and_wait(Pid2),
+                    timer:sleep(300),
+                    ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236E')),
+                    %% The budget is per class: an unrelated class still restarts.
+                    kill_and_wait(PidB),
+                    ?assertEqual(
+                        ok,
+                        wait_until(fun() ->
+                            case beamtalk_class_registry:whereis_class('SupTest3236F') of
+                                undefined -> false;
+                                P -> P =/= PidB
+                            end
+                        end)
+                    )
                 end}}
         ]
     end}.
