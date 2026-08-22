@@ -1565,9 +1565,20 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Keyboard chord (Esc in the browser, ⌘W in the desktop shell) closing the
   # focused editor tab — same path as clicking the tab's ✕, including the
-  # silent discard of a dirty tab. No-op when nothing is open.
+  # silent discard of a dirty tab. No-op when nothing is open. While an
+  # Escape-dismissable surface is open (New Class modal, Senders/Implementors
+  # popover, Settings dropdown — all closed via `phx-window-keydown`, which
+  # never `preventDefault`s, so the JS hook cannot tell the key was claimed),
+  # Escape means "dismiss it": bail here so backing out of a modal never also
+  # discards the active tab.
   def handle_event("tab_close_active", _params, socket) do
-    case socket.assigns.active_tab do
+    %{assigns: assigns} = socket
+
+    escape_claimed? =
+      assigns.new_class_open or assigns.show_settings or assigns.nav_popover != nil
+
+    case assigns.active_tab do
+      _ when escape_claimed? -> {:noreply, socket}
       nil -> {:noreply, socket}
       id -> {:noreply, close_tab(socket, id)}
     end

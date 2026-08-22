@@ -91,6 +91,40 @@ defmodule BtAttachWeb.WorkspaceKeyboardShortcutsTest do
     assert html =~ "Counter ▸ def"
   end
 
+  test "tab_close_active is a no-op while the New Class modal is open", %{conn: conn} do
+    {:ok, view, _html} = live(owner_conn(conn), "/")
+
+    html = render_click(view, "browser_open_definition", %{"class" => "Counter"})
+    assert html =~ "Counter ▸ def"
+
+    # The modal dismisses on Escape via phx-window-keydown, which never
+    # preventDefaults — the same keypress reaches the KeyboardShortcuts hook,
+    # so the server must treat Escape as claimed and keep the tab.
+    render_click(view, "toggle_new_class", %{})
+    html = render_click(view, "tab_close_active", %{})
+    assert html =~ "Counter ▸ def"
+
+    # With the modal closed again, Escape closes the tab as usual.
+    render_click(view, "close_new_class", %{})
+    html = render_click(view, "tab_close_active", %{})
+    refute html =~ "Counter ▸ def"
+  end
+
+  test "tab_close_active is a no-op while the settings dropdown is open", %{conn: conn} do
+    {:ok, view, _html} = live(owner_conn(conn), "/")
+
+    html = render_click(view, "browser_open_definition", %{"class" => "Counter"})
+    assert html =~ "Counter ▸ def"
+
+    render_click(view, "toggle_settings", %{})
+    html = render_click(view, "tab_close_active", %{})
+    assert html =~ "Counter ▸ def"
+
+    render_click(view, "close_settings", %{})
+    html = render_click(view, "tab_close_active", %{})
+    refute html =~ "Counter ▸ def"
+  end
+
   test "tab_close_active with no open tab is a no-op", %{conn: conn} do
     {:ok, view, _html} = live(owner_conn(conn), "/")
 
