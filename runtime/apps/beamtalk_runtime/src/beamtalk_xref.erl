@@ -115,7 +115,18 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% `beamtalk_class_registry:class_object_tag/1` already uses — rather than
 %% falling into `dynamic` by omission.
 -type name() :: atom().
--type recv_type() :: name() | dynamic.
+%% BT-3215: a `Union`/`Intersection`-typed receiver whose members *all*
+%% resolved to a single `name()` each (write path: `project_composed` in
+%% `crates/.../gen_server/methods.rs`) — never a partial member list; a
+%% union/intersection with even one unresolvable member coarsens to
+%% `dynamic` in its entirety at write time, per Constraint 2 ("cannot be
+%% narrowed and must never be excluded" — a partial list would let the read
+%% path wrongly exclude a real dependent typed as the dropped member). Read
+%% path (`is_relevant/5`): `{union, Names}` is relevant iff *any* member is
+%% relevant (the receiver could be any one of them at runtime); `{intersection,
+%% Names}` iff *all* members are relevant (the receiver must simultaneously
+%% satisfy every one).
+-type recv_type() :: name() | {union, [name()]} | {intersection, [name()]} | dynamic.
 
 -type send_entry() :: #{
     selector := selector(),
@@ -653,18 +664,64 @@ is_relevant(Site, BaseChanged, ChangedIsClassSide, Related, Cache) ->
             {true, Cache};
         {ok, dynamic} ->
             {true, Cache};
+        {ok, {union, Names}} ->
+            %% BT-3215: relevant iff *any* member is — the receiver could be
+            %% any one of the union's members at runtime.
+            union_relevant(Names, BaseChanged, ChangedIsClassSide, Related, Cache);
+        {ok, {intersection, Names}} ->
+            %% BT-3215: relevant iff *every* member is — the receiver must
+            %% simultaneously satisfy all of them.
+            intersection_relevant(Names, BaseChanged, ChangedIsClassSide, Related, Cache);
         {ok, T} ->
-            {BaseT, SiteIsClassSide} = split_class_object_tag(T),
-            case SiteIsClassSide =:= ChangedIsClassSide of
-                false ->
-                    %% Amendment 3: a class-object (`Meta{C}`) receiver only
-                    %% ever dispatches through the metaclass (class-side)
-                    %% chain, and a plain instance-typed receiver only
-                    %% through the instance chain — never collapse the two.
-                    {false, Cache};
-                true ->
-                    relatedness(BaseT, BaseChanged, Related, Cache)
-            end
+            member_relevant(T, BaseChanged, ChangedIsClassSide, Related, Cache)
+    end.
+
+%% Shared single-name relevance test `is_relevant/5`'s plain-`T` clause and
+%% both BT-3215 composed-type folds below reduce to, member-by-member: strip
+%% any `' class'` class-object tag, apply Amendment 3's side check, then
+%% `relatedness/4`.
+-spec member_relevant(name(), class_name(), boolean(), sets:set(class_name()), relevance_cache()) ->
+    {boolean(), relevance_cache()}.
+member_relevant(T, BaseChanged, ChangedIsClassSide, Related, Cache) ->
+    {BaseT, SiteIsClassSide} = split_class_object_tag(T),
+    case SiteIsClassSide =:= ChangedIsClassSide of
+        false ->
+            %% Amendment 3: a class-object (`Meta{C}`) receiver only ever
+            %% dispatches through the metaclass (class-side) chain, and a
+            %% plain instance-typed receiver only through the instance
+            %% chain — never collapse the two.
+            {false, Cache};
+        true ->
+            relatedness(BaseT, BaseChanged, Related, Cache)
+    end.
+
+%% BT-3215: OR-fold over a `{union, Names}` member list — short-circuits on
+%% the first relevant member (no need to evaluate, or cache, the rest), still
+%% threading `Cache` through whatever prefix it did evaluate.
+-spec union_relevant([name()], class_name(), boolean(), sets:set(class_name()), relevance_cache()) ->
+    {boolean(), relevance_cache()}.
+union_relevant([], _BaseChanged, _ChangedIsClassSide, _Related, Cache) ->
+    {false, Cache};
+union_relevant([T | Rest], BaseChanged, ChangedIsClassSide, Related, Cache) ->
+    case member_relevant(T, BaseChanged, ChangedIsClassSide, Related, Cache) of
+        {true, Cache1} -> {true, Cache1};
+        {false, Cache1} -> union_relevant(Rest, BaseChanged, ChangedIsClassSide, Related, Cache1)
+    end.
+
+%% BT-3215: AND-fold over an `{intersection, Names}` member list —
+%% short-circuits on the first irrelevant member.
+-spec intersection_relevant(
+    [name()], class_name(), boolean(), sets:set(class_name()), relevance_cache()
+) ->
+    {boolean(), relevance_cache()}.
+intersection_relevant([], _BaseChanged, _ChangedIsClassSide, _Related, Cache) ->
+    {true, Cache};
+intersection_relevant([T | Rest], BaseChanged, ChangedIsClassSide, Related, Cache) ->
+    case member_relevant(T, BaseChanged, ChangedIsClassSide, Related, Cache) of
+        {false, Cache1} ->
+            {false, Cache1};
+        {true, Cache1} ->
+            intersection_relevant(Rest, BaseChanged, ChangedIsClassSide, Related, Cache1)
     end.
 
 -spec relatedness(name(), class_name(), sets:set(class_name()), relevance_cache()) ->
