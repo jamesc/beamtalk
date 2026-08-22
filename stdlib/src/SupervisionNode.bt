@@ -118,6 +118,8 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   /// ```
   restartIntensity -> Dictionary | Nil => self delegate
 
+  // === Snapshot integrity ===
+
   /// Whether this supervisor's children were truncated by the snapshot child cap
   /// (a large `simpleOneForOne` pool, ADR 0092 §Constraints 1). When `true`,
   /// `children` is empty but `childCount` still reports the live total.

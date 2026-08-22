@@ -226,6 +226,8 @@ sealed typed Number subclass: Integer
   /// ```
   truncated -> Integer => self
 
+  // === Powers ===
+
   /// The receiver multiplied by itself.
   ///
   /// ## Examples
@@ -234,6 +236,8 @@ sealed typed Number subclass: Integer
   /// -3 squared       // => 9
   /// ```
   squared -> Integer => self * self
+
+  // === Rounding to a quantum ===
 
   /// Round to the nearest multiple of `quantum`.
   ///

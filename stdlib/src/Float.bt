@@ -224,6 +224,8 @@ sealed typed Number subclass: Float
   /// ```
   truncated -> Integer => @primitive
 
+  // === Powers ===
+
   /// The receiver multiplied by itself.
   ///
   /// ## Examples
@@ -231,6 +233,8 @@ sealed typed Number subclass: Float
   /// 2.5 squared      // => 6.25
   /// ```
   squared -> Float => self * self
+
+  // === Rounding to a quantum ===
 
   /// Round to the nearest multiple of `quantum`.
   ///

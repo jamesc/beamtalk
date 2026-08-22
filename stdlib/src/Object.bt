@@ -342,7 +342,7 @@ ProtoObject subclass: Object
     TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
     self
 
-  // === Class testing and errors ===
+  // === Type testing ===
 
   /// Test if the receiver is an instance of aClass or any of its subclasses.
   ///
@@ -366,6 +366,8 @@ ProtoObject subclass: Object
   /// ```
   isKindOf: aClass :: Behaviour -> Boolean =>
     self class includesBehaviour: aClass
+
+  // === Error handling & dispatch ===
 
   /// Raise an error with the given message.
   ///

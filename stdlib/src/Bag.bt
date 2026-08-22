@@ -125,6 +125,8 @@ typed Collection(E) subclass: Bag(E)
   /// A Bag is already a Bag — identity override of `Collection>>asBag`.
   asBag -> Bag(E) => self
 
+  // === Printing ===
+
   /// Return a developer-readable string representation.
   ///
   /// ## Examples

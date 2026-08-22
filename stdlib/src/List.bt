@@ -206,9 +206,13 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   do: block :: Block(E, Object) -> Nil => @primitive
 
+  // === Conversions ===
+
   /// A List is already a List — identity override of `Collection>>asList`
   /// that avoids rebuilding via the generic `do:`-fold.
   asList -> List(E) => self
+
+  // === Enumerating ===
 
   /// Collect results of evaluating `block` on each element.
   ///

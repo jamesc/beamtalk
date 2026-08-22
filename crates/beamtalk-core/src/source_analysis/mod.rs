@@ -50,6 +50,15 @@ mod token;
 #[cfg(test)]
 mod lexer_property_tests;
 
+// Shared `.bt` corpus-walking helpers for the corpus test suites below.
+#[cfg(test)]
+mod corpus_test_support;
+
+// Corpus-wide divider validation for method categories (BT-2601 recognizer,
+// BT-2626 stdlib-wide curation).
+#[cfg(test)]
+mod method_category_corpus_tests;
+
 // Corpus round-trip validation for the byte-span resolver (ADR 0082, Phase 0).
 #[cfg(test)]
 mod method_span_corpus_tests;
