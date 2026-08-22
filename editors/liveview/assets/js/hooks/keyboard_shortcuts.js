@@ -15,7 +15,10 @@
 //
 // Events another handler already claimed (`defaultPrevented`) are skipped, so
 // e.g. Escape dismissing CodeMirror's autocomplete or the omni-search popover
-// (both preventDefault) never ALSO fires a bare "escape" binding.
+// (both preventDefault) never ALSO fires a bare "escape" binding. LiveView's
+// own `phx-window-keydown` dismissals never preventDefault, so bare-key chords
+// additionally defer to any mounted `[phx-window-keydown][phx-key]` element
+// claiming the same key (see `claimedByWindowKeydown`).
 //
 // Each value is the action fired when the chord matches; the chord's default
 // browser action (e.g. the Save dialog for ⌘S) is prevented either way:
@@ -49,6 +52,22 @@ function isPlain(ev) {
   // the binding still fires with a stray Shift down (none of the bare keys we
   // bind are shift-sensitive).
   return !ev.metaKey && !ev.ctrlKey && !ev.altKey
+}
+
+function claimedByWindowKeydown(key) {
+  // LiveView surfaces that dismiss on a bare key (the New Class modal, the
+  // Senders/Implementors popover, the settings dropdown) mount an element with
+  // `phx-window-keydown` + `phx-key` only while they are open. Their dismiss
+  // can't be seen via `defaultPrevented` (LiveView never preventDefaults it),
+  // and it can't be checked server-side either: LiveView's own window listener
+  // registered before this hook's, so the dismiss event from the SAME
+  // keystroke is processed first and has already cleared the "is it open"
+  // assign by the time our event arrives. The DOM at keypress time is the
+  // reliable signal — if any mounted element claims this key, the press means
+  // "dismiss that surface", not the bare-key chord.
+  return Array.from(
+    document.querySelectorAll("[phx-window-keydown][phx-key]")
+  ).some((el) => (el.getAttribute("phx-key") || "").toLowerCase() === key)
 }
 
 export const KeyboardShortcuts = {
@@ -87,6 +106,7 @@ export const KeyboardShortcuts = {
     const key = ev.key.toLowerCase()
     const chord = isMod(ev) ? "mod+" + key : isPlain(ev) ? key : null
     if (!chord) return
+    if (chord === key && claimedByWindowKeydown(key)) return
     const action = this.bindings[chord]
     if (!action) return
     ev.preventDefault()

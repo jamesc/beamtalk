@@ -1567,10 +1567,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # focused editor tab — same path as clicking the tab's ✕, including the
   # silent discard of a dirty tab. No-op when nothing is open. While an
   # Escape-dismissable surface is open (New Class modal, Senders/Implementors
-  # popover, Settings dropdown — all closed via `phx-window-keydown`, which
-  # never `preventDefault`s, so the JS hook cannot tell the key was claimed),
-  # Escape means "dismiss it": bail here so backing out of a modal never also
-  # discards the active tab.
+  # popover, Settings dropdown), Escape means "dismiss it", never "close the
+  # tab". The PRIMARY defence is client-side (`claimedByWindowKeydown` in
+  # `keyboard_shortcuts.js`): those surfaces mount a `phx-window-keydown`
+  # element only while open, and LiveView's window listener fires before the
+  # hook's, so the same keystroke's dismiss event can reach the server first
+  # and clear these assigns before this handler runs — the guard below is a
+  # best-effort backstop (and the testable contract) for any push that does
+  # arrive while a surface is still open.
   def handle_event("tab_close_active", _params, socket) do
     %{assigns: assigns} = socket
 
