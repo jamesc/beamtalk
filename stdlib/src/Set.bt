@@ -40,6 +40,8 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```
   class new: elements :: List(E) -> Set(E) => self withAll: elements
 
+  // === Accessing ===
+
   /// Number of elements in the set.
   ///
   /// ## Examples
@@ -82,6 +84,8 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```
   remove: element :: E -> Set(E) => @primitive
 
+  // === Set operations ===
+
   /// Return a new set with elements from both sets.
   ///
   /// ## Examples
@@ -114,6 +118,8 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```
   isSubsetOf: other :: Set(E) -> Boolean => @primitive
 
+  // === Conversions ===
+
   /// Convert the set to a list of elements.
   ///
   /// Perf override of `Collection>>asList`: converts directly from the
@@ -136,6 +142,8 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```
   fromList: list :: List -> Set(E) => @primitive
 
+  // === Enumerating ===
+
   /// Iterate over each element, evaluating `block` with each one.
   ///
   /// ## Examples
@@ -144,6 +152,8 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```
   do: block :: Block(E, Object) -> Nil => @primitive
 
+  // === Printing ===
+
   /// Return a developer-readable string representation.
   ///
   /// ## Examples
@@ -151,6 +161,8 @@ sealed typed Collection(E) subclass: Set(E)
   /// Set new printString
   /// ```
   printString -> String => @primitive
+
+  // === Streaming ===
 
   /// Return a lazy Stream over the set elements.
   ///

@@ -38,6 +38,8 @@
 /// ```
 sealed typed Object subclass: AnnouncementNavigation
 
+  // === Class Methods — Construction ===
+
   /// A navigation over the singleton system bus (`SystemAnnouncer current`) —
   /// the `default` scope, the one feed for everything the system emits.
   ///
@@ -59,6 +61,8 @@ sealed typed Object subclass: AnnouncementNavigation
   /// ```
   class of: anAnnouncer :: Announcer -> AnnouncementNavigation =>
     (Erlang beamtalk_announcements) navigationFor: anAnnouncer
+
+  // === Instance Methods — Querying ===
 
   /// A read-only snapshot of every live subscription on the navigated announcer,
   /// as immutable `SubscriptionNode` records. Re-call to refresh.

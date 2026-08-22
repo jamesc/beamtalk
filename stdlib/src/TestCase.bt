@@ -61,6 +61,8 @@ Value subclass: TestCase
   /// ```
   class serial -> Boolean => false
 
+  // === Fixture lifecycle ===
+
   /// Prepare the test fixture. Called before each test method.
   /// Override in subclasses to set up shared state or resources.
   ///
@@ -103,6 +105,8 @@ Value subclass: TestCase
   /// The test runner injects the fixture value into the instance map
   /// before each test method runs.
   suiteFixture => (Erlang beamtalk_test_case) suiteFixture: self
+
+  // === Assertions ===
 
   /// Assert that `condition` is true, failing the test if it is false.
   ///
@@ -161,6 +165,8 @@ Value subclass: TestCase
   should: block :: Block raise: errorKind :: Symbol -> Nil =>
     (Erlang beamtalk_test_case) should: block raise: errorKind
 
+  // === Failing and skipping ===
+
   /// Fail the test immediately with the given `message`.
   ///
   /// ## Examples
@@ -187,6 +193,8 @@ Value subclass: TestCase
   /// Equivalent to `self skip: ""`. The test is counted as skipped, not
   /// failed. Use `^` to exit the test method early after calling this.
   skip -> Nil => self skip: ""
+
+  // === Result assertions ===
 
   /// Assert that `result` is a successful Result and return its value.
   ///

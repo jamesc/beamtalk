@@ -17,6 +17,8 @@
 typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
   classState: current :: TranscriptStream | Nil = nil
 
+  // === Class-side Singleton ===
+
   /// Return the current singleton instance (nil before workspace bootstrap).
   class current -> TranscriptStream => self.current
 
@@ -26,6 +28,8 @@ typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
 
   /// Clear the current singleton instance (reset to nil).
   class resetCurrent -> Nil => self.current := nil
+
+  // === Writing ===
 
   /// Write a value to the transcript.
   ///
@@ -44,6 +48,8 @@ typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
   /// ```
   cr -> Nil => self delegate
 
+  // === Subscriptions ===
+
   /// Subscribe the calling process to receive transcript output.
   ///
   /// ## Examples
@@ -59,6 +65,8 @@ typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
   /// Transcript unsubscribe
   /// ```
   unsubscribe -> Nil => self delegate
+
+  // === Buffer ===
 
   /// Return recent transcript entries as a list.
   ///

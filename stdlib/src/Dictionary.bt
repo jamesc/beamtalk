@@ -105,6 +105,8 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// ```
   includes: value :: V -> Boolean => @primitive
 
+  // === Enumerating ===
+
   /// Iterate over each value, evaluating `block` with each one.
   ///
   /// ## Examples
@@ -144,6 +146,8 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
   keysAndValuesDo: block :: Block(K, V, Object) -> Nil => self doWithKey: block
+
+  // === Printing ===
 
   /// Return a string representation using Beamtalk syntax.
   ///

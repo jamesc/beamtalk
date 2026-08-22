@@ -40,6 +40,8 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```
   class new: elements :: List(E) -> Array(E) => self withAll: elements
 
+  // === Accessing ===
+
   /// Number of elements in the array.
   ///
   /// ## Examples
@@ -109,6 +111,8 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```
   includes: element :: E -> Boolean => @primitive
 
+  // === Enumerating ===
+
   /// Iterate over each element, evaluating `block` with each one.
   ///
   /// ## Examples
@@ -117,8 +121,12 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```
   do: block :: Block(E, Object) -> Nil => @primitive
 
+  // === Conversions ===
+
   /// An Array is already an Array — identity override of `Collection>>asArray`.
   asArray -> Array(E) => self
+
+  // === Transforming ===
 
   /// Map a block over the array, returning a new Array.
   ///
@@ -143,6 +151,8 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]   // => 6
   /// ```
   inject: initial :: A into: block :: Block(A, E, A) -> A => @primitive
+
+  // === Printing ===
 
   /// Return a developer-readable string representation.
   ///

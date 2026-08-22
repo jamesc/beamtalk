@@ -52,6 +52,8 @@ sealed typed Value subclass: ChangeLog
   /// ```
   allEntries -> List(ChangeEntry) => self.entries
 
+  // === Querying ===
+
   /// The number of active (live, re-appliable) changes.
   ///
   /// ## Examples
@@ -77,6 +79,8 @@ sealed typed Value subclass: ChangeLog
   /// Workspace changes notEmpty   // => false
   /// ```
   notEmpty -> Boolean => self isEmpty not
+
+  // === Enumerating ===
 
   /// Iterate over each active entry, evaluating `block` with it.
   ///
@@ -118,6 +122,8 @@ sealed typed Value subclass: ChangeLog
     // (beamtalk_workspace_changelog:dirtyMethods/0), matching the declared
     // return type.
     (Erlang beamtalk_workspace_changelog) dirtyMethods
+
+  // === Mutating ===
 
   /// Re-install the prior body of `anEntry`'s method, undoing the patch
   /// (ADR 0082 Phase 4).
@@ -202,6 +208,8 @@ sealed typed Value subclass: ChangeLog
   /// ```
   flushKinds: kinds :: Object confirmDestructive: confirmDestructive :: Boolean -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds confirmDestructive: confirmDestructive
+
+  // === Printing ===
 
   /// Developer-readable representation, e.g. "ChangeLog with 2 entries".
   ///

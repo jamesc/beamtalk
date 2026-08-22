@@ -66,6 +66,8 @@ typed Value subclass: ProcessNavigation
   class internal systemSnapshot -> List(SupervisionNode) =>
     (Erlang beamtalk_process_navigation) system_snapshot
 
+  // === Subtree Construction ===
+
   /// A navigation over the subtree rooted at `aRoot` — a `Supervisor` handle or
   /// a raw `Pid`.
   ///
@@ -92,6 +94,8 @@ typed Value subclass: ProcessNavigation
   /// snapshot rooted at `aRoot`. Keeps `from:` pure Beamtalk.
   class internal snapshotFrom: aRoot :: Supervisor | Pid -> Result(List(SupervisionNode), Error) =>
     (Erlang beamtalk_process_navigation) from: aRoot
+
+  // === Accessing ===
 
   /// The navigable `SupervisionTree` snapshot for this navigation.
   ///

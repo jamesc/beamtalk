@@ -69,6 +69,8 @@ Object subclass: Exception
   class sealed signalKind: kind :: ExceptionKind class: cls :: Symbol selector: sel :: Symbol hint: hint :: String -> Never =>
     @primitive "classSignalKind:class:selector:hint:"
 
+  // === Accessing ===
+
   /// Return the error message string.
   ///
   /// ## Examples
@@ -109,6 +111,8 @@ Object subclass: Exception
   /// ```
   errorClass -> String => @primitive
 
+  // === Printing ===
+
   /// Return a developer-readable string representation of the error.
   ///
   /// ## Examples
@@ -116,6 +120,8 @@ Object subclass: Exception
   /// [42 unknownMsg] on: Exception do: [:e | e printString]
   /// ```
   printString -> String => @primitive
+
+  // === Stack trace ===
 
   /// Return the stack trace as a list of StackFrame objects.
   ///
@@ -127,6 +133,8 @@ Object subclass: Exception
   /// [1 / 0] on: Exception do: [:e | e stackTrace]
   /// ```
   stackTrace -> List(StackFrame) => @primitive
+
+  // === Raising ===
 
   /// Raise this exception.
   ///

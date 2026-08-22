@@ -23,6 +23,8 @@ sealed typed Integer subclass: Character
   /// ```
   class sealed value: codepoint :: Integer -> Character => @primitive
 
+  // === Comparing ===
+
   /// Test strict equality with another character.
   ///
   /// ## Examples
@@ -82,6 +84,8 @@ sealed typed Integer subclass: Character
   /// ```
   >= other :: Character -> Boolean => @primitive
 
+  // === Converting ===
+
   /// Return the Unicode codepoint as an integer.
   ///
   /// ## Examples
@@ -106,6 +110,8 @@ sealed typed Integer subclass: Character
   /// ```
   printString -> String => @primitive
 
+  // === Hashing ===
+
   /// Return a hash value for the character.
   ///
   /// ## Examples
@@ -113,6 +119,8 @@ sealed typed Integer subclass: Character
   /// $A hash
   /// ```
   hash -> Integer => @primitive
+
+  // === Testing ===
 
   /// Test if the character is a Unicode letter.
   ///
@@ -158,6 +166,8 @@ sealed typed Integer subclass: Character
   /// $a isWhitespace          // => false
   /// ```
   isWhitespace -> Boolean => @primitive
+
+  // === Case conversion ===
 
   /// Convert to uppercase.
   ///

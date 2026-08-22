@@ -24,72 +24,11 @@
 //! if the resolver returned a wrong or sloppy span.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 
 use crate::ast::Module;
+use crate::source_analysis::corpus_test_support::{corpus_files, corpus_present, read_corpus_file};
 use crate::source_analysis::method_span::{MethodSide, resolve_in_module};
 use crate::source_analysis::{Span, lex_with_eof, parse};
-
-/// Returns the repository root (`CARGO_MANIFEST_DIR/../..`).
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
-}
-
-/// Recursively collects every `.bt` file under `dir`.
-fn collect_bt_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
-    // Deterministic order for stable test output.
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            collect_bt_files(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "bt") {
-            out.push(path);
-        }
-    }
-}
-
-/// The corpus directories: every `.bt` file lives under one of these.
-fn corpus_dirs() -> [PathBuf; 2] {
-    let root = repo_root();
-    [root.join("stdlib/src"), root.join("examples")]
-}
-
-/// Whether the corpus directories are present in this checkout.
-///
-/// They are absent when the crate is built from a source distribution or a
-/// partial checkout that omits the workspace `stdlib/` and `examples/` trees. In
-/// that case the corpus tests skip rather than hard-fail (a present-but-
-/// unreadable *file*, by contrast, is always a hard failure).
-fn corpus_present() -> bool {
-    corpus_dirs().iter().any(|dir| dir.is_dir())
-}
-
-/// Gathers the whole corpus: every `.bt` file under `stdlib/src` and `examples`.
-fn corpus_files() -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for dir in corpus_dirs() {
-        collect_bt_files(&dir, &mut files);
-    }
-    files
-}
-
-/// Reads a corpus file, hard-failing (with the path + error) if it is present
-/// but cannot be read. Unlike skipping an absent *directory*, an unreadable file
-/// that the walk already discovered must never be silently ignored — that would
-/// let the round-trip proof go false-green.
-fn read_corpus_file(path: &Path) -> String {
-    std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("could not read corpus file {}: {e}", path.display()))
-}
 
 /// One method to resolve, identified the way a caller would: by class name,
 /// canonical selector string, and side.

@@ -31,6 +31,8 @@ typed Value subclass: Queue native: beamtalk_queue
   /// ```
   class sealed new -> Queue => self delegate
 
+  // === Queue Operations ===
+
   /// Add an element to the back of the queue. Returns a new Queue.
   ///
   /// O(1) amortised.
@@ -62,6 +64,8 @@ typed Value subclass: Queue native: beamtalk_queue
   /// front := q peek    // => first element
   /// ```
   peek -> Object => self delegate
+
+  // === Inspecting ===
 
   /// Return `true` if the queue contains no elements.
   ///

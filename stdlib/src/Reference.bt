@@ -34,6 +34,8 @@ sealed typed Object subclass: Reference
   /// ```
   printString -> String => self asString
 
+  // === Comparison ===
+
   /// Test strict equality with another reference.
   ///
   /// ## Examples
@@ -57,6 +59,8 @@ sealed typed Object subclass: Reference
   /// ref1 /= ref2          // => true
   /// ```
   /= other -> Boolean => @primitive
+
+  // === Monitoring & Hashing ===
 
   /// Cancel a monitor associated with this reference.
   ///

@@ -31,6 +31,8 @@ typed Collection(E) subclass: Bag(E)
   class withAll: list :: List(E) -> Bag(E) =>
     list inject: Bag new into: [:bag :elem | bag add: elem]
 
+  // === Accessing ===
+
   /// Total number of element occurrences (sum of all counts).
   ///
   /// ## Examples
@@ -58,6 +60,8 @@ typed Collection(E) subclass: Bag(E)
   /// (Bag withAll: #(1, 2)) includes: 3   // => false
   /// ```
   includes: element :: E -> Boolean => (self occurrencesOf: element) > 0
+
+  // === Adding & Removing ===
 
   /// Return a new bag with one more occurrence of `element`.
   ///
@@ -103,6 +107,8 @@ typed Collection(E) subclass: Bag(E)
         ]
       ]
 
+  // === Enumerating ===
+
   /// Iterate over each element once per occurrence.
   ///
   /// ## Examples
@@ -114,8 +120,12 @@ typed Collection(E) subclass: Bag(E)
       count timesRepeat: [block value: elem]
     ]
 
+  // === Converting ===
+
   /// A Bag is already a Bag — identity override of `Collection>>asBag`.
   asBag -> Bag(E) => self
+
+  // === Printing ===
 
   /// Return a developer-readable string representation.
   ///

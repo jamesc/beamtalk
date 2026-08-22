@@ -74,6 +74,8 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
         }
       ]
 
+  // === Writing ===
+
   /// Write a line to the subprocess's stdin (appends newline).
   ///
   /// ## Examples
@@ -81,6 +83,8 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// agent writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
   writeLine: data :: String -> Nil => self delegate
+
+  // === Reading ===
 
   /// Read one line from stdout. Blocks until a line is available. Returns nil at EOF.
   ///
@@ -129,6 +133,8 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// agent stderrLines do: [:line | Transcript show: line]
   /// ```
   stderrLines -> Stream(String) => self delegate
+
+  // === Lifecycle ===
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   ///

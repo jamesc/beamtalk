@@ -75,6 +75,8 @@ typed Value subclass: StackFrame
   /// ```
   file -> String | Nil => @primitive
 
+  // === Printing ===
+
   /// Return a human-readable string representation.
   ///
   /// ## Examples

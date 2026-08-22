@@ -55,6 +55,8 @@ typed Value subclass: SupervisionTree
   root -> SupervisionNode | Nil =>
     (Erlang beamtalk_process_navigation) rootOf: self flatNodes
 
+  // === Querying ===
+
   /// Total number of nodes in the snapshot.
   ///
   /// ## Examples
@@ -70,6 +72,8 @@ typed Value subclass: SupervisionTree
   /// tree isEmpty   // => false
   /// ```
   isEmpty -> Boolean => self flatNodes isEmpty
+
+  // === Enumerating ===
 
   /// Pre-order walk: evaluate `aBlock` for every node in the snapshot.
   ///
@@ -139,6 +143,8 @@ typed Value subclass: SupervisionTree
   findClass: aClass :: Class -> List(SupervisionNode) =>
     self nodes select: [:node | node behaviourClass == aClass]
 
+  // === Converting ===
+
   /// A serialisable form of the snapshot — one `Dictionary` per node carrying
   /// its identity, kind, class, child count, and parent linkage (adjacency).
   ///
@@ -169,6 +175,8 @@ typed Value subclass: SupervisionTree
           ] ifFalse: [n parentPid asString])
         }
       ]
+
+  // === Printing ===
 
   /// Human-readable summary, e.g. `#SupervisionTree<6 nodes, root: #AppSup>` or
   /// `#SupervisionTree<empty>`.

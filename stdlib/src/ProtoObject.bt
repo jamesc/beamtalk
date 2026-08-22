@@ -58,6 +58,8 @@ abstract nil subclass: ProtoObject
   /// ```
   =/= other :: ProtoObject -> Boolean => @intrinsic "=/="
 
+  // === Reflection ===
+
   /// Return the class of the receiver.
   ///
   /// ## Examples
@@ -75,6 +77,8 @@ abstract nil subclass: ProtoObject
   /// ```
   doesNotUnderstand: selector args: arguments =>
     @intrinsic "doesNotUnderstand:args:"
+
+  // === Dynamic Messaging ===
 
   /// Send a message dynamically with an arguments list.
   ///

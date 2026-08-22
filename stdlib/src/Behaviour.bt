@@ -24,7 +24,7 @@
 /// ```
 abstract Object subclass: Behaviour
 
-  // --- Identity ---
+  // === Naming ===
 
   /// Return the name of the receiver (class or metaclass) as a Symbol.
   ///
@@ -42,7 +42,7 @@ abstract Object subclass: Behaviour
   /// ```
   sealed name -> Symbol => @primitive "className"
 
-  // --- Method lookup ---
+  // === Method lookup ===
 
   /// Look up a method by selector, returning a CompiledMethod object,
   /// or nil if the selector is not found in the method dictionary.
@@ -59,7 +59,7 @@ abstract Object subclass: Behaviour
   sealed >> aSelector :: Symbol -> CompiledMethod | Nil =>
     @primitive "methodLookup"
 
-  // --- Hierarchy queries ---
+  // === Hierarchy queries ===
 
   /// Return the superclass of the receiver as a class object, or nil for roots.
   ///
@@ -154,7 +154,7 @@ abstract Object subclass: Behaviour
   sealed includesBehaviour: aBehaviour :: Behaviour -> Boolean =>
     self == aBehaviour ifTrue: [true] ifFalse: [self inheritsFrom: aBehaviour]
 
-  // --- Method dictionary ---
+  // === Method dictionary ===
 
   /// Return selectors defined on this class (not inherited).
   ///
@@ -214,7 +214,7 @@ abstract Object subclass: Behaviour
       c includesSelector: selector
     ] ifNone: [nil]
 
-  // --- Instance variable queries ---
+  // === Instance variable queries ===
 
   /// Return the names of fields declared in this class (not inherited).
   ///
@@ -252,7 +252,7 @@ abstract Object subclass: Behaviour
   /// ```
   sealed allClassVarNames -> List(Symbol) => @primitive "classAllClassVarNames"
 
-  // --- Documentation (ADR 0033) ---
+  // === Documentation (ADR 0033) ===
 
   /// Return the class documentation string, or nil if none set.
   ///
@@ -292,7 +292,7 @@ abstract Object subclass: Behaviour
   sealed docForMethod: aSelector :: Symbol -> String | Nil =>
     @primitive "classDocForMethod"
 
-  // --- Identity ---
+  // === Type predicates ===
 
   /// Test whether this is a Behaviour (class-describing object).
   ///
@@ -320,7 +320,7 @@ abstract Object subclass: Behaviour
   /// ```
   sealed isMetaclass -> Boolean => false
 
-  // --- Protocol queries (ADR 0068 Phase 2c) ---
+  // === Protocol queries (ADR 0068 Phase 2c) ===
 
   /// Test whether instances of the receiver conform to a protocol.
   ///
@@ -345,7 +345,7 @@ abstract Object subclass: Behaviour
   /// ```
   sealed protocols -> List(Symbol) => @primitive "classProtocols"
 
-  // --- Source file and reload (ADR 0040 Phase 2) ---
+  // === Source file and reload (ADR 0040 Phase 2) ===
 
   /// Return the path of the source file this class was compiled from, or nil.
   ///
@@ -374,7 +374,7 @@ abstract Object subclass: Behaviour
   /// ```
   sealed reload -> Behaviour => @primitive "classReload"
 
-  // --- Live method editing (ADR 0082 Phase 1) ---
+  // === Live method editing (ADR 0082 Phase 1) ===
 
   /// Compile a method from a source body String and install it in this class,
   /// attempting to record a **durable** ChangeLog entry (ADR 0082).
@@ -453,7 +453,7 @@ abstract Object subclass: Behaviour
   sealed precheckCompile: aSelector :: Symbol source: aSource :: String -> Dictionary =>
     @primitive "classPrecheckCompileSource"
 
-  // --- Method removal (ADR 0112) ---
+  // === Method removal (ADR 0112) ===
 
   /// Remove `aSelector` from the receiver, raising if it is not defined
   /// locally or as an extension.
@@ -506,7 +506,7 @@ abstract Object subclass: Behaviour
   sealed removeSelector: aSelector :: Symbol ifAbsent: absentBlock :: Block(T) -> Behaviour | T =>
     @primitive "classRemoveSelectorIfAbsent"
 
-  // --- Class removal ---
+  // === Class removal ===
 
   /// Remove this class from the system, cleaning up all associated state.
   ///

@@ -21,6 +21,8 @@
 /// ```
 sealed typed Value subclass: Regex native: beamtalk_regex
 
+  // ===== Class Methods — Construction =====
+
   /// Use 'Regex from: pattern' to create a Regex.
   class new: _ :: Object -> Object =>
     self error: "Use 'Regex from: pattern' to create a Regex"
@@ -44,6 +46,8 @@ sealed typed Value subclass: Regex native: beamtalk_regex
   class sealed from: pattern :: String options: opts :: List(Symbol) -> Result(Regex, Error) =>
     self delegate
 
+  // ===== Instance Methods — Accessors =====
+
   /// Return the original pattern source string.
   ///
   /// ## Examples
@@ -51,6 +55,8 @@ sealed typed Value subclass: Regex native: beamtalk_regex
   /// (Regex from: "[0-9]+") source              // => "[0-9]+"
   /// ```
   source -> String => self delegate
+
+  // ===== Instance Methods — Display =====
 
   /// Human-readable representation: Regex(pattern).
   ///

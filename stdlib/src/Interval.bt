@@ -48,6 +48,8 @@ typed Collection subclass: Interval
       by: self.step
       do: block
 
+  // === Accessing ===
+
   /// Return the element at the given 1-based index.
   ///
   /// Raises `index_out_of_bounds` for any index outside `1..self size` —
@@ -99,6 +101,8 @@ typed Collection subclass: Interval
       (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #last
     ] ifFalse: [self.from + ((self size - 1) * self.step)]
 
+  // === Conversions ===
+
   /// Materialise the interval into a `List` of its elements (ADR 0095 §6 — the
   /// canonical large-collection example `(1 to: 100000) asList`).
   ///
@@ -116,6 +120,8 @@ typed Collection subclass: Interval
       from: self.from
       to: self.to
       by: self.step
+
+  // === Printing ===
 
   /// Return a developer-readable string representation.
   ///
