@@ -23,6 +23,11 @@ const createWorkspaceButton = document.getElementById(
   "create-workspace-button",
 );
 const workspaceListEl = document.getElementById("workspace-list");
+const workspaceFiltersEl = document.getElementById("workspace-filters");
+const workspaceFilterEmptyEl = document.getElementById(
+  "workspace-filter-empty",
+);
+const filterButtons = [...document.querySelectorAll(".filter-button")];
 const quitButton = document.getElementById("quit-button");
 const logsButton = document.getElementById("logs-button");
 const logPanelEl = document.getElementById("log-panel");
@@ -35,6 +40,53 @@ const attachProgress = new Map();
 // workspaceId -> a short human-readable disconnected/unreachable label, for
 // attached workspaces the post-attach monitor has flagged as unhealthy.
 const connectionBadges = new Map();
+
+// "all" | "running" | "stopped" (BT-3230) — persists across refreshes
+// (a periodic `runRefresh()` re-applies it to the freshly fetched list
+// rather than resetting to "all") until the user picks a different one.
+let currentFilter = "all";
+// The last full (unfiltered) workspace list `render()` saw — filter button
+// clicks re-render from this directly rather than re-invoking
+// `list_workspaces`, so switching filters is instant and never races a
+// concurrent backend refresh.
+let lastWorkspaces = [];
+
+// The last non-empty path segment, e.g. "/Users/james/source/beamtalk" ->
+// "beamtalk". Splits on both "/" and "\\" since `project_path` comes from
+// the picker's own host OS and this app targets Windows too (BT-2988);
+// `null` for a missing path or one with no segments (e.g. "/" or "\\"),
+// letting the caller fall back to something else rather than showing
+// nothing.
+function leafDirName(projectPath) {
+  if (!projectPath) {
+    return null;
+  }
+  const segments = projectPath.split(/[/\\]/).filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : null;
+}
+
+function matchesFilter(workspace) {
+  if (currentFilter === "running") {
+    return workspace.alive;
+  }
+  if (currentFilter === "stopped") {
+    return !workspace.alive;
+  }
+  return true;
+}
+
+function setFilter(filter) {
+  currentFilter = filter;
+  for (const button of filterButtons) {
+    button.classList.toggle("active", button.dataset.filter === filter);
+  }
+  renderWorkspaceListForCurrentFilter();
+}
+
+for (const button of filterButtons) {
+  button.addEventListener("click", () => setFilter(button.dataset.filter));
+}
+setFilter(currentFilter);
 
 // BT-3225: launcher-side log lines (backend `tracing` events), fed by the
 // `launcher-log-line` event once the panel has been opened once, seeded
@@ -141,21 +193,43 @@ async function runRefresh() {
 }
 
 function render(view) {
+  lastWorkspaces = view.workspaces;
   const hasWorkspaces = view.workspaces.length > 0;
   statusEl.hidden = true;
   emptyStateEl.hidden = hasWorkspaces;
-  workspaceListEl.hidden = !hasWorkspaces;
+  // Filter buttons are meaningless with nothing to filter — hide them along
+  // with the (unrelated) "create a workspace" empty state.
+  workspaceFiltersEl.hidden = !hasWorkspaces;
 
   if (!hasWorkspaces) {
     renderEmptyState(view.empty_state);
     // Nothing to reconcile against once the list is empty — clear any rows
     // left over from a prior non-empty render so the next transition back
-    // to non-empty starts from a clean slate.
+    // to non-empty starts from a clean slate. Also clears a stale
+    // "no workspaces match this filter" message left over from before the
+    // last workspace disappeared entirely.
+    workspaceListEl.hidden = true;
     workspaceListEl.replaceChildren();
+    workspaceFilterEmptyEl.hidden = true;
     return;
   }
 
-  reconcileWorkspaceList(view.workspaces);
+  renderWorkspaceListForCurrentFilter();
+}
+
+// Re-derive the visible row set from `lastWorkspaces` + `currentFilter` and
+// reconcile the list against it. Called both by `render()` (a fresh
+// backend fetch landed) and `setFilter()` (the user picked a different
+// filter over already-fetched data) — kept as one function so those two
+// triggers can't drift into different filtering logic.
+function renderWorkspaceListForCurrentFilter() {
+  if (lastWorkspaces.length === 0) {
+    return;
+  }
+  const visible = lastWorkspaces.filter(matchesFilter);
+  workspaceFilterEmptyEl.hidden = visible.length > 0;
+  workspaceListEl.hidden = visible.length === 0;
+  reconcileWorkspaceList(visible);
 }
 
 // Update `workspaceListEl` to match `workspaces` by reusing existing row
@@ -238,6 +312,10 @@ function renderWorkspaceRow(workspace) {
   name.className = "workspace-name";
   info.appendChild(name);
 
+  const id = document.createElement("span");
+  id.className = "workspace-id";
+  info.appendChild(id);
+
   const liveBadge = document.createElement("span");
   liveBadge.className = "workspace-live-badge";
   info.appendChild(liveBadge);
@@ -265,8 +343,22 @@ function renderWorkspaceRow(workspace) {
 // showing (e.g.) an open dropdown or mid-click button is left otherwise
 // undisturbed by an unrelated refresh.
 function updateWorkspaceRow(li, workspace) {
+  // BT-3230: the leaf directory name (e.g. ".../source/beamtalk" ->
+  // "beamtalk") is the one thing a human actually recognizes at a glance —
+  // promote it to the row's primary label, in place of the opaque id.
+  // Falls back to the id when there's no project_path to take a leaf from
+  // (a hand-edited/corrupted metadata.json — rare).
+  const leaf = leafDirName(workspace.project_path);
   const name = li.querySelector(".workspace-name");
-  name.textContent = workspace.id;
+  name.textContent = leaf ?? workspace.id;
+
+  const id = li.querySelector(".workspace-id");
+  // Only shown alongside a promoted leaf name — when there's no path, the
+  // primary label above already *is* the id, so repeating it here would be
+  // redundant clutter instead of the disambiguation aid it's meant to be
+  // (two different projects can share a leaf directory name).
+  id.hidden = !leaf;
+  id.textContent = leaf ? workspace.id : "";
 
   const liveBadge = li.querySelector(".workspace-live-badge");
   liveBadge.className = workspace.alive

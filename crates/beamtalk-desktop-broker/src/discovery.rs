@@ -185,8 +185,36 @@ pub fn discover_workspaces() -> Result<Vec<WorkspaceSummary>> {
         summary.alive = epmd_names.iter().any(|n| n == short_name);
         summaries.push(summary);
     }
-    summaries.sort_by(|a, b| a.id.cmp(&b.id));
+    sort_by_project_path(&mut summaries);
     Ok(summaries)
+}
+
+/// Sort key for [`discover_workspaces`]'s listing: by project path
+/// (case-insensitive), not `id` — `id` is an opaque SHA256 hash of the path
+/// (`beamtalk_workspace::generate_workspace_id`), so sorting by it scatters
+/// workspaces from the same project directory randomly through the list
+/// instead of grouping them (BT-3230). A missing `project_path` (a
+/// hand-edited/corrupted `metadata.json`) sorts after every path-having
+/// workspace; `id` is the tiebreaker for two workspaces with the same or
+/// absent path.
+///
+/// Pure (no filesystem I/O) and split out from [`discover_workspaces`]
+/// specifically so it's unit-testable directly against hand-built
+/// `WorkspaceSummary` values, without touching the real
+/// `~/.beamtalk/workspaces/` that function itself reads from.
+fn sort_by_project_path(summaries: &mut [WorkspaceSummary]) {
+    summaries.sort_by(|a, b| {
+        // `(has_no_path, lowercased_path)`, not a bare `Option<String>`:
+        // `Option`'s derived order puts `None` *before* every `Some`, the
+        // opposite of what's wanted here — this tuple's `bool` element
+        // pushes every no-path workspace after every path-having one
+        // regardless of the (irrelevant, in that case) string half.
+        let path_key = |s: &WorkspaceSummary| match &s.project_path {
+            Some(p) => (false, p.to_string_lossy().to_lowercase()),
+            None => (true, String::new()),
+        };
+        path_key(a).cmp(&path_key(b)).then_with(|| a.id.cmp(&b.id))
+    });
 }
 
 #[cfg(test)]
@@ -328,5 +356,78 @@ mod tests {
         // like. The pure-parsing behavior above covers the real logic.
         let result = discover_workspaces();
         assert!(result.is_ok(), "discovery must not error: {result:?}");
+    }
+
+    fn summary_with_path(id: &str, path: Option<&str>) -> WorkspaceSummary {
+        WorkspaceSummary {
+            id: id.to_string(),
+            project_path: path.map(PathBuf::from),
+            node_name: default_node_name(id),
+            alive: false,
+        }
+    }
+
+    #[test]
+    fn sort_by_project_path_groups_by_directory_not_id() {
+        let mut summaries = vec![
+            summary_with_path("zzz111", Some("/Users/james/source/beamtalk")),
+            summary_with_path("aaa000", Some("/Users/james/source/zebra")),
+            summary_with_path("mmm555", Some("/Users/james/source/beamtalk")),
+        ];
+
+        sort_by_project_path(&mut summaries);
+
+        // Both `beamtalk`-path workspaces land adjacent, ordered before
+        // `zebra` alphabetically — despite `id` ordering (aaa < mmm < zzz)
+        // disagreeing entirely.
+        assert_eq!(
+            summaries.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["mmm555", "zzz111", "aaa000"]
+        );
+    }
+
+    #[test]
+    fn sort_by_project_path_is_case_insensitive() {
+        let mut summaries = vec![
+            summary_with_path("id1", Some("/Users/James/Project")),
+            summary_with_path("id2", Some("/users/adam/project")),
+        ];
+
+        sort_by_project_path(&mut summaries);
+
+        assert_eq!(
+            summaries.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["id2", "id1"]
+        );
+    }
+
+    #[test]
+    fn sort_by_project_path_puts_missing_paths_last() {
+        let mut summaries = vec![
+            summary_with_path("no_path", None),
+            summary_with_path("has_path", Some("/anywhere")),
+        ];
+
+        sort_by_project_path(&mut summaries);
+
+        assert_eq!(
+            summaries.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["has_path", "no_path"]
+        );
+    }
+
+    #[test]
+    fn sort_by_project_path_breaks_ties_on_id() {
+        let mut summaries = vec![
+            summary_with_path("zzz", Some("/same/path")),
+            summary_with_path("aaa", Some("/same/path")),
+        ];
+
+        sort_by_project_path(&mut summaries);
+
+        assert_eq!(
+            summaries.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["aaa", "zzz"]
+        );
     }
 }

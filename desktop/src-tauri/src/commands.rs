@@ -303,6 +303,15 @@ fn attach_and_open_window(
         .map_err(|e| format!("invalid front URL: {e}"))?;
     let window = match WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
         .title(format!("Beamtalk — {workspace_id}"))
+        // The workspace window is a full IDE (editor, REPL, transcript,
+        // inspector panes) — Tauri's own unset-size default (a plain
+        // 800x600) is cramped for that on anything but a small laptop
+        // display. 1400x900 is a roomy-but-not-presumptuous starting size;
+        // `resizable` isn't set `false` anywhere, so this is just the
+        // initial size, not a cap.
+        .inner_size(1400.0, 900.0)
+        .min_inner_size(720.0, 480.0)
+        .center()
         .build()
     {
         Ok(window) => window,

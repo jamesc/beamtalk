@@ -77,6 +77,26 @@ main {
   padding: 0;
 }
 
+.workspace-filters {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-button {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.filter-button.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 .workspace-row {
   display: flex;
   align-items: center;
@@ -95,6 +115,12 @@ main {
 
 .workspace-name {
   font-weight: 600;
+}
+
+.workspace-id {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .workspace-path {
