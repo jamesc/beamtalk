@@ -473,9 +473,10 @@ pub fn create_workspace(workspace_id: String) -> Result<(), String> {
     cli_ops::create_workspace(&cli_path, &workspace_id).map_err(|e| e.to_string())
 }
 
-/// Tail of `~/.beamtalk/launcher.log`, for the picker UI's log panel to seed
-/// itself with recent history on open — live updates after that arrive via
-/// the `launcher-log-line` event ([`crate::logging::spawn_log_relay`]).
+/// Tail of the launcher's rotating log under `~/.beamtalk/` (BT-3229), for
+/// the picker UI's log panel to seed itself with recent history on open —
+/// live updates after that arrive via the `launcher-log-line` event
+/// ([`crate::logging::spawn_log_relay`]).
 #[tauri::command(async)]
 pub fn get_launcher_logs(limit: Option<usize>) -> Result<Vec<String>, String> {
     Ok(crate::logging::read_recent_logs(limit.unwrap_or(500)))
