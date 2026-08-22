@@ -21,7 +21,7 @@
 
 Value subclass: TempClassForRemoval
   greet => "hello"
-// => _
+// => TempClassForRemoval
 
 // Verify class is defined
 TempClassForRemoval new greet
@@ -37,7 +37,7 @@ Object allSubclasses includes: TempClassForRemoval
 
 // Save a reference to the class before removing it
 tempClass := TempClassForRemoval
-// => _
+// => TempClassForRemoval
 
 // Remove the class
 TempClassForRemoval removeFromSystem
