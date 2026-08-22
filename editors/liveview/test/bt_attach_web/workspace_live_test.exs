@@ -750,18 +750,24 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # This class is eval-defined (no on-disk `sources/` file), exactly like
     # the plain modify-revert e2e above — `revert_method/3` cannot reconstruct
     # the removed method's prior body from disk, so it returns a structured
-    # "no recorded prior body" explanation rather than silently restoring or
-    # crashing. The point under test is the UI binding BT-3194 fixes: the
-    # `remove-method` row's revert button now exists and its click reaches
-    # `revert_method/3` end-to-end — proven by getting back this specific,
-    # expected domain response — rather than the button being silently absent
-    # (the bug) or the LiveView echoing a raw error tuple/crashing. Body
-    # restoration itself is covered at the domain layer by
-    # `revert_remove_method_entry_restores_removed_instance_method` and
+    # "prior body could not be recovered" explanation rather than silently
+    # restoring or crashing. (BT-3208/ADR 0113 generalized this message's
+    # wording — it used to say "no recorded prior body" / "method body"
+    # specifically; `do_revert/3`'s `no_prev_source` arm now shares one
+    # message across a method-modify revert AND a `'remove-class'` revert,
+    # so the wording had to stop naming "method body" specifically. See
+    # `beamtalk_workspace_interface_primitives:do_revert/3`'s `{error,
+    # no_prev_source}` clause.) The point under test is the UI binding
+    # BT-3194 fixes: the `remove-method` row's revert button now exists and
+    # its click reaches `revert_method/3` end-to-end — proven by getting back
+    # this specific, expected domain response — rather than the button being
+    # silently absent (the bug) or the LiveView echoing a raw error
+    # tuple/crashing. Body restoration itself is covered at the domain layer
+    # by `revert_remove_method_entry_restores_removed_instance_method` and
     # `revert_method_selects_correct_side_entry_when_both_sides_have_entries`
     # (`beamtalk_workspace_revert_tests.erl`), which use an on-disk project
     # class so a prior body is actually recorded to restore.
-    assert revert_html =~ "revert:" and revert_html =~ "no recorded prior body"
+    assert revert_html =~ "revert:" and revert_html =~ "prior body could not be recovered"
     refute revert_html =~ "beamtalk_error"
     refute revert_html =~ "{:error"
 
