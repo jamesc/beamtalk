@@ -29,6 +29,16 @@
         </div>
       </section>
 
+      <div id="workspace-filters" class="workspace-filters" hidden>
+        <button class="filter-button" data-filter="all">All</button>
+        <button class="filter-button" data-filter="running">Running</button>
+        <button class="filter-button" data-filter="stopped">Stopped</button>
+      </div>
+
+      <p id="workspace-filter-empty" class="status" hidden>
+        No workspaces match this filter.
+      </p>
+
       <ul id="workspace-list" hidden></ul>
     </main>
 
