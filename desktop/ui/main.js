@@ -29,6 +29,10 @@ const workspaceFilterEmptyEl = document.getElementById(
 );
 const filterButtons = [...document.querySelectorAll(".filter-button")];
 const quitButton = document.getElementById("quit-button");
+const logsButton = document.getElementById("logs-button");
+const logPanelEl = document.getElementById("log-panel");
+const logOutputEl = document.getElementById("log-output");
+const logPanelCloseButton = document.getElementById("log-panel-close-button");
 
 // workspaceId -> stage string ("spawning" | "probing"), while an attach is
 // in flight.
@@ -83,6 +87,56 @@ for (const button of filterButtons) {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 }
 setFilter(currentFilter);
+
+// BT-3225: launcher-side log lines (backend `tracing` events), fed by the
+// `launcher-log-line` event once the panel has been opened once, seeded
+// from `~/.beamtalk/launcher.log` at that same moment. Lines that arrive
+// *before* the first open are deliberately dropped by `pushLogLine`, not
+// buffered — the same tracing event that fires `launcher-log-line` also
+// writes to `launcher.log`, so `get_launcher_logs`' file-tail read on first
+// open already contains everything that happened before it; buffering the
+// live copy too would show every one of those lines twice. Capped so a long
+// session's log can't grow the DOM without bound.
+const MAX_LOG_LINES = 2000;
+let logLines = [];
+let logsLoaded = false;
+
+function pushLogLine(line) {
+  if (!logsLoaded) {
+    return;
+  }
+  logLines.push(line);
+  if (logLines.length > MAX_LOG_LINES) {
+    logLines = logLines.slice(logLines.length - MAX_LOG_LINES);
+  }
+  if (!logPanelEl.hidden) {
+    renderLogs();
+  }
+}
+
+function renderLogs() {
+  logOutputEl.textContent = logLines.join("\n");
+  logOutputEl.scrollTop = logOutputEl.scrollHeight;
+}
+
+async function openLogPanel() {
+  logPanelEl.hidden = false;
+  if (!logsLoaded) {
+    let recent;
+    try {
+      recent = await invoke("get_launcher_logs", { limit: MAX_LOG_LINES });
+    } catch (err) {
+      recent = [`(failed to load launcher.log: ${err})`];
+    }
+    // Flip the flag in the same tick as the assignment (no `await` between
+    // them): any `launcher-log-line` event that arrives during the fetch
+    // above was dropped by `pushLogLine` (`logsLoaded` was still false), so
+    // assigning here can't race a concurrent append into `logLines`.
+    logLines = recent;
+    logsLoaded = true;
+  }
+  renderLogs();
+}
 
 // Coalescing window for `scheduleRefresh` (below) — chosen to smooth out a
 // flapping connection or several concurrent attaches firing `attach-progress`/
@@ -388,6 +442,14 @@ quitButton.addEventListener("click", () => {
   invoke("quit");
 });
 
+logsButton.addEventListener("click", () => {
+  openLogPanel();
+});
+
+logPanelCloseButton.addEventListener("click", () => {
+  logPanelEl.hidden = true;
+});
+
 // These two events are the flapping/bursty case `scheduleRefresh`'s debounce
 // exists for: a shaky connection or several concurrent attaches can each
 // fire several times a second, and without coalescing, each one used to
@@ -395,6 +457,13 @@ quitButton.addEventListener("click", () => {
 listen("attach-progress", (event) => {
   attachProgress.set(event.payload.workspace_id, event.payload.stage);
   scheduleRefresh();
+});
+
+// BT-3225: always listening (not just while the panel is open), so nothing
+// is lost between backend events and the next time the user opens it — see
+// `pushLogLine`'s doc comment.
+listen("launcher-log-line", (event) => {
+  pushLogLine(event.payload);
 });
 
 listen("connection-state-changed", (event) => {

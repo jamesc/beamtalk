@@ -154,13 +154,13 @@ pub struct FrontRecord {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn state_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| {
+    let root = beamtalk_workspace::beamtalk_root_dir().map_err(|_| {
         crate::error::BrokerError::Io(std::io::Error::new(
             ErrorKind::NotFound,
             "could not determine home directory",
         ))
     })?;
-    Ok(home.join(".beamtalk").join("desktop-broker"))
+    Ok(root.join("desktop-broker"))
 }
 
 fn record_path(dir: &Path, workspace_id: &str, port: u16) -> PathBuf {

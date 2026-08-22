@@ -8,8 +8,19 @@
   <body>
     <header>
       <h1>Beamtalk</h1>
-      <button id="quit-button" title="Quit">Quit</button>
+      <div class="header-actions">
+        <button id="logs-button" title="Show launcher logs">Logs</button>
+        <button id="quit-button" title="Quit">Quit</button>
+      </div>
     </header>
+
+    <section id="log-panel" hidden>
+      <div class="log-panel-head">
+        <span>Launcher logs</span>
+        <button id="log-panel-close-button" title="Close">Close</button>
+      </div>
+      <pre id="log-output"></pre>
+    </section>
 
     <main id="app">
       <p id="status" class="status">Loading workspaces…</p>

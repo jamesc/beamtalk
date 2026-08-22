@@ -126,16 +126,17 @@ pub(super) fn build_detached_node_command(
         cmd.env("HOME", home);
     }
     // Keep Erlang distribution off untrusted networks by default (ADR 0091
-    // Decision 5): pin the address epmd binds/contacts to loopback so a node
-    // that *starts* epmd does not expose the port mapper on `0.0.0.0`. epmd is a
-    // persistent per-user daemon, so this only governs an epmd this node starts;
-    // a pre-existing promiscuous epmd is caught separately by the launcher's
-    // preflight check (`epmd::check_epmd_loopback`). An operator deploying across
-    // a trusted private network can override by exporting `ERL_EPMD_ADDRESS`
-    // (e.g. the private interface address) before launching — never `0.0.0.0`.
-    let epmd_address =
-        std::env::var("ERL_EPMD_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string());
-    cmd.env("ERL_EPMD_ADDRESS", epmd_address);
+    // Decision 5) — see `beamtalk_workspace::resolve_epmd_address`'s doc
+    // comment for the full rationale, shared with
+    // `beamtalk-desktop-broker`'s own front-spawn env (`spawn::build_env`).
+    // epmd is a persistent per-user daemon, so this only governs an epmd
+    // this node starts; a pre-existing promiscuous epmd is caught
+    // separately by the launcher's preflight check
+    // (`epmd::check_epmd_loopback`).
+    cmd.env(
+        "ERL_EPMD_ADDRESS",
+        beamtalk_workspace::resolve_epmd_address(),
+    );
     // Locale settings for proper string handling
     for var in &["LANG", "LC_ALL"] {
         if let Ok(val) = std::env::var(var) {
