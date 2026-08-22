@@ -16,9 +16,13 @@ defmodule BtAttachWeb.Endpoint do
     secure: Application.compile_env(:bt_attach, :secure_session, false)
   ]
 
+  # :peer_data is required by BtAttachWeb.Auth.dev_connect_ok?/1, which gates
+  # dev-auth LiveView sockets to loopback. Without it, get_connect_info(socket,
+  # :peer_data) is always nil on every connected mount, so dev-auth always
+  # halts+redirects — an infinite full-page reload loop (BT-3228).
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:peer_data, session: @session_options]],
+    longpoll: [connect_info: [:peer_data, session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
   #

@@ -120,4 +120,43 @@ defmodule BtAttachWeb.SessionLifecycleTest do
       assert response(conn, 403) =~ "loopback-only"
     end
   end
+
+  describe "dev-auth connected mount requires :peer_data in connect_info (BT-3228)" do
+    setup do
+      System.put_env("BT_IDE_DEV_AUTH", "1")
+      :ok
+    end
+
+    defp with_connect_info(conn, connect_info),
+      do: Plug.Conn.put_private(conn, :live_view_connect_info, connect_info)
+
+    test "the /live socket declares :peer_data, or dev-auth loops forever (regression guard)" do
+      {_path, _module, opts} =
+        Enum.find(BtAttachWeb.Endpoint.__sockets__(), fn {path, _, _} -> path == "/live" end)
+
+      assert :peer_data in get_in(opts, [:websocket, :connect_info])
+      assert :peer_data in get_in(opts, [:longpoll, :connect_info])
+    end
+
+    test "a connected mount with loopback peer_data succeeds", %{conn: conn} do
+      conn =
+        conn
+        |> authed_conn(0)
+        |> with_connect_info(%{peer_data: %{address: {127, 0, 0, 1}, port: 0, ssl_cert: nil}})
+
+      assert {:ok, _view, html} = live_probe(conn)
+      assert html =~ "probe ok"
+    end
+
+    test "a connected mount without :peer_data in connect_info (undeclared socket key, the bug) " <>
+           "is redirected rather than mounted",
+         %{conn: conn} do
+      conn =
+        conn
+        |> authed_conn(0)
+        |> with_connect_info(%{})
+
+      assert {:error, {:redirect, %{to: "/"}}} = live_probe(conn)
+    end
+  end
 end
