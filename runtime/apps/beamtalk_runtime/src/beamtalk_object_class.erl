@@ -496,6 +496,7 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_methods_table(),
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
+    beamtalk_class_registry:ensure_backing_module_index_table(),
     ok = pg:join(beamtalk_classes, self()),
 
     Superclass = maps:get(superclass, ClassInfo, none),

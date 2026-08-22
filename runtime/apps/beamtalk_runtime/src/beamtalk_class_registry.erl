@@ -998,22 +998,46 @@ Record (or clear) a class's row in the backing-module reverse index.
 
 Called from `beamtalk_object_class:init/1` and `apply_class_info/2` with the
 class's own `Meta` map (ADR 0056's `__beamtalk_meta/0`) and its pid. Any
-existing rows for `ClassName` are removed first, unconditionally — mirrors
-`record_loaded_class/2`'s unconditional overwrite — so a hot reload that
-changes (or drops) the class's backing module never leaves a stale row behind.
-A fresh row is inserted only when `Meta` names a real backing module.
+*other* existing rows for `ClassName` (a stale backing module, a stale pid, or
+both) are cleared — mirrors `record_loaded_class/2`'s unconditional overwrite —
+so a hot reload that changes (or drops) the class's backing module never
+leaves a stale row behind. A fresh row is written first, then stale rows are
+removed, so a concurrent `classes_backing_module/1` reader never observes a
+window where `ClassName` has no row at all — at worst it briefly sees the
+class under both its old and new backing module, which the read side already
+tolerates (each is a plain per-module bucket).
+
+Caution for future callers: `Meta` reporting no backing module
+(`meta_backing_module/1` returning `none`) is treated as authoritative —
+"this class has no backing module right now" — and clears any existing row.
+That is correct for `init/1` and today's `apply_class_info/2` call sites
+(their `Meta` is always freshly read or explicitly supplied), but a future
+caller that passes an incomplete `Meta` (e.g. reflection failed, or `meta`
+was omitted from `ClassInfo` while the module is still on_load and
+`function_exported/3` returns `false`) would silently un-index a genuinely
+native-backed class. Pass the *real* meta, or skip the call, rather than an
+empty map you don't fully trust.
 """.
 -spec record_backing_module_entry(atom(), map(), pid()) -> ok.
 record_backing_module_entry(ClassName, Meta, Pid) when
     is_atom(ClassName), is_map(Meta), is_pid(Pid)
 ->
     ensure_backing_module_index_table(),
-    _ = ets:match_delete(beamtalk_backing_module_index, {'_', ClassName, '_'}),
     case meta_backing_module(Meta) of
         none ->
+            _ = ets:match_delete(beamtalk_backing_module_index, {'_', ClassName, '_'}),
             ok;
         BackingModule ->
             ets:insert(beamtalk_backing_module_index, {BackingModule, ClassName, Pid}),
+            _ = ets:select_delete(beamtalk_backing_module_index, [
+                {
+                    {'$1', ClassName, '$2'},
+                    [{'orelse', {'=/=', '$1', BackingModule}, {'=/=', '$2', Pid}}],
+                    [
+                        true
+                    ]
+                }
+            ]),
             ok
     end.
 
