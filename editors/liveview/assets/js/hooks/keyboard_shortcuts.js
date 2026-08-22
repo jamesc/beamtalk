@@ -106,9 +106,11 @@ export const KeyboardShortcuts = {
     const key = ev.key.toLowerCase()
     const chord = isMod(ev) ? "mod+" + key : isPlain(ev) ? key : null
     if (!chord) return
-    if (chord === key && claimedByWindowKeydown(key)) return
     const action = this.bindings[chord]
+    // The `data-scope="window"` hook fires on every keydown anywhere on the
+    // page, so only pay for the DOM scan once a binding actually matches.
     if (!action) return
+    if (chord === key && claimedByWindowKeydown(key)) return
     ev.preventDefault()
 
     if (typeof action !== "string") return
