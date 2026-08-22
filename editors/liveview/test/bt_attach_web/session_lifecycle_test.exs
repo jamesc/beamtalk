@@ -159,4 +159,51 @@ defmodule BtAttachWeb.SessionLifecycleTest do
       assert {:error, {:redirect, %{to: "/"}}} = live_probe(conn)
     end
   end
+
+  describe "session cookie Secure flag is runtime-resolved (BT-3233)" do
+    # WKWebView (the Tauri desktop webview) silently drops `Secure` cookies
+    # over plain http — no localhost exception like Chrome/Firefox — so the
+    # desktop posture must serve the session cookie without `Secure`, while a
+    # TLS deployment keeps it. The flag must flip WITHOUT recompiling: a
+    # compile-time flag frozen into the endpoint was the bug.
+    setup do
+      on_exit(fn -> Application.delete_env(:bt_attach, :secure_session) end)
+      :ok
+    end
+
+    defp session_cookie(conn) do
+      conn
+      |> Plug.Conn.get_resp_header("set-cookie")
+      |> Enum.find(&String.starts_with?(&1, "_bt_attach_key="))
+    end
+
+    test "desktop/local posture (secure_session false): cookie is sent without Secure",
+         %{conn: conn} do
+      Application.put_env(:bt_attach, :secure_session, false)
+
+      cookie = conn |> get(~p"/") |> session_cookie()
+      assert cookie
+      refute cookie =~ ~r/;\s*secure/i
+    end
+
+    test "TLS posture (secure_session true): cookie is Secure, same compiled endpoint",
+         %{conn: conn} do
+      Application.put_env(:bt_attach, :secure_session, true)
+
+      cookie = conn |> get(~p"/") |> session_cookie()
+      assert cookie
+      assert cookie =~ ~r/;\s*secure/i
+    end
+
+    test "the /live socket's connect_info session options are an MFA, not a frozen list" do
+      {_path, _module, opts} =
+        Enum.find(BtAttachWeb.Endpoint.__sockets__(), fn {path, _, _} -> path == "/live" end)
+
+      assert {BtAttachWeb.Endpoint, :session_options, []} =
+               get_in(opts, [:websocket, :connect_info])[:session]
+
+      assert {BtAttachWeb.Endpoint, :session_options, []} =
+               get_in(opts, [:longpoll, :connect_info])[:session]
+    end
+  end
 end
