@@ -187,9 +187,19 @@ fn read_erlang_cookie() -> Option<String> {
 }
 
 /// Decide whether ephemeral cleanup should stop a workspace node.
-/// Returns true when ephemeral flag is set and there is no local BEAM child guard (detached workspace).
-pub(crate) fn should_stop_workspace(ephemeral: bool, beam_guard_present: bool) -> bool {
-    ephemeral && !beam_guard_present
+///
+/// Returns true only when the ephemeral flag is set, there is no local BEAM
+/// child guard (i.e. the workspace is detached rather than `--foreground`),
+/// AND this invocation is the one that spawned the workspace
+/// (`is_new_workspace`). An ephemeral REPL that merely *attached* to an
+/// already-running, persistent workspace must never tear it down on exit
+/// (BT-3224) — only the invocation that started the node owns its lifecycle.
+pub(crate) fn should_stop_workspace(
+    ephemeral: bool,
+    beam_guard_present: bool,
+    is_new_workspace: bool,
+) -> bool {
+    ephemeral && !beam_guard_present && is_new_workspace
 }
 
 /// Decide whether to enter the interactive (rustyline) REPL loop.
@@ -516,7 +526,7 @@ pub fn run(
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
 
     // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
-    if should_stop_workspace(ephemeral, beam_guard_opt.is_some()) {
+    if should_stop_workspace(ephemeral, beam_guard_opt.is_some(), is_new_workspace) {
         if let Some(workspace_id) = workspace_id_opt {
             if let Err(e) = crate::commands::workspace::stop_workspace(Some(&workspace_id), false) {
                 eprintln!("Warning: failed to stop workspace {workspace_id}: {e}");
@@ -534,18 +544,26 @@ mod ephemeral_tests {
     use super::should_stop_workspace;
 
     #[test]
-    fn stops_when_ephemeral_and_no_guard() {
-        assert!(should_stop_workspace(true, false));
+    fn stops_when_ephemeral_new_workspace_and_no_guard() {
+        assert!(should_stop_workspace(true, false, true));
     }
 
     #[test]
     fn not_stop_when_not_ephemeral() {
-        assert!(!should_stop_workspace(false, false));
+        assert!(!should_stop_workspace(false, false, true));
     }
 
     #[test]
     fn not_stop_when_guard_present() {
-        assert!(!should_stop_workspace(true, true));
+        assert!(!should_stop_workspace(true, true, true));
+    }
+
+    /// BT-3224: `beamtalk repl -e` against a pre-existing/persistent
+    /// workspace (this invocation only attached, it didn't spawn the node)
+    /// must never send a shutdown request on exit.
+    #[test]
+    fn not_stop_when_ephemeral_but_attached_to_existing_workspace() {
+        assert!(!should_stop_workspace(true, false, false));
     }
 }
 
