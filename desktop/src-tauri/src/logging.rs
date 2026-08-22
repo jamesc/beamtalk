@@ -41,7 +41,7 @@ const LOG_FILE_NAME: &str = "launcher.log";
 /// realistic `limit` (the picker UI caps its own display at 2000 lines)
 /// almost never needs the "there weren't enough lines in this window" retry
 /// this function's implementation does. Full rotation is tracked separately
-/// (BT-3228) — this is only a read-side bound, not a write-side cap.
+/// (BT-3229) — this is only a read-side bound, not a write-side cap.
 const MAX_TAIL_READ_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Keeps `tracing-appender`'s background flush thread alive; dropping this
@@ -226,7 +226,7 @@ pub fn read_recent_logs(limit: usize) -> Vec<String> {
 ///
 /// Bounded to the last [`MAX_TAIL_READ_BYTES`] of the file (BT-3225 review
 /// follow-up) rather than reading it in full — `launcher.log` has no
-/// rotation yet (BT-3228) and grows across every restart.
+/// rotation yet (BT-3229) and grows across every restart.
 fn read_recent_lines_from(path: &Path, limit: usize) -> Vec<String> {
     use std::io::{Read, Seek, SeekFrom};
 
