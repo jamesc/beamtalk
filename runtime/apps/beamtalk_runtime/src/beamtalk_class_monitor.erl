@@ -244,10 +244,10 @@ restart_within_budget(
                         #{class => ClassName, reason => RestartReason}
                     )
             catch
-                Class:CatchReason ->
+                ErrClass:CatchReason ->
                     ?LOG_ERROR(
                         "Eager restart of crashed class '~p' raised ~p:~p",
-                        [ClassName, Class, CatchReason],
+                        [ClassName, ErrClass, CatchReason],
                         #{class => ClassName, reason => CatchReason}
                     )
             end,

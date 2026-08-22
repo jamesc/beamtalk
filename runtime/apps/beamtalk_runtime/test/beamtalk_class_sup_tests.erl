@@ -20,16 +20,61 @@ eager crash recovery via `beamtalk_class_monitor`.
 setup() ->
     setup(#{}).
 
+%% In a shared EUnit node an earlier suite may have run
+%% `application:ensure_all_started(beamtalk_runtime)` and left the app
+%% running — then beamtalk_class_sup and beamtalk_class_monitor are already
+%% registered as beamtalk_runtime_sup children. Adopt the running sup
+%% (start_child works the same either way), and swap the app's monitor out
+%% via supervisor:terminate_child so each fixture gets a fresh monitor with
+%% its own budget opts; teardown restores it via supervisor:restart_child.
 setup(MonitorOpts) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_pid_table(),
-    {ok, SupPid} = beamtalk_class_sup:start_link(),
+    {SupPid, SupOwned} =
+        case whereis(beamtalk_class_sup) of
+            undefined ->
+                {ok, P} = beamtalk_class_sup:start_link(),
+                {P, true};
+            P ->
+                {P, false}
+        end,
+    RestoreMonitor = displace_registered_monitor(),
     {ok, MonPid} = beamtalk_class_monitor:start_link(MonitorOpts),
-    #{sup => SupPid, monitor => MonPid}.
+    #{sup => SupPid, sup_owned => SupOwned, monitor => MonPid, restore_monitor => RestoreMonitor}.
 
-teardown(#{sup := SupPid, monitor := MonPid}) ->
+%% Clear the beamtalk_class_monitor registered name so the fixture can start
+%% its own. Returns true when the displaced monitor was the runtime app's
+%% supervised child (teardown must restart_child it).
+displace_registered_monitor() ->
+    case whereis(beamtalk_class_monitor) of
+        undefined ->
+            false;
+        Pid ->
+            case whereis(beamtalk_runtime_sup) of
+                undefined ->
+                    stop_if_alive(Pid),
+                    false;
+                _ ->
+                    case supervisor:terminate_child(beamtalk_runtime_sup, beamtalk_class_monitor) of
+                        ok ->
+                            true;
+                        {error, _} ->
+                            %% Registered but not the app's child (leaked from
+                            %% another suite) — stop it directly.
+                            stop_if_alive(Pid),
+                            false
+                    end
+            end
+    end.
+
+teardown(#{
+    sup := SupPid,
+    sup_owned := SupOwned,
+    monitor := MonPid,
+    restore_monitor := RestoreMonitor
+}) ->
     %% Stop the monitor FIRST so class cleanup below cannot trigger eager
     %% restarts, then stop this module's classes gracefully, then the sup.
     %% Leaving either registered would change the routing behaviour of every
@@ -58,7 +103,14 @@ teardown(#{sup := SupPid, monitor := MonPid}) ->
             _:_ -> []
         end
     ),
-    stop_if_alive(SupPid),
+    case SupOwned of
+        true -> stop_if_alive(SupPid);
+        false -> ok
+    end,
+    case RestoreMonitor of
+        true -> catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor);
+        false -> ok
+    end,
     ok.
 
 stop_if_alive(Pid) when is_pid(Pid) ->
@@ -276,17 +328,47 @@ restart_budget_test_() ->
 fallback_without_sup_test_() ->
     {setup,
         fun() ->
-            %% No supervisor / monitor here — the standalone-EUnit context.
+            %% The fixture needs beamtalk_class_sup to be ABSENT. If a prior
+            %% suite left the runtime app running, carve its class_sup out via
+            %% supervisor:terminate_child (restored in teardown); a leaked
+            %% standalone sup is stopped directly.
             beamtalk_class_registry:ensure_pg_started(),
             beamtalk_class_registry:ensure_hierarchy_table(),
             beamtalk_class_registry:ensure_module_table(),
             beamtalk_class_registry:ensure_pid_table(),
-            ok
+            case whereis(beamtalk_class_sup) of
+                undefined ->
+                    false;
+                SupPid ->
+                    case whereis(beamtalk_runtime_sup) of
+                        undefined ->
+                            stop_if_alive(SupPid),
+                            false;
+                        _ ->
+                            case
+                                supervisor:terminate_child(
+                                    beamtalk_runtime_sup, beamtalk_class_sup
+                                )
+                            of
+                                ok ->
+                                    true;
+                                {error, _} ->
+                                    stop_if_alive(SupPid),
+                                    false
+                            end
+                    end
+            end
         end,
-        fun(_) ->
+        fun(RestoreSup) ->
             case beamtalk_class_registry:whereis_class('SupTest3236G') of
                 undefined -> ok;
                 P -> stop_if_alive(P)
+            end,
+            case RestoreSup of
+                true ->
+                    catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_sup);
+                false ->
+                    ok
             end
         end,
         fun(_) ->
