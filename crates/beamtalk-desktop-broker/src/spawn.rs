@@ -375,8 +375,25 @@ fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
 /// the same underlying file description — via [`File::try_clone`], not two
 /// independent `open` calls — so stdout and stderr share one file offset and
 /// interleave in write order rather than racing to overwrite each other.
+///
+/// Created `0o600` (owner-only) on Unix, matching every other
+/// security-relevant file already in the same workspace directory
+/// (`workspace.log`, `cookie`, `vm.args`, `pid`, `port` are all `0600`) —
+/// the front's own `Logger` output can carry the same class of sensitive
+/// runtime detail `workspace.log` does, so it gets the same posture rather
+/// than the world-readable default (`create(true)`'s default mode, same as
+/// e.g. `metadata.json` — appropriate there, not here). No Windows
+/// equivalent is set here; it inherits the parent directory's ACLs, same as
+/// this crate's other Windows gaps this module's doc comment already notes.
 fn open_front_log(path: &Path) -> io::Result<(File, File)> {
-    let file = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
     let cloned = file.try_clone()?;
     Ok((file, cloned))
 }
@@ -1479,6 +1496,17 @@ mod tests {
         assert!(
             contents.contains("stderr-marker"),
             "expected attach.log to contain the launcher's stderr, got: {contents:?}"
+        );
+
+        // attach.log can carry the same class of sensitive runtime detail
+        // workspace.log does — must be owner-only, not the world-readable
+        // default (BT-3225 review follow-up).
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(&log_path).unwrap().permissions(),
+        ) & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "attach.log should be created 0600, got {mode:o}"
         );
     }
 

@@ -37,15 +37,22 @@ const attachProgress = new Map();
 const connectionBadges = new Map();
 
 // BT-3225: launcher-side log lines (backend `tracing` events), fed by the
-// `launcher-log-line` event and seeded from `~/.beamtalk/launcher.log` on
-// first open. Buffered here (not just appended to the DOM) so lines that
-// arrive while the panel is closed aren't lost, and capped so a long
+// `launcher-log-line` event once the panel has been opened once, seeded
+// from `~/.beamtalk/launcher.log` at that same moment. Lines that arrive
+// *before* the first open are deliberately dropped by `pushLogLine`, not
+// buffered — the same tracing event that fires `launcher-log-line` also
+// writes to `launcher.log`, so `get_launcher_logs`' file-tail read on first
+// open already contains everything that happened before it; buffering the
+// live copy too would show every one of those lines twice. Capped so a long
 // session's log can't grow the DOM without bound.
 const MAX_LOG_LINES = 2000;
 let logLines = [];
 let logsLoaded = false;
 
 function pushLogLine(line) {
+  if (!logsLoaded) {
+    return;
+  }
   logLines.push(line);
   if (logLines.length > MAX_LOG_LINES) {
     logLines = logLines.slice(logLines.length - MAX_LOG_LINES);
@@ -63,16 +70,18 @@ function renderLogs() {
 async function openLogPanel() {
   logPanelEl.hidden = false;
   if (!logsLoaded) {
-    logsLoaded = true;
+    let recent;
     try {
-      const recent = await invoke("get_launcher_logs", { limit: MAX_LOG_LINES });
-      logLines = recent.concat(logLines);
-      if (logLines.length > MAX_LOG_LINES) {
-        logLines = logLines.slice(logLines.length - MAX_LOG_LINES);
-      }
+      recent = await invoke("get_launcher_logs", { limit: MAX_LOG_LINES });
     } catch (err) {
-      logLines.push(`(failed to load launcher.log: ${err})`);
+      recent = [`(failed to load launcher.log: ${err})`];
     }
+    // Flip the flag in the same tick as the assignment (no `await` between
+    // them): any `launcher-log-line` event that arrives during the fetch
+    // above was dropped by `pushLogLine` (`logsLoaded` was still false), so
+    // assigning here can't race a concurrent append into `logLines`.
+    logLines = recent;
+    logsLoaded = true;
   }
   renderLogs();
 }
