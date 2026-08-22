@@ -284,7 +284,21 @@ fn attach_and_open_window(
     tracing::info!(workspace_id, port, "opening workspace window");
 
     let label = window_label(workspace_id);
-    let url = format!("http://127.0.0.1:{port}/")
+    // `localhost`, not `127.0.0.1`: the front's zero-config endpoint config
+    // (`editors/liveview/config/runtime.exs`, the `PHX_HOST` unset case)
+    // advertises `url: [host: "localhost", ...]` and — since it never sets
+    // `check_origin` itself, Phoenix's own default (`true`, checked against
+    // that configured host) applies — rejects any WebSocket/LiveView
+    // upgrade whose `Origin` header doesn't match it. Opening the window at
+    // `127.0.0.1` sent an `Origin: http://127.0.0.1:<port>` that endpoint
+    // always rejected ("Could not check origin for Phoenix.Socket
+    // transport"), leaving the LiveView page stuck on its own pre-connected
+    // render ("Connecting to workspace…") forever — the readiness probe
+    // above only checks a plain HTTP GET, which carries no `Origin` header
+    // and was never affected. `localhost` resolves to the same loopback
+    // address this window was always restricted to (`BT_ATTACH_BIND_IP`
+    // above), so this changes nothing about which interfaces are reachable.
+    let url = format!("http://localhost:{port}/")
         .parse::<tauri::Url>()
         .map_err(|e| format!("invalid front URL: {e}"))?;
     let window = match WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
@@ -464,6 +478,14 @@ pub fn get_launcher_logs(limit: Option<usize>) -> Result<Vec<String>, String> {
 pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     tracing::info!("quit requested");
     detach_all(&app, &state);
+    // Best-effort and idempotent (`LoggingGuard::flush` is a `.take()`):
+    // flush explicitly here rather than relying solely on `main.rs`'s
+    // `RunEvent::ExitRequested` handler, since it's not guaranteed that
+    // `app.exit()` below re-delivers that event before the process
+    // actually tears down.
+    if let Some(guard) = app.try_state::<Mutex<crate::logging::LoggingGuard>>() {
+        guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
+    }
     app.exit(0);
     Ok(())
 }

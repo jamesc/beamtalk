@@ -276,6 +276,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

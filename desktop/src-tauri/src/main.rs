@@ -26,18 +26,25 @@ mod launcher;
 mod logging;
 mod state;
 
+use std::sync::Mutex;
+
 use tauri::Manager;
 
+use logging::LoggingGuard;
 use state::AppState;
 
 fn main() {
     // Must run before any other `tracing::` call this process makes,
     // including the reap sweep and `resolve_launcher_path` calls in
     // `.setup()` just below — see `logging::init_logging`'s doc comment.
-    // `_logging_guard` is never read again, but must stay alive until
-    // `app.run()` below returns (dropping it early would silently stop
-    // `launcher.log` file writes).
-    let (_logging_guard, log_rx) = logging::init_logging();
+    // Managed as Tauri state (below, in `.setup()`) rather than left as a
+    // local binding: `commands::quit` and this file's own
+    // `RunEvent::ExitRequested` handler both need to call
+    // `LoggingGuard::flush` explicitly at shutdown — a plain `let` binding
+    // here would only flush on `main()`'s own scope exit, which
+    // `app.run()` below may never reach (see `LoggingGuard::flush`'s doc
+    // comment for why).
+    let (logging_guard, log_rx) = logging::init_logging();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -74,6 +81,7 @@ fn main() {
             let launcher = launcher::resolve_launcher_path(app.handle());
             tracing::info!(launcher = %launcher.display(), "resolved bt_attach launcher path");
             app.manage(AppState::new(launcher));
+            app.manage(Mutex::new(logging_guard));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -98,6 +106,14 @@ fn main() {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             let state = app_handle.state::<AppState>();
             commands::detach_all(app_handle, &state);
+            // Best-effort and idempotent (`LoggingGuard::flush` is a
+            // `.take()`) — `commands::quit`'s in-app "Quit" path already
+            // calls this itself, so this only matters for an OS-level quit
+            // (Cmd-Q, taskbar close, SIGTERM, …), which never goes through
+            // that command at all.
+            if let Some(guard) = app_handle.try_state::<Mutex<LoggingGuard>>() {
+                guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
+            }
         }
     });
 }
