@@ -140,16 +140,43 @@ impl io::Write for ChannelWriter {
 /// self-heals any file `tracing-appender` created at the process umask's
 /// default mode on a run before this existed, or before a given day's file
 /// happened to get chmod'd.
+///
+/// Opens each path with `O_NOFOLLOW` and chmods the resulting file
+/// descriptor (`File::set_permissions` uses `fchmod`, not a second path
+/// lookup) rather than chmodding by path directly — closes the TOCTOU
+/// window between [`list_rotated_log_files`]'s directory listing (which
+/// excludes symlinks via `DirEntry::metadata`, an `lstat`) and this call:
+/// under [`init_logging`]'s `std::env::temp_dir()` fallback (world-writable
+/// on Unix), a listed entry could otherwise be swapped for a symlink in
+/// between, and a path-based chmod follows symlinks. `O_NOFOLLOW` makes
+/// that open fail (`ELOOP`) instead of following it.
 #[cfg(unix)]
 fn ensure_owner_only(root_dir: &Path) {
-    use std::os::unix::fs::PermissionsExt;
     for path in list_rotated_log_files(root_dir) {
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        let _ = chmod_owner_only_no_follow(&path);
     }
 }
 
 #[cfg(not(unix))]
 fn ensure_owner_only(_root_dir: &Path) {}
+
+/// Opens `path` with `O_NOFOLLOW` and chmods the resulting file descriptor
+/// to `0600` (`File::set_permissions` is `fchmod`, not a second path
+/// lookup) — see [`ensure_owner_only`]'s doc comment for the TOCTOU this
+/// guards against. Split out from `ensure_owner_only` so the open-then-fchmod
+/// mechanism itself is directly testable against a symlink, independent of
+/// [`list_rotated_log_files`]'s own symlink filtering (which would
+/// otherwise mean a symlink never reaches this function in the first place
+/// during a normal, non-racing test).
+#[cfg(unix)]
+fn chmod_owner_only_no_follow(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+}
 
 /// Wraps the rolling file appender so a UTC day boundary crossed *while the
 /// process keeps running* also gets [`ensure_owner_only`] applied, not just
@@ -196,6 +223,16 @@ impl<W> RechmodOnRollover<W> {
 
 impl<W: io::Write> io::Write for RechmodOnRollover<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Write through *first*: `RollingFileAppender::write` (internal to
+        // `tracing-appender`) is what actually detects and performs the
+        // rollover — opening the new day's file, at the process' default
+        // umask, only happens inside this call. Sweeping before this point
+        // (the original, buggy ordering) chmods only files that already
+        // existed, then marks the day as already swept — so the file the
+        // rollover is about to create never gets chmod'd at all, for the
+        // rest of that day.
+        let result = self.inner.write(buf);
+
         let today = days_since_unix_epoch();
         if self
             .last_chmod_day
@@ -204,7 +241,8 @@ impl<W: io::Write> io::Write for RechmodOnRollover<W> {
         {
             ensure_owner_only(&self.root_dir);
         }
-        self.inner.write(buf)
+
+        result
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -731,18 +769,71 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn rechmod_on_rollover_rechmods_on_a_simulated_day_change() {
+    fn chmod_owner_only_no_follow_refuses_to_follow_a_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let target = tmp.path().join("real-target");
+        std::fs::write(&target, "secret").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let result = chmod_owner_only_no_follow(&link);
+
+        assert!(
+            result.is_err(),
+            "must refuse to open through a symlink (O_NOFOLLOW / ELOOP), not chmod its target"
+        );
+        let target_mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            target_mode, 0o644,
+            "the symlink target's permissions must be untouched by the refused attempt"
+        );
+    }
+
+    /// Stand-in for `tracing-appender`'s real rolling writer: creates its
+    /// target file (plain `OpenOptions::new().create(true).append(true)`,
+    /// no mode — matching that crate's own `create_writer`, internal to
+    /// it) *during* `write`, not before. Real rollover works the same way:
+    /// the new day's file does not exist until the write that triggers it.
+    struct FileCreatingWriter {
+        path: PathBuf,
+    }
+
+    impl io::Write for FileCreatingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?;
+            io::Write::write(&mut file, buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rechmod_on_rollover_chmods_a_file_the_inner_writer_creates_during_the_write() {
         use std::os::unix::fs::PermissionsExt;
 
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("launcher.log.2026-08-22");
-        std::fs::write(&path, "").unwrap();
-
-        let mut wrapper = RechmodOnRollover::new(Vec::new(), tmp.path().to_path_buf());
-        // Loosen the mode, then force `last_chmod_day` to a stale value so
-        // the write below looks like it crossed a day boundary — isolating
-        // the rollover path from the constructor's own initial chmod.
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        // Deliberately does NOT pre-create `path` — the point is to
+        // exercise the real ordering, where the inner writer creates the
+        // file *during* this wrapper's `write`, not before it. The bug
+        // this test would have caught: sweeping before delegating to
+        // `inner.write` chmods only files that already exist, then marks
+        // the day as already swept — so the file the rollover is about to
+        // create never gets chmod'd, for the rest of that day.
+        let mut wrapper = RechmodOnRollover::new(
+            FileCreatingWriter { path: path.clone() },
+            tmp.path().to_path_buf(),
+        );
+        // Force the write below to look like a day-boundary rollover.
         wrapper
             .last_chmod_day
             .store(0, std::sync::atomic::Ordering::Relaxed);
@@ -750,7 +841,10 @@ mod tests {
         std::io::Write::write_all(&mut wrapper, b"line\n").unwrap();
 
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "a write crossing a day boundary must re-chmod");
+        assert_eq!(
+            mode, 0o600,
+            "a file created by the inner writer during a rollover write must still end up owner-only"
+        );
     }
 
     #[cfg(unix)]

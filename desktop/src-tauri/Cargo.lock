@@ -271,6 +271,7 @@ dependencies = [
  "beamtalk-desktop-broker",
  "beamtalk-desktop-shell",
  "beamtalk-workspace",
+ "libc",
  "serde",
  "serde_json",
  "tauri",

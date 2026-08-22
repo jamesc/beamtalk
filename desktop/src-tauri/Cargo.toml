@@ -48,5 +48,11 @@ beamtalk-desktop-broker = { path = "../../crates/beamtalk-desktop-broker" }
 beamtalk-desktop-shell = { path = "../../crates/beamtalk-desktop-shell" }
 beamtalk-workspace = { path = "../../crates/beamtalk-workspace" }
 
+# Unix-only, mirrors beamtalk-desktop-broker's own Cargo.toml: O_NOFOLLOW for
+# ensure_owner_only's open-then-fchmod (logging.rs), closing the TOCTOU gap
+# between listing a rotated log file and chmodding it.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3.27.0"
