@@ -82,9 +82,15 @@ ran. Clearing rows can't prevent that: the write simply happens after the
 clear. Stamping the generation *before* the compute and checking it *after*
 means a bump anywhere in between is always visible to the reader: the stored
 generation is behind, so it's a permanent miss for that entry, not a
-resurrected stale value (BT-3222 review round 2). Table size stays bounded
-regardless — entries are only ever overwritten per-key, never accumulate
-across bumps. Bumped on:
+resurrected stale value (BT-3222 review round 2). A repeated `{ClassName,
+ProtocolName}` pair's entry is overwritten in place, never duplicated, so
+the table doesn't grow from re-querying the same pair across generations —
+but unlike the old whole-table flush, a bump never removes rows for a pair
+that stops being queried (e.g. a class renamed or removed mid-session), so
+those linger until that exact name is queried again. Unbounded in principle
+over a long, churny hot-reload session with ever-fresh class names; accepted
+because real class/protocol names are near-universally reused, not
+uniquely generated per reload. Bumped on:
 
 - `register_protocol/1` / `unregister_protocol/1` (this module)
 - class registration and hot reload — `beamtalk_object_class:init/1` and its
@@ -441,7 +447,7 @@ Call sites are listed there.
 invalidate_conforms_cache() ->
     try
         ets:update_counter(
-            ?CONFORMS_CACHE_TABLE, ?CONFORMS_CACHE_GEN_KEY, 1, {?CONFORMS_CACHE_GEN_KEY, 1}
+            ?CONFORMS_CACHE_TABLE, ?CONFORMS_CACHE_GEN_KEY, 1, {?CONFORMS_CACHE_GEN_KEY, 0}
         ),
         ok
     catch
