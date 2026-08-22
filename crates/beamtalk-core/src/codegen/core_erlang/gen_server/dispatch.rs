@@ -13,6 +13,43 @@ use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Block, Expression, MethodKind, Module};
 use crate::docvec;
 
+/// Collects all primary method names and arities from a module.
+///
+/// Walks two sources in order:
+/// 1. Expression-based script/workspace methods — top-level `name := [block]`
+///    assignments compiled as the module's methods (LIVE compilation mode,
+///    exercised by the test-package-compiler snapshot cases). Not dead code:
+///    removing this strips methods from every compiled script.
+/// 2. Class definition primary methods — `MethodKind::Primary` entries from
+///    every class in the module.
+///
+/// Both `generate_method_table` and `generate_has_method` share this traversal;
+/// the comment above lives here in one place rather than being duplicated.
+fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usize)> {
+    let mut methods: Vec<(String, usize)> = module
+        .expressions
+        .iter()
+        .filter_map(|stmt| {
+            if let Expression::Assignment { target, value, .. } = &stmt.expression {
+                if let (Expression::Identifier(id), Expression::Block(block)) =
+                    (target.as_ref(), value.as_ref())
+                {
+                    return Some((id.name.to_string(), block.arity()));
+                }
+            }
+            None
+        })
+        .collect();
+    for class in &module.classes {
+        for method in &class.methods {
+            if method.kind == MethodKind::Primary {
+                methods.push((method.selector.name().to_string(), method.selector.arity()));
+            }
+        }
+    }
+    methods
+}
+
 impl CoreErlangGenerator {
     /// Generates the method table mapping selector names to arities.
     ///
@@ -31,35 +68,7 @@ impl CoreErlangGenerator {
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        // Collect methods from expression-based script/workspace modules: top-level
-        // `name := [block]` assignments compiled as the module's methods. This is a
-        // LIVE compilation mode (the package/workspace compiler — exercised by the
-        // test-package-compiler snapshot cases), distinct from class definitions.
-        // Not dead code: removing it strips methods from every compiled script.
-        let mut methods: Vec<(String, usize)> = module
-            .expressions
-            .iter()
-            .filter_map(|stmt| {
-                if let Expression::Assignment { target, value, .. } = &stmt.expression {
-                    if let (Expression::Identifier(id), Expression::Block(block)) =
-                        (target.as_ref(), value.as_ref())
-                    {
-                        return Some((id.name.to_string(), block.arity()));
-                    }
-                }
-                None
-            })
-            .collect();
-
-        // Collect methods from class definitions
-        for class in &module.classes {
-            for method in &class.methods {
-                // Only include primary methods in the method table for now
-                if method.kind == MethodKind::Primary {
-                    methods.push((method.selector.name().to_string(), method.selector.arity()));
-                }
-            }
-        }
+        let methods = collect_primary_method_names_and_arities(module);
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, fieldNames,
         // fieldAt:, fieldAt:put:, perform:, perform:withArguments:) are now
@@ -105,35 +114,10 @@ impl CoreErlangGenerator {
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        // Collect methods from expression-based script/workspace modules: top-level
-        // `name := [block]` assignments compiled as the module's methods. This is a
-        // LIVE compilation mode (the package/workspace compiler — exercised by the
-        // test-package-compiler snapshot cases), distinct from class definitions.
-        // Not dead code: removing it strips methods from every compiled script.
-        let mut methods: Vec<String> = module
-            .expressions
-            .iter()
-            .filter_map(|stmt| {
-                if let Expression::Assignment { target, value, .. } = &stmt.expression {
-                    if let (Expression::Identifier(id), Expression::Block(_)) =
-                        (target.as_ref(), value.as_ref())
-                    {
-                        return Some(id.name.to_string());
-                    }
-                }
-                None
-            })
+        let methods: Vec<String> = collect_primary_method_names_and_arities(module)
+            .into_iter()
+            .map(|(name, _)| name)
             .collect();
-
-        // Collect methods from class definitions
-        for class in &module.classes {
-            for method in &class.methods {
-                // Only include primary methods (matching method_table behavior)
-                if method.kind == MethodKind::Primary {
-                    methods.push(method.selector.name().to_string());
-                }
-            }
-        }
 
         // ADR 0006 Phase 1b: Reflection methods are inherited from Object.
 
