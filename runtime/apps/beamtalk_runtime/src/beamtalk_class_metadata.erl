@@ -634,9 +634,10 @@ reset_runtime_class_methods(Name) ->
 %% `undefined` writes). `undefined` never has a corresponding index row —
 %% only actually-written superclass values (including the literal atom
 %% `none` for a root class) do — so it is never inserted or deleted as an
-%% edge target. Best-effort: a table-absent race (only possible mid-teardown,
-%% since new/0 always runs first in every caller) degrades to leaving the
-%% index momentarily stale rather than crashing the write it is attached to.
+%% edge target. Best-effort: a table-absent race (e.g. mid-teardown, or
+%% `delete/1`'s call site, which does not call `new/0` first) degrades to
+%% leaving the index momentarily stale rather than crashing the write it is
+%% attached to.
 -spec sync_subclass_index(class_name(), superclass() | undefined, superclass() | undefined) -> ok.
 sync_subclass_index(_Name, Same, Same) ->
     ok;
