@@ -7,10 +7,18 @@
 // see `spikes/cockpit-ux-spike/app.jsx`).
 //
 // The bindings are declared on the element as JSON, keyed by the lowercased key
-// with a `mod+` prefix meaning "Cmd on macOS / Ctrl elsewhere":
+// with a `mod+` prefix meaning "Cmd on macOS / Ctrl elsewhere". A key WITHOUT
+// the prefix (e.g. "escape") matches the bare key with no Cmd/Ctrl/Alt held:
 //
 //   <form phx-hook="KeyboardShortcuts" id="..."
-//         data-shortcuts='{"mod+s":"submit","mod+d":"do_it"}'>
+//         data-shortcuts='{"mod+s":"submit","escape":"tab_close_active"}'>
+//
+// Events another handler already claimed (`defaultPrevented`) are skipped, so
+// e.g. Escape dismissing CodeMirror's autocomplete or the omni-search popover
+// (both preventDefault) never ALSO fires a bare "escape" binding. LiveView's
+// own `phx-window-keydown` dismissals never preventDefault, so bare-key chords
+// additionally defer to any mounted `[phx-window-keydown][phx-key]` element
+// claiming the same key (see `claimedByWindowKeydown`).
 //
 // Each value is the action fired when the chord matches; the chord's default
 // browser action (e.g. the Save dialog for ⌘S) is prevented either way:
@@ -37,6 +45,29 @@ function isMod(ev) {
   // require *exactly* one so a user with Ctrl held on macOS still triggers it,
   // but we DO reject Alt/Shift so plain editing chords don't misfire.
   return (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey
+}
+
+function isPlain(ev) {
+  // A bare-key chord like "escape": no Cmd/Ctrl/Alt held. Shift is allowed so
+  // the binding still fires with a stray Shift down (none of the bare keys we
+  // bind are shift-sensitive).
+  return !ev.metaKey && !ev.ctrlKey && !ev.altKey
+}
+
+function claimedByWindowKeydown(key) {
+  // LiveView surfaces that dismiss on a bare key (the New Class modal, the
+  // Senders/Implementors popover, the settings dropdown) mount an element with
+  // `phx-window-keydown` + `phx-key` only while they are open. Their dismiss
+  // can't be seen via `defaultPrevented` (LiveView never preventDefaults it),
+  // and it can't be checked server-side either: LiveView's own window listener
+  // registered before this hook's, so the dismiss event from the SAME
+  // keystroke is processed first and has already cleared the "is it open"
+  // assign by the time our event arrives. The DOM at keypress time is the
+  // reliable signal — if any mounted element claims this key, the press means
+  // "dismiss that surface", not the bare-key chord.
+  return Array.from(
+    document.querySelectorAll("[phx-window-keydown][phx-key]")
+  ).some((el) => (el.getAttribute("phx-key") || "").toLowerCase() === key)
 }
 
 export const KeyboardShortcuts = {
@@ -71,10 +102,15 @@ export const KeyboardShortcuts = {
   },
 
   handleKeyDown(ev) {
-    if (!isMod(ev) || !ev.key) return
-    const chord = "mod+" + ev.key.toLowerCase()
+    if (ev.defaultPrevented || !ev.key) return
+    const key = ev.key.toLowerCase()
+    const chord = isMod(ev) ? "mod+" + key : isPlain(ev) ? key : null
+    if (!chord) return
     const action = this.bindings[chord]
+    // The `data-scope="window"` hook fires on every keydown anywhere on the
+    // page, so only pay for the DOM scan once a binding actually matches.
     if (!action) return
+    if (chord === key && claimedByWindowKeydown(key)) return
     ev.preventDefault()
 
     if (typeof action !== "string") return

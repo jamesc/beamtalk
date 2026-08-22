@@ -112,11 +112,14 @@ defmodule BtAttachWeb.WorkspaceLive do
       themed `--t-*` CSS variables still drive the colours. This retired the old
       transparent-textarea-over-`<pre>` overlay (CodeEditor) and the separate
       SelectionTracker hook, both folded into CmEditor.
-    * `KeyboardShortcuts` — maps Cmd/Ctrl chords to actions from a
-      `data-shortcuts` JSON map. The method-editor form binds ⌘S → `submit`
-      (request-submits the form so class/selector/source ride the normal
-      `save_method` `phx-submit`); the Workspace dock binds ⌘D/⌘P/⌘I →
-      `submit:<action>` (BT-2490), riding the eval form's hidden `action` field.
+    * `KeyboardShortcuts` — maps Cmd/Ctrl chords (and bare keys like Escape)
+      to actions from a `data-shortcuts` JSON map. The method-editor form binds
+      ⌘S → `submit` (request-submits the form so class/selector/source ride the
+      normal `save_method` `phx-submit`); the Workspace dock binds ⌘D/⌘P/⌘I →
+      `submit:<action>` (BT-2490), riding the eval form's hidden `action` field;
+      the cockpit root binds Esc/⌘W → `tab_close_active` (close the focused
+      editor tab — ⌘W only reaches the page in the desktop shell, browsers
+      reserve it) and ⌘/ → `toggle_doc` (documentation disclosure).
 
   ## Tweaks panel (BT-2487, epic BT-2482 Phase 1)
 
@@ -1559,6 +1562,31 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("tab_close", _params, socket), do: {:noreply, socket}
+
+  # Keyboard chord (Esc in the browser, ⌘W in the desktop shell) closing the
+  # focused editor tab — same path as clicking the tab's ✕, including the
+  # silent discard of a dirty tab. No-op when nothing is open. While an
+  # Escape-dismissable surface is open (New Class modal, Senders/Implementors
+  # popover, Settings dropdown), Escape means "dismiss it", never "close the
+  # tab". The PRIMARY defence is client-side (`claimedByWindowKeydown` in
+  # `keyboard_shortcuts.js`): those surfaces mount a `phx-window-keydown`
+  # element only while open, and LiveView's window listener fires before the
+  # hook's, so the same keystroke's dismiss event can reach the server first
+  # and clear these assigns before this handler runs — the guard below is a
+  # best-effort backstop (and the testable contract) for any push that does
+  # arrive while a surface is still open.
+  def handle_event("tab_close_active", _params, socket) do
+    %{assigns: assigns} = socket
+
+    escape_claimed? =
+      assigns.new_class_open or assigns.show_settings or assigns.nav_popover != nil
+
+    case assigns.active_tab do
+      _ when escape_claimed? -> {:noreply, socket}
+      nil -> {:noreply, socket}
+      id -> {:noreply, close_tab(socket, id)}
+    end
+  end
 
   # Open a fresh class-definition tab (the spike's "+ def" affordance): a tab
   # whose source is a *class definition* rather than a method body, so saving it
@@ -8946,7 +8974,26 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="bt-cockpit">
+    <%!-- Workspace-wide keyboard chords ride the root element so they work no
+         matter which pane has focus (data-scope="window"): Esc closes the
+         focused editor tab (same path as its ✕), ⌘/ toggles the documentation
+         disclosure. "mod+w" is inert in a browser — Cmd/Ctrl+W is on every
+         browser's reserved list and closes the tab before the page sees it —
+         but the desktop (Tauri) webview delivers it once its menu no longer
+         claims ⌘W, giving the native app the real chord. --%>
+    <div
+      class="bt-cockpit"
+      id="workspace-shortcuts"
+      phx-hook="KeyboardShortcuts"
+      data-scope="window"
+      data-shortcuts={
+        Jason.encode!(%{
+          "escape" => "tab_close_active",
+          "mod+w" => "tab_close_active",
+          "mod+/" => "toggle_doc"
+        })
+      }
+    >
       <div class="app">
         <%!-- ── top bar (46px): brand + Attach-topology widget ───────────── --%>
         <div class="topbar">
