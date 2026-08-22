@@ -341,4 +341,155 @@ mod tests {
         assert!(drain_child_stderr(&mut child).is_none());
         let _ = child.wait();
     }
+
+    #[test]
+    fn read_port_from_child_parses_happy_path() {
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo 'BEAMTALK_PORT:12345'")
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn failed");
+
+        let port = read_port_from_child(&mut child).expect("should parse port");
+        assert_eq!(port, 12345);
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn read_port_from_child_skips_non_matching_lines() {
+        // Port line appears after unrelated startup lines.
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("printf 'some startup line\\nother line\\nBEAMTALK_PORT:8080\\n'")
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn failed");
+
+        let port =
+            read_port_from_child(&mut child).expect("should parse port after non-matching lines");
+        assert_eq!(port, 8080);
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn read_port_from_child_rejects_invalid_port_number() {
+        // The prefix matches but the port is not a valid u16 — must return an error.
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo 'BEAMTALK_PORT:not_a_port'")
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn failed");
+
+        let result = read_port_from_child(&mut child);
+        assert!(result.is_err(), "expected error for non-numeric port");
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn read_port_from_child_rejects_out_of_range_port() {
+        // A number too large for u16 must also fail.
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo 'BEAMTALK_PORT:99999'")
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn failed");
+
+        let result = read_port_from_child(&mut child);
+        assert!(result.is_err(), "expected error for out-of-range port");
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn read_port_from_child_fails_without_stdout_pipe() {
+        // When stdout is not piped, take() returns None → function returns an error.
+        let mut child = std::process::Command::new("true")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn failed");
+
+        let result = read_port_from_child(&mut child);
+        assert!(result.is_err(), "expected error when stdout is not piped");
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn resolve_port_uses_explicit_arg() {
+        // CLI flag wins regardless of environment.
+        let result = resolve_port(Some(4242));
+        assert_eq!(result.expect("should succeed"), 4242);
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn resolve_port_uses_env_var() {
+        // Uses BEAMTALK_REPL_PORT=9090 when no CLI flag is given.
+        // SAFETY: Test is serialized with #[serial(env_var)]; env var is removed before returning.
+        unsafe { std::env::set_var("BEAMTALK_REPL_PORT", "9090") };
+        let result = resolve_port(None);
+        // SAFETY: Test is serialized with #[serial(env_var)].
+        unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
+        assert_eq!(result.expect("should succeed"), 9090);
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn resolve_port_rejects_invalid_env_var() {
+        // Non-numeric BEAMTALK_REPL_PORT must produce an error.
+        // SAFETY: Test is serialized with #[serial(env_var)]; env var is removed before returning.
+        unsafe { std::env::set_var("BEAMTALK_REPL_PORT", "not_a_port") };
+        let result = resolve_port(None);
+        // SAFETY: Test is serialized with #[serial(env_var)].
+        unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
+        assert!(result.is_err(), "expected parse error for invalid env port");
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn resolve_port_returns_default_without_arg_or_env() {
+        // With no CLI flag and no env var, must return the OS-assigned sentinel (0).
+        // SAFETY: Test is serialized with #[serial(env_var)].
+        unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
+        let result = resolve_port(None);
+        assert_eq!(result.expect("should succeed"), DEFAULT_REPL_PORT);
+    }
+
+    #[test]
+    fn resolve_node_name_returns_explicit_arg() {
+        let result = resolve_node_name(Some("mynode".to_string()));
+        assert_eq!(result, Some("mynode".to_string()));
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn resolve_node_name_falls_back_to_env_var() {
+        // SAFETY: Test is serialized with #[serial(env_var)]; env var is removed before returning.
+        unsafe { std::env::set_var("BEAMTALK_NODE_NAME", "envnode") };
+        let result = resolve_node_name(None);
+        // SAFETY: Test is serialized with #[serial(env_var)].
+        unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
+        assert_eq!(result, Some("envnode".to_string()));
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn resolve_node_name_returns_none_when_nothing_set() {
+        // SAFETY: Test is serialized with #[serial(env_var)].
+        unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
+        let result = resolve_node_name(None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn resolve_node_name_prefers_explicit_arg_over_env() {
+        // SAFETY: Test is serialized with #[serial(env_var)]; env var is removed before returning.
+        unsafe { std::env::set_var("BEAMTALK_NODE_NAME", "envnode") };
+        let result = resolve_node_name(Some("clinode".to_string()));
+        // SAFETY: Test is serialized with #[serial(env_var)].
+        unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
+        assert_eq!(result, Some("clinode".to_string()));
+    }
 }
