@@ -427,6 +427,149 @@ loaded_class_index_reload_keeps_new_pid_test() ->
     ?assertEqual([], ets:lookup(beamtalk_loaded_classes, Class)).
 
 %%% ============================================================================
+%%% backing-module reverse index tests (BT-2736)
+%%% ============================================================================
+
+meta_backing_module_test_() ->
+    [
+        {"a real atom is returned as-is", fun() ->
+            ?assertEqual(
+                bt_native_mod,
+                beamtalk_class_registry:meta_backing_module(#{backing_module => bt_native_mod})
+            )
+        end},
+        {"a missing backing_module key is none", fun() ->
+            ?assertEqual(none, beamtalk_class_registry:meta_backing_module(#{}))
+        end},
+        {"an explicit `none` value is none", fun() ->
+            ?assertEqual(
+                none, beamtalk_class_registry:meta_backing_module(#{backing_module => none})
+            )
+        end},
+        {"an explicit `undefined` value is none", fun() ->
+            ?assertEqual(
+                none, beamtalk_class_registry:meta_backing_module(#{backing_module => undefined})
+            )
+        end},
+        {"a non-atom value is none", fun() ->
+            ?assertEqual(
+                none, beamtalk_class_registry:meta_backing_module(#{backing_module => "lists"})
+            )
+        end}
+    ].
+
+%% A class started through the normal lifecycle (init/1) with a `meta` map
+%% carrying `backing_module` shows up in the reverse index (write side); a
+%% class with no backing module never does. Passing `meta` directly in
+%% ClassInfo (rather than compiling a fake module) exercises the exact same
+%% code path init/1 uses for a real ADR 0056 `native:` facade, since init/1
+%% only consults `Module:'__beamtalk_meta'()` when `meta` is absent.
+backing_module_index_lifecycle_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_backing_module_index_table()
+        end,
+        fun(_) -> ok end, [
+            {"native-backed class appears under its backing module", fun() ->
+                Class = 'BackingIndexLifecycle2736',
+                Backing = bt_backing_lifecycle_2736,
+                ?assertNot(
+                    lists:member(Class, beamtalk_class_registry:classes_backing_module(Backing))
+                ),
+                ClassInfo = #{
+                    superclass => none,
+                    methods => #{},
+                    class_methods => #{},
+                    meta => #{backing_module => Backing}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(Class, ClassInfo),
+                ?assert(
+                    lists:member(Class, beamtalk_class_registry:classes_backing_module(Backing))
+                ),
+                ok = gen_server:stop(Pid),
+                ?assertNot(
+                    lists:member(Class, beamtalk_class_registry:classes_backing_module(Backing))
+                )
+            end},
+            {"a class with no backing module is never indexed", fun() ->
+                Class = 'BackingIndexNoNative2736',
+                ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+                {ok, Pid} = beamtalk_object_class:start_link(Class, ClassInfo),
+                try
+                    %% There is no module-less "none" bucket to check membership
+                    %% against directly; instead confirm the class never appears
+                    %% under a module name it was never given.
+                    ?assertNot(
+                        lists:member(
+                            Class,
+                            beamtalk_class_registry:classes_backing_module(
+                                bt_backing_never_assigned_2736
+                            )
+                        )
+                    )
+                after
+                    gen_server:stop(Pid)
+                end
+            end},
+            {"reload to a new backing module moves the class, not duplicates it", fun() ->
+                Class = 'BackingIndexReload2736',
+                OldBacking = bt_backing_reload_old_2736,
+                NewBacking = bt_backing_reload_new_2736,
+                ClassInfo = #{
+                    superclass => none,
+                    methods => #{},
+                    class_methods => #{},
+                    meta => #{backing_module => OldBacking}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link(Class, ClassInfo),
+                try
+                    ?assert(
+                        lists:member(
+                            Class, beamtalk_class_registry:classes_backing_module(OldBacking)
+                        )
+                    ),
+                    {ok, _} = beamtalk_object_class:update_class(Class, #{
+                        meta => #{backing_module => NewBacking}
+                    }),
+                    ?assertNot(
+                        lists:member(
+                            Class, beamtalk_class_registry:classes_backing_module(OldBacking)
+                        )
+                    ),
+                    ?assertEqual(
+                        [Class], beamtalk_class_registry:classes_backing_module(NewBacking)
+                    ),
+                    %% Reloading to "no backing module" drops the class entirely
+                    %% rather than leaving a stale row under NewBacking.
+                    {ok, _} = beamtalk_object_class:update_class(Class, #{meta => #{}}),
+                    ?assertNot(
+                        lists:member(
+                            Class, beamtalk_class_registry:classes_backing_module(NewBacking)
+                        )
+                    )
+                after
+                    gen_server:stop(Pid)
+                end
+            end}
+        ]}.
+
+%% A reload (same name, new pid) overwrites the row; the dying old process must
+%% not clobber the replacement — forget_backing_module_entries/2 is guarded on
+%% the pid, exactly like forget_loaded_class/2. BT-2736.
+backing_module_index_reload_keeps_new_pid_test() ->
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+    Class = 'BackingIndexPidGuard2736',
+    Backing = bt_backing_pid_guard_2736,
+    OldPid = list_to_pid("<0.9993.0>"),
+    NewPid = list_to_pid("<0.9994.0>"),
+    ets:insert(beamtalk_backing_module_index, {Backing, Class, NewPid}),
+    ok = beamtalk_class_registry:forget_backing_module_entries(Class, OldPid),
+    ?assertEqual([Class], beamtalk_class_registry:classes_backing_module(Backing)),
+    ok = beamtalk_class_registry:forget_backing_module_entries(Class, NewPid),
+    ?assertEqual([], beamtalk_class_registry:classes_backing_module(Backing)).
+
+%%% ============================================================================
 %%% get_method_return_type / get_class_method_return_type tests (BT-1002)
 %%% ============================================================================
 

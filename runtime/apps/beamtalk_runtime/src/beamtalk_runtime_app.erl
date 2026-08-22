@@ -47,6 +47,11 @@ start(_StartType, _StartArgs) ->
     %% BT-737: Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 
+    %% BT-2736: Create the backing-module reverse index ETS table at app
+    %% startup for the same reason as the loaded-class index above — owned by
+    %% the application master so it survives class process crashes.
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
 
@@ -62,6 +67,7 @@ start(_StartType, _StartArgs) ->
             beamtalk_class_registry:ensure_loaded_classes_table(),
             beamtalk_class_registry:ensure_class_warnings_table(),
             beamtalk_class_registry:ensure_pending_errors_table(),
+            beamtalk_class_registry:ensure_backing_module_index_table(),
             %% BT-2222: Same retroactive heir set for the unified class metadata
             %% table (created at line 31 before the supervisor existed).
             beamtalk_class_registry:ensure_hierarchy_table(),

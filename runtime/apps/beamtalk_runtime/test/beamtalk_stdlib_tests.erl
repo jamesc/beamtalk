@@ -59,6 +59,8 @@ stdlib_test_() ->
         {"Tuple class is registered", fun tuple_class_registered_test/0},
         {"BeamtalkInterface class is registered", fun system_dictionary_class_registered_test/0},
         {"TranscriptStream class is registered", fun transcript_stream_class_registered_test/0},
+        {"backing-module reverse index reflects real native stdlib classes (BT-2736)",
+            fun backing_module_index_reflects_real_stdlib_native_classes_test/0},
         {"method-bearing stdlib classes carry baked method_xref (BT-2385)",
             fun method_bearing_classes_indexed_test/0},
         {"Integer class has correct superclass", fun integer_superclass_test/0},
@@ -162,6 +164,35 @@ transcript_stream_class_registered_test() ->
     Pid = beamtalk_class_registry:whereis_class('TranscriptStream'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('TranscriptStream', beamtalk_object_class:class_name(Pid)).
+
+%% BT-2736: The backing-module reverse index (write side: beamtalk_object_class
+%% :init/1's beamtalk_class_registry:record_backing_module_entry/3 call) is
+%% populated from each class's *real, compiled* `__beamtalk_meta/0` here —
+%% unlike the beamtalk_class_registry_tests.erl coverage, which passes a
+%% hand-built `meta` map directly in ClassInfo. `Subprocess` / `TranscriptStream`
+%% / `ReactiveSubprocess` (Actor subclass: ... native: ...) are exactly the
+%% shape `delegate_callers_of_native_module/1` (LiveView "Callers" op) looks up
+%% by backing module, so this is the real end-to-end write-side contract: a
+%% normal stdlib load must leave the index resolvable by native module name,
+%% with no unrelated classes bleeding into the wrong bucket.
+backing_module_index_reflects_real_stdlib_native_classes_test() ->
+    ?assertEqual(
+        ['Subprocess'], beamtalk_class_registry:classes_backing_module(beamtalk_subprocess)
+    ),
+    ?assertEqual(
+        ['TranscriptStream'],
+        beamtalk_class_registry:classes_backing_module(beamtalk_transcript_stream)
+    ),
+    ?assertEqual(
+        ['ReactiveSubprocess'],
+        beamtalk_class_registry:classes_backing_module(beamtalk_reactive_subprocess)
+    ),
+    %% A module that backs no stdlib class stays the honest empty state.
+    ?assertEqual(
+        [], beamtalk_class_registry:classes_backing_module(bt_no_such_native_backing_module_xyz)
+    ),
+    %% A plain (non-native) class is never indexed under its own module name.
+    ?assertEqual([], beamtalk_class_registry:classes_backing_module('Integer')).
 
 %% BT-2385: Regression — these method-bearing stdlib classes previously loaded
 %% with NO baked method_xref, so they were absent from `xref_class_gen` and every

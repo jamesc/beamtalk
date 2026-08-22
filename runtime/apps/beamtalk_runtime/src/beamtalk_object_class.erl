@@ -496,6 +496,7 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_methods_table(),
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
+    beamtalk_class_registry:ensure_backing_module_index_table(),
     ok = pg:join(beamtalk_classes, self()),
 
     Superclass = maps:get(superclass, ClassInfo, none),
@@ -581,6 +582,12 @@ init({ClassName, ClassInfo}) ->
     %% read instead of an O(loaded-classes) gen_server walk. Mirrors the
     %% pg:join above and the forget_loaded_class in terminate/1.
     beamtalk_class_registry:record_loaded_class(ClassName, self()),
+
+    %% BT-2736: Record this class's native backing module (ADR 0056), if any,
+    %% in the reverse index so the LiveView "Callers" op on a native module
+    %% resolves its delegating classes in O(1) instead of scanning every
+    %% loaded class. Guarded/forgotten the same way at shutdown in terminate/2.
+    beamtalk_class_registry:record_backing_module_entry(ClassName, Meta, self()),
 
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
@@ -1195,6 +1202,15 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     _ =
         (try
             beamtalk_class_registry:forget_loaded_class(ClassName, self())
+        catch
+            _:_ -> ok
+        end),
+    %% BT-2736: Drop this class from the backing-module reverse index, guarded
+    %% on self() exactly like forget_loaded_class/2 above so a reload that
+    %% already recorded a replacement pid's row is not clobbered.
+    _ =
+        (try
+            beamtalk_class_registry:forget_backing_module_entries(ClassName, self())
         catch
             _:_ -> ok
         end),
@@ -1815,6 +1831,12 @@ apply_class_info(State, ClassInfo) ->
         maps:keys(NewClassMethods),
         merge
     ),
+    %% BT-2736: Reconcile the backing-module reverse index on reload too — a
+    %% recompile can add, change, or drop a class's `native:` backing module
+    %% (ADR 0056), and `record_backing_module_entry/3` unconditionally clears
+    %% any stale row for this class name before writing the current one (or
+    %% none). Mirrors sync_identity/6 immediately above.
+    beamtalk_class_registry:record_backing_module_entry(State#class_state.name, Meta, self()),
     seed_runtime_class_methods(State#class_state.name, NewClassMethods),
 
     State#class_state{
