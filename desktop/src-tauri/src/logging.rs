@@ -19,7 +19,7 @@
 //! on the *spawned front's* side, fixed alongside this).
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use tauri::{AppHandle, Emitter};
@@ -42,6 +42,19 @@ const LOG_FILE_NAME: &str = "launcher.log";
 /// How many daily rollovers [`init_logging`]'s appender keeps
 /// (`tracing_appender::rolling::Builder::max_log_files`) before pruning the
 /// oldest — one week, the retention window settled on for BT-3229.
+///
+/// This pruning is `tracing-appender`'s own, and — unlike
+/// [`list_rotated_log_files`]'s stricter `YYYY-MM-DD`-shaped match — it
+/// deletes anything on disk that merely starts with `LOG_FILE_NAME` once
+/// there are more than [`MAX_LOG_FILES`] such names (internal to that
+/// crate's `Inner::prune_old_logs`, keyed only on the prefix/suffix passed
+/// to `Builder`, no date-shape check when a prefix is set). In practice
+/// that's only ever this module's own rotated files plus, for a while, the
+/// bare pre-BT-3229 `launcher.log` this module also still reads — but a
+/// stray same-prefixed file dropped into `~/.beamtalk/` by hand (a manual
+/// `launcher.log.bak`, say) is fair game for that pruning too. Accepted
+/// tradeoff of using the crate's built-in rotation rather than reason to
+/// avoid it.
 const MAX_LOG_FILES: usize = 7;
 
 /// Bounds how much log content [`read_recent_logs`] reads from disk in
@@ -138,6 +151,80 @@ fn ensure_owner_only(root_dir: &Path) {
 #[cfg(not(unix))]
 fn ensure_owner_only(_root_dir: &Path) {}
 
+/// Wraps the rolling file appender so a UTC day boundary crossed *while the
+/// process keeps running* also gets [`ensure_owner_only`] applied, not just
+/// the file that existed when [`init_logging`] started.
+///
+/// `tracing-appender`'s own rollover (`RollingFileAppender::write`,
+/// internal to that crate) opens the new day's file with plain
+/// `OpenOptions::new().append(true).create(true)` — no mode — so a
+/// long-lived launcher left running across midnight would otherwise start
+/// appending to a file at the process' default umask (typically
+/// world-readable) until the next restart happened to call
+/// `ensure_owner_only` again. A one-off call from [`init_logging`] alone
+/// only covers the file that exists at startup.
+///
+/// Tracks "day" as a plain count of days since the Unix epoch rather than
+/// reproducing `tracing-appender`'s own `Rotation::date_format`/`join_date`
+/// logic (internal to that crate) — this only needs to detect *that* the
+/// day changed, not compute the exact filename, so it stays independent of
+/// that crate's internal date formatting. The check itself
+/// (`SystemTime::now` + an `AtomicI64` compare-and-swap) is cheap enough to
+/// run on every write; the actual directory sweep only runs on the write
+/// that first observes a new day, so a chatty logger doesn't turn this into
+/// a per-line filesystem scan.
+struct RechmodOnRollover<W> {
+    inner: W,
+    root_dir: PathBuf,
+    last_chmod_day: std::sync::atomic::AtomicI64,
+}
+
+impl<W> RechmodOnRollover<W> {
+    fn new(inner: W, root_dir: PathBuf) -> Self {
+        // Chmod immediately, matching the old pre-creation behavior's
+        // "always 0600 before anything can read from the file", then seed
+        // `last_chmod_day` so the *first* write doesn't immediately re-sweep
+        // the directory it was just handed.
+        ensure_owner_only(&root_dir);
+        Self {
+            inner,
+            root_dir,
+            last_chmod_day: std::sync::atomic::AtomicI64::new(days_since_unix_epoch()),
+        }
+    }
+}
+
+impl<W: io::Write> io::Write for RechmodOnRollover<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let today = days_since_unix_epoch();
+        if self
+            .last_chmod_day
+            .swap(today, std::sync::atomic::Ordering::Relaxed)
+            != today
+        {
+            ensure_owner_only(&self.root_dir);
+        }
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Days since the Unix epoch, UTC — matches the day boundary
+/// `tracing_appender::rolling::Rotation::DAILY` rotates on
+/// (`OffsetDateTime::now_utc()`, internal to that crate). `0` on a clock
+/// that reports before 1970 (never in practice) rather than panicking —
+/// [`RechmodOnRollover`] only needs *some* value that changes once per real
+/// day, not a historically accurate one.
+fn days_since_unix_epoch() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| (d.as_secs() / 86_400) as i64)
+        .unwrap_or(0)
+}
+
 /// Initialize the launcher's `tracing` subscriber: a file layer rotating
 /// daily under `~/.beamtalk/` (append, across restarts, [`MAX_LOG_FILES`]
 /// days kept — BT-3229) plus a channel layer whose receiver
@@ -178,14 +265,15 @@ pub fn init_logging() -> (LoggingGuard, mpsc::Receiver<String>) {
         })
         .ok();
 
-    // After (not before) opening today's file: unlike the old
-    // `Rotation::NEVER` fixed path, `tracing-appender` names today's file
-    // by today's date, so there's nothing to pre-create ahead of its own
-    // open — see `ensure_owner_only`'s doc comment.
-    ensure_owner_only(&root_dir);
-
     let (file_layer, file_guard) = match file_appender {
         Some(appender) => {
+            // `RechmodOnRollover` chmods today's file immediately (after,
+            // not before, opening it: unlike the old `Rotation::NEVER`
+            // fixed path, `tracing-appender` names today's file by today's
+            // date, so there's nothing to pre-create ahead of its own
+            // open — see its doc comment), and again on the first write
+            // after any later UTC day boundary the process lives past.
+            let appender = RechmodOnRollover::new(appender, root_dir.clone());
             let (non_blocking, guard) = tracing_appender::non_blocking(appender);
             (
                 Some(
@@ -263,14 +351,25 @@ pub fn read_recent_logs(limit: usize) -> Vec<String> {
 /// sorts before all of them ascending, i.e. last descending, which is
 /// exactly where a file that predates rotation belongs relative to any
 /// dated one.
-fn list_rotated_log_files(root_dir: &Path) -> Vec<std::path::PathBuf> {
+fn list_rotated_log_files(root_dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(root_dir) else {
         return Vec::new();
     };
 
-    let mut files: Vec<(String, std::path::PathBuf)> = entries
+    let mut files: Vec<(String, PathBuf)> = entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
+            // `DirEntry::metadata` is an `lstat`, not a `stat` — it does not
+            // follow symlinks — so this excludes both directories and
+            // symlinks, not just directories. Matters for both callers:
+            // [`ensure_owner_only`] must never chmod through a symlink onto
+            // an arbitrary target file (relevant mainly under
+            // [`init_logging`]'s `std::env::temp_dir()` fallback, a
+            // world-writable directory on Unix), and the read side has no
+            // business trying to tail a directory.
+            if !entry.metadata().ok()?.is_file() {
+                return None;
+            }
             let name = entry.file_name().to_str()?.to_string();
             let matches = name == LOG_FILE_NAME
                 || name
@@ -311,7 +410,7 @@ fn is_daily_rotation_date_suffix(suffix: &str) -> bool {
 /// files that took has hit [`MAX_TAIL_READ_BYTES`] — daily rotation caps
 /// any single file to roughly a day's writes, so a `limit`-sized window can
 /// legitimately need to reach into one or more earlier files to fill.
-fn read_recent_lines_from_files(files: &[std::path::PathBuf], limit: usize) -> Vec<String> {
+fn read_recent_lines_from_files(files: &[PathBuf], limit: usize) -> Vec<String> {
     let mut chunks_newest_first: Vec<Vec<String>> = Vec::new();
     let mut lines_so_far = 0usize;
     let mut bytes_budget = MAX_TAIL_READ_BYTES;
@@ -491,7 +590,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         assert_eq!(
             list_rotated_log_files(&tmp.path().join("does-not-exist")),
-            Vec::<std::path::PathBuf>::new()
+            Vec::<PathBuf>::new()
         );
     }
 
@@ -543,6 +642,139 @@ mod tests {
         assert_eq!(
             read_recent_lines_from_files(&[missing, older], 100),
             vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn list_rotated_log_files_finds_a_real_tracing_appender_daily_file() {
+        // End-to-end guard against a `tracing-appender` version bump
+        // silently changing `Rotation::DAILY`'s file-naming contract
+        // (`join_date`/`date_format`, internal to that crate) out from
+        // under `list_rotated_log_files`'s own prefix/date-shape matching
+        // — every other test in this module exercises
+        // `list_rotated_log_files` against hand-written filenames, which
+        // would stay green even if the two diverged.
+        use std::io::Write as _;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut appender = tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix(LOG_FILE_NAME)
+            .build(tmp.path())
+            .unwrap();
+        appender.write_all(b"hello\n").unwrap();
+        appender.flush().unwrap();
+
+        let files = list_rotated_log_files(tmp.path());
+        assert_eq!(files.len(), 1, "expected exactly one file, found {files:?}");
+        let name = files[0].file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("launcher.log."),
+            "unexpected file name from a real Builder: {name}"
+        );
+        assert_eq!(std::fs::read_to_string(&files[0]).unwrap(), "hello\n");
+    }
+
+    #[test]
+    fn list_rotated_log_files_excludes_a_same_prefixed_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("launcher.log.2026-08-22")).unwrap();
+        std::fs::write(tmp.path().join("launcher.log.2026-08-21"), "").unwrap();
+
+        let files = list_rotated_log_files(tmp.path());
+        let names: Vec<_> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["launcher.log.2026-08-21"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_rotated_log_files_excludes_a_same_prefixed_symlink() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let target = tmp.path().join("real-target.log");
+        std::fs::write(&target, "secret").unwrap();
+        std::os::unix::fs::symlink(&target, tmp.path().join("launcher.log.2026-08-22")).unwrap();
+        std::fs::write(tmp.path().join("launcher.log.2026-08-21"), "").unwrap();
+
+        let files = list_rotated_log_files(tmp.path());
+        let names: Vec<_> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["launcher.log.2026-08-21"],
+            "a symlink must not be chmod'd through to an arbitrary target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_owner_only_chmods_matching_files_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("launcher.log.2026-08-22");
+        std::fs::write(&path, "").unwrap();
+        // Start from a permissive mode so the assertion below proves the
+        // call actually changed something, not that the file happened to
+        // already be 0600 (e.g. from a restrictive umask).
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        ensure_owner_only(tmp.path());
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rechmod_on_rollover_rechmods_on_a_simulated_day_change() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("launcher.log.2026-08-22");
+        std::fs::write(&path, "").unwrap();
+
+        let mut wrapper = RechmodOnRollover::new(Vec::new(), tmp.path().to_path_buf());
+        // Loosen the mode, then force `last_chmod_day` to a stale value so
+        // the write below looks like it crossed a day boundary — isolating
+        // the rollover path from the constructor's own initial chmod.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        wrapper
+            .last_chmod_day
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+
+        std::io::Write::write_all(&mut wrapper, b"line\n").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a write crossing a day boundary must re-chmod");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rechmod_on_rollover_skips_the_sweep_within_the_same_day() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("launcher.log.2026-08-22");
+        std::fs::write(&path, "").unwrap();
+
+        let mut wrapper = RechmodOnRollover::new(Vec::new(), tmp.path().to_path_buf());
+        // Loosen the mode *after* construction's own initial chmod, and
+        // leave `last_chmod_day` alone (still "today") — the write below
+        // must see no day change and skip the sweep, leaving the loosened
+        // mode in place.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        std::io::Write::write_all(&mut wrapper, b"line\n").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o644,
+            "a same-day write must not re-sweep the directory"
         );
     }
 }
