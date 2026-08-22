@@ -225,6 +225,8 @@ infra_deny_list_contents_test() ->
     ?assert(sets:is_element(beamtalk_xref, DenyList)),
     ?assert(sets:is_element(beamtalk_workspace_changelog, DenyList)),
     ?assert(sets:is_element(beamtalk_runtime_sup, DenyList)),
+    ?assert(sets:is_element(beamtalk_class_sup, DenyList)),
+    ?assert(sets:is_element(beamtalk_class_monitor, DenyList)),
     ?assertNot(sets:is_element(some_user_actor, DenyList)).
 
 is_infra_predicate_test() ->
@@ -294,7 +296,9 @@ deny_list_parity_test() ->
         beamtalk_object_instances,
         beamtalk_trace_store,
         beamtalk_subprocess_sup,
-        beamtalk_reactive_subprocess_sup
+        beamtalk_reactive_subprocess_sup,
+        beamtalk_class_sup,
+        beamtalk_class_monitor
     ],
     lists:foreach(
         fun(Name) ->

@@ -26,6 +26,18 @@ budget.
 This supervisor is started by `beamtalk_runtime_sup` (before
 `beamtalk_bootstrap`, so the bootstrap stub classes register through it)
 and registered locally as `beamtalk_class_sup`.
+
+## Constraint: no class starts from within class init
+
+`start_child/2` serializes through this single supervisor process with an
+infinity timeout, and it blocks for the whole of
+`beamtalk_object_class:init/1`. Nothing reachable from that `init/1` may —
+directly or transitively — start another class (i.e. re-enter
+`beamtalk_object_class:start/2`): the nested `start_child` would deadlock
+the supervisor against itself with no timeout to break the cycle. Today
+`init/1`'s outward calls (xref registration, `beamtalk_protocol_registry`
+cache invalidation, compiler-server cast) are ETS-backed or async; keep it
+that way.
 """.
 
 -export([start_link/0, start_child/2]).

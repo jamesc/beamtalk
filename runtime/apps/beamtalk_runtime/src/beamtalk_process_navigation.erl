@@ -455,6 +455,11 @@ infra_deny_list() ->
             beamtalk_trace_store,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
+            %% BT-3236: class gen_servers moved under a supervisor; keep them
+            %% (and their recovery monitor) out of the default snapshot, as
+            %% class processes always were before supervision.
+            beamtalk_class_sup,
+            beamtalk_class_monitor,
             %% Workspace plumbing: the workspace supervisor itself, the
             %% ChangeLog, the compiler server/port, the REPL compiler.
             beamtalk_workspace_sup,

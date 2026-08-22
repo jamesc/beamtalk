@@ -145,6 +145,21 @@ start(ClassName, ClassInfo) ->
     Result =
         case whereis(beamtalk_class_sup) of
             undefined ->
+                %% Expected in standalone EUnit suites. In a running release
+                %% this branch means beamtalk_class_sup is dead or mid-restart
+                %% — the class still starts, but unsupervised; make that
+                %% visible rather than silently degrading.
+                case whereis(beamtalk_runtime_sup) of
+                    undefined ->
+                        ok;
+                    _ ->
+                        ?LOG_WARNING(
+                            "beamtalk_class_sup not running — starting class "
+                            "'~p' unsupervised",
+                            [ClassName],
+                            #{class => ClassName}
+                        )
+                end,
                 RegName = beamtalk_class_registry:registry_name(ClassName),
                 gen_server:start({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []);
             _SupPid ->

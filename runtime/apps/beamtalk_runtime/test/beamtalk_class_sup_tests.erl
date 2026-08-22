@@ -31,12 +31,27 @@ setup(MonitorOpts) ->
 
 teardown(#{sup := SupPid, monitor := MonPid}) ->
     %% Stop the monitor FIRST so class cleanup below cannot trigger eager
-    %% restarts, then stop each remaining class gracefully, then the sup.
+    %% restarts, then stop this module's classes gracefully, then the sup.
     %% Leaving either registered would change the routing behaviour of every
-    %% test module that runs after this one in the same VM.
+    %% test module that runs after this one in the same VM. Only classes this
+    %% module created (SupTest3236* prefix) are stopped — the pg group is
+    %% shared with other suites in the same EUnit node.
     stop_if_alive(MonPid),
+    %% A test may have replaced the monitor (monitor_restart_readopts_test_);
+    %% stop whatever currently holds the registered name too.
+    stop_if_alive(whereis(beamtalk_class_monitor)),
     lists:foreach(
-        fun(Pid) -> stop_if_alive(Pid) end,
+        fun(Pid) ->
+            case beamtalk_class_registry:class_name_for_pid(Pid) of
+                {ok, Name} ->
+                    case string:prefix(atom_to_list(Name), "SupTest3236") of
+                        nomatch -> ok;
+                        _ -> stop_if_alive(Pid)
+                    end;
+                not_found ->
+                    ok
+            end
+        end,
         try
             pg:get_members(beamtalk_classes)
         catch
@@ -286,3 +301,46 @@ fallback_without_sup_test_() ->
                 end}
             ]
         end}.
+
+unwatch_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"unwatched class is not restarted even on an abnormal exit", fun() ->
+                {ok, Pid} = beamtalk_object_class:start('SupTest3236H', minimal_class_info()),
+                %% Let the watch cast land, then unwatch (synchronous).
+                ok = beamtalk_class_monitor:unwatch('SupTest3236H'),
+                kill_and_wait(Pid),
+                timer:sleep(300),
+                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236H'))
+            end}
+        ]
+    end}.
+
+monitor_restart_readopts_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(Ctx) ->
+        [
+            {"a restarted monitor re-adopts surviving classes from pg",
+                {timeout, 30, fun() ->
+                    #{monitor := MonPid} = Ctx,
+                    {ok, OldPid} = beamtalk_object_class:start(
+                        'SupTest3236I', minimal_class_info()
+                    ),
+                    %% Simulate a monitor crash/restart cycle: the replacement
+                    %% must pick the surviving class back up from pg on init,
+                    %% not silently lose eager recovery (adversarial finding).
+                    stop_if_alive(MonPid),
+                    {ok, NewMon} = beamtalk_class_monitor:start_link(),
+                    ?assert(is_process_alive(NewMon)),
+                    kill_and_wait(OldPid),
+                    ?assertEqual(
+                        ok,
+                        wait_until(fun() ->
+                            case beamtalk_class_registry:whereis_class('SupTest3236I') of
+                                undefined -> false;
+                                P -> P =/= OldPid
+                            end
+                        end)
+                    )
+                end}}
+        ]
+    end}.
