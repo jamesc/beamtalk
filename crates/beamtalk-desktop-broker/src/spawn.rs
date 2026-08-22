@@ -1608,6 +1608,59 @@ mod tests {
         }
     }
 
+    /// BT-3226: `poll_try_wait_until` should observe an exit that happens
+    /// well before the deadline without waiting out the full grace period —
+    /// this is what lets the conflict path in
+    /// `spawn_front_with_port_retry` return early instead of always paying
+    /// the full `bind_failure_grace`.
+    #[cfg(unix)]
+    #[test]
+    fn poll_try_wait_until_returns_promptly_once_the_child_exits() {
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 7")
+            .spawn()
+            .unwrap();
+
+        let started = Instant::now();
+        let status = poll_try_wait_until(&mut child, Duration::from_secs(5))
+            .unwrap()
+            .expect("child should have exited");
+        let elapsed = started.elapsed();
+
+        assert_eq!(status.code(), Some(7));
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "expected an early return well under the 5s grace period, took {elapsed:?}"
+        );
+    }
+
+    /// BT-3226: a still-running child must not be misreported as exited —
+    /// `poll_try_wait_until` should keep polling right up to (and
+    /// including) the deadline and only then report `None`.
+    #[cfg(unix)]
+    #[test]
+    fn poll_try_wait_until_returns_none_when_the_child_outlives_the_deadline() {
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 5")
+            .spawn()
+            .unwrap();
+
+        let started = Instant::now();
+        let status = poll_try_wait_until(&mut child, Duration::from_millis(100)).unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(status, None, "child is still running, should report None");
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "should have waited out the full grace period, took {elapsed:?}"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
     #[cfg(unix)]
     #[test]
     fn spawn_front_with_port_retry_gives_up_after_max_attempts_when_launcher_always_exits() {
