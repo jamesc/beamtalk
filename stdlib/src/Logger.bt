@@ -21,6 +21,8 @@
 /// ```
 sealed typed Object subclass: Logger
 
+  // === Info ===
+
   /// Log a message at info level.
   ///
   /// ## Examples
@@ -39,6 +41,8 @@ sealed typed Object subclass: Logger
   /// ```
   class sealed info: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerInfoMeta
+
+  // === Warning ===
 
   /// Log a message at warning level.
   ///
@@ -59,6 +63,8 @@ sealed typed Object subclass: Logger
   class sealed warn: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerWarnMeta
 
+  // === Error ===
+
   /// Log a message at error level.
   ///
   /// ## Examples
@@ -77,6 +83,8 @@ sealed typed Object subclass: Logger
   /// ```
   class sealed error: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerErrorMeta
+
+  // === Debug ===
 
   /// Log a message at debug level.
   ///

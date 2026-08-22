@@ -33,6 +33,8 @@ sealed Announcer subclass: SystemAnnouncer
   class current -> SystemAnnouncer =>
     (Erlang beamtalk_announcements) systemAnnouncer
 
+  // === Prohibited operations ===
+
   /// PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.
   /// The system bus is async-only (ADR 0093 §1).
   announceAndWait: anEvent :: Announcement -> Nil =>

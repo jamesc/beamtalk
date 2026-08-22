@@ -14,6 +14,8 @@
 /// ```
 sealed typed Value subclass: CompiledMethod
 
+  // ===== Instance Methods — Accessors =====
+
   /// Return the method selector as a symbol.
   ///
   /// ## Examples
@@ -46,6 +48,8 @@ sealed typed Value subclass: CompiledMethod
   /// (Integer >> #abs) argumentCount // => 0
   /// ```
   argumentCount -> Integer => @primitive
+
+  // ===== Instance Methods — Conversions =====
 
   /// Return a developer-readable string representation.
   ///

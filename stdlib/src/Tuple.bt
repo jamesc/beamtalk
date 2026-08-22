@@ -60,6 +60,8 @@ sealed typed Collection subclass: Tuple
   /// ```
   class new: elements :: List -> Tuple => self withAll: elements
 
+  // === Accessing ===
+
   /// Number of elements in the tuple.
   ///
   /// ## Examples
@@ -75,6 +77,8 @@ sealed typed Collection subclass: Tuple
   /// result at: 2   // => the value from an {ok, Value} tuple
   /// ```
   at: index :: Integer => @primitive
+
+  // === Result protocol ===
 
   /// Test if the tuple represents an `{'ok', _}` result.
   ///
@@ -125,6 +129,8 @@ sealed typed Collection subclass: Tuple
   unwrapOrElse: block :: Block(Object) -> Object =>
     self isOk ifTrue: [self at: 2] ifFalse: [block value]
 
+  // === Converting ===
+
   /// Convert the tuple to its string representation.
   ///
   /// ## Examples
@@ -140,6 +146,8 @@ sealed typed Collection subclass: Tuple
   /// result printString   // => "{ok,42}"
   /// ```
   printString -> String => self asString
+
+  // === Enumerating ===
 
   /// Iterate over each element, evaluating `block` with each one.
   ///

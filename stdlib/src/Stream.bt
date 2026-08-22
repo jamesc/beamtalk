@@ -48,6 +48,8 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```
   class sealed on: collection :: Object -> Stream(E) => self delegate
 
+  // === Lazy operations ===
+
   /// Filter elements matching predicate (lazy).
   ///
   /// ## Examples
@@ -79,6 +81,8 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ((Stream on: #(1, 2, 3, 4, 5)) drop: 2) asList  // => #(3, 4, 5)
   /// ```
   drop: count :: Integer -> Stream(E) => self delegate
+
+  // === Terminal operations ===
 
   /// Return first N elements as a List (terminal).
   ///
@@ -156,6 +160,8 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// (Stream on: #(1, 2, 3)) allSatisfy: [:n | n > 0]  // => true
   /// ```
   allSatisfy: predicate :: Block(E, Boolean) -> Boolean => self delegate
+
+  // === Printing ===
 
   /// Return a developer-readable string showing pipeline structure.
   ///

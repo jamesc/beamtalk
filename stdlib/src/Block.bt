@@ -50,6 +50,8 @@ sealed typed Object subclass: Block
   value: arg1 :: Object value: arg2 :: Object value: arg3 :: Object =>
     @intrinsic blockValue3
 
+  // === Control Flow ===
+
   /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to true.
   ///
   /// ## Examples
@@ -89,6 +91,8 @@ sealed typed Object subclass: Block
   /// [File readAll: "data.txt"] ensure: [Transcript show: "done"]
   /// ```
   ensure: cleanupBlock :: Block(R) => @intrinsic ensure
+
+  // === Introspection ===
 
   /// Return the number of arguments the block expects.
   ///

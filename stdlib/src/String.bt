@@ -57,6 +57,8 @@ sealed typed Binary subclass: String
   /// ```
   class fromIolist: iolist -> String => @primitive
 
+  // === Comparison and concatenation ===
+
   /// Test strict equality with another string.
   ///
   /// ## Examples
@@ -140,6 +142,8 @@ sealed typed Binary subclass: String
   /// ```
   , other :: String -> String => @primitive
 
+  // === Length and access ===
+
   /// Number of grapheme clusters in the string.
   ///
   /// ## Examples
@@ -191,6 +195,8 @@ sealed typed Binary subclass: String
   /// "hello" last         // => "o"
   /// ```
   last -> String => @primitive
+
+  // === Case and trimming ===
 
   /// Convert all characters to uppercase.
   ///
@@ -248,6 +254,8 @@ sealed typed Binary subclass: String
   /// ```
   reverse -> String => @primitive
 
+  // === Searching ===
+
   /// Test if the receiver contains a substring.
   ///
   /// ## Examples
@@ -283,6 +291,8 @@ sealed typed Binary subclass: String
   /// "hello" indexOf: "xyz"      // => nil
   /// ```
   indexOf: substring :: String -> Integer | Nil => @primitive
+
+  // === Splitting and repeating ===
 
   /// Split the string by a separator.
   ///
@@ -324,6 +334,8 @@ sealed typed Binary subclass: String
   /// ```
   words -> List(String) => @primitive
 
+  // === Replacing and slicing ===
+
   /// Replace all occurrences of `old` with `new`.
   ///
   /// ## Examples
@@ -356,6 +368,8 @@ sealed typed Binary subclass: String
   /// ```
   drop: n :: Integer -> String => @primitive
 
+  // === Padding ===
+
   /// Left-pad the string to the given width with spaces.
   ///
   /// ## Examples
@@ -387,6 +401,8 @@ sealed typed Binary subclass: String
   /// "hi" padRight: 5 with: "0"  // => "hi000"
   /// ```
   padRight: width :: Integer with: char :: String -> String => @primitive
+
+  // === Testing and conversion ===
 
   /// Test if the string is empty.
   ///
@@ -465,6 +481,8 @@ sealed typed Binary subclass: String
   /// ```
   asList -> List(String) => @primitive
 
+  // === Enumerating ===
+
   /// Iterate over each grapheme cluster, evaluating `block` with each one.
   ///
   /// ## Examples
@@ -511,6 +529,8 @@ sealed typed Binary subclass: String
   /// ("hello" stream) take: 3         // => #("h", "e", "l")
   /// ```
   stream -> Stream(String) => @primitive
+
+  // === Regular expressions ===
 
   /// Test if the string matches a regular expression pattern.
   /// Accepts a String pattern or compiled Regex object.
@@ -571,6 +591,8 @@ sealed typed Binary subclass: String
   /// ```
   splitRegex: pattern -> List(String) => @primitive
 
+  // === Printing ===
+
   /// Return a developer-readable string representation (with surrounding quotes).
   /// Embedded double-quote characters are doubled (Beamtalk string literal convention).
   ///
@@ -596,9 +618,7 @@ sealed typed Binary subclass: String
   /// ```
   displayString -> String => self
 
-  // ═══════════════════════════════════════════════════════════════════
-  // URL encoding
-  // ═══════════════════════════════════════════════════════════════════
+  // === URL encoding ===
 
   /// Percent-encode characters outside the URL-safe unreserved set
   /// (RFC 3986 §2.3: letters, digits, `-`, `.`, `_`, `~`).

@@ -107,6 +107,8 @@ sealed typed Object subclass: BindingsView native: beamtalk_session_primitives
   /// ```
   size -> Integer => self delegate
 
+  // === Enumerating ===
+
   /// Iterate over each value, evaluating `block` with each one (matches
   /// `Dictionary do:`, which iterates values).
   ///
@@ -115,6 +117,8 @@ sealed typed Object subclass: BindingsView native: beamtalk_session_primitives
   /// Session current bindings do: [:v | Transcript show: v printString]
   /// ```
   do: block :: Block(Object, Object) -> Nil => self values do: block
+
+  // === Printing ===
 
   /// Return a string representation rendered like a `Dictionary`, so REPL
   /// output stays familiar.

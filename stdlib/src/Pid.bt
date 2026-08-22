@@ -34,6 +34,8 @@ sealed typed Object subclass: Pid
   /// ```
   printString -> String => self asString
 
+  // === Comparison ===
+
   /// Test strict equality with another pid.
   ///
   /// ## Examples
@@ -60,6 +62,8 @@ sealed typed Object subclass: Pid
 
   /// Return a hash value for the pid.
   hash -> Integer => @primitive
+
+  // === Process Control ===
 
   /// Test if the process referred to by this pid is alive.
   ///

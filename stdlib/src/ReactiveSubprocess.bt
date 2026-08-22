@@ -84,6 +84,8 @@ typed Actor subclass: ReactiveSubprocess native: beamtalk_reactive_subprocess
       dir: dir
       notify: notify
 
+  // === Instance Protocol ===
+
   /// Write a line to the subprocess's stdin (appends newline).
   ///
   /// ## Examples

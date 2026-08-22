@@ -67,6 +67,8 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   class sealed new: name :: Symbol type: tableType :: EtsTableType -> Ets =>
     self delegate
 
+  // === Class-side lookup ===
+
   /// Look up an existing named ETS table (class method).
   ///
   /// Returns an `Ets` instance if a table with the given name exists.
@@ -103,6 +105,8 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```
   class sealed newOrExisting: name :: Symbol type: tableType :: EtsTableType -> Ets =>
     self delegate
+
+  // === Accessing ===
 
   /// Look up a key. Returns the value, or `nil` if the key is absent.
   ///
@@ -185,6 +189,8 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// cache size    // => 3
   /// ```
   size -> Integer => (Erlang beamtalk_ets) tableSize: self
+
+  // === Destroying ===
 
   /// Destroy the table, freeing all memory. Returns `nil`.
   ///

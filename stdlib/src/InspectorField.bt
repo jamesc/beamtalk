@@ -51,6 +51,8 @@ sealed typed Value subclass: InspectorField
   /// ```
   isLeaf -> Boolean => self drillable not
 
+  // === Printing ===
+
   /// Human-readable one-line description, e.g.
   /// `#InspectorField<x: 3>` or `#InspectorField<status: #unavailable>`.
   ///

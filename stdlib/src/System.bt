@@ -77,6 +77,8 @@ sealed typed Object subclass: System native: beamtalk_system
   /// ```
   class sealed unsetEnv: name :: String -> Boolean => self delegate
 
+  // === Platform and process info ===
+
   /// Return the OS platform name: "linux", "darwin", or "win32".
   ///
   /// ## Examples
@@ -142,6 +144,8 @@ sealed typed Object subclass: System native: beamtalk_system
   /// // => _
   /// ```
   class sealed uniqueId -> Integer => self delegate
+
+  // === Halting the VM ===
 
   /// Halt the whole VM with status 0 — the nuclear, whole-node option.
   /// Does not return.

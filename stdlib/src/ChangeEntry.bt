@@ -111,6 +111,8 @@ sealed typed Value subclass: ChangeEntry
   /// classes that have no on-disk source.
   sourceFile -> String | Nil => self.sourceFile
 
+  // === Restart-state flags (ADR 0082) ===
+
   /// Whether the entry is orphaned — its prev_source no longer matches disk
   /// after a workspace restart, so the patch can no longer be reconciled.
   ///
@@ -151,6 +153,8 @@ sealed typed Value subclass: ChangeEntry
   /// ```
   isClean -> Boolean => self.clean
 
+  // === Diff and change kind ===
+
   /// The net change this entry represents, as a unified diff (on-disk →
   /// in-memory), or nil when the entry is clean or the diff could not be
   /// computed (ADR 0082, BT-2575). Each line is prefixed `  ` (unchanged),
@@ -170,6 +174,8 @@ sealed typed Value subclass: ChangeEntry
 
   /// Whether this entry removed a class (`removeFromSystem`, ADR 0113).
   isRemoveClass -> Boolean => self.kind =:= #'remove-class'
+
+  // === Printing ===
 
   /// Developer-readable representation, e.g. "Counter>>increment",
   /// "Counter (new-class)", or "Counter (remove-class)".

@@ -28,6 +28,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// Return the current singleton instance.
   class current -> WorkspaceInterface => self.current
 
+  // === Actors and processes ===
+
   /// Return a list of all live actors as object references.
   ///
   /// ## Examples
@@ -76,6 +78,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   actorsOf: aClass :: Class -> List(Actor) =>
     self actors select: [:a | a class includesBehaviour: aClass]
+
+  // === Classes and bindings ===
 
   /// Return a list of loaded user classes with source file info.
   ///
@@ -148,6 +152,8 @@ sealed typed Object subclass: WorkspaceInterface
   sessions -> List(Session) =>
     (Erlang beamtalk_workspace_interface_primitives) sessions
 
+  // === Sync and change tracking ===
+
   /// Sync the project: incrementally compile all changed files.
   ///
   /// Scans the current working directory for a `beamtalk.toml` project
@@ -188,6 +194,8 @@ sealed typed Object subclass: WorkspaceInterface
     // result as ChangeLog, matching the declared return type.
     (Erlang beamtalk_workspace_changelog) changeLog
 
+  // === Loading and creating classes ===
+
   /// Compile and load a .bt file, registering the class.
   /// Returns a List of loaded class objects (empty if none resolved).
   /// Returns a structured error if path is not a String or the file cannot be loaded.
@@ -220,6 +228,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   newClass: source :: String at: path :: String -> List(Behaviour) =>
     (Erlang beamtalk_workspace_interface_primitives) newClass: source at: path
+
+  // === Flushing changes to disk ===
 
   /// Flush every pending durable Tier 1 change to disk (ADR 0082 Phase 2;
   /// destructive tiering ADR 0113 Phase 2).
@@ -316,6 +326,8 @@ sealed typed Object subclass: WorkspaceInterface
   flushIncludingDestructive -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) flushIncludingDestructive
 
+  // === Rechecking and testing ===
+
   /// Whole-image re-check (ADR 0105 Phase 3): re-check every live class the
   /// workspace has a recorded source for, not just the dependents of one
   /// changed selector.
@@ -355,6 +367,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   test: testClass :: Class -> TestResult => TestRunner run: testClass
 
+  // === Namespace bindings ===
+
   /// Register a value in the workspace namespace under a given name.
   /// Subsequent REPL evals can reference the value by name.
   /// Raises an error if name exists in Beamtalk globals (system name conflict).
@@ -376,6 +390,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   unbind: bindingName :: Symbol -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) unbind: bindingName
+
+  // === Supervision ===
 
   /// Return the OTP application root supervisor, or nil if not configured.
   ///
@@ -431,6 +447,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   supervisors -> List =>
     (Erlang beamtalk_workspace_interface_primitives) supervisors
+
+  // === Settings ===
 
   /// Read the `autoflush` workspace setting (ADR 0082 Phase 4).
   ///

@@ -30,6 +30,8 @@ sealed Object subclass: UndefinedObject
   /// ```
   notNil -> Boolean => false
 
+  // === Conditional Evaluation ===
+
   /// Evaluate `nilBlock` since the receiver is nil.
   ///
   /// ## Examples
@@ -72,6 +74,8 @@ sealed Object subclass: UndefinedObject
   ifNotNil: _notNilBlock :: Block(R) ifNil: nilBlock :: Block(R) -> R =>
     nilBlock value
 
+  // === Copying ===
+
   /// Return self. nil is immutable and unique.
   ///
   /// ## Examples
@@ -95,6 +99,8 @@ sealed Object subclass: UndefinedObject
   /// nil shallowCopy             // => nil
   /// ```
   shallowCopy -> Nil => self
+
+  // === Display ===
 
   /// Return a developer-readable string representation.
   ///

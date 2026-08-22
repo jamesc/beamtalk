@@ -48,6 +48,8 @@ sealed typed Number subclass: Float
   class infinity -> Float =>
     self error: "BEAM does not support IEEE 754 infinity"
 
+  // === Arithmetic ===
+
   /// Add a number to the receiver.
   ///
   /// ## Examples
@@ -79,6 +81,8 @@ sealed typed Number subclass: Float
   /// 10.0 / 4.0       // => 2.5
   /// ```
   / other :: Number -> Float => @primitive
+
+  // === Comparison ===
 
   /// Test strict equality with another number.
   ///
@@ -143,6 +147,8 @@ sealed typed Number subclass: Float
   /// ```
   >= other :: Number -> Boolean => @primitive
 
+  // === Sign and magnitude ===
+
   /// Negate the receiver.
   ///
   /// ## Examples
@@ -181,6 +187,8 @@ sealed typed Number subclass: Float
   /// if `other` is the larger value, the result carries its runtime type.
   max: other :: Number -> Number =>
     (self > other) ifTrue: [self] ifFalse: [other]
+
+  // === Rounding ===
 
   /// Round to the nearest integer.
   ///
@@ -241,6 +249,8 @@ sealed typed Number subclass: Float
   truncateTo: quantum :: Number -> Number =>
     (self / quantum) truncated * quantum
 
+  // === Testing / predicates ===
+
   /// Always returns false. BEAM has no NaN representation.
   ///
   /// ## Examples
@@ -265,6 +275,8 @@ sealed typed Number subclass: Float
   /// 1.0 isZero       // => false
   /// ```
   isZero -> Boolean => self =:= 0.0
+
+  // === Conversion ===
 
   /// Convert the receiver to an integer (truncates).
   ///

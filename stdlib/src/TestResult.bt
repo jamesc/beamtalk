@@ -65,6 +65,8 @@ typed Object subclass: TestResult native: beamtalk_test_runner
   /// ```
   failures -> List => self delegate
 
+  // === Reporting ===
+
   /// True if all tests passed (i.e. `failed` is zero).
   ///
   /// ## Examples

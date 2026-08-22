@@ -54,6 +54,8 @@ typed Object subclass: AtomicCounter native: beamtalk_atomic_counter
   /// ```
   class sealed named: name :: Symbol -> AtomicCounter => self delegate
 
+  // === Incrementing & Decrementing ===
+
   /// Atomically add 1. Returns the new value.
   ///
   /// ## Examples
@@ -85,6 +87,8 @@ typed Object subclass: AtomicCounter native: beamtalk_atomic_counter
   /// c decrementBy: 3    // => -3
   /// ```
   decrementBy: n :: Integer -> Integer => self delegate
+
+  // === Accessing & Lifecycle ===
 
   // `value` stays inline FFI (not `self delegate`, ADR 0101 / BT-2731): the
   // unary `value` selector is intercepted by block-evaluation codegen (BT-1260),

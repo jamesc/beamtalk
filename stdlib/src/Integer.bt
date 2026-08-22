@@ -19,6 +19,8 @@
 /// ```
 sealed typed Number subclass: Integer
 
+  // === Arithmetic ===
+
   /// Add an integer to the receiver.
   ///
   /// ## Examples
@@ -89,6 +91,8 @@ sealed typed Number subclass: Integer
   /// ```
   ** other :: Number -> Integer => @primitive
 
+  // === Comparison ===
+
   /// Test strict equality with another integer.
   ///
   /// ## Examples
@@ -152,6 +156,8 @@ sealed typed Number subclass: Integer
   /// ```
   >= other :: Number -> Boolean => @primitive
 
+  // === Sign and magnitude ===
+
   /// Negate the receiver.
   ///
   /// ## Examples
@@ -169,6 +175,8 @@ sealed typed Number subclass: Integer
   /// 7 abs         // => 7
   /// ```
   abs -> Integer => (self < 0) ifTrue: [self negated] ifFalse: [self]
+
+  // === Rounding ===
 
   /// Round to the nearest integer. Identity for Integer.
   ///
@@ -248,6 +256,8 @@ sealed typed Number subclass: Integer
   truncateTo: quantum :: Number -> Number =>
     (self / quantum) truncated * quantum
 
+  // === Testing / predicates ===
+
   /// Test if the receiver is even.
   ///
   /// ## Examples
@@ -265,6 +275,8 @@ sealed typed Number subclass: Integer
   /// 4 isOdd       // => false
   /// ```
   isOdd -> Boolean => (self % 2) /= 0
+
+  // === Min and max ===
 
   /// Return the smaller of the receiver and `other`.
   ///
@@ -289,6 +301,8 @@ sealed typed Number subclass: Integer
   /// if `other` is the larger value, the result carries its runtime type.
   max: other :: Number -> Number =>
     (self > other) ifTrue: [self] ifFalse: [other]
+
+  // === Iteration ===
 
   /// Evaluate `block` the receiver number of times.
   ///
@@ -336,6 +350,8 @@ sealed typed Number subclass: Integer
       ]
       ifFalse: [nil]
 
+  // === Interval construction ===
+
   /// Return an Interval from the receiver to `stop` with step 1.
   ///
   /// ## Examples
@@ -356,6 +372,8 @@ sealed typed Number subclass: Integer
   to: stop :: Integer by: step :: Integer -> Interval =>
     step =:= 0 ifTrue: [self error: "Interval step cannot be zero"]
     Interval new: #{#from => self, #to => stop, #step => step}
+
+  // === Conversion & printing ===
 
   /// Convert the receiver to a Float.
   ///
@@ -380,6 +398,8 @@ sealed typed Number subclass: Integer
   /// 42 printString  // => "42"
   /// ```
   printString -> String => @primitive
+
+  // === Bitwise operations ===
 
   /// Bitwise AND with another integer.
   ///
@@ -422,6 +442,8 @@ sealed typed Number subclass: Integer
   /// ```
   bitNot -> Integer => @primitive
 
+  // === Number theory ===
+
   /// Factorial of the receiver. Raises an error for negative integers.
   ///
   /// ## Examples
@@ -456,6 +478,8 @@ sealed typed Number subclass: Integer
   lcm: other :: Integer -> Integer =>
     g := self gcd: other
     g =:= 0 ifTrue: [0] ifFalse: [(self abs div: g) * other abs]
+
+  // === Codepoint predicates ===
 
   /// Test if the codepoint is a Unicode letter.
   ///

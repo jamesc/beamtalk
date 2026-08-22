@@ -64,6 +64,8 @@ Object subclass: Value
   /// ```
   class sealed new: initArgs -> Self => @intrinsic basicNewWith
 
+  // === Printing ===
+
   /// Return a developer-readable string representation showing fields.
   ///
   /// Produces `ClassName(field: value, ...)` via the canonical structural

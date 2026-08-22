@@ -97,6 +97,8 @@ sealed typed Object subclass: Console native: beamtalk_console
   /// ```
   class sealed flush -> Nil => self delegate
 
+  // === Reading Input ===
+
   /// Read one line from stdin, with the trailing newline stripped.
   ///
   /// Returns the line as a `String`, or `nil` at end of input (including a

@@ -28,6 +28,8 @@
 /// ```
 sealed typed Object subclass: SystemNavigation
 
+  // ===== Class Methods — Construction =====
+
   /// Return a navigation query rooted at the default scope (all loaded
   /// classes in the workspace's class registry).
   ///
@@ -40,6 +42,8 @@ sealed typed Object subclass: SystemNavigation
     // class instantiation path). ADR 0083 models this in the type checker, so
     // no `@expect dnu` suppression is needed.
     self new
+
+  // ===== Class Registry Overview =====
 
   /// Snapshot of the class registry visible to this navigation query.
   ///
@@ -108,6 +112,8 @@ sealed typed Object subclass: SystemNavigation
       c includesSelector: #doesNotUnderstand:args:
     ]
     handlers sort: [:a :b | a name asString < b name asString]
+
+  // ===== Package & Extension Ownership Queries =====
 
   /// Return the packages (ADR 0070) that contribute extension methods (ADR 0066)
   /// to `aClass` — answers "who extends class X?".
@@ -259,6 +265,8 @@ sealed typed Object subclass: SystemNavigation
     Package named: pkgName
     pkgName
 
+  // ===== Implementors Of (ADR 0087) =====
+
   /// Return all classes that locally define the given selector.
   ///
   /// Searches both instance-side and class-side definitions:
@@ -326,6 +334,8 @@ sealed typed Object subclass: SystemNavigation
     ]) collect: [:c | c class]
     indexImpls ++ fallbackInstance ++ fallbackClassSide
 
+  // ===== Outgoing Calls (messagesSentBy:) =====
+
   /// Return the message sends that occur in the body of `aMethod` — the
   /// outgoing-call set of a single method, the dual of `sendersOf:`.
   ///
@@ -383,6 +393,8 @@ sealed typed Object subclass: SystemNavigation
           acc
         ] ifFalse: [acc add: #{#selector => sentSel, #line => line}]
       ]
+
+  // ===== Senders Of (ADR 0087) & Site-Record Helpers =====
 
   /// Return a collection of call sites that send the given selector.
   ///
@@ -559,6 +571,8 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :line |
         acc add: #{#class => aClass, #selector => methodSel, #line => line}
       ]
+
+  // ===== Announcement Emission Queries (ADR 0093 §7 / BT-2475) =====
 
   /// Return the distinct `Announcement` subclasses that `aClass` statically
   /// emits — the publisher-side dual of `AnnouncementNavigation` (ADR 0093 §7,
@@ -786,6 +800,8 @@ sealed typed Object subclass: SystemNavigation
     @expect dnu
     targetNames includes: extClass name
 
+  // ===== References To (ADR 0087) =====
+
   /// Return a collection of references to the given class.
   ///
   /// Each result is a Dictionary with three keys:
@@ -939,6 +955,8 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :line |
         acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
       ]
+
+  // ===== Field Reader/Writer Queries =====
 
   /// Return a collection of methods that READ the named field.
   ///
@@ -1121,6 +1139,8 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :line |
         acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
       ]
+
+  // ===== Erlang FFI Call-Site Queries =====
 
   /// Return a collection of the Erlang FFI call sites that invoke the named
   /// Erlang function across the loaded class registry.
@@ -1316,6 +1336,8 @@ sealed typed Object subclass: SystemNavigation
           ]
       ]
 
+  // ===== Source-Text Search (methodsMatching:) =====
+
   /// Return a collection of `{class, selector}` records for every method
   /// whose source text matches `aRegex`.
   ///
@@ -1410,6 +1432,8 @@ sealed typed Object subclass: SystemNavigation
               ]
           ]
       ]
+
+  // ===== Selector Search (selectorsMatching:) =====
 
   /// Return a sorted, deduplicated list of selectors whose name contains
   /// `aPattern` (case-insensitive substring match).
@@ -1548,6 +1572,8 @@ sealed typed Object subclass: SystemNavigation
     rawEntries := self extensionEntriesFor: classTag
     rawEntries collect: [:entry | entry at: 1]
 
+  // ===== Shared Extension-Body Scan Helpers =====
+
   /// Append senders of `aSelector` found in every extension method source
   /// (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended) result.
   ///
@@ -1632,6 +1658,8 @@ sealed typed Object subclass: SystemNavigation
           acc add: #{#class => extClass, #selector => extSelector}
         ] ifFalse: [acc]
       ]
+
+  // ===== Unimplemented Selectors (typo finder, ADR 0087 / BT-2303) =====
 
   /// Return a List of every selector that is *sent* somewhere in the loaded
   /// class registry but *defined* nowhere — the classic Smalltalk typo-finder.
@@ -2060,6 +2088,8 @@ sealed typed Object subclass: SystemNavigation
   resolveExtensionClass: classTag :: Symbol -> Object =>
     resolved := self findClass: classTag
     resolved isNil ifTrue: [classTag] ifFalse: [resolved]
+
+  // ===== Unused Selectors (dead-method finder, ADR 0087 / BT-2303) =====
 
   /// Return a List of dead-method *candidates* — selectors that are DEFINED on
   /// some class but SENT nowhere in the loaded class registry. The conservative

@@ -38,6 +38,8 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   class new: elements :: List(E) -> List(E) => self withAll: elements
 
+  // === Accessing ===
+
   /// Number of elements in the list.
   ///
   /// ## Examples
@@ -122,6 +124,8 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   includes: item :: E -> Boolean => @primitive
 
+  // === Sorting and reordering ===
+
   /// Sort the list in ascending order.
   ///
   /// ## Examples
@@ -160,6 +164,8 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   unique -> List(E) => @primitive
 
+  // === Searching ===
+
   /// Find the first element for which `block` returns true.
   ///
   /// Raises `not_found` if no element matches — the return type is `E`, so
@@ -189,6 +195,8 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   detect: block :: Block(E, Boolean) ifNone: default :: Block(Object) -> E | Object =>
     @primitive
+
+  // === Enumerating ===
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -233,6 +241,8 @@ sealed typed Collection(E) subclass: List(E)
   /// #(1, 2, 3) inject: 0 into: [:sum :x | sum + x]   // => 6
   /// ```
   inject: initial :: A into: block :: Block(A, E, A) -> A => @primitive
+
+  // === Slicing, flattening, and aggregation ===
 
   /// Return the first `n` elements.
   ///
@@ -290,6 +300,8 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   allSatisfy: block :: Block(E, Boolean) -> Boolean => @primitive
 
+  // === Concatenation and printing ===
+
   /// Concatenate two lists.
   ///
   /// ## Examples
@@ -305,6 +317,8 @@ sealed typed Collection(E) subclass: List(E)
   /// #(1, 2, 3) printString           // => "#(1, 2, 3)"
   /// ```
   printString -> String => @primitive
+
+  // === Slicing and index search ===
 
   /// Return a subsequence from `start` to `end` (1-based, inclusive).
   ///
@@ -340,6 +354,8 @@ sealed typed Collection(E) subclass: List(E)
 
   // `eachWithIndex:` is inherited from Collection (pure-BT, built on inject:into:).
 
+  // === Combining and partitioning ===
+
   /// Combine two lists element-wise into a list of pairs.
   ///
   /// ## Examples
@@ -365,6 +381,8 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   partition: block :: Block(E, Boolean) -> Dictionary(String, List(E)) =>
     @primitive
+
+  // === Conditional slicing and construction ===
 
   /// Take elements from the front while `block` returns true.
   ///
@@ -406,6 +424,8 @@ sealed typed Collection(E) subclass: List(E)
   /// #(1, 2) add: 3                   // => #(1, 2, 3)
   /// ```
   add: item :: E -> List(E) => @primitive
+
+  // === Streams, sampling, and joining ===
 
   /// Return a lazy Stream over the list elements.
   ///

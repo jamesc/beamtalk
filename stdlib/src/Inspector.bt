@@ -64,6 +64,8 @@ sealed typed Object subclass: Inspector
   class on: anObject :: Object -> Inspector =>
     (Erlang beamtalk_inspector) on: anObject
 
+  // === Accessing ===
+
   /// The inspected object — the value itself, or, for an actor, the captured
   /// state snapshot.
   ///
@@ -123,6 +125,8 @@ sealed typed Object subclass: Inspector
   /// `#collection` cursor. Keeps `size` pure Beamtalk.
   internal sizeOfCollection -> Integer =>
     (Erlang beamtalk_inspector) sizeOf: self
+
+  // === Navigating ===
 
   /// Drill into one field by name, returning a child `Inspector` cursor on that
   /// field's value (ADR 0095 §1).
@@ -226,6 +230,8 @@ sealed typed Object subclass: Inspector
   /// ci refresh fields              // a fresh cursor at T1 (root actor re-fetched)
   /// ```
   refresh -> Inspector => (Erlang beamtalk_inspector) refresh: self
+
+  // === Printing and converting ===
 
   /// An indented text tree of the cursor and its immediate fields, one level
   /// deep (ADR 0095 §7). The REPL default.

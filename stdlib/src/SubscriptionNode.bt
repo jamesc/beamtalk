@@ -51,6 +51,8 @@ sealed typed Value subclass: SubscriptionNode
   /// ```
   isSend -> Boolean => self handlerKind == #send
 
+  // === Printing ===
+
   /// Human-readable description, e.g.
   /// `#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>` or, for a one-shot,
   /// `#SubscriptionNode<ActorSpawned #doOnce #Pid<0.200.0>>`.

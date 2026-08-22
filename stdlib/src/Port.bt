@@ -17,6 +17,8 @@
 /// ```
 sealed typed Object subclass: Port
 
+  // === Conversions ===
+
   /// Convert the port to a readable string representation.
   ///
   /// ## Examples
@@ -32,6 +34,8 @@ sealed typed Object subclass: Port
   /// port printString       // => "#Port<0.5>"
   /// ```
   printString -> String => self asString
+
+  // === Comparison ===
 
   /// Test strict equality with another port.
   ///

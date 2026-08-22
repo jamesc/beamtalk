@@ -64,6 +64,8 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   isBeamtalk -> Boolean =>
     (self kind == #beamtalkActor) or: [self kind == #beamtalkSupervisor]
 
+  // === Navigation ===
+
   /// The snapshot children of this node (supervisors only; `#()` otherwise).
   ///
   /// Resolved from the shared sibling set captured at snapshot time, so it
@@ -93,6 +95,8 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   /// node parentPid   // => a Pid | nil
   /// ```
   parentPid -> Pid | Nil => self delegate
+
+  // === Supervisor configuration ===
 
   /// The configured OTP restart strategy (`#oneForOne`, `#simpleOneForOne`, …)
   /// for a Beamtalk supervisor node, or `nil` for actors and foreign processes.
@@ -124,6 +128,8 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   /// ```
   truncated -> Boolean => self delegate
 
+  // === Live status ===
+
   /// Lazily fetch this node's live OTP status (ADR 0092 §5).
   ///
   /// Issues a timeout-guarded `sys:get_status` against the node's pid *at call
@@ -143,6 +149,8 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   /// (ADR 0101 / BT-2731).
   status -> Dictionary | Nil =>
     (Erlang beamtalk_process_navigation) status: self pid
+
+  // === Printing ===
 
   /// Human-readable description, e.g. `#SupervisionNode<#beamtalkActor Counter
   /// #Pid<0.132.0>>` or, for a supervisor, `#SupervisionNode<#beamtalkSupervisor

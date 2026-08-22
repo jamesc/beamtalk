@@ -58,6 +58,8 @@ typed Actor subclass: ClassBuilder
   /// ```
   superclass: aClass :: Object -> Object => self.superclassRef := aClass
 
+  // === Bulk configuration (used by codegen) ===
+
   /// Set all fields at once (used by codegen).
   ///
   /// ## Examples
@@ -246,6 +248,8 @@ typed Actor subclass: ClassBuilder
   isConstructible: aBoolean :: Boolean -> Boolean =>
     self.isConstructible := aBoolean
 
+  // === Incremental mutation (browser use case) ===
+
   /// Add a single field with a default value.
   ///
   /// ## Examples
@@ -326,6 +330,8 @@ typed Actor subclass: ClassBuilder
   removeClassMethod: aSelector :: Symbol -> Dictionary =>
     self.classMethods := self.classMethods removeKey: aSelector
 
+  // === Modifiers and native linkage ===
+
   /// Apply a class modifier (#abstract, #sealed, #typed, #internal).
   ///
   /// ## Examples
@@ -346,6 +352,8 @@ typed Actor subclass: ClassBuilder
   /// ```
   native: anErlangModule :: Symbol -> Symbol =>
     self.backingModule := anErlangModule
+
+  // === Registration ===
 
   /// Register the class with the runtime and return the new class object.
   /// Stops the builder process after registration — the builder is

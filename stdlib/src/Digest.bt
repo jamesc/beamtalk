@@ -21,6 +21,8 @@
 /// ```
 sealed typed Object subclass: Digest
 
+  // === Hashing ===
+
   /// SHA-256 digest (32 bytes) of `input`.
   ///
   /// ## Examples
@@ -53,6 +55,8 @@ sealed typed Object subclass: Digest
   /// ```
   class sealed md5: input :: String | Binary -> Binary =>
     (Erlang beamtalk_digest) md5: input
+
+  // === HMAC ===
 
   /// HMAC-SHA256 message authentication code of `input` using `key`.
   ///

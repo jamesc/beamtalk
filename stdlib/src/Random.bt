@@ -56,6 +56,8 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// ```
   class sealed nextInteger: max :: Integer -> Integer => self delegate
 
+  // === Instance Construction ===
+
   /// Create a new Random instance with an auto-generated seed.
   ///
   /// The instance has its own isolated random state.
@@ -79,6 +81,8 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// ```
   class sealed seed: seed :: Integer -> Random => self delegate
 
+  // === Display ===
+
   /// Return a display string. Overrides the default structural Value form
   /// because the instance holds an opaque internal `rand` generator state
   /// that is not meaningful (or safe) to render field-by-field.
@@ -88,6 +92,8 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// Random new printString       // => "Random"
   /// ```
   printString -> String => self class name asString
+
+  // === Instance-Side Generation ===
 
   /// Return a random float from the instance state.
   ///

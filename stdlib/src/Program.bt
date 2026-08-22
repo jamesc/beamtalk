@@ -19,6 +19,8 @@
 /// ```
 sealed typed Object subclass: Program native: beamtalk_program
 
+  // === Accessors ===
+
   /// The invoked program's name as a `String`.
   ///
   /// Under a packaged escript it is the invoked filename; under `beamtalk run`
@@ -36,6 +38,8 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// // => "beamtalk"
   /// ```
   class sealed commandName -> String => self delegate
+
+  // === Exiting ===
 
   /// End this program with status 0 — the job-level, safe exit. Does not return.
   ///

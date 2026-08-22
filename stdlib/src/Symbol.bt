@@ -34,6 +34,8 @@ sealed typed Object subclass: Symbol
   /// ```
   asAtom -> Symbol => @primitive
 
+  // === Printing ===
+
   /// Return a developer-readable string representation (with `#` prefix).
   ///
   /// ## Examples
@@ -41,6 +43,8 @@ sealed typed Object subclass: Symbol
   /// #hello printString     // => "#hello"
   /// ```
   printString -> String => @primitive
+
+  // === Comparison ===
 
   /// Test strict equality with another symbol.
   ///
@@ -68,6 +72,8 @@ sealed typed Object subclass: Symbol
   /// #hello /= #hello       // => false
   /// ```
   /= other :: Symbol -> Boolean => @primitive
+
+  // === Display & Hashing ===
 
   /// Return a user-facing string representation without the `#` prefix.
   ///

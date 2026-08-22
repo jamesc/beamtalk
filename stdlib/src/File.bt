@@ -32,6 +32,8 @@ typed Object subclass: File native: beamtalk_file
   /// ```
   class sealed exists: path :: String -> Boolean => self delegate
 
+  // === Reading and writing files ===
+
   /// Read the entire contents of a file as a string (class method).
   ///
   /// Returns `Result ok: contents` on success, or `Result error: err` on failure.
@@ -86,6 +88,8 @@ typed Object subclass: File native: beamtalk_file
   /// ```
   class sealed appendBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
     self delegate
+
+  // === Streaming and handles ===
 
   /// Return a lazy Stream of lines from a file (class method).
   ///
@@ -184,6 +188,8 @@ typed Object subclass: File native: beamtalk_file
   class sealed open: path :: String mode: mode :: Symbol do: block :: Block(FileHandle, R) -> Result(R, Error) =>
     self delegate
 
+  // === Metadata ===
+
   /// Get the last modification time of a file (class method).
   ///
   /// Returns `Result ok: DateTime` on success, or `Result error: err` if the
@@ -211,6 +217,8 @@ typed Object subclass: File native: beamtalk_file
   /// File isFile: "test.txt"   // => true or false
   /// ```
   class sealed isFile: path :: String -> Boolean => self delegate
+
+  // === Directory operations ===
 
   /// Create a directory (class method). Error if the parent does not exist.
   ///
@@ -243,6 +251,8 @@ typed Object subclass: File native: beamtalk_file
   class sealed listDirectory: path :: String -> Result(List(String), Error) =>
     self delegate
 
+  // === Deleting and renaming ===
+
   /// Delete a file or empty directory (class method).
   ///
   /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
@@ -273,6 +283,8 @@ typed Object subclass: File native: beamtalk_file
   /// ```
   class sealed rename: from :: String to: to :: String -> Result(Nil, Error) =>
     self delegate
+
+  // === Paths and diagnostics ===
 
   /// Resolve a relative path to its absolute path (class method).
   ///

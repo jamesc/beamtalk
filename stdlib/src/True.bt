@@ -14,6 +14,8 @@
 /// ```
 sealed Boolean subclass: True
 
+  // === Control flow ===
+
   /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.
   ///
   /// ## Examples
@@ -47,6 +49,8 @@ sealed Boolean subclass: True
   /// ```
   not -> Boolean => false
 
+  // === Predicates ===
+
   /// Returns true.
   ///
   /// ## Examples
@@ -62,6 +66,8 @@ sealed Boolean subclass: True
   /// true isFalse               // => false
   /// ```
   isFalse -> Boolean => false
+
+  // === Display ===
 
   /// Return a developer-readable string representation.
   ///
