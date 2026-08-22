@@ -95,9 +95,8 @@ pub fn default_ide_config_path() -> PathBuf {
             return PathBuf::from(path);
         }
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".beamtalk")
+    beamtalk_workspace::beamtalk_root_dir()
+        .unwrap_or_else(|_| PathBuf::from(".beamtalk"))
         .join("ide.toml")
 }
 
