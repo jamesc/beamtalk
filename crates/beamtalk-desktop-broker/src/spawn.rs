@@ -171,8 +171,29 @@ impl SpawnConfig {
 /// (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`, `SECRET_KEY_BASE`,
 /// `PHX_SERVER`, `RELEASE_TMP`) that don't go through this function — it
 /// does not report the full env set there, only the cross-platform baseline.
+///
+/// `ERL_EPMD_ADDRESS` here (resolved by
+/// [`beamtalk_workspace::resolve_epmd_address`], shared with
+/// `beamtalk-cli`'s own workspace startup — see that function's doc
+/// comment for the full ADR 0091 Decision 5 rationale) keeps Erlang
+/// distribution off untrusted networks by pinning the address epmd
+/// binds/contacts to loopback, so a node that *starts* epmd (as the
+/// front's own lazy `ensure_distributed/0` does, the first time anything
+/// calls its `/readiness` endpoint) does not expose the port mapper on
+/// `0.0.0.0`. Without this, a Tauri app launched from Finder/dock — which
+/// does not inherit whatever `ERL_EPMD_ADDRESS` a user's shell profile
+/// might set, unlike a terminal-launched `beamtalk workspace create` —
+/// would leave epmd to its own un-pinned default the moment it's the first
+/// thing on the machine to start one. `bin/server`
+/// (`editors/liveview/rel/overlays/bin/server`) does not set this itself,
+/// so it must come from here, same as every other var in this function; a
+/// pre-existing promiscuous epmd from *other* tooling is a separate case,
+/// caught by the CLI's own preflight check
+/// (`beamtalk_cli::commands::workspace::epmd::check_epmd_loopback`), not by
+/// anything this broker can control after the fact.
 #[must_use]
 pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
+    let epmd_address = beamtalk_workspace::resolve_epmd_address();
     vec![
         ("PORT".to_string(), config.port.to_string()),
         ("BT_ATTACH_BIND_IP".to_string(), config.bind_ip.clone()),
@@ -181,6 +202,7 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
             attach_node_suffix(&config.workspace_id),
         ),
         ("RELEASE_DISTRIBUTION".to_string(), "none".to_string()),
+        ("ERL_EPMD_ADDRESS".to_string(), epmd_address),
     ]
 }
 
@@ -820,7 +842,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_env_sets_the_four_required_vars() {
+    fn build_env_sets_the_five_required_vars() {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
         let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
         let env = build_env(&config);
         assert_eq!(
@@ -830,8 +855,23 @@ mod tests {
                 ("BT_ATTACH_BIND_IP".to_string(), "127.0.0.1".to_string()),
                 ("BT_ATTACH_NODE_SUFFIX".to_string(), "abc123".to_string()),
                 ("RELEASE_DISTRIBUTION".to_string(), "none".to_string()),
+                ("ERL_EPMD_ADDRESS".to_string(), "127.0.0.1".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn build_env_respects_an_operator_provided_erl_epmd_address() {
+        // BT-3225 review follow-up: a trusted-private-network operator can
+        // still override the loopback pin — see build_env's doc comment.
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::set_var("ERL_EPMD_ADDRESS", "10.0.0.5") };
+        let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
+        let env = build_env(&config);
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
+        assert!(env.contains(&("ERL_EPMD_ADDRESS".to_string(), "10.0.0.5".to_string())));
     }
 
     #[test]
