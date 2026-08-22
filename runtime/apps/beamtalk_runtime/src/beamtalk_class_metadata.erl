@@ -43,6 +43,27 @@ absence of the others.
   the supervisor is alive so `beamtalk_runtime_sup` is set as `{heir, ...}`. The
   table therefore survives both a class-process crash and an app-master swap.
 
+## Reverse subclass index (BT-3221)
+
+`match_subclasses/1` is answered from a second table,
+`beamtalk_class_subclass_index` — a `bag` of `{Superclass, ClassName}` edges,
+keyed on `Superclass` — instead of an `ets:match/2` scan of every row in
+`?TABLE`. A `bag` table (many rows per key) cannot share `?TABLE`'s `set`
+semantics, so this is a genuine second table rather than a field on the
+existing row; the "second table" it replaces is only the mental model of a
+"seventh, independently-lifecycled table" that BT-2222 weighed against — this
+one has no owner module, public API, or lifecycle of its own. It is created
+and destroyed by this module's own `new/0`, and every write that can change a
+row's `superclass` (`insert/5`, `merge_identity/5`, `delete/1`) maintains it
+as an internal side effect via `sync_subclass_index/3`, keyed off the row's
+*previous* superclass value (read via `field/2` before the write lands) so a
+re-register that changes superclass removes the stale edge from the old
+parent rather than leaving it to accumulate. Storing the edge independently of
+the superclass's own row (rather than as a `subclasses` list field on it)
+means a class's children stay discoverable even if the parent's own row is
+gone (e.g. a crash mid-teardown) — matching the exact-scan semantics this
+replaces, which never depended on the queried class having a row at all.
+
 ## Concurrency
 
 `new/0` uses try/catch around `ets:new/2` for the TOCTOU race between
@@ -85,6 +106,10 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% `has_runtime_class_methods` flag gates reads on this table so compile-time-only
 %% classes pay nothing on the dispatch hot path (BT-2008).
 -define(FUN_TABLE, beamtalk_class_method_funs).
+%% BT-3221: reverse-edge index for match_subclasses/1 — a `bag` of
+%% {Superclass, ClassName} rows, keyed on Superclass. See moduledoc "Reverse
+%% subclass index".
+-define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 
 -type class_name() :: atom().
 -type superclass() :: class_name() | none.
@@ -135,6 +160,14 @@ new() ->
     %% Key = {DefiningClass, Selector}, Value = #{block, arity}.
     ensure_table(?FUN_TABLE, [
         set,
+        public,
+        named_table,
+        {read_concurrency, true}
+    ]),
+    %% BT-3221: reverse-edge index, {Superclass, ClassName} rows, default
+    %% keypos 1 (Superclass). `bag` because a superclass has many subclasses.
+    ensure_table(?SUBCLASS_INDEX, [
+        bag,
         public,
         named_table,
         {read_concurrency, true}
@@ -196,14 +229,20 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
         is_abstract = IsAbstract
     },
     new(),
+    %% BT-3221: read the row's previous superclass (undefined if there was no
+    %% row yet) before overwriting it, so the subclass index can drop the
+    %% stale edge from the old superclass if this call changes it.
+    OldSuperclass = field(Name, #class_metadata.superclass),
     try
         ets:insert(?TABLE, Row),
+        sync_subclass_index(Name, OldSuperclass, Superclass),
         ok
     catch
         error:badarg ->
             %% Table vanished between new/0 and ets:insert/2 — recreate and retry once.
             new(),
             ets:insert(?TABLE, Row),
+            sync_subclass_index(Name, OldSuperclass, Superclass),
             ok
     end.
 
@@ -235,6 +274,10 @@ apply_class_info/2`) always has a row already (the class went through
     ok.
 merge_identity(Name, Module, Selectors, Superclass, IsAbstract) ->
     new(),
+    %% BT-3221: read the previous superclass before the update lands, so a
+    %% re-register that changes superclass can drop the stale reverse edge
+    %% from the old parent (see sync_subclass_index/3).
+    OldSuperclass = field(Name, #class_metadata.superclass),
     %% ets:update_element/3 does NOT raise on a missing key — it returns
     %% `false` (only a missing/unwritable *table* raises badarg) — so the
     %% fallback to row creation must branch on the boolean return, not on a
@@ -248,10 +291,13 @@ merge_identity(Name, Module, Selectors, Superclass, IsAbstract) ->
         ])
     of
         true ->
+            sync_subclass_index(Name, OldSuperclass, Superclass),
             ok;
         false ->
             %% No existing row — fall back to row creation. A brand-new row
             %% has no funs to preserve, so insert/5's gate reset is correct.
+            %% insert/5 re-reads the (still-absent) old superclass itself, so
+            %% this never double-applies the index update.
             insert(Name, Module, Selectors, Superclass, IsAbstract)
     catch
         error:badarg ->
@@ -271,8 +317,16 @@ delete(Name) ->
     %% a class that is removed (or whose process terminates) leaves no stale
     %% dispatch entries behind.
     delete_class_method_funs(Name),
+    %% BT-3221: read the superclass before the row disappears, so the reverse
+    %% edge {Superclass, Name} can be dropped from the subclass index too —
+    %% otherwise Name would linger forever as a phantom subclass of its old
+    %% superclass. This does NOT touch edges keyed on Name itself (i.e. rows
+    %% for Name's own children) — those stay valid; a class's children remain
+    %% discoverable even if its own row is gone (see moduledoc).
+    OldSuperclass = field(Name, #class_metadata.superclass),
     try
         ets:delete(?TABLE, Name),
+        sync_subclass_index(Name, OldSuperclass, undefined),
         ok
     catch
         error:badarg -> ok
@@ -344,31 +398,20 @@ lookup_is_abstract(Name) ->
 -doc """
 Return all class names whose direct superclass is `Name`.
 
-Returns `[]` if the table does not exist.
+BT-3221: an indexed `ets:lookup/2` on the `beamtalk_class_subclass_index`
+reverse-edge table, not a full-table scan of `?TABLE` — O(subclass count)
+instead of O(loaded-class count). Returns `[]` if the index table does not
+exist (mirrors the old table-absent contract, now against the table this
+function actually reads).
 """.
 -spec match_subclasses(class_name()) -> [class_name()].
 match_subclasses(Name) ->
-    case ets:info(?TABLE) of
+    case ets:info(?SUBCLASS_INDEX) of
         undefined ->
             [];
         _ ->
             try
-                %% Build the match pattern from record field indices rather than a
-                %% literal tuple, so it stays correct if the record's fields are
-                %% reordered or extended. (Record syntax `#class_metadata{_ = '_'}`
-                %% can't be used here — it assigns the atom '_' to typed fields and
-                %% trips dialyzer.) Bind the name column, match the superclass column.
-                Pattern = erlang:make_tuple(
-                    record_info(size, class_metadata),
-                    '_',
-                    [
-                        {1, class_metadata},
-                        {#class_metadata.name, '$1'},
-                        {#class_metadata.superclass, Name}
-                    ]
-                ),
-                Matches = ets:match(?TABLE, Pattern),
-                [N || [N] <- Matches]
+                [ClassName || {_Superclass, ClassName} <- ets:lookup(?SUBCLASS_INDEX, Name)]
             catch
                 error:badarg -> []
             end
@@ -582,6 +625,50 @@ reset_runtime_class_methods(Name) ->
 %%====================================================================
 %% Internal
 %%====================================================================
+
+%% BT-3221: reconcile the {Superclass, ClassName} reverse-edge index with a
+%% row write that set Name's superclass to NewSuperclass, given the value it
+%% held immediately before (OldSuperclass, `undefined` if there was no prior
+%% row or the field was never written). A no-op when the value didn't change
+%% (covers the common re-register-with-same-superclass case, and repeated
+%% `undefined` writes). `undefined` never has a corresponding index row —
+%% only actually-written superclass values (including the literal atom
+%% `none` for a root class) do — so it is never inserted or deleted as an
+%% edge target. Best-effort: a table-absent race (e.g. mid-teardown, or
+%% `delete/1`'s call site, which does not call `new/0` first) degrades to
+%% leaving the index momentarily stale rather than crashing the write it is
+%% attached to.
+-spec sync_subclass_index(class_name(), superclass() | undefined, superclass() | undefined) -> ok.
+sync_subclass_index(_Name, Same, Same) ->
+    ok;
+sync_subclass_index(Name, OldSuperclass, NewSuperclass) ->
+    case OldSuperclass of
+        undefined -> ok;
+        _ -> delete_subclass_edge(OldSuperclass, Name)
+    end,
+    case NewSuperclass of
+        undefined -> ok;
+        _ -> insert_subclass_edge(NewSuperclass, Name)
+    end,
+    ok.
+
+-spec insert_subclass_edge(superclass(), class_name()) -> ok.
+insert_subclass_edge(Superclass, Name) ->
+    try
+        ets:insert(?SUBCLASS_INDEX, {Superclass, Name}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-spec delete_subclass_edge(superclass(), class_name()) -> ok.
+delete_subclass_edge(Superclass, Name) ->
+    try
+        ets:delete_object(?SUBCLASS_INDEX, {Superclass, Name}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 %% Fetch a single field via ets:lookup_element/4 (OTP 26+), which copies only
 %% that element instead of the whole row — measurably faster than ets:lookup/2

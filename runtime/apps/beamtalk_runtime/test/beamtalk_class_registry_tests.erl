@@ -208,16 +208,26 @@ direct_subclasses_test_() ->
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
+            %% BT-3221: direct_subclasses/1 now reads beamtalk_class_subclass_index,
+            %% a table separate from beamtalk_class_metadata. Wiping only the main
+            %% table (as before) leaves this test's real, currently-loaded classes
+            %% still indexed, so 'Object'/'Actor' would resolve to their genuine
+            %% subclasses instead of this fixture's synthetic ones — must be
+            %% cleared/restored in lockstep with the main table.
+            SavedIndex = ets:tab2list(beamtalk_class_subclass_index),
             ets:delete_all_objects(beamtalk_class_metadata),
+            ets:delete_all_objects(beamtalk_class_subclass_index),
             beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
             beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
             beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor', undefined),
             beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor', undefined),
-            Saved
+            {Saved, SavedIndex}
         end,
-        fun(Saved) ->
+        fun({Saved, SavedIndex}) ->
             ets:delete_all_objects(beamtalk_class_metadata),
-            ets:insert(beamtalk_class_metadata, Saved)
+            ets:delete_all_objects(beamtalk_class_subclass_index),
+            ets:insert(beamtalk_class_metadata, Saved),
+            ets:insert(beamtalk_class_subclass_index, SavedIndex)
         end,
         [
             {"direct children of Actor", fun() ->
@@ -244,16 +254,22 @@ all_subclasses_test_() ->
         fun() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
+            %% BT-3221: see direct_subclasses_test_/0's setup for why the
+            %% subclass index must be cleared/restored alongside the main table.
+            SavedIndex = ets:tab2list(beamtalk_class_subclass_index),
             ets:delete_all_objects(beamtalk_class_metadata),
+            ets:delete_all_objects(beamtalk_class_subclass_index),
             beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
             beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
             beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor', undefined),
             beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor', undefined),
-            Saved
+            {Saved, SavedIndex}
         end,
-        fun(Saved) ->
+        fun({Saved, SavedIndex}) ->
             ets:delete_all_objects(beamtalk_class_metadata),
-            ets:insert(beamtalk_class_metadata, Saved)
+            ets:delete_all_objects(beamtalk_class_subclass_index),
+            ets:insert(beamtalk_class_metadata, Saved),
+            ets:insert(beamtalk_class_subclass_index, SavedIndex)
         end,
         [
             {"all subclasses of Object", fun() ->

@@ -583,11 +583,13 @@ find_class_method_in_chain/2` already uses) over `beamtalk_class_metadata:
 lookup_superclass/1` reads for the ancestor half — pure ETS, no
 `gen_server:call`.
 
-The descendant half is a full-table `ets:match/2` per node in the subtree
-(`beamtalk_class_metadata:match_subclasses/1` is unindexed on the
-superclass column) — O(N²) in loaded-class count for a root-class change,
-~500 µs at today's 109-class stdlib scale (spike §2). Accepted as-is for
-this issue; indexing that column is the separate follow-up BT-3221.
+The descendant half was a full-table `ets:match/2` per node in the subtree
+(O(N²) in loaded-class count for a root-class change, ~500 µs at the
+109-class stdlib scale measured in spike §2) until BT-3221 gave
+`beamtalk_class_metadata:match_subclasses/1` a reverse-edge index
+(`beamtalk_class_subclass_index`, a `bag` keyed on superclass): now one
+indexed `ets:lookup/2` per node, so the closure's scan count no longer
+tracks loaded-class count.
 """.
 -spec hierarchy_related_classes(class_name()) -> sets:set(class_name()).
 hierarchy_related_classes(ChangedClass) ->
