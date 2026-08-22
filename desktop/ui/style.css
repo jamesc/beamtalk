@@ -151,9 +151,17 @@ button:disabled {
   position: fixed;
   inset: 0;
   z-index: 10;
-  display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* `#log-panel` alone (specificity 100) would otherwise beat the browser's
+   built-in `[hidden] { display: none }` UA rule (specificity 10) and stay
+   visible — covering the whole window, workspace list included — even with
+   the `hidden` attribute set. `display` only turns on here, scoped to the
+   non-hidden case, so `hidden` wins when present. */
+#log-panel:not([hidden]) {
+  display: flex;
 }
 
 .log-panel-head {
