@@ -9,6 +9,21 @@
 set shell := ["bash", "-uc"]
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
+# BT-3235: pin epmd's bind address for every recipe that shells out to
+# rebar3/mix/erl (build-erlang, test-runtime, perf, dialyzer, ...). epmd is a
+# per-user singleton daemon: whichever process starts it first wins its bind
+# posture for the rest of the session, and epmd's own default (no -address)
+# is *all* interfaces (ADR 0091 Decision 5, finding F1) — the same gap
+# `beamtalk-workspace`'s `resolve_epmd_address` and `startup_command.rs`
+# already close for workspace-node launches. On a shared dev box running
+# concurrent toolchain invocations (several agent worktrees building/testing
+# at once), an unpinned `rebar3 eunit`/`compile` can auto-start a genuinely
+# promiscuous epmd before this pin ever gets a chance to apply — closing the
+# gap here removes this project's own tooling as a source of that. Respects
+# an operator-set ERL_EPMD_ADDRESS (e.g. a trusted private-network address)
+# rather than clobbering it, matching `resolve_epmd_address`'s own fallback.
+export ERL_EPMD_ADDRESS := env_var_or_default("ERL_EPMD_ADDRESS", "127.0.0.1")
+
 # Default recipe (list all tasks)
 default:
     @just --list
