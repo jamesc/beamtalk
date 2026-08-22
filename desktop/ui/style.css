@@ -47,6 +47,11 @@ header h1 {
   margin: 0;
 }
 
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 main {
   padding: 1rem;
 }
@@ -136,7 +141,45 @@ button:disabled {
   cursor: default;
 }
 
-#quit-button {
+#quit-button,
+#logs-button {
   background: transparent;
   color: var(--fg);
+}
+
+#log-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* `#log-panel` alone (specificity 100) would otherwise beat the browser's
+   built-in `[hidden] { display: none }` UA rule (specificity 10) and stay
+   visible — covering the whole window, workspace list included — even with
+   the `hidden` attribute set. `display` only turns on here, scoped to the
+   non-hidden case, so `hidden` wins when present. */
+#log-panel:not([hidden]) {
+  display: flex;
+}
+
+.log-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+#log-output {
+  flex: 1;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  overflow-y: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
 }

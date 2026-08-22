@@ -109,8 +109,10 @@
 //! still misses (e.g. a crash in the narrow assign-after-spawn window).
 
 use std::cell::RefCell;
-use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::fs::{File, OpenOptions};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use crate::error::{BrokerError, Result};
@@ -169,8 +171,29 @@ impl SpawnConfig {
 /// (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`, `SECRET_KEY_BASE`,
 /// `PHX_SERVER`, `RELEASE_TMP`) that don't go through this function — it
 /// does not report the full env set there, only the cross-platform baseline.
+///
+/// `ERL_EPMD_ADDRESS` here (resolved by
+/// [`beamtalk_workspace::resolve_epmd_address`], shared with
+/// `beamtalk-cli`'s own workspace startup — see that function's doc
+/// comment for the full ADR 0091 Decision 5 rationale) keeps Erlang
+/// distribution off untrusted networks by pinning the address epmd
+/// binds/contacts to loopback, so a node that *starts* epmd (as the
+/// front's own lazy `ensure_distributed/0` does, the first time anything
+/// calls its `/readiness` endpoint) does not expose the port mapper on
+/// `0.0.0.0`. Without this, a Tauri app launched from Finder/dock — which
+/// does not inherit whatever `ERL_EPMD_ADDRESS` a user's shell profile
+/// might set, unlike a terminal-launched `beamtalk workspace create` —
+/// would leave epmd to its own un-pinned default the moment it's the first
+/// thing on the machine to start one. `bin/server`
+/// (`editors/liveview/rel/overlays/bin/server`) does not set this itself,
+/// so it must come from here, same as every other var in this function; a
+/// pre-existing promiscuous epmd from *other* tooling is a separate case,
+/// caught by the CLI's own preflight check
+/// (`beamtalk_cli::commands::workspace::epmd::check_epmd_loopback`), not by
+/// anything this broker can control after the fact.
 #[must_use]
 pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
+    let epmd_address = beamtalk_workspace::resolve_epmd_address();
     vec![
         ("PORT".to_string(), config.port.to_string()),
         ("BT_ATTACH_BIND_IP".to_string(), config.bind_ip.clone()),
@@ -179,6 +202,7 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
             attach_node_suffix(&config.workspace_id),
         ),
         ("RELEASE_DISTRIBUTION".to_string(), "none".to_string()),
+        ("ERL_EPMD_ADDRESS".to_string(), epmd_address),
     ]
 }
 
@@ -292,6 +316,8 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         ));
     }
 
+    redirect_front_stdio(&mut cmd, &config.workspace_id);
+
     detach(&mut cmd);
 
     // Created before `cmd.spawn()` (not after) so there is no
@@ -337,6 +363,61 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     {
         Ok(SpawnedFront { child })
     }
+}
+
+/// Redirect `cmd`'s stdout/stderr to `~/.beamtalk/workspaces/<id>/attach.log`
+/// (append mode, accumulating across restarts — mirrors `workspace.log`'s own
+/// convention on the workspace-node side) instead of the default inherited
+/// stdio. Inherited stdio is the packaged Tauri app's own — i.e. nowhere, in
+/// a release build (`windows_subsystem = "windows"` on Windows; macOS/Linux
+/// app bundles have no attached terminal either) — so without this, a
+/// spawned front's crash or an Elixir-side exception is invisible short of
+/// running the release binary manually from a terminal (BT-3225).
+///
+/// Best-effort: if the log file can't be opened (e.g. the workspace
+/// directory somehow isn't writable), stdout/stderr fall back to
+/// [`Stdio::null`] rather than failing the whole spawn over a logging
+/// nicety — `attach.log`'s absence is itself a signal something is wrong on
+/// this machine, for whoever goes looking for it.
+fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
+    let stdio_pair = beamtalk_workspace::workspace_dir(workspace_id)
+        .ok()
+        .and_then(|dir| open_front_log(&dir.join("attach.log")).ok());
+
+    if let Some((stdout_file, stderr_file)) = stdio_pair {
+        cmd.stdout(Stdio::from(stdout_file));
+        cmd.stderr(Stdio::from(stderr_file));
+    } else {
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+    }
+}
+
+/// Open `path` for append (creating it if absent) and return two handles to
+/// the same underlying file description — via [`File::try_clone`], not two
+/// independent `open` calls — so stdout and stderr share one file offset and
+/// interleave in write order rather than racing to overwrite each other.
+///
+/// Created `0o600` (owner-only) on Unix, matching every other
+/// security-relevant file already in the same workspace directory
+/// (`workspace.log`, `cookie`, `vm.args`, `pid`, `port` are all `0600`) —
+/// the front's own `Logger` output can carry the same class of sensitive
+/// runtime detail `workspace.log` does, so it gets the same posture rather
+/// than the world-readable default (`create(true)`'s default mode, same as
+/// e.g. `metadata.json` — appropriate there, not here). No Windows
+/// equivalent is set here; it inherits the parent directory's ACLs, same as
+/// this crate's other Windows gaps this module's doc comment already notes.
+fn open_front_log(path: &Path) -> io::Result<(File, File)> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
+    let cloned = file.try_clone()?;
+    Ok((file, cloned))
 }
 
 /// Kill and reap `child` after it was successfully spawned but
@@ -761,7 +842,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_env_sets_the_four_required_vars() {
+    fn build_env_sets_the_five_required_vars() {
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
         let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
         let env = build_env(&config);
         assert_eq!(
@@ -771,8 +855,23 @@ mod tests {
                 ("BT_ATTACH_BIND_IP".to_string(), "127.0.0.1".to_string()),
                 ("BT_ATTACH_NODE_SUFFIX".to_string(), "abc123".to_string()),
                 ("RELEASE_DISTRIBUTION".to_string(), "none".to_string()),
+                ("ERL_EPMD_ADDRESS".to_string(), "127.0.0.1".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn build_env_respects_an_operator_provided_erl_epmd_address() {
+        // BT-3225 review follow-up: a trusted-private-network operator can
+        // still override the loopback pin — see build_env's doc comment.
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::set_var("ERL_EPMD_ADDRESS", "10.0.0.5") };
+        let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
+        let env = build_env(&config);
+        // SAFETY: guarded by ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
+        assert!(env.contains(&("ERL_EPMD_ADDRESS".to_string(), "10.0.0.5".to_string())));
     }
 
     #[test]
@@ -1399,6 +1498,75 @@ mod tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log() {
+        // BT-3225: the spawned front's stdout/stderr must land in
+        // `~/.beamtalk/workspaces/<id>/attach.log`, not the packaged app's
+        // inherited (and, in a release build, nonexistent) stdio.
+        let ws = TestWorkspaceDir::new("attach_log_capture");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let launcher = write_launcher_script(
+            tmp.path(),
+            "server",
+            "echo stdout-marker; echo stderr-marker 1>&2; sleep 5",
+        );
+
+        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
+        config.bind_failure_grace = Duration::from_millis(100);
+
+        let (mut child, _port) =
+            spawn_front_with_port_retry(&config).expect("should spawn and bind on first try");
+
+        let log_path = beamtalk_workspace::workspace_dir(&ws.id)
+            .unwrap()
+            .join("attach.log");
+        let contents = wait_for_file_contents(&log_path, Duration::from_secs(2));
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            contents.contains("stdout-marker"),
+            "expected attach.log to contain the launcher's stdout, got: {contents:?}"
+        );
+        assert!(
+            contents.contains("stderr-marker"),
+            "expected attach.log to contain the launcher's stderr, got: {contents:?}"
+        );
+
+        // attach.log can carry the same class of sensitive runtime detail
+        // workspace.log does — must be owner-only, not the world-readable
+        // default (BT-3225 review follow-up).
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(&log_path).unwrap().permissions(),
+        ) & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "attach.log should be created 0600, got {mode:o}"
+        );
+    }
+
+    /// Poll `path` until it exists and is non-empty, or `timeout` elapses —
+    /// the launcher script's `echo`s race this test process reading the file
+    /// it just told the OS to create.
+    #[cfg(unix)]
+    fn wait_for_file_contents(path: &std::path::Path, timeout: Duration) -> String {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                if !contents.is_empty() {
+                    return contents;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return std::fs::read_to_string(path).unwrap_or_default();
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[cfg(unix)]

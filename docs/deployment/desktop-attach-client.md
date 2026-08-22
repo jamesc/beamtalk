@@ -131,6 +131,15 @@ not run it, or any Beamtalk workspace, as a genuinely multi-user service.
 
 ## Troubleshooting
 
+- **Logs** — the picker's own attach/spawn/readiness stages are logged to
+  `~/.beamtalk/launcher.log`, viewable live from within the app itself via
+  the header's **Logs** button, or by tailing the file directly. A spawned
+  front's own output (Elixir `Logger`/Phoenix, including exceptions and
+  endpoint errors) goes to `~/.beamtalk/workspaces/<id>/attach.log` — check
+  this first if a workspace window opens but never finishes connecting
+  (stuck on "Connecting to workspace…"), since that means the front itself
+  is up but something inside it is failing. Both accumulate across restarts
+  the same way `workspace.log` does.
 - **"Attach failed: unreachable"** (or similar) — the picker surfaces the
   same failure taxonomy the workspace's `/readiness` endpoint reports:
   `epmd_absent` (no local epmd — the workspace's own boot should have started

@@ -122,6 +122,7 @@ pub fn attach(
     // workspace both saw "nothing tracked" and both spawned a front. See
     // `beamtalk_desktop_shell::attach`'s module docs.
     let decision = locked(&state.attach).decide_and_claim(&workspace_id);
+    tracing::info!(workspace_id = %workspace_id, ?decision, "attach requested");
 
     let generation = match decision {
         AttachDecision::FocusExisting { window_id, .. } => {
@@ -161,12 +162,20 @@ fn attach_and_open_window(
     generation: u64,
 ) -> Result<AttachOutcome, String> {
     emit_progress(app, workspace_id, "spawning");
+    tracing::info!(workspace_id, "spawning front");
 
     let launcher = state.launcher.clone();
     let spawn_config = SpawnAttemptConfig::new(launcher, workspace_id.to_string());
-    let (child, port) = beamtalk_desktop_broker::spawn::spawn_front_with_port_retry(&spawn_config)
-        .map_err(|e| e.to_string())?;
+    let (child, port) =
+        match beamtalk_desktop_broker::spawn::spawn_front_with_port_retry(&spawn_config) {
+            Ok(result) => result,
+            Err(err) => {
+                tracing::error!(workspace_id, %err, "spawn failed");
+                return Err(err.to_string());
+            }
+        };
     let pid = child.id();
+    tracing::info!(workspace_id, port, pid, "front spawned");
 
     // Persist the orphan-reaping record *and* start tracking the child in
     // `state.children` immediately after a successful spawn — before the
@@ -192,6 +201,7 @@ fn attach_and_open_window(
     locked(&state.children).insert(workspace_id.to_string(), child);
 
     emit_progress(app, workspace_id, "probing");
+    tracing::info!(workspace_id, port, "waiting for front readiness");
 
     let timeouts = ProbeTimeouts::default_local();
     let probe = readiness::http_probe("127.0.0.1", port, timeouts);
@@ -201,6 +211,7 @@ fn attach_and_open_window(
         ATTACH_POLL_INTERVAL,
         probe,
     );
+    tracing::info!(workspace_id, ?final_state, "readiness wait finished");
 
     match final_state {
         ReadinessState::Ready(_version) => {
@@ -240,12 +251,14 @@ fn attach_and_open_window(
             }
         }
         ReadinessState::Failed(reason) => {
+            tracing::error!(workspace_id, ?reason, "readiness failed");
             kill_and_untrack(state, workspace_id, port);
             return Err(format!(
                 "workspace '{workspace_id}' is unreachable: {reason:?}"
             ));
         }
         ReadinessState::TimedOut(stage) => {
+            tracing::error!(workspace_id, ?stage, "readiness timed out");
             kill_and_untrack(state, workspace_id, port);
             return Err(format!(
                 "timed out waiting for workspace '{workspace_id}' ({stage:?})"
@@ -267,8 +280,25 @@ fn attach_and_open_window(
         }
     }
 
+    emit_progress(app, workspace_id, "opening");
+    tracing::info!(workspace_id, port, "opening workspace window");
+
     let label = window_label(workspace_id);
-    let url = format!("http://127.0.0.1:{port}/")
+    // `localhost`, not `127.0.0.1`: the front's zero-config endpoint config
+    // (`editors/liveview/config/runtime.exs`, the `PHX_HOST` unset case)
+    // advertises `url: [host: "localhost", ...]` and — since it never sets
+    // `check_origin` itself, Phoenix's own default (`true`, checked against
+    // that configured host) applies — rejects any WebSocket/LiveView
+    // upgrade whose `Origin` header doesn't match it. Opening the window at
+    // `127.0.0.1` sent an `Origin: http://127.0.0.1:<port>` that endpoint
+    // always rejected ("Could not check origin for Phoenix.Socket
+    // transport"), leaving the LiveView page stuck on its own pre-connected
+    // render ("Connecting to workspace…") forever — the readiness probe
+    // above only checks a plain HTTP GET, which carries no `Origin` header
+    // and was never affected. `localhost` resolves to the same loopback
+    // address this window was always restricted to (`BT_ATTACH_BIND_IP`
+    // above), so this changes nothing about which interfaces are reachable.
+    let url = format!("http://localhost:{port}/")
         .parse::<tauri::Url>()
         .map_err(|e| format!("invalid front URL: {e}"))?;
     let window = match WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
@@ -277,6 +307,7 @@ fn attach_and_open_window(
     {
         Ok(window) => window,
         Err(err) => {
+            tracing::error!(workspace_id, %err, "failed to open workspace window");
             // The front is up and ready but we couldn't open a window for
             // it — kill it rather than leaking a live, untracked, cookie-
             // bearing process for the rest of this session.
@@ -321,6 +352,10 @@ fn attach_and_open_window(
         // down without emitting anything, so there's no double-cleanup or
         // reentrancy to reason about here) and clear the on-disk front
         // record rather than leaving that behind.
+        tracing::warn!(
+            workspace_id,
+            "attach cancelled by a concurrent detach/quit after window open"
+        );
         let _ = window.destroy();
         kill_and_untrack(state, workspace_id, port);
         return Err(format!(
@@ -330,6 +365,7 @@ fn attach_and_open_window(
     // The child is already tracked in `state.children` (inserted right
     // after spawn, above) — nothing more to do there on the success path.
 
+    tracing::info!(workspace_id, port, pid, "attach complete");
     spawn_monitor(app.clone(), workspace_id.to_string(), port, generation);
 
     Ok(AttachOutcome::Opened)
@@ -383,6 +419,7 @@ pub fn detach_internal(
     state: &AppState,
     workspace_id: &str,
 ) -> Result<(), String> {
+    tracing::info!(workspace_id, "detaching");
     let removed = locked(&state.attach).remove(workspace_id);
 
     if let Some(mut child) = locked(&state.children).remove(workspace_id) {
@@ -427,11 +464,28 @@ pub fn create_workspace(workspace_id: String) -> Result<(), String> {
     cli_ops::create_workspace(&cli_path, &workspace_id).map_err(|e| e.to_string())
 }
 
+/// Tail of `~/.beamtalk/launcher.log`, for the picker UI's log panel to seed
+/// itself with recent history on open — live updates after that arrive via
+/// the `launcher-log-line` event ([`crate::logging::spawn_log_relay`]).
+#[tauri::command(async)]
+pub fn get_launcher_logs(limit: Option<usize>) -> Result<Vec<String>, String> {
+    Ok(crate::logging::read_recent_logs(limit.unwrap_or(500)))
+}
+
 /// Quit: detach every tracked workspace (kills every front process, not
 /// just the picker), then exit the app.
 #[tauri::command(async)]
 pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    tracing::info!("quit requested");
     detach_all(&app, &state);
+    // Best-effort and idempotent (`LoggingGuard::flush` is a `.take()`):
+    // flush explicitly here rather than relying solely on `main.rs`'s
+    // `RunEvent::ExitRequested` handler, since it's not guaranteed that
+    // `app.exit()` below re-delivers that event before the process
+    // actually tears down.
+    if let Some(guard) = app.try_state::<Mutex<crate::logging::LoggingGuard>>() {
+        guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
+    }
     app.exit(0);
     Ok(())
 }
@@ -460,6 +514,7 @@ pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
 /// meant to guarantee they get killed.
 pub fn detach_all(app: &AppHandle, state: &AppState) {
     let ids: Vec<String> = locked(&state.children).keys().cloned().collect();
+    tracing::info!(count = ids.len(), "detaching all tracked fronts");
     for id in ids {
         let _ = detach_internal(app, state, &id);
     }
@@ -663,6 +718,7 @@ fn reflect_connection_state(
     workspace_id: &str,
     connection_state: &monitor::ConnectionState,
 ) {
+    tracing::info!(workspace_id, ?connection_state, "connection state changed");
     let label = window_label(workspace_id);
     if let Some(window) = app.get_webview_window(&label) {
         let base_title = format!("Beamtalk — {workspace_id}");

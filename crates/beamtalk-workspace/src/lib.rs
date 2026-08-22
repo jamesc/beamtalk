@@ -74,14 +74,45 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     Ok(hash_workspace_path_string(path_str))
 }
 
+/// Get the root Beamtalk state directory (`~/.beamtalk/`) — the shared leaf
+/// under every tool that needs it (workspace storage here, the desktop
+/// launcher's log file, ...), so none of them re-derive `dirs::home_dir()`
+/// on their own.
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
+pub fn beamtalk_root_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
+    Ok(home.join(".beamtalk"))
+}
+
+/// Resolve the address epmd should bind/contact: `ERL_EPMD_ADDRESS` if the
+/// operator has set one (e.g. a trusted private network's interface), else
+/// loopback (`127.0.0.1`) — the default posture for every Beamtalk-spawned
+/// BEAM node (ADR 0091 Decision 5), so a node that *starts* epmd (there is
+/// only one epmd per machine; whoever gets there first sets its bind
+/// address for as long as it keeps running) never exposes the port mapper
+/// on `0.0.0.0`. Shared by `beamtalk-cli`'s workspace startup
+/// (`commands::workspace::startup_command`) and
+/// `beamtalk-desktop-broker`'s front spawn (`spawn::build_env`) — both set
+/// `ERL_EPMD_ADDRESS` in the child process env from this same resolution,
+/// rather than each re-deriving the "does the operator want to override
+/// loopback" policy independently. Never returns `"0.0.0.0"` on its own —
+/// an operator who explicitly exports that anyway is making their own
+/// informed choice, not something this function should second-guess.
+#[must_use]
+pub fn resolve_epmd_address() -> String {
+    std::env::var("ERL_EPMD_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
 ///
 /// # Errors
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn workspaces_base_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk").join("workspaces"))
+    Ok(beamtalk_root_dir()?.join("workspaces"))
 }
 
 /// Get the workspace directory for a given workspace ID.
@@ -191,6 +222,40 @@ pub fn parse_repl_workspace_id(stdout: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Guards every test below that reads/mutates `ERL_EPMD_ADDRESS` — Rust
+    // runs tests in this binary concurrently by default, and
+    // `std::env::set_var`/`remove_var` racing a concurrent `env::var` read
+    // in another thread is a real hazard, not a theoretical one (mirrors
+    // `beamtalk-desktop-broker::test_support::ENV_LOCK`'s same discipline).
+    static EPMD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn resolve_epmd_address_defaults_to_loopback() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
+        assert_eq!(resolve_epmd_address(), "127.0.0.1");
+    }
+
+    #[test]
+    fn resolve_epmd_address_respects_an_operator_override() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::set_var("ERL_EPMD_ADDRESS", "10.0.0.5") };
+        let result = resolve_epmd_address();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
+        assert_eq!(result, "10.0.0.5");
+    }
+
+    #[test]
+    fn workspaces_base_dir_is_workspaces_under_beamtalk_root_dir() {
+        assert_eq!(
+            workspaces_base_dir().unwrap(),
+            beamtalk_root_dir().unwrap().join("workspaces")
+        );
+    }
 
     #[test]
     fn test_generate_workspace_id_length() {

@@ -23,13 +23,29 @@
 mod commands;
 mod dto;
 mod launcher;
+mod logging;
 mod state;
+
+use std::sync::Mutex;
 
 use tauri::Manager;
 
+use logging::LoggingGuard;
 use state::AppState;
 
 fn main() {
+    // Must run before any other `tracing::` call this process makes,
+    // including the reap sweep and `resolve_launcher_path` calls in
+    // `.setup()` just below — see `logging::init_logging`'s doc comment.
+    // Managed as Tauri state (below, in `.setup()`) rather than left as a
+    // local binding: `commands::quit` and this file's own
+    // `RunEvent::ExitRequested` handler both need to call
+    // `LoggingGuard::flush` explicitly at shutdown — a plain `let` binding
+    // here would only flush on `main()`'s own scope exit, which
+    // `app.run()` below may never reach (see `LoggingGuard::flush`'s doc
+    // comment for why).
+    let (logging_guard, log_rx) = logging::init_logging();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch: focus the existing picker rather than starting
@@ -40,16 +56,32 @@ fn main() {
                 let _ = window.unminimize();
             }
         }))
-        .setup(|app| {
+        .setup(move |app| {
+            // The frontend log panel's live feed — needs a real AppHandle,
+            // which only exists from here on (see `logging::spawn_log_relay`'s
+            // doc comment for why this can't happen inside `init_logging`
+            // itself).
+            logging::spawn_log_relay(app.handle().clone(), log_rx);
+
             // Broker-restart duty (ADR 0097 Broker §4 / spike criterion (g)):
             // sweep any fronts orphaned by a previous, uncleanly-terminated
             // broker process before this one starts tracking anything new.
-            if let Ok(dir) = beamtalk_desktop_broker::reap::state_dir() {
-                let _ = beamtalk_desktop_broker::reap::sweep(&dir);
+            match beamtalk_desktop_broker::reap::state_dir() {
+                Ok(dir) => match beamtalk_desktop_broker::reap::sweep(&dir) {
+                    Ok(report) => {
+                        tracing::info!(?report, "swept orphaned fronts from a previous broker run");
+                    }
+                    Err(err) => tracing::warn!(%err, "orphan sweep failed"),
+                },
+                Err(err) => {
+                    tracing::warn!(%err, "could not resolve broker state dir; skipped orphan sweep")
+                }
             }
 
             let launcher = launcher::resolve_launcher_path(app.handle());
+            tracing::info!(launcher = %launcher.display(), "resolved bt_attach launcher path");
             app.manage(AppState::new(launcher));
+            app.manage(Mutex::new(logging_guard));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -58,6 +90,7 @@ fn main() {
             commands::detach,
             commands::create_workspace,
             commands::quit,
+            commands::get_launcher_logs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the beamtalk desktop app");
@@ -73,6 +106,14 @@ fn main() {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             let state = app_handle.state::<AppState>();
             commands::detach_all(app_handle, &state);
+            // Best-effort and idempotent (`LoggingGuard::flush` is a
+            // `.take()`) — `commands::quit`'s in-app "Quit" path already
+            // calls this itself, so this only matters for an OS-level quit
+            // (Cmd-Q, taskbar close, SIGTERM, …), which never goes through
+            // that command at all.
+            if let Some(guard) = app_handle.try_state::<Mutex<LoggingGuard>>() {
+                guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
+            }
         }
     });
 }
