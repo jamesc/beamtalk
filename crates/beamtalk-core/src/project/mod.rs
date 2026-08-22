@@ -23,7 +23,7 @@ const PROJECT_MARKERS: &[&str] = &[".beamtalk", "beamtalk.toml", ".git"];
 
 /// Returns the global Beamtalk config directory (`~/.beamtalk`), if resolvable.
 fn global_beamtalk_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".beamtalk"))
+    beamtalk_workspace::beamtalk_root_dir().ok()
 }
 
 /// Check whether a `.beamtalk` marker refers to global config, not a project marker.

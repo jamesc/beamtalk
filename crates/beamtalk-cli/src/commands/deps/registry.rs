@@ -382,15 +382,16 @@ fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
         }
     }
 
-    dirs::home_dir()
-        .and_then(|home| Utf8PathBuf::from_path_buf(home).ok())
+    beamtalk_workspace::beamtalk_root_dir()
+        .ok()
+        .and_then(|root| Utf8PathBuf::from_path_buf(root).ok())
         .map_or_else(
             || {
                 BuildLayout::new(project_root)
                     .registry_dir()
                     .join(cache_key(url))
             },
-            |home| home.join(".beamtalk").join("registry").join(cache_key(url)),
+            |root| root.join("registry").join(cache_key(url)),
         )
 }
 
