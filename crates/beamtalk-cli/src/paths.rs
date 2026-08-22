@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use miette::{Result, miette};
+use miette::Result;
 
 /// Directory for beamtalk state files (session-based).
 ///
@@ -28,8 +28,7 @@ use miette::{Result, miette};
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn beamtalk_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    let base = home.join(".beamtalk");
+    let base = beamtalk_workspace::beamtalk_root_dir()?;
 
     // 1. Explicit named session (highest priority)
     if let Ok(session) = std::env::var("BEAMTALK_WORKSPACE") {
