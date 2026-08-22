@@ -622,6 +622,14 @@ classRemoveFromSystemByName(ClassName) ->
                             %% uses).
                             ClassNameBin = atom_to_binary(ClassName, utf8),
                             RemovalSnapshot = capture_class_removal_snapshot(ClassNameBin),
+                            %% BT-3236: stop eager crash recovery for this
+                            %% class BEFORE killing its actors — actors are
+                            %% linked to the class gen_server, so the kills
+                            %% below can take the class process down with
+                            %% reason 'killed', which the monitor would
+                            %% otherwise classify as a crash and resurrect
+                            %% mid-removal.
+                            beamtalk_class_monitor:unwatch(ClassName),
                             %% Stop live actors of this class
                             stop_class_actors(ClassName),
                             %% Stop the class gen_server
