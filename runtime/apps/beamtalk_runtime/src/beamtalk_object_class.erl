@@ -129,11 +129,34 @@ and join the `beamtalk_classes` pg group for enumeration.
 %% API
 %%====================================================================
 
--doc "Start a class process (unlinked) for on_load registration.".
+-doc """
+Start a class process for on_load registration.
+
+BT-3236: Routes through `beamtalk_class_sup` so class processes live in the
+OTP supervision tree, and registers the pid with `beamtalk_class_monitor`
+for eager crash recovery. When the supervisor is not running (EUnit suites
+start class processes without the runtime supervision tree), falls back to
+the pre-BT-3236 unlinked `gen_server:start/4` — that fallback never fires
+in a running release, where `beamtalk_runtime_sup` starts the supervisor
+before any class registers.
+""".
 -spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start(ClassName, ClassInfo) ->
-    RegName = beamtalk_class_registry:registry_name(ClassName),
-    gen_server:start({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
+    Result =
+        case whereis(beamtalk_class_sup) of
+            undefined ->
+                RegName = beamtalk_class_registry:registry_name(ClassName),
+                gen_server:start({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []);
+            _SupPid ->
+                beamtalk_class_sup:start_child(ClassName, ClassInfo)
+        end,
+    case Result of
+        {ok, Pid} ->
+            beamtalk_class_monitor:watch(ClassName, Pid),
+            {ok, Pid};
+        Other ->
+            Other
+    end.
 
 -doc "Start a class process with full options.".
 -spec start_link(class_name(), map()) -> {ok, pid()} | {error, term()}.

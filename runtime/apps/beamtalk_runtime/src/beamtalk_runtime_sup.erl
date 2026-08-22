@@ -44,6 +44,27 @@ init([]) ->
             type => worker,
             modules => [beamtalk_xref]
         },
+        %% Supervisor for class gen_servers (BT-3236). MUST come before
+        %% beamtalk_bootstrap so the stub classes (Class/Metaclass/
+        %% ClassBuilder) already register through the supervision tree.
+        #{
+            id => beamtalk_class_sup,
+            start => {beamtalk_class_sup, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => supervisor,
+            modules => [beamtalk_class_sup]
+        },
+        %% Eager crash recovery for class processes (BT-3236). Same ordering
+        %% constraint as beamtalk_class_sup: up before any class registers.
+        #{
+            id => beamtalk_class_monitor,
+            start => {beamtalk_class_monitor, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_class_monitor]
+        },
         %% Bootstrap the class hierarchy first
         #{
             id => beamtalk_bootstrap,
