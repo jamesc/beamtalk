@@ -39,6 +39,7 @@
 
 mod error;
 mod lexer;
+pub mod method_category;
 pub mod method_span;
 mod parser;
 mod span;
@@ -55,6 +56,9 @@ mod method_span_corpus_tests;
 
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
+pub use method_category::{
+    CategorizedMethod, MethodCategory, categorize_methods, parse_divider_name,
+};
 pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
 pub use parser::{
     Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete,

@@ -406,6 +406,11 @@ pub enum DocumentSymbolKind {
     ClassMethod,
     /// A state variable (field).
     Field,
+    /// A `// === Name ===` section-divider method category (BT-2601):
+    /// a container symbol grouping the methods between one divider and the
+    /// next (or the end of the class), surfaced only when the class's source
+    /// actually contains at least one divider.
+    Category,
 }
 
 #[cfg(test)]

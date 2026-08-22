@@ -5018,6 +5018,14 @@ fn to_lsp_symbol(
             DocumentSymbolKind::Class => SymbolKind::CLASS,
             DocumentSymbolKind::Method | DocumentSymbolKind::ClassMethod => SymbolKind::METHOD,
             DocumentSymbolKind::Field => SymbolKind::FIELD,
+            // BT-2601: a `// === Name ===` divider's method-category
+            // container. NAMESPACE is the closest standard LSP `SymbolKind`
+            // for "a named grouping of members that isn't itself a
+            // type/function" — VS Code renders it with a distinct icon from
+            // Method/Class, which is all that's needed here (nesting,
+            // breadcrumbs, and sticky-scroll come from the tree shape, not
+            // the icon choice).
+            DocumentSymbolKind::Category => SymbolKind::NAMESPACE,
         },
         detail: None,
         tags: None,

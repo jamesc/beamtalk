@@ -2002,7 +2002,10 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        crate::queries::document_symbols_provider::compute_document_symbols(&file_data.module)
+        crate::queries::document_symbols_provider::compute_document_symbols(
+            &file_data.module,
+            &file_data.source,
+        )
     }
 
     fn code_actions(&self, file: &Utf8PathBuf, start: u32, end: u32) -> Vec<CodeAction> {
