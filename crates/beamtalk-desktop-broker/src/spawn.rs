@@ -113,7 +113,7 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::error::{BrokerError, Result};
 use crate::oidc_guard::{default_ide_config_path, oidc_configured};
@@ -718,15 +718,15 @@ impl SpawnAttemptConfig {
 /// observed crash latency, matching the safety-margin style used by
 /// [`crate::readiness::ProbeTimeouts::default_local`].
 ///
-/// This grace period is paid on **every** spawn attempt, successful or not
-/// (`spawn_front_with_port_retry` always sleeps the full duration before
-/// checking `try_wait`) — so raising it here trades ~3.5s of extra latency
-/// on every attach for not silently handing back a front that is already
-/// doomed. Correctness was judged more important than shaving that fixed
-/// cost; a future revision could poll `try_wait` instead of sleeping once,
-/// but that still can't return early on the *success* path (a still-running
-/// process can't be told apart from one about to crash without waiting out
-/// the full window), so it was not pursued here.
+/// This grace period is paid in full on the **success** path of every spawn
+/// attempt (`spawn_front_with_port_retry` polls `try_wait` up to this
+/// deadline — see BT-3226 — but a still-running process can't be told apart
+/// from one about to crash without waiting out the full window) — so
+/// raising it here trades ~3.5s of extra latency on every attach for not
+/// silently handing back a front that is already doomed. Correctness was
+/// judged more important than shaving that fixed cost. The **conflict**
+/// path (an early exit) can return sooner, as soon as the poll loop
+/// observes it.
 ///
 /// This also compounds with [`port::DEFAULT_MAX_ATTEMPTS`]: the pathological
 /// worst case (every one of 10 fresh, OS-assigned candidate ports conflicts)
@@ -789,8 +789,20 @@ pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Spawn
             ide_toml_path: config.ide_toml_path.clone(),
         };
         let mut child = spawn_front(&spawn_config)?;
-        std::thread::sleep(config.bind_failure_grace);
-        if let Some(exit_status) = child.try_wait()? {
+        // BT-3226: poll try_wait() up to the deadline instead of a single
+        // sleep-then-check. A single check exactly at the deadline can miss
+        // a child that has *actually* exited but whose exit status the OS
+        // hasn't yet made visible to this process under scheduler
+        // contention (e.g. many parallel `cargo test` threads forking
+        // processes, or a throttled/virtualized sandbox) — polling gives
+        // several chances to observe the exit within the same total window,
+        // and returns as soon as it's detected rather than always paying
+        // the full grace period on the conflict path. The happy (bound)
+        // path is unaffected: a still-running process can't be told apart
+        // from one about to crash before the deadline, so that path still
+        // pays the full `bind_failure_grace` either way.
+        let exit_status = poll_try_wait_until(&mut child, config.bind_failure_grace)?;
+        if let Some(exit_status) = exit_status {
             // BT-3045: carry the launcher's actual exit status through, so a
             // caller that exhausts every attempt sees more than a bare count
             // (see BrokerError::PortsExhausted's doc comment) — this is a
@@ -808,6 +820,33 @@ pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Spawn
         .into_inner()
         .expect("SpawnAttempt::Bound is only returned after storing the child above");
     Ok((child, port))
+}
+
+/// Poll `child.try_wait()` at short intervals until it reports an exit or
+/// `grace` elapses, whichever comes first (BT-3226).
+///
+/// Returns `Ok(Some(status))` as soon as an exit is observed, or
+/// `Ok(None)` once the deadline passes with the child still reported
+/// running. Checks *before* sleeping on every iteration — including the
+/// final one right at the deadline — so this observes strictly more
+/// opportunities for the exit to become visible than a single
+/// sleep-then-check, without extending the total wait beyond `grace`.
+fn poll_try_wait_until(
+    child: &mut Child,
+    grace: Duration,
+) -> io::Result<Option<std::process::ExitStatus>> {
+    const POLL_INTERVAL: Duration = Duration::from_millis(15);
+    let deadline = Instant::now() + grace;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        std::thread::sleep(POLL_INTERVAL.min(remaining));
+    }
 }
 
 #[cfg(unix)]
@@ -1579,7 +1618,13 @@ mod tests {
 
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        config.bind_failure_grace = Duration::from_millis(50);
+        // BT-3226: the poll loop alone doesn't stabilize this in a sandboxed
+        // CI/dev environment — the *first* exec of a brand-new tempdir path
+        // (a fresh one every run, from `tempfile::TempDir::new()`) can pay a
+        // cold-exec tax north of 50ms here, independent of how tightly
+        // `try_wait` is polled within the window. 250ms (the spec's allowed
+        // ceiling) comfortably covers that without masking a real hang.
+        config.bind_failure_grace = Duration::from_millis(250);
         config.max_port_attempts = 3;
 
         let result = spawn_front_with_port_retry(&config);
@@ -1615,7 +1660,10 @@ mod tests {
 
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        config.bind_failure_grace = Duration::from_millis(100);
+        // BT-3226: see the sibling `..._always_exits` test above for why
+        // this needed raising past the poll loop alone — same cold-exec tax
+        // applies to this test's first attempt at a brand-new tempdir path.
+        config.bind_failure_grace = Duration::from_millis(250);
         config.max_port_attempts = 5;
 
         let (mut child, _port) =
