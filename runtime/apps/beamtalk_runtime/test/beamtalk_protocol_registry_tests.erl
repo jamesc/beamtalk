@@ -738,6 +738,53 @@ conforms_to_invalidated_by_class_removal_test() ->
     ok = beamtalk_class_lifecycle:class_removed('BT3222RemovalClass', bt3222_removal_class_mod),
     ?assertNot(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')).
 
+-doc """
+Regression test for the lost-invalidation race flagged in review (BT-3222,
+round 2): a `compute_conforms_to/2` result that finishes *after* a
+concurrent `invalidate_conforms_cache/0` bump must never be treated as a
+cache hit.
+
+Simulated directly on the cache's public ETS table rather than with real
+concurrency (this repo has no mocking library, and reliably interleaving a
+real millisecond-scale `gen_server:call` walk against a bump within one
+EUnit test is impractical): it inserts an entry stamped with a generation
+*older* than the table's current counter — exactly what a race-losing
+`cache_store/3` call would have written had it lost the race — and asserts
+`conforms_to/2` recomputes instead of returning it.
+""".
+conforms_to_ignores_entry_stamped_with_stale_generation_test() ->
+    rt_setup(),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3222RaceProto',
+        required_methods => [#{selector => ping, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    {ok, Pid} = start_class_with_ping('BT3222RaceClass'),
+    %% Prime the cache table + generation counter — any conforms_to/2 call
+    %% does this as a side effect; the result itself doesn't matter here.
+    _ = beamtalk_protocol_registry:conforms_to('BT3222RaceClass', 'BT3222RaceProto'),
+    %% Bump the generation past whatever that primed entry was stamped with —
+    %% mirrors a mutation's invalidate_conforms_cache/0 firing while a
+    %% concurrent compute was still in flight.
+    ok = beamtalk_protocol_registry:invalidate_conforms_cache(),
+    CurrentGen = ets:lookup_element(
+        beamtalk_protocol_conforms_cache, '$conforms_cache_generation', 2
+    ),
+    %% Simulate a compute that started *before* the bump above landing
+    %% *after* it: a wrong (`false`) answer stamped with the now-stale
+    %% pre-bump generation, written directly to bypass conforms_to/2's own
+    %% (correct) generation sampling.
+    StaleGen = CurrentGen - 1,
+    true = ets:insert(
+        beamtalk_protocol_conforms_cache,
+        {{'BT3222RaceClass', 'BT3222RaceProto'}, {false, StaleGen}}
+    ),
+    %% A stale-generation entry must never be returned — conforms_to/2 must
+    %% recompute and see the true, current answer.
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3222RaceClass', 'BT3222RaceProto')),
+    stop_class_process(Pid).
+
 -doc "invalidate_conforms_cache/0 is a no-op (never raises) when the cache table doesn't exist.".
 invalidate_conforms_cache_before_init_test() ->
     case ets:info(beamtalk_protocol_conforms_cache) of

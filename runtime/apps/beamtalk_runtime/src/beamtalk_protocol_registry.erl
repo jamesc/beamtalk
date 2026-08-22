@@ -60,12 +60,31 @@ ETS table (`beamtalk_protocol_conforms_cache`) keyed by `{ClassName,
 ProtocolName}`, so a repeated pair is an ETS lookup with no `gen_server:call`
 at all.
 
-Invalidation is a conservative whole-table flush (`invalidate_conforms_cache/0`)
-rather than fine-grained per-class/per-protocol tracking — conformance depends
-on the *transitive* method set, so a `put_method` on an ancestor invalidates
-every descendant's conformance, not just the class it was called on; proving a
-fine-grained scheme sound is materially harder than proving "flush everything"
-sound, and the flush itself is O(1) (`ets:delete_all_objects/1`). Flushed on:
+Invalidation is a conservative whole-cache flush rather than fine-grained
+per-class/per-protocol tracking — conformance depends on the *transitive*
+method set, so a `put_method` on an ancestor invalidates every descendant's
+conformance, not just the class it was called on; proving a fine-grained
+scheme sound is materially harder than proving "flush everything" sound.
+
+The flush is a monotonic **generation counter**, not `ets:delete_all_objects/1`
+on the results themselves: each cache entry is stamped `{Result, Gen}` with
+the generation sampled *before* `compute_conforms_to/2` runs, and
+`invalidate_conforms_cache/0` bumps a single counter rather than clearing
+rows. `cache_lookup/1` only treats an entry as a hit if its stamped `Gen`
+still equals the *current* counter. This closes a lost-invalidation race a
+row-clearing flush cannot: `compute_conforms_to/2` is a multi-`gen_server:call`
+walk that can take milliseconds (see the timings below), so a flush that
+lands *during* an in-flight compute — e.g. `beamtalk_xref:compute_relatedness/3`
+calling `conforms_to/2` from inside hot-reload's own `senders_of/2` recompute,
+concurrently with the very mutation that triggers the flush — must not let
+that compute's now-stale result land in the cache *after* the flush already
+ran. Clearing rows can't prevent that: the write simply happens after the
+clear. Stamping the generation *before* the compute and checking it *after*
+means a bump anywhere in between is always visible to the reader: the stored
+generation is behind, so it's a permanent miss for that entry, not a
+resurrected stale value (BT-3222 review round 2). Table size stays bounded
+regardless — entries are only ever overwritten per-key, never accumulate
+across bumps. Bumped on:
 
 - `register_protocol/1` / `unregister_protocol/1` (this module)
 - class registration and hot reload — `beamtalk_object_class:init/1` and its
@@ -101,6 +120,10 @@ concurrently (e.g. during test teardown).
 
 -define(PROTOCOL_TABLE, beamtalk_protocol_registry).
 -define(CONFORMS_CACHE_TABLE, beamtalk_protocol_conforms_cache).
+%% Generation-counter row inside ?CONFORMS_CACHE_TABLE (BT-3222). Not a valid
+%% `{atom(), atom()}` cache key shape, so it can never collide with a real
+%% `{ClassName, ProtocolName}` entry in the same `set` table.
+-define(CONFORMS_CACHE_GEN_KEY, '$conforms_cache_generation').
 
 %%% ============================================================================
 %%% Initialization
@@ -267,9 +290,9 @@ Returns `false` if:
 BT-3222: Results are cached in `?CONFORMS_CACHE_TABLE`, keyed by
 `{ClassName, ProtocolName}` — a repeated pair is a plain ETS lookup with no
 `gen_server:call` to any class process. See this module's "Conformance
-Cache" doc for the full invalidation list; a stale entry is never returned
-across a class or protocol mutation because every mutation site flushes the
-whole cache table.
+Cache" doc for the full invalidation list and why a generation-stamped entry,
+not a whole-table flush, is what actually makes a stale entry unreturnable
+across a class or protocol mutation.
 """.
 -spec conforms_to(atom(), atom()) -> boolean().
 conforms_to(ClassName, ProtocolName) ->
@@ -278,8 +301,12 @@ conforms_to(ClassName, ProtocolName) ->
         {ok, Cached} ->
             Cached;
         miss ->
+            %% Sampled *before* compute_conforms_to/2 runs — see the
+            %% "Conformance Cache" moduledoc for why the store below must
+            %% carry this pre-compute generation, not one read afterward.
+            Gen = current_generation(),
             Result = compute_conforms_to(ClassName, ProtocolName),
-            cache_store(CacheKey, Result),
+            cache_store(CacheKey, Result, Gen),
             Result
     end.
 
@@ -329,7 +356,10 @@ compute_conforms_to(ClassName, ProtocolName) ->
 -doc """
 Look up a cached `conforms_to/2` result.
 
-`badarg`-safe: a missing table (never initialised, or torn down
+A hit requires the entry's stamped generation to still equal the *current*
+generation counter — an entry stamped before a bump is a permanent miss,
+never a stale hit, regardless of write timing (see the "Conformance Cache"
+moduledoc). `badarg`-safe: a missing table (never initialised, or torn down
 concurrently — e.g. mid test-teardown) reports a cache miss rather than
 raising, exactly like every other lookup in this module.
 """.
@@ -341,8 +371,13 @@ cache_lookup(Key) ->
                 miss;
             _ ->
                 case ets:lookup(?CONFORMS_CACHE_TABLE, Key) of
-                    [{_, Result}] -> {ok, Result};
-                    [] -> miss
+                    [{_, {Result, Gen}}] ->
+                        case Gen =:= current_generation() of
+                            true -> {ok, Result};
+                            false -> miss
+                        end;
+                    [] ->
+                        miss
                 end
         end
     catch
@@ -350,19 +385,23 @@ cache_lookup(Key) ->
     end.
 
 -doc """
-Store a `conforms_to/2` result in the cache.
+Store a `conforms_to/2` result in the cache, stamped with the generation
+sampled before it was computed.
 
-`badarg`-safe (see `cache_lookup/1`) — a failed store just means the next
-call recomputes, never a crash.
+No compare-and-swap against the current generation is needed here — that's
+the point of stamp-and-validate-on-read (see the moduledoc): a store carrying
+a now-stale `Gen` is harmless because `cache_lookup/1` will never treat it as
+a hit. `badarg`-safe (see `cache_lookup/1`) — a failed store just means the
+next call recomputes, never a crash.
 """.
--spec cache_store({atom(), atom()}, boolean()) -> ok.
-cache_store(Key, Result) ->
+-spec cache_store({atom(), atom()}, boolean(), non_neg_integer()) -> ok.
+cache_store(Key, Result, Gen) ->
     try
         case ets:info(?CONFORMS_CACHE_TABLE) of
             undefined ->
                 ok;
             _ ->
-                ets:insert(?CONFORMS_CACHE_TABLE, {Key, Result}),
+                ets:insert(?CONFORMS_CACHE_TABLE, {Key, {Result, Gen}}),
                 ok
         end
     catch
@@ -370,29 +409,41 @@ cache_store(Key, Result) ->
     end.
 
 -doc """
-Flush every cached `conforms_to/2` result (BT-3222).
+Read the current cache generation, initialising it to `0` if this is the
+first read since the table was created.
 
-A conservative whole-table flush rather than fine-grained per-class/
-per-protocol invalidation — conformance depends on the *transitive* method
-set, so a mutation on one class can change the cached result for every
-descendant, not just itself; proving "flush everything" correct is far
-simpler than proving a fine-grained scheme tracks every such dependency, and
-the flush itself is a single O(1) `ets:delete_all_objects/1`. Call sites are
-listed in this module's "Conformance Cache" doc.
+`badarg`-safe: reports `0` if the table is missing or torn down concurrently,
+matching every other accessor in this module — a caller that gets `0` here
+either finds no matching row on the immediately-following `cache_lookup/1`
+(miss, safe) or is racing table teardown entirely, in which case the result
+is discarded anyway.
+""".
+-spec current_generation() -> non_neg_integer().
+current_generation() ->
+    try
+        ets:update_counter(
+            ?CONFORMS_CACHE_TABLE, ?CONFORMS_CACHE_GEN_KEY, 0, {?CONFORMS_CACHE_GEN_KEY, 0}
+        )
+    catch
+        error:badarg -> 0
+    end.
+
+-doc """
+Invalidate every cached `conforms_to/2` result (BT-3222) by bumping the
+generation counter — see the "Conformance Cache" moduledoc for why a
+counter bump, not `ets:delete_all_objects/1`, is what makes this race-free.
+Call sites are listed there.
 
 `badarg`-safe: a missing or concurrently-torn-down table is a no-op, matching
-`cache_lookup/1` / `cache_store/2`.
+`cache_lookup/1` / `cache_store/3`.
 """.
 -spec invalidate_conforms_cache() -> ok.
 invalidate_conforms_cache() ->
     try
-        case ets:info(?CONFORMS_CACHE_TABLE) of
-            undefined ->
-                ok;
-            _ ->
-                ets:delete_all_objects(?CONFORMS_CACHE_TABLE),
-                ok
-        end
+        ets:update_counter(
+            ?CONFORMS_CACHE_TABLE, ?CONFORMS_CACHE_GEN_KEY, 1, {?CONFORMS_CACHE_GEN_KEY, 1}
+        ),
+        ok
     catch
         error:badarg -> ok
     end.
