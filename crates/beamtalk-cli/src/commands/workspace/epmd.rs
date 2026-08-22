@@ -223,10 +223,36 @@ mod tests {
         // must not classify it as Promiscuous. A `Promiscuous` result here is a
         // genuine finding (a stray epmd bound to 0.0.0.0), not test flakiness —
         // which is exactly the posture this check is meant to catch.
-        assert!(
-            !matches!(check_epmd_loopback(), EpmdPosture::Promiscuous(_)),
-            "default deployment must not expose epmd on a public interface"
-        );
+        //
+        // BT-3235: on a shared dev box running several concurrent Erlang/OTP
+        // toolchain invocations (e.g. multiple agent worktrees building/testing
+        // at once), this *can* legitimately fail — epmd is a per-user singleton
+        // daemon, and whichever process starts it first wins its bind posture
+        // (all interfaces by default, absent `-address`/`ERL_EPMD_ADDRESS`) for
+        // the rest of the session. Investigation found no false-positive mode in
+        // `primary_non_loopback_ipv4`/`epmd_reachable_at` (verified against a
+        // real LAN interface + an active Tailscale VPN interface: the kernel's
+        // default-route choice was stable and neither IP hairpinned to a
+        // loopback-bound epmd) — a failure here is a real posture violation
+        // worth investigating, not something to silence. The Justfile now pins
+        // `ERL_EPMD_ADDRESS=127.0.0.1` for every recipe so this project's own
+        // build/test tooling can't be the culprit; see the panic message below
+        // for how to tell an external stray epmd apart from a regression here.
+        if let EpmdPosture::Promiscuous(ip) = check_epmd_loopback() {
+            let names = query_epmd_names();
+            panic!(
+                "default deployment must not expose epmd on a public interface: \
+                 epmd answered on {ip}:{EPMD_PORT}.\n\
+                 epmd -names reports: {names:?}\n\
+                 epmd is a shared, per-user daemon — this is usually *other* Erlang/OTP \
+                 tooling on this host that started it without ERL_EPMD_ADDRESS pinned to \
+                 loopback before this project's own tooling got a chance to (epmd keeps its \
+                 bind posture until killed). If the names above aren't this project's own \
+                 workspace/bt_attach nodes, that confirms an external cause. Remediation: \
+                 `epmd -kill` (only if no other Erlang node on this host needs it) and re-run \
+                 — this project's tooling will restart epmd pinned to loopback."
+            );
+        }
     }
 
     #[test]
