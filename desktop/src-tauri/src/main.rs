@@ -23,6 +23,7 @@
 mod commands;
 mod dto;
 mod launcher;
+mod logging;
 mod state;
 
 use tauri::Manager;
@@ -30,6 +31,14 @@ use tauri::Manager;
 use state::AppState;
 
 fn main() {
+    // Must run before any other `tracing::` call this process makes,
+    // including the reap sweep and `resolve_launcher_path` calls in
+    // `.setup()` just below — see `logging::init_logging`'s doc comment.
+    // `_logging_guard` is never read again, but must stay alive until
+    // `app.run()` below returns (dropping it early would silently stop
+    // `launcher.log` file writes).
+    let (_logging_guard, log_rx) = logging::init_logging();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch: focus the existing picker rather than starting
@@ -40,15 +49,30 @@ fn main() {
                 let _ = window.unminimize();
             }
         }))
-        .setup(|app| {
+        .setup(move |app| {
+            // The frontend log panel's live feed — needs a real AppHandle,
+            // which only exists from here on (see `logging::spawn_log_relay`'s
+            // doc comment for why this can't happen inside `init_logging`
+            // itself).
+            logging::spawn_log_relay(app.handle().clone(), log_rx);
+
             // Broker-restart duty (ADR 0097 Broker §4 / spike criterion (g)):
             // sweep any fronts orphaned by a previous, uncleanly-terminated
             // broker process before this one starts tracking anything new.
-            if let Ok(dir) = beamtalk_desktop_broker::reap::state_dir() {
-                let _ = beamtalk_desktop_broker::reap::sweep(&dir);
+            match beamtalk_desktop_broker::reap::state_dir() {
+                Ok(dir) => match beamtalk_desktop_broker::reap::sweep(&dir) {
+                    Ok(report) => {
+                        tracing::info!(?report, "swept orphaned fronts from a previous broker run");
+                    }
+                    Err(err) => tracing::warn!(%err, "orphan sweep failed"),
+                },
+                Err(err) => {
+                    tracing::warn!(%err, "could not resolve broker state dir; skipped orphan sweep")
+                }
             }
 
             let launcher = launcher::resolve_launcher_path(app.handle());
+            tracing::info!(launcher = %launcher.display(), "resolved bt_attach launcher path");
             app.manage(AppState::new(launcher));
             Ok(())
         })
@@ -58,6 +82,7 @@ fn main() {
             commands::detach,
             commands::create_workspace,
             commands::quit,
+            commands::get_launcher_logs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the beamtalk desktop app");

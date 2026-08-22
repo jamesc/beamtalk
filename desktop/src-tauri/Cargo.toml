@@ -41,5 +41,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+tracing-appender = "0.2"
 beamtalk-desktop-broker = { path = "../../crates/beamtalk-desktop-broker" }
 beamtalk-desktop-shell = { path = "../../crates/beamtalk-desktop-shell" }
+beamtalk-workspace = { path = "../../crates/beamtalk-workspace" }

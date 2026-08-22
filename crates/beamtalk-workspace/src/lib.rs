@@ -74,14 +74,26 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     Ok(hash_workspace_path_string(path_str))
 }
 
+/// Get the root Beamtalk state directory (`~/.beamtalk/`) — the shared leaf
+/// under every tool that needs it (workspace storage here, the desktop
+/// launcher's log file, ...), so none of them re-derive `dirs::home_dir()`
+/// on their own.
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
+pub fn beamtalk_root_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
+    Ok(home.join(".beamtalk"))
+}
+
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
 ///
 /// # Errors
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn workspaces_base_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk").join("workspaces"))
+    Ok(beamtalk_root_dir()?.join("workspaces"))
 }
 
 /// Get the workspace directory for a given workspace ID.
@@ -191,6 +203,14 @@ pub fn parse_repl_workspace_id(stdout: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspaces_base_dir_is_workspaces_under_beamtalk_root_dir() {
+        assert_eq!(
+            workspaces_base_dir().unwrap(),
+            beamtalk_root_dir().unwrap().join("workspaces")
+        );
+    }
 
     #[test]
     fn test_generate_workspace_id_length() {

@@ -109,8 +109,10 @@
 //! still misses (e.g. a crash in the narrow assign-after-spawn window).
 
 use std::cell::RefCell;
-use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::fs::{File, OpenOptions};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use crate::error::{BrokerError, Result};
@@ -292,6 +294,8 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         ));
     }
 
+    redirect_front_stdio(&mut cmd, &config.workspace_id);
+
     detach(&mut cmd);
 
     // Created before `cmd.spawn()` (not after) so there is no
@@ -337,6 +341,44 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     {
         Ok(SpawnedFront { child })
     }
+}
+
+/// Redirect `cmd`'s stdout/stderr to `~/.beamtalk/workspaces/<id>/attach.log`
+/// (append mode, accumulating across restarts — mirrors `workspace.log`'s own
+/// convention on the workspace-node side) instead of the default inherited
+/// stdio. Inherited stdio is the packaged Tauri app's own — i.e. nowhere, in
+/// a release build (`windows_subsystem = "windows"` on Windows; macOS/Linux
+/// app bundles have no attached terminal either) — so without this, a
+/// spawned front's crash or an Elixir-side exception is invisible short of
+/// running the release binary manually from a terminal (BT-3225).
+///
+/// Best-effort: if the log file can't be opened (e.g. the workspace
+/// directory somehow isn't writable), stdout/stderr fall back to
+/// [`Stdio::null`] rather than failing the whole spawn over a logging
+/// nicety — `attach.log`'s absence is itself a signal something is wrong on
+/// this machine, for whoever goes looking for it.
+fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
+    let stdio_pair = beamtalk_workspace::workspace_dir(workspace_id)
+        .ok()
+        .and_then(|dir| open_front_log(&dir.join("attach.log")).ok());
+
+    if let Some((stdout_file, stderr_file)) = stdio_pair {
+        cmd.stdout(Stdio::from(stdout_file));
+        cmd.stderr(Stdio::from(stderr_file));
+    } else {
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+    }
+}
+
+/// Open `path` for append (creating it if absent) and return two handles to
+/// the same underlying file description — via [`File::try_clone`], not two
+/// independent `open` calls — so stdout and stderr share one file offset and
+/// interleave in write order rather than racing to overwrite each other.
+fn open_front_log(path: &Path) -> io::Result<(File, File)> {
+    let file = OpenOptions::new().create(true).append(true).open(path)?;
+    let cloned = file.try_clone()?;
+    Ok((file, cloned))
 }
 
 /// Kill and reap `child` after it was successfully spawned but
@@ -1399,6 +1441,64 @@ mod tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log() {
+        // BT-3225: the spawned front's stdout/stderr must land in
+        // `~/.beamtalk/workspaces/<id>/attach.log`, not the packaged app's
+        // inherited (and, in a release build, nonexistent) stdio.
+        let ws = TestWorkspaceDir::new("attach_log_capture");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let launcher = write_launcher_script(
+            tmp.path(),
+            "server",
+            "echo stdout-marker; echo stderr-marker 1>&2; sleep 5",
+        );
+
+        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
+        config.bind_failure_grace = Duration::from_millis(100);
+
+        let (mut child, _port) =
+            spawn_front_with_port_retry(&config).expect("should spawn and bind on first try");
+
+        let log_path = beamtalk_workspace::workspace_dir(&ws.id)
+            .unwrap()
+            .join("attach.log");
+        let contents = wait_for_file_contents(&log_path, Duration::from_secs(2));
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            contents.contains("stdout-marker"),
+            "expected attach.log to contain the launcher's stdout, got: {contents:?}"
+        );
+        assert!(
+            contents.contains("stderr-marker"),
+            "expected attach.log to contain the launcher's stderr, got: {contents:?}"
+        );
+    }
+
+    /// Poll `path` until it exists and is non-empty, or `timeout` elapses —
+    /// the launcher script's `echo`s race this test process reading the file
+    /// it just told the OS to create.
+    #[cfg(unix)]
+    fn wait_for_file_contents(path: &std::path::Path, timeout: Duration) -> String {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                if !contents.is_empty() {
+                    return contents;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return std::fs::read_to_string(path).unwrap_or_default();
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[cfg(unix)]
