@@ -3,11 +3,12 @@
 
 //! Launcher-side structured logging (BT-3225): every real stage of the
 //! attach/spawn/readiness flow gets a `tracing` event. Two sinks:
-//! `~/.beamtalk/launcher.log` (persisted across restarts, `tail -f`-able —
-//! mirrors `~/.beamtalk/workspaces/<id>/workspace.log`'s own convention on
-//! the workspace-node side), and a channel drained by [`spawn_log_relay`]
-//! once an [`AppHandle`] exists, forwarding each line to the picker UI's
-//! log panel as a [`LOG_LINE_EVENT`].
+//! `~/.beamtalk/launcher.log.<date>` (persisted across restarts, `tail
+//! -f`-able, rotated daily and pruned after a week — BT-3229 — mirrors
+//! `~/.beamtalk/workspaces/<id>/workspace.log`'s own convention on the
+//! workspace-node side otherwise), and a channel drained by
+//! [`spawn_log_relay`] once an [`AppHandle`] exists, forwarding each line
+//! to the picker UI's log panel as a [`LOG_LINE_EVENT`].
 //!
 //! Without this, `beamtalk-desktop-broker`'s own `tracing::info!/warn!`
 //! calls (`discovery.rs`, `reap.rs`) went nowhere — no subscriber was ever
@@ -29,19 +30,29 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// [`spawn_log_relay`].
 pub const LOG_LINE_EVENT: &str = "launcher-log-line";
 
-/// File name under `~/.beamtalk/` — shared between [`init_logging`] (writes)
-/// and [`read_recent_logs`] (reads), so the two can't drift apart.
+/// File prefix under `~/.beamtalk/` — shared between [`init_logging`]
+/// (writes) and [`read_recent_logs`] (reads), so the two can't drift apart.
+/// With `Rotation::DAILY` (see [`init_logging`]), the file actually written
+/// to on a given day is `{LOG_FILE_NAME}.<date>`, not this bare name — a
+/// bare `launcher.log` only exists as a leftover from before rotation
+/// shipped (BT-3229). [`list_rotated_log_files`] is what resolves this
+/// prefix to the current set of on-disk files.
 const LOG_FILE_NAME: &str = "launcher.log";
 
-/// Bounds how much of `launcher.log` [`read_recent_logs`] reads from disk.
-/// The file is never rotated (`Rotation::NEVER`) and accumulates across
-/// every restart, so a long-lived install's log can grow large; reading the
-/// whole thing just to keep the last few thousand lines would get slower
-/// and heavier every day the app stays installed. Generous enough that a
-/// realistic `limit` (the picker UI caps its own display at 2000 lines)
-/// almost never needs the "there weren't enough lines in this window" retry
-/// this function's implementation does. Full rotation is tracked separately
-/// (BT-3229) — this is only a read-side bound, not a write-side cap.
+/// How many daily rollovers [`init_logging`]'s appender keeps
+/// (`tracing_appender::rolling::Builder::max_log_files`) before pruning the
+/// oldest — one week, the retention window settled on for BT-3229.
+const MAX_LOG_FILES: usize = 7;
+
+/// Bounds how much log content [`read_recent_logs`] reads from disk in
+/// total, across however many rotated files it takes to fill `limit` lines.
+/// Even with daily rotation capping any single file to a day's worth of
+/// writes, a very chatty day (or a `limit` requesting more history than one
+/// file holds) can still mean reading across several files — this caps the
+/// combined read the same way it capped the single unrotated file before
+/// BT-3229. Generous enough that a realistic `limit` (the picker UI caps
+/// its own display at 2000 lines) almost never needs the "there weren't
+/// enough lines in this window" retry this function's implementation does.
 const MAX_TAIL_READ_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Keeps `tracing-appender`'s background flush thread alive; dropping this
@@ -96,41 +107,49 @@ impl io::Write for ChannelWriter {
     }
 }
 
-/// Create `path` ahead of `tracing-appender`'s own open, `0600` (owner-only)
-/// on Unix — matching every other security-relevant file already under
-/// `~/.beamtalk/` (`workspace.log`, `cookie`, `vm.args`, `attach.log` —
-/// see `beamtalk_desktop_broker::spawn::open_front_log`'s doc comment for
-/// the same reasoning). `launcher.log` isn't as sensitive as a workspace's
-/// own cookie, but it does record project paths, workspace ids, and ports —
-/// enough to match the same posture rather than the world-readable default.
-/// Best-effort and creation-only, same limitation `open_front_log` already
-/// accepts: a file that already exists from before this code ran keeps
-/// whatever mode it had.
+/// Chmod every file already on disk under `root_dir` that belongs to the
+/// launcher log (matched via [`list_rotated_log_files`]'s prefix rule) to
+/// `0600` (owner-only) on Unix — matching every other security-relevant
+/// file already under `~/.beamtalk/` (`workspace.log`, `cookie`, `vm.args`,
+/// `attach.log` — see `beamtalk_desktop_broker::spawn::open_front_log`'s
+/// doc comment for the same reasoning). `launcher.log` isn't as sensitive
+/// as a workspace's own cookie, but it does record project paths,
+/// workspace ids, and ports — enough to match the same posture rather than
+/// the world-readable default.
+///
+/// Runs *after* [`init_logging`] opens today's file rather than
+/// pre-creating it at the right mode: `tracing-appender`'s `DAILY`
+/// rotation names that file by today's date
+/// (`Rotation::date_format`/`join_date`, internal to the crate), so unlike
+/// the old `Rotation::NEVER` single fixed path there's no name to
+/// pre-create ahead of `tracing-appender`'s own open. Best-effort, and
+/// applied to every matching file (not just today's) so a restart
+/// self-heals any file `tracing-appender` created at the process umask's
+/// default mode on a run before this existed, or before a given day's file
+/// happened to get chmod'd.
 #[cfg(unix)]
-fn ensure_owner_only(path: &Path) {
-    use std::os::unix::fs::OpenOptionsExt;
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(path);
+fn ensure_owner_only(root_dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    for path in list_rotated_log_files(root_dir) {
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
 }
 
 #[cfg(not(unix))]
-fn ensure_owner_only(_path: &Path) {}
+fn ensure_owner_only(_root_dir: &Path) {}
 
-/// Initialize the launcher's `tracing` subscriber: a file layer at
-/// `~/.beamtalk/launcher.log` (append, across restarts) plus a channel
-/// layer whose receiver [`spawn_log_relay`] later drains. Falls back to the
-/// OS temp dir if `~/.beamtalk` can't be resolved, and degrades to
-/// channel-only logging (no crash) if `launcher.log` itself can't be
-/// opened — e.g. `~/.beamtalk` owned by another user from a prior `sudo`
-/// invocation, or a full/read-only home directory. This function runs as
-/// the very first thing in `main()`, before any window exists; a hard
-/// `.expect()` here (which `tracing_appender::rolling::never` — the
-/// convenience constructor this used before this fix — has internally)
-/// would silently kill the app on launch with no visible error in a
-/// packaged build.
+/// Initialize the launcher's `tracing` subscriber: a file layer rotating
+/// daily under `~/.beamtalk/` (append, across restarts, [`MAX_LOG_FILES`]
+/// days kept — BT-3229) plus a channel layer whose receiver
+/// [`spawn_log_relay`] later drains. Falls back to the OS temp dir if
+/// `~/.beamtalk` can't be resolved, and degrades to channel-only logging
+/// (no crash) if today's log file itself can't be opened — e.g.
+/// `~/.beamtalk` owned by another user from a prior `sudo` invocation, or a
+/// full/read-only home directory. This function runs as the very first
+/// thing in `main()`, before any window exists; a hard `.expect()` here
+/// (which `tracing_appender::rolling::never` — the convenience constructor
+/// this used before the BT-3225 fix — has internally) would silently kill
+/// the app on launch with no visible error in a packaged build.
 ///
 /// Defaults to `info` (not the CLI's `warn`, see
 /// `beamtalk-cli/src/main.rs`'s own `EnvFilter` setup) — this subscriber
@@ -144,21 +163,26 @@ fn ensure_owner_only(_path: &Path) {}
 #[must_use]
 pub fn init_logging() -> (LoggingGuard, mpsc::Receiver<String>) {
     let root_dir = beamtalk_workspace::beamtalk_root_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let log_path = root_dir.join(LOG_FILE_NAME);
-    ensure_owner_only(&log_path);
 
     let file_appender = tracing_appender::rolling::Builder::new()
-        .rotation(tracing_appender::rolling::Rotation::NEVER)
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix(LOG_FILE_NAME)
+        .max_log_files(MAX_LOG_FILES)
         .build(&root_dir)
         .map_err(|err| {
             eprintln!(
-                "beamtalk-desktop: could not open {}: {err} — file logging disabled, \
-                 in-app log panel still works",
-                log_path.display()
+                "beamtalk-desktop: could not open a {LOG_FILE_NAME} file under {}: {err} — \
+                 file logging disabled, in-app log panel still works",
+                root_dir.display()
             );
         })
         .ok();
+
+    // After (not before) opening today's file: unlike the old
+    // `Rotation::NEVER` fixed path, `tracing-appender` names today's file
+    // by today's date, so there's nothing to pre-create ahead of its own
+    // open — see `ensure_owner_only`'s doc comment.
+    ensure_owner_only(&root_dir);
 
     let (file_layer, file_guard) = match file_appender {
         Some(appender) => {
@@ -206,47 +230,137 @@ pub fn spawn_log_relay(app: AppHandle, rx: mpsc::Receiver<String>) {
     });
 }
 
-/// Read the tail of `~/.beamtalk/launcher.log` — up to `limit` lines — to
-/// seed the picker UI's log panel with recent history on open, before any
-/// live [`LOG_LINE_EVENT`] has fired. Returns an empty vec (not an error)
-/// if the file doesn't exist yet — nothing has logged since the log
+/// Read the tail of the launcher log — up to `limit` lines, newest content
+/// last — to seed the picker UI's log panel with recent history on open,
+/// before any live [`LOG_LINE_EVENT`] has fired. Returns an empty vec (not
+/// an error) if no log file exists yet — nothing has logged since the log
 /// directory was created, not a failure worth surfacing to the UI.
+///
+/// Since [`init_logging`]'s appender rotates daily (BT-3229), "the log" is
+/// no longer one fixed file: this discovers the current file plus however
+/// many of the recent rotations it takes to fill `limit` (see
+/// [`list_rotated_log_files`] and [`read_recent_lines_from_files`]).
 #[must_use]
 pub fn read_recent_logs(limit: usize) -> Vec<String> {
     let Ok(root_dir) = beamtalk_workspace::beamtalk_root_dir() else {
         return Vec::new();
     };
-    read_recent_lines_from(&root_dir.join(LOG_FILE_NAME), limit)
+    read_recent_lines_from_files(&list_rotated_log_files(&root_dir), limit)
 }
 
-/// [`read_recent_logs`]'s actual logic, parameterized over the file path so
-/// it's testable against a temp file instead of the real
-/// `~/.beamtalk/launcher.log` (`read_recent_logs` itself can't be — it
-/// hardcodes the real path via `beamtalk_workspace::beamtalk_root_dir`).
+/// Every on-disk file belonging to the launcher log under `root_dir`,
+/// newest first: each `{LOG_FILE_NAME}.<date>` written by
+/// [`init_logging`]'s `Rotation::DAILY` appender, plus a bare
+/// `{LOG_FILE_NAME}` if one is still around from before BT-3229 added
+/// rotation. `tracing-appender` names *today's* file by today's date
+/// rather than a fixed name, so callers that want "the current log" have
+/// to discover it this way instead of hardcoding a path.
 ///
-/// Bounded to the last [`MAX_TAIL_READ_BYTES`] of the file (BT-3225 review
-/// follow-up) rather than reading it in full — `launcher.log` has no
-/// rotation yet (BT-3229) and grows across every restart.
-fn read_recent_lines_from(path: &Path, limit: usize) -> Vec<String> {
+/// Sorts by filename, descending, rather than parsing out and comparing
+/// dates: `{LOG_FILE_NAME}.<date>` sorts chronologically because the date
+/// suffix is ISO-8601 (`YYYY-MM-DD`, lexicographic == chronological), and
+/// the bare `{LOG_FILE_NAME}` — being a strict prefix of every dated name —
+/// sorts before all of them ascending, i.e. last descending, which is
+/// exactly where a file that predates rotation belongs relative to any
+/// dated one.
+fn list_rotated_log_files(root_dir: &Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root_dir) else {
+        return Vec::new();
+    };
+
+    let mut files: Vec<(String, std::path::PathBuf)> = entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name().to_str()?.to_string();
+            let matches = name == LOG_FILE_NAME
+                || name
+                    .strip_prefix(&format!("{LOG_FILE_NAME}."))
+                    .is_some_and(is_daily_rotation_date_suffix);
+            matches.then_some((name, entry.path()))
+        })
+        .collect();
+
+    files.sort_by(|(a, _), (b, _)| b.cmp(a));
+    files.into_iter().map(|(_, path)| path).collect()
+}
+
+/// True if `suffix` has the exact `YYYY-MM-DD` shape
+/// `tracing_appender::rolling::Rotation::DAILY` names files with
+/// (`Rotation::date_format`, internal to that crate — `[year]-[month]-[day]`
+/// zero-padded). Guards [`list_rotated_log_files`]'s prefix match against
+/// picking up an unrelated file that merely starts with
+/// `"{LOG_FILE_NAME}."`, e.g. a stray `launcher.log.bak`.
+fn is_daily_rotation_date_suffix(suffix: &str) -> bool {
+    let bytes = suffix.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+}
+
+/// [`read_recent_logs`]'s actual logic, parameterized over the candidate
+/// files (newest first, as returned by [`list_rotated_log_files`]) so it's
+/// testable against temp files instead of the real rotated logs under
+/// `~/.beamtalk/`.
+///
+/// Reads each file's tail starting from the newest, stopping once `limit`
+/// lines have been collected or the combined read across however many
+/// files that took has hit [`MAX_TAIL_READ_BYTES`] — daily rotation caps
+/// any single file to roughly a day's writes, so a `limit`-sized window can
+/// legitimately need to reach into one or more earlier files to fill.
+fn read_recent_lines_from_files(files: &[std::path::PathBuf], limit: usize) -> Vec<String> {
+    let mut chunks_newest_first: Vec<Vec<String>> = Vec::new();
+    let mut lines_so_far = 0usize;
+    let mut bytes_budget = MAX_TAIL_READ_BYTES;
+
+    for path in files {
+        if lines_so_far >= limit || bytes_budget == 0 {
+            break;
+        }
+        let (lines, bytes_read) = read_tail(path, limit - lines_so_far, bytes_budget);
+        bytes_budget = bytes_budget.saturating_sub(bytes_read);
+        if lines.is_empty() {
+            continue;
+        }
+        lines_so_far += lines.len();
+        chunks_newest_first.push(lines);
+    }
+
+    // Each chunk is already in on-disk (chronological) order internally;
+    // reversing the chunk order — not each chunk's contents — puts the
+    // oldest file's lines first overall.
+    chunks_newest_first.into_iter().rev().flatten().collect()
+}
+
+/// Read up to `limit` lines from the tail of `path`, bounded to at most
+/// `max_bytes` read from disk. Returns the matched lines in on-disk
+/// (chronological) order, plus how many bytes were actually read so
+/// [`read_recent_lines_from_files`] can track a shared budget across
+/// several files. Returns `(vec![], 0)` for a missing or unreadable file.
+fn read_tail(path: &Path, limit: usize, max_bytes: u64) -> (Vec<String>, u64) {
     use std::io::{Read, Seek, SeekFrom};
 
     let Ok(mut file) = std::fs::File::open(path) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
     let Ok(len) = file.metadata().map(|m| m.len()) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
 
-    let seek_start = len.saturating_sub(MAX_TAIL_READ_BYTES);
+    let seek_start = len.saturating_sub(max_bytes);
     let truncated = seek_start > 0;
     if truncated && file.seek(SeekFrom::Start(seek_start)).is_err() {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
 
     let mut buf = Vec::new();
     if file.read_to_end(&mut buf).is_err() {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
+    let bytes_read = buf.len() as u64;
 
     // `from_utf8_lossy`, not `String::from_utf8` — a seek into the middle
     // of the file can land mid-character, and lossy conversion turns that
@@ -262,12 +376,16 @@ fn read_recent_lines_from(path: &Path, limit: usize) -> Vec<String> {
     }
 
     let start = lines.len().saturating_sub(limit);
-    lines[start..].to_vec()
+    (lines[start..].to_vec(), bytes_read)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn read_recent_lines_from(path: &Path, limit: usize) -> Vec<String> {
+        read_tail(path, limit, MAX_TAIL_READ_BYTES).0
+    }
 
     #[test]
     fn read_recent_lines_from_returns_empty_for_a_missing_file() {
@@ -322,6 +440,109 @@ mod tests {
             vec!["tail-marker-1", "tail-marker-2", "tail-marker-3"],
             "expected exactly the three tail markers, in order, with no \
              truncated filler fragment ahead of them"
+        );
+    }
+
+    #[test]
+    fn list_rotated_log_files_sorts_dated_files_newest_first() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for name in [
+            "launcher.log.2026-08-20",
+            "launcher.log.2026-08-22",
+            "launcher.log.2026-08-21",
+        ] {
+            std::fs::write(tmp.path().join(name), "").unwrap();
+        }
+
+        let files = list_rotated_log_files(tmp.path());
+        let names: Vec<_> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "launcher.log.2026-08-22",
+                "launcher.log.2026-08-21",
+                "launcher.log.2026-08-20",
+            ]
+        );
+    }
+
+    #[test]
+    fn list_rotated_log_files_puts_the_undated_legacy_file_last() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("launcher.log"), "").unwrap();
+        std::fs::write(tmp.path().join("launcher.log.2026-08-22"), "").unwrap();
+        // Unrelated file sharing a prefix character-wise but not on a `.`
+        // boundary — must not be picked up.
+        std::fs::write(tmp.path().join("launcher.log.old.bak"), "").unwrap();
+
+        let files = list_rotated_log_files(tmp.path());
+        let names: Vec<_> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["launcher.log.2026-08-22", "launcher.log"]);
+    }
+
+    #[test]
+    fn list_rotated_log_files_returns_empty_for_a_missing_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert_eq!(
+            list_rotated_log_files(&tmp.path().join("does-not-exist")),
+            Vec::<std::path::PathBuf>::new()
+        );
+    }
+
+    #[test]
+    fn read_recent_lines_from_files_returns_empty_for_no_files() {
+        assert_eq!(read_recent_lines_from_files(&[], 100), Vec::<String>::new());
+    }
+
+    #[test]
+    fn read_recent_lines_from_files_reads_a_single_newest_file_first() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let newer = tmp.path().join("launcher.log.2026-08-22");
+        let older = tmp.path().join("launcher.log.2026-08-21");
+        std::fs::write(&newer, "c\nd\n").unwrap();
+        std::fs::write(&older, "a\nb\n").unwrap();
+
+        // `limit: 2` is fully satisfied by the newest file alone — the
+        // older file must not be touched at all.
+        assert_eq!(
+            read_recent_lines_from_files(&[newer.clone(), older.clone()], 2),
+            vec!["c", "d"]
+        );
+    }
+
+    #[test]
+    fn read_recent_lines_from_files_spans_into_older_files_to_fill_the_limit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let newer = tmp.path().join("launcher.log.2026-08-22");
+        let older = tmp.path().join("launcher.log.2026-08-21");
+        std::fs::write(&newer, "c\nd\n").unwrap();
+        std::fs::write(&older, "a\nb\n").unwrap();
+
+        // `limit: 3` can't be filled by the 2-line newest file alone, so
+        // this must reach into the older file for one more line — and the
+        // overall result stays chronological (oldest first).
+        assert_eq!(
+            read_recent_lines_from_files(&[newer, older], 3),
+            vec!["b", "c", "d"]
+        );
+    }
+
+    #[test]
+    fn read_recent_lines_from_files_skips_an_unreadable_file_and_keeps_going() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join("launcher.log.2026-08-22");
+        let older = tmp.path().join("launcher.log.2026-08-21");
+        std::fs::write(&older, "a\nb\n").unwrap();
+
+        assert_eq!(
+            read_recent_lines_from_files(&[missing, older], 100),
+            vec!["a", "b"]
         );
     }
 }
