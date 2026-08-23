@@ -28,19 +28,37 @@
 //! `Cargo.toml`'s header comment on why it's excluded from the root
 //! workspace) and `menu.rs` has no reason to become a public library API
 //! just for this one test to reach it. Including the same source file a
-//! second time here is the standard workaround for testing a binary
-//! crate's private modules from `tests/` — not a second, hand-copied
-//! implementation (the "no duplicate implementations" rule doesn't apply to
-//! the compiler including one file twice).
-// `dead_code`/`unused_imports`: this second compilation of `menu.rs` only
-// exercises `build` and its public constants below — `handle_event` and the
-// file's own `#[cfg(test)] mod tests` (which needs the standard libtest
-// harness to ever run, unavailable here under `harness = false`) are dead
-// weight in *this* copy specifically, not a real problem with the source.
+//! second time here is the common pattern for reaching a binary crate's
+//! private modules from `tests/` — not a second, hand-copied implementation
+//! (the "no duplicate implementations" rule doesn't apply to the compiler
+//! including one file twice).
+//!
+//! macOS-only: `menu::build` is itself only ever *called* on macOS in
+//! production (`main.rs`'s `.menu(menu::build)` is
+//! `#[cfg(target_os = "macos")]`-gated — see `menu.rs`'s module doc for why:
+//! Tauri never auto-installs a menu on Windows/Linux, so this app never
+//! builds one there either), so scoping this test's real assertions to the
+//! same platform matches what actually ships. That scoping also happens to
+//! route around a real, separately-tracked Windows limitation: an earlier
+//! version of this test ran unconditionally and crashed the compiled
+//! `menu_main_thread.exe` at process startup on `windows-2022` CI with
+//! `STATUS_ENTRYPOINT_NOT_FOUND` — an OS-loader symbol-resolution failure,
+//! not a test assertion, and it happened before any test code executed at
+//! all (see BT-3253 for the investigation and leading theory: `tauri-build`'s
+//! Windows resource/manifest linking likely only reaches the crate's
+//! `[[bin]]` target, not arbitrary `[[test]]` targets, so `muda`'s native
+//! Win32 menu-construction code — genuinely exercised here, unlike in any
+//! other test in this crate — can't resolve a symbol it expects). The same
+//! run's `test-desktop (macos-latest)` and `test-desktop (ubuntu-latest)`
+//! both passed; macOS is the only platform this needs to run on regardless,
+//! so BT-3253 is a test-infra follow-up, not a blocker for this file.
+
+#[cfg(target_os = "macos")]
 #[path = "../src/menu.rs"]
 #[allow(dead_code, unused_imports)]
 mod menu;
 
+#[cfg(target_os = "macos")]
 fn main() {
     let app = tauri::test::mock_app();
     let built = menu::build(app.handle()).expect("menu should build against a mock app");
@@ -70,3 +88,11 @@ fn main() {
 
     println!("menu_main_thread: ok");
 }
+
+// Non-macOS: `menu::build` is never called in production here (see the
+// module doc above), and — for Windows specifically — actually calling it
+// from this harness=false binary is the exact thing BT-3253 tracks as
+// broken. Trivially succeed rather than omitting the `[[test]]` target
+// outright, so `cargo test`'s target list stays identical across platforms.
+#[cfg(not(target_os = "macos"))]
+fn main() {}
