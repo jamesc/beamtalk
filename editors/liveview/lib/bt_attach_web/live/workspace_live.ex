@@ -8086,7 +8086,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       phx-hook="TweaksPanel"
       data-tweaks-defaults={Jason.encode!(@defaults)}
     >
-      <div class="panel-head">Tweaks</div>
+      <div class="panel-head"><span class="panel-title">Tweaks</span></div>
       <div class="panel-body">
         <%!-- Theme → data-theme on <html> (whole palette swap) --%>
         <div class="twk-row">
@@ -8236,7 +8236,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     ~H"""
     <div id="system-browser" class="panel">
       <div class="panel-head">
-        System Browser <span class="spacer"></span>
+        <span class="panel-title">System Browser</span> <span class="spacer"></span>
         <%!-- BT-2656: Classes | Native panel-mode toggle. Native (Erlang) modules
              are a distinct namespace from Beamtalk classes, so they live in their
              own scrollable, filterable browser rather than a collapsed in-tree
@@ -8753,11 +8753,25 @@ defmodule BtAttachWeb.WorkspaceLive do
     ~H"""
     <div class="panel">
       <div class="panel-head">
-        <%= if @selected_class do %>
-          {if @browser_side == "class", do: @selected_class <> " class", else: @selected_class}
-        <% else %>
-          Protocols &amp; Methods
-        <% end %>
+        <%!-- BT-3247 review nit: the title can now ellipsis-truncate at a
+             narrow `--browser-w`, so give it a `title=` attribute (same text
+             as the rendered content) — a hover reveals the full class name
+             even once the visible label is cut short. --%>
+        <span
+          class="panel-title"
+          title={
+            if @selected_class,
+              do:
+                if(@browser_side == "class", do: @selected_class <> " class", else: @selected_class),
+              else: "Protocols & Methods"
+          }
+        >
+          <%= if @selected_class do %>
+            {if @browser_side == "class", do: @selected_class <> " class", else: @selected_class}
+          <% else %>
+            Protocols &amp; Methods
+          <% end %>
+        </span>
         <span class="spacer"></span>
         <span :if={@selected_class} class="count">{@total_methods} methods</span>
       </div>
@@ -10781,7 +10795,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               <div class="right-split">
                 <div id="bindings-panel" class="panel bindings-panel">
                   <div class="panel-head">
-                    Bindings <span class="spacer"></span>
+                    <span class="panel-title">Bindings</span> <span class="spacer"></span>
                     <span class="count">{length(@bindings)} in session</span>
                   </div>
                   <div class="panel-body">
@@ -10853,7 +10867,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
                 <div id="inspector-panel" class="panel insp inspector-panel">
                   <div class="panel-head">
-                    Inspector <span class="spacer"></span>
+                    <span class="panel-title">Inspector</span> <span class="spacer"></span>
                     <%!-- Freeze toggle (BT-2492, spike `iw-freeze`): live tracking
                          subscribes to the object's change stream and flashes
                          changed fields; freezing holds the current snapshot. Shown
@@ -11027,7 +11041,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           <div class="cockpit" style="grid-template-columns: minmax(0, 1fr);">
             <div class="col">
               <div class="panel" style="flex:1;">
-                <div class="panel-head">Workspace</div>
+                <div class="panel-head"><span class="panel-title">Workspace</span></div>
                 <div class="panel-body">
                   <%= if @error do %>
                     <div class="io-block err">

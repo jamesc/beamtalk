@@ -68,7 +68,8 @@ pub use class_span::{ClassSpanResolveError, resolve_class_span};
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
 pub use method_category::{
-    CategorizedMethod, MethodCategory, categorize_methods, parse_divider_name,
+    CategorizeMethodsError, CategorizedMethod, MethodCategory, categorize_methods,
+    categorize_methods_in_source, parse_divider_name,
 };
 pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
 pub use parser::{

@@ -2839,6 +2839,86 @@ fn class_span_error_response(err: &beamtalk_core::source_analysis::ClassSpanReso
     ]))
 }
 
+/// Handle a `categorize_methods` request (BT-3239).
+///
+/// Groups a class's methods by its `// === Name ===` section dividers —
+/// `beamtalk_core::source_analysis::categorize_methods_in_source` is the
+/// single, canonical recognizer (BT-2601) already used by the LSP's
+/// `documentSymbol` outline; this command is the bridge that lets the
+/// Erlang REPL surface (which has no Rust parser of its own) reach the same
+/// function instead of reimplementing its recognition grammar — see that
+/// module's doc for why a second implementation is exactly what BT-3239 was
+/// written to avoid.
+fn handle_categorize_methods(request: &Map) -> Term {
+    use beamtalk_core::source_analysis::{MethodSide, categorize_methods_in_source};
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(class_name) = map_get(request, "class_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_name' field".to_string()]);
+    };
+
+    // Parse diagnostics are intentionally not surfaced as a failure here,
+    // same rationale as `handle_resolve_class_span`: the hook only needs the
+    // categorized methods.
+    let (result, _diagnostics) = categorize_methods_in_source(&source, &class_name);
+    match result {
+        Ok(categories) => {
+            let category_terms: Vec<Term> = categories
+                .iter()
+                .map(|category| {
+                    let method_terms: Vec<Term> = category
+                        .methods
+                        .iter()
+                        .map(|method| {
+                            let side = match method.side {
+                                MethodSide::Instance => atom("instance"),
+                                MethodSide::Class => atom("class"),
+                            };
+                            Term::from(Map::from([
+                                (atom("selector"), binary(&method.selector)),
+                                (atom("side"), side),
+                            ]))
+                        })
+                        .collect();
+                    // The implicit leading (unnamed) category omits `name`
+                    // entirely rather than emitting a `null` sentinel — same
+                    // "omit, never null" convention `build_method_xref_entry`
+                    // already uses for its own optional fields.
+                    let mut fields = vec![(atom("methods"), Term::from(List::from(method_terms)))];
+                    if let Some(name) = &category.name {
+                        fields.push((atom("name"), binary(name)));
+                    }
+                    Term::from(Map {
+                        map: fields.into_iter().collect(),
+                    })
+                })
+                .collect();
+            Term::from(Map::from([
+                (atom("status"), atom("ok")),
+                (atom("categories"), Term::from(List::from(category_terms))),
+            ]))
+        }
+        Err(err) => categorize_methods_error_response(&err),
+    }
+}
+
+fn categorize_methods_error_response(
+    err: &beamtalk_core::source_analysis::CategorizeMethodsError,
+) -> Term {
+    use beamtalk_core::source_analysis::CategorizeMethodsError;
+    let reason = match err {
+        CategorizeMethodsError::ClassNotFound { .. } => "class_not_found",
+        CategorizeMethodsError::Ambiguous { .. } => "ambiguous",
+    };
+    Term::from(Map::from([
+        (atom("status"), atom("error")),
+        (atom("reason"), atom(reason)),
+        (atom("message"), binary(&err.to_string())),
+    ]))
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -2888,6 +2968,7 @@ fn handle_request(request_term: &Term) -> Term {
         "resolve_method_span" => handle_resolve_method_span(map),
         "reindent_method_source" => handle_reindent_method_source(map),
         "resolve_class_span" => handle_resolve_class_span(map),
+        "categorize_methods" => handle_categorize_methods(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -4349,6 +4430,122 @@ Object subclass: Counter
             (atom("source"), binary(SPAN_FIXTURE)),
         ]);
         let response = handle_resolve_class_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+    }
+
+    // --- categorize_methods tests (BT-3239) ---
+
+    const CATEGORY_FIXTURE: &str = "\
+Object subclass: Counter
+  // === Construction ===
+  class new => self basicNew
+
+  // === Arithmetic ===
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
+";
+
+    #[test]
+    fn categorize_methods_groups_by_divider() {
+        let request = Map::from([
+            (atom("command"), atom("categorize_methods")),
+            (atom("source"), binary(CATEGORY_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+        ]);
+        let response = handle_categorize_methods(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(categories)) = map_get(m, "categories") else {
+            panic!("categories should be a list: {response:?}");
+        };
+        assert_eq!(categories.elements.len(), 2);
+
+        let Term::Map(first) = &categories.elements[0] else {
+            panic!("category should be a map");
+        };
+        assert_eq!(
+            map_get(first, "name").and_then(term_to_string).as_deref(),
+            Some("Construction")
+        );
+        let Some(Term::List(first_methods)) = map_get(first, "methods") else {
+            panic!("methods should be a list");
+        };
+        assert_eq!(first_methods.elements.len(), 1);
+        let Term::Map(first_method) = &first_methods.elements[0] else {
+            panic!("method should be a map");
+        };
+        assert_eq!(
+            map_get(first_method, "selector")
+                .and_then(term_to_string)
+                .as_deref(),
+            Some("new")
+        );
+        assert_eq!(map_get(first_method, "side"), Some(&atom("class")));
+
+        let Term::Map(second) = &categories.elements[1] else {
+            panic!("category should be a map");
+        };
+        assert_eq!(
+            map_get(second, "name").and_then(term_to_string).as_deref(),
+            Some("Arithmetic")
+        );
+        let Some(Term::List(second_methods)) = map_get(second, "methods") else {
+            panic!("methods should be a list");
+        };
+        assert_eq!(second_methods.elements.len(), 2);
+    }
+
+    #[test]
+    fn categorize_methods_no_dividers_is_single_unnamed_category() {
+        let request = Map::from([
+            (atom("command"), atom("categorize_methods")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+        ]);
+        let response = handle_categorize_methods(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(categories)) = map_get(m, "categories") else {
+            panic!("categories should be a list: {response:?}");
+        };
+        assert_eq!(categories.elements.len(), 1);
+        let Term::Map(only) = &categories.elements[0] else {
+            panic!("category should be a map");
+        };
+        // The implicit leading category omits `name` entirely rather than a
+        // `null` sentinel — see `handle_categorize_methods`'s doc.
+        assert_eq!(map_get(only, "name"), None);
+    }
+
+    #[test]
+    fn categorize_methods_class_not_found_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("categorize_methods")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("NoSuchClass")),
+        ]);
+        let response = handle_categorize_methods(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
+    }
+
+    #[test]
+    fn categorize_methods_missing_source_field_is_error() {
+        let request = Map::from([
+            (atom("command"), atom("categorize_methods")),
+            (atom("class_name"), binary("Counter")),
+        ]);
+        let response = handle_categorize_methods(&request);
         let Term::Map(ref m) = response else {
             panic!("Expected map response, got: {response:?}");
         };

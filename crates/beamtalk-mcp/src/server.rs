@@ -193,6 +193,82 @@ fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
+/// BT-3239: locate `class`'s on-disk `.bt` source via a `nav-symbols` round
+/// trip, then compute its divider-grouped method categories locally.
+///
+/// The `nav-symbols` op is the same one the LSP's `documentSymbol`
+/// runtime-delegate path already sends (`crates/beamtalk-lsp/src/runtime.rs`)
+/// — reused here purely to resolve `class` -> source file path; the
+/// categorization itself runs in-process against `beamtalk-core`'s
+/// `source_analysis::categorize_methods_in_source`, the same function the
+/// static AST-walker `documentSymbol` path calls (BT-2601) — no
+/// reimplementation, no second port round trip. Returns `None` (never an
+/// error) whenever nothing is computable: the class isn't in the live
+/// registry, it has no source file, the file can't be read, or the class
+/// can't be found/categorized in it.
+///
+/// Requests `scope: "user"` — only classes with a backing `.bt` file, per
+/// `RequestBuilder::nav_symbols`'s doc — rather than `"all"`: a class with
+/// no source file could never yield a `source_file` below regardless, so
+/// the narrower scope is both the correct filter and a smaller reply to
+/// pull over the wire on an image with many loaded classes.
+async fn doc_method_categories(client: &ReplClient, class: &str) -> Option<serde_json::Value> {
+    let response = client.nav_symbols(Some("user")).await.ok()?;
+    if response.is_error() {
+        return None;
+    }
+    let payload: beamtalk_core::language_service::NavSymbolsResponse =
+        serde_json::from_value(response.value?).ok()?;
+    let source_file = payload
+        .classes
+        .into_iter()
+        .find(|c| c.name == class)?
+        .source_file?;
+    // File I/O + parsing is blocking/CPU-bound work — run it off the Tokio
+    // worker thread, same as the `lint`/`diagnostic_summary` tools' own
+    // `spawn_blocking` wrapping around comparable offline analysis.
+    let class_owned = class.to_string();
+    tokio::task::spawn_blocking(move || compute_doc_method_categories(&source_file, &class_owned))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Pure helper behind [`doc_method_categories`]: read `source_file` and
+/// categorize `class`'s methods by its `// === Name ===` section dividers,
+/// returning a JSON value shaped
+/// `{"class": ..., "categories": [{"name": ..|null, "methods": [{"selector",
+/// "side"}]}]}` — or `None` if the file can't be read or `class` can't be
+/// found/categorized in it. Split out from [`doc_method_categories`] so it
+/// can be unit-tested against a fixture file with no live REPL connection,
+/// matching this module's other offline-testable helpers (e.g.
+/// `run_lint_structured`).
+fn compute_doc_method_categories(source_file: &str, class: &str) -> Option<serde_json::Value> {
+    use beamtalk_core::source_analysis::{MethodSide, categorize_methods_in_source};
+
+    let source = std::fs::read_to_string(source_file).ok()?;
+    let (result, _diagnostics) = categorize_methods_in_source(&source, class);
+    let categories = result.ok()?;
+    let categories_json: Vec<serde_json::Value> = categories
+        .iter()
+        .map(|category| {
+            let methods: Vec<serde_json::Value> = category
+                .methods
+                .iter()
+                .map(|method| {
+                    let side = match method.side {
+                        MethodSide::Instance => "instance",
+                        MethodSide::Class => "class",
+                    };
+                    serde_json::json!({"selector": method.selector, "side": side})
+                })
+                .collect();
+            serde_json::json!({"name": category.name, "methods": methods})
+        })
+        .collect();
+    Some(serde_json::json!({"class": class, "categories": categories_json}))
+}
+
 /// Build the Beamtalk expression for the `save_method` MCP tool — durable
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
 fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
@@ -1164,8 +1240,23 @@ impl BeamtalkMcp {
             }
         };
 
+        let mut call_result = CallToolResult::default();
+        call_result.content = vec![ContentBlock::text(text)];
+
+        // BT-3239: for a whole-class lookup (no per-selector filter), also
+        // attach structured, divider-grouped method-category data —
+        // "structured data, not just REPL text formatting" per the surface-
+        // parity contract, since `docs`'s text content above is the exact
+        // same rendered string the REPL's `:help` prints. Best-effort: a
+        // purely runtime-loaded class (no `.bt` source file), a class with
+        // no `// === Name ===` dividers, or any lookup failure along the
+        // way just leaves `structured_content` unset — never an error.
+        if let (Some(class), None) = (&params.class, &params.selector) {
+            call_result.structured_content = doc_method_categories(&self.client, class).await;
+        }
+
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        Ok(call_result)
     }
 
     /// Unload a class from the workspace.
@@ -4155,4 +4246,62 @@ mod tests {
     // defined in `beamtalk_core::tool_expr` (BT-3193) and golden-tested
     // there — that suite is the single source of truth both this crate and
     // `beamtalk-lsp` call into, so there is nothing left to re-test here.
+
+    // --- compute_doc_method_categories (BT-3239) ---
+
+    #[test]
+    fn compute_doc_method_categories_groups_by_divider() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("counter.bt");
+        std::fs::write(
+            &file,
+            "Object subclass: Counter\n\
+             \n\
+             \x20\x20// === Construction ===\n\
+             \x20\x20class new => self basicNew\n\
+             \n\
+             \x20\x20// === Arithmetic ===\n\
+             \x20\x20increment => self.value := self.value + 1\n",
+        )
+        .unwrap();
+
+        let result = compute_doc_method_categories(file.to_str().unwrap(), "Counter")
+            .expect("categorization should succeed");
+        assert_eq!(result["class"], "Counter");
+        let categories = result["categories"].as_array().unwrap();
+        assert_eq!(categories.len(), 2);
+        assert_eq!(categories[0]["name"], "Construction");
+        assert_eq!(categories[0]["methods"][0]["selector"], "new");
+        assert_eq!(categories[0]["methods"][0]["side"], "class");
+        assert_eq!(categories[1]["name"], "Arithmetic");
+        assert_eq!(categories[1]["methods"][0]["selector"], "increment");
+        assert_eq!(categories[1]["methods"][0]["side"], "instance");
+    }
+
+    #[test]
+    fn compute_doc_method_categories_no_dividers_is_single_unnamed_category() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("plain.bt");
+        std::fs::write(&file, "Object subclass: Plain\n  foo => 1\n").unwrap();
+
+        let result = compute_doc_method_categories(file.to_str().unwrap(), "Plain")
+            .expect("categorization should succeed");
+        let categories = result["categories"].as_array().unwrap();
+        assert_eq!(categories.len(), 1);
+        assert!(categories[0]["name"].is_null());
+    }
+
+    #[test]
+    fn compute_doc_method_categories_missing_file_is_none() {
+        assert!(compute_doc_method_categories("/nonexistent/path/nope.bt", "Counter").is_none());
+    }
+
+    #[test]
+    fn compute_doc_method_categories_class_not_found_is_none() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("counter.bt");
+        std::fs::write(&file, "Object subclass: Counter\n  foo => 1\n").unwrap();
+
+        assert!(compute_doc_method_categories(file.to_str().unwrap(), "NoSuchClass").is_none());
+    }
 }

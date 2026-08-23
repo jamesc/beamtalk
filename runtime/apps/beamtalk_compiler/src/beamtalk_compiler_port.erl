@@ -29,6 +29,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_announce_sites_in_source/2,
     resolve_method_span/5,
     resolve_class_span/3,
+    categorize_methods/3,
     reindent_method_source/3,
     close/1
 ]).
@@ -956,6 +957,93 @@ resolve_class_span(Port, Source, ClassName) when
     end;
 resolve_class_span(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<"resolve_class_span: source/class must be binary or atom">>}.
+
+-doc """
+Group a class's methods by its `// === Name ===' section dividers (BT-3239).
+
+Given the source text of a `.bt' file and a target `ClassName', returns the
+class's methods grouped by the divider comments that precede them, in
+source order — the same recognition rules
+`beamtalk_core::source_analysis::categorize_methods_in_source' locks down
+for every surface (see that module's doc). This is the bridge that lets the
+REPL/MCP surfaces reach it without a second, drift-prone implementation of
+the divider grammar in Erlang (CLAUDE.md's "No duplicate implementations"
+rule) — see `beamtalk_interface:format_class_help/2', its caller.
+
+Returns `{ok, Categories}' on success, where each category is
+`#{name => binary() | undefined, methods := [#{selector := binary(),
+side := instance | class}]}' — `name' is `undefined' for the implicit
+leading (unnamed) category, in source order, matching
+`MethodCategory.name: Option<String>' on the Rust side. Resolution failures
+(class not found, ambiguous) come back as `{error, Reason, Message}' with
+`Reason' an atom. Transport failures (port down, timeout) return
+`{error, port_error, Message}'.
+""".
+-spec categorize_methods(port(), binary(), atom() | binary()) ->
+    {ok, [#{name => binary(), methods := [#{selector := binary(), side := instance | class}]}]}
+    | {error, atom(), binary()}.
+categorize_methods(Port, Source, ClassName) when
+    is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
+->
+    Request = #{
+        command => categorize_methods,
+        source => Source,
+        class_name => to_binary(ClassName)
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_categorize_methods_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (categorize methods)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during method-categorize query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (categorize methods)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (categorize methods)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+categorize_methods(_Port, _Source, _ClassName) ->
+    {error, bad_argument, <<"categorize_methods: source/class must be binary or atom">>}.
+
+-spec handle_categorize_methods_response(map()) ->
+    {ok, [map()]} | {error, atom(), binary()}.
+handle_categorize_methods_response(#{status := ok, categories := Categories}) when
+    is_list(Categories)
+->
+    {ok, Categories};
+handle_categorize_methods_response(#{status := error, reason := Reason} = Resp) ->
+    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
+    {error, Reason, Message};
+handle_categorize_methods_response(Other) ->
+    ?LOG_ERROR("Unexpected categorize-methods response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

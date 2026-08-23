@@ -1,16 +1,25 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
--module(beamtalk_workspace_test_boot).
+-module(beamtalk_test_boot).
 
-%%% **DDD Context:** REPL Session Context (test support)
+%%% **DDD Context:** Runtime Context (test support)
 
 -moduledoc """
-Shared EUnit fixture: boot the real runtime + stdlib for `beamtalk_workspace`
-integration tests that need a genuinely compiled class (not a hand-written
-`.erl` test double) — e.g. `beamtalk_repl_docs_tests`'s doc-formatting
-integration tests and `beamtalk_repl_ops_browse_tests`'s BT-3242 native-class
-delegate-callers regression test.
+Shared EUnit fixture: boot the real runtime + stdlib for EUnit suites that
+need a genuinely compiled class (not a hand-written `.erl` test double) —
+e.g. `beamtalk_workspace`'s `beamtalk_repl_docs_tests` (doc-formatting
+integration tests) and `beamtalk_repl_ops_browse_tests` (BT-3242 native-class
+delegate-callers regression test), and `beamtalk_stdlib`'s
+`beamtalk_test_case_stdlib_tests` (BT-3251 BIF-fallback-path regression
+test against a real compiled `TestCase` subclass).
+
+BT-3251: originally `beamtalk_workspace_test_boot`, living under
+`beamtalk_workspace/test/` — moved here (mirroring `beamtalk_test_corpus`'s
+precedent, see its `moduledoc` for the "why a standalone app" rationale) once
+`beamtalk_stdlib`'s EUnit suite needed the same boot sequence too. Reaching
+into a peer/dependent app's `test/` tree from another app's suite would
+recreate the duplication `beamtalk_test_support` exists to avoid.
 
 Guarded so it is safe to call from more than one test module in the same
 EUnit VM: `beamtalk_bootstrap:start_link/0` is only invoked when no bootstrap

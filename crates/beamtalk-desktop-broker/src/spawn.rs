@@ -1459,6 +1459,21 @@ mod tests {
         path
     }
 
+    /// Exec `launcher` once, synchronously, and return its exit status —
+    /// warms the OS's one-time "cold exec" cost for a brand-new script file
+    /// (BT-3241, BT-3250) so a subsequent *timed* exec of the same file
+    /// isn't racing that one-time cost against a tight grace window. Only
+    /// suitable for a launcher that's expected to exit on its own quickly;
+    /// see `spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log`
+    /// for the spawn-then-kill variant this doesn't cover (a launcher that
+    /// never exits by itself).
+    #[cfg(unix)]
+    fn warm_up_launcher_exec(launcher: &std::path::Path) -> std::process::ExitStatus {
+        Command::new(launcher)
+            .status()
+            .expect("warm-up exec of the launcher should run")
+    }
+
     #[cfg(unix)]
     #[test]
     fn build_launch_command_errors_on_launcher_platform_mismatch() {
@@ -1552,6 +1567,31 @@ mod tests {
             "server",
             "echo stdout-marker; echo stderr-marker 1>&2; sleep 5",
         );
+
+        // BT-3250: pay this exact file's first-exec tax here, untimed,
+        // instead of racing it against the fixed 2s `wait_for_file_contents`
+        // timeout below. Same root cause as BT-3241 (see the sibling
+        // `..._recovers_after_transient_conflicts` test): the *first* exec of
+        // a brand-new script file can take 200ms+ on a loaded macOS sandbox —
+        // and under full-crate parallel `cargo test` scheduler contention,
+        // occasionally much more — while every *subsequent* exec of that same
+        // already-warm file consistently lands under 20ms. Unlike the
+        // `exit 1`-style launchers in the sibling tests, this script never
+        // exits on its own (it ends in `sleep 5`), so the warm-up here can't
+        // wait for a natural exit — it only needs to force the one-time
+        // cold-exec cost to happen now, so the timed spawn below execs an
+        // already-warm file and its `echo`s land in `attach.log` well within
+        // the 2s window. Stdio is discarded rather than left inherited, so
+        // this warm-up run's own `echo` output doesn't leak into the test
+        // process's stdout/stderr.
+        let mut warmup = Command::new(&launcher)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("warm-up exec of the launcher should start");
+        let _ = warmup.kill();
+        let _ = warmup.wait();
 
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
@@ -1669,6 +1709,25 @@ mod tests {
         // Simulates an immediate `:eaddrinuse`-style crash on every attempt.
         let launcher = write_launcher_script(tmp.path(), "server", "exit 1");
 
+        // BT-3250: pay this exact file's first-exec tax here, untimed,
+        // instead of racing it against `bind_failure_grace` below — same
+        // fix as BT-3241's `..._recovers_after_transient_conflicts` sibling
+        // test (see its comment for the full root-cause rationale). The
+        // *first* exec of a brand-new script file can take 200ms+ on a
+        // loaded macOS sandbox, comfortably exceeding this test's 250ms
+        // grace and misclassifying attempt 1 as `Bound`; every *subsequent*
+        // exec of the same already-warm file consistently lands under
+        // 20ms. Running the launcher once here, synchronously and with no
+        // deadline, forces that one-time tax to happen before the timed
+        // retry logic below starts, so all three *measured* attempts exec
+        // an already-warm file.
+        let warmup_status = warm_up_launcher_exec(&launcher);
+        assert_eq!(
+            warmup_status.code(),
+            Some(1),
+            "warm-up exec should hit the script's own `exit 1` branch, got {warmup_status:?}"
+        );
+
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
         // BT-3226: the poll loop alone doesn't stabilize this in a sandboxed
@@ -1677,6 +1736,9 @@ mod tests {
         // cold-exec tax north of 50ms here, independent of how tightly
         // `try_wait` is polled within the window. 250ms (the spec's allowed
         // ceiling) comfortably covers that without masking a real hang.
+        // BT-3250: the warm-up above removes the *first-exec* tax race; this
+        // grace still covers ordinary scheduler jitter across all 3 timed
+        // attempts, same as it always has.
         config.bind_failure_grace = Duration::from_millis(250);
         config.max_port_attempts = 3;
 
@@ -1730,9 +1792,7 @@ mod tests {
         // synchronously and with no deadline, forces that one-time tax to
         // happen before the timed retry logic below ever starts, so all
         // three *measured* attempts exec an already-warm file.
-        let warmup_status = Command::new(&launcher)
-            .status()
-            .expect("warm-up exec of the launcher should run");
+        let warmup_status = warm_up_launcher_exec(&launcher);
         assert!(
             warmup_status.success() || warmup_status.code() == Some(1),
             "warm-up exec should either succeed or hit the script's own \

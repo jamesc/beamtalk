@@ -351,11 +351,13 @@ real_stdlib_delegate_callers_test_() ->
 
 %% Boot the real runtime + stdlib so `Subprocess`'s facade module is loaded from
 %% its real compiled BEAM — not a hand-written test double — and registered as a
-%% live class process. Delegates to the shared `beamtalk_workspace_test_boot`
-%% fixture (same helper `beamtalk_repl_docs_tests`'s integration tests use in this
-%% app's test suite) rather than a second copy of the boot/wait sequence.
+%% live class process. Delegates to the shared `beamtalk_test_boot` (in
+%% `beamtalk_test_support`) fixture (same helper `beamtalk_repl_docs_tests`'s
+%% integration tests use in this app's test suite, and BT-3251's
+%% `beamtalk_stdlib` regression test uses too) rather than a second copy of
+%% the boot/wait sequence.
 real_stdlib_setup() ->
-    beamtalk_workspace_test_boot:boot_real_stdlib('Subprocess').
+    beamtalk_test_boot:boot_real_stdlib('Subprocess').
 
 %%====================================================================
 %% browse-native-modules — enumeration + filter + source-path (BT-2648)
@@ -689,6 +691,58 @@ alias_row_undefined_doc_is_null_test() ->
     },
     Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"my_app">>, <<"project">>),
     ?assertEqual(null, maps:get(<<"doc">>, Row)).
+
+%%====================================================================
+%% class_definition_text/5 — BT-3255 (ADR 0067 field:/state: + typed prefix)
+%%====================================================================
+%%
+%% `class_definition_text/5` is pure — no live class needed — so these
+%% construct the `State` rows and `Meta` map directly, the same shapes
+%% `state_slots/2` and `browse_class_definition/1` build from a real
+%% `__beamtalk_meta/0` read.
+
+class_definition_text_typed_value_with_types_and_defaults_test() ->
+    State = [
+        #{<<"name">> => <<"attempt">>, <<"default">> => <<"0">>, <<"type">> => <<"Integer">>},
+        #{<<"name">> => <<"label">>, <<"default">> => null, <<"type">> => <<"String">>}
+    ],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Retry', 'Value', State, true, #{kind => value}
+    ),
+    ?assertEqual(
+        <<
+            "typed Value subclass: Retry\n"
+            "  field: attempt :: Integer = 0\n"
+            "  field: label :: String"
+        >>,
+        Definition
+    ).
+
+class_definition_text_typed_value_without_defaults_test() ->
+    %% Acceptance criterion: typed class w/o defaults keeps the `:: Type`
+    %% annotation but drops the `= <default>` suffix entirely.
+    State = [#{<<"name">> => <<"x">>, <<"default">> => null, <<"type">> => <<"Integer">>}],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Point', 'Value', State, true, #{kind => value}
+    ),
+    ?assertEqual(<<"typed Value subclass: Point\n  field: x :: Integer">>, Definition).
+
+class_definition_text_non_typed_actor_test() ->
+    %% Acceptance criterion: a non-typed class (Actor, using `state:`) renders
+    %% with no `typed ` prefix and no `:: Type` annotation.
+    State = [#{<<"name">> => <<"count">>, <<"default">> => <<"0">>, <<"type">> => null}],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Counter', 'Actor', State, false, #{kind => actor}
+    ),
+    ?assertEqual(<<"Actor subclass: Counter\n  state: count = 0">>, Definition).
+
+class_definition_text_unknown_kind_falls_back_to_state_test() ->
+    %% A file-less ClassBuilder class or a module with no `__beamtalk_meta/0`
+    %% carries no `kind` — the skeleton must still render, defaulting to
+    %% `state:` (the pre-BT-3255 behaviour for such classes).
+    State = [#{<<"name">> => <<"x">>, <<"default">> => null, <<"type">> => null}],
+    Definition = beamtalk_repl_ops_browse:class_definition_text('Loose', none, State, false, #{}),
+    ?assertEqual(<<"Object subclass: Loose\n  state: x">>, Definition).
 
 %% Helper: enumerate via the term handler.
 type_aliases() ->

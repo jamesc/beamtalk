@@ -888,6 +888,7 @@ pub(crate) fn compile_source_with_bindings(
     let (new_diagnostics, analysis_result) =
         beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
             &module,
+            &source,
             diagnostics,
             &diag_ctx,
         );

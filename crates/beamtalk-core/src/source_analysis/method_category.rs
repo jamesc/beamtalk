@@ -108,7 +108,7 @@
 
 use crate::ast::{ClassDefinition, Comment, CommentKind};
 use crate::source_analysis::method_span;
-use crate::source_analysis::{MethodSide, Span};
+use crate::source_analysis::{Diagnostic, MethodSide, Span, lex_with_eof, parse};
 
 /// One method, categorized by its position relative to `// === Name ===`
 /// dividers in the class body.
@@ -359,10 +359,86 @@ pub fn categorize_methods(class: &ClassDefinition, source: &str) -> Vec<MethodCa
     categories
 }
 
+/// Why [`categorize_methods_in_source`] could not locate `class` in `source`.
+/// Mirrors [`crate::source_analysis::ClassSpanResolveError`]'s shape (same
+/// "find the one class definition named `class`" lookup, reused here rather
+/// than shared directly since the two resolvers return different success
+/// payloads and `ClassSpanResolveError` is not `Copy`-free to repurpose
+/// across crate-internal call sites without adding a dependency edge).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CategorizeMethodsError {
+    /// No class named `class` was found in `source`.
+    ClassNotFound {
+        /// The class name that was searched for.
+        class: String,
+    },
+    /// More than one class definition matched `class`.
+    Ambiguous {
+        /// The class name that matched more than once.
+        class: String,
+        /// How many definitions matched.
+        count: usize,
+    },
+}
+
+impl std::fmt::Display for CategorizeMethodsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CategorizeMethodsError::ClassNotFound { class } => {
+                write!(f, "class `{class}` not found in source")
+            }
+            CategorizeMethodsError::Ambiguous { class, count } => {
+                write!(f, "class `{class}` is ambiguous ({count} definitions)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CategorizeMethodsError {}
+
+/// Parses `source` and categorizes the named `class`'s methods by its
+/// `// === Name ===` section dividers (BT-3239) — the entry point for a
+/// caller that has only source text and a class name in hand, not an
+/// already-parsed [`ClassDefinition`] (e.g. the compiler-port bridge that
+/// lets the Erlang REPL/workspace reach this module without reimplementing
+/// its recognition grammar — see this module's doc for why that
+/// reimplementation must never happen).
+///
+/// Mirrors [`crate::source_analysis::resolve_class_span`]'s own
+/// parse-then-find-the-one-matching-class shape. Parser [`Diagnostic`]s are
+/// returned alongside the result, same convention as that resolver — a
+/// caller that only needs the categories, not the parse health, may ignore
+/// them.
+pub fn categorize_methods_in_source(
+    source: &str,
+    class: &str,
+) -> (
+    Result<Vec<MethodCategory>, CategorizeMethodsError>,
+    Vec<Diagnostic>,
+) {
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+    let matches: Vec<&ClassDefinition> = module
+        .classes
+        .iter()
+        .filter(|class_def| class_def.name.name.as_str() == class)
+        .collect();
+    let result = match matches.len() {
+        0 => Err(CategorizeMethodsError::ClassNotFound {
+            class: class.to_string(),
+        }),
+        1 => Ok(categorize_methods(matches[0], source)),
+        count => Err(CategorizeMethodsError::Ambiguous {
+            class: class.to_string(),
+            count,
+        }),
+    };
+    (result, diagnostics)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
 
     // --- parse_divider_name ---
 
@@ -717,5 +793,65 @@ Object subclass: Counter
         let text = &src[span.as_range()];
         assert!(text.starts_with("foo => 1"));
         assert!(text.ends_with("bar => 2"));
+    }
+
+    // --- categorize_methods_in_source (BT-3239) ---
+
+    #[test]
+    fn categorize_methods_in_source_finds_the_named_class() {
+        let src = "\
+Object subclass: Counter
+  // === Alpha ===
+  foo => 1
+
+  // === Beta ===
+  bar => 2
+";
+        let (result, diagnostics) = categorize_methods_in_source(src, "Counter");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let categories = result.expect("Counter is present");
+        assert_eq!(categories.len(), 2);
+        assert_eq!(categories[0].name.as_deref(), Some("Alpha"));
+        assert_eq!(categories[1].name.as_deref(), Some("Beta"));
+    }
+
+    #[test]
+    fn categorize_methods_in_source_no_dividers_is_single_unnamed_category() {
+        let src = "Object subclass: Counter\n  foo => 1\n  bar => 2\n";
+        let (result, _diagnostics) = categorize_methods_in_source(src, "Counter");
+        let categories = result.expect("Counter is present");
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories[0].name, None);
+    }
+
+    #[test]
+    fn categorize_methods_in_source_class_not_found_is_structured_error() {
+        let src = "Object subclass: Counter\n  foo => 1\n";
+        let (result, _diagnostics) = categorize_methods_in_source(src, "NoSuchClass");
+        assert_eq!(
+            result,
+            Err(CategorizeMethodsError::ClassNotFound {
+                class: "NoSuchClass".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn categorize_methods_in_source_ambiguous_class_is_structured_error() {
+        let src = "\
+Object subclass: Counter
+  foo => 1
+
+Object subclass: Counter
+  bar => 2
+";
+        let (result, _diagnostics) = categorize_methods_in_source(src, "Counter");
+        assert_eq!(
+            result,
+            Err(CategorizeMethodsError::Ambiguous {
+                class: "Counter".to_string(),
+                count: 2
+            })
+        );
     }
 }
