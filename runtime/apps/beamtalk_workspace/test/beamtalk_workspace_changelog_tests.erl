@@ -1041,9 +1041,14 @@ known_kinds_decode_to_atoms() ->
     NewClass = beamtalk_workspace_changelog:entry_from_json(
         line_json_with(#{<<"kind">> => <<"new-class">>})
     ),
+    %% BT-3248: redefining an *existing* class's whole definition.
+    ClassDef = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"kind">> => <<"class-def">>})
+    ),
     ?assertEqual(instance, beamtalk_workspace_changelog:entry_kind(Instance)),
     ?assertEqual(class, beamtalk_workspace_changelog:entry_kind(Class)),
-    ?assertEqual('new-class', beamtalk_workspace_changelog:entry_kind(NewClass)).
+    ?assertEqual('new-class', beamtalk_workspace_changelog:entry_kind(NewClass)),
+    ?assertEqual('class-def', beamtalk_workspace_changelog:entry_kind(ClassDef)).
 
 %%====================================================================
 %% Table-absent guards (no gen_server started)

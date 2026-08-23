@@ -2756,6 +2756,89 @@ fn method_span_error_response(err: &beamtalk_core::source_analysis::SpanResolveE
     ]))
 }
 
+/// Handle a `resolve_class_span` request (ADR 0082 extension, BT-3248).
+///
+/// Backs the cockpit `:def` tab's live-patch install hook for an *existing*
+/// class: given the current on-disk source of a `.bt` file and a target class
+/// name, resolve the exact byte span of that class's whole definition (the
+/// [`resolve_class_span`](beamtalk_core::source_analysis::resolve_class_span)
+/// resolver) and return both the span and the bytes currently occupying it
+/// (`prev_source`) — mirrors `handle_resolve_method_span`'s contract exactly,
+/// just at class rather than method granularity.
+///
+/// Request fields:
+/// - `source` (binary): the current on-disk source text of the `.bt` file
+/// - `class_name` (binary): the target class name (e.g. `Counter`)
+///
+/// Response on success: `#{status => ok, span => #{start => S, end => E},
+/// prev_source => <<...>>}`. Failures (class not found, ambiguous) come back
+/// as `#{status => error, reason => <atom>, ...}` so the install hook can
+/// downgrade to a memory-only patch (no flushable `ChangeEntry`) rather than
+/// crash.
+fn handle_resolve_class_span(request: &Map) -> Term {
+    use beamtalk_core::source_analysis::resolve_class_span;
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(class_name) = map_get(request, "class_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_name' field".to_string()]);
+    };
+
+    // Parse diagnostics are intentionally not surfaced as a failure here, same
+    // rationale as `handle_resolve_method_span`: the hook only needs the span.
+    let (result, _diagnostics) = resolve_class_span(&source, &class_name);
+    match result {
+        Ok(span) => {
+            let start = span.start();
+            let end = span.end();
+            let Some(prev_source) = source.get(start as usize..end as usize) else {
+                return Term::from(Map::from([
+                    (atom("status"), atom("error")),
+                    (atom("reason"), atom("invalid_span")),
+                    (
+                        atom("message"),
+                        binary(&format!(
+                            "Resolved class span {start}..{end} is out of bounds \
+                             for source of length {}",
+                            source.len()
+                        )),
+                    ),
+                ]));
+            };
+            let span_map = Term::from(Map::from([
+                (
+                    atom("start"),
+                    int_term(i32::try_from(start).unwrap_or(i32::MAX)),
+                ),
+                (
+                    atom("end"),
+                    int_term(i32::try_from(end).unwrap_or(i32::MAX)),
+                ),
+            ]));
+            Term::from(Map::from([
+                (atom("status"), atom("ok")),
+                (atom("span"), span_map),
+                (atom("prev_source"), binary(prev_source)),
+            ]))
+        }
+        Err(err) => class_span_error_response(&err),
+    }
+}
+
+fn class_span_error_response(err: &beamtalk_core::source_analysis::ClassSpanResolveError) -> Term {
+    use beamtalk_core::source_analysis::ClassSpanResolveError;
+    let reason = match err {
+        ClassSpanResolveError::ClassNotFound { .. } => "class_not_found",
+        ClassSpanResolveError::Ambiguous { .. } => "ambiguous",
+    };
+    Term::from(Map::from([
+        (atom("status"), atom("error")),
+        (atom("reason"), atom(reason)),
+        (atom("message"), binary(&err.to_string())),
+    ]))
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -2779,7 +2862,7 @@ fn handle_request(request_term: &Term) -> Term {
     // (BT-3078 drift audit; BT-3091 flagged this pair for evaluation).
     // A shared corpus fixture
     // (`runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json`)
-    // pins both sides to the same 16-command list end-to-end: the Rust test
+    // pins both sides to the same 17-command list end-to-end: the Rust test
     // below dispatches each corpus command through `handle_request` and
     // checks it isn't the catch-all arm, while
     // `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`
@@ -2804,6 +2887,7 @@ fn handle_request(request_term: &Term) -> Term {
         "find_announce_sites_in_source" => handle_find_announce_sites_in_source(map),
         "resolve_method_span" => handle_resolve_method_span(map),
         "reindent_method_source" => handle_reindent_method_source(map),
+        "resolve_class_span" => handle_resolve_class_span(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -4205,6 +4289,71 @@ Object subclass: Counter
         };
         assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
         assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
+    }
+
+    // --- resolve_class_span tests (ADR 0082 extension, BT-3248) ---
+
+    #[test]
+    fn resolve_class_span_whole_class() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_class_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+        ]);
+        let response = handle_resolve_class_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let prev = map_get(m, "prev_source")
+            .and_then(term_to_string)
+            .expect("prev_source present");
+        // The whole-class span starts at the class's own declaration line and
+        // covers every method (header through last body line).
+        assert!(
+            prev.starts_with("Object subclass: Counter"),
+            "got: {prev:?}"
+        );
+        assert!(prev.contains("increment =>"), "got: {prev:?}");
+        assert!(prev.contains("class new =>"), "got: {prev:?}");
+        let Some(Term::Map(span)) = map_get(m, "span") else {
+            panic!("span should be a map: {response:?}");
+        };
+        let start = map_get(span, "start").and_then(term_to_usize).unwrap();
+        let end = map_get(span, "end").and_then(term_to_usize).unwrap();
+        assert_eq!(
+            &SPAN_FIXTURE[start..end],
+            prev,
+            "span must bound prev_source"
+        );
+    }
+
+    #[test]
+    fn resolve_class_span_class_not_found_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_class_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("NoSuchClass")),
+        ]);
+        let response = handle_resolve_class_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
+    }
+
+    #[test]
+    fn resolve_class_span_missing_class_name_field_is_error() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_class_span")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+        ]);
+        let response = handle_resolve_class_span(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
     }
 
     // --- reindent_method_source tests (BT-2584) ---

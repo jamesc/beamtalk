@@ -46,6 +46,7 @@ to avoid temp files on disk (BT-48).
     find_ffi_sites_in_source/4,
     find_announce_sites_in_source/1,
     resolve_method_span/4,
+    resolve_class_span/2,
     reindent_method_source/2
 ]).
 
@@ -536,6 +537,30 @@ resolve_method_span(Source, ClassName, Selector, Side) ->
     end.
 
 -doc """
+Resolve the byte span of a whole class definition in `Source' (ADR 0082
+extension, BT-3248).
+
+Backs the cockpit `:def' tab's live-patch install hook for an *existing*
+class — given the current on-disk source of a `.bt' file and a target
+`ClassName', returns `{ok, #{start := S, end := E}, PrevSource}' with the
+exact byte span of that class's whole definition and the bytes currently
+occupying it. Resolution failures return `{error, Reason, Message}'; transport
+failures return `{error, port_error | noproc | timeout, Message}'.
+""".
+-spec resolve_class_span(binary(), atom() | binary()) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_class_span(Source, ClassName) ->
+    try
+        gen_server:call(?MODULE, {resolve_class_span, Source, ClassName}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
 
 Produces the on-disk byte-span shape from the compiler's canonical
@@ -891,6 +916,11 @@ handle_call({find_announce_sites_in_source, Source}, _From, State) ->
 handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, State) ->
     Result = beamtalk_compiler_port:resolve_method_span(
         State#state.port, Source, ClassName, Selector, Side
+    ),
+    {reply, Result, State};
+handle_call({resolve_class_span, Source, ClassName}, _From, State) ->
+    Result = beamtalk_compiler_port:resolve_class_span(
+        State#state.port, Source, ClassName
     ),
     {reply, Result, State};
 handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->

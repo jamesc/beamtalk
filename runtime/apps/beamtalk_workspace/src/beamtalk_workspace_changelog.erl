@@ -159,8 +159,12 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% `kind` is an open enum (ADR 0082): newer writers may add values this beam does
 %% not know. Decoding maps any unrecognised value to `unknown` so history is
 %% preserved across versions rather than dropped. `'remove-method'` is ADR
-%% 0112's method-removal kind (BT-3187).
--type kind() :: instance | class | 'new-class' | 'remove-method' | 'remove-class' | unknown.
+%% 0112's method-removal kind (BT-3187). `'class-def'` is ADR 0082's
+%% extension for redefining an *existing* class's whole definition (BT-3248) —
+%% the cockpit `:def` tab's "Compile" action, as opposed to `'new-class'`
+%% (a brand-new class created via `newClass:at:`).
+-type kind() ::
+    instance | class | 'new-class' | 'class-def' | 'remove-method' | 'remove-class' | unknown.
 %% ADR 0112: which method table a `'remove-method'` entry targets. Stored
 %% explicitly only for that kind — legacy `instance`/`class`-kind patch
 %% entries derive their side from `kind` itself (`entry_side/1`), so the field
@@ -754,8 +758,13 @@ dirtyMethods() ->
 
 %% The selector recorded for the dirty-methods view. Method patches use their
 %% own selector; new-class entries (selector = undefined) use the `#new-class`
-%% placeholder so the per-class entry is still visible.
+%% placeholder so the per-class entry is still visible. A `'class-def'` entry
+%% (redefinition of an *existing* class's whole definition, BT-3248) also
+%% carries no selector — it gets its own `#'class-def'` placeholder rather
+%% than reusing `#new-class`, so the dirty view does not misreport a
+%% redefinition as a brand-new class.
 -spec dirty_selector(#entry{}) -> atom().
+dirty_selector(#entry{kind = 'class-def', selector = undefined}) -> 'class-def';
 dirty_selector(#entry{selector = undefined}) -> 'new-class';
 dirty_selector(#entry{selector = Sel}) -> binary_to_atom(Sel, utf8).
 
@@ -837,6 +846,22 @@ method_delta(#entry{kind = Kind, selector = Selector, source_file = File} = E) w
     catch
         _:_ -> {false, undefined}
     end;
+method_delta(#entry{kind = 'class-def', source_file = File} = E) when is_binary(File) ->
+    %% BT-3248: same disk-vs-memory delta as an instance/class-kind method
+    %% patch above, just resolved at whole-class granularity
+    %% (`resolve_class_span/2` instead of `resolve_method_span/4`) — a
+    %% redefinition of an *existing* class always has a prior on-disk body to
+    %% diff against (unlike `'new-class'`, which never does).
+    try
+        case {read_source_body(E), file:read_file(File)} of
+            {{ok, MemBody}, {ok, DiskSource}} ->
+                body_delta(disk_class_body(DiskSource, E#entry.class), MemBody);
+            _ ->
+                {false, undefined}
+        end
+    catch
+        _:_ -> {false, undefined}
+    end;
 method_delta(_E) ->
     {false, undefined}.
 
@@ -849,6 +874,19 @@ disk_method_body(DiskSource, Class, Selector, Kind) ->
     case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Kind) of
         {ok, _Span, Body} -> Body;
         {error, selector_not_found, _} -> <<>>;
+        {error, _Reason, _Msg} -> throw(span_unresolved)
+    end.
+
+%% The class's current whole-definition body on disk (BT-3248). Unlike a
+%% method's `selector_not_found` case, a `'class-def'` entry only ever exists
+%% for a class this ChangeLog already knows had a prior tracked source (see
+%% `beamtalk_repl_loader:emit_class_def_entries/3`'s doc), so the class is
+%% expected to resolve on disk; any resolution failure throws so the caller
+%% degrades to "no diff" rather than reporting a misleading verdict.
+-spec disk_class_body(binary(), binary()) -> binary().
+disk_class_body(DiskSource, Class) ->
+    case beamtalk_compiler:resolve_class_span(DiskSource, Class) of
+        {ok, _Span, Body} -> Body;
         {error, _Reason, _Msg} -> throw(span_unresolved)
     end.
 
@@ -1676,6 +1714,8 @@ decode_kind(<<"class">>) ->
     class;
 decode_kind(<<"new-class">>) ->
     'new-class';
+decode_kind(<<"class-def">>) ->
+    'class-def';
 decode_kind(<<"remove-method">>) ->
     'remove-method';
 decode_kind(<<"remove-class">>) ->

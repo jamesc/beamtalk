@@ -37,6 +37,7 @@
 //!
 //! Use [`LexError`] to construct structured diagnostics with miette integration.
 
+pub mod class_span;
 mod error;
 mod lexer;
 pub mod method_category;
@@ -63,6 +64,7 @@ mod method_category_corpus_tests;
 #[cfg(test)]
 mod method_span_corpus_tests;
 
+pub use class_span::{ClassSpanResolveError, resolve_class_span};
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
 pub use method_category::{

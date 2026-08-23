@@ -42,6 +42,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_ffi_sites_in_source/4,
     find_announce_sites_in_source/1,
     resolve_method_span/4,
+    resolve_class_span/2,
     reindent_method_source/2
 ]).
 
@@ -383,6 +384,32 @@ Backs the `>>' / `compile:source:' install hook.
     | {error, atom(), binary()}.
 resolve_method_span(Source, ClassName, Selector, Side) ->
     beamtalk_compiler_server:resolve_method_span(Source, ClassName, Selector, Side).
+
+-doc """
+Resolve the byte span of a whole class definition in `Source' against the
+current on-disk `.bt' file (ADR 0082 extension, BT-3248).
+
+Backs the cockpit `:def' tab's live-patch install hook for an *existing*
+class: given the current on-disk source and a target `ClassName', resolves
+the exact byte span of that class's whole definition (header, state
+declarations, and body) plus the bytes currently occupying it. On success:
+`{ok, Span, PrevSource}'. The install hook records both on the `ChangeEntry'
+so a later `Workspace flush' can splice by byte-span replacement, mirroring
+`resolve_method_span/4''s contract at class granularity.
+
+A `class_not_found' error means the disk file no longer declares this class
+(renamed/moved out from under the live class); `ambiguous' means the file
+declares the class more than once. Either downgrades the entry to
+`flushable: false' with a `not_flushable_reason'. The error never blocks or
+undoes the in-memory install.
+
+Backs the `:def' tab redefinition install hook.
+""".
+-spec resolve_class_span(binary(), atom() | binary()) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_class_span(Source, ClassName) ->
+    beamtalk_compiler_server:resolve_class_span(Source, ClassName).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

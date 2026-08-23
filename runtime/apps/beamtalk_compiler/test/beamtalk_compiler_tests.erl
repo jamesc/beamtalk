@@ -55,6 +55,8 @@ compiler_test_() ->
         {"resolve_method_span instance method", fun resolve_method_span_instance/0},
         {"resolve_method_span class method", fun resolve_method_span_class/0},
         {"resolve_method_span selector not found", fun resolve_method_span_not_found/0},
+        {"resolve_class_span whole class", fun resolve_class_span_whole_class/0},
+        {"resolve_class_span class not found", fun resolve_class_span_not_found/0},
         {"command vocabulary corpus is recognized (BT-3095)",
             fun command_vocabulary_corpus_is_recognized/0}
     ]}.
@@ -261,6 +263,24 @@ resolve_method_span_not_found() ->
         beamtalk_compiler:resolve_method_span(Source, <<"SpanCounter">>, <<"nope">>, instance),
     ?assertMatch({error, selector_not_found, _}, Result).
 
+%% --- resolve_class_span (ADR 0082 extension, BT-3248) ---
+
+resolve_class_span_whole_class() ->
+    Source = span_fixture(),
+    {ok, #{start := Start, 'end' := End}, PrevSource} =
+        beamtalk_compiler:resolve_class_span(Source, <<"SpanCounter">>),
+    %% Splicing PrevSource back over the span is a no-op, same load-bearing
+    %% property as the method-span resolver.
+    ?assertEqual(PrevSource, binary:part(Source, Start, End - Start)),
+    ?assert(binary:match(PrevSource, <<"Object subclass: SpanCounter">>) =/= nomatch),
+    ?assert(binary:match(PrevSource, <<"increment =>">>) =/= nomatch),
+    ?assert(binary:match(PrevSource, <<"class new =>">>) =/= nomatch).
+
+resolve_class_span_not_found() ->
+    Source = span_fixture(),
+    Result = beamtalk_compiler:resolve_class_span(Source, <<"NoSuchClass">>),
+    ?assertMatch({error, class_not_found, _}, Result).
+
 %%% ---------------------------------------------------------------
 %%% Command-vocabulary conformance corpus (BT-3095)
 %%% ---------------------------------------------------------------
@@ -351,6 +371,11 @@ assert_command_recognized(<<"resolve_method_span">>) ->
     );
 assert_command_recognized(<<"reindent_method_source">>) ->
     ?assertMatch({ok, _}, beamtalk_compiler:reindent_method_source(<<"greet => 42">>, <<"  ">>));
+assert_command_recognized(<<"resolve_class_span">>) ->
+    ?assertMatch(
+        {ok, _, _},
+        beamtalk_compiler:resolve_class_span(span_fixture(), <<"SpanCounter">>)
+    );
 assert_command_recognized(Command) ->
     %% A corpus entry with no dispatch clause is a test-authoring gap, not a
     %% vocabulary mismatch — fail loudly rather than silently skipping it.
