@@ -174,3 +174,37 @@ fn corpus_has_no_empty_named_categories() {
          {named_categories} — the walk may have silently failed"
     );
 }
+
+/// BT-3240: the near-miss-divider lint pass agrees with this suite's own raw
+/// scan (`corpus_has_no_near_miss_dividers`, above) — every divider-shaped
+/// comment leading a class's state/method declarations parses cleanly, so
+/// the lint (which runs live in the LSP and `beamtalk lint`/MCP `lint`) has
+/// nothing to flag anywhere in the corpus today. A hit here means either a
+/// real near-miss divider slipped into the corpus, or the lint's shape
+/// detection has drifted from `parse_divider_name`.
+#[test]
+fn corpus_triggers_no_near_miss_divider_lint() {
+    if !corpus_present() {
+        return;
+    }
+    let files = corpus_files();
+    let mut hits: Vec<String> = Vec::new();
+
+    for path in &files {
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
+        let (module, _diags) = parse(tokens);
+        let mut diagnostics = Vec::new();
+        crate::lint::check_near_miss_dividers(&module, &mut diagnostics);
+        for diag in diagnostics {
+            hits.push(format!("{}: {}", path.display(), diag.message));
+        }
+    }
+
+    assert!(
+        hits.is_empty(),
+        "found {} near-miss-divider lint hit(s) in the corpus:\n{}",
+        hits.len(),
+        hits.join("\n")
+    );
+}

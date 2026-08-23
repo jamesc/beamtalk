@@ -191,6 +191,16 @@ pub fn compute_project_diagnostics_with_analysis(
         );
     }
 
+    // BT-3240: near-miss `// === Name ===` section-divider comments (typoed
+    // `=` run lengths, too-short runs, or a `///`/`/* */` comment where the
+    // divider convention requires a plain `//` line) get no signal anywhere
+    // today — they silently fall back to an ordinary comment and the
+    // methods below are mis-categorized with no diagnostic. Unlike every
+    // other pass in `crate::lint` (which are `beamtalk lint`-only), this one
+    // check also runs here so it reaches the LSP's live diagnostics too —
+    // see `crate::lint::check_near_miss_dividers`'s doc for why.
+    crate::lint::check_near_miss_dividers(module, &mut diagnostics);
+
     // BT-782: Apply @expect directives to suppress matching diagnostics.
     apply_expect_directives(module, &mut diagnostics);
 

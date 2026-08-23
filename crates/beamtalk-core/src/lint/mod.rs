@@ -23,6 +23,7 @@ mod cascade_candidate;
 mod dead_block_assignment;
 mod effect_free_statement;
 mod inspect_in_string_position;
+mod near_miss_divider;
 mod shadowed_block_param;
 mod sync_send_in_timer_block;
 mod trailing_caret;
@@ -68,6 +69,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
         Box::new(dead_block_assignment::DeadBlockAssignmentPass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(inspect_in_string_position::InspectInStringPositionPass),
+        Box::new(near_miss_divider::NearMissDividerPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(sync_send_in_timer_block::SyncSendInTimerBlockPass),
         Box::new(trailing_caret::TrailingCaretPass),
@@ -88,4 +90,21 @@ pub fn run_lint_passes(module: &Module) -> Vec<Diagnostic> {
         pass.check(module, &mut diagnostics);
     }
     diagnostics
+}
+
+/// Runs only the near-miss-divider check (BT-3240) and appends its findings
+/// to `diagnostics`.
+///
+/// Every other pass in this module is [`Severity::Lint`]-only and reachable
+/// solely through [`run_lint_passes`] — via `beamtalk lint` and the MCP
+/// `lint` tool. This one check is additionally wired into
+/// `queries::diagnostic_provider`'s live pipeline (so it also reaches the
+/// LSP's `publishDiagnostics`), because a silently-mis-parsed section
+/// divider is cheap to fix the moment it's written and easy to miss later —
+/// see `near_miss_divider`'s module doc. It stays out of `beamtalk build`'s
+/// output: `beam_compiler.rs` filters every `Severity::Lint` diagnostic
+/// there, matching the "only shown by `beamtalk lint`" contract the rest of
+/// this module relies on.
+pub(crate) fn check_near_miss_dividers(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    near_miss_divider::NearMissDividerPass.check(module, diagnostics);
 }
