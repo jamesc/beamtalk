@@ -1741,7 +1741,8 @@ save_section_write_rejects_stale_source_test() ->
         %% landing on `Path` after this op's own read but before its write.
         ConcurrentSource = <<"Object subclass: BtSectionConflictClass\n\n  foo => 99\n">>,
         ok = file:write_file(Path, ConcurrentSource),
-        NewSource = <<"Object subclass: BtSectionConflictClass\n\n  // === New ===\n\n  foo => 1\n">>,
+        NewSource =
+            <<"Object subclass: BtSectionConflictClass\n\n  // === New ===\n\n  foo => 1\n">>,
         Result = beamtalk_repl_ops_load:finish_section_write(
             Path, <<"BtSectionConflictClass">>, OriginalSource, NewSource
         ),
