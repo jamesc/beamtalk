@@ -810,6 +810,38 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     end)
   end
 
+  test "the System Browser panel-head title stays on one line at any column width (BT-3247)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#col-gutter-left")
+    # Default width (286px): the title used to be a bare text node — the only
+    # shrinkable flex item in `.panel-head` — so it wrapped to two lines under
+    # pressure from the mode/view segs + source select, overflowing the fixed
+    # 30px header. `scrollHeight === clientHeight` fails the moment it wraps.
+    |> assert_eventually(
+      "(() => { const h = document.querySelector('#system-browser .panel-head'); return h.scrollHeight === h.clientHeight; })()",
+      "the System Browser panel-head overflowed its height at the default column width"
+    )
+    # Narrow the column well past the point that used to force a wrap (286px
+    # default down toward the 160px floor, data-min on #col-gutter-left) — the
+    # title must truncate with an ellipsis instead of wrapping the head.
+    |> drag_split("col-gutter-left", -150, 0)
+    |> assert_eventually(
+      "document.querySelector('.cockpit > .col').offsetWidth < 200",
+      "dragging the left column gutter left did not narrow the System Browser column"
+    )
+    |> assert_eventually(
+      "(() => { const h = document.querySelector('#system-browser .panel-head'); return h.scrollHeight === h.clientHeight; })()",
+      "the System Browser panel-head overflowed its height at a narrowed column width"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('#system-browser .panel-title')).whiteSpace",
+      fn v -> assert v == "nowrap", "the panel title should never wrap, got #{inspect(v)}" end
+    )
+  end
+
   test "a saved split size is restored on the next load (BT-2576)", %{conn: conn} do
     conn
     |> visit("/")
