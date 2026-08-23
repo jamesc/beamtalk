@@ -39,6 +39,7 @@ changelog_test_() ->
         fun change_log_wraps_all_entries/1,
         fun change_entries_marks_active_flag/1,
         fun change_entries_marks_shadowed/1,
+        fun class_def_entry_does_not_shadow_pending_new_class_entry/1,
         fun dirty_methods_groups_active_by_class/1,
         fun dirty_methods_uses_new_class_placeholder/1,
         fun append_returns_error_on_unwritable_dir/1,
@@ -337,6 +338,47 @@ change_entries_marks_shadowed(_Ctx) ->
             [dec, inc],
             maps:get(elements, maps:get('Counter', beamtalk_workspace_changelog:dirtyMethods()))
         )
+    ].
+
+%% Regression for a Claude-review-caught blocker (BT-3248): a `'class-def'`
+%% redefinition and a still-pending `'new-class'` creation for the SAME class
+%% both have `selector = undefined`, so before this fix they collided on the
+%% same shadow key and the newer `'class-def'` entry (always
+%% `flushable: false`) would shadow — hide from the pending view — the older
+%% `'new-class'` entry, which is what `Workspace flush` actually still acts
+%% on. Neither may shadow the other: both must stay visible so the CHANGES
+%% dock never misrepresents what a flush is about to write.
+class_def_entry_does_not_shadow_pending_new_class_entry(_Ctx) ->
+    NewClassInput = #{
+        class => <<"Widget">>,
+        kind => 'new-class',
+        source => <<"Object subclass: Widget\n  state: count = 0\n">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/widget.bt">>
+    },
+    ClassDefInput = #{
+        class => <<"Widget">>,
+        kind => 'class-def',
+        source => <<"Object subclass: Widget\n  state: count = 1\n">>,
+        prev_source => <<"Object subclass: Widget\n  state: count = 0\n">>,
+        intent => durable,
+        flushable => false,
+        not_flushable_reason => <<"class_def_flush_not_yet_supported">>,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/widget.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    {ok, _} = beamtalk_workspace_changelog:append(ClassDefInput),
+    [NewClassEntry, ClassDefEntry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual('new-class', maps:get(kind, NewClassEntry)),
+        ?_assertEqual(false, maps:get(shadowed, NewClassEntry)),
+        ?_assertEqual('class-def', maps:get(kind, ClassDefEntry)),
+        ?_assertEqual(false, maps:get(shadowed, ClassDefEntry))
     ].
 
 dirty_methods_groups_active_by_class(_Ctx) ->

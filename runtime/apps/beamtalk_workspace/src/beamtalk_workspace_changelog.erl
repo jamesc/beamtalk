@@ -727,9 +727,26 @@ survivor_seqs(Entries) ->
 
 %% The `(class, selector, side)` shadow-key tuple for `E` — shared by
 %% `survivor_seqs/1` and `entry_to_value/2` so both agree on what shadows what.
--type shadow_key() :: {binary(), binary() | undefined, side() | undefined}.
+%%
+%% Whole-class-level entries (`'new-class'`, `'class-def'`, `'remove-class'`)
+%% carry no `selector`, so without a tie-breaker they would all collide on
+%% the same `(class, undefined, undefined)` key. Concretely: a `'class-def'`
+%% redefinition (BT-3248, always `flushable: false`) of a class whose
+%% `'new-class'` creation (flushable, still pending) has not yet been
+%% flushed would win the shadow slot by seq and mark the `'new-class'` entry
+%% `shadowed`, hiding the entry `Workspace flush` actually acts on from the
+%% CHANGES dock's pending view — the dock would show only the non-flushable
+%% edit, silently misrepresenting what flush is about to write. Keying on
+%% `kind` too for selector-less entries keeps `'new-class'`/`'class-def'`/
+%% `'remove-class'` in separate shadow buckets so each stays independently
+%% visible.
+-type shadow_key() ::
+    {binary(), binary() | undefined, side() | undefined} | {binary(), undefined, kind()}.
 -spec shadow_key(#entry{}) -> shadow_key().
-shadow_key(E) -> {E#entry.class, E#entry.selector, entry_side(E)}.
+shadow_key(#entry{selector = undefined} = E) ->
+    {E#entry.class, undefined, E#entry.kind};
+shadow_key(E) ->
+    {E#entry.class, E#entry.selector, entry_side(E)}.
 
 -doc """
 Return the dirty methods derived from the *active* entries as a Beamtalk

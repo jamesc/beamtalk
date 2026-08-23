@@ -33,6 +33,15 @@
 //! declaration (or the header line itself, when there is none) specifically
 //! so a flush can never reach a method.
 //!
+//! A second review pass caught a follow-on version of the same class of bug:
+//! `state:`/`field:` declarations are legal Beamtalk anywhere in a class body
+//! (interleaved with, or after, methods), so "the last state declaration"
+//! must be read positionally, not by parse-list order, and is additionally
+//! clamped to never extend past the start of the *first* method (instance or
+//! class-side) in the class — even if that means excluding a state
+//! declaration that textually follows an earlier method. See this module's
+//! test `excludes_a_method_that_precedes_a_later_state_declaration`.
+//!
 //! This span is currently used only for the CHANGES-dock diff
 //! (`beamtalk_workspace_changelog:disk_class_body/2`) — a read-only
 //! disk-vs-memory comparison — not for an actual `Workspace flush` splice.
@@ -156,14 +165,41 @@ fn resolve_class_in_module(
 /// Computes the header+state span for `class_def`. See the module doc's
 /// "Span boundaries" section — this is the one function responsible for the
 /// "never reaches a method" guarantee the whole module exists for.
+///
+/// `class_def.state` is a parse-order list, not necessarily a *positional*
+/// ordering relative to methods: Beamtalk legally allows `state:`/`field:`
+/// declarations interleaved with or placed after methods (see
+/// `crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs::class_state_after_methods`
+/// / `class_members_fully_interleaved`). Naively extending to
+/// `state.last()`'s line end can therefore land past an earlier method's
+/// start. The end is clamped to the start of the first method (instance or
+/// class-side) in the class, whichever comes first — this can trim off a
+/// state declaration that textually follows that method, but never
+/// compromises the "never reaches a method" guarantee.
 fn class_header_and_state_span(source: &str, class_def: &ClassDefinition) -> Span {
     let header_line_start = line_start(source, class_def.span.start());
-    let end = match class_def.state.last() {
-        Some(last_state) => extend_to_line_end(source, last_state.span.end()),
+
+    let candidate_end = match class_def.state.iter().map(|s| s.span.end()).max() {
+        Some(last_state_end) => extend_to_line_end(source, last_state_end),
         // No state declarations: the span is just the (single-line, by
         // convention) header line itself.
         None => extend_to_line_end(source, header_line_start),
     };
+
+    let first_method_start = class_def
+        .methods
+        .iter()
+        .chain(class_def.class_methods.iter())
+        .map(|m| m.span.start())
+        .min();
+
+    let end = match first_method_start {
+        Some(method_start) if method_start < candidate_end => {
+            line_start(source, method_start)
+        }
+        _ => candidate_end,
+    };
+
     Span::new(header_line_start, end)
 }
 
@@ -208,6 +244,26 @@ mod tests {
         assert_eq!(slice, "Object subclass: Counter\n  state: count = 0\n");
         assert!(!slice.contains("increment"));
         assert!(!slice.contains("class new"));
+    }
+
+    /// Regression for a Claude-review-caught blocker (BT-3248): a
+    /// `state:`/`field:` declaration that textually follows a method must
+    /// not pull that method into the span. `class_def.state.last()` alone
+    /// (parse-order, not position-order relative to methods) would extend
+    /// the span through `increment` here — see this codebase's parser tests
+    /// `class_state_after_methods` / `class_members_fully_interleaved` for
+    /// why this input is legal Beamtalk that must be handled correctly, not
+    /// rejected.
+    #[test]
+    fn excludes_a_method_that_precedes_a_later_state_declaration() {
+        let source = "Actor subclass: Counter\n  increment => self.value := self.value + 1\n  state: value = 0\n  getValue => ^self.value\n";
+        let (result, _diags) = resolve_class_span(source, "Counter");
+        let span = result.expect("class should resolve");
+        let slice = &source[span.start() as usize..span.end() as usize];
+        assert_eq!(slice, "Actor subclass: Counter\n");
+        assert!(!slice.contains("increment"));
+        assert!(!slice.contains("state: value"));
+        assert!(!slice.contains("getValue"));
     }
 
     #[test]
