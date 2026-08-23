@@ -20,6 +20,7 @@ runtime/apps/beamtalk_runtime/test_fixtures/
 ├── spawner_actor.bt     # Actor-spawns-actor from a compiled method (BT-3093)
 ├── shadow_actor.bt      # Param name shadows an instance var (BT-3093)
 ├── coordinate_actor.bt  # Multiple instance vars, one keyword message (BT-3093)
+├── bif_fallback_test_case.bt  # Real TestCase subclass for the BIF-fallback path (BT-3251)
 └── README.md           # This file
 ```
 
@@ -117,6 +118,38 @@ precedent:
 `counter_module_state/1` doc comment explain what stayed simulated and why
 (the async future-cast protocol tested there has no compiled `.bt` source
 construct that reaches it).
+
+### bif_fallback_test_case.bt (BT-3251)
+
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/bif_fallback_test_case.bt`
+**Purpose:** A real, compiled `TestCase` subclass for `beamtalk_test_case`'s
+"BIF fallback" path (`run_all/1`, `run_single/2`, `run_all_structured/1`) —
+the code path used when a test class is run outside a gen_server
+`handle_call` (i.e. NOT via `execute_tests/5`'s `FlatMethods` map). That path
+used to call `Module:module_info(exports)` directly, which always raises
+`undef` on a genuinely Beamtalk-compiled (`bt@...`) module (CLAUDE.md: Core
+Erlang codegen goes through `compile:forms(..., [from_core | Opts])`, which
+never runs the `sys_pre_expand` pass that injects `module_info/0,1`).
+Hand-written `.erl` stubs like `runtime/apps/beamtalk_stdlib/test/bt@tc_stub.erl`
+get `module_info` auto-injected by the ordinary `erlc` pipeline, so they
+can't reproduce the bug — this fixture can.
+
+Has `setUp`/`tearDown` and `setUpOnce`/`tearDownOnce` so the regression test
+(`runtime/apps/beamtalk_stdlib/test/beamtalk_test_case_stdlib_tests.erl`)
+exercises `discover_test_methods_from_module/1`,
+`check_lifecycle_methods/2`, and `check_suite_lifecycle_methods/2` — all
+three BT-3251 call sites — not just method discovery. `setUp`/`setUpOnce`
+set observable state (a field, a suite fixture map) rather than returning
+`nil`, so both test methods assert on it — a `nil`-returning `setUp` is
+rejected by `is_valid_setUp_result/2` and falls back to the pre-setUp
+instance either way, so it wouldn't prove `check_lifecycle_methods/2` (vs.
+`check_suite_lifecycle_methods/2`) actually ran on this path.
+
+**Note:** unlike the other fixtures here (consumed only by
+`beamtalk_codegen_simulation_tests.erl` in `beamtalk_runtime`'s own EUnit
+scope), this fixture's `.beam` is copied into `beamtalk_stdlib`'s test build
+dir instead, since that's the app `beamtalk_test_case` and its regression
+test both live in. See `copy_to_build_dirs/4` in `compile_fixtures.escript`.
 
 ## References
 

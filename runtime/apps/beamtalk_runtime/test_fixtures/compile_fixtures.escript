@@ -91,11 +91,64 @@ main([]) ->
         LocalFixtures
     ),
 
+    %% BT-3251: fixtures needed by beamtalk_stdlib's EUnit scope (a real
+    %% compiled TestCase subclass for beamtalk_test_case's BIF-fallback-path
+    %% regression test), in addition to beamtalk_runtime's. Kept as a
+    %% separate list/app-target pair rather than widening every existing
+    %% LocalFixtures entry's destination, since those are beamtalk_runtime-only.
+    StdlibFixtures = [
+        %% BT-3251 - BIF-fallback (run_all/1 etc.) regression fixture
+        "bif_fallback_test_case"
+    ],
+    lists:foreach(
+        fun(Basename) ->
+            build_local_fixture(
+                Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename, [
+                    {"test", "beamtalk_stdlib", "ebin"}
+                ]
+            )
+        end,
+        StdlibFixtures
+    ),
+
     ok.
 
 %% @private Compile a `<Basename>.bt` fixture from FixturesDir and copy the
-%% resulting `bt@<Basename>.beam` into every rebar3 test build directory.
+%% resulting `bt@<Basename>.beam` into every rebar3 test build directory for
+%% `beamtalk_runtime`'s `test` dir (the default consumer of this fixtures
+%% directory).
 build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) ->
+    build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename, [
+        {"*", "beamtalk_runtime", "test"}
+    ]).
+
+%% @private Compile a `<Basename>.bt` fixture from FixturesDir and copy the
+%% resulting `bt@<Basename>.beam` into every rebar3 build directory of each
+%% `{Profile, App, SubDir}` in `Targets` (BT-3251: a fixture consumed by more
+%% than one app's EUnit scope, e.g. beamtalk_stdlib, needs its `.beam` on
+%% that app's code path too).
+%%
+%% SubDir matters: `rebar3 eunit --dir=apps/<App>/test` treats every `.beam`
+%% file already sitting in that app's `test` build dir as a candidate test
+%% suite and probes it for `_test`/`_test_`-suffixed exports — which, for a
+%% genuinely Beamtalk-compiled module, means calling something equivalent to
+%% `Module:module_info(exports)` and hitting the very `undef` this fixture
+%% exists to reproduce, this time inside EUnit's own discovery instead of
+%% the code under test (observed as an EUnit-level `{abort,
+%% {module_not_found, Mod}}` and cascading `cancelled` tests). `ebin` (the
+%% app's normal, non-test compiled code) is also on the VM code path during
+%% `eunit --dir=...` — so `resolve_module/1`'s `code:get_object_code/1` /
+%% `code:ensure_loaded/1` still finds it there — without being inside the
+%% directory EUnit scans for test suites.
+%%
+%% Profile matters too: an `ebin`-targeted fixture must be pinned to the
+%% `test` rebar3 profile, not the `*` wildcard `beamtalk_runtime`'s `test`-dir
+%% fixtures use. `_build/default/lib/<App>/ebin` is exactly what `just
+%% install` copies into the install prefix wholesale, and `*` would also
+%% match it whenever a prior `rebar3 compile`/`build-erlang` run (independent
+%% of this eunit-only pre-hook) already created that directory — silently
+%% shipping an EUnit fixture class into a production install.
+build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename, Targets) ->
     ModuleFile = "bt@" ++ Basename ++ ".beam",
     Src = filename:join([FixturesDir, Basename ++ ".bt"]),
     Beam = filename:join(FixtureBuildDir, ModuleFile),
@@ -111,7 +164,12 @@ build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) 
                       "  Source:   ~s~n", [Basename, Beam, Beamtalk, Src]),
             halt(1)
     end,
-    copy_to_build_dirs(RepoRoot, Beam, ModuleFile).
+    lists:foreach(
+        fun({Profile, App, SubDir}) ->
+            copy_to_build_dirs(RepoRoot, Beam, ModuleFile, Profile, App, SubDir)
+        end,
+        Targets
+    ).
 
 %% @private Run beamtalk build on a source file.
 %% Uses open_port/spawn_executable to avoid cmd.exe quoting issues on Windows.
@@ -150,19 +208,44 @@ delete_if_exists(Path) ->
         false -> ok
     end.
 
-%% @private Copy a beam file to all rebar3 test build directories.
+%% @private Copy a beam file to all of `beamtalk_runtime`'s rebar3 test build
+%% directories, across every profile (the default consumer of this fixtures
+%% directory).
 copy_to_build_dirs(RepoRoot, SrcFile, FileName) ->
-    Pattern = filename:join([RepoRoot, "runtime", "_build", "*", "lib", "beamtalk_runtime", "test"]),
-    Dirs = filelib:wildcard(Pattern),
-    lists:foreach(fun(Dir) ->
-        Dest = filename:join(Dir, FileName),
-        case file:copy(SrcFile, Dest) of
-            {ok, _BytesCopied} ->
-                ok;
-            {error, Reason} ->
-                io:format(standard_error,
-                          "Failed to copy ~s to ~s: ~p~n",
-                          [SrcFile, Dest, Reason]),
-                halt(1)
-        end
-    end, Dirs).
+    copy_to_build_dirs(RepoRoot, SrcFile, FileName, "*", "beamtalk_runtime", "test").
+
+%% @private Copy a beam file to `App`'s rebar3 `SubDir` build directory under
+%% `Profile` (a literal rebar3 profile name like `"test"`, or `"*"` to match
+%% every profile directory present) (BT-3251: a fixture may be consumed by
+%% more than one app's EUnit scope, and may need to land in `ebin` rather
+%% than `test`, pinned to the `test` profile only — see
+%% `build_local_fixture/6`'s doc for why).
+%%
+%% Fails loudly (rather than silently copying nowhere) when the wildcard
+%% matches no directories — e.g. a mistyped `SubDir`/`App`, or `Profile`
+%% pinned to `"test"` before `rebar3 eunit` has ever created that profile's
+%% `_build` tree — since a fixture that never lands anywhere degrades to
+%% the exact same symptom the bug it exists to catch produces ("No test
+%% methods found in ..."), silently passing instead of failing the build.
+copy_to_build_dirs(RepoRoot, SrcFile, FileName, Profile, App, SubDir) ->
+    Pattern = filename:join([RepoRoot, "runtime", "_build", Profile, "lib", App, SubDir]),
+    case filelib:wildcard(Pattern) of
+        [] ->
+            io:format(standard_error,
+                      "No build directories matched ~s — nowhere to copy ~s~n",
+                      [Pattern, FileName]),
+            halt(1);
+        Dirs ->
+            lists:foreach(fun(Dir) ->
+                Dest = filename:join(Dir, FileName),
+                case file:copy(SrcFile, Dest) of
+                    {ok, _BytesCopied} ->
+                        ok;
+                    {error, Reason} ->
+                        io:format(standard_error,
+                                  "Failed to copy ~s to ~s: ~p~n",
+                                  [SrcFile, Dest, Reason]),
+                        halt(1)
+                end
+            end, Dirs)
+    end.

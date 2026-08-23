@@ -10,17 +10,25 @@
 %% class was added.
 
 %% Scan the stdlib ebin directory for bt@* BEAM files.
+%%
+%% Two sources, always unioned (not "checked-in dir, else _build fallback"):
+%% `apps/beamtalk_stdlib/ebin` holds the real, `just build-stdlib`-generated
+%% production classes; `_build/*/lib/beamtalk_stdlib/ebin` also picks up
+%% EUnit-only `bt@*` fixtures that compile_fixtures.escript copies there for
+%% suites needing a genuinely Beamtalk-compiled module rather than a
+%% hand-written `.erl` test double (BT-3251) — those have the same "no
+%% abstract code" problem this exclusion exists for, but never land in the
+%% checked-in production ebin dir, so the old either/or logic silently
+%% skipped the `_build` scan whenever production classes already existed
+%% (the common case) and left them unexcluded.
 StdlibEbin = "apps/beamtalk_stdlib/ebin",
 BtModules =
-    case filelib:wildcard(filename:join(StdlibEbin, "bt@*.beam")) of
-        [] ->
-            %% Fallback: check _build directories (rebar3 copies beams there)
-            lists:usort(
-                [list_to_atom(filename:basename(F, ".beam"))
-                 || F <- filelib:wildcard("_build/*/lib/beamtalk_stdlib/ebin/bt@*.beam")]);
-        Files ->
-            [list_to_atom(filename:basename(F, ".beam")) || F <- lists:sort(Files)]
-    end,
+    lists:usort(
+        [list_to_atom(filename:basename(F, ".beam"))
+         || F <-
+             filelib:wildcard(filename:join(StdlibEbin, "bt@*.beam")) ++
+                 filelib:wildcard("_build/*/lib/beamtalk_stdlib/ebin/bt@*.beam")]
+    ),
 
 %% Helper: deep-merge a key into a proplist, preserving other keys.
 SetKey = fun(Key, Value, Proplist) ->

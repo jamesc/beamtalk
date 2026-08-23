@@ -42,7 +42,8 @@ source text) are handled via the `on_activate` callback in activation options.
     topo_sort/1,
     extract_source_path/1,
     extract_class_names/1,
-    load_app_from_ebin/1
+    load_app_from_ebin/1,
+    safe_module_exports/1
 ]).
 
 %% Exported for callers that need validation (e.g. workspace_bootstrap backwards compat).
@@ -685,4 +686,62 @@ extract_class_info_from_beam(EbinDir, ModuleName) ->
             end;
         _ ->
             error
+    end.
+
+-doc """
+Read a module's exports without depending on `Module:module_info/1`
+(BT-3242, BT-3251).
+
+Beamtalk's Core Erlang codegen compiles straight to Core Erlang and feeds it
+to `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never runs the
+abstract-form `sys_pre_expand` compiler pass that auto-injects
+`module_info/0,1`. So every Beamtalk-compiled (`bt@...`) module lacks
+`module_info/1`, and `Module:module_info(exports)` always raises `undef` for
+one.
+
+Tries `erlang:get_module_info/2` first — a BIF that reads the VM's
+already-loaded code table directly, independent of whether the module itself
+exports `module_info/1`. This is the primary path (not merely a fast path)
+because it is the only one of the two that works for a module loaded via
+`code:load_binary/3` with a `Filename` that isn't a real path on the code
+path — e.g. every REPL/System-Browser-defined class (`beamtalk_repl_loader`
+loads each edited class straight from its compiled `Binary`, never writing
+it to disk first) — and because it reads the binary actually resident in the
+VM rather than whatever currently sits at that path on disk, so a hot-reloaded
+class can't return stale exports the way a disk re-read could.
+
+Falls back to `code:get_object_code/1` + `beam_lib:chunks/2` — reading the
+compiled Exports chunk straight from a `.beam` file on the code path — only
+when the module isn't loaded yet (`get_module_info/2` raises `badarg` for
+that case), the same pattern `extract_class_info_from_loaded/1` above uses to
+read the `beamtalk_class` attribute without forcing a load. Returns `[]` when
+neither path resolves the module (not loaded and not on the code path,
+or the Exports chunk can't be read), so callers get an honest "no exports
+found" rather than a crash.
+
+Shared by `beamtalk_repl_ops_browse` (native-delegate callers, BT-3242) and
+`beamtalk_test_case` (BIF-fallback test/lifecycle-method discovery, BT-3251)
+so the read-exports-safely rule has one implementation instead of two copies
+that could drift.
+""".
+-spec safe_module_exports(module()) -> [{atom(), arity()}].
+safe_module_exports(Module) ->
+    try erlang:get_module_info(Module, exports) of
+        Exports -> Exports
+    catch
+        error:badarg -> safe_module_exports_from_object_code(Module)
+    end.
+
+%% @private Fallback for a module that is on the code path but not (yet)
+%% loaded — `erlang:get_module_info/2` only reads already-loaded code.
+-spec safe_module_exports_from_object_code(module()) -> [{atom(), arity()}].
+safe_module_exports_from_object_code(Module) ->
+    case code:get_object_code(Module) of
+        {Module, Beam, _Filename} ->
+            case beam_lib:chunks(Beam, [exports]) of
+                {ok, {Module, [{exports, Exports}]}} -> Exports;
+                _ -> []
+            end;
+        _ ->
+            []
     end.
