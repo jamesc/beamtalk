@@ -55,11 +55,15 @@ dictionary or ETS state is required.
 ]).
 
 -ifdef(TEST).
-%% Expose internal helpers for EUnit testing (BT-2219, BT-2467, BT-3084).
+%% Expose internal helpers for EUnit testing (BT-2219, BT-2467, BT-3084, BT-3239).
 -export([
     log_compiler_diagnostics/2,
     class_object_for_pid/2,
-    make_method_not_found_error/2
+    make_method_not_found_error/2,
+    validated_own_categories/2,
+    instance_selectors/1,
+    method_sig_line/2,
+    render_own_methods_part/2
 ]).
 -endif.
 
@@ -1024,6 +1028,16 @@ format_class_help(ClassName, ClassPid) ->
         end,
         OwnSelectors
     ),
+    %% Skip the source-file read + compiler-port round trip entirely when
+    %% there is nothing to render either way (a class with no own instance
+    %% methods, e.g. a pure factory whose only own methods are class-side) —
+    %% `OwnMethodsPart` below renders `<<>>` for `OwnDocs =:= []` regardless
+    %% of `OwnCategories`, so computing it would be pure waste.
+    OwnCategories =
+        case OwnDocs of
+            [] -> undefined;
+            _ -> own_method_categories(ClassName, ClassPid, SealedMap)
+        end,
 
     InheritedGrouped = group_by_class(lists:sort(Inherited)),
 
@@ -1052,22 +1066,7 @@ format_class_help(ClassName, ClassPid) ->
             Text -> iolist_to_binary([<<"\n">>, Text])
         end,
 
-    OwnMethodsPart =
-        case OwnDocs of
-            [] ->
-                <<>>;
-            _ ->
-                Lines = lists:map(
-                    fun
-                        ({_Sel, Sig, true}) ->
-                            iolist_to_binary([<<"  ">>, Sig, <<" [sealed]">>]);
-                        ({_Sel, Sig, false}) ->
-                            iolist_to_binary([<<"  ">>, Sig])
-                    end,
-                    OwnDocs
-                ),
-                iolist_to_binary([<<"\nInstance methods:\n">>, lists:join(<<"\n">>, Lines)])
-        end,
+    OwnMethodsPart = render_own_methods_part(OwnDocs, OwnCategories),
 
     InheritedParts = lists:map(
         fun({FromClass, Selectors}) ->
@@ -1158,6 +1157,186 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
         end,
 
     iolist_to_binary([Header, SealedLine, InheritedPart, SignatureLine, DocPart]).
+
+-doc """
+Compute BT-3239 source-divider method categories for `ClassName''s own
+(non-inherited) instance methods, or `undefined' when no such grouping is
+available or safely usable.
+
+Returns `undefined' when: `ClassPid''s module carries no `beamtalk_source'
+attribute (a purely runtime-loaded class — BT-2601's documented boundary,
+`format_class_help/2' then renders exactly as it did before this function
+existed); the on-disk file can't be read; the compiler port can't
+parse/find the class in it (stale/renamed source); the class's source has
+no `// === Name ===' dividers at all (nothing to group by — the flat,
+alphabetical rendering *is* the BT-3239-compliant output here, per its
+"class with no dividers is unaffected" acceptance criterion); or — the
+safety check that matters most — the categorized selector set doesn't
+exactly match `SealedMap''s keys (the live image and the on-disk file have
+diverged, e.g. an unflushed `>>' patch — **or** a `Value subclass:`'s
+compiler-generated slot accessors, which exist in `SealedMap' via the live
+method table but have no method declaration in the AST
+`categorize_methods_in_source' walks, so they can never appear in a
+category), in which case a *partial* grouped view would silently hide or
+duplicate a method, so this falls back to the always-correct flat
+rendering instead. Conservative by design (a class with generated
+accessors simply never groups, rather than risking an incomplete listing)
+— a follow-up could relax this to append any uncovered live selector under
+a trailing bucket instead of aborting the whole grouping.
+
+Otherwise returns `[{Name :: binary() | undefined, [atom()]}]` — every
+instance-side selector from `SealedMap`, grouped and ordered exactly as
+`beamtalk_core::source_analysis::categorize_methods' would (source order,
+`undefined' name for the implicit leading category of methods before the
+first divider).
+""".
+-spec own_method_categories(atom(), pid(), map()) ->
+    undefined | [{binary() | undefined, [atom()]}].
+own_method_categories(ClassName, ClassPid, SealedMap) ->
+    try
+        ModName = beamtalk_object_class:module_name(ClassPid),
+        case beamtalk_reflection:source_file_from_module(ModName) of
+            nil ->
+                undefined;
+            SourceFile when is_binary(SourceFile) ->
+                case file:read_file(SourceFile) of
+                    {ok, SourceBin} ->
+                        NameBin = atom_to_binary(ClassName, utf8),
+                        case beamtalk_compiler:categorize_methods(SourceBin, NameBin) of
+                            {ok, Categories} ->
+                                validated_own_categories(Categories, SealedMap);
+                            {error, _Reason, _Message} ->
+                                undefined
+                        end;
+                    {error, _} ->
+                        undefined
+                end
+        end
+    catch
+        _:_ -> undefined
+    end.
+
+%% Filters the raw compiler-port `Categories` shape to instance-side
+%% methods, converts each selector to its atom, drops now-empty categories,
+%% then applies two safety gates before trusting the grouping:
+%% (1) the resulting selector set must exactly match `SealedMap`'s keys —
+%%     see `own_method_categories/3`'s doc for why a partial match must not
+%%     be silently rendered;
+%% (2) a single, unnamed category (no dividers found at all) returns
+%%     `undefined` so the caller falls back to the identical pre-BT-3239
+%%     flat rendering rather than printing a lone "(uncategorized)" header
+%%     no one asked for.
+-spec validated_own_categories([map()], map()) ->
+    undefined | [{binary() | undefined, [atom()]}].
+validated_own_categories(Categories, SealedMap) ->
+    Grouped = lists:filtermap(
+        fun(Category) ->
+            Methods = maps:get(methods, Category, []),
+            case instance_selectors(Methods) of
+                [] -> false;
+                Selectors -> {true, {maps:get(name, Category, undefined), Selectors}}
+            end
+        end,
+        Categories
+    ),
+    AllSelectors = lists:append([Selectors || {_Name, Selectors} <- Grouped]),
+    ExpectedSelectors = lists:sort(maps:keys(SealedMap)),
+    SelectorsMatch = lists:sort(AllSelectors) =:= ExpectedSelectors,
+    case {SelectorsMatch, Grouped} of
+        {true, [{undefined, _OnlyBucket}]} -> undefined;
+        {true, _} -> Grouped;
+        {false, _} -> undefined
+    end.
+
+%% Instance-side selectors from one category's raw `methods` list, as
+%% atoms, in source order. A selector that isn't a live atom (should be
+%% unreachable — every selector came from the class's own compiled method
+%% table) is dropped rather than crashing this call; the exact-match check
+%% in `validated_own_categories/2` catches the resulting mismatch and falls
+%% back to the flat rendering.
+-spec instance_selectors([map()]) -> [atom()].
+instance_selectors(Methods) ->
+    lists:filtermap(
+        fun(Method) ->
+            case maps:get(side, Method, undefined) of
+                instance ->
+                    SelBin = maps:get(selector, Method),
+                    try
+                        {true, binary_to_existing_atom(SelBin, utf8)}
+                    catch
+                        error:badarg -> false
+                    end;
+                _ ->
+                    false
+            end
+        end,
+        Methods
+    ).
+
+-doc "Render one method's signature line, with an optional `[sealed]' suffix.".
+-spec method_sig_line(binary(), boolean()) -> binary().
+method_sig_line(Sig, true) ->
+    iolist_to_binary([Sig, <<" [sealed]">>]);
+method_sig_line(Sig, false) ->
+    Sig.
+
+-doc """
+Render `format_class_help/2''s `Instance methods:' section (BT-3239).
+
+`OwnDocs' is `[{Selector, Sig, Sealed}]` (own instance methods, sorted
+alphabetically). `OwnCategories' is `undefined' (render flat, exactly as
+before BT-3239) or `[{Name :: binary() | undefined, [atom()]}]` from
+`own_method_categories/3` (render grouped, source order). Every method
+line — flat or grouped — is indented two spaces under the `Instance
+methods:` header, matching this repo's documented `:help` output
+(`docs/beamtalk-tooling.md`'s `:help` example); split out as its own
+function specifically so this indentation contract has a direct eunit test
+independent of a live class/compiler-port round trip (see
+`beamtalk_interface_tests:render_own_methods_part_*`).
+""".
+-spec render_own_methods_part(
+    [{atom(), binary(), boolean()}],
+    undefined
+    | [
+        {binary() | undefined, [atom()]}
+    ]
+) -> binary().
+render_own_methods_part([], _OwnCategories) ->
+    <<>>;
+render_own_methods_part(OwnDocs, undefined) ->
+    %% No source-backed category grouping available (no on-disk file, no
+    %% dividers, or a disk/live-image mismatch) — render exactly as before
+    %% BT-3239: one flat, alphabetical list.
+    Lines = [
+        iolist_to_binary([<<"  ">>, method_sig_line(Sig, Sealed)])
+     || {_Sel, Sig, Sealed} <- OwnDocs
+    ],
+    iolist_to_binary([<<"\nInstance methods:\n">>, lists:join(<<"\n">>, Lines)]);
+render_own_methods_part(OwnDocs, Categories) ->
+    %% BT-3239: grouped by the class's `// === Name ===` source dividers,
+    %% in source order — `Categories` is already validated
+    %% (own_method_categories/3) to cover exactly `OwnDocs`'s selectors, so
+    %% every `maps:get/2` below is total.
+    SigOf = maps:from_list([{Sel, {Sig, Sealed}} || {Sel, Sig, Sealed} <- OwnDocs]),
+    CategoryParts = lists:map(
+        fun({Name, Selectors}) ->
+            Header =
+                case Name of
+                    undefined -> <<"  (uncategorized)">>;
+                    _ -> iolist_to_binary([<<"  === ">>, Name, <<" ===">>])
+                end,
+            MethodLines = [
+                begin
+                    {Sig, Sealed} = maps:get(Sel, SigOf),
+                    iolist_to_binary([<<"  ">>, method_sig_line(Sig, Sealed)])
+                end
+             || Sel <- Selectors
+            ],
+            lists:join(<<"\n">>, [Header | MethodLines])
+        end,
+        Categories
+    ),
+    iolist_to_binary([<<"\nInstance methods:\n">>, lists:join(<<"\n">>, CategoryParts)]).
 
 -doc "Get method signature from a class pid.".
 -spec get_method_sig(pid(), atom()) -> {binary(), binary() | none}.

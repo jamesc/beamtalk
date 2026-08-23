@@ -47,6 +47,7 @@ to avoid temp files on disk (BT-48).
     find_announce_sites_in_source/1,
     resolve_method_span/4,
     resolve_class_span/2,
+    categorize_methods/2,
     reindent_method_source/2
 ]).
 
@@ -563,6 +564,26 @@ resolve_class_span(Source, ClassName) ->
     end.
 
 -doc """
+Group a class's methods by its `// === Name ===' section dividers
+(BT-3239) — see `beamtalk_compiler_port:categorize_methods/3' for the wire
+shape. Returns `{ok, Categories}' on success, `{error, Reason, Message}' on
+a resolution failure, or `{error, noproc | timeout, Message}' on transport
+failure.
+""".
+-spec categorize_methods(binary(), atom() | binary()) ->
+    {ok, [#{name => binary(), methods := [#{selector := binary(), side := instance | class}]}]}
+    | {error, atom(), binary()}.
+categorize_methods(Source, ClassName) ->
+    try
+        gen_server:call(?MODULE, {categorize_methods, Source, ClassName}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
 
 Produces the on-disk byte-span shape from the compiler's canonical
@@ -922,6 +943,11 @@ handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, Sta
     {reply, Result, State};
 handle_call({resolve_class_span, Source, ClassName}, _From, State) ->
     Result = beamtalk_compiler_port:resolve_class_span(
+        State#state.port, Source, ClassName
+    ),
+    {reply, Result, State};
+handle_call({categorize_methods, Source, ClassName}, _From, State) ->
+    Result = beamtalk_compiler_port:categorize_methods(
         State#state.port, Source, ClassName
     ),
     {reply, Result, State};

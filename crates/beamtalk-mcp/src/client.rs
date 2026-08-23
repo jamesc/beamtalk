@@ -817,6 +817,18 @@ impl ReplClient {
     pub async fn list_classes(&self, filter: Option<&str>) -> Result<ReplResponse, String> {
         self.send(&RequestBuilder::list_classes(filter)).await
     }
+
+    /// Send a `nav-symbols` request (BT-2244) — bulk class+method outline
+    /// from the live class registry, including each class's `source_file`
+    /// when it has one (`None` for a purely runtime-loaded class).
+    ///
+    /// Used by the `docs` tool (BT-3239) to locate the on-disk `.bt` file
+    /// backing a class before reading it locally for divider-based method
+    /// categorization — the same op the LSP's `textDocument/documentSymbol`
+    /// runtime-delegate path already sends (`crates/beamtalk-lsp/src/runtime.rs`).
+    pub async fn nav_symbols(&self, scope: Option<&str>) -> Result<ReplResponse, String> {
+        self.send(&RequestBuilder::nav_symbols(scope)).await
+    }
 }
 
 // Response types (`ReplResponse`, `ActorInfo`, `ClassInfo`) are imported from

@@ -43,6 +43,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_announce_sites_in_source/1,
     resolve_method_span/4,
     resolve_class_span/2,
+    categorize_methods/2,
     reindent_method_source/2
 ]).
 
@@ -417,6 +418,34 @@ computable" — never blocks or undoes anything, since nothing here writes.
     | {error, atom(), binary()}.
 resolve_class_span(Source, ClassName) ->
     beamtalk_compiler_server:resolve_class_span(Source, ClassName).
+
+-doc """
+Group a class's methods by its `// === Name ===' section dividers
+(BT-3239).
+
+Given the source text of a `.bt' file and a target `ClassName', returns
+`{ok, Categories}' — the class's methods grouped by the divider comments
+that precede them, in source order, exactly matching
+`beamtalk_core::source_analysis::categorize_methods_in_source' (the shared
+Rust recognizer BT-2601 introduced for the LSP outline). Each category is
+`#{name => binary() | undefined, methods := [#{selector := binary(),
+side := instance | class}]}' — `name' is absent (not `undefined' as a map
+value, matching the port's "omit, never null" convention) for the implicit
+leading, unnamed category.
+
+Backs `beamtalk_interface:format_class_help/2' (`Beamtalk help: ClassName'
+— the CLI REPL's `:help' and the MCP `docs' tool both evaluate this), so a
+class with a `.bt' source file on disk gets its `Instance methods:' listing
+grouped the same way the editor's Outline view already does. A
+`class_not_found'/`ambiguous' error means the on-disk source doesn't match
+the requested class cleanly; callers degrade to the pre-BT-3239 flat,
+alphabetical listing rather than erroring.
+""".
+-spec categorize_methods(binary(), atom() | binary()) ->
+    {ok, [#{name => binary(), methods := [#{selector := binary(), side := instance | class}]}]}
+    | {error, atom(), binary()}.
+categorize_methods(Source, ClassName) ->
+    beamtalk_compiler_server:categorize_methods(Source, ClassName).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

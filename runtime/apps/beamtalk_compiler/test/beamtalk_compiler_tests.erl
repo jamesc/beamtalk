@@ -379,6 +379,11 @@ assert_command_recognized(<<"resolve_class_span">>) ->
         {ok, _, _},
         beamtalk_compiler:resolve_class_span(span_fixture(), <<"SpanCounter">>)
     );
+assert_command_recognized(<<"categorize_methods">>) ->
+    ?assertMatch(
+        {ok, _},
+        beamtalk_compiler:categorize_methods(span_fixture(), <<"SpanCounter">>)
+    );
 assert_command_recognized(Command) ->
     %% A corpus entry with no dispatch clause is a test-authoring gap, not a
     %% vocabulary mismatch — fail loudly rather than silently skipping it.
