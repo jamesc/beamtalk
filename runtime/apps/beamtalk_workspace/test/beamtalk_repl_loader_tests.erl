@@ -1242,13 +1242,31 @@ loader_integration_test_() ->
                 t_install_method_chains_signature_generations(Proj)
             end},
             %% BT-3248: redefining an existing class (the cockpit `:def` tab)
-            %% records a pending, non-flushable 'class-def' ChangeLog entry.
+            %% records a pending 'class-def' ChangeLog entry. BT-3254: now
+            %% flushable once the resubmitted skeleton is round-trip-safe.
             {"load_class_module/3 redefinition emits class-def entry", fun() ->
                 t_load_class_module_redefinition_emits_class_def_entry(Proj)
             end},
-            {"load_class_module/3 redefinition never flushes over existing methods", fun() ->
+            {"load_class_module/3 redefinition flush never touches existing methods", fun() ->
                 t_load_class_module_redefinition_preserves_existing_methods(Proj)
             end},
+            {"load_class_module/3 redefinition round-trips sealed/typed modifiers", fun() ->
+                t_load_class_module_redefinition_sealed_typed_round_trips(Proj)
+            end},
+            {"load_class_module/3 redefinition with methods in source is not flushable", fun() ->
+                t_load_class_module_redefinition_with_methods_in_source_not_flushable(Proj)
+            end},
+            {"load_class_module/3 redefinition with a leading comment is not flushable", fun() ->
+                t_load_class_module_redefinition_with_leading_comment_not_flushable(Proj)
+            end},
+            {"load_class_module/3 redefinition that would drop a field default is not flushable",
+                fun() ->
+                    t_load_class_module_redefinition_drops_default_not_flushable(Proj)
+                end},
+            {"load_class_module/3 redefinition with state declared after a method is not flushable",
+                fun() ->
+                    t_load_class_module_redefinition_state_after_method_not_flushable(Proj)
+                end},
             {"load_class_module/3 multi-class eval logs no class-def entry", fun() ->
                 t_load_class_module_multi_class_eval_no_class_def_entry(Proj)
             end},
@@ -1627,13 +1645,11 @@ contains(Haystack, Needle) ->
 %% `:def` tab's "Compile" action — a plain eval that classifies as a class
 %% definition and routes through load_class_module/3) must record a pending
 %% `'class-def'` ChangeLog entry — previously this path installed the new
-%% class body with NO ChangeLog entry at all (the bug this issue fixes). The
-%% entry is `flushable: false` — see add_class_def_flushability/2's doc for
-%% why disk-flush isn't safe yet (the `:def` tab's resubmitted skeleton drops
-%% modifiers/type annotations, and an earlier version of this feature that
-%% DID mark such entries flushable also had a span bug that would have
-%% deleted every method's source on flush — see
-%% t_load_class_module_redefinition_preserves_existing_methods below).
+%% class body with NO ChangeLog entry at all (the bug BT-3248 fixed). BT-3254
+%% made the `:def` tab's resubmitted skeleton round-trip-safe (modifier
+%% keywords, `field:`/`state:` keyword choice, `::` type annotations), so —
+%% for a class with no methods to worry about clamping around — the entry is
+%% now `flushable: true` with a resolved on-disk span.
 t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
     %% Use the live workspace project_path so the redefined class's sourceFile
     %% is populated (robust against any workspace_meta restart between setup
@@ -1661,23 +1677,29 @@ t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
     ],
     ?assertEqual('class-def', beamtalk_workspace_changelog:entry_kind(Entry)),
     ?assertEqual(undefined, beamtalk_workspace_changelog:entry_selector(Entry)),
-    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
-    ?assertEqual(
-        <<"class_def_flush_not_yet_supported">>,
-        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
-    ),
+    ?assertEqual(true, beamtalk_workspace_changelog:entry_flushable(Entry)),
     ?assertEqual(
         list_to_binary(Path), beamtalk_workspace_changelog:entry_source_file(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(1, maps:get(flushed, Summary)),
+    ?assertEqual(
+        {ok, <<"Actor subclass: DefRedefine\n  state: x = 1\n">>}, file:read_file(Path)
     ).
 
-%% BT-3248 regression guard (adversarial review finding): a `'class-def'`
-%% redefinition must never be flushable when the class has methods already
-%% installed — an earlier version of this feature resolved a whole-class span
-%% (header through the last *method*) and marked such entries flushable,
-%% which would have spliced the `:def` tab's header+state-only skeleton over
-%% the header+state+methods region on flush, permanently deleting every
-%% method's source from disk. Proves the fix: flushing after a redefinition
-%% of a class with a live method leaves the file, and the method, untouched.
+%% BT-3248 regression guard (adversarial review finding), now proven the
+%% other way by BT-3254: a `'class-def'` redefinition must never splice over
+%% an already-installed method's source — an earlier version of this feature
+%% resolved a whole-class span (header through the last *method*) and marked
+%% such entries flushable, which would have spliced the `:def` tab's
+%% header+state-only skeleton over the header+state+methods region on flush,
+%% permanently deleting every method's source from disk.
+%% `beamtalk_compiler:resolve_class_span/2` (`class_span.rs`) fixes that at
+%% the resolver level — its span deliberately clamps to end before the first
+%% method — so now that BT-3254 wires it up for flush, the entry legitimately
+%% BECOMES flushable while still never touching the method: the resolved span
+%% covers only the header + state region ahead of `double`, so splicing the
+%% redefined skeleton in leaves the method's source byte-identical.
 t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
     Proj = live_project_dir(),
     ok = beamtalk_workspace_changelog:clear(),
@@ -1693,7 +1715,7 @@ t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
     %% The `:def` tab's synthesized skeleton — header + state only, exactly
-    %% like `beamtalk_repl_ops_browse:class_definition_text/3` produces —
+    %% like `beamtalk_repl_ops_browse:class_definition_text/7` produces —
     %% carries no methods.
     NewSource = "Actor subclass: DefWithMethod\n  state: x = 1\n",
     {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
@@ -1708,9 +1730,299 @@ t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
      || E <- beamtalk_workspace_changelog:active_entries(),
         beamtalk_workspace_changelog:entry_class(E) =:= <<"DefWithMethod">>
     ],
-    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(true, beamtalk_workspace_changelog:entry_flushable(Entry)),
     {ok, Summary} = beamtalk_workspace_flush:flush(),
-    %% Non-flushable: flush must report nothing written for this entry.
+    ?assertEqual(1, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(
+        <<
+            "Actor subclass: DefWithMethod\n"
+            "  state: x = 1\n"
+            "\n"
+            "  double -> Integer =>\n"
+            "    self.x * 2\n"
+        >>,
+        Final
+    ).
+
+%% BT-3254 acceptance criterion: a class with `sealed`/`typed` modifiers and a
+%% typed instance var survives a `:def` tab edit + flush cycle unchanged apart
+%% from the intended edit. `NewSource` is built via
+%% `beamtalk_repl_ops_browse:class_definition_text/7` — the exact function the
+%% `:def` tab's Compile action resubmits — rather than a hand-typed literal,
+%% so this proves the real skeleton the cockpit generates round-trips, not
+%% just a hand-crafted flush-layer fixture (that lower-level coverage already
+%% exists in beamtalk_workspace_flush_tests.erl:
+%% flush_kinds_by_class_def_entry_kind/1).
+t_load_class_module_redefinition_sealed_typed_round_trips(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original =
+        <<
+            "sealed typed Value subclass: DefSealedTyped\n"
+            "  field: x :: Integer = 0\n"
+            "\n"
+            "  double -> Integer =>\n"
+            "    self.x * 2\n"
+        >>,
+    Path = write_bt_under(Proj, "src", "DefSealedTyped.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    NewState = [#{<<"name">> => <<"x">>, <<"default">> => <<"1">>, <<"type">> => <<"Integer">>}],
+    NewDefinition = beamtalk_repl_ops_browse:class_definition_text(
+        'DefSealedTyped', 'Value', NewState, true, true, false, #{kind => value}
+    ),
+    NewSource = binary_to_list(iolist_to_binary([NewDefinition, <<"\n">>])),
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefSealedTyped">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefSealedTyped">>
+    ],
+    ?assertEqual(true, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(1, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(
+        <<
+            "sealed typed Value subclass: DefSealedTyped\n"
+            "  field: x :: Integer = 1\n"
+            "\n"
+            "  double -> Integer =>\n"
+            "    self.x * 2\n"
+        >>,
+        Final
+    ).
+
+%% BT-3254 regression guard: `add_class_def_flushability/2` is reached from
+%% ANY successful redefinition through `load_class_module/3`, not only the
+%% cockpit `:def` tab's own header+state-only skeleton — a raw REPL eval that
+%% redefines an existing class with a FULL body (header + state + a method)
+%% routes through the exact same path. Splicing such a `source` into the
+%% disk span (which, by `resolve_class_span/2`'s own guarantee, stops before
+%% the file's first method) would jam the new method text into the
+%% header/state region while leaving the file's real method stale and
+%% duplicated right after it — the mirror image, on the resubmitted-text
+%% side, of the disk-side bug the original `t_load_class_module_redefinition_
+%% preserves_existing_methods` guards against. Proves the fix: such an entry
+%% is `flushable: false` and flush leaves the file untouched.
+t_load_class_module_redefinition_with_methods_in_source_not_flushable(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original =
+        <<
+            "Actor subclass: DefFullBody\n"
+            "  state: x = 0\n"
+            "\n"
+            "  double -> Integer =>\n"
+            "    self.x * 2\n"
+        >>,
+    Path = write_bt_under(Proj, "src", "DefFullBody.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% A raw REPL-typed redefinition — the whole class body, methods
+    %% included — unlike the `:def` tab's own header+state-only skeleton.
+    NewSource =
+        "Actor subclass: DefFullBody\n"
+        "  state: x = 1\n"
+        "\n"
+        "  double -> Integer =>\n"
+        "    self.x * 3\n",
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefFullBody">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefFullBody">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_source_not_skeleton_shaped">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(0, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(Original, Final).
+
+%% BT-3254 adversarial-review finding (the mirror image of the "methods in
+%% source" guard above, on the LEADING side instead of the trailing side): a
+%% raw REPL-typed redefinition that includes a NEW leading `///` doc comment
+%% — unlike the `:def` tab's own skeleton, which never carries one — must
+%% not be treated as skeleton-shaped either. `resolve_class_span`'s span
+%% deliberately starts at the class's own declaration line, never backing up
+%% across a doc comment, so splicing a `source` whose comment sits BEFORE
+%% that span into the disk region (which itself starts only at the header,
+%% excluding the disk's own doc comment) would duplicate/misplace the
+%% comment rather than losing data outright — still a corruption this guard
+%% must catch.
+t_load_class_module_redefinition_with_leading_comment_not_flushable(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original = <<
+        "/// Original doc.\n"
+        "Actor subclass: DefLeadingComment\n"
+        "  state: x = 0\n"
+    >>,
+    Path = write_bt_under(Proj, "src", "DefLeadingComment.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    NewSource =
+        "/// New doc.\n"
+        "Actor subclass: DefLeadingComment\n"
+        "  state: x = 1\n",
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefLeadingComment">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefLeadingComment">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_source_not_skeleton_shaped">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(0, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(Original, Final).
+
+%% BT-3254 adversarial-review finding (the field-defaults gap, distinct from
+%% the modifier/method-safety findings above): a COMPILED class's field
+%% default-value TEXT is not recoverable from live reflection at all — only
+%% `beamtalk_class_builder`-created (file-less) classes populate
+%% `field_defaults`; `__beamtalk_meta/0` for a real `.bt` class carries only
+%% the `field_has_default` boolean (BT-1976). So the `:def` tab's OWN
+%% skeleton generator (`class_definition_text/7`, fed by
+%% `beamtalk_repl_ops_browse:browse_class_definition/1`'s LIVE reflection —
+%% not a hand-fed `State` list like
+%% `t_load_class_module_redefinition_sealed_typed_round_trips` above) always
+%% renders `default => null` for a compiled class's defaulted field. Proves
+%% the fix end-to-end through the REAL browse pane: resubmitting exactly what
+%% the cockpit shows for a class with a defaulted field is refused —
+%% `flushable: false` — rather than silently deleting that default from disk
+%% on flush.
+t_load_class_module_redefinition_drops_default_not_flushable(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original = <<
+        "Actor subclass: DefDroppedDefault\n"
+        "  state: x :: Integer = 42\n"
+        "\n"
+        "  double -> Integer =>\n"
+        "    self.x * 2\n"
+    >>,
+    Path = write_bt_under(Proj, "src", "DefDroppedDefault.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% Fetch the definition text the cockpit `:def` tab would actually show —
+    %% the real browse-class-definition op, not a hand-built `State` list.
+    {value, BrowseValue} = beamtalk_repl_ops_browse:handle_term(
+        <<"browse-class-definition">>, #{<<"class">> => <<"DefDroppedDefault">>}, undefined, self()
+    ),
+    Definition = maps:get(<<"definition">>, BrowseValue),
+    %% Confirms the reflection gap this test guards against is real: the
+    %% live-reflected skeleton for a compiled class does NOT carry the
+    %% on-disk default, even though `x` was declared `= 42`.
+    ?assertEqual(nomatch, binary:match(Definition, <<"= 42">>)),
+    NewSource = binary_to_list(iolist_to_binary([Definition, <<"\n">>])),
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefDroppedDefault">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefDroppedDefault">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_would_drop_field_default">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(0, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(Original, Final).
+
+%% Claude BeamTalk Review finding on this PR (BT-3254): a `state:`/`field:`
+%% declaration positioned AT OR AFTER a method (legal Beamtalk — see
+%% `class_span.rs`'s `excludes_a_method_that_precedes_a_later_state_
+%% declaration` test) is excluded from `resolve_class_span/2`'s clamped span
+%% entirely, but the `:def` tab's skeleton is built from LIVE reflection
+%% (`instance_variables`), which is position-agnostic and always includes
+%% every current field. The field here (`b`) has NO default, so
+%% `class_def_preserves_field_defaults/3` alone does not catch this — there
+%% is nothing to "lose". Splicing the regenerated skeleton (`Actor subclass:
+%% DefStateAfterMethod\n  state: b\n`) into the clamped span (`Actor
+%% subclass: DefStateAfterMethod\n`, ending before `method1`) would
+%% DUPLICATE `state: b` — once newly inserted before the method, once still
+%% present, untouched, after it. Proves the fix: refused, not flushable.
+t_load_class_module_redefinition_state_after_method_not_flushable(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original = <<
+        "Actor subclass: DefStateAfterMethod\n"
+        "  method1 => 1\n"
+        "\n"
+        "  state: b\n"
+    >>,
+    Path = write_bt_under(Proj, "src", "DefStateAfterMethod.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% Fetch the definition text the cockpit `:def` tab would actually show —
+    %% the real browse-class-definition op, not a hand-built `State` list.
+    {value, BrowseValue} = beamtalk_repl_ops_browse:handle_term(
+        <<"browse-class-definition">>,
+        #{<<"class">> => <<"DefStateAfterMethod">>},
+        undefined,
+        self()
+    ),
+    Definition = maps:get(<<"definition">>, BrowseValue),
+    %% Confirms the reflection gap this test guards against is real: the
+    %% live-reflected skeleton carries `b` even though it is declared after
+    %% `method1` on disk — position-agnostic reflection, unlike the disk
+    %% span.
+    ?assert(binary:match(Definition, <<"state: b">>) =/= nomatch),
+    NewSource = binary_to_list(iolist_to_binary([Definition, <<"\n">>])),
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefStateAfterMethod">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefStateAfterMethod">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_state_after_method">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
     ?assertEqual(0, maps:get(flushed, Summary)),
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).

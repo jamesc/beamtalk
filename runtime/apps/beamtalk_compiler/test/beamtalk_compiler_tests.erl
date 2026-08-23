@@ -61,6 +61,9 @@ compiler_test_() ->
             fun categorize_methods_no_dividers/0},
         {"categorize_methods groups by divider", fun categorize_methods_groups_by_divider/0},
         {"categorize_methods class not found", fun categorize_methods_not_found/0},
+        {"class_state_field_defaults reports presence per field",
+            fun class_state_field_defaults_reports_presence/0},
+        {"class_state_field_defaults class not found", fun class_state_field_defaults_not_found/0},
         {"command vocabulary corpus is recognized (BT-3095)",
             fun command_vocabulary_corpus_is_recognized/0}
     ]}.
@@ -329,6 +332,20 @@ categorize_methods_not_found() ->
     Result = beamtalk_compiler:categorize_methods(Source, <<"NoSuchClass">>),
     ?assertMatch({error, class_not_found, _}, Result).
 
+class_state_field_defaults_reports_presence() ->
+    Source =
+        <<"Actor subclass: FieldDefaultsFixture\n  state: count = 0\n  state: label :: String\n">>,
+    {ok, Defaults} = beamtalk_compiler:class_state_field_defaults(
+        Source, <<"FieldDefaultsFixture">>
+    ),
+    ?assertEqual(true, maps:get(<<"count">>, Defaults)),
+    ?assertEqual(false, maps:get(<<"label">>, Defaults)).
+
+class_state_field_defaults_not_found() ->
+    Source = span_fixture(),
+    Result = beamtalk_compiler:class_state_field_defaults(Source, <<"NoSuchClass">>),
+    ?assertMatch({error, class_not_found, _}, Result).
+
 %%% ---------------------------------------------------------------
 %%% Command-vocabulary conformance corpus (BT-3095)
 %%% ---------------------------------------------------------------
@@ -428,6 +445,11 @@ assert_command_recognized(<<"categorize_methods">>) ->
     ?assertMatch(
         {ok, _},
         beamtalk_compiler:categorize_methods(span_fixture(), <<"SpanCounter">>)
+    );
+assert_command_recognized(<<"class_state_field_defaults">>) ->
+    ?assertMatch(
+        {ok, _},
+        beamtalk_compiler:class_state_field_defaults(span_fixture(), <<"SpanCounter">>)
     );
 assert_command_recognized(Command) ->
     %% A corpus entry with no dispatch clause is a test-authoring gap, not a

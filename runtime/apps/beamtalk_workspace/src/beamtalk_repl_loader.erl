@@ -770,38 +770,73 @@ emit_class_def_entry(ClassNameBin, NewSource, PrevSource) ->
     end.
 
 -doc """
-Classify a `'class-def'` entry's flushability — always `flushable: false` for
-now (BT-3248 Phase 1), regardless of whether the class is genuinely an
-in-project file the entry could, in principle, ever target.
+Classify a `'class-def'` entry's flushability (BT-3248 Phase 1 → BT-3254).
 
 Reuses `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
-(the same classification `add_flushability/4` uses for a method patch) only
-to populate `sourceFile` when the class IS an in-project file — informational,
-so the CHANGES dock can show a path and `beamtalk_workspace_changelog:
-disk_class_body/2` can compute a diff against it — never to decide
-`flushable`, which is hardcoded `false` here on purpose.
+(the same classification `add_flushability/4` uses for a method patch) to
+decide whether the class is genuinely an in-project file at all — stdlib,
+dependency, and file-less (dynamic) classes stay `flushable: false` exactly
+like a method patch on that kind of class.
 
-Why: the cockpit `:def` tab recompiles a *synthesized* skeleton
-(`beamtalk_repl_ops_browse:class_definition_text/5` — `{typed }{Superclass}
-subclass: {Name}` plus one `field:`/`state:` line per instance variable, per
-ADR 0067/BT-3255) that is still missing information no flush can safely
-reconstruct — the `sealed`/`abstract` modifier keywords are silently dropped
-from what gets resubmitted at Compile (BT-3255 closed the `typed`/`field:`-
-`state:`-keyword/`::`-type-annotation gaps this paragraph used to describe;
-`sealed`/`abstract` remain open). An earlier version of this function resolved
-a real on-disk span (`beamtalk_compiler:resolve_class_span/2`) and marked the
-entry flushable whenever that span resolved — even with a span correctly
-bounded to exclude every method (a first, more dangerous version of that
-resolver did not, and would have deleted a class's methods from disk on
-flush; see `crates/beamtalk-core/src/source_analysis/class_span.rs`'s module
-doc), splicing the skeleton in would still have silently downgraded e.g.
-`sealed typed Value subclass: Foo` + `field: x :: Integer` to
-`typed Value subclass: Foo` + `field: x :: Integer` on every ordinary flush,
-for any `sealed`/`abstract` class — caught in adversarial review before this
-shipped (BT-3248). Fixing that needs the `:def` tab's skeleton itself made
-round-trip-safe first (tracked as a follow-up); until then, every
-`'class-def'` entry stays visible in the CHANGES dock (with a computed diff —
-see `disk_class_body/2`) but is never a `Workspace flush` candidate.
+BT-3254 made the cockpit `:def` tab's resubmitted skeleton
+(`beamtalk_repl_ops_browse:class_definition_text/7`) round-trip-safe: it now
+carries the `sealed`/`abstract`/`typed` modifier keywords, the
+`field:`/`state:` keyword choice, and `::` type annotations, closing the gap
+an earlier version of this function's doc described — and the gap that made
+an even earlier version of this function (which resolved a real on-disk span
+and marked the entry flushable whenever the span resolved, regardless of what
+the skeleton actually contained) unsafe: it would have silently downgraded
+e.g. `sealed typed Value subclass: Foo` + `field: x :: Integer` to
+`Value subclass: Foo` + `state: x` on every ordinary flush, caught in
+adversarial review before BT-3248 shipped.
+
+With the skeleton itself fixed, this function now resolves the real on-disk
+span (`beamtalk_compiler:resolve_class_span/2` — the same resolver
+`beamtalk_workspace_changelog:disk_class_body/2` already used read-only for
+the CHANGES-dock diff) and marks the entry flushable when it resolves — the
+same span-resolve-or-downgrade shape `add_flushability/4` uses for a method
+patch, just resolved at whole-class (header + state) granularity rather than
+one method. Unlike a method body, the `:def` tab's skeleton is already built
+at the on-disk column-0-header / 2-space-state-line shape, so this never needs
+`reindent_method_source` — the only reshape is matching the resolved span's
+trailing-newline state (the skeleton itself never carries one).
+
+This chokepoint is NOT exclusive to the cockpit `:def` tab, though: any
+successful redefinition of an already-loaded class (e.g. a raw REPL eval of a
+FULL class body with methods) reaches `load_class_module/3` → here too, with
+whatever text the caller compiled as `Base`'s `source`. Before trusting the
+disk span at all, `add_class_def_span_or_downgrade/4` first confirms `source`
+ITSELF is header+state-only (`class_def_source_is_skeleton_shaped/2`, reusing
+`resolve_class_span/2` against the candidate text rather than the disk file) —
+otherwise splicing a `source` that also carries methods into the disk span
+(which, by construction, stops before the file's first method) would jam the
+new methods into the header/state region while leaving the file's real
+methods stale and duplicated right after it. Same bug class BT-3248's
+adversarial review caught for the disk side; this closes the mirror-image gap
+on the resubmitted-text side.
+
+A second, independent adversarial-review finding closes a further gap: a
+compiled (non-`ClassBuilder`) class's field DEFAULT-VALUE TEXT is not
+recoverable from live reflection at all (only whether a field has one —
+`__beamtalk_meta/0`'s `field_has_default`, BT-1976), so `class_definition_
+text/7`'s skeleton always renders `default => null` for every field of any
+real, file-backed class — even one whose on-disk declaration has one.
+`resolve_class_def_span_entry/4` therefore ALSO compares each field's
+default-presence between the disk source and the candidate replacement
+(`class_def_preserves_field_defaults/3`, via
+`beamtalk_compiler:class_state_field_defaults/2`) and refuses to flush when a
+field that had a default on disk would lose it — otherwise a byte-accurate,
+method-safe, modifier-complete splice could still silently delete a default.
+
+A third finding (Claude BeamTalk Review, this same PR) closes a related span
+gap: `resolve_class_span/2` clamps its span to end before the class's first
+method, so a `state:`/`field:` declared AT OR AFTER a method (legal Beamtalk)
+is excluded from the span/`PrevSource` entirely — but the live-reflected
+skeleton includes it regardless of position, so splicing the skeleton into
+the clamped span duplicates that field's declaration rather than losing it
+(the field survives, untouched, past the spliced region too).
+`class_def_span_contains_all_state_fields/3` refuses to flush whenever the
+disk class has any field outside the span that would be spliced.
 """.
 -spec add_class_def_flushability(map(), binary()) -> map().
 add_class_def_flushability(Base, ClassNameBin) ->
@@ -810,16 +845,253 @@ add_class_def_flushability(Base, ClassNameBin) ->
             Base#{flushable => false, not_flushable_reason => no_source_reason(ClassNameBin)};
         SourceFile when is_binary(SourceFile) ->
             case classify_source_file(SourceFile) of
-                {flushable, _AbsPath} ->
-                    Base#{
-                        flushable => false,
-                        not_flushable_reason => <<"class_def_flush_not_yet_supported">>,
-                        source_file => SourceFile
-                    };
+                {flushable, AbsPath} ->
+                    add_class_def_span_or_downgrade(Base, ClassNameBin, SourceFile, AbsPath);
                 {not_flushable, Reason} ->
                     Base#{flushable => false, not_flushable_reason => Reason}
             end
     end.
+
+%% Read the current on-disk file and resolve the class's span against it —
+%% but ONLY once `Base`'s own `source` has been confirmed header+state-only
+%% (`class_def_source_is_skeleton_shaped/2`). `add_class_def_flushability/2`
+%% is reached from `load_class_module/3`, which is NOT exclusive to the
+%% cockpit `:def` tab's own skeleton — any successful redefinition of an
+%% already-loaded class routes through it, e.g. a raw REPL eval of a FULL
+%% class body (header + state + methods). Splicing such a `source` into the
+%% disk span — which, by `resolve_class_span/2`'s own "never reaches a
+%% method" guarantee, stops before the *first* method — would jam the new
+%% text's methods into the header/state region while leaving the file's
+%% actual (now stale/duplicated) methods untouched right after it: exactly
+%% the class of bug BT-3248's adversarial review caught, just triggered from
+%% the resubmitted text's shape instead of the disk span's. Mirrors
+%% `add_span_or_downgrade/6`'s disk-read-failure handling exactly for the
+%% read itself (an unreadable file downgrades to memory-only rather than
+%% blocking the install that already happened).
+-spec add_class_def_span_or_downgrade(map(), binary(), binary(), string()) -> map().
+add_class_def_span_or_downgrade(#{source := Canonical} = Base, ClassNameBin, SourceFile, AbsPath) ->
+    case class_def_source_is_skeleton_shaped(Canonical, ClassNameBin) of
+        false ->
+            Base#{
+                flushable => false,
+                not_flushable_reason => <<"class_def_source_not_skeleton_shaped">>,
+                source_file => SourceFile
+            };
+        true ->
+            case file:read_file(AbsPath) of
+                {ok, DiskSource} ->
+                    resolve_class_def_span_entry(Base, ClassNameBin, SourceFile, DiskSource);
+                {error, ReadReason} ->
+                    ?LOG_WARNING(
+                        "ChangeLog: could not read sourceFile for class-def entry; "
+                        "recording memory-only",
+                        #{
+                            source_file => SourceFile,
+                            reason => ReadReason,
+                            domain => [beamtalk, runtime]
+                        }
+                    ),
+                    Base#{flushable => false, not_flushable_reason => <<"disk_read_failed">>}
+            end
+    end.
+
+%% True iff `Source` (the resubmitted `'class-def'` text) is ITSELF entirely
+%% header + state — i.e. `resolve_class_span/2` applied to `Source` (not the
+%% on-disk file) resolves a span reaching all the way to the end of `Source`
+%% AND starting at its very beginning, modulo whitespace on either side.
+%% Reuses the exact same resolver the disk side uses, just pointed at the
+%% candidate replacement text instead:
+%%
+%%  * trailing bytes past the resolved span — if `Source` carries a method,
+%%    `resolve_class_span` clamps its span to end BEFORE that method (its own
+%%    "never reaches a method" guarantee — see `class_span.rs`'s module doc),
+%%    so any non-blank bytes left over past the resolved span are exactly the
+%%    method text this guard exists to catch.
+%%  * leading bytes before the resolved span — `resolve_class_span`'s span
+%%    deliberately starts at the class's OWN declaration line, never backing
+%%    up across a `///` doc comment or `//` license header (see that module's
+%%    "Span boundaries" doc). A candidate `Source` with such a leading
+%%    comment (e.g. a raw REPL eval that includes a NEW doc comment, unlike
+%%    the `:def` tab's own skeleton, which never carries one) would still
+%%    pass a trailing-only check, and splicing the whole `Source` — comment
+%%    included — into the disk span (which starts only at the header,
+%%    excluding the disk's own doc comment) would duplicate/misplace it.
+-spec class_def_source_is_skeleton_shaped(binary(), binary()) -> boolean().
+class_def_source_is_skeleton_shaped(Source, ClassNameBin) ->
+    case beamtalk_compiler:resolve_class_span(Source, ClassNameBin) of
+        {ok, #{start := Start, 'end' := End}, _Body} when
+            Start =< End, End =< byte_size(Source)
+        ->
+            %% `string:trim/1` (not a hand-rolled whitespace scan): blank
+            %% bytes on both sides of the resolved span means `Source` is
+            %% entirely header+state; anything else (a method, a leading
+            %% comment) is not blank.
+            string:trim(binary:part(Source, 0, Start)) =:= <<>> andalso
+                string:trim(binary:part(Source, End, byte_size(Source) - End)) =:= <<>>;
+        _ ->
+            %% Resolution failure (`class_not_found`/`ambiguous`) on text that
+            %% was just successfully compiled under this exact class name
+            %% should not happen — but fails closed (not skeleton-shaped)
+            %% rather than risking an unsafe splice on a resolver surprise.
+            false
+    end.
+
+-spec resolve_class_def_span_entry(map(), binary(), binary(), binary()) -> map().
+resolve_class_def_span_entry(#{source := Canonical} = Base, ClassNameBin, SourceFile, DiskSource) ->
+    case beamtalk_compiler:resolve_class_span(DiskSource, ClassNameBin) of
+        {ok, Span, PrevSource} ->
+            case class_def_span_contains_all_state_fields(DiskSource, PrevSource, ClassNameBin) of
+                false ->
+                    Base#{
+                        flushable => false,
+                        not_flushable_reason => <<"class_def_state_after_method">>,
+                        source_file => SourceFile
+                    };
+                true ->
+                    case class_def_preserves_field_defaults(DiskSource, Canonical, ClassNameBin) of
+                        true ->
+                            store_class_def_disk_shaped_entry(Base, SourceFile, Span, PrevSource);
+                        false ->
+                            Base#{
+                                flushable => false,
+                                not_flushable_reason => <<"class_def_would_drop_field_default">>,
+                                source_file => SourceFile
+                            }
+                    end
+            end;
+        {error, Reason, _Message} ->
+            %% `class_not_found` (renamed/moved out from under the live class)
+            %% or `ambiguous` (duplicate declarations) — either downgrades to
+            %% memory-only, same as a method patch's span-resolution failure.
+            span_error_entry(Base, SourceFile, Reason)
+    end.
+
+%% True iff EVERY `state:`/`field:` declaration `ClassNameBin` has anywhere in
+%% `DiskSource` (the whole file) is also visible within `SpanText` (the
+%% `resolve_class_span/2`-clamped region that a flush would actually splice
+%% into) — i.e. the disk class has no field declared at or after its first
+%% method.
+%%
+%% Why this exists (Claude BeamTalk Review finding on this PR, BT-3254):
+%% `resolve_class_span/2` deliberately clamps its span to end BEFORE the
+%% class's first method (its own "never reaches a method" guarantee — see
+%% `class_span.rs`'s module doc) — legal Beamtalk allows a `state:`/`field:`
+%% declaration positioned at/after a method, and such a field is EXCLUDED
+%% from the clamped span/`PrevSource`. But the `:def` tab's skeleton is built
+%% from LIVE reflection (`instance_variables`), which is position-agnostic —
+%% it always includes every current field regardless of where it was
+%% declared on disk. `class_def_preserves_field_defaults/3` alone does not
+%% catch this: a field with no default (so nothing to "lose") still gets
+%% written into the skeleton, and splicing that skeleton into the clamped
+%% span duplicates the field's declaration — once newly inserted at the
+%% span's location, once still present, untouched, after the method. Repro:
+%% `Actor subclass: Foo\n  method1 => 1\n\n  state: b\n` (b has no default)
+%% resolves a span of just `Actor subclass: Foo\n`; the regenerated skeleton
+%% `Actor subclass: Foo\n  state: b\n` spliced into that span leaves `state:
+%% b` duplicated in the file (once before `method1`, once after).
+%%
+%% Reuses `beamtalk_compiler:class_state_field_defaults/2` for its field-NAME
+%% enumeration (the boolean default-presence values themselves are unused
+%% here) against BOTH `DiskSource` (every field on disk, any position) and
+%% `SpanText` (only the fields within the region that would actually be
+%% spliced) — any field present in the former but not the latter is exactly
+%% the "declared after the first method" case this guards against.
+-spec class_def_span_contains_all_state_fields(binary(), binary(), binary()) -> boolean().
+class_def_span_contains_all_state_fields(DiskSource, SpanText, ClassNameBin) ->
+    case
+        {
+            beamtalk_compiler:class_state_field_defaults(DiskSource, ClassNameBin),
+            beamtalk_compiler:class_state_field_defaults(SpanText, ClassNameBin)
+        }
+    of
+        {{ok, AllFields}, {ok, SpanFields}} ->
+            sets:is_subset(
+                sets:from_list(maps:keys(AllFields), [{version, 2}]),
+                sets:from_list(maps:keys(SpanFields), [{version, 2}])
+            );
+        _ ->
+            %% Either side failed to resolve — fail closed, same posture as
+            %% `class_def_preserves_field_defaults/3`.
+            false
+    end.
+
+%% True iff redefining `ClassNameBin` in `OldSource` (the on-disk file) with
+%% `NewSource` (the candidate replacement — already confirmed skeleton-shaped
+%% by `class_def_source_is_skeleton_shaped/2`) would NOT silently drop any
+%% field's default value.
+%%
+%% Why this exists (BT-3254 adversarial-review finding): `class_definition_
+%% text/7`'s `default` field is read from LIVE class reflection
+%% (`beamtalk_repl_ops_browse:state_slots/2`'s `field_defaults`), and that
+%% reflection is populated ONLY for a `beamtalk_class_builder`-created class
+%% (file-less, so it never reaches this function at all — `class_source_
+%% file/1` already gates on a real `sourceFile`). A COMPILED `.bt` class's
+%% `__beamtalk_meta/0` carries `field_has_default` (a boolean per field,
+%% BT-1976) but never the default-value TEXT, so `field_defaults` reflection
+%% is always empty and the skeleton always renders `default => null` — even
+%% for a field the on-disk source declares with one. Splicing that skeleton
+%% into a byte-accurate disk span (the span/method-safety guarantee
+%% `resolve_class_span/2` gives) would still silently DELETE the default —
+%% exactly the class of data-loss bug this whole feature exists to prevent,
+%% just triggered by an unreflectable value instead of an unrendered
+%% modifier keyword.
+%%
+%% Reuses `beamtalk_compiler:class_state_field_defaults/2` (the parser's own
+%% `StateDeclaration.default_value`, not a text heuristic) against BOTH
+%% texts: a field present in both with a default in `OldSource` must also
+%% have one in `NewSource`. A field ABSENT from `NewSource` (an intentional
+%% removal — the user deleted that field via the editor) is not a violation;
+%% only "still declared, default silently gone" is.
+-spec class_def_preserves_field_defaults(binary(), binary(), binary()) -> boolean().
+class_def_preserves_field_defaults(OldSource, NewSource, ClassNameBin) ->
+    case
+        {
+            beamtalk_compiler:class_state_field_defaults(OldSource, ClassNameBin),
+            beamtalk_compiler:class_state_field_defaults(NewSource, ClassNameBin)
+        }
+    of
+        {{ok, OldDefaults}, {ok, NewDefaults}} ->
+            maps:fold(
+                fun(Field, HadDefault, Acc) ->
+                    Acc andalso
+                        (not HadDefault orelse
+                            case maps:find(Field, NewDefaults) of
+                                {ok, StillHasDefault} -> StillHasDefault;
+                                error -> true
+                            end)
+                end,
+                true,
+                OldDefaults
+            );
+        _ ->
+            %% Either side failed to resolve (transport error, or the class
+            %% somehow doesn't parse under its own name — pathological given
+            %% `resolve_class_span/2` on `OldSource` just succeeded and
+            %% `NewSource` was already confirmed skeleton-shaped): fail
+            %% closed rather than risk an unsafe splice on a resolver
+            %% surprise.
+            false
+    end.
+
+%% Store the flushable shape of a `'class-def'` entry once its span has
+%% resolved. Unlike `store_disk_shaped_entry/4` (a method patch), the
+%% skeleton's `source` needs no `reindent_method_source` reshape — a class
+%% header and its `state:`/`field:` lines are already built at the on-disk
+%% column-0 / 2-space convention (`class_definition_text/7`) — only the
+%% trailing-newline shape can mismatch (the skeleton never carries one; the
+%% resolved span usually does), matched the same way a method patch's body is.
+-spec store_class_def_disk_shaped_entry(
+    map(), binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()
+) -> map().
+store_class_def_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
+    DiskShaped = match_trailing_newline(Canonical, PrevSource),
+    Base#{
+        source => DiskShaped,
+        flushable => true,
+        source_file => SourceFile,
+        span => Span,
+        prev_source => PrevSource
+    }.
 
 %% Extract trailing expression info from a class definition result (BT-885).
 -spec extract_trailing_info(map()) ->

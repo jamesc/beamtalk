@@ -64,7 +64,7 @@ mod method_category_corpus_tests;
 #[cfg(test)]
 mod method_span_corpus_tests;
 
-pub use class_span::{ClassSpanResolveError, resolve_class_span};
+pub use class_span::{ClassSpanResolveError, class_state_field_defaults, resolve_class_span};
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
 pub use method_category::{

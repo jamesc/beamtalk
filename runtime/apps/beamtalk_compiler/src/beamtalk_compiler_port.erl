@@ -30,6 +30,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     resolve_method_span/5,
     resolve_class_span/3,
     categorize_methods/3,
+    class_state_field_defaults/3,
     reindent_method_source/3,
     close/1
 ]).
@@ -1111,6 +1112,94 @@ normalize_categorized_method(#{selector := Selector, side := Side, span := Span}
     #{selector => Selector, side => Side, span => normalize_span(Span)};
 normalize_categorized_method(Other) ->
     error({malformed_categorize_methods_response, Other}).
+
+-doc """
+Field-level default-value presence for a class's `state:'/`field:' declarations
+(ADR 0082 extension, BT-3254).
+
+Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2''s sibling
+safety check before marking a `'class-def'' ChangeEntry flushable: whether the
+resubmitted skeleton text would silently drop a field's default value compared
+against the on-disk source — see
+`beamtalk_core::source_analysis::class_state_field_defaults''s module doc for
+the full "why" (live class reflection cannot recover a compiled class's
+default-value TEXT, only whether one exists).
+
+Returns `{ok, #{FieldNameBin => boolean()}}' — one entry per declared field —
+on success. Resolution failures (class not found, ambiguous) come back as
+`{error, Reason, Message}', collapsed to the single reason `class_not_found'
+(this caller has no splice-safety span to report, unlike `resolve_class_span',
+so the finer not-found/ambiguous distinction isn't needed). Transport failures
+(port down, timeout) return `{error, port_error, Message}'.
+""".
+-spec class_state_field_defaults(port(), binary(), atom() | binary()) ->
+    {ok, #{binary() => boolean()}} | {error, atom(), binary()}.
+class_state_field_defaults(Port, Source, ClassName) when
+    is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
+->
+    Request = #{
+        command => class_state_field_defaults,
+        source => Source,
+        class_name => to_binary(ClassName)
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_class_state_field_defaults_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR(
+                                "Compiler port decode error (class state field defaults)", #{
+                                    domain => [beamtalk, runtime], port => Port
+                                }
+                            ),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during class-state-field-defaults query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (class state field defaults)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (class state field defaults)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+class_state_field_defaults(_Port, _Source, _ClassName) ->
+    {error, bad_argument, <<
+        "class_state_field_defaults: source/class must be binary or atom"
+    >>}.
+
+-spec handle_class_state_field_defaults_response(term()) ->
+    {ok, #{binary() => boolean()}} | {error, atom(), binary()}.
+handle_class_state_field_defaults_response(#{status := ok, field_defaults := FieldDefaults}) when
+    is_map(FieldDefaults)
+->
+    {ok, FieldDefaults};
+handle_class_state_field_defaults_response(#{status := error, reason := Reason} = Resp) ->
+    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
+    {error, Reason, Message};
+handle_class_state_field_defaults_response(Other) ->
+    ?LOG_ERROR("Unexpected class-state-field-defaults response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

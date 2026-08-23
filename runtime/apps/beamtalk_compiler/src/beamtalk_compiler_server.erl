@@ -48,6 +48,7 @@ to avoid temp files on disk (BT-48).
     resolve_method_span/4,
     resolve_class_span/2,
     categorize_methods/2,
+    class_state_field_defaults/2,
     reindent_method_source/2
 ]).
 
@@ -585,6 +586,29 @@ categorize_methods(Source, ClassName) ->
     end.
 
 -doc """
+Field-level default-value presence for `ClassName''s `state:'/`field:'
+declarations in `Source' (ADR 0082 extension, BT-3254).
+
+Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2''s sibling
+safety check before marking a `'class-def'' ChangeEntry flushable — see
+`beamtalk_compiler_port:class_state_field_defaults/3''s doc for the full
+"why". Returns `{ok, #{FieldNameBin => boolean()}}' on success. Resolution
+failures return `{error, class_not_found, Message}'; transport failures
+return `{error, port_error | noproc | timeout, Message}'.
+""".
+-spec class_state_field_defaults(binary(), atom() | binary()) ->
+    {ok, #{binary() => boolean()}} | {error, atom(), binary()}.
+class_state_field_defaults(Source, ClassName) ->
+    try
+        gen_server:call(?MODULE, {class_state_field_defaults, Source, ClassName}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
 
 Produces the on-disk byte-span shape from the compiler's canonical
@@ -949,6 +973,11 @@ handle_call({resolve_class_span, Source, ClassName}, _From, State) ->
     {reply, Result, State};
 handle_call({categorize_methods, Source, ClassName}, _From, State) ->
     Result = beamtalk_compiler_port:categorize_methods(
+        State#state.port, Source, ClassName
+    ),
+    {reply, Result, State};
+handle_call({class_state_field_defaults, Source, ClassName}, _From, State) ->
+    Result = beamtalk_compiler_port:class_state_field_defaults(
         State#state.port, Source, ClassName
     ),
     {reply, Result, State};
