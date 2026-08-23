@@ -97,6 +97,19 @@ main {
   border-color: var(--accent);
 }
 
+/* BT-3246: inline "Show all" affordance inside the filter-empty message
+   (e.g. "No running workspaces — 2 stopped workspaces.") — styled small and
+   understated like `.filter-button` rather than the bold solid `button`
+   default, since it's a secondary escape hatch next to a status line, not
+   a primary action. */
+.filter-empty-show-all {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--border);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}
+
 .workspace-row {
   display: flex;
   align-items: center;

@@ -847,6 +847,34 @@ Beamtalk help: Counter selector: #increment
 
 Doc comments flow from source → AST → compiled BEAM module → runtime. They are not stripped at compilation. The `## Examples` blocks are the source for `Beamtalk help:` output and can be verified by the test framework.
 
+### Method Category Dividers (`// === Name ===`)
+
+A `// === Name ===` comment placed between methods introduces a **method category** — a named group that the LSP outline, VS Code breadcrumbs, and sticky-scroll use to organize a class's methods visually.
+
+```beamtalk
+Value subclass: Point
+  field: x :: Integer
+  field: y :: Integer
+
+  // === Accessing ===
+
+  /// The X coordinate.
+  x -> Integer => self.x
+
+  /// The Y coordinate.
+  y -> Integer => self.y
+
+  // === Arithmetic ===
+
+  /// Add two points.
+  + other :: Point -> Point =>
+    Point x: self.x + other x y: self.y + other y
+```
+
+**Format:** a leading `//` line comment whose trimmed text is `=+ <name> =+`, where the leading and trailing `=` runs are the same length (3 or more) and `<name>` is non-empty. Triple-slash (`///`) and block (`/* */`) comments are not recognized as dividers. A class with no dividers keeps the existing flat outline — no behavior change.
+
+Methods following a divider belong to that category until the next divider or end of class. Instance-side and class-side methods are merged in true source order (not grouped by side). The stdlib uses this convention throughout (BT-2601, BT-2626).
+
 ### Erlang FFI
 
 Beamtalk provides direct access to all Erlang modules via the `Erlang` gateway object (ADR 0028). Send a unary message with the module name to get a proxy, then send messages as normal:

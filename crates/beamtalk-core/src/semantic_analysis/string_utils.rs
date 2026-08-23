@@ -79,6 +79,79 @@ pub(crate) fn split_generic_base(type_name: &str) -> (&str, Option<&str>) {
     }
 }
 
+/// Split a string of consecutive Erlang map literals at the top level.
+///
+/// Maps are delimited by `#{…}` with possible nesting (`{…}` also increments
+/// depth). Binary literals (`<<…>>`) are skipped so that `<<",">>` content is
+/// not treated as a separator. Splitting happens when depth returns to zero
+/// after a closing `}`, and any trailing `,` / whitespace before the next map
+/// is consumed. Returns each top-level map as a `&str` slice (inclusive of its
+/// outer braces).
+///
+/// This is the companion scanner to [`split_top_level`] for the Erlang-map
+/// content produced by `beamtalk_spec_reader.erl` — moved here from
+/// `type_checker::native_types` so both map-aware and paren-aware scanners
+/// live in the same shared leaf module.
+///
+/// **References:** ADR 0075; used by `type_checker::native_types`.
+pub(crate) fn split_top_level_maps(input: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'#' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
+                depth += 1;
+                i += 2;
+            }
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    result.push(&input[start..=i]);
+                    i += 1;
+                    while i < bytes.len()
+                        && (bytes[i] == b',' || bytes[i] == b' ' || bytes[i] == b'\n')
+                    {
+                        i += 1;
+                    }
+                    start = i;
+                    continue;
+                }
+                i += 1;
+            }
+            b'<' if i + 1 < bytes.len() && bytes[i + 1] == b'<' => {
+                i += 2;
+                while i < bytes.len() {
+                    if bytes[i] == b'>' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    if start < bytes.len() && depth == 0 {
+        let remainder = input[start..].trim();
+        if !remainder.is_empty() {
+            result.push(remainder);
+        }
+    }
+
+    result
+}
+
 /// Simple edit distance (Levenshtein) for "did you mean" suggestions.
 pub(crate) fn edit_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
@@ -189,6 +262,50 @@ mod tests {
     #[test]
     fn split_top_level_unbalanced_closing_paren_recovers_immediately() {
         assert_eq!(split_top_level("A), B", ','), vec!["A)", "B"]);
+    }
+
+    // ---- split_top_level_maps ----
+
+    #[test]
+    fn split_top_level_maps_empty() {
+        assert_eq!(split_top_level_maps(""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn split_top_level_maps_single() {
+        assert_eq!(split_top_level_maps("#{a => 1}"), vec!["#{a => 1}"]);
+    }
+
+    #[test]
+    fn split_top_level_maps_two_maps() {
+        assert_eq!(
+            split_top_level_maps("#{a => 1}, #{b => 2}"),
+            vec!["#{a => 1}", "#{b => 2}"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_maps_nested_map() {
+        assert_eq!(
+            split_top_level_maps("#{a => #{x => 1}}, #{b => 2}"),
+            vec!["#{a => #{x => 1}}", "#{b => 2}"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_maps_binary_literal_not_split() {
+        assert_eq!(
+            split_top_level_maps("#{name => <<\"hello,world\">>}, #{v => 1}"),
+            vec!["#{name => <<\"hello,world\">>}", "#{v => 1}"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_maps_plain_braces_nested() {
+        assert_eq!(
+            split_top_level_maps("#{a => {1, 2}}, #{b => 3}"),
+            vec!["#{a => {1, 2}}", "#{b => 3}"]
+        );
     }
 
     // ---- split_generic_base ----

@@ -27,6 +27,12 @@ const workspaceFiltersEl = document.getElementById("workspace-filters");
 const workspaceFilterEmptyEl = document.getElementById(
   "workspace-filter-empty",
 );
+const workspaceFilterEmptyMessageEl = document.getElementById(
+  "workspace-filter-empty-message",
+);
+const workspaceFilterEmptyShowAllButton = document.getElementById(
+  "workspace-filter-empty-show-all",
+);
 const filterButtons = [...document.querySelectorAll(".filter-button")];
 const quitButton = document.getElementById("quit-button");
 const logsButton = document.getElementById("logs-button");
@@ -41,10 +47,12 @@ const attachProgress = new Map();
 // attached workspaces the post-attach monitor has flagged as unhealthy.
 const connectionBadges = new Map();
 
-// "all" | "running" | "stopped" (BT-3230) — persists across refreshes
-// (a periodic `runRefresh()` re-applies it to the freshly fetched list
-// rather than resetting to "all") until the user picks a different one.
-let currentFilter = "all";
+// "all" | "running" | "stopped" (BT-3230) — defaults to "running" (BT-3246)
+// since attaching to an already-running workspace is the common case on
+// app open; persists across refreshes (a periodic `runRefresh()` re-applies
+// it to the freshly fetched list rather than resetting to the default)
+// until the user picks a different one.
+let currentFilter = "running";
 // The last full (unfiltered) workspace list `render()` saw — filter button
 // clicks re-render from this directly rather than re-invoking
 // `list_workspaces`, so switching filters is instant and never races a
@@ -86,6 +94,14 @@ function setFilter(filter) {
 for (const button of filterButtons) {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 }
+// BT-3246: the default "running" filter can land on an empty list when
+// every discoverable workspace happens to be stopped — the empty-state
+// message rendered by `updateFilterEmptyMessage` offers this as an escape
+// hatch back to the unfiltered view rather than leaving the user stuck
+// looking at "No workspaces match this filter" with no obvious next step.
+workspaceFilterEmptyShowAllButton.addEventListener("click", () =>
+  setFilter("all"),
+);
 setFilter(currentFilter);
 
 // BT-3225: launcher-side log lines (backend `tracing` events), fed by the
@@ -227,9 +243,37 @@ function renderWorkspaceListForCurrentFilter() {
     return;
   }
   const visible = lastWorkspaces.filter(matchesFilter);
-  workspaceFilterEmptyEl.hidden = visible.length > 0;
-  workspaceListEl.hidden = visible.length === 0;
+  const isEmpty = visible.length === 0;
+  workspaceFilterEmptyEl.hidden = !isEmpty;
+  workspaceListEl.hidden = isEmpty;
+  if (isEmpty) {
+    updateFilterEmptyMessage();
+  }
   reconcileWorkspaceList(visible);
+}
+
+// Fill in `workspaceFilterEmptyEl` for the case `renderWorkspaceListForCurrentFilter`
+// just found zero rows matching `currentFilter`. BT-3246: since "running" is
+// now the *default* filter (not a choice the user necessarily made), landing
+// here with stopped-but-not-running workspaces present needs an explicit
+// way back to seeing them, not just a generic "nothing matches" — the
+// "Show all" button covers that; every other empty case (an explicit
+// "stopped" filter with nothing stopped, or "all" somehow empty despite
+// `lastWorkspaces` being non-empty, which can only be a transient render
+// race) falls back to the original generic message with no escape hatch,
+// since there's no other filter to usefully suggest.
+function updateFilterEmptyMessage() {
+  if (currentFilter === "running") {
+    const stoppedCount = lastWorkspaces.filter((w) => !w.alive).length;
+    if (stoppedCount > 0) {
+      const plural = stoppedCount === 1 ? "workspace" : "workspaces";
+      workspaceFilterEmptyMessageEl.textContent = `No running workspaces — ${stoppedCount} stopped ${plural}.`;
+      workspaceFilterEmptyShowAllButton.hidden = false;
+      return;
+    }
+  }
+  workspaceFilterEmptyMessageEl.textContent = "No workspaces match this filter.";
+  workspaceFilterEmptyShowAllButton.hidden = true;
 }
 
 // Update `workspaceListEl` to match `workspaces` by reusing existing row
