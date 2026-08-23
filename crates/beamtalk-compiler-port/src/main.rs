@@ -2758,13 +2758,15 @@ fn method_span_error_response(err: &beamtalk_core::source_analysis::SpanResolveE
 
 /// Handle a `resolve_class_span` request (ADR 0082 extension, BT-3248).
 ///
-/// Backs the cockpit `:def` tab's live-patch install hook for an *existing*
-/// class: given the current on-disk source of a `.bt` file and a target class
-/// name, resolve the exact byte span of that class's whole definition (the
+/// Backs the CHANGES dock's disk-vs-memory diff for a `'class-def'`
+/// `ChangeEntry` (redefining an *existing* class via the cockpit `:def` tab):
+/// given the current on-disk source of a `.bt` file and a target class name,
+/// resolve the byte span of that class's declaration line through its last
+/// `state:`/`field:` declaration — **never** its methods (the
 /// [`resolve_class_span`](beamtalk_core::source_analysis::resolve_class_span)
-/// resolver) and return both the span and the bytes currently occupying it
-/// (`prev_source`) — mirrors `handle_resolve_method_span`'s contract exactly,
-/// just at class rather than method granularity.
+/// resolver's own module doc has the full "why" and the data-loss bug this
+/// boundary avoids) — and return both the span and the bytes currently
+/// occupying it (`prev_source`).
 ///
 /// Request fields:
 /// - `source` (binary): the current on-disk source text of the `.bt` file
@@ -2772,9 +2774,7 @@ fn method_span_error_response(err: &beamtalk_core::source_analysis::SpanResolveE
 ///
 /// Response on success: `#{status => ok, span => #{start => S, end => E},
 /// prev_source => <<...>>}`. Failures (class not found, ambiguous) come back
-/// as `#{status => error, reason => <atom>, ...}` so the install hook can
-/// downgrade to a memory-only patch (no flushable `ChangeEntry`) rather than
-/// crash.
+/// as `#{status => error, reason => <atom>, ...}`.
 fn handle_resolve_class_span(request: &Map) -> Term {
     use beamtalk_core::source_analysis::resolve_class_span;
 
@@ -4294,7 +4294,7 @@ Object subclass: Counter
     // --- resolve_class_span tests (ADR 0082 extension, BT-3248) ---
 
     #[test]
-    fn resolve_class_span_whole_class() {
+    fn resolve_class_span_header_only_excludes_methods() {
         let request = Map::from([
             (atom("command"), atom("resolve_class_span")),
             (atom("source"), binary(SPAN_FIXTURE)),
@@ -4308,14 +4308,13 @@ Object subclass: Counter
         let prev = map_get(m, "prev_source")
             .and_then(term_to_string)
             .expect("prev_source present");
-        // The whole-class span starts at the class's own declaration line and
-        // covers every method (header through last body line).
-        assert!(
-            prev.starts_with("Object subclass: Counter"),
-            "got: {prev:?}"
-        );
-        assert!(prev.contains("increment =>"), "got: {prev:?}");
-        assert!(prev.contains("class new =>"), "got: {prev:?}");
+        // SPAN_FIXTURE's `Counter` has no state declarations, so the span is
+        // just its (single-line) header — deliberately excluding every
+        // method (BT-3248: a class-span flush must never be able to delete a
+        // method's source — see class_span.rs's module doc).
+        assert_eq!(prev, "Object subclass: Counter\n", "got: {prev:?}");
+        assert!(!prev.contains("increment"), "got: {prev:?}");
+        assert!(!prev.contains("class new"), "got: {prev:?}");
         let Some(Term::Map(span)) = map_get(m, "span") else {
             panic!("span should be a map: {response:?}");
         };

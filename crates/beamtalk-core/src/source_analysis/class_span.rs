@@ -1,56 +1,80 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Byte-span resolver for whole class definitions (ADR 0082 extension, BT-3248).
+//! Byte-span resolver for a class's header + state declarations (ADR 0082
+//! extension, BT-3248).
 //!
 //! **DDD Context:** Source Analysis (Compilation context per ADR 0082).
 //!
 //! Given the source text of a `.bt` file and a target class name,
-//! [`resolve_class_span`] returns the exact byte span of that class's own
-//! declaration and body — from the first token of the class's declaration
-//! line through the trailing newline that terminates its last body line.
+//! [`resolve_class_span`] returns the byte span of that class's declaration
+//! line through its last `state:`/`field:` declaration — **never** its
+//! methods.
 //!
-//! # Why this exists
+//! # Why this exists, and why it stops before the methods
 //!
-//! [`crate::source_analysis::method_span::resolve_method_span`] resolves a
-//! single *method*'s byte span so `Workspace flush` can splice a patched
-//! method body into a `.bt` file (ADR 0082 Phase 0). Redefining an *existing*
-//! class's shape (the cockpit `:def` tab's "Compile" action, BT-3248) needs
-//! the same byte-span-replacement strategy applied to the *class's own
-//! header + state declaration* — the exact same "verbatim splice, no AST
-//! reprint" argument applies, and reusing a second whole-class-install
-//! mechanism was already ruled out for `Workspace changes revert:` on a
-//! `'remove-class'` entry (see `beamtalk_repl_loader:revert_remove_class/2`'s
-//! doc) for the same reason: don't duplicate a chokepoint that already exists.
+//! The cockpit `:def` tab's "Compile" action (BT-3248) recompiles a small,
+//! *synthesized* skeleton of an already-loaded class:
+//! `beamtalk_repl_ops_browse:class_definition_text/3` builds it purely from
+//! runtime reflection — `{Superclass} subclass: {Name}` plus one
+//! `state: {field} = {default}` line per instance variable — and explicitly
+//! carries **no method bodies** ("Pharo convention", per that function's own
+//! doc). This resolver exists to compute the byte range in the on-disk file
+//! that a `Workspace flush` of that skeleton is allowed to touch: this
+//! module's own [`resolve_class_in_module`] doc and test suite are the
+//! record of *why* the span must never reach past the last state declaration.
 //!
-//! # Span boundaries — deliberately EXCLUDES the doc comment
+//! Naively using the whole `ClassDefinition::span` (header through the last
+//! *method*, which is what a first draft of this resolver did) would make a
+//! flush splice the header+state skeleton over the header+state+**all
+//! methods** region — permanently erasing every method's source from the
+//! file on disk. That bug was caught in review before it shipped (BT-3248);
+//! this module's span deliberately ends at the last `state:`/`field:`
+//! declaration (or the header line itself, when there is none) specifically
+//! so a flush can never reach a method.
 //!
-//! Unlike [`resolve_method_span`], which pulls a method's leading `///` doc
-//! comment into the span (BT-2577 — the method editor round-trips the whole
-//! definition, doc comment included), this resolver's span starts at the
-//! class's own declaration line and never backs up across `///` lines. The
-//! cockpit `:def` tab edits only the class's header + state declarations —
-//! its doc comment is a separate, independently-fetched/edited surface
-//! (`beamtalk_repl_ops_browse:browse_class_definition/1`'s `comment` field,
-//! rendered as "Class comment" — see `workspace_live.ex`'s
-//! `doc_summary_label/1`), never part of what `:def` submits back to compile.
-//! Including the doc comment in the span, as a method's does, would make a
-//! flush of an ordinary `:def` edit silently delete the class's doc comment
-//! from disk (the spliced-in replacement text has none) — caught by this
-//! module's own `preserves_leading_doc_comment` test.
+//! This span is currently used only for the CHANGES-dock diff
+//! (`beamtalk_workspace_changelog:disk_class_body/2`) — a read-only
+//! disk-vs-memory comparison — not for an actual `Workspace flush` splice.
+//! `beamtalk_repl_loader:add_class_def_flushability/2` marks every
+//! `'class-def'` `ChangeEntry` `flushable: false` unconditionally: even with
+//! this corrected span, the synthesized skeleton also drops modifier
+//! keywords (`sealed`/`typed`/`abstract`), the `field:`/`state:` keyword
+//! choice, and `::` type annotations (see that function's doc and
+//! `class_definition_text/3`'s own construction) — so splicing it into disk
+//! today would still silently downgrade a class's declaration even with a
+//! byte-perfect span. Safe flush support needs the skeleton itself fixed
+//! first (tracked as a follow-up); this resolver is the piece of that future
+//! work that is safe to land now, because it is read-only until then.
+//!
+//! # Span boundaries — also EXCLUDES the doc comment
+//!
+//! Unlike [`crate::source_analysis::method_span::resolve_method_span`], which
+//! pulls a method's leading `///` doc comment into its span (BT-2577 — the
+//! method editor round-trips the whole definition, doc comment included),
+//! this resolver's span starts at the class's own declaration line and never
+//! backs up across `///` lines. The `:def` tab's skeleton never carries the
+//! doc comment either (it is a separate, independently-fetched surface —
+//! `browse_class_definition/1`'s `comment` field, rendered as "Class
+//! comment" per `workspace_live.ex`'s `doc_summary_label/1`).
 //!
 //! - **start**: the beginning of the class's own declaration line (including
-//!   indentation and any leading modifier keywords like `sealed`/`typed`,
-//!   which are part of `ClassDefinition::span`). A file-level license header,
-//!   a plain `//` comment, or the class's own `///` doc comment above it are
-//!   never pulled in.
-//! - **end**: the byte immediately after the trailing newline terminating the
-//!   last source line of the class body (clamped to EOF if the file has no
-//!   trailing newline).
+//!   indentation and any leading modifier keywords, which are part of
+//!   `ClassDefinition::span`). A file-level license header, a plain `//`
+//!   comment, or the class's own `///` doc comment above it are never pulled
+//!   in.
+//! - **end**: when the class declares at least one `state:`/`field:`, the
+//!   byte immediately after the trailing newline of the *last* declaration's
+//!   own line. When it declares none, the end of the declaration line itself
+//!   (the header is always a single line by this codebase's convention —
+//!   every example in `stdlib/src/*.bt` is one line, however many modifier
+//!   keywords or type parameters it carries).
 //!
-//! Splicing `source[span]` back into `source` at `span` is therefore an exact
-//! no-op, same guarantee as the method-span resolver.
+//! Splicing `source[span]` back into `source` at `span` is an exact no-op,
+//! same guarantee as the method-span resolver — and, unlike a first version
+//! of this module, is also guaranteed to never include a method's bytes.
 
+use crate::ast::ClassDefinition;
 use crate::source_analysis::method_span::{extend_to_line_end, line_start};
 use crate::source_analysis::{Diagnostic, Span, lex_with_eof, parse};
 
@@ -89,21 +113,13 @@ impl std::fmt::Display for ClassSpanResolveError {
 
 impl std::error::Error for ClassSpanResolveError {}
 
-/// Resolve the exact byte span of `class`'s whole definition in `source`
-/// (ADR 0082 extension, BT-3248).
+/// Resolve the byte span of `class`'s declaration line through its last
+/// `state:`/`field:` declaration in `source` (ADR 0082 extension, BT-3248).
 ///
-/// Backs the `:def` tab's live-patch install hook for an *existing* class:
-/// given the current on-disk source of a `.bt` file and a target class name,
-/// resolve the byte span of that class's definition (header, state
-/// declarations, and body) so the install hook can record it — and a later
-/// `Workspace flush` can splice the redefined class back in by byte-span
-/// replacement — mirroring [`resolve_method_span`]'s contract exactly.
-///
-/// Parser [`Diagnostic`]s produced while parsing `source` are returned
-/// alongside the result, same convention as `resolve_method_span`.
-///
-/// [`resolve_method_span`]: crate::source_analysis::method_span::resolve_method_span
-#[must_use]
+/// See the module doc for why this stops before any method — it is the
+/// load-bearing property of this resolver. Parser [`Diagnostic`]s produced
+/// while parsing `source` are returned alongside the result, same convention
+/// as `resolve_method_span`.
 pub fn resolve_class_span(
     source: &str,
     class: &str,
@@ -119,18 +135,17 @@ fn resolve_class_in_module(
     source: &str,
     class: &str,
 ) -> Result<Span, ClassSpanResolveError> {
-    let matches: Vec<Span> = module
+    let matches: Vec<&ClassDefinition> = module
         .classes
         .iter()
         .filter(|class_def| class_def.name.name.as_str() == class)
-        .map(|class_def| class_def.span)
         .collect();
 
     match matches.len() {
         0 => Err(ClassSpanResolveError::ClassNotFound {
             class: class.to_string(),
         }),
-        1 => Ok(class_definition_span(source, matches[0])),
+        1 => Ok(class_header_and_state_span(source, matches[0])),
         count => Err(ClassSpanResolveError::Ambiguous {
             class: class.to_string(),
             count,
@@ -138,17 +153,18 @@ fn resolve_class_in_module(
     }
 }
 
-/// Computes the definition span for a class whose AST span is `class_span`.
-///
-/// Deliberately does NOT back up across a leading `///` doc-comment block the
-/// way [`crate::source_analysis::method_span`]'s `definition_span` does for a
-/// method — see the module doc's "Span boundaries" section for why. The
-/// start is simply the beginning of the class's own declaration line; the end
-/// extends past the trailing newline of the last body line (ADR 0082).
-fn class_definition_span(source: &str, class_span: Span) -> Span {
-    let start = line_start(source, class_span.start());
-    let end = extend_to_line_end(source, class_span.end());
-    Span::new(start, end)
+/// Computes the header+state span for `class_def`. See the module doc's
+/// "Span boundaries" section — this is the one function responsible for the
+/// "never reaches a method" guarantee the whole module exists for.
+fn class_header_and_state_span(source: &str, class_def: &ClassDefinition) -> Span {
+    let header_line_start = line_start(source, class_def.span.start());
+    let end = match class_def.state.last() {
+        Some(last_state) => extend_to_line_end(source, last_state.span.end()),
+        // No state declarations: the span is just the (single-line, by
+        // convention) header line itself.
+        None => extend_to_line_end(source, header_line_start),
+    };
+    Span::new(header_line_start, end)
 }
 
 #[cfg(test)]
@@ -164,19 +180,51 @@ mod tests {
     }
 
     #[test]
-    fn resolves_simple_class() {
-        let source = "Object subclass: Counter\n  state: count = 0\n";
+    fn resolves_class_with_no_state_or_methods() {
+        let source = "Object subclass: Counter\n";
         let (result, _diags) = resolve_class_span(source, "Counter");
         let span = result.expect("class should resolve");
         assert_eq!(&source[span.start() as usize..span.end() as usize], source);
     }
 
     #[test]
+    fn resolves_header_and_state_only() {
+        let source = "Object subclass: Counter\n  state: count = 0\n  state: step = 1\n";
+        let (result, _diags) = resolve_class_span(source, "Counter");
+        let span = result.expect("class should resolve");
+        assert_eq!(&source[span.start() as usize..span.end() as usize], source);
+    }
+
+    /// The load-bearing guarantee this whole module exists for: a class with
+    /// methods must have a span that stops at the last state declaration, so
+    /// splicing a header+state-only replacement into it can never touch —
+    /// let alone delete — a method's source.
+    #[test]
+    fn excludes_methods_even_though_they_share_the_class_ast_span() {
+        let source = "Object subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\n  class new => self basicNew\n";
+        let (result, _diags) = resolve_class_span(source, "Counter");
+        let span = result.expect("class should resolve");
+        let slice = &source[span.start() as usize..span.end() as usize];
+        assert_eq!(slice, "Object subclass: Counter\n  state: count = 0\n");
+        assert!(!slice.contains("increment"));
+        assert!(!slice.contains("class new"));
+    }
+
+    #[test]
+    fn excludes_methods_when_class_has_no_state_at_all() {
+        let source = "Object subclass: Greeter\n  greet => 'hello'\n";
+        let (result, _diags) = resolve_class_span(source, "Greeter");
+        let span = result.expect("class should resolve");
+        let slice = &source[span.start() as usize..span.end() as usize];
+        assert_eq!(slice, "Object subclass: Greeter\n");
+        assert!(!slice.contains("greet"));
+    }
+
+    #[test]
     fn excludes_license_header_and_doc_comment() {
         // Unlike a method's span, the class span must NOT pull in the leading
-        // `///` doc comment — see the module doc's "Span boundaries" section:
-        // the cockpit `:def` tab never resubmits the doc comment, so
-        // including it here would make a flush delete it from disk.
+        // `///` doc comment — see the module doc: the cockpit `:def` tab
+        // never resubmits the doc comment either.
         let source = "// Copyright 2026\n// SPDX-License-Identifier: Apache-2.0\n\n/// A counter.\nObject subclass: Counter\n  state: count = 0\n";
         let (result, _diags) = resolve_class_span(source, "Counter");
         let span = result.expect("class should resolve");
@@ -190,11 +238,11 @@ mod tests {
     }
 
     #[test]
-    fn splicing_a_new_definition_preserves_leading_doc_comment_on_disk() {
-        // The end-to-end guarantee the exclusion above exists for: splicing a
-        // `:def`-tab-style replacement (no doc comment) into the resolved
-        // span must leave the file's doc comment untouched.
-        let source = "/// Original doc.\nObject subclass: Counter\n  state: count = 0\n";
+    fn splicing_a_new_definition_preserves_doc_comment_and_methods_on_disk() {
+        // The end-to-end guarantee the exclusions above exist for: splicing a
+        // `:def`-tab-style replacement (no doc comment, no methods) into the
+        // resolved span must leave both untouched.
+        let source = "/// Original doc.\nObject subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n";
         let (result, _diags) = resolve_class_span(source, "Counter");
         let span = result.expect("class should resolve");
         let spliced = splice(
@@ -204,21 +252,8 @@ mod tests {
         );
         assert_eq!(
             spliced,
-            "/// Original doc.\nObject subclass: Counter\n  state: count = 1\n"
+            "/// Original doc.\nObject subclass: Counter\n  state: count = 1\n\n  increment => self.count := self.count + 1\n"
         );
-    }
-
-    #[test]
-    fn preserves_trailing_content_outside_span() {
-        let source = "Object subclass: Counter\n  state: count = 0\n";
-        let (result, _diags) = resolve_class_span(source, "Counter");
-        let span = result.expect("class should resolve");
-        let spliced = splice(
-            source,
-            span,
-            "Object subclass: Counter\n  field: count = 0\n",
-        );
-        assert_eq!(spliced, "Object subclass: Counter\n  field: count = 0\n");
     }
 
     #[test]

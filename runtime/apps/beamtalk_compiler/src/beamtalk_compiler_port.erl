@@ -889,15 +889,16 @@ handle_method_span_response(Other) ->
     {error, port_error, <<"Unexpected compiler response">>}.
 
 -doc """
-Resolve the byte span of a whole class definition in `Source' (ADR 0082
-extension, BT-3248).
+Resolve the byte span of a class's header + state declarations in `Source'
+(ADR 0082 extension, BT-3248) — never its methods.
 
 Given the current on-disk source of a `.bt' file and a target `ClassName',
-returns the exact byte span of that class's whole definition (header, state
-declarations, and body) plus the bytes currently occupying it (`prev_source').
-Backs the cockpit `:def' tab's live-patch install hook for an *existing*
-class, mirroring `resolve_method_span/5''s contract at class granularity
-instead of method granularity.
+returns the byte span of that class's declaration line through its last
+`state:'/`field:' declaration, plus the bytes currently occupying it
+(`prev_source'). Backs the CHANGES dock's disk-vs-memory diff for a
+`'class-def'' entry (the cockpit `:def' tab's redefinition of an *existing*
+class) — see `beamtalk_core::source_analysis::resolve_class_span''s module
+doc for why the span must stop before any method.
 
 Returns `{ok, #{start := S, end := E}, PrevSource}' on success. Resolution
 failures (class not found, ambiguous) come back as `{error, Reason, Message}'

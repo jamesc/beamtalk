@@ -695,25 +695,32 @@ FFI chokepoint that creates a file for it. A REPL-typed brand-new inline class
 recording no ChangeLog entry is the same pre-existing (unrelated) gap it
 always was, not a regression introduced here.
 
+Also skips logging entirely when `Classes` has more than one entry. The `:def`
+tab always edits exactly one class; a multi-class inline eval (typed directly
+at the REPL, not through the tab) would otherwise log one entry per class,
+each carrying the *same* whole `Expression` text as its `source` — there is
+no per-class slice of a raw multi-class eval to attribute correctly, and
+logging the same shared text under N different classes would be misleading
+audit history, not a fix. This is the same "out of scope" carve-out as the
+brand-new-class case above, not a data-loss concern (see
+`add_class_def_flushability/2`'s doc — no `'class-def'` entry is ever
+flushed to disk yet regardless).
+
 Returns `true` iff at least one entry was appended, so the caller knows
 whether an autoflush pass is worth triggering.
 """.
 -spec emit_class_def_entries([map()], string(), #{binary() => string() | undefined}) -> boolean().
-emit_class_def_entries(Classes, Expression, PrevSources) ->
-    lists:foldl(
-        fun(#{name := Name}, AnyEmitted) ->
-            NameBin = normalize_class_source_key(Name),
-            case maps:get(NameBin, PrevSources, undefined) of
-                undefined ->
-                    AnyEmitted;
-                PrevSource ->
-                    emit_class_def_entry(NameBin, Expression, PrevSource),
-                    true
-            end
-        end,
-        false,
-        Classes
-    ).
+emit_class_def_entries([#{name := Name}], Expression, PrevSources) ->
+    NameBin = normalize_class_source_key(Name),
+    case maps:get(NameBin, PrevSources, undefined) of
+        undefined ->
+            false;
+        PrevSource ->
+            emit_class_def_entry(NameBin, Expression, PrevSource),
+            true
+    end;
+emit_class_def_entries(_MultipleOrNoClasses, _Expression, _PrevSources) ->
+    false.
 
 %% Emit the durable `'class-def'` ChangeEntry for one redefined class. Best
 %% effort: a ChangeLog write must never fail or undo the in-memory install
@@ -755,16 +762,39 @@ emit_class_def_entry(ClassNameBin, NewSource, PrevSource) ->
             ok
     end.
 
-%% Derive flushability and, when flushable, the on-disk span for a
-%% `'class-def'` entry — mirrors `add_flushability/4`'s classification exactly
-%% (same `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
-%% helpers), just resolving a whole-class span
-%% (`beamtalk_compiler:resolve_class_span/2`) instead of a method span.
-%% Unlike a method patch's stored `source`, the text a `:def` tab submits is
-%% already the exact top-level shape a user would type into the file (classes
-%% are never nested/indented, unlike methods inside a class body) — no
-%% `reindent_method_source` reshape step is needed before storing it as the
-%% on-disk byte-span shape.
+-doc """
+Classify a `'class-def'` entry's flushability — always `flushable: false` for
+now (BT-3248 Phase 1), regardless of whether the class is genuinely an
+in-project file the entry could, in principle, ever target.
+
+Reuses `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
+(the same classification `add_flushability/4` uses for a method patch) only
+to populate `sourceFile` when the class IS an in-project file — informational,
+so the CHANGES dock can show a path and `beamtalk_workspace_changelog:
+disk_class_body/2` can compute a diff against it — never to decide
+`flushable`, which is hardcoded `false` here on purpose.
+
+Why: the cockpit `:def` tab recompiles a *synthesized* skeleton
+(`beamtalk_repl_ops_browse:class_definition_text/3` — `{Superclass}
+subclass: {Name}` plus one bare `state: {field} = {default}` line per
+instance variable) that is missing information no flush can safely
+reconstruct — modifier keywords (`sealed`/`typed`/`abstract`), the
+`field:'/`state:' keyword choice, and `::' type annotations are all silently
+dropped from what gets resubmitted at Compile. An earlier version of this
+function resolved a real on-disk span (`beamtalk_compiler:resolve_class_span/2`)
+and marked the entry flushable whenever that span resolved — even with a span
+correctly bounded to exclude every method (a first, more dangerous version of
+that resolver did not, and would have deleted a class's methods from disk on
+flush; see `crates/beamtalk-core/src/source_analysis/class_span.rs`'s module
+doc), splicing the skeleton in would still have silently downgraded e.g.
+`sealed typed Value subclass: Foo` + `field: x :: Integer` to
+`Value subclass: Foo` + `state: x` on every ordinary flush, for any class
+using those features — caught in adversarial review before this shipped
+(BT-3248). Fixing that needs the `:def` tab's skeleton itself made
+round-trip-safe first (tracked as a follow-up); until then, every
+`'class-def'` entry stays visible in the CHANGES dock (with a computed diff —
+see `disk_class_body/2`) but is never a `Workspace flush` candidate.
+""".
 -spec add_class_def_flushability(map(), binary()) -> map().
 add_class_def_flushability(Base, ClassNameBin) ->
     case class_source_file(ClassNameBin) of
@@ -772,53 +802,15 @@ add_class_def_flushability(Base, ClassNameBin) ->
             Base#{flushable => false, not_flushable_reason => no_source_reason(ClassNameBin)};
         SourceFile when is_binary(SourceFile) ->
             case classify_source_file(SourceFile) of
-                {flushable, AbsPath} ->
-                    add_class_def_span_or_downgrade(Base, ClassNameBin, SourceFile, AbsPath);
+                {flushable, _AbsPath} ->
+                    Base#{
+                        flushable => false,
+                        not_flushable_reason => <<"class_def_flush_not_yet_supported">>,
+                        source_file => SourceFile
+                    };
                 {not_flushable, Reason} ->
                     Base#{flushable => false, not_flushable_reason => Reason}
             end
-    end.
-
--spec add_class_def_span_or_downgrade(map(), binary(), binary(), string()) -> map().
-add_class_def_span_or_downgrade(Base, ClassNameBin, SourceFile, AbsPath) ->
-    case file:read_file(AbsPath) of
-        {ok, DiskSource} ->
-            resolve_class_def_span_entry(Base, ClassNameBin, SourceFile, DiskSource);
-        {error, ReadReason} ->
-            ?LOG_WARNING(
-                "ChangeLog: could not read sourceFile for class redefinition; recording memory-only",
-                #{
-                    source_file => SourceFile,
-                    reason => ReadReason,
-                    domain => [beamtalk, runtime]
-                }
-            ),
-            Base#{flushable => false, not_flushable_reason => <<"disk_read_failed">>}
-    end.
-
--spec resolve_class_def_span_entry(map(), binary(), binary(), binary()) -> map().
-resolve_class_def_span_entry(Base, ClassNameBin, SourceFile, DiskSource) ->
-    case beamtalk_compiler:resolve_class_span(DiskSource, ClassNameBin) of
-        {ok, Span, DiskPrevSource} ->
-            Base#{
-                flushable => true,
-                source_file => SourceFile,
-                span => Span,
-                %% The disk-resolved span's own bytes are the authoritative
-                %% `prev_source` for the splice's external-edit check
-                %% (`beamtalk_workspace_flush:splice_with_prev/5` compares
-                %% `disk[span]` against this verbatim) — overrides whatever
-                %% `emit_class_def_entry/3` set from the tracked in-memory
-                %% source above, mirroring `store_disk_shaped_entry/4`'s
-                %% equivalent override for a method patch.
-                prev_source => DiskPrevSource
-            };
-        {error, Reason, _Msg} ->
-            Base#{
-                flushable => false,
-                not_flushable_reason =>
-                    iolist_to_binary([<<"span_unresolved:">>, atom_to_binary(Reason, utf8)])
-            }
     end.
 
 %% Extract trailing expression info from a class definition result (BT-885).

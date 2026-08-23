@@ -537,15 +537,17 @@ resolve_method_span(Source, ClassName, Selector, Side) ->
     end.
 
 -doc """
-Resolve the byte span of a whole class definition in `Source' (ADR 0082
-extension, BT-3248).
+Resolve the byte span of a class's header + state declarations in `Source'
+(ADR 0082 extension, BT-3248) — never its methods.
 
-Backs the cockpit `:def' tab's live-patch install hook for an *existing*
-class — given the current on-disk source of a `.bt' file and a target
-`ClassName', returns `{ok, #{start := S, end := E}, PrevSource}' with the
-exact byte span of that class's whole definition and the bytes currently
-occupying it. Resolution failures return `{error, Reason, Message}'; transport
-failures return `{error, port_error | noproc | timeout, Message}'.
+Backs the CHANGES dock's disk-vs-memory diff for a `'class-def'' entry (the
+cockpit `:def' tab's redefinition of an *existing* class) — given the current
+on-disk source of a `.bt' file and a target `ClassName', returns
+`{ok, #{start := S, end := E}, PrevSource}' with the byte span of that
+class's declaration line through its last `state:'/`field:' declaration and
+the bytes currently occupying it. Resolution failures return
+`{error, Reason, Message}'; transport failures return
+`{error, port_error | noproc | timeout, Message}'.
 """.
 -spec resolve_class_span(binary(), atom() | binary()) ->
     {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}

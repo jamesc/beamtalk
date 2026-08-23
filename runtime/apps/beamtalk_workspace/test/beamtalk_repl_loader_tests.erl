@@ -1242,12 +1242,15 @@ loader_integration_test_() ->
                 t_install_method_chains_signature_generations(Proj)
             end},
             %% BT-3248: redefining an existing class (the cockpit `:def` tab)
-            %% records a pending 'class-def' ChangeLog entry and flushes.
+            %% records a pending, non-flushable 'class-def' ChangeLog entry.
             {"load_class_module/3 redefinition emits class-def entry", fun() ->
                 t_load_class_module_redefinition_emits_class_def_entry(Proj)
             end},
-            {"load_class_module/3 redefinition flush rewrites disk", fun() ->
-                t_load_class_module_redefinition_flush_rewrites_disk(Proj)
+            {"load_class_module/3 redefinition never flushes over existing methods", fun() ->
+                t_load_class_module_redefinition_preserves_existing_methods(Proj)
+            end},
+            {"load_class_module/3 multi-class eval logs no class-def entry", fun() ->
+                t_load_class_module_multi_class_eval_no_class_def_entry(Proj)
             end},
             {"load_class_module/3 brand-new inline class has no class-def entry", fun() ->
                 t_load_class_module_brand_new_inline_no_class_def_entry(Proj)
@@ -1624,12 +1627,18 @@ contains(Haystack, Needle) ->
 %% `:def` tab's "Compile" action — a plain eval that classifies as a class
 %% definition and routes through load_class_module/3) must record a pending
 %% `'class-def'` ChangeLog entry — previously this path installed the new
-%% class body with NO ChangeLog entry at all (the bug this issue fixes).
+%% class body with NO ChangeLog entry at all (the bug this issue fixes). The
+%% entry is `flushable: false` — see add_class_def_flushability/2's doc for
+%% why disk-flush isn't safe yet (the `:def` tab's resubmitted skeleton drops
+%% modifiers/type annotations, and an earlier version of this feature that
+%% DID mark such entries flushable also had a span bug that would have
+%% deleted every method's source on flush — see
+%% t_load_class_module_redefinition_preserves_existing_methods below).
 t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
     %% Use the live workspace project_path so the redefined class's sourceFile
-    %% is classified flushable (robust against any workspace_meta restart
-    %% between setup and execution — same convention as
-    %% t_new_method_appends_indented / t_new_class_success).
+    %% is populated (robust against any workspace_meta restart between setup
+    %% and execution — same convention as t_new_method_appends_indented /
+    %% t_new_class_success).
     Proj = live_project_dir(),
     ok = beamtalk_workspace_changelog:clear(),
     Path = write_bt_under(
@@ -1652,44 +1661,79 @@ t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
     ],
     ?assertEqual('class-def', beamtalk_workspace_changelog:entry_kind(Entry)),
     ?assertEqual(undefined, beamtalk_workspace_changelog:entry_selector(Entry)),
-    ?assertEqual(true, beamtalk_workspace_changelog:entry_flushable(Entry)),
-    ?assertMatch(#{start := _, 'end' := _}, beamtalk_workspace_changelog:entry_span(Entry)),
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_flush_not_yet_supported">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
     ?assertEqual(
         list_to_binary(Path), beamtalk_workspace_changelog:entry_source_file(Entry)
     ).
 
-%% Flushing a pending `'class-def'` entry rewrites the class definition in the
-%% source file correctly (BT-3248 acceptance criterion) — the license/doc
-%% comment ahead of the class declaration is preserved, only the class's own
-%% definition span is replaced.
-t_load_class_module_redefinition_flush_rewrites_disk(_Proj) ->
-    %% See t_load_class_module_redefinition_emits_class_def_entry's comment.
+%% BT-3248 regression guard (adversarial review finding): a `'class-def'`
+%% redefinition must never be flushable when the class has methods already
+%% installed — an earlier version of this feature resolved a whole-class span
+%% (header through the last *method*) and marked such entries flushable,
+%% which would have spliced the `:def` tab's header+state-only skeleton over
+%% the header+state+methods region on flush, permanently deleting every
+%% method's source from disk. Proves the fix: flushing after a redefinition
+%% of a class with a live method leaves the file, and the method, untouched.
+t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
     Proj = live_project_dir(),
     ok = beamtalk_workspace_changelog:clear(),
-    Path = write_bt_under(
-        Proj,
-        "src",
-        "DefFlush.bt",
-        <<"/// Original doc.\nActor subclass: DefFlush\n  state: x = 0\n">>
-    ),
+    Original =
+        <<
+            "Actor subclass: DefWithMethod\n"
+            "  state: x = 0\n"
+            "\n"
+            "  double -> Integer =>\n"
+            "    self.x * 2\n"
+        >>,
+    Path = write_bt_under(Proj, "src", "DefWithMethod.bt", Original),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-    NewSource = "Actor subclass: DefFlush\n  state: x = 1\n",
+    %% The `:def` tab's synthesized skeleton — header + state only, exactly
+    %% like `beamtalk_repl_ops_browse:class_definition_text/3` produces —
+    %% carries no methods.
+    NewSource = "Actor subclass: DefWithMethod\n  state: x = 1\n",
     {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
         NewSource, Path, false, undefined
     ),
     ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
-    {ok, <<"DefFlush">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+    {ok, <<"DefWithMethod">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
         ClassInfo, NewSource, State1
     ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefWithMethod">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
     {ok, Summary} = beamtalk_workspace_flush:flush(),
-    ?assertMatch(#{flushed := N, files := [_ | _]} when N > 0, Summary),
+    %% Non-flushable: flush must report nothing written for this entry.
+    ?assertEqual(0, maps:get(flushed, Summary)),
     {ok, Final} = file:read_file(Path),
-    %% The class's own definition is replaced with the new source...
-    ?assert(contains(Final, <<"state: x = 1">>)),
-    ?assertNot(contains(Final, <<"state: x = 0">>)),
-    %% ...but the file-level doc comment ahead of the class is untouched.
-    ?assert(contains(Final, <<"/// Original doc.">>)).
+    ?assertEqual(Original, Final).
+
+%% Redefining more than one class in a single eval (an unusual REPL-typed
+%% multi-class expression, not the `:def` tab's own shape — that tab always
+%% edits exactly one class) records no 'class-def' entry at all, rather than
+%% logging N misleading entries that all share the same whole-expression
+%% `source` text (see emit_class_def_entries/3's doc). Exercises
+%% emit_class_def_entries/3 directly (exported for testing) since driving two
+%% classes through one real eval is an orthogonal compiler-support question
+%% this test isn't about.
+t_load_class_module_multi_class_eval_no_class_def_entry(_Proj) ->
+    ok = beamtalk_workspace_changelog:clear(),
+    Classes = [#{name => "DefMultiA"}, #{name => "DefMultiB"}],
+    PrevSources = #{
+        <<"DefMultiA">> => "Object subclass: DefMultiA\n",
+        <<"DefMultiB">> => "Object subclass: DefMultiB\n"
+    },
+    Expression = "Object subclass: DefMultiA\nObject subclass: DefMultiB\n",
+    AnyEmitted = beamtalk_repl_loader:emit_class_def_entries(Classes, Expression, PrevSources),
+    ?assertEqual(false, AnyEmitted),
+    ?assertEqual([], beamtalk_workspace_changelog:active_entries()).
 
 %% A brand-new class defined inline (never previously loaded, no prior
 %% tracked source) is out of this issue's scope — see

@@ -55,7 +55,7 @@ compiler_test_() ->
         {"resolve_method_span instance method", fun resolve_method_span_instance/0},
         {"resolve_method_span class method", fun resolve_method_span_class/0},
         {"resolve_method_span selector not found", fun resolve_method_span_not_found/0},
-        {"resolve_class_span whole class", fun resolve_class_span_whole_class/0},
+        {"resolve_class_span header only", fun resolve_class_span_header_only/0},
         {"resolve_class_span class not found", fun resolve_class_span_not_found/0},
         {"command vocabulary corpus is recognized (BT-3095)",
             fun command_vocabulary_corpus_is_recognized/0}
@@ -265,16 +265,19 @@ resolve_method_span_not_found() ->
 
 %% --- resolve_class_span (ADR 0082 extension, BT-3248) ---
 
-resolve_class_span_whole_class() ->
+resolve_class_span_header_only() ->
     Source = span_fixture(),
     {ok, #{start := Start, 'end' := End}, PrevSource} =
         beamtalk_compiler:resolve_class_span(Source, <<"SpanCounter">>),
     %% Splicing PrevSource back over the span is a no-op, same load-bearing
     %% property as the method-span resolver.
     ?assertEqual(PrevSource, binary:part(Source, Start, End - Start)),
-    ?assert(binary:match(PrevSource, <<"Object subclass: SpanCounter">>) =/= nomatch),
-    ?assert(binary:match(PrevSource, <<"increment =>">>) =/= nomatch),
-    ?assert(binary:match(PrevSource, <<"class new =>">>) =/= nomatch).
+    %% span_fixture()'s SpanCounter has no state declarations, so the span is
+    %% just its header line — deliberately excluding every method (BT-3248:
+    %% a class-def entry must never be able to reach a method's bytes).
+    ?assertEqual(<<"Object subclass: SpanCounter\n">>, PrevSource),
+    ?assertEqual(nomatch, binary:match(PrevSource, <<"increment =>">>)),
+    ?assertEqual(nomatch, binary:match(PrevSource, <<"class new =>">>)).
 
 resolve_class_span_not_found() ->
     Source = span_fixture(),
