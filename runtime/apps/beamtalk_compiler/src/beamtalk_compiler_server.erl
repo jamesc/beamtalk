@@ -565,14 +565,15 @@ resolve_class_span(Source, ClassName) ->
 
 -doc """
 Group a class's methods by its `// === Name ===' section dividers
-(BT-3239) — see `beamtalk_compiler_port:categorize_methods/3' for the wire
-shape. Returns `{ok, Categories}' on success, `{error, Reason, Message}' on
-a resolution failure, or `{error, noproc | timeout, Message}' on transport
+(BT-3239, extended by BT-3238 with `divider_span'/method `span' for the
+Cockpit's section-authoring write path) — see
+`beamtalk_compiler_port:categorize_methods/3' for the full wire shape.
+Returns `{ok, Categories}' on success, `{error, Reason, Message}' on a
+resolution failure, or `{error, noproc | timeout, Message}' on transport
 failure.
 """.
 -spec categorize_methods(binary(), atom() | binary()) ->
-    {ok, [#{name => binary(), methods := [#{selector := binary(), side := instance | class}]}]}
-    | {error, atom(), binary()}.
+    {ok, [map()]} | {error, atom(), binary()}.
 categorize_methods(Source, ClassName) ->
     try
         gen_server:call(?MODULE, {categorize_methods, Source, ClassName}, 30000)

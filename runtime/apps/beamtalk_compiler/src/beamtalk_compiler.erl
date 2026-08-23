@@ -421,29 +421,38 @@ resolve_class_span(Source, ClassName) ->
 
 -doc """
 Group a class's methods by its `// === Name ===' section dividers
-(BT-3239).
+(BT-3239, extended by BT-3238).
 
 Given the source text of a `.bt' file and a target `ClassName', returns
 `{ok, Categories}' — the class's methods grouped by the divider comments
 that precede them, in source order, exactly matching
 `beamtalk_core::source_analysis::categorize_methods_in_source' (the shared
-Rust recognizer BT-2601 introduced for the LSP outline). Each category is
-`#{name => binary() | undefined, methods := [#{selector := binary(),
-side := instance | class}]}' — `name' is absent (not `undefined' as a map
-value, matching the port's "omit, never null" convention) for the implicit
-leading, unnamed category.
+Rust recognizer BT-2601 introduced for the LSP outline). See
+`beamtalk_compiler_port:categorize_methods/3' for the full response shape —
+a list of `#{name := binary() | undefined, divider_span := #{start := S,
+'end' := E} | undefined, methods := [#{selector := binary(), side :=
+instance | class, span := #{start := S, 'end' := E}}]}' categories, where
+`name'/`divider_span' are `undefined' (never an omitted key) for the
+implicit leading, unnamed category.
 
-Backs `beamtalk_interface:format_class_help/2' (`Beamtalk help: ClassName'
-— the CLI REPL's `:help' and the MCP `docs' tool both evaluate this), so a
-class with a `.bt' source file on disk gets its `Instance methods:' listing
-grouped the same way the editor's Outline view already does. A
-`class_not_found'/`ambiguous' error means the on-disk source doesn't match
-the requested class cleanly; callers degrade to the pre-BT-3239 flat,
-alphabetical listing rather than erroring.
+Two consumers:
+
+* `beamtalk_interface:format_class_help/2' (`Beamtalk help: ClassName' — the
+  CLI REPL's `:help' and the MCP `docs' tool both evaluate this), BT-3239,
+  reading only `name'/`selector'/`side' — a class with a `.bt' source file
+  on disk gets its `Instance methods:' listing grouped the same way the
+  editor's Outline view already does.
+* The Cockpit System Browser's divider-grouped method view and file-level
+  section rename/insert (`save-section'), BT-3238, which also needs
+  `divider_span' and each method's `span' to locate the byte range of an
+  existing divider or method for a splice.
+
+A `class_not_found'/`ambiguous' error means the on-disk source doesn't
+match the requested class cleanly; the REPL/MCP path degrades to the
+pre-BT-3239 flat, alphabetical listing rather than erroring.
 """.
 -spec categorize_methods(binary(), atom() | binary()) ->
-    {ok, [#{name => binary(), methods := [#{selector := binary(), side := instance | class}]}]}
-    | {error, atom(), binary()}.
+    {ok, [map()]} | {error, atom(), binary()}.
 categorize_methods(Source, ClassName) ->
     beamtalk_compiler_server:categorize_methods(Source, ClassName).
 

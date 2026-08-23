@@ -959,29 +959,36 @@ resolve_class_span(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<"resolve_class_span: source/class must be binary or atom">>}.
 
 -doc """
-Group a class's methods by its `// === Name ===' section dividers (BT-3239).
+Group a class's methods by its `// === Name ===' section dividers (BT-3239,
+extended by BT-3238).
 
-Given the source text of a `.bt' file and a target `ClassName', returns the
-class's methods grouped by the divider comments that precede them, in
-source order — the same recognition rules
+Given the current on-disk source of a `.bt' file and a target `ClassName',
+returns the class's methods grouped by the divider comments that precede
+them, in source order — the same recognition rules
 `beamtalk_core::source_analysis::categorize_methods_in_source' locks down
-for every surface (see that module's doc). This is the bridge that lets the
-REPL/MCP surfaces reach it without a second, drift-prone implementation of
-the divider grammar in Erlang (CLAUDE.md's "No duplicate implementations"
-rule) — see `beamtalk_interface:format_class_help/2', its caller.
+for every surface (see that module's doc). This is the bridge that lets
+Erlang surfaces reach it without a second, drift-prone implementation of
+the divider grammar (CLAUDE.md's "No duplicate implementations" rule):
+`beamtalk_interface:format_class_help/2' (BT-3239, REPL/MCP `:help'/`docs')
+and the Cockpit System Browser's grouped method view + `save-section'
+(BT-3238).
 
-Returns `{ok, Categories}' on success, where each category is
-`#{name => binary() | undefined, methods := [#{selector := binary(),
-side := instance | class}]}' — `name' is `undefined' for the implicit
-leading (unnamed) category, in source order, matching
-`MethodCategory.name: Option<String>' on the Rust side. Resolution failures
-(class not found, ambiguous) come back as `{error, Reason, Message}' with
-`Reason' an atom. Transport failures (port down, timeout) return
-`{error, port_error, Message}'.
+Returns `{ok, Categories}' on success, where each category is `#{name :=
+binary() | undefined, divider_span := #{start := S, 'end' := E} |
+undefined, methods := [#{selector := binary(), side := instance | class,
+span := #{start := S, 'end' := E}}]}'. `name'/`divider_span' are always
+present — using `undefined' as the "absent" sentinel, never an omitted key
+— for the implicit leading (unnamed) category, matching
+`MethodCategory.name: Option<String>' on the Rust side. `divider_span`/each
+method's `span` are BT-3238's addition over BT-3239's original shape: the
+Cockpit's `save-section` write path needs a divider's or method's exact
+byte range to splice a rename/insert; the REPL/MCP path (BT-3239) ignores
+them. Resolution failures (class not found, ambiguous) come back as
+`{error, Reason, Message}' with `Reason' an atom. Transport failures (port
+down, timeout) return `{error, port_error, Message}'.
 """.
 -spec categorize_methods(port(), binary(), atom() | binary()) ->
-    {ok, [#{name => binary(), methods := [#{selector := binary(), side := instance | class}]}]}
-    | {error, atom(), binary()}.
+    {ok, [map()]} | {error, atom(), binary()}.
 categorize_methods(Port, Source, ClassName) when
     is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
 ->
@@ -1005,7 +1012,7 @@ categorize_methods(Port, Source, ClassName) when
                             {error, port_error, <<"Compiler port response is malformed">>}
                     end;
                 {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during method-categorize query", #{
+                    ?LOG_ERROR("Compiler port exited during categorize-methods query", #{
                         domain => [beamtalk, runtime], status => Status
                     }),
                     {error, port_error, <<"Compiler port exited unexpectedly">>}
@@ -1030,12 +1037,11 @@ categorize_methods(Port, Source, ClassName) when
 categorize_methods(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<"categorize_methods: source/class must be binary or atom">>}.
 
--spec handle_categorize_methods_response(map()) ->
-    {ok, [map()]} | {error, atom(), binary()}.
+-spec handle_categorize_methods_response(map()) -> {ok, [map()]} | {error, atom(), binary()}.
 handle_categorize_methods_response(#{status := ok, categories := Categories}) when
     is_list(Categories)
 ->
-    {ok, Categories};
+    {ok, [normalize_category(C) || C <- Categories]};
 handle_categorize_methods_response(#{status := error, reason := Reason} = Resp) ->
     Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
     {error, Reason, Message};
@@ -1044,6 +1050,41 @@ handle_categorize_methods_response(Other) ->
         domain => [beamtalk, runtime], response => Other
     }),
     {error, port_error, <<"Unexpected compiler response">>}.
+
+%% Reshape one raw decoded category map into its canonical Erlang-side
+%% contract: `#{name := binary() | undefined, divider_span := #{start :=
+%% non_neg_integer(), 'end' := non_neg_integer()} | undefined, methods :=
+%% [#{selector := binary(), side := instance | class, span := #{...}}]}'.
+%%
+%% Pattern-matching every key here — rather than passing the decoded map
+%% through opaquely, as the previous version of this function did — keeps
+%% `name'/`divider_span'/`selector'/`side'/`methods' resident in THIS
+%% module's own compiled literal table. `binary_to_term(_, [safe])' (the
+%% caller, above) requires every atom in the decoded term to already exist
+%% in the receiving node's atom table; none of those atoms otherwise appear
+%% anywhere in `beamtalk_compiler''s own source (only in `beamtalk_workspace',
+%% the one caller today), so a future caller that links `beamtalk_compiler'
+%% without `beamtalk_workspace' ever loaded would otherwise hit a `badarg'
+%% decode failure the first time a category carried a name.
+-spec normalize_category(map()) -> map().
+normalize_category(#{name := Name, divider_span := DividerSpan, methods := Methods}) ->
+    #{
+        name => Name,
+        divider_span => normalize_span(DividerSpan),
+        methods => [normalize_categorized_method(M) || M <- Methods]
+    }.
+
+-spec normalize_span(map() | undefined) -> map() | undefined.
+normalize_span(undefined) ->
+    undefined;
+normalize_span(#{start := Start, 'end' := End}) ->
+    #{start => Start, 'end' => End}.
+
+-spec normalize_categorized_method(map()) -> map().
+normalize_categorized_method(#{selector := Selector, side := Side, span := Span}) when
+    Side =:= instance; Side =:= class
+->
+    #{selector => Selector, side => Side, span => normalize_span(Span)}.
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

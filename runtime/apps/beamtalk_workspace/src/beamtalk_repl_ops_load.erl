@@ -429,7 +429,17 @@ handle_term(<<"save-native-source">>, Params, _Msg, _SessionPid) ->
     %% native is writable — deps/stdlib are rejected read-only.
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     Source = maps:get(<<"source">>, Params, <<>>),
-    save_native_source(ModuleBin, Source).
+    save_native_source(ModuleBin, Source);
+handle_term(<<"save-section">>, Params, _Msg, _SessionPid) ->
+    %% BT-3238: add/rename a `// === Name ===` section-divider comment at the
+    %% file/class level. Exactly one of `old_name` (rename) / `before_selector`
+    %% (insert) selects the mode — see save_section/5's doc.
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    NewName = maps:get(<<"new_name">>, Params, <<>>),
+    OldName = maps:get(<<"old_name">>, Params, <<>>),
+    BeforeSelector = maps:get(<<"before_selector">>, Params, <<>>),
+    BeforeSide = maps:get(<<"before_side">>, Params, <<"instance">>),
+    save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide).
 
 %%% Internal helpers
 
@@ -683,6 +693,408 @@ atomic_write_file(Path, Content) ->
             _ = file:delete(TempPath),
             {error, WriteReason}
     end.
+
+-doc """
+Add or rename a `// === Name ===` section-divider comment in a class's `.bt`
+source file (BT-3238) — the System Browser's file/class-level section-
+authoring affordance.
+
+Per BT-2601's design ("the divider comment is the storage, no sidecar
+metadata"), this writes the divider text directly into the source file. It is
+**not** a method-body edit and deliberately does not go through the ADR 0082
+patch/ChangeLog/flush pipeline — a comment-only change has no method body to
+reconcile against a pending patch, so the simpler direct-write path
+`save-native-source` already established for the same reason (BT-2670)
+applies here too.
+
+Exactly one of two params selects the mode:
+
+  * `old_name` (non-empty): **rename** — locate the existing category whose
+    divider name is `old_name` via a *fresh* `categorize_methods/2` read of
+    the current on-disk source (never a client-supplied byte offset — the
+    file may have changed since the client last read it), then replace that
+    divider line's name text with `new_name` in place, preserving
+    indentation and the surrounding `=`-run markers.
+  * `before_selector` (+ optional `before_side`, default `instance`):
+    **insert** — locate that method's own definition span via
+    `beamtalk_compiler:resolve_method_span/4` (the same ADR 0082 resolver the
+    live-patch install hook uses) and insert a brand-new
+    `// === NewName ===` divider line directly above it, matching its
+    indentation.
+
+Authorizes and resolves the write target server-side via
+`beamtalk_repl_loader:class_source_file/1` + `classify_source_file/1` — never
+a client-supplied path — and rejects a class with no editable, in-project
+`.bt` file (deps/stdlib/file-less classes) the same way
+`native_module_editable_target/1` gates `save-native-source`. The write is
+atomic (temp file + rename, `atomic_write_file/2`). A comment-only change
+never affects the compiled class, so nothing is recompiled or reloaded.
+
+Returns `{value, #{<<"class">> => _, <<"source_file">> => _, <<"ok">> =>
+true}}` on success. Failure (class not found/not editable, missing/blank
+params, `old_name` not found, `before_selector` not found, disk I/O error)
+returns `{error, #beamtalk_error{}}`.
+""".
+-spec save_section(binary(), binary(), binary(), binary(), binary()) ->
+    {value, map()} | {error, #beamtalk_error{}}.
+save_section(<<>>, _NewName, _OldName, _BeforeSelector, _BeforeSide) ->
+    {error,
+        beamtalk_repl_errors:make(
+            invalid_argument,
+            'WorkspaceInterface',
+            <<"save-section requires a class name">>,
+            <<"Pass the class whose source you want to edit.">>
+        )};
+save_section(_ClassBin, <<>>, _OldName, _BeforeSelector, _BeforeSide) ->
+    {error,
+        beamtalk_repl_errors:make(
+            invalid_argument,
+            'WorkspaceInterface',
+            <<"save-section requires a non-empty new_name">>,
+            <<"Pass the section name to write.">>
+        )};
+save_section(_ClassBin, _NewName, <<>>, <<>>, _BeforeSide) ->
+    {error,
+        beamtalk_repl_errors:make(
+            invalid_argument,
+            'WorkspaceInterface',
+            <<"save-section requires old_name (rename) or before_selector (insert)">>,
+            <<
+                "Pass old_name to rename an existing section, or before_selector "
+                "to add a new one above that method."
+            >>
+        )};
+save_section(_ClassBin, _NewName, OldName, BeforeSelector, _BeforeSide) when
+    OldName =/= <<>>, BeforeSelector =/= <<>>
+->
+    %% Review finding: the mode dispatch (`write_section/7`) picks rename
+    %% whenever `old_name` is non-empty, silently ignoring `before_selector`
+    %% if both are somehow sent together. Reject the ambiguous combination
+    %% outright rather than silently picking one.
+    {error,
+        beamtalk_repl_errors:make(
+            invalid_argument,
+            'WorkspaceInterface',
+            <<"save-section requires exactly one of old_name or before_selector, not both">>,
+            <<"Pass old_name to rename, or before_selector to insert; never both.">>
+        )};
+save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
+    is_binary(ClassBin),
+    is_binary(NewName),
+    is_binary(OldName),
+    is_binary(BeforeSelector),
+    is_binary(BeforeSide)
+->
+    case valid_section_name(NewName) of
+        false ->
+            {error, invalid_section_name_error()};
+        true ->
+            case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+                {error, badarg} ->
+                    {error, section_class_not_editable_error(ClassBin)};
+                {ok, ClassName} ->
+                    case beamtalk_repl_loader:class_source_file(ClassBin) of
+                        nil ->
+                            {error, section_class_not_editable_error(ClassBin)};
+                        SourceFile ->
+                            case beamtalk_repl_loader:classify_source_file(SourceFile) of
+                                {not_flushable, _Reason} ->
+                                    {error, section_class_not_editable_error(ClassBin)};
+                                {flushable, Path} ->
+                                    write_section(
+                                        Path,
+                                        ClassBin,
+                                        ClassName,
+                                        NewName,
+                                        OldName,
+                                        BeforeSelector,
+                                        BeforeSide
+                                    )
+                            end
+                    end
+            end
+    end.
+
+%% Review finding (BT-3238): `new_name` used to be spliced verbatim into the
+%% divider line with only an empty-binary check — a name containing `\n`/`\r`
+%% would inject arbitrary extra source lines (corrupting the file, defeating
+%% the whole "comment-only edit" premise this op's direct-write bypass of
+%% ADR 0082 rests on), and a whitespace-only name composes into a line
+%% `parse_divider_name` itself rejects (`method_category.rs`), so the section
+%% would silently vanish (its methods merging into whatever category preceded
+%% it) with no error. Reject both up front.
+-spec valid_section_name(binary()) -> boolean().
+valid_section_name(NewName) ->
+    case binary:match(NewName, [<<"\n">>, <<"\r">>]) of
+        nomatch -> string:trim(NewName) =/= <<>>;
+        _ -> false
+    end.
+
+-spec invalid_section_name_error() -> #beamtalk_error{}.
+invalid_section_name_error() ->
+    beamtalk_repl_errors:make(
+        invalid_argument,
+        'WorkspaceInterface',
+        <<"save-section requires a single-line, non-blank new_name">>,
+        <<
+            "Section names can't contain a newline (it would corrupt the "
+            "source file) or be blank/whitespace-only."
+        >>
+    ).
+
+-spec section_class_not_editable_error(binary()) -> #beamtalk_error{}.
+section_class_not_editable_error(ClassBin) ->
+    beamtalk_repl_errors:make(
+        permission_denied,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Class '">>, ClassBin, <<"' has no editable in-project .bt source.">>
+        ]),
+        <<
+            "Only classes backed by a project-owned .bt file can have "
+            "sections added or renamed."
+        >>
+    ).
+
+-spec write_section(string(), binary(), atom(), binary(), binary(), binary(), binary()) ->
+    {value, map()} | {error, #beamtalk_error{}}.
+write_section(Path, ClassBin, ClassName, NewName, <<>>, BeforeSelector, BeforeSide) ->
+    case file:read_file(Path) of
+        {ok, Source} ->
+            insert_section(Path, Source, ClassBin, ClassName, NewName, BeforeSelector, BeforeSide);
+        {error, ReadReason} ->
+            {error, section_io_error(ClassBin, <<"reading">>, ReadReason)}
+    end;
+write_section(Path, ClassBin, ClassName, NewName, OldName, _BeforeSelector, _BeforeSide) ->
+    case file:read_file(Path) of
+        {ok, Source} ->
+            rename_section(Path, Source, ClassBin, ClassName, NewName, OldName);
+        {error, ReadReason} ->
+            {error, section_io_error(ClassBin, <<"reading">>, ReadReason)}
+    end.
+
+-spec rename_section(string(), binary(), binary(), atom(), binary(), binary()) ->
+    {value, map()} | {error, #beamtalk_error{}}.
+rename_section(Path, Source, ClassBin, ClassName, NewName, OldName) ->
+    case beamtalk_compiler:categorize_methods(Source, ClassName) of
+        {ok, Categories} ->
+            case find_category_divider_span(Categories, OldName) of
+                undefined ->
+                    {error, section_not_found_error(ClassBin, OldName)};
+                ambiguous ->
+                    {error, section_ambiguous_error(ClassBin, OldName)};
+                {Start, End} ->
+                    %% Review finding: rebuild the line from its own
+                    %% indentation rather than `binary:replace(OldLine,
+                    %% OldName, NewName)` — a divider name is free text (per
+                    %% `parse_divider_name`, `method_category.rs`) and can
+                    %% legally contain `/`, `//`, or `=` characters, any of
+                    %% which `binary:replace`'s first-match substring search
+                    %% could match INSIDE the `// ===`/`===` markers instead
+                    %% of the actual name, corrupting the divider. The
+                    %% located span's own leading whitespace is the only
+                    %% part worth preserving; the marker style is normalized
+                    %% to the same 3-`=` convention `insert_section/7` uses
+                    %% for a new divider, so a rename never needs to parse
+                    %% the old line's `=`-run length back out.
+                    OldLine = binary:part(Source, Start, End - Start),
+                    Indent = leading_indent(OldLine),
+                    NewLine = <<Indent/binary, "// === ", NewName/binary, " ===\n">>,
+                    Before = binary:part(Source, 0, Start),
+                    After = binary:part(Source, End, byte_size(Source) - End),
+                    NewSource = <<Before/binary, NewLine/binary, After/binary>>,
+                    finish_section_write(Path, ClassBin, NewSource)
+            end;
+        {error, Reason, Message} ->
+            {error, section_locate_error(ClassBin, Reason, Message)}
+    end.
+
+%% The category whose divider name matches `TargetName`, as its
+%% `divider_span`'s `{Start, End}` byte offsets — `undefined` when no
+%% category has that name (or the located one's divider line couldn't be
+%% re-found in `source`, defensive; see `find_divider_span`'s own doc), and
+%% `ambiguous` when MORE THAN ONE category shares that name (the divider
+%% grammar has no uniqueness rule, so this can legitimately happen) — never
+%% silently pick one, since renaming the wrong one is a silent data-loss bug
+%% for whichever divider was not renamed.
+-spec find_category_divider_span([map()], binary()) ->
+    {non_neg_integer(), non_neg_integer()} | undefined | ambiguous.
+find_category_divider_span(Categories, TargetName) ->
+    case
+        [
+            Span
+         || #{name := Name, divider_span := Span} <- Categories,
+            Name =:= TargetName,
+            Span =/= undefined
+        ]
+    of
+        [#{start := S, 'end' := E}] -> {S, E};
+        [] -> undefined;
+        [_ | _] -> ambiguous
+    end.
+
+-spec insert_section(string(), binary(), binary(), atom(), binary(), binary(), binary()) ->
+    {value, map()} | {error, #beamtalk_error{}}.
+insert_section(Path, Source, ClassBin, ClassName, NewName, BeforeSelector, BeforeSide) ->
+    Side =
+        case BeforeSide of
+            <<"class">> -> class;
+            _ -> instance
+        end,
+    %% Server-side backstop (the LiveView UI's `insertable_methods_for_side/2`
+    %% already filters these out of the "add section" dropdown, but a stale
+    %% or crafted request could still name one): reject inserting directly
+    %% above a method that already starts a NAMED category. Two divider
+    %% lines back-to-back would silently orphan the existing one —
+    %% `find_divider_span`'s own doc (`method_category.rs`) says only the
+    %% nearer divider survives — rather than cleanly split the category.
+    case beamtalk_compiler:categorize_methods(Source, ClassName) of
+        {ok, Categories} ->
+            case starts_named_category(Categories, BeforeSelector, Side) of
+                true ->
+                    {error, section_collision_error(ClassBin, BeforeSelector)};
+                false ->
+                    do_insert_section(
+                        Path, Source, ClassBin, ClassName, NewName, BeforeSelector, Side
+                    )
+            end;
+        {error, Reason, Message} ->
+            {error, section_locate_error(ClassBin, Reason, Message)}
+    end.
+
+%% True when `Selector`/`Side` is the first method of a category that
+%% already has a divider name — see `insert_section/7`'s doc for why that
+%% makes it an unsafe insertion point.
+-spec starts_named_category([map()], binary(), instance | class) -> boolean().
+starts_named_category(Categories, Selector, Side) ->
+    lists:any(
+        fun
+            (#{name := Name, methods := [#{selector := Sel, side := Sd} | _]}) ->
+                Name =/= undefined andalso Sel =:= Selector andalso Sd =:= Side;
+            (_) ->
+                false
+        end,
+        Categories
+    ).
+
+-spec do_insert_section(
+    string(), binary(), binary(), atom(), binary(), binary(), instance | class
+) -> {value, map()} | {error, #beamtalk_error{}}.
+do_insert_section(Path, Source, ClassBin, ClassName, NewName, BeforeSelector, Side) ->
+    case beamtalk_compiler:resolve_method_span(Source, ClassName, BeforeSelector, Side) of
+        {ok, #{start := Start}, PrevSource} ->
+            Indent = leading_indent(PrevSource),
+            DividerLine = <<Indent/binary, "// === ", NewName/binary, " ===\n">>,
+            Before = binary:part(Source, 0, Start),
+            After = binary:part(Source, Start, byte_size(Source) - Start),
+            NewSource = <<Before/binary, DividerLine/binary, After/binary>>,
+            finish_section_write(Path, ClassBin, NewSource);
+        {error, Reason, Message} ->
+            {error, section_locate_error(ClassBin, Reason, Message)}
+    end.
+
+-spec section_collision_error(binary(), binary()) -> #beamtalk_error{}.
+section_collision_error(ClassBin, BeforeSelector) ->
+    beamtalk_repl_errors:make(
+        invalid_argument,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Class '">>,
+            ClassBin,
+            <<"' already has a section starting at '">>,
+            BeforeSelector,
+            <<"'.">>
+        ]),
+        <<"Pick a method further down, or rename the existing section instead.">>
+    ).
+
+%% The leading run of spaces/tabs at the start of `Bin` (a method definition's
+%% own first line, from `resolve_method_span`'s `prev_source`) — the
+%% indentation the new divider line is written at, so it lines up with the
+%% method it precedes.
+-spec leading_indent(binary()) -> binary().
+leading_indent(Bin) ->
+    leading_indent(Bin, 0).
+
+leading_indent(Bin, N) when N < byte_size(Bin) ->
+    case binary:at(Bin, N) of
+        C when C =:= $\s; C =:= $\t -> leading_indent(Bin, N + 1);
+        _ -> binary:part(Bin, 0, N)
+    end;
+leading_indent(Bin, N) ->
+    binary:part(Bin, 0, N).
+
+-spec finish_section_write(string(), binary(), binary()) ->
+    {value, map()} | {error, #beamtalk_error{}}.
+finish_section_write(Path, ClassBin, NewSource) ->
+    case atomic_write_file(Path, NewSource) of
+        ok ->
+            {value, #{
+                <<"class">> => ClassBin,
+                <<"source_file">> => list_to_binary(Path),
+                <<"ok">> => true
+            }};
+        {error, WriteReason} ->
+            {error, section_io_error(ClassBin, <<"writing">>, WriteReason)}
+    end.
+
+-spec section_not_found_error(binary(), binary()) -> #beamtalk_error{}.
+section_not_found_error(ClassBin, OldName) ->
+    beamtalk_repl_errors:make(
+        invalid_argument,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Class '">>, ClassBin, <<"' has no section named '">>, OldName, <<"'.">>
+        ]),
+        <<"The section may have been renamed or removed by another edit; refresh and retry.">>
+    ).
+
+-spec section_ambiguous_error(binary(), binary()) -> #beamtalk_error{}.
+section_ambiguous_error(ClassBin, OldName) ->
+    beamtalk_repl_errors:make(
+        invalid_argument,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Class '">>,
+            ClassBin,
+            <<"' has more than one section named '">>,
+            OldName,
+            <<"'.">>
+        ]),
+        <<"Rename one of the duplicate dividers directly in the source file to disambiguate.">>
+    ).
+
+-spec section_locate_error(binary(), atom(), binary()) -> #beamtalk_error{}.
+section_locate_error(ClassBin, Reason, Message) ->
+    beamtalk_repl_errors:make(
+        invalid_argument,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Could not locate the section target in '">>,
+            ClassBin,
+            <<"' (">>,
+            atom_to_binary(Reason, utf8),
+            <<"): ">>,
+            Message
+        ]),
+        <<"Check that the class and method/section names are current, then retry.">>
+    ).
+
+-spec section_io_error(binary(), binary(), term()) -> #beamtalk_error{}.
+section_io_error(ClassBin, Verb, Reason) ->
+    beamtalk_repl_errors:make(
+        io_error,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Error ">>,
+            Verb,
+            <<" source for '">>,
+            ClassBin,
+            <<"': ">>,
+            iolist_to_binary(io_lib:format("~p", [Reason]))
+        ]),
+        <<"Check file permissions and try again.">>
+    ).
 
 -doc """
 Format a dependency activation error as a structured error map.

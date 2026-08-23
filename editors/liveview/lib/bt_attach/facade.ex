@@ -106,6 +106,20 @@ defmodule BtAttach.Facade do
     # user code, `:read`, safe for the Observer role, same guarantee as
     # `browse_classes`/`browse_native_modules`.
     browse_type_aliases: :read,
+    # BT-3238: the divider-grouped ("// === Name ===") method view — a fresh,
+    # server-side read of the class's on-disk source through the shared
+    # `source_analysis::method_category` recognizer (the same one the LSP's
+    # `documentSymbol` outline uses). Pure source read + parse, no user code,
+    # so it is `:read`, safe for the Observer role, scoped like the other
+    # browse ops.
+    browse_categories: :read,
+    # BT-3238: add/rename a `// === Name ===` section-divider comment,
+    # writing the comment text directly into the class's on-disk `.bt` file.
+    # It mutates the working tree (like `save_native_source`), so it is
+    # `:execute` — Owner-only. The workspace re-derives project ownership
+    # server-side and rejects any deps/stdlib/outside-project target, so the
+    # gate is defence in depth, not the sole guard.
+    save_section: :execute,
     # BT-2670: edit → compile → reload → write-back for a project-owned native
     # (`.erl`) module. It compiles the edited buffer, hot-loads the module, and
     # writes the source to disk — mutating both the live image and the working
@@ -297,6 +311,13 @@ defmodule BtAttach.Facade do
       else: {:error, :invalid_params}
   end
 
+  # BT-3238: the divider-grouped method view for a single class.
+  defp invoke(:browse_categories, %{class: class}, _ctx) do
+    if is_binary(class),
+      do: client().browse_categories(class),
+      else: {:error, :invalid_params}
+  end
+
   # BT-2578: the backing Erlang source of a native: class. `selector` is
   # optional — present → also resolve the matching `handle_call` clause; absent
   # → whole-module view. A non-native class comes back as a structured
@@ -333,6 +354,24 @@ defmodule BtAttach.Facade do
     if is_binary(module) and is_binary(source),
       do: client().save_native_source(module, source),
       else: {:error, :invalid_params}
+  end
+
+  # BT-3238: add/rename a `// === Name ===` section divider. `class`/`new_name`
+  # are required; exactly one of `old_name` (rename) / `before_selector`
+  # (insert, with optional `before_side`) selects the mode — the workspace
+  # client passes through whichever is present and lets the workspace-side
+  # `save-section` op validate the combination.
+  defp invoke(:save_section, %{class: class, new_name: new_name} = params, _ctx) do
+    if is_binary(class) and is_binary(new_name) do
+      opts =
+        [old_name: Map.get(params, :old_name)] ++
+          [before_selector: Map.get(params, :before_selector)] ++
+          [before_side: Map.get(params, :before_side)]
+
+      client().save_section(class, new_name, opts)
+    else
+      {:error, :invalid_params}
+    end
   end
 
   # BT-2495: the Senders/Implementors popovers and the omni-search index. Each

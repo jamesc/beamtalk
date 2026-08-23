@@ -57,6 +57,10 @@ compiler_test_() ->
         {"resolve_method_span selector not found", fun resolve_method_span_not_found/0},
         {"resolve_class_span header only", fun resolve_class_span_header_only/0},
         {"resolve_class_span class not found", fun resolve_class_span_not_found/0},
+        {"categorize_methods class with no dividers is one unnamed category",
+            fun categorize_methods_no_dividers/0},
+        {"categorize_methods groups by divider", fun categorize_methods_groups_by_divider/0},
+        {"categorize_methods class not found", fun categorize_methods_not_found/0},
         {"command vocabulary corpus is recognized (BT-3095)",
             fun command_vocabulary_corpus_is_recognized/0}
     ]}.
@@ -282,6 +286,47 @@ resolve_class_span_header_only() ->
 resolve_class_span_not_found() ->
     Source = span_fixture(),
     Result = beamtalk_compiler:resolve_class_span(Source, <<"NoSuchClass">>),
+    ?assertMatch({error, class_not_found, _}, Result).
+
+%% --- categorize_methods (BT-3238) ---
+
+%% span_fixture()'s SpanCounter has no `// === Name ===` dividers, so it must
+%% come back as a single, unnamed (implicit leading) category — the
+%% `has_dividers` gate every consumer uses to fall back to a flat rendering.
+categorize_methods_no_dividers() ->
+    Source = span_fixture(),
+    {ok, Categories} = beamtalk_compiler:categorize_methods(Source, <<"SpanCounter">>),
+    ?assertMatch([#{name := undefined}], Categories).
+
+divider_fixture() ->
+    <<
+        "Object subclass: SpanCounter\n"
+        "\n"
+        "  increment => self.value := self.value + 1\n"
+        "\n"
+        "  // === Construction ===\n"
+        "\n"
+        "  class new => self basicNew\n"
+    >>.
+
+categorize_methods_groups_by_divider() ->
+    Source = divider_fixture(),
+    {ok, Categories} = beamtalk_compiler:categorize_methods(Source, <<"SpanCounter">>),
+    ?assertMatch(
+        [
+            #{name := undefined, methods := [#{selector := <<"increment">>, side := instance}]},
+            #{
+                name := <<"Construction">>,
+                divider_span := #{start := _, 'end' := _},
+                methods := [#{selector := <<"new">>, side := class}]
+            }
+        ],
+        Categories
+    ).
+
+categorize_methods_not_found() ->
+    Source = span_fixture(),
+    Result = beamtalk_compiler:categorize_methods(Source, <<"NoSuchClass">>),
     ?assertMatch({error, class_not_found, _}, Result).
 
 %%% ---------------------------------------------------------------

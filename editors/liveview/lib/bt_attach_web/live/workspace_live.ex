@@ -546,6 +546,18 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:selected_protocol, nil)
       |> assign(:browser_protocols, [])
       |> assign(:browser_error, nil)
+      # BT-3238: the divider-grouped method view alongside the protocol view.
+      # `browser_group_mode` toggles which grouping the method list renders by
+      # ("protocol" | "section"); "section" is only reachable when
+      # `browser_categories["has_dividers"]` is true, so a divider-free class
+      # renders exactly as before (no behavior change). `editing_section` is
+      # the section currently being renamed/added (`nil` | a section name
+      # binary | the sentinel `:new`); `section_form_error` surfaces a failed
+      # save inline.
+      |> assign(:browser_categories, default_categories())
+      |> assign(:browser_group_mode, "protocol")
+      |> assign(:editing_section, nil)
+      |> assign(:section_form_error, nil)
       # BT-2578: the read-only native backing-source pane. `nil` = collapsed;
       # otherwise a map carrying the fetched Erlang source for one class
       # (lazily loaded on the def tab's "View Erlang source" toggle).
@@ -1916,7 +1928,15 @@ defmodule BtAttachWeb.WorkspaceLive do
       if selected_class_visible?(socket) do
         socket
       else
-        assign(socket, selected_class: nil, selected_protocol: nil, browser_protocols: [])
+        assign(socket,
+          selected_class: nil,
+          selected_protocol: nil,
+          browser_protocols: [],
+          browser_categories: default_categories(),
+          browser_group_mode: "protocol",
+          editing_section: nil,
+          section_form_error: nil
+        )
       end
 
     {:noreply, socket}
@@ -1947,8 +1967,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       when is_binary(class) do
     socket =
       assign(socket, selected_class: class, selected_protocol: nil)
+      |> load_protocols(class, socket.assigns.browser_side)
+      |> load_categories(class)
 
-    {:noreply, load_protocols(socket, class, socket.assigns.browser_side)}
+    {:noreply, socket}
   end
 
   def handle_event("browser_select_class", _params, socket), do: {:noreply, socket}
@@ -1980,6 +2002,75 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("browser_select_method", _params, socket), do: {:noreply, socket}
+
+  # ── grouped method view: `// === Name ===` section dividers (BT-3238) ──────
+
+  # Toggle the method list between the existing per-protocol grouping and the
+  # divider-category grouping. The UI only renders this toggle when
+  # `browser_categories["has_dividers"]` is true (a divider-free class never
+  # shows it, so its method list renders exactly as before), but the handler
+  # itself just no-ops on an unrecognised mode rather than trusting that gate.
+  def handle_event("browser_group_mode", %{"mode" => mode}, socket)
+      when mode in ~w(protocol section) do
+    {:noreply,
+     assign(socket, browser_group_mode: mode, editing_section: nil, section_form_error: nil)}
+  end
+
+  def handle_event("browser_group_mode", _params, socket), do: {:noreply, socket}
+
+  # Open the inline section form: renaming an existing section (`name` is
+  # that section's current divider text) or adding a new one (`name` is
+  # empty, the `:new` sentinel). Owner-only, matching `new_method`'s gate —
+  # authoring is Owner-only, so the entry is rendered only for `:owner` and a
+  # crafted event from a read-only role is a no-op.
+  def handle_event(
+        "browser_edit_section",
+        %{"name" => name},
+        %{assigns: %{role: :owner}} = socket
+      )
+      when is_binary(name) do
+    target = if name == "", do: :new, else: name
+    {:noreply, assign(socket, editing_section: target, section_form_error: nil)}
+  end
+
+  def handle_event("browser_edit_section", _params, socket), do: {:noreply, socket}
+
+  # Close the inline section form without saving.
+  def handle_event("browser_cancel_section", _params, socket) do
+    {:noreply, assign(socket, editing_section: nil, section_form_error: nil)}
+  end
+
+  # Rename an existing section: `old_name` identifies the divider being
+  # edited, `new_name` is the submitted form text.
+  def handle_event(
+        "browser_rename_section",
+        %{"old_name" => old_name, "new_name" => new_name},
+        %{assigns: %{role: :owner, selected_class: class}} = socket
+      )
+      when is_binary(old_name) and is_binary(new_name) and is_binary(class) do
+    {:noreply, submit_section(socket, class, new_name, old_name: old_name)}
+  end
+
+  def handle_event("browser_rename_section", _params, socket), do: {:noreply, socket}
+
+  # Add a brand-new section directly above `before_selector` (the method
+  # picked in the inline "add section" form's dropdown).
+  def handle_event(
+        "browser_add_section",
+        %{"new_name" => new_name, "before_selector" => before_selector} = params,
+        %{assigns: %{role: :owner, selected_class: class, browser_side: side}} = socket
+      )
+      when is_binary(new_name) and is_binary(before_selector) and is_binary(class) do
+    before_side = Map.get(params, "before_side", side)
+
+    {:noreply,
+     submit_section(socket, class, new_name,
+       before_selector: before_selector,
+       before_side: before_side
+     )}
+  end
+
+  def handle_event("browser_add_section", _params, socket), do: {:noreply, socket}
 
   # ── omni search (BT-2495, epic BT-2482 Phase 3) ─────────────────────────────
 
@@ -4997,6 +5088,115 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # Load `class`'s methods grouped by `// === Name ===` section-divider
+  # category (op `browse-categories`, BT-3238) for the grouped method view.
+  # Class-wide (not per-side, unlike protocols) — a category can hold both
+  # instance- and class-side methods. Resets the group-mode toggle back to
+  # "protocol" and clears any in-progress section edit whenever the class
+  # changes, so switching classes never leaves a stale rename form open. A
+  # dispatch failure degrades to the default "unaffected" shape (`browser_categories`
+  # is a rendering aid, not something worth surfacing its own error banner for
+  # — the protocol/method list is still fully usable).
+  defp load_categories(socket, class) do
+    socket
+    |> refresh_categories(class)
+    |> assign(browser_group_mode: "protocol", editing_section: nil, section_form_error: nil)
+  end
+
+  # BT-3238: re-fetch `browse-categories` WITHOUT resetting `browser_group_mode`
+  # / `editing_section` — the post-save refresh path (`submit_section/4`) uses
+  # this alone, not `load_categories/2`, so a successful rename/add doesn't
+  # kick the viewer back to Protocol mode right after they used Sections mode
+  # to get there (review finding: `load_categories/2` used to reset the mode
+  # unconditionally on every call, including this one).
+  defp refresh_categories(socket, class) do
+    view =
+      case Facade.dispatch(:browse_categories, %{class: class}, ctx(socket)) do
+        {:value, %{"has_dividers" => _, "categories" => _} = view} -> view
+        _ -> default_categories()
+      end
+
+    assign(socket, browser_categories: view)
+  end
+
+  defp default_categories, do: %{"has_dividers" => false, "categories" => []}
+
+  # BT-3238: flattens `browse-categories`' category list into one ordered
+  # list of `side`-only method rows, in source order across every category —
+  # the section-mode method list renders from this (filtered per-category at
+  # render time), and the "has any methods at all" empty-state check uses it
+  # unfiltered.
+  defp category_methods_for_side(categories, side) when is_list(categories) do
+    Enum.flat_map(categories, fn category ->
+      Enum.filter(category["methods"] || [], &(&1["side"] == side))
+    end)
+  end
+
+  defp category_methods_for_side(_categories, _side), do: []
+
+  # BT-3238: the "add a new section" form's before-selector dropdown draws
+  # from this, NOT the full `category_methods_for_side/2` list — it excludes
+  # each named category's own first method. Inserting a new divider directly
+  # above a method that already starts a category would write two dividers
+  # back-to-back with nothing between them; `find_divider_span`'s own doc
+  # (`method_category.rs`) says only the nearer one survives, so the
+  # existing category's divider would be silently orphaned (its methods
+  # merging into whatever category preceded it) rather than cleanly split.
+  # Every method in the implicit (unnamed) leading group stays a valid
+  # insertion point — there is no divider there yet to collide with — and so
+  # does every method after a category's first, since a new divider there
+  # cleanly splits that category into two.
+  defp insertable_methods_for_side(categories, side) when is_list(categories) do
+    Enum.flat_map(categories, fn category ->
+      same_side = Enum.filter(category["methods"] || [], &(&1["side"] == side))
+
+      case category["name"] do
+        nil ->
+          same_side
+
+        _named ->
+          # A category's "first method" is its first method OVERALL (any
+          # side), matching the server-side collision guard
+          # (`starts_named_category/3`, `beamtalk_repl_ops_load.erl`) — not
+          # the first *same-side* method. A category can legitimately open
+          # with a class-side method and continue with instance-side ones;
+          # filtering by side before dropping "the first" would wrongly
+          # treat that instance-side method as the category's start and
+          # exclude it, when the server would happily accept it.
+          case category["methods"] || [] do
+            [first_overall | _] -> Enum.reject(same_side, &(&1 == first_overall))
+            [] -> []
+          end
+      end
+    end)
+  end
+
+  defp insertable_methods_for_side(_categories, _side), do: []
+
+  # BT-3238: dispatch `save-section` (rename via `old_name:`, or insert via
+  # `before_selector:`/`before_side:` — the caller passes exactly one shape
+  # via `opts`) and, on success, close the inline form and refresh the
+  # grouped view so the new/renamed divider shows up immediately. A failure
+  # surfaces inline on the form (`section_form_error`) rather than the
+  # page-wide `@save_error` notice, since it's scoped to the small form, not
+  # the whole editor.
+  defp submit_section(socket, class, new_name, opts) do
+    params = Map.merge(%{class: class, new_name: new_name}, Map.new(opts))
+
+    case Facade.dispatch(:save_section, params, ctx(socket)) do
+      {:value, %{"ok" => true}} ->
+        socket
+        |> assign(editing_section: nil, section_form_error: nil)
+        |> refresh_categories(class)
+
+      {:error, reason} ->
+        assign(socket, section_form_error: facade_error(reason))
+
+      _other ->
+        assign(socket, section_form_error: "Could not save the section.")
+    end
+  end
+
   # ── navigation aids: omni search + senders/implementors (BT-2495) ───────────
 
   # Filter the workspace symbol index (`nav-symbols`) against the live query and
@@ -5089,6 +5289,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(selected_class: class, selected_protocol: nil)
     |> load_protocols(class, socket.assigns.browser_side)
+    |> load_categories(class)
   end
 
   # Point the System Browser at a class/side — select it in the tree, flip the
@@ -5101,6 +5302,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(selected_class: class, browser_side: side, selected_protocol: nil)
     |> load_protocols(class, side)
+    |> load_categories(class)
   end
 
   # Open (or re-focus) an *editable* method tab for class/side/selector — the
@@ -8743,12 +8945,31 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The viewer's role — the "Add a method…" authoring entry is owner-only (Observers
   # get a read-only browser).
   attr :role, :atom, required: true
+  # BT-3238: the divider-grouped method view — `%{"has_dividers" => bool,
+  # "categories" => [%{"name" => name_or_nil, "methods" => [...]}]}` — plus
+  # the group-mode toggle and any in-progress section edit.
+  attr :browser_categories, :map, required: true
+  attr :browser_group_mode, :string, default: "protocol"
+  attr :editing_section, :any, default: nil
+  attr :section_form_error, :string, default: nil
 
   defp system_browser_methods(assigns) do
     assigns =
       assigns
       |> assign(:methods, filtered_methods(assigns.browser_protocols, assigns.selected_protocol))
       |> assign(:total_methods, protocol_method_count(assigns.browser_protocols))
+      |> assign(:has_dividers, assigns.browser_categories["has_dividers"] || false)
+      |> assign(
+        :section_methods,
+        category_methods_for_side(assigns.browser_categories["categories"], assigns.browser_side)
+      )
+      |> assign(
+        :insertable_methods,
+        insertable_methods_for_side(
+          assigns.browser_categories["categories"],
+          assigns.browser_side
+        )
+      )
 
     ~H"""
     <div class="panel">
@@ -8805,64 +9026,210 @@ defmodule BtAttachWeb.WorkspaceLive do
               <span class="mname mono">Add a method…</span>
             </div>
           </div>
-          <%!-- protocol filter row: ∗ "all" + one row per protocol --%>
-          <div class="tree sb-protocols">
-            <div
-              class={["row", @selected_protocol == nil && "sel"]}
-              phx-click="browser_select_protocol"
-              phx-value-protocol=""
-            >
-              <span class="twig">∗</span>
-              <span>all</span>
-              <span class="meta">{@total_methods}</span>
-            </div>
-            <div
-              :for={proto <- @browser_protocols}
-              class={["row", @selected_protocol == proto["name"] && "sel"]}
-              phx-click="browser_select_protocol"
-              phx-value-protocol={proto["name"]}
-            >
-              <span class="twig">·</span>
-              <span>{proto["name"]}</span>
-              <span class="meta">{length(proto["selectors"] || [])}</span>
-            </div>
-          </div>
-          <%!-- method list for the active protocol filter --%>
-          <div class="tree">
-            <div :if={@methods == []} class="empty">No methods on the {@browser_side} side.</div>
-            <div
-              :for={m <- @methods}
-              class={[
-                "row method-row",
-                @active_method && @active_method.class == @selected_class &&
-                  @active_method.side == @browser_side &&
-                  @active_method.selector == m["selector"] && "sel"
-              ]}
-              phx-click="browser_select_method"
-              phx-value-class={@selected_class}
-              phx-value-side={@browser_side}
-              phx-value-selector={m["selector"]}
-              title={method_row_title(m)}
-            >
-              <span class="twig" style="color: var(--accent);">m</span>
-              <span class="mname mono">{m["selector"]}</span>
-              <span
-                :if={m["source_origin"] && m["source_origin"] != "project"}
-                class={"source-origin-tag #{source_origin_class(m)}"}
-                title={source_origin_title(m)}
+          <%!-- BT-3238: group-mode toggle (only meaningful once the class has
+               at least one `// === Name ===` divider — a divider-free class
+               never shows this row, so its method list renders exactly as
+               before) + the owner-only "add a section" affordance. --%>
+          <div
+            :if={@has_dividers or (@role == :owner and @insertable_methods != [])}
+            class="tree sb-section-toolbar"
+            style="display:flex; align-items:center; gap:6px; padding:2px 8px;"
+          >
+            <span :if={@has_dividers} style="display:flex; gap:4px;">
+              <button
+                type="button"
+                class={["btn-link", @browser_group_mode == "protocol" && "sel"]}
+                phx-click="browser_group_mode"
+                phx-value-mode="protocol"
               >
-                {source_origin_label(m)}
-              </span>
-              <span :if={runtime_only?(m)} class="runtime-tag" title="runtime-only">⚡</span>
-              <span
-                :if={synthetic?(m)}
-                class="derived-tag"
-                title="compiler-derived (auto-generated synthetic method)"
+                Protocol
+              </button>
+              <button
+                type="button"
+                class={["btn-link", @browser_group_mode == "section" && "sel"]}
+                phx-click="browser_group_mode"
+                phx-value-mode="section"
               >
-                derived
-              </span>
-            </div>
+                Sections
+              </button>
+            </span>
+            <span class="spacer"></span>
+            <button
+              :if={@role == :owner and @insertable_methods != []}
+              type="button"
+              class="btn-link"
+              phx-click="browser_edit_section"
+              phx-value-name=""
+            >
+              + Section
+            </button>
           </div>
+          <%!-- BT-3238: inline "add a new section" form — appears above the
+               method list, in either group mode, once opened. --%>
+          <form
+            :if={@editing_section == :new}
+            class="tree sb-section-form"
+            style="padding:4px 8px;"
+            phx-submit="browser_add_section"
+          >
+            <input
+              type="text"
+              name="new_name"
+              class="field"
+              placeholder="Section name"
+              autocomplete="off"
+              spellcheck="false"
+              phx-mounted={Phoenix.LiveView.JS.focus()}
+            />
+            <select name="before_selector">
+              <option :for={m <- @insertable_methods} value={m["selector"]}>
+                before {m["selector"]}
+              </option>
+            </select>
+            <input type="hidden" name="before_side" value={@browser_side} />
+            <p :if={@section_form_error} class="new-class-error" role="alert">
+              {@section_form_error}
+            </p>
+            <div class="modal-actions">
+              <button type="button" class="btn ghost" phx-click="browser_cancel_section">
+                Cancel
+              </button>
+              <button class="btn primary" type="submit">Add</button>
+            </div>
+          </form>
+          <%= if @browser_group_mode == "section" do %>
+            <%!-- BT-3238: the divider-grouped method list — one header per
+                 category (in source order), its methods for the current
+                 side nested underneath. Mirrors the LSP `documentSymbol`
+                 outline shape (BT-2601): the implicit leading group (`name`
+                 is `nil`) renders with no header, just its methods. --%>
+            <div class="tree sb-sections">
+              <div :if={@section_methods == []} class="empty">
+                No methods on the {@browser_side} side.
+              </div>
+              <%= for category <- @browser_categories["categories"] || [] do %>
+                <% category_methods =
+                  Enum.filter(category["methods"] || [], &(&1["side"] == @browser_side)) %>
+                <div :if={category["name"]} class="row section-row">
+                  <span class="twig" style="color: var(--accent);">§</span>
+                  <span class="mname">{category["name"]}</span>
+                  <span class="meta">{length(category_methods)}</span>
+                  <button
+                    :if={@role == :owner}
+                    type="button"
+                    class="btn-link"
+                    phx-click="browser_edit_section"
+                    phx-value-name={category["name"]}
+                    title="Rename section"
+                  >
+                    ✎
+                  </button>
+                </div>
+                <form
+                  :if={category["name"] && @editing_section == category["name"]}
+                  class="sb-section-form"
+                  style="padding:2px 8px 2px 20px;"
+                  phx-submit="browser_rename_section"
+                >
+                  <input type="hidden" name="old_name" value={category["name"]} />
+                  <input
+                    type="text"
+                    name="new_name"
+                    class="field"
+                    value={category["name"]}
+                    autocomplete="off"
+                    spellcheck="false"
+                    phx-mounted={Phoenix.LiveView.JS.focus()}
+                  />
+                  <p :if={@section_form_error} class="new-class-error" role="alert">
+                    {@section_form_error}
+                  </p>
+                  <div class="modal-actions">
+                    <button type="button" class="btn ghost" phx-click="browser_cancel_section">
+                      Cancel
+                    </button>
+                    <button class="btn primary" type="submit">Save</button>
+                  </div>
+                </form>
+                <div
+                  :for={m <- category_methods}
+                  class={[
+                    "row method-row",
+                    @active_method && @active_method.class == @selected_class &&
+                      @active_method.side == @browser_side &&
+                      @active_method.selector == m["selector"] && "sel"
+                  ]}
+                  style={if category["name"], do: "padding-left: 20px;", else: ""}
+                  phx-click="browser_select_method"
+                  phx-value-class={@selected_class}
+                  phx-value-side={@browser_side}
+                  phx-value-selector={m["selector"]}
+                >
+                  <span class="twig" style="color: var(--accent);">m</span>
+                  <span class="mname mono">{m["selector"]}</span>
+                </div>
+              <% end %>
+            </div>
+          <% else %>
+            <%!-- protocol filter row: ∗ "all" + one row per protocol --%>
+            <div class="tree sb-protocols">
+              <div
+                class={["row", @selected_protocol == nil && "sel"]}
+                phx-click="browser_select_protocol"
+                phx-value-protocol=""
+              >
+                <span class="twig">∗</span>
+                <span>all</span>
+                <span class="meta">{@total_methods}</span>
+              </div>
+              <div
+                :for={proto <- @browser_protocols}
+                class={["row", @selected_protocol == proto["name"] && "sel"]}
+                phx-click="browser_select_protocol"
+                phx-value-protocol={proto["name"]}
+              >
+                <span class="twig">·</span>
+                <span>{proto["name"]}</span>
+                <span class="meta">{length(proto["selectors"] || [])}</span>
+              </div>
+            </div>
+            <%!-- method list for the active protocol filter --%>
+            <div class="tree">
+              <div :if={@methods == []} class="empty">No methods on the {@browser_side} side.</div>
+              <div
+                :for={m <- @methods}
+                class={[
+                  "row method-row",
+                  @active_method && @active_method.class == @selected_class &&
+                    @active_method.side == @browser_side &&
+                    @active_method.selector == m["selector"] && "sel"
+                ]}
+                phx-click="browser_select_method"
+                phx-value-class={@selected_class}
+                phx-value-side={@browser_side}
+                phx-value-selector={m["selector"]}
+                title={method_row_title(m)}
+              >
+                <span class="twig" style="color: var(--accent);">m</span>
+                <span class="mname mono">{m["selector"]}</span>
+                <span
+                  :if={m["source_origin"] && m["source_origin"] != "project"}
+                  class={"source-origin-tag #{source_origin_class(m)}"}
+                  title={source_origin_title(m)}
+                >
+                  {source_origin_label(m)}
+                </span>
+                <span :if={runtime_only?(m)} class="runtime-tag" title="runtime-only">⚡</span>
+                <span
+                  :if={synthetic?(m)}
+                  class="derived-tag"
+                  title="compiler-derived (auto-generated synthetic method)"
+                >
+                  derived
+                </span>
+              </div>
+            </div>
+          <% end %>
         <% end %>
       </div>
     </div>
@@ -9270,6 +9637,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                   active_method={selected_method_ref(assigns)}
                   active_def={selected_def_ref(assigns)}
                   role={@role}
+                  browser_categories={@browser_categories}
+                  browser_group_mode={@browser_group_mode}
+                  editing_section={@editing_section}
+                  section_form_error={@section_form_error}
                 />
               </div>
             </div>
