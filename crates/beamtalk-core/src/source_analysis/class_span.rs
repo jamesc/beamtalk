@@ -194,9 +194,7 @@ fn class_header_and_state_span(source: &str, class_def: &ClassDefinition) -> Spa
         .min();
 
     let end = match first_method_start {
-        Some(method_start) if method_start < candidate_end => {
-            line_start(source, method_start)
-        }
+        Some(method_start) if method_start < candidate_end => line_start(source, method_start),
         _ => candidate_end,
     };
 
