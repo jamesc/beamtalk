@@ -816,13 +816,33 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> visit("/")
     |> assert_has(".att-label", text: "attached")
     |> assert_has("#col-gutter-left")
+    # Wait for the UI webfont (Hanken Grotesk, loaded from Google Fonts —
+    # `root.html.heex`) to finish loading before measuring: while it's still
+    # loading the fallback stack renders wider/narrower text, which would
+    # make this assertion race the font swap instead of testing the fix.
+    |> evaluate("document.fonts.ready.then(() => true)")
     # Default width (286px): the title used to be a bare text node — the only
     # shrinkable flex item in `.panel-head` — so it wrapped to two lines under
     # pressure from the mode/view segs + source select, overflowing the fixed
-    # 30px header. `scrollHeight === clientHeight` fails the moment it wraps.
+    # 30px header. `scrollHeight === clientHeight` fails the moment anything
+    # in the row wraps to a second line.
     |> assert_eventually(
       "(() => { const h = document.querySelector('#system-browser .panel-head'); return h.scrollHeight === h.clientHeight; })()",
       "the System Browser panel-head overflowed its height at the default column width"
+    )
+    # Regression guard for the follow-up half of the same bug (found while
+    # fixing this one): once the title stopped absorbing the row's width
+    # deficit, the flexbox shrink algorithm pushed it onto the Classes/
+    # Native/Type-Aliases `.seg` toggle next, wrapping a button's own label
+    # onto a second line — same overflow, different element. `white-space:
+    # nowrap` on `.seg button` is what stops that; assert it directly so a
+    # regression here fails fast instead of racing `assert_eventually`'s 3s
+    # window. (The row's remaining HORIZONTAL deficit at this width — the
+    # trailing icon buttons losing a few px to `.panel`'s `overflow: hidden`
+    # — is a separate, pre-existing issue tracked in BT-3256, not this one.)
+    |> evaluate(
+      "getComputedStyle(document.querySelector('#system-browser .panel-head .seg button')).whiteSpace",
+      fn v -> assert v == "nowrap", "seg buttons should never wrap, got #{inspect(v)}" end
     )
     # Narrow the column well past the point that used to force a wrap (286px
     # default down toward the 160px floor, data-min on #col-gutter-left) — the

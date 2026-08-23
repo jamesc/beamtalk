@@ -8753,7 +8753,19 @@ defmodule BtAttachWeb.WorkspaceLive do
     ~H"""
     <div class="panel">
       <div class="panel-head">
-        <span class="panel-title">
+        <%!-- BT-3247 review nit: the title can now ellipsis-truncate at a
+             narrow `--browser-w`, so give it a `title=` attribute (same text
+             as the rendered content) — a hover reveals the full class name
+             even once the visible label is cut short. --%>
+        <span
+          class="panel-title"
+          title={
+            if @selected_class,
+              do:
+                if(@browser_side == "class", do: @selected_class <> " class", else: @selected_class),
+              else: "Protocols & Methods"
+          }
+        >
           <%= if @selected_class do %>
             {if @browser_side == "class", do: @selected_class <> " class", else: @selected_class}
           <% else %>
