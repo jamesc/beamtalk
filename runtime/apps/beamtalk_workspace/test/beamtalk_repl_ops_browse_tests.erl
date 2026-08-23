@@ -693,10 +693,11 @@ alias_row_undefined_doc_is_null_test() ->
     ?assertEqual(null, maps:get(<<"doc">>, Row)).
 
 %%====================================================================
-%% class_definition_text/5 — BT-3255 (ADR 0067 field:/state: + typed prefix)
+%% class_definition_text/7 — BT-3255 (ADR 0067 field:/state: + typed prefix),
+%% BT-3254 (sealed/abstract modifier round-trip)
 %%====================================================================
 %%
-%% `class_definition_text/5` is pure — no live class needed — so these
+%% `class_definition_text/7` is pure — no live class needed — so these
 %% construct the `State` rows and `Meta` map directly, the same shapes
 %% `state_slots/2` and `browse_class_definition/1` build from a real
 %% `__beamtalk_meta/0` read.
@@ -707,7 +708,7 @@ class_definition_text_typed_value_with_types_and_defaults_test() ->
         #{<<"name">> => <<"label">>, <<"default">> => null, <<"type">> => <<"String">>}
     ],
     Definition = beamtalk_repl_ops_browse:class_definition_text(
-        'Retry', 'Value', State, true, #{kind => value}
+        'Retry', 'Value', State, true, false, false, #{kind => value}
     ),
     ?assertEqual(
         <<
@@ -723,7 +724,7 @@ class_definition_text_typed_value_without_defaults_test() ->
     %% annotation but drops the `= <default>` suffix entirely.
     State = [#{<<"name">> => <<"x">>, <<"default">> => null, <<"type">> => <<"Integer">>}],
     Definition = beamtalk_repl_ops_browse:class_definition_text(
-        'Point', 'Value', State, true, #{kind => value}
+        'Point', 'Value', State, true, false, false, #{kind => value}
     ),
     ?assertEqual(<<"typed Value subclass: Point\n  field: x :: Integer">>, Definition).
 
@@ -732,7 +733,7 @@ class_definition_text_non_typed_actor_test() ->
     %% with no `typed ` prefix and no `:: Type` annotation.
     State = [#{<<"name">> => <<"count">>, <<"default">> => <<"0">>, <<"type">> => null}],
     Definition = beamtalk_repl_ops_browse:class_definition_text(
-        'Counter', 'Actor', State, false, #{kind => actor}
+        'Counter', 'Actor', State, false, false, false, #{kind => actor}
     ),
     ?assertEqual(<<"Actor subclass: Counter\n  state: count = 0">>, Definition).
 
@@ -741,8 +742,40 @@ class_definition_text_unknown_kind_falls_back_to_state_test() ->
     %% carries no `kind` — the skeleton must still render, defaulting to
     %% `state:` (the pre-BT-3255 behaviour for such classes).
     State = [#{<<"name">> => <<"x">>, <<"default">> => null, <<"type">> => null}],
-    Definition = beamtalk_repl_ops_browse:class_definition_text('Loose', none, State, false, #{}),
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Loose', none, State, false, false, false, #{}
+    ),
     ?assertEqual(<<"Object subclass: Loose\n  state: x">>, Definition).
+
+%% BT-3254: `sealed`/`abstract` are now emitted the same way `typed` already
+%% was — this is the round-trip gap `add_class_def_flushability/2` used to
+%% document as open.
+class_definition_text_sealed_typed_test() ->
+    State = [#{<<"name">> => <<"x">>, <<"default">> => <<"0">>, <<"type">> => <<"Integer">>}],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'MetricsTable', 'Value', State, true, true, false, #{kind => value}
+    ),
+    ?assertEqual(
+        <<"sealed typed Value subclass: MetricsTable\n  field: x :: Integer = 0">>, Definition
+    ).
+
+class_definition_text_abstract_typed_test() ->
+    State = [],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Supervisor', 'Object', State, true, false, true, #{kind => object}
+    ),
+    ?assertEqual(<<"abstract typed Object subclass: Supervisor">>, Definition).
+
+%% Every modifier combined — order is `abstract sealed typed`, matching every
+%% pairwise combination already used across stdlib (see the function doc); the
+%% parser accepts any order, so this is a canonicalization, not a literal
+%% round-trip of source text order.
+class_definition_text_all_modifiers_test() ->
+    State = [],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Everything', 'Object', State, true, true, true, #{kind => object}
+    ),
+    ?assertEqual(<<"abstract sealed typed Object subclass: Everything">>, Definition).
 
 %% Helper: enumerate via the term handler.
 type_aliases() ->

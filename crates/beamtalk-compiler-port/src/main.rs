@@ -2826,6 +2826,68 @@ fn handle_resolve_class_span(request: &Map) -> Term {
     }
 }
 
+/// Handle a `class_state_field_defaults` request (ADR 0082 extension,
+/// BT-3254).
+///
+/// Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2`'s
+/// sibling safety check before marking a `'class-def'` `ChangeLog` entry
+/// flushable: whether resubmitting a candidate class-body text for `class`
+/// would silently drop a field's default value, compared against the
+/// on-disk text — see
+/// [`class_state_field_defaults`](beamtalk_core::source_analysis::class_state_field_defaults)'s
+/// own doc for the full "why" (live class reflection cannot recover a
+/// compiled class's default-value TEXT, only whether one exists).
+///
+/// Request fields:
+/// - `source` (binary): the class-body source text to inspect
+/// - `class_name` (binary): the target class name (e.g. `Counter`)
+///
+/// Response on success: `#{status => ok, field_defaults => #{FieldName =>
+/// true | false, ...}}`, one entry per declared `state:`/`field:`. Failures
+/// (class not found, ambiguous) come back as `#{status => error, ...}`, same
+/// shape as `resolve_class_span`.
+fn handle_class_state_field_defaults(request: &Map) -> Term {
+    use beamtalk_core::source_analysis::class_state_field_defaults;
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(class_name) = map_get(request, "class_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_name' field".to_string()]);
+    };
+
+    match class_state_field_defaults(&source, &class_name) {
+        Some(defaults) => {
+            let mut field_map: std::collections::HashMap<Term, Term> =
+                std::collections::HashMap::new();
+            for (field, has_default) in defaults {
+                field_map.insert(
+                    binary(&field),
+                    atom(if has_default { "true" } else { "false" }),
+                );
+            }
+            Term::from(Map::from([
+                (atom("status"), atom("ok")),
+                (atom("field_defaults"), Term::from(Map::from(field_map))),
+            ]))
+        }
+        // `class_state_field_defaults` collapses "not found" and "ambiguous"
+        // into one `None` (it has no splice-safety span to report, unlike
+        // `resolve_class_span`, so the finer distinction isn't needed by its
+        // one caller) — the loader treats either as "cannot confirm safety".
+        None => Term::from(Map::from([
+            (atom("status"), atom("error")),
+            (atom("reason"), atom("class_not_found")),
+            (
+                atom("message"),
+                binary(&format!(
+                    "class `{class_name}` not found or ambiguous in source"
+                )),
+            ),
+        ])),
+    }
+}
+
 fn class_span_error_response(err: &beamtalk_core::source_analysis::ClassSpanResolveError) -> Term {
     use beamtalk_core::source_analysis::ClassSpanResolveError;
     let reason = match err {
@@ -2942,7 +3004,7 @@ fn handle_request(request_term: &Term) -> Term {
     // (BT-3078 drift audit; BT-3091 flagged this pair for evaluation).
     // A shared corpus fixture
     // (`runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json`)
-    // pins both sides to the same 17-command list end-to-end: the Rust test
+    // pins both sides to the same 19-command list end-to-end: the Rust test
     // below dispatches each corpus command through `handle_request` and
     // checks it isn't the catch-all arm, while
     // `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`
@@ -2969,6 +3031,7 @@ fn handle_request(request_term: &Term) -> Term {
         "reindent_method_source" => handle_reindent_method_source(map),
         "resolve_class_span" => handle_resolve_class_span(map),
         "categorize_methods" => handle_categorize_methods(map),
+        "class_state_field_defaults" => handle_class_state_field_defaults(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -4546,6 +4609,69 @@ Object subclass: Counter
             (atom("class_name"), binary("Counter")),
         ]);
         let response = handle_categorize_methods(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+    }
+
+    // --- class_state_field_defaults tests (ADR 0082 extension, BT-3254) ---
+
+    #[test]
+    fn class_state_field_defaults_reports_presence_per_field() {
+        let request = Map::from([
+            (atom("command"), atom("class_state_field_defaults")),
+            (
+                atom("source"),
+                binary("Actor subclass: Counter\n  state: count = 0\n  state: label :: String\n"),
+            ),
+            (atom("class_name"), binary("Counter")),
+        ]);
+        let response = handle_class_state_field_defaults(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::Map(field_defaults)) = map_get(m, "field_defaults") else {
+            panic!("field_defaults should be a map: {response:?}");
+        };
+        // Field names are wire binaries (never atoms — user-controlled class
+        // field names must never risk atom-table exhaustion), so look them up
+        // directly rather than via `map_get` (atom-keyed lookups only).
+        assert_eq!(
+            field_defaults.map.get(&binary("count")),
+            Some(&atom("true")),
+            "{field_defaults:?}"
+        );
+        assert_eq!(
+            field_defaults.map.get(&binary("label")),
+            Some(&atom("false")),
+            "{field_defaults:?}"
+        );
+    }
+
+    #[test]
+    fn class_state_field_defaults_class_not_found_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("class_state_field_defaults")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("NoSuchClass")),
+        ]);
+        let response = handle_class_state_field_defaults(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
+    }
+
+    #[test]
+    fn class_state_field_defaults_missing_class_name_field_is_error() {
+        let request = Map::from([
+            (atom("command"), atom("class_state_field_defaults")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+        ]);
+        let response = handle_class_state_field_defaults(&request);
         let Term::Map(ref m) = response else {
             panic!("Expected map response, got: {response:?}");
         };

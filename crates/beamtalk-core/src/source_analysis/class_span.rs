@@ -15,14 +15,15 @@
 //!
 //! The cockpit `:def` tab's "Compile" action (BT-3248) recompiles a small,
 //! *synthesized* skeleton of an already-loaded class:
-//! `beamtalk_repl_ops_browse:class_definition_text/3` builds it purely from
-//! runtime reflection — `{Superclass} subclass: {Name}` plus one
-//! `state: {field} = {default}` line per instance variable — and explicitly
-//! carries **no method bodies** ("Pharo convention", per that function's own
-//! doc). This resolver exists to compute the byte range in the on-disk file
-//! that a `Workspace flush` of that skeleton is allowed to touch: this
-//! module's own [`resolve_class_in_module`] doc and test suite are the
-//! record of *why* the span must never reach past the last state declaration.
+//! `beamtalk_repl_ops_browse:class_definition_text/7` builds it purely from
+//! runtime reflection — `{modifier keywords }{Superclass} subclass: {Name}`
+//! plus one `field:`/`state:` line (with its own `:: Type` annotation where
+//! declared) per instance variable — and explicitly carries **no method
+//! bodies** ("Pharo convention", per that function's own doc). This resolver
+//! exists to compute the byte range in the on-disk file that a `Workspace
+//! flush` of that skeleton is allowed to touch: this module's own
+//! [`resolve_class_in_module`] doc and test suite are the record of *why*
+//! the span must never reach past the last state declaration.
 //!
 //! Naively using the whole `ClassDefinition::span` (header through the last
 //! *method*, which is what a first draft of this resolver did) would make a
@@ -42,19 +43,26 @@
 //! declaration that textually follows an earlier method. See this module's
 //! test `excludes_a_method_that_precedes_a_later_state_declaration`.
 //!
-//! This span is currently used only for the CHANGES-dock diff
-//! (`beamtalk_workspace_changelog:disk_class_body/2`) — a read-only
-//! disk-vs-memory comparison — not for an actual `Workspace flush` splice.
-//! `beamtalk_repl_loader:add_class_def_flushability/2` marks every
-//! `'class-def'` `ChangeEntry` `flushable: false` unconditionally: even with
-//! this corrected span, the synthesized skeleton also drops modifier
-//! keywords (`sealed`/`typed`/`abstract`), the `field:`/`state:` keyword
-//! choice, and `::` type annotations (see that function's doc and
-//! `class_definition_text/3`'s own construction) — so splicing it into disk
-//! today would still silently downgrade a class's declaration even with a
-//! byte-perfect span. Safe flush support needs the skeleton itself fixed
-//! first (tracked as a follow-up); this resolver is the piece of that future
-//! work that is safe to land now, because it is read-only until then.
+//! This span backs the CHANGES-dock diff
+//! (`beamtalk_workspace_changelog:disk_class_body/2`, read-only) and, since
+//! BT-3254 made the skeleton itself round-trip-safe (modifier keywords, the
+//! `field:`/`state:` keyword choice, and `::` type annotations all now
+//! survive a resubmit — see `class_definition_text/7`),
+//! `beamtalk_repl_loader:add_class_def_flushability/2` also uses it to mark a
+//! `'class-def'` `ChangeEntry` `flushable: true` and to compute the actual
+//! `Workspace flush` splice region. This module's own "never reaches a
+//! method" guarantee (above) is exactly what makes that splice safe: a class
+//! with all its `state:`/`field:` declarations positioned before its first
+//! method round-trips losslessly; a class with a `state:`/`field:`
+//! declaration positioned *after* a method has that declaration excluded
+//! from the span by the same clamp (see
+//! `excludes_a_method_that_precedes_a_later_state_declaration` below) — safe
+//! for the read-only diff, but means such a class's full current field list
+//! (from reflection) is not byte-reconstructable from this span alone. That
+//! interleaved/trailing-`state:` style is unusual (no stdlib class uses it)
+//! and is not handled specially by the flush path; it is a known, narrow
+//! limitation inherited from this resolver's existing "never reaches a
+//! method" trade-off, not a new one BT-3254 introduces.
 //!
 //! # Span boundaries — also EXCLUDES the doc comment
 //!
@@ -135,15 +143,51 @@ pub fn resolve_class_span(
 ) -> (Result<Span, ClassSpanResolveError>, Vec<Diagnostic>) {
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
-    let result = resolve_class_in_module(&module, source, class);
+    let result = find_class_def(&module, class)
+        .map(|class_def| class_header_and_state_span(source, class_def));
     (result, diagnostics)
 }
 
-fn resolve_class_in_module(
-    module: &crate::ast::Module,
-    source: &str,
+/// For every `state:`/`field:` declaration of `class` in `source`, its field
+/// name and whether it carries a default value (ADR 0082 extension,
+/// BT-3254).
+///
+/// Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2`'s
+/// sibling safety check: a `'class-def'` `ChangeLog` entry's resubmitted
+/// skeleton (`beamtalk_repl_ops_browse:class_definition_text/7`) is built
+/// from LIVE runtime reflection, which recovers a compiled class's field
+/// *default-value TEXT* for no class at all — only `__beamtalk_meta/0`'s
+/// `field_has_default` boolean says whether one exists, never what it is
+/// (`beamtalk_class_builder`-created classes are the sole exception, and
+/// those are file-less — never reach a flushable `'class-def'` entry in the
+/// first place, since `class_source_file/1` requires a real `sourceFile`).
+/// So a skeleton resubmitted for ANY real, file-backed class always renders
+/// `default => null` for every field, even when the on-disk declaration has
+/// one — silently deleting it on splice. The loader calls this function
+/// against BOTH the on-disk source and the candidate replacement text and
+/// refuses to flush when a field that had a default on disk does not have
+/// one in the candidate — see that function's doc for the comparison.
+///
+/// Returns `None` when `class` cannot be uniquely resolved in `source` (not
+/// found, or ambiguous) — same failure shape as [`resolve_class_span`]; the
+/// caller treats that as "cannot confirm safety" and refuses to flush.
+pub fn class_state_field_defaults(source: &str, class: &str) -> Option<Vec<(String, bool)>> {
+    let tokens = lex_with_eof(source);
+    let (module, _diagnostics) = parse(tokens);
+    let class_def = find_class_def(&module, class).ok()?;
+    Some(
+        class_def
+            .state
+            .iter()
+            .map(|s| (s.name.name.to_string(), s.default_value.is_some()))
+            .collect(),
+    )
+}
+
+fn find_class_def<'a>(
+    module: &'a crate::ast::Module,
     class: &str,
-) -> Result<Span, ClassSpanResolveError> {
+) -> Result<&'a ClassDefinition, ClassSpanResolveError> {
     let matches: Vec<&ClassDefinition> = module
         .classes
         .iter()
@@ -154,7 +198,7 @@ fn resolve_class_in_module(
         0 => Err(ClassSpanResolveError::ClassNotFound {
             class: class.to_string(),
         }),
-        1 => Ok(class_header_and_state_span(source, matches[0])),
+        1 => Ok(matches[0]),
         count => Err(ClassSpanResolveError::Ambiguous {
             class: class.to_string(),
             count,
@@ -320,5 +364,49 @@ mod tests {
                 class: "Missing".to_string()
             })
         );
+    }
+
+    // --- class_state_field_defaults tests (ADR 0082 extension, BT-3254) ---
+
+    #[test]
+    fn class_state_field_defaults_reports_presence_per_field() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n  state: label :: String\n";
+        let defaults = class_state_field_defaults(source, "Counter").expect("class should resolve");
+        assert_eq!(
+            defaults,
+            vec![("count".to_string(), true), ("label".to_string(), false),]
+        );
+    }
+
+    #[test]
+    fn class_state_field_defaults_empty_for_no_state() {
+        let source = "Object subclass: Counter\n  greet => 'hello'\n";
+        let defaults = class_state_field_defaults(source, "Counter").expect("class should resolve");
+        assert_eq!(defaults, Vec::new());
+    }
+
+    #[test]
+    fn class_state_field_defaults_none_for_missing_class() {
+        let source = "Object subclass: Counter\n  state: count = 0\n";
+        assert_eq!(class_state_field_defaults(source, "Missing"), None);
+    }
+
+    #[test]
+    fn class_state_field_defaults_none_for_ambiguous_class() {
+        let source = "Object subclass: Counter\nObject subclass: Counter\n  state: count = 0\n";
+        assert_eq!(class_state_field_defaults(source, "Counter"), None);
+    }
+
+    /// A state declaration positioned after a method is legal (see
+    /// `excludes_a_method_that_precedes_a_later_state_declaration` above) —
+    /// unlike `resolve_class_span`'s byte span, this function reads
+    /// `class_def.state` directly (no positional clamp needed, since it
+    /// reports field presence rather than a splice-safe byte range), so it
+    /// still reports that field's default-presence correctly.
+    #[test]
+    fn class_state_field_defaults_includes_state_after_a_method() {
+        let source = "Actor subclass: Counter\n  increment => self.value := self.value + 1\n  state: value = 0\n";
+        let defaults = class_state_field_defaults(source, "Counter").expect("class should resolve");
+        assert_eq!(defaults, vec![("value".to_string(), true)]);
     }
 }
