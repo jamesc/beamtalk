@@ -317,6 +317,47 @@ delegate_tests(#{class_name := ClassName}) ->
     ].
 
 %%====================================================================
+%% Native-module delegate callers — REAL compiled stdlib class (BT-3242)
+%%====================================================================
+
+%% Regression coverage: `delegate_callers_of_native_module/1` against a REAL
+%% Beamtalk-compiled native-backed stdlib class (`Subprocess`), not the
+%% hand-written `beamtalk_test_native_facade` test double the suite above
+%% uses. Beamtalk's Core Erlang codegen compiles straight to Core Erlang and
+%% feeds it to `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which
+%% never runs the abstract-form `sys_pre_expand` compiler pass that
+%% auto-injects `module_info/0,1` — so a real compiled `bt@stdlib@subprocess`
+%% facade module has no `module_info/1`, unlike `beamtalk_test_native_facade`
+%% (a normal `.erl` file DOES get `module_info` auto-injected by the ordinary
+%% compile pipeline). That gap is exactly why the BT-2732 double above didn't
+%% catch `safe_module_exports/1` silently swallowing the resulting `undef` and
+%% returning `[]` for every real native-backed class (BT-3242) — this test
+%% boots the real stdlib app so the facade module under test is genuinely
+%% `from_core`-compiled, closing the coverage gap that let the bug ship.
+real_stdlib_delegate_callers_test_() ->
+    {setup, fun real_stdlib_setup/0, fun(_) -> ok end, [
+        {"Subprocess (a real native: class) reports its self delegate methods", fun() ->
+            Rows = beamtalk_repl_ops_browse:delegate_callers_of_native_module(
+                beamtalk_subprocess
+            ),
+            SubprocessRows = [R || R <- Rows, maps:get(owner, R) =:= 'Subprocess'],
+            ?assertNotEqual([], SubprocessRows),
+            %% `exitCode` is one of Subprocess's `self delegate` instance methods
+            %% (Subprocess.bt) — assert the real selector, not just "some row".
+            Selectors = [maps:get(method, R) || R <- SubprocessRows],
+            ?assert(lists:member(exitCode, Selectors))
+        end}
+    ]}.
+
+%% Boot the real runtime + stdlib so `Subprocess`'s facade module is loaded from
+%% its real compiled BEAM — not a hand-written test double — and registered as a
+%% live class process. Delegates to the shared `beamtalk_workspace_test_boot`
+%% fixture (same helper `beamtalk_repl_docs_tests`'s integration tests use in this
+%% app's test suite) rather than a second copy of the boot/wait sequence.
+real_stdlib_setup() ->
+    beamtalk_workspace_test_boot:boot_real_stdlib('Subprocess').
+
+%%====================================================================
 %% browse-native-modules — enumeration + filter + source-path (BT-2648)
 %%====================================================================
 

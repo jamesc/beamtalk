@@ -573,32 +573,12 @@ format_method_doc_metaclass_unknown_test() ->
 %% Integration tests (require running runtime with bootstrap)
 %%====================================================================
 
+%% Boots the real runtime + stdlib via the shared `beamtalk_workspace_test_boot`
+%% fixture (BT-3242: extracted so `beamtalk_repl_ops_browse_tests`'s real-stdlib
+%% delegate-callers regression test doesn't carry a second copy of this same
+%% boot/wait sequence), blocking until `Integer` is registered.
 integration_setup() ->
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_bootstrap) of
-        undefined ->
-            case beamtalk_bootstrap:start_link() of
-                {ok, _} -> ok;
-                {error, {already_started, _}} -> ok
-            end;
-        _ ->
-            ok
-    end,
-    beamtalk_stdlib:init(),
-    %% Wait for Integer class to be registered
-    wait_for_class('Integer', 50),
-    ok.
-
-wait_for_class(ClassName, 0) ->
-    error({class_not_registered, ClassName});
-wait_for_class(ClassName, Retries) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            timer:sleep(50),
-            wait_for_class(ClassName, Retries - 1);
-        _Pid ->
-            ok
-    end.
+    beamtalk_workspace_test_boot:boot_real_stdlib('Integer').
 
 format_class_docs_integer_test_() ->
     {setup, fun integration_setup/0, fun(_) -> ok end, [
@@ -770,7 +750,7 @@ format_class_docs_class_side_test_() ->
 value_synthetic_accessor_docs_test_() ->
     {setup, fun integration_setup/0, fun(_) -> ok end, [
         {"ChangeEntry withSeq: CompiledMethod carries synthetic __doc__/__signature__", fun() ->
-            wait_for_class('ChangeEntry', 50),
+            beamtalk_workspace_test_boot:wait_for_class('ChangeEntry', 50),
             ClassPid = beamtalk_class_registry:whereis_class('ChangeEntry'),
             ?assert(is_pid(ClassPid)),
             Method = gen_server:call(ClassPid, {method, 'withSeq:'}, 5000),
@@ -785,7 +765,7 @@ value_synthetic_accessor_docs_test_() ->
             )
         end},
         {"format_method_doc surfaces the synthetic doc + signature for withSeq:", fun() ->
-            wait_for_class('ChangeEntry', 50),
+            beamtalk_workspace_test_boot:wait_for_class('ChangeEntry', 50),
             {ok, Result} = beamtalk_repl_docs:format_method_doc(
                 'ChangeEntry', <<"withSeq:">>
             ),
@@ -798,7 +778,7 @@ value_synthetic_accessor_docs_test_() ->
             )
         end},
         {"auto getter (clean) carries a synthetic signature from its slot type", fun() ->
-            wait_for_class('ChangeEntry', 50),
+            beamtalk_workspace_test_boot:wait_for_class('ChangeEntry', 50),
             ClassPid = beamtalk_class_registry:whereis_class('ChangeEntry'),
             Method = gen_server:call(ClassPid, {method, clean}, 5000),
             ?assert(is_map(Method)),
