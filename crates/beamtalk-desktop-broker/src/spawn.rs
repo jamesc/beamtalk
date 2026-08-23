@@ -1711,11 +1711,46 @@ mod tests {
         );
         let launcher = write_launcher_script(tmp.path(), "server", &script);
 
+        // BT-3241: pay this exact file's first-exec tax here, untimed,
+        // instead of racing it against `bind_failure_grace` below. Root
+        // cause (confirmed by instrumenting `spawn_front_with_port_retry`
+        // locally): the *first* exec of a brand-new script file — even one
+        // as small as this one — can take 200ms+ on a loaded macOS sandbox,
+        // while every *subsequent* exec of that same already-warm file
+        // consistently lands under 20ms. BT-3226's poll loop only shortens
+        // *detection* latency once the process actually exits; it can't
+        // shorten the process's own wall-clock time to reach `exit 1`, so
+        // when that first-exec tax alone exceeds the 250ms grace, attempt 1
+        // is still running (not yet even at the `cat`/arithmetic/`echo`
+        // lines) when the deadline fires and gets misclassified as `Bound`
+        // — the test then reads a `0`-or-`1`-attempts counter instead of the
+        // expected `3`. Widening the grace further would only raise the bar
+        // the tax has to clear, not remove the race (forbidden by this
+        // issue's acceptance criteria) — running the launcher once here,
+        // synchronously and with no deadline, forces that one-time tax to
+        // happen before the timed retry logic below ever starts, so all
+        // three *measured* attempts exec an already-warm file.
+        let warmup_status = Command::new(&launcher)
+            .status()
+            .expect("warm-up exec of the launcher should run");
+        assert!(
+            warmup_status.success() || warmup_status.code() == Some(1),
+            "warm-up exec should either succeed or hit the script's own \
+             `exit 1` branch, got {warmup_status:?}"
+        );
+        // The warm-up run above incremented the counter file (it's the same
+        // script, same file, counting the same way) — reset it so the timed
+        // retry logic below starts counting from a clean `0`.
+        std::fs::write(&counter_path, b"0").unwrap();
+
         let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
         // BT-3226: see the sibling `..._always_exits` test above for why
         // this needed raising past the poll loop alone — same cold-exec tax
         // applies to this test's first attempt at a brand-new tempdir path.
+        // BT-3241: the warm-up above removes the *first-exec* tax race; this
+        // grace still covers ordinary scheduler jitter across all 3 timed
+        // attempts, same as it always has.
         config.bind_failure_grace = Duration::from_millis(250);
         config.max_port_attempts = 5;
 
