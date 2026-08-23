@@ -1263,6 +1263,10 @@ loader_integration_test_() ->
                 fun() ->
                     t_load_class_module_redefinition_drops_default_not_flushable(Proj)
                 end},
+            {"load_class_module/3 redefinition with state declared after a method is not flushable",
+                fun() ->
+                    t_load_class_module_redefinition_state_after_method_not_flushable(Proj)
+                end},
             {"load_class_module/3 multi-class eval logs no class-def entry", fun() ->
                 t_load_class_module_multi_class_eval_no_class_def_entry(Proj)
             end},
@@ -1954,6 +1958,68 @@ t_load_class_module_redefinition_drops_default_not_flushable(_Proj) ->
     ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
     ?assertEqual(
         <<"class_def_would_drop_field_default">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(0, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(Original, Final).
+
+%% Claude BeamTalk Review finding on this PR (BT-3254): a `state:`/`field:`
+%% declaration positioned AT OR AFTER a method (legal Beamtalk — see
+%% `class_span.rs`'s `excludes_a_method_that_precedes_a_later_state_
+%% declaration` test) is excluded from `resolve_class_span/2`'s clamped span
+%% entirely, but the `:def` tab's skeleton is built from LIVE reflection
+%% (`instance_variables`), which is position-agnostic and always includes
+%% every current field. The field here (`b`) has NO default, so
+%% `class_def_preserves_field_defaults/3` alone does not catch this — there
+%% is nothing to "lose". Splicing the regenerated skeleton (`Actor subclass:
+%% DefStateAfterMethod\n  state: b\n`) into the clamped span (`Actor
+%% subclass: DefStateAfterMethod\n`, ending before `method1`) would
+%% DUPLICATE `state: b` — once newly inserted before the method, once still
+%% present, untouched, after it. Proves the fix: refused, not flushable.
+t_load_class_module_redefinition_state_after_method_not_flushable(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original = <<
+        "Actor subclass: DefStateAfterMethod\n"
+        "  method1 => 1\n"
+        "\n"
+        "  state: b\n"
+    >>,
+    Path = write_bt_under(Proj, "src", "DefStateAfterMethod.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% Fetch the definition text the cockpit `:def` tab would actually show —
+    %% the real browse-class-definition op, not a hand-built `State` list.
+    {value, BrowseValue} = beamtalk_repl_ops_browse:handle_term(
+        <<"browse-class-definition">>,
+        #{<<"class">> => <<"DefStateAfterMethod">>},
+        undefined,
+        self()
+    ),
+    Definition = maps:get(<<"definition">>, BrowseValue),
+    %% Confirms the reflection gap this test guards against is real: the
+    %% live-reflected skeleton carries `b` even though it is declared after
+    %% `method1` on disk — position-agnostic reflection, unlike the disk
+    %% span.
+    ?assert(binary:match(Definition, <<"state: b">>) =/= nomatch),
+    NewSource = binary_to_list(iolist_to_binary([Definition, <<"\n">>])),
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefStateAfterMethod">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefStateAfterMethod">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_state_after_method">>,
         beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
     ),
     {ok, Summary} = beamtalk_workspace_flush:flush(),

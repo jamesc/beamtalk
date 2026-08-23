@@ -58,11 +58,16 @@
 //! from the span by the same clamp (see
 //! `excludes_a_method_that_precedes_a_later_state_declaration` below) — safe
 //! for the read-only diff, but means such a class's full current field list
-//! (from reflection) is not byte-reconstructable from this span alone. That
-//! interleaved/trailing-`state:` style is unusual (no stdlib class uses it)
-//! and is not handled specially by the flush path; it is a known, narrow
-//! limitation inherited from this resolver's existing "never reaches a
-//! method" trade-off, not a new one BT-3254 introduces.
+//! (from reflection) is not byte-reconstructable from this span alone.
+//! Splicing a live-reflected skeleton (which lists every field regardless of
+//! position) into a span that excludes a trailing field would duplicate that
+//! field's declaration rather than losing it. `beamtalk_repl_loader:
+//! class_def_span_contains_all_state_fields/3` (BT-3254 review finding)
+//! guards the flush path against exactly this: it compares
+//! the field set [`class_state_field_defaults`] reports for the whole disk
+//! file against the field set it reports for just the resolved span, and
+//! refuses to flush whenever a field lies outside the span this module
+//! resolves.
 //!
 //! # Span boundaries — also EXCLUDES the doc comment
 //!

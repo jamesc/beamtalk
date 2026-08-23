@@ -820,6 +820,16 @@ default-presence between the disk source and the candidate replacement
 `beamtalk_compiler:class_state_field_defaults/2`) and refuses to flush when a
 field that had a default on disk would lose it — otherwise a byte-accurate,
 method-safe, modifier-complete splice could still silently delete a default.
+
+A third finding (Claude BeamTalk Review, this same PR) closes a related span
+gap: `resolve_class_span/2` clamps its span to end before the class's first
+method, so a `state:`/`field:` declared AT OR AFTER a method (legal Beamtalk)
+is excluded from the span/`PrevSource` entirely — but the live-reflected
+skeleton includes it regardless of position, so splicing the skeleton into
+the clamped span duplicates that field's declaration rather than losing it
+(the field survives, untouched, past the spliced region too).
+`class_def_span_contains_all_state_fields/3` refuses to flush whenever the
+disk class has any field outside the span that would be spliced.
 """.
 -spec add_class_def_flushability(map(), binary()) -> map().
 add_class_def_flushability(Base, ClassNameBin) ->
@@ -923,21 +933,79 @@ class_def_source_is_skeleton_shaped(Source, ClassNameBin) ->
 resolve_class_def_span_entry(#{source := Canonical} = Base, ClassNameBin, SourceFile, DiskSource) ->
     case beamtalk_compiler:resolve_class_span(DiskSource, ClassNameBin) of
         {ok, Span, PrevSource} ->
-            case class_def_preserves_field_defaults(DiskSource, Canonical, ClassNameBin) of
-                true ->
-                    store_class_def_disk_shaped_entry(Base, SourceFile, Span, PrevSource);
+            case class_def_span_contains_all_state_fields(DiskSource, PrevSource, ClassNameBin) of
                 false ->
                     Base#{
                         flushable => false,
-                        not_flushable_reason => <<"class_def_would_drop_field_default">>,
+                        not_flushable_reason => <<"class_def_state_after_method">>,
                         source_file => SourceFile
-                    }
+                    };
+                true ->
+                    case class_def_preserves_field_defaults(DiskSource, Canonical, ClassNameBin) of
+                        true ->
+                            store_class_def_disk_shaped_entry(Base, SourceFile, Span, PrevSource);
+                        false ->
+                            Base#{
+                                flushable => false,
+                                not_flushable_reason => <<"class_def_would_drop_field_default">>,
+                                source_file => SourceFile
+                            }
+                    end
             end;
         {error, Reason, _Message} ->
             %% `class_not_found` (renamed/moved out from under the live class)
             %% or `ambiguous` (duplicate declarations) — either downgrades to
             %% memory-only, same as a method patch's span-resolution failure.
             span_error_entry(Base, SourceFile, Reason)
+    end.
+
+%% True iff EVERY `state:`/`field:` declaration `ClassNameBin` has anywhere in
+%% `DiskSource` (the whole file) is also visible within `SpanText` (the
+%% `resolve_class_span/2`-clamped region that a flush would actually splice
+%% into) — i.e. the disk class has no field declared at or after its first
+%% method.
+%%
+%% Why this exists (Claude BeamTalk Review finding on this PR, BT-3254):
+%% `resolve_class_span/2` deliberately clamps its span to end BEFORE the
+%% class's first method (its own "never reaches a method" guarantee — see
+%% `class_span.rs`'s module doc) — legal Beamtalk allows a `state:`/`field:`
+%% declaration positioned at/after a method, and such a field is EXCLUDED
+%% from the clamped span/`PrevSource`. But the `:def` tab's skeleton is built
+%% from LIVE reflection (`instance_variables`), which is position-agnostic —
+%% it always includes every current field regardless of where it was
+%% declared on disk. `class_def_preserves_field_defaults/3` alone does not
+%% catch this: a field with no default (so nothing to "lose") still gets
+%% written into the skeleton, and splicing that skeleton into the clamped
+%% span duplicates the field's declaration — once newly inserted at the
+%% span's location, once still present, untouched, after the method. Repro:
+%% `Actor subclass: Foo\n  method1 => 1\n\n  state: b\n` (b has no default)
+%% resolves a span of just `Actor subclass: Foo\n`; the regenerated skeleton
+%% `Actor subclass: Foo\n  state: b\n` spliced into that span leaves `state:
+%% b` duplicated in the file (once before `method1`, once after).
+%%
+%% Reuses `beamtalk_compiler:class_state_field_defaults/2` for its field-NAME
+%% enumeration (the boolean default-presence values themselves are unused
+%% here) against BOTH `DiskSource` (every field on disk, any position) and
+%% `SpanText` (only the fields within the region that would actually be
+%% spliced) — any field present in the former but not the latter is exactly
+%% the "declared after the first method" case this guards against.
+-spec class_def_span_contains_all_state_fields(binary(), binary(), binary()) -> boolean().
+class_def_span_contains_all_state_fields(DiskSource, SpanText, ClassNameBin) ->
+    case
+        {
+            beamtalk_compiler:class_state_field_defaults(DiskSource, ClassNameBin),
+            beamtalk_compiler:class_state_field_defaults(SpanText, ClassNameBin)
+        }
+    of
+        {{ok, AllFields}, {ok, SpanFields}} ->
+            sets:is_subset(
+                sets:from_list(maps:keys(AllFields), [{version, 2}]),
+                sets:from_list(maps:keys(SpanFields), [{version, 2}])
+            );
+        _ ->
+            %% Either side failed to resolve — fail closed, same posture as
+            %% `class_def_preserves_field_defaults/3`.
+            false
     end.
 
 %% True iff redefining `ClassNameBin` in `OldSource` (the on-disk file) with
