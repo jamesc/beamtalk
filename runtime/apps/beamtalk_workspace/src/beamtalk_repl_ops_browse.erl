@@ -102,7 +102,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     alias_visible/2,
     alias_row/3,
     package_type_aliases/1,
-    class_definition_text/5
+    class_definition_text/7
 ]).
 -endif.
 
@@ -575,8 +575,17 @@ browse_class_definition(ClassName) ->
             %% the skeleton is built from one `__beamtalk_meta/0` read.
             Meta = native_meta_of(ModName),
             IsTyped = safe_bool(fun() -> beamtalk_runtime_api:is_typed(ClassPid) end),
+            IsSealed = safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
+            IsAbstract = safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
             State = state_slots(ClassPid, Meta),
-            Definition = class_definition_text(ClassName, Super, State, IsTyped, Meta),
+            %% BT-3254: `IsSealed`/`IsAbstract` are now threaded into the skeleton
+            %% itself (see `class_definition_text/7`), not just the sibling
+            %% `sealed`/`abstract` reflection fields below — closing the last
+            %% round-trip gap BT-3255 left open (that one covered `typed`,
+            %% `field:`/`state:`, and `::` type annotations only).
+            Definition = class_definition_text(
+                ClassName, Super, State, IsTyped, IsSealed, IsAbstract, Meta
+            ),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"superclass">> => atom_or_null(Super),
@@ -588,14 +597,14 @@ browse_class_definition(ClassName) ->
                 <<"backing_module">> =>
                     atom_or_null(beamtalk_class_registry:meta_backing_module(Meta)),
                 %% BT-2605: reflected class modifiers for the IDE's editor-header
-                %% modifier badges. The synthesized `definition` skeleton above
-                %% carries no leading modifier keywords, so these come from the
-                %% same runtime reflection op 1 (`browse-classes`) uses — not a
-                %% string parse.
-                <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
+                %% modifier badges. BT-3254: the synthesized `definition` skeleton
+                %% above now also carries these as leading modifier keywords (round-
+                %% trip safety for the `:def` tab's resubmit path), but these fields
+                %% remain the badge source of truth — same runtime reflection op 1
+                %% (`browse-classes`) uses, not a string parse of `definition`.
+                <<"sealed">> => IsSealed,
                 <<"typed">> => IsTyped,
-                <<"abstract">> =>
-                    safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
+                <<"abstract">> => IsAbstract,
                 %% BT-2639: a structural reflection boolean (not a header
                 %% string-sniff) so the System Browser can reliably render the
                 %% protocol-definition action row (Required methods / Conforming
@@ -690,15 +699,31 @@ default_text(Value) ->
 %% `:: Type` suffix comes from its own entry in `State` (present iff that field
 %% was declared with a type — independent of `IsTyped`, which only gates the
 %% header prefix).
--spec class_definition_text(atom(), atom() | none, [map()], boolean(), map()) -> binary().
-class_definition_text(ClassName, Super, State, IsTyped, Meta) ->
+%%
+%% BT-3254: `abstract `/`sealed ` are prepended the same way when `IsAbstract`/
+%% `IsSealed`, closing the round-trip gap `add_class_def_flushability/2`'s doc
+%% used to describe — the cockpit `:def` tab's resubmitted skeleton no longer
+%% silently drops these modifiers on a redefine + flush. The parser
+%% (`parse_class_definition`) accepts `abstract`/`sealed`/`typed`/`internal` in
+%% ANY order (a `while` loop over identifier tokens, each just setting a flag —
+%% see `crates/beamtalk-core/src/source_analysis/parser/declarations.rs`), so a
+%% fixed emission order (`abstract sealed typed`, matching every combination
+%% already used across stdlib — e.g. `abstract typed Value subclass:
+%% Collection(E)`, `abstract sealed Value subclass: Boolean`) round-trips
+%% correctly regardless of the class's original source order.
+-spec class_definition_text(
+    atom(), atom() | none, [map()], boolean(), boolean(), boolean(), map()
+) -> binary().
+class_definition_text(ClassName, Super, State, IsTyped, IsSealed, IsAbstract, Meta) ->
     SuperName =
         case Super of
             none -> <<"Object">>;
             S -> atom_to_binary(S, utf8)
         end,
     Header = [
-        typed_prefix(IsTyped),
+        modifier_prefix(IsAbstract, <<"abstract">>),
+        modifier_prefix(IsSealed, <<"sealed">>),
+        modifier_prefix(IsTyped, <<"typed">>),
         SuperName,
         <<" subclass: ">>,
         atom_to_binary(ClassName, utf8)
@@ -710,9 +735,9 @@ class_definition_text(ClassName, Super, State, IsTyped, Meta) ->
     ],
     iolist_to_binary([Header | StateLines]).
 
--spec typed_prefix(boolean()) -> binary().
-typed_prefix(true) -> <<"typed ">>;
-typed_prefix(false) -> <<>>.
+-spec modifier_prefix(boolean(), binary()) -> iolist().
+modifier_prefix(true, Keyword) -> [Keyword, <<" ">>];
+modifier_prefix(false, _Keyword) -> [].
 
 %% ADR 0067: Actor uses `state:`, Value uses `field:`; Object subclasses carry
 %% no instance data under the ADR. `Meta`'s `kind` (ADR 0070, `object | value |

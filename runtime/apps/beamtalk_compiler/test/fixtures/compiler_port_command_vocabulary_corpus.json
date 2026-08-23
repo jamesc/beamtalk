@@ -16,5 +16,6 @@
   "resolve_method_span",
   "reindent_method_source",
   "resolve_class_span",
-  "categorize_methods"
+  "categorize_methods",
+  "class_state_field_defaults"
 ]

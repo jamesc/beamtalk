@@ -1138,15 +1138,15 @@ flush_kinds_by_class_entry_kind(#{proj_dir := ProjDir}) ->
 %% apply_splices/replacement_for) handles a no-selector, class-level entry
 %% exactly like a method patch, purely at the flush layer.
 %%
-%% `beamtalk_repl_loader` itself never actually produces a `flushable: true`
-%% `'class-def'` entry today — `add_class_def_flushability/2` hardcodes
-%% `flushable: false` for every one, because the cockpit `:def` tab's
-%% resubmitted skeleton drops modifier keywords/type annotations that no
-%% flush can safely reconstruct yet (see that function's doc). This test
-%% constructs a synthetic flushable entry directly (bypassing the loader) so
-%% the flush layer's own `'class-def'` handling — which the loader will reuse
-%% once the skeleton is made round-trip-safe — has coverage now rather than
-%% only once that follow-up ships.
+%% This test constructs a synthetic flushable entry directly (bypassing the
+%% loader) so the flush layer's own `'class-def'` handling has focused
+%% coverage independent of `beamtalk_repl_loader`'s classification logic.
+%% `beamtalk_repl_loader:add_class_def_flushability/2` now also produces a
+%% real `flushable: true` `'class-def'` entry end-to-end (BT-3254, once the
+%% `:def` tab's resubmitted skeleton became round-trip-safe — see that
+%% function's doc) — exercised through the loader in
+%% `beamtalk_repl_loader_tests.erl`'s
+%% `t_load_class_module_redefinition_sealed_typed_round_trips/1`.
 flush_kinds_by_class_def_entry_kind(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "counter.bt"]),
     Original = <<"/// Doc.\nObject subclass: Counter\n  state: value = 0\n">>,
@@ -1908,9 +1908,10 @@ new_class_input(ClassName, Source, File) ->
 %% A synthetic *flushable* `'class-def'` entry (ADR 0082 extension, BT-3248) —
 %% no `selector`/`side` (a class-level redefinition, not a single method), a
 %% `span`/`prev_source` against the on-disk region it replaces. Exercises the
-%% flush layer's `'class-def'` handling directly; `beamtalk_repl_loader`
-%% itself never actually builds an entry with `flushable => true` here today
-%% (see `flush_kinds_by_class_def_entry_kind/1`'s doc for why).
+%% flush layer's `'class-def'` handling directly, independent of
+%% `beamtalk_repl_loader`'s own classification logic (`add_class_def_
+%% flushability/2`, covered end-to-end via the loader in
+%% `beamtalk_repl_loader_tests.erl`, BT-3254).
 class_def_input(Class, NewSource, OldSource, File, Start, End) ->
     #{
         class => Class,

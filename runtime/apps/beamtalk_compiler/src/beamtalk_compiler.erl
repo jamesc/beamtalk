@@ -44,6 +44,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     resolve_method_span/4,
     resolve_class_span/2,
     categorize_methods/2,
+    class_state_field_defaults/2,
     reindent_method_source/2
 ]).
 
@@ -400,13 +401,16 @@ its methods; see
 data-loss bug that boundary avoids — plus the bytes currently occupying it.
 On success: `{ok, Span, PrevSource}'.
 
-Not used for an actual `Workspace flush' splice today: the `:def' tab's
-resubmitted skeleton also drops modifier keywords, the `field:'/`state:'
-keyword choice, and `::' type annotations, so a byte-accurate span alone
-isn't enough to flush safely yet —
-`beamtalk_repl_loader:add_class_def_flushability/2' marks every
-`'class-def'' entry `flushable: false' unconditionally until that's fixed.
-This resolver only backs the dock's read-only diff for now.
+Also backs an actual `Workspace flush' splice (BT-3254): once the `:def' tab's
+resubmitted skeleton (`beamtalk_repl_ops_browse:class_definition_text/7')
+became round-trip-safe — carrying modifier keywords, the `field:'/`state:'
+keyword choice, and `::' type annotations — a byte-accurate span was most of
+what flush needed, so `beamtalk_repl_loader:add_class_def_flushability/2' now
+resolves this span and marks a `'class-def'' entry `flushable: true' when it
+resolves (subject also to `class_state_field_defaults/2''s sibling check
+below, which this span alone cannot guarantee — reflection cannot recover a
+compiled class's field *default-value TEXT*, so the skeleton always renders
+`default => null' even when the disk declaration has one).
 
 A `class_not_found' error means the disk file no longer declares this class
 (renamed/moved out from under the live class); `ambiguous' means the file
@@ -446,6 +450,34 @@ alphabetical listing rather than erroring.
     | {error, atom(), binary()}.
 categorize_methods(Source, ClassName) ->
     beamtalk_compiler_server:categorize_methods(Source, ClassName).
+
+-doc """
+Field-level default-value presence for `ClassName''s `state:'/`field:'
+declarations in `Source' (ADR 0082 extension, BT-3254).
+
+The sibling safety check `resolve_class_span/2' alone cannot provide:
+`beamtalk_repl_ops_browse:class_definition_text/7' builds its skeleton from
+LIVE runtime reflection, and a compiled (non-`ClassBuilder') class's
+`__beamtalk_meta/0' carries only a `field_has_default' *boolean* per field —
+never the default-value *expression text* — so the skeleton always renders
+`default => null' for a field even when the on-disk declaration has one. A
+`'class-def'' entry that spliced such a skeleton into a byte-accurate disk
+span would still silently delete that field's default.
+`beamtalk_repl_loader:add_class_def_flushability/2' calls this function
+against BOTH the on-disk source and the candidate replacement text and
+refuses to flush when a field with a default on disk has none in the
+candidate.
+
+Returns `{ok, #{FieldNameBin => boolean()}}' on success — one entry per
+declared field. `class_not_found' covers both "class not found" and
+"ambiguous" (this caller has no splice-safety span to report, so the finer
+distinction `resolve_class_span/2' makes isn't needed); either degrades to
+"cannot confirm safety", never a crash.
+""".
+-spec class_state_field_defaults(binary(), atom() | binary()) ->
+    {ok, #{binary() => boolean()}} | {error, atom(), binary()}.
+class_state_field_defaults(Source, ClassName) ->
+    beamtalk_compiler_server:class_state_field_defaults(Source, ClassName).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
