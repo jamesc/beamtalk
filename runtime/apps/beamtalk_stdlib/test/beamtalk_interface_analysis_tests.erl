@@ -394,3 +394,165 @@ log_compiler_diagnostics_non_binary_message_returns_ok_test() ->
     Diag = #{message => some_atom},
     Result = beamtalk_interface:log_compiler_diagnostics([Diag], 'test:'),
     ?assertEqual(ok, Result).
+
+%%====================================================================
+%% instance_selectors/1, validated_own_categories/2, method_sig_line/2
+%% (BT-3239) — grouped `Instance methods:` rendering for `:help`/`docs`.
+%%====================================================================
+
+instance_selectors_filters_to_instance_side_test() ->
+    Methods = [
+        #{selector => <<"foo">>, side => instance},
+        #{selector => <<"new">>, side => class},
+        #{selector => <<"bar">>, side => instance}
+    ],
+    ?assertEqual([foo, bar], beamtalk_interface:instance_selectors(Methods)).
+
+instance_selectors_drops_unknown_atom_selector_test() ->
+    %% A selector that isn't a live atom (shouldn't happen in practice —
+    %% every selector comes from the class's own compiled method table) is
+    %% dropped rather than crashing.
+    Methods = [
+        #{selector => <<"foo">>, side => instance},
+        #{selector => <<"bt3239_definitely_not_an_existing_atom_xyz">>, side => instance}
+    ],
+    ?assertEqual([foo], beamtalk_interface:instance_selectors(Methods)).
+
+validated_own_categories_groups_when_selectors_match_test() ->
+    Categories = [
+        #{name => <<"Construction">>, methods => [#{selector => <<"foo">>, side => instance}]},
+        #{name => <<"Arithmetic">>, methods => [#{selector => <<"bar">>, side => instance}]}
+    ],
+    SealedMap = #{foo => false, bar => false},
+    ?assertEqual(
+        [{<<"Construction">>, [foo]}, {<<"Arithmetic">>, [bar]}],
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_drops_class_side_methods_test() ->
+    %% `format_class_help/2`'s "Instance methods:" section is instance-only
+    %% (BT-3087 `collect_flattened_methods` never walks class-side) —
+    %% grouping must preserve that scope even though the Rust categorizer
+    %% interleaves both sides.
+    Categories = [
+        #{
+            name => <<"Construction">>,
+            methods => [
+                #{selector => <<"new">>, side => class},
+                #{selector => <<"foo">>, side => instance}
+            ]
+        }
+    ],
+    SealedMap = #{foo => false},
+    ?assertEqual(
+        [{<<"Construction">>, [foo]}],
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_no_dividers_falls_back_to_undefined_test() ->
+    %% A single implicit, unnamed category (no dividers in the source at
+    %% all) must render exactly as it did before BT-3239 — no lone
+    %% "(uncategorized)" header.
+    Categories = [
+        #{methods => [#{selector => <<"foo">>, side => instance}]}
+    ],
+    SealedMap = #{foo => false},
+    ?assertEqual(
+        undefined,
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_single_named_category_is_kept_test() ->
+    %% Unlike the no-dividers case, a *single real* divider is still real
+    %% grouping information and should render with its header.
+    Categories = [
+        #{name => <<"OnlySection">>, methods => [#{selector => <<"foo">>, side => instance}]}
+    ],
+    SealedMap = #{foo => false},
+    ?assertEqual(
+        [{<<"OnlySection">>, [foo]}],
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_selector_mismatch_falls_back_to_undefined_test() ->
+    %% The on-disk source and the live image have diverged (e.g. an
+    %% unflushed `>>` patch) — a partial grouped view could silently hide a
+    %% method, so this must degrade to the always-correct flat rendering.
+    Categories = [
+        #{name => <<"Section">>, methods => [#{selector => <<"foo">>, side => instance}]}
+    ],
+    SealedMap = #{foo => false, bar => false},
+    ?assertEqual(
+        undefined,
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_empty_category_is_omitted_test() ->
+    %% A category with no instance-side methods left after filtering (e.g.
+    %% it only had class-side methods) contributes no header at all.
+    Categories = [
+        #{name => <<"ClassSideOnly">>, methods => [#{selector => <<"new">>, side => class}]},
+        #{name => <<"Real">>, methods => [#{selector => <<"foo">>, side => instance}]}
+    ],
+    SealedMap = #{foo => false},
+    ?assertEqual(
+        [{<<"Real">>, [foo]}],
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+method_sig_line_sealed_appends_suffix_test() ->
+    ?assertEqual(
+        <<"foo [sealed]">>, beamtalk_interface:method_sig_line(<<"foo">>, true)
+    ).
+
+method_sig_line_unsealed_is_unchanged_test() ->
+    ?assertEqual(<<"foo">>, beamtalk_interface:method_sig_line(<<"foo">>, false)).
+
+%%====================================================================
+%% render_own_methods_part/2 (BT-3239) — the actual `Instance methods:`
+%% string `format_class_help/2` emits, deterministic and independent of a
+%% live class or compiler-port round trip (a dropped indentation prefix in
+%% either branch would fail one of these directly, unlike a live end-to-end
+%% check that depends on the eunit environment's stdlib .beam artifacts
+%% actually carrying a `beamtalk_source` attribute, which they may not).
+%%====================================================================
+
+render_own_methods_part_empty_own_docs_is_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_interface:render_own_methods_part([], undefined)).
+
+render_own_methods_part_flat_indents_every_line_test() ->
+    OwnDocs = [{bar, <<"bar">>, false}, {foo, <<"foo">>, false}],
+    Result = beamtalk_interface:render_own_methods_part(OwnDocs, undefined),
+    ?assertEqual(<<"\nInstance methods:\n  bar\n  foo">>, Result).
+
+render_own_methods_part_flat_sealed_suffix_is_indented_too_test() ->
+    %% Regression guard (BT-3239 review): the flat-fallback branch must
+    %% indent every rendered line, sealed or not — a prior version of this
+    %% function rendered the flat branch flush at column 0.
+    OwnDocs = [{foo, <<"foo">>, true}],
+    Result = beamtalk_interface:render_own_methods_part(OwnDocs, undefined),
+    ?assertEqual(<<"\nInstance methods:\n  foo [sealed]">>, Result),
+    ?assertEqual(nomatch, binary:match(Result, <<"\nfoo">>)).
+
+render_own_methods_part_grouped_indents_header_and_methods_test() ->
+    OwnDocs = [{bar, <<"bar">>, false}, {foo, <<"foo">>, false}],
+    Categories = [{<<"Section">>, [foo, bar]}],
+    Result = beamtalk_interface:render_own_methods_part(OwnDocs, Categories),
+    ?assertEqual(
+        <<"\nInstance methods:\n  === Section ===\n  foo\n  bar">>, Result
+    ).
+
+render_own_methods_part_grouped_uncategorized_leading_bucket_test() ->
+    OwnDocs = [{bar, <<"bar">>, false}, {foo, <<"foo">>, false}],
+    Categories = [{undefined, [foo]}, {<<"Section">>, [bar]}],
+    Result = beamtalk_interface:render_own_methods_part(OwnDocs, Categories),
+    ?assertEqual(
+        <<"\nInstance methods:\n  (uncategorized)\n  foo\n  === Section ===\n  bar">>,
+        Result
+    ).
+
+render_own_methods_part_grouped_sealed_method_is_indented_test() ->
+    OwnDocs = [{foo, <<"foo">>, true}],
+    Categories = [{<<"Section">>, [foo]}],
+    Result = beamtalk_interface:render_own_methods_part(OwnDocs, Categories),
+    ?assertEqual(<<"\nInstance methods:\n  === Section ===\n  foo [sealed]">>, Result).

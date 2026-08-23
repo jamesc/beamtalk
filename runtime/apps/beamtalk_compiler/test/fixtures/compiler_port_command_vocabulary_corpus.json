@@ -15,5 +15,6 @@
   "find_announce_sites_in_source",
   "resolve_method_span",
   "reindent_method_source",
-  "resolve_class_span"
+  "resolve_class_span",
+  "categorize_methods"
 ]
