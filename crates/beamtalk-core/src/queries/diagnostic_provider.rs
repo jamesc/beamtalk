@@ -29,7 +29,7 @@
 
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::semantic_analysis;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 
 /// Project-level context for the unified diagnostic pipeline (BT-2009).
@@ -93,6 +93,9 @@ pub struct ProjectDiagnosticContext<'a> {
 /// # Arguments
 ///
 /// * `module` - The parsed AST
+/// * `source` - The module's raw source text (BT-3240: needed to give the
+///   near-miss-divider check an accurate comment span — see
+///   `crate::lint::near_miss_divider::scan_source`'s doc)
 /// * `initial_diagnostics` - Pre-analysis diagnostics (parse + any earlier passes,
 ///   e.g. `@primitive` validation from the CLI compiler); the function appends
 ///   semantic and post-analysis diagnostics to this list.
@@ -104,10 +107,11 @@ pub struct ProjectDiagnosticContext<'a> {
 #[must_use]
 pub fn compute_project_diagnostics(
     module: &Module,
+    source: &str,
     initial_diagnostics: Vec<Diagnostic>,
     ctx: &ProjectDiagnosticContext<'_>,
 ) -> Vec<Diagnostic> {
-    compute_project_diagnostics_with_analysis(module, initial_diagnostics, ctx).0
+    compute_project_diagnostics_with_analysis(module, source, initial_diagnostics, ctx).0
 }
 
 /// [`compute_project_diagnostics`], additionally returning the
@@ -123,6 +127,7 @@ pub fn compute_project_diagnostics(
 #[must_use]
 pub fn compute_project_diagnostics_with_analysis(
     module: &Module,
+    source: &str,
     initial_diagnostics: Vec<Diagnostic>,
     ctx: &ProjectDiagnosticContext<'_>,
 ) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
@@ -198,11 +203,32 @@ pub fn compute_project_diagnostics_with_analysis(
     // methods below are mis-categorized with no diagnostic. Unlike every
     // other pass in `crate::lint` (which are `beamtalk lint`-only), this one
     // check also runs here so it reaches the LSP's live diagnostics too —
-    // see `crate::lint::check_near_miss_dividers`'s doc for why.
-    crate::lint::check_near_miss_dividers(module, &mut diagnostics);
+    // see `crate::lint::check_near_miss_dividers`'s doc for why. Scans
+    // `source` directly (not `module`) so the diagnostic's span is the
+    // comment's own line, not the AST's (inaccurate, see that doc) token span.
+    crate::lint::check_near_miss_dividers(source, &mut diagnostics);
 
     // BT-782: Apply @expect directives to suppress matching diagnostics.
     apply_expect_directives(module, &mut diagnostics);
+
+    // BT-3240 (adversarial review): set the near-miss-divider diagnostics
+    // above aside before the `[diagnostics]` table runs. `Severity::Lint` is
+    // an unconditional "`beamtalk lint`-only, never build" contract (see
+    // `crate::lint`'s module doc) — nothing else in this pipeline ever
+    // produces one, so this partition can only ever catch that check's own
+    // output. Without it, a project that sets `lint = "error"` would
+    // silently promote *this one* lint's diagnostics to `Severity::Error`
+    // below (the table keys purely on `DiagnosticCategory`, regardless of
+    // starting severity) and `beam_compiler.rs`'s blanket
+    // `Severity::Lint`-skip would no longer catch them post-promotion,
+    // breaking `beamtalk build` — while every other lint pass stays
+    // completely unaffected by that same config key, since none of them
+    // reach this function at all. Keeping the guarantee "true by
+    // construction" here (rather than by severity coincidence) means a
+    // future project config can never make this one check special.
+    let (lint_only_diags, mut diagnostics): (Vec<_>, Vec<_>) = diagnostics
+        .into_iter()
+        .partition(|d| d.severity == Severity::Lint);
 
     // ADR 0100 Rule 3 (BT-2793 / BT-2800): apply the package's `[diagnostics]`
     // table last, after `@expect` suppression and ahead of any
@@ -216,6 +242,7 @@ pub fn compute_project_diagnostics_with_analysis(
         diagnostics,
         &ctx.diagnostics_overrides,
     );
+    diagnostics.extend(lint_only_diags);
 
     (diagnostics, analysis_result)
 }
@@ -2027,7 +2054,7 @@ Object subclass: Foo
 
         // New unified path with default context (no project-level inputs)
         let ctx = ProjectDiagnosticContext::default();
-        let new_diags = compute_project_diagnostics(&module, parse_diags, &ctx);
+        let new_diags = compute_project_diagnostics(&module, source, parse_diags, &ctx);
 
         // Both should contain a DNU hint
         let old_dnu = old_diags
@@ -2069,7 +2096,7 @@ typed Object subclass: Caller
         let (module, parse_diags) = parse(tokens);
 
         let ctx = ProjectDiagnosticContext::default();
-        let diagnostics = compute_project_diagnostics(&module, parse_diags, &ctx);
+        let diagnostics = compute_project_diagnostics(&module, source, parse_diags, &ctx);
 
         let stale = diagnostics
             .iter()
@@ -2109,7 +2136,7 @@ Object subclass: Helper
             cross_file_classes: helper_infos,
             ..Default::default()
         };
-        let diagnostics = compute_project_diagnostics(&user_module, parse_diags, &ctx);
+        let diagnostics = compute_project_diagnostics(&user_module, user_source, parse_diags, &ctx);
 
         // `greet` should NOT produce a DNU hint when Helper is in the hierarchy.
         let dnu_greet = diagnostics
@@ -2118,6 +2145,67 @@ Object subclass: Helper
         assert!(
             !dnu_greet,
             "With cross-file classes, 'greet' should be resolved, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn project_diagnostics_surfaces_near_miss_divider() {
+        // BT-3240: `compute_project_diagnostics` (the LSP-facing pipeline)
+        // must actually surface a near-miss-divider finding, not just the
+        // lint module's own unit tests in isolation.
+        let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        let ctx = ProjectDiagnosticContext::default();
+        let diagnostics = compute_project_diagnostics(&module, source, parse_diags, &ctx);
+
+        let near_miss = diagnostics
+            .iter()
+            .find(|d| d.message.contains("section divider"));
+        let near_miss = near_miss.unwrap_or_else(|| {
+            panic!("expected a near-miss-divider diagnostic, got: {diagnostics:?}")
+        });
+        assert_eq!(near_miss.severity, Severity::Lint);
+    }
+
+    #[test]
+    fn project_diagnostics_lint_error_override_does_not_promote_near_miss_divider() {
+        // BT-3240 (adversarial review): `apply_diagnostics_table` keys
+        // purely on `DiagnosticCategory`, regardless of a diagnostic's
+        // starting severity — so a project that sets `[diagnostics] lint =
+        // "error"` must not be able to promote the near-miss-divider
+        // diagnostic to `Severity::Error` and break `beamtalk build`
+        // (which unconditionally skips `Severity::Lint`, but has no such
+        // exemption for `Error`). Every other lint pass never reaches this
+        // pipeline at all, so this key must stay a no-op for this one too.
+        let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        let mut overrides = crate::compilation::diagnostics_policy::DiagnosticsTable::new();
+        overrides.insert(
+            DiagnosticCategory::Lint,
+            crate::compilation::diagnostics_policy::DiagnosticSeverityOverride::Error,
+        );
+        let ctx = ProjectDiagnosticContext {
+            diagnostics_overrides: overrides,
+            ..Default::default()
+        };
+        let diagnostics = compute_project_diagnostics(&module, source, parse_diags, &ctx);
+
+        let near_miss = diagnostics
+            .iter()
+            .find(|d| d.message.contains("section divider"));
+        let near_miss = near_miss.unwrap_or_else(|| {
+            panic!("expected a near-miss-divider diagnostic, got: {diagnostics:?}")
+        });
+        assert_eq!(
+            near_miss.severity,
+            Severity::Lint,
+            "near-miss-divider severity must never be promoted by the \
+             `[diagnostics]` table, even when `lint = \"error\"` is set — \
+             got: {diagnostics:?}"
         );
     }
 
@@ -2136,7 +2224,7 @@ Object subclass: Helper
             },
             ..Default::default()
         };
-        let diagnostics = compute_project_diagnostics(&module, parse_diags, &ctx);
+        let diagnostics = compute_project_diagnostics(&module, source, parse_diags, &ctx);
 
         let has_shadow = diagnostics
             .iter()
@@ -2162,7 +2250,7 @@ Object subclass: Helper
             },
             ..Default::default()
         };
-        let diagnostics = compute_project_diagnostics(&module, parse_diags, &ctx);
+        let diagnostics = compute_project_diagnostics(&module, source, parse_diags, &ctx);
 
         let has_shadow = diagnostics
             .iter()

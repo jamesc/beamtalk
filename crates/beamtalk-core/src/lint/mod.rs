@@ -92,19 +92,21 @@ pub fn run_lint_passes(module: &Module) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// Runs only the near-miss-divider check (BT-3240) and appends its findings
-/// to `diagnostics`.
+/// Runs the source-text near-miss-divider scan (BT-3240) and appends its
+/// findings to `diagnostics`. See `near_miss_divider::scan_source`'s doc for
+/// why this check has two entry points (this one, plus the AST-based
+/// `NearMissDividerPass` registered in [`all_passes`]) and why this one
+/// takes `source` directly instead of a `Module`.
 ///
 /// Every other pass in this module is [`Severity::Lint`]-only and reachable
 /// solely through [`run_lint_passes`] — via `beamtalk lint` and the MCP
 /// `lint` tool. This one check is additionally wired into
 /// `queries::diagnostic_provider`'s live pipeline (so it also reaches the
 /// LSP's `publishDiagnostics`), because a silently-mis-parsed section
-/// divider is cheap to fix the moment it's written and easy to miss later —
-/// see `near_miss_divider`'s module doc. It stays out of `beamtalk build`'s
-/// output: `beam_compiler.rs` filters every `Severity::Lint` diagnostic
-/// there, matching the "only shown by `beamtalk lint`" contract the rest of
-/// this module relies on.
-pub(crate) fn check_near_miss_dividers(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    near_miss_divider::NearMissDividerPass.check(module, diagnostics);
+/// divider is cheap to fix the moment it's written and easy to miss later.
+/// It stays out of `beamtalk build`'s output: `beam_compiler.rs` filters
+/// every `Severity::Lint` diagnostic there, matching the "only shown by
+/// `beamtalk lint`" contract the rest of this module relies on.
+pub(crate) fn check_near_miss_dividers(source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    diagnostics.extend(near_miss_divider::scan_source(source));
 }
