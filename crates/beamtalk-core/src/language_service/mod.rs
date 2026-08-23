@@ -1763,6 +1763,7 @@ impl LanguageService for SimpleLanguageService {
                 };
                 crate::queries::diagnostic_provider::compute_project_diagnostics(
                     &data.module,
+                    &data.source,
                     data.diagnostics.clone(),
                     &ctx,
                 )
