@@ -115,11 +115,19 @@ fn check_comments(leading: &[Comment], diagnostics: &mut Vec<Diagnostic>) {
 /// comments are out of scope — a divider is inherently a one-line
 /// construct, so a genuine attempt is always on one line; a block comment
 /// whose opening line has no closing `*/` is skipped rather than
-/// misidentified.
+/// misidentified, and (BT-3240 review) every line up to its matching `*/`
+/// is skipped too — otherwise a `// ...` line of ordinary commentary
+/// *inside* a real block comment would be misread as a genuine `//` line
+/// comment the lexer never sees as one.
 #[must_use]
 pub(crate) fn scan_source(source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut offset: u32 = 0;
+    // Tracks whether the line just processed opened a `/* ...` with no
+    // matching `*/` on the same line — every line until (and including) the
+    // one that closes it belongs to that block comment's body, not to
+    // top-level source, and must never be classified on its own.
+    let mut in_block_comment = false;
     for line in source.split_inclusive('\n') {
         let line_len = u32::try_from(line.len()).unwrap_or(u32::MAX);
         let line_span = Span::new(offset, offset + line_len);
@@ -131,6 +139,20 @@ pub(crate) fn scan_source(source: &str) -> Vec<Diagnostic> {
         // recognize the line if trailing spaces before the newline were
         // left in place.
         let trimmed = line.trim();
+
+        if in_block_comment {
+            if trimmed.contains("*/") {
+                in_block_comment = false;
+            }
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("/*") {
+            if !rest.contains("*/") {
+                in_block_comment = true;
+                continue;
+            }
+        }
+
         let Some((kind, content)) = classify_comment_line(trimmed) else {
             continue;
         };
@@ -467,6 +489,20 @@ mod tests {
         // `*/` on the same line) is misidentified as a near-miss.
         let source = "/*\n === Section ===\n*/\n";
         assert!(super::scan_source(source).is_empty());
+    }
+
+    #[test]
+    fn scan_source_ignores_a_near_miss_shaped_line_inside_a_block_comment() {
+        // BT-3240 review: a `//`-shaped line *inside* a real multi-line
+        // `/* ... */` block comment is never a `//` line comment to the
+        // lexer/AST at all — it's ordinary text the block comment swallows.
+        // Without block-comment state tracking, the naive per-line scan
+        // would misclassify it as a genuine `//` near-miss.
+        let source = "/*\n// === Old Behavior ====\n*/\n";
+        assert!(
+            super::scan_source(source).is_empty(),
+            "a commented-out-looking line inside a real block comment must not be flagged"
+        );
     }
 
     #[test]

@@ -29,7 +29,7 @@
 
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::semantic_analysis;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 /// Project-level context for the unified diagnostic pipeline (BT-2009).
@@ -196,39 +196,8 @@ pub fn compute_project_diagnostics_with_analysis(
         );
     }
 
-    // BT-3240: near-miss `// === Name ===` section-divider comments (typoed
-    // `=` run lengths, too-short runs, or a `///`/`/* */` comment where the
-    // divider convention requires a plain `//` line) get no signal anywhere
-    // today — they silently fall back to an ordinary comment and the
-    // methods below are mis-categorized with no diagnostic. Unlike every
-    // other pass in `crate::lint` (which are `beamtalk lint`-only), this one
-    // check also runs here so it reaches the LSP's live diagnostics too —
-    // see `crate::lint::check_near_miss_dividers`'s doc for why. Scans
-    // `source` directly (not `module`) so the diagnostic's span is the
-    // comment's own line, not the AST's (inaccurate, see that doc) token span.
-    crate::lint::check_near_miss_dividers(source, &mut diagnostics);
-
     // BT-782: Apply @expect directives to suppress matching diagnostics.
     apply_expect_directives(module, &mut diagnostics);
-
-    // BT-3240 (adversarial review): set the near-miss-divider diagnostics
-    // above aside before the `[diagnostics]` table runs. `Severity::Lint` is
-    // an unconditional "`beamtalk lint`-only, never build" contract (see
-    // `crate::lint`'s module doc) — nothing else in this pipeline ever
-    // produces one, so this partition can only ever catch that check's own
-    // output. Without it, a project that sets `lint = "error"` would
-    // silently promote *this one* lint's diagnostics to `Severity::Error`
-    // below (the table keys purely on `DiagnosticCategory`, regardless of
-    // starting severity) and `beam_compiler.rs`'s blanket
-    // `Severity::Lint`-skip would no longer catch them post-promotion,
-    // breaking `beamtalk build` — while every other lint pass stays
-    // completely unaffected by that same config key, since none of them
-    // reach this function at all. Keeping the guarantee "true by
-    // construction" here (rather than by severity coincidence) means a
-    // future project config can never make this one check special.
-    let (lint_only_diags, mut diagnostics): (Vec<_>, Vec<_>) = diagnostics
-        .into_iter()
-        .partition(|d| d.severity == Severity::Lint);
 
     // ADR 0100 Rule 3 (BT-2793 / BT-2800): apply the package's `[diagnostics]`
     // table last, after `@expect` suppression and ahead of any
@@ -242,7 +211,42 @@ pub fn compute_project_diagnostics_with_analysis(
         diagnostics,
         &ctx.diagnostics_overrides,
     );
-    diagnostics.extend(lint_only_diags);
+
+    // BT-3240: near-miss `// === Name ===` section-divider comments (typoed
+    // `=` run lengths, too-short runs, or a `///`/`/* */` comment where the
+    // divider convention requires a plain `//` line) get no signal anywhere
+    // today — they silently fall back to an ordinary comment and the
+    // methods below are mis-categorized with no diagnostic. Unlike every
+    // other pass in `crate::lint` (which are `beamtalk lint`-only), this one
+    // check also runs here so it reaches the LSP's live diagnostics too —
+    // see `crate::lint::check_near_miss_dividers`'s doc for why. Scans
+    // `source` directly (not `module`) so the diagnostic's span is the
+    // comment's own line, not the AST's (inaccurate, see that doc) token span.
+    //
+    // Deliberately appended *after* both `apply_expect_directives` and
+    // `apply_diagnostics_table` (adversarial review, BT-3240) rather than
+    // mixed into `diagnostics` beforehand:
+    // - `apply_expect_directives` matches an `@expect` directive to a
+    //   diagnostic by `target_span.contains(diag.span)`, where `target_span`
+    //   is the annotated *declaration's* span — which never includes that
+    //   declaration's own *leading comments*. A near-miss-divider comment's
+    //   span (the comment's own line) can therefore never be contained in
+    //   any declaration's span, so no `@expect` (not even `@expect all`)
+    //   could ever have matched one — running it through that pass first
+    //   would be a no-op at best, so skipping it changes nothing observable.
+    // - `apply_diagnostics_table` promotes/demotes purely by
+    //   `DiagnosticCategory`, not by which pass produced a diagnostic. Two
+    //   pre-existing `semantic_analysis` checks (`check_effect_free_statements`,
+    //   BT-951; the BT-2140 redundant-type-annotation check) also emit
+    //   `Severity::Lint` diagnostics tagged `DiagnosticCategory::Lint` and
+    //   *do* need the table applied to them (a project's `[diagnostics] lint
+    //   = "..."` must still control those) — so this can't be solved by
+    //   filtering on severity or category before the table runs; appending
+    //   after it is what keeps every other check's table behavior
+    //   unaffected while still guaranteeing *this* check's diagnostics can
+    //   never be promoted to a build-breaking severity by any project
+    //   config, by construction rather than by coincidence.
+    crate::lint::check_near_miss_dividers(source, &mut diagnostics);
 
     (diagnostics, analysis_result)
 }
@@ -773,7 +777,7 @@ fn collect_directives_from_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use crate::source_analysis::{Severity, lex_with_eof, parse};
 
     #[test]
     fn compute_diagnostics_returns_parse_errors() {
