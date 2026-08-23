@@ -1459,6 +1459,21 @@ mod tests {
         path
     }
 
+    /// Exec `launcher` once, synchronously, and return its exit status —
+    /// warms the OS's one-time "cold exec" cost for a brand-new script file
+    /// (BT-3241, BT-3250) so a subsequent *timed* exec of the same file
+    /// isn't racing that one-time cost against a tight grace window. Only
+    /// suitable for a launcher that's expected to exit on its own quickly;
+    /// see `spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log`
+    /// for the spawn-then-kill variant this doesn't cover (a launcher that
+    /// never exits by itself).
+    #[cfg(unix)]
+    fn warm_up_launcher_exec(launcher: &std::path::Path) -> std::process::ExitStatus {
+        Command::new(launcher)
+            .status()
+            .expect("warm-up exec of the launcher should run")
+    }
+
     #[cfg(unix)]
     #[test]
     fn build_launch_command_errors_on_launcher_platform_mismatch() {
@@ -1706,9 +1721,7 @@ mod tests {
         // deadline, forces that one-time tax to happen before the timed
         // retry logic below starts, so all three *measured* attempts exec
         // an already-warm file.
-        let warmup_status = Command::new(&launcher)
-            .status()
-            .expect("warm-up exec of the launcher should run");
+        let warmup_status = warm_up_launcher_exec(&launcher);
         assert_eq!(
             warmup_status.code(),
             Some(1),
@@ -1779,9 +1792,7 @@ mod tests {
         // synchronously and with no deadline, forces that one-time tax to
         // happen before the timed retry logic below ever starts, so all
         // three *measured* attempts exec an already-warm file.
-        let warmup_status = Command::new(&launcher)
-            .status()
-            .expect("warm-up exec of the launcher should run");
+        let warmup_status = warm_up_launcher_exec(&launcher);
         assert!(
             warmup_status.success() || warmup_status.code() == Some(1),
             "warm-up exec should either succeed or hit the script's own \
