@@ -775,22 +775,23 @@ disk_class_body/2` can compute a diff against it — never to decide
 `flushable`, which is hardcoded `false` here on purpose.
 
 Why: the cockpit `:def` tab recompiles a *synthesized* skeleton
-(`beamtalk_repl_ops_browse:class_definition_text/3` — `{Superclass}
-subclass: {Name}` plus one bare `state: {field} = {default}` line per
-instance variable) that is missing information no flush can safely
-reconstruct — modifier keywords (`sealed`/`typed`/`abstract`), the
-`field:'/`state:' keyword choice, and `::' type annotations are all silently
-dropped from what gets resubmitted at Compile. An earlier version of this
-function resolved a real on-disk span (`beamtalk_compiler:resolve_class_span/2`)
-and marked the entry flushable whenever that span resolved — even with a span
-correctly bounded to exclude every method (a first, more dangerous version of
-that resolver did not, and would have deleted a class's methods from disk on
+(`beamtalk_repl_ops_browse:class_definition_text/5` — `{typed }{Superclass}
+subclass: {Name}` plus one `field:`/`state:` line per instance variable, per
+ADR 0067/BT-3255) that is still missing information no flush can safely
+reconstruct — the `sealed`/`abstract` modifier keywords are silently dropped
+from what gets resubmitted at Compile (BT-3255 closed the `typed`/`field:`-
+`state:`-keyword/`::`-type-annotation gaps this paragraph used to describe;
+`sealed`/`abstract` remain open). An earlier version of this function resolved
+a real on-disk span (`beamtalk_compiler:resolve_class_span/2`) and marked the
+entry flushable whenever that span resolved — even with a span correctly
+bounded to exclude every method (a first, more dangerous version of that
+resolver did not, and would have deleted a class's methods from disk on
 flush; see `crates/beamtalk-core/src/source_analysis/class_span.rs`'s module
 doc), splicing the skeleton in would still have silently downgraded e.g.
 `sealed typed Value subclass: Foo` + `field: x :: Integer` to
-`Value subclass: Foo` + `state: x` on every ordinary flush, for any class
-using those features — caught in adversarial review before this shipped
-(BT-3248). Fixing that needs the `:def` tab's skeleton itself made
+`typed Value subclass: Foo` + `field: x :: Integer` on every ordinary flush,
+for any `sealed`/`abstract` class — caught in adversarial review before this
+shipped (BT-3248). Fixing that needs the `:def` tab's skeleton itself made
 round-trip-safe first (tracked as a follow-up); until then, every
 `'class-def'` entry stays visible in the CHANGES dock (with a computed diff —
 see `disk_class_body/2`) but is never a `Workspace flush` candidate.
