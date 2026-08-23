@@ -34,6 +34,7 @@ use super::type_resolver;
 use super::types::DynamicReason;
 use super::types::{InferredType, TypeProvenance};
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
+use crate::semantic_analysis::string_utils::split_top_level_maps;
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -198,72 +199,6 @@ fn parse_erlang_spec_term(term: &str) -> Vec<FunctionSignature> {
         } else {
             seen.insert(key, (result.len(), is_bare));
             result.push(sig);
-        }
-    }
-
-    result
-}
-
-/// Splits a string containing multiple Erlang maps at the top level.
-///
-/// Maps are delimited by `#{...}` with possible nesting. We split on `,#{`
-/// patterns that occur at nesting depth 0.
-fn split_top_level_maps(input: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut depth = 0;
-    let mut start = 0;
-    let bytes = input.as_bytes();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        match bytes[i] {
-            b'#' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
-                depth += 1;
-                i += 2;
-            }
-            b'{' => {
-                depth += 1;
-                i += 1;
-            }
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    // End of a top-level map
-                    result.push(&input[start..=i]);
-                    // Skip comma and whitespace after the closing brace
-                    i += 1;
-                    while i < bytes.len()
-                        && (bytes[i] == b',' || bytes[i] == b' ' || bytes[i] == b'\n')
-                    {
-                        i += 1;
-                    }
-                    start = i;
-                    continue;
-                }
-                i += 1;
-            }
-            b'<' if i + 1 < bytes.len() && bytes[i + 1] == b'<' => {
-                // Skip binary literal: <<"...">>
-                i += 2;
-                while i < bytes.len() {
-                    if bytes[i] == b'>' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
-                        i += 2;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-
-    // If there's remaining content (shouldn't happen for well-formed input)
-    if start < bytes.len() && depth == 0 {
-        let remainder = input[start..].trim();
-        if !remainder.is_empty() {
-            result.push(remainder);
         }
     }
 
