@@ -2574,6 +2574,29 @@ impl LanguageServer for Backend {
     /// row, which documents BT-2601's outline nesting as AST-only for the
     /// same reason: folding ranges are inter-method file structure, not a
     /// property surfaced by a loaded class with no source in hand).
+    ///
+    /// Returning `Ok(None)` (JSON `null`) rather than `Ok(Some(vec![]))` for
+    /// a divider-less file is load-bearing, not a style choice: `null` is
+    /// how a `textDocument/foldingRange` response tells VS Code "this
+    /// provider has nothing to say," which is what lets the editor fall
+    /// back to its own indentation-based folding for that request. An empty
+    /// array is a *real, if vacuous, answer* and editors are not obligated
+    /// to fall back on one. Do not simplify away the `is_empty()` branch
+    /// below.
+    ///
+    /// Known limitation (review finding, BT-3237): registering
+    /// `folding_range_provider` at all opts every `.bt` file — including
+    /// ones with no dividers — out of VS Code's default indentation-based
+    /// folding strategy once `editor.foldingStrategy` is `"auto"` (the
+    /// default), per the LSP folding spec's provider-registration model.
+    /// This handler answers only the divider-category ranges the BT-3237
+    /// acceptance criteria call for, not per-class/per-method ranges, so a
+    /// file that used to fold at every method (via indentation) may fold
+    /// only at its divider banners after this ships. Tracked for follow-up
+    /// rather than fixed here, since restoring parity would mean emitting
+    /// class/method ranges too — a materially larger scope change than
+    /// this issue's stated contract ("`None`/empty for a class with
+    /// [dividers]").
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = &params.text_document.uri;
         let Some(path) = self.resolve_path_for_uri(uri) else {

@@ -21,9 +21,9 @@
     "comments": {
       "patterns": [
         {
-          "comment": "BT-3237: `// === Name ===` section-divider banner (BT-2601's category-recognition rule, source_analysis::method_category::parse_divider_name) — matched ahead of the plain line-comment pattern below so it renders visually distinct (bold heading name, dimmed border) instead of as an ordinary comment. `(?!/)` after the slashes excludes `///` doc comments, which BT-2601 never treats as dividers.",
+          "comment": "BT-3237: `// === Name ===` section-divider banner (BT-2601's category-recognition rule, source_analysis::method_category::parse_divider_name) — matched ahead of the plain line-comment pattern below so it renders visually distinct (bold heading name, dimmed border) instead of as an ordinary comment. `(?<!/)` / `(?!/)` around the slashes excludes `///` doc comments (and any longer run) — without both, a lookahead alone still lets the regex match starting at the 2nd/3rd slash of a `///` line, since the character immediately after that inner `//` is a space, not another `/`. The closing border is `\\1` (a backreference to the opening `={3,}` run, not an independent capture) so a length mismatch like `// === Name ====` — which `parse_divider_name` rejects as not a divider — fails to match here too, the same as the Rust rule.",
           "name": "comment.line.double-slash.section-divider.beamtalk",
-          "match": "//(?!/)\\s*(=+)\\s+(.+?)\\s+(=+)\\s*$",
+          "match": "(?<!/)//(?!/)\\s*(={3,})\\s+(.+?)\\s+(\\1)\\s*$",
           "captures": {
             "1": { "name": "punctuation.section.divider.beamtalk" },
             "2": { "name": "entity.name.section.beamtalk markup.heading.beamtalk" },

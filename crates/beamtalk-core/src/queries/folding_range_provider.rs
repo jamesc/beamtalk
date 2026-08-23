@@ -42,14 +42,27 @@ pub fn compute_folding_ranges(module: &Module, source: &str) -> Vec<Span> {
 
     for class in &module.classes {
         for category in source_analysis::categorize_methods(class, source) {
-            if category.name.is_none() {
+            // Skip the implicit unnamed leading category, and — review
+            // finding (BT-3237) — skip a *named* category with zero methods
+            // too: a divider can precede any class member (BT-2601), so
+            // `// === Beta ===\nstate: x = 0` (divider directly above a
+            // state/classState declaration with no method before the next
+            // divider or end of class) produces a named category whose
+            // `methods` is empty. `MethodCategory::span()` still resolves
+            // for that case — it degenerates to just `divider_span`, the
+            // banner line plus its trailing newline — which would emit a
+            // folding range with nothing but the divider itself as "body"
+            // (start_line == the divider's line, end_line == the next
+            // line), a misleading fold marker with no real content to
+            // collapse. Requiring a non-empty `methods` list keeps this
+            // aligned with what a category container actually represents.
+            if category.name.is_none() || category.methods.is_empty() {
                 continue;
             }
-            // A named category always has at least one method (it is only
-            // created while processing one that starts a new category), so
-            // `span()` should always resolve here. Defensively skip rather
-            // than emit a bogus range if it doesn't (e.g. a stale AST that
-            // no longer matches `source`).
+            // A non-empty named category always has a resolvable span (its
+            // own methods' spans alone are enough to merge, even if
+            // `divider_span` couldn't be re-found in `source`). Defensively
+            // skip rather than emit a bogus range if it doesn't.
             if let Some(span) = category.span() {
                 ranges.push(span);
             }
@@ -159,5 +172,53 @@ Object subclass: B
         let module = parse_module(source);
         let ranges = compute_folding_ranges(&module, source);
         assert_eq!(ranges.len(), 2);
+    }
+
+    #[test]
+    fn named_category_with_no_methods_contributes_no_range() {
+        // Review finding (BT-3237): a divider can precede any class member
+        // (BT-2601), not only a method. A divider directly above a
+        // `state:`/`classState:` declaration with no method before the next
+        // divider or the end of the class produces a named category whose
+        // `methods` list is empty. Without the `methods.is_empty()` guard,
+        // `MethodCategory::span()` still resolves for this case (it
+        // degenerates to just `divider_span`), which would emit a folding
+        // range spanning nothing but the divider's own banner line — a
+        // misleading fold marker with no real content to collapse.
+        let source = "\
+Object subclass: Counter
+  foo => 1
+
+  // === Beta ===
+  state: x = 0
+";
+        let module = parse_module(source);
+        let ranges = compute_folding_ranges(&module, source);
+        assert!(
+            ranges.is_empty(),
+            "an empty-methods named category must not become a folding range, got {ranges:?}"
+        );
+    }
+
+    #[test]
+    fn crlf_line_endings_produce_the_same_ranges_as_lf() {
+        let lf_source = "\
+Object subclass: Counter
+  // === Section ===
+  bar => 2
+  baz => 3
+";
+        let crlf_source = lf_source.replace('\n', "\r\n");
+        let lf_module = parse_module(lf_source);
+        let crlf_module = parse_module(&crlf_source);
+
+        let lf_ranges = compute_folding_ranges(&lf_module, lf_source);
+        let crlf_ranges = compute_folding_ranges(&crlf_module, &crlf_source);
+
+        assert_eq!(lf_ranges.len(), 1);
+        assert_eq!(crlf_ranges.len(), 1);
+        let crlf_text = &crlf_source[crlf_ranges[0].as_range()];
+        assert!(crlf_text.starts_with("  // === Section ==="));
+        assert!(crlf_text.trim_end().ends_with("baz => 3"));
     }
 }
