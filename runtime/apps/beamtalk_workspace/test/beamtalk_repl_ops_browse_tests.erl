@@ -351,11 +351,13 @@ real_stdlib_delegate_callers_test_() ->
 
 %% Boot the real runtime + stdlib so `Subprocess`'s facade module is loaded from
 %% its real compiled BEAM — not a hand-written test double — and registered as a
-%% live class process. Delegates to the shared `beamtalk_workspace_test_boot`
-%% fixture (same helper `beamtalk_repl_docs_tests`'s integration tests use in this
-%% app's test suite) rather than a second copy of the boot/wait sequence.
+%% live class process. Delegates to the shared `beamtalk_test_boot` (in
+%% `beamtalk_test_support`) fixture (same helper `beamtalk_repl_docs_tests`'s
+%% integration tests use in this app's test suite, and BT-3251's
+%% `beamtalk_stdlib` regression test uses too) rather than a second copy of
+%% the boot/wait sequence.
 real_stdlib_setup() ->
-    beamtalk_workspace_test_boot:boot_real_stdlib('Subprocess').
+    beamtalk_test_boot:boot_real_stdlib('Subprocess').
 
 %%====================================================================
 %% browse-native-modules — enumeration + filter + source-path (BT-2648)

@@ -686,10 +686,22 @@ discover_test_methods(FlatMethods) ->
     ),
     lists:sort(TestMethods).
 
--doc "Discover test methods from module exports (BIF fallback path).".
+-doc """
+Discover test methods from module exports (BIF fallback path).
+
+BT-3251: uses `beamtalk_module_activation:safe_module_exports/1` rather than
+`Module:module_info(exports)`. `Module` here is a real Beamtalk-compiled
+`bt@`-prefixed test class, and Beamtalk's Core Erlang codegen compiles
+straight to Core Erlang via `compile:forms(..., [from_core | Opts])`
+(CLAUDE.md), which never runs the abstract-form `sys_pre_expand` compiler
+pass that auto-injects `module_info/0,1` — so a compiled test module never
+has `module_info/1`, and calling it here raised an uncaught `undef` for every
+real test class run through the BIF-fallback path (`run_all/1`,
+`run_single/2`, `run_all_structured/1`).
+""".
 -spec discover_test_methods_from_module(atom()) -> [atom()].
 discover_test_methods_from_module(Module) ->
-    Exports = Module:module_info(exports),
+    Exports = beamtalk_module_activation:safe_module_exports(Module),
     TestMethods = lists:filtermap(
         fun({FunName, _Arity}) ->
             case atom_to_list(FunName) of
@@ -743,7 +755,7 @@ resolve_module(ClassName) ->
 Run a single test method with setUp/tearDown lifecycle (BT-440).
 
 FlatMethods is either a map (from gen_server state) or 'none' (BIF fallback).
-When 'none', uses module_info(exports) to check for setUp/tearDown.
+When 'none', uses safe_module_exports/1 (BT-3251) to check for setUp/tearDown.
 Creates fresh instance, runs lifecycle, returns pass/fail.
 tearDown always runs, even if the test fails.
 """.
@@ -855,12 +867,19 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
             {fail, MethodName, SetupMsg}
     end.
 
--doc "Check for setUp/tearDown methods, using FlatMethods map or module exports.".
+-doc """
+Check for setUp/tearDown methods, using FlatMethods map or module exports.
+
+BT-3251: the `none` clause reads exports via
+`beamtalk_module_activation:safe_module_exports/1`, not
+`Module:module_info(exports)` — see `discover_test_methods_from_module/1`
+for why the BIF-fallback path can never rely on `module_info/1`.
+""".
 -spec check_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
 check_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
     {maps:is_key(setUp, FlatMethods), maps:is_key(tearDown, FlatMethods)};
 check_lifecycle_methods(Module, none) ->
-    Exports = Module:module_info(exports),
+    Exports = beamtalk_module_activation:safe_module_exports(Module),
     {lists:keymember(setUp, 1, Exports), lists:keymember(tearDown, 1, Exports)}.
 
 -doc """
@@ -943,12 +962,19 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
             end
     end.
 
--doc "Check for setUpOnce/tearDownOnce methods (BT-1549).".
+-doc """
+Check for setUpOnce/tearDownOnce methods (BT-1549).
+
+BT-3251: the `none` clause reads exports via
+`beamtalk_module_activation:safe_module_exports/1`, not
+`Module:module_info(exports)` — see `discover_test_methods_from_module/1`
+for why the BIF-fallback path can never rely on `module_info/1`.
+""".
 -spec check_suite_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
 check_suite_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
     {maps:is_key(setUpOnce, FlatMethods), maps:is_key(tearDownOnce, FlatMethods)};
 check_suite_lifecycle_methods(Module, none) ->
-    Exports = Module:module_info(exports),
+    Exports = beamtalk_module_activation:safe_module_exports(Module),
     {lists:keymember(setUpOnce, 1, Exports), lists:keymember(tearDownOnce, 1, Exports)}.
 
 -doc "Run tearDownOnce, swallowing errors to avoid masking test results (BT-1549).".

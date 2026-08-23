@@ -1323,7 +1323,7 @@ meta_is_native(Meta) ->
 %% selectors are never delegated this way, so they are always `false`.
 -spec is_native_delegate(atom(), boolean(), atom()) -> boolean().
 is_native_delegate(ModName, false, Selector) when is_atom(ModName) ->
-    delegate_exported(safe_module_exports(ModName), Selector);
+    delegate_exported(beamtalk_module_activation:safe_module_exports(ModName), Selector);
 is_native_delegate(_ModName, _ClassSide, _Selector) ->
     false.
 
@@ -1401,7 +1401,7 @@ delegate_rows_for_class_name(ClassName, Module) ->
                 ModName = beamtalk_runtime_api:module_name(Pid),
                 case beamtalk_class_registry:meta_backing_module(native_meta_of(ModName)) of
                     Module ->
-                        Exports = safe_module_exports(ModName),
+                        Exports = beamtalk_module_activation:safe_module_exports(ModName),
                         [delegate_row(ClassName, Sel) || Sel <- self_delegate_selectors(Exports)];
                     _ ->
                         []
@@ -1409,37 +1409,6 @@ delegate_rows_for_class_name(ClassName, Module) ->
         end
     catch
         _:_ -> []
-    end.
-
-%% BT-3242: `ModName:module_info(exports)` is unreliable for a
-%% Beamtalk-compiled module. Beamtalk's Core Erlang codegen compiles straight
-%% to Core Erlang and feeds it to `compile:forms(..., [from_core | Opts])`
-%% (CLAUDE.md), which never runs the abstract-form `sys_pre_expand` compiler
-%% pass that auto-injects `module_info/0,1` — so every Beamtalk-compiled
-%% (`bt@...`) module lacks `module_info/1`, and `ModName:module_info(exports)`
-%% always raised `undef` for one, which this function's old `try/catch`
-%% silently swallowed to `[]`. That made `delegate_callers_of_native_module/1`
-%% return `[]` for every real native-backed class (the bug this fixes), and
-%% `is_native_delegate/3` (the other native-delegate check site) shared the
-%% same blind spot via its own copy of the same catch — now routed through
-%% here instead of duplicating it.
-%%
-%% `beam_lib:chunks/2` reads the compiled Exports chunk straight from the
-%% object code, independent of whether the module exports `module_info` at
-%% all — the same `code:get_object_code/1` + `beam_lib:chunks/2` pattern
-%% `beamtalk_module_activation:extract_class_info_from_loaded/1` already uses
-%% to read a module's `beamtalk_class` attribute without forcing a
-%% `module_info` call.
--spec safe_module_exports(atom()) -> [{atom(), arity()}].
-safe_module_exports(ModName) ->
-    case code:get_object_code(ModName) of
-        {ModName, Beam, _Filename} ->
-            case beam_lib:chunks(Beam, [exports]) of
-                {ok, {ModName, [{exports, Exports}]}} -> Exports;
-                _ -> []
-            end;
-        _ ->
-            []
     end.
 
 %% The `self delegate` instance selectors a facade exposes, recovered from its

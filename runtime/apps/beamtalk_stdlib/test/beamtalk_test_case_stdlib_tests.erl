@@ -454,6 +454,82 @@ run_single_structured_fail_test() ->
     ?assertEqual(1, maps:get(failed, Result)).
 
 %%% ============================================================================
+%%% BT-3251 regression: BIF-fallback path against a REAL Beamtalk-compiled
+%%% TestCase subclass — 'bt@bif_fallback_test_case', compiled by
+%%% compile_fixtures.escript from
+%%% runtime/apps/beamtalk_runtime/test_fixtures/bif_fallback_test_case.bt —
+%%% NOT a hand-written .erl stub like bt@tc_stub.erl above.
+%%%
+%%% A hand-written .erl module gets module_info/0,1 auto-injected by the
+%%% ordinary erlc pipeline, so the run_all_with_tests_test() etc. tests above
+%%% never exercised the actual bug: Beamtalk's Core Erlang codegen compiles
+%%% straight to Core Erlang via compile:forms(..., [from_core | Opts])
+%%% (CLAUDE.md), which never runs the sys_pre_expand pass that injects
+%%% module_info/0,1 — so a genuinely compiled bt@ module has no
+%%% module_info/1, and Module:module_info(exports) raised an uncaught undef
+%%% for one. discover_test_methods_from_module/1, check_lifecycle_methods/2,
+%%% and check_suite_lifecycle_methods/2 now go through
+%%% beamtalk_module_activation:safe_module_exports/1 instead, which reads
+%%% the compiled Exports chunk directly and never depends on module_info/1.
+%%%
+%%% BifFallbackTestCase's testPasses/testFails inherit assert:equals: from
+%%% the real TestCase.bt hierarchy, so the class registry must actually be
+%%% booted first — boot_real_stdlib/1 (shared with beamtalk_workspace's
+%%% integration tests, see beamtalk_test_support:beamtalk_test_boot) starts
+%%% beamtalk_runtime and runs beamtalk_stdlib:init/0 before the assertions
+%%% run, the same way a hand-written stub (which needs none of that
+%%% machinery) never had to.
+%%%
+%%% The canary passed to boot_real_stdlib/1 is 'TestCase' itself, NOT
+%%% 'BifFallbackTestCase': the fixture is loaded ad hoc via
+%%% resolve_module/1's own code:ensure_loaded/1 (mirroring how a real BIF
+%%% fallback caller would reach an arbitrary compiled test class), not
+%%% through beamtalk_stdlib:init/0's activation walk — so it never gets a
+%%% live class gen_server process of its own and
+%%% beamtalk_class_registry:whereis_class/1 would never resolve it.
+%%% Waiting on 'TestCase' instead confirms the real ancestor chain
+%%% (TestCase -> Value -> Object -> ProtoObject) that assert:equals: needs
+%%% is loaded and registered before dispatching into the fixture.
+%%% ============================================================================
+
+bif_fallback_setup() ->
+    beamtalk_test_boot:boot_real_stdlib('TestCase').
+
+bif_fallback_bif_path_test_() ->
+    {setup, fun bif_fallback_setup/0, fun(_) -> ok end, [
+        {"run_all/1 discovers + runs both test methods without crashing", fun() ->
+            %% resolve_module('BifFallbackTestCase') -> 'bt@bif_fallback_test_case';
+            %% discover_test_methods_from_module/1 finds testPasses + testFails via
+            %% safe_module_exports/1. Pre-fix, this raised an uncaught `undef`.
+            Result = beamtalk_test_case:run_all('BifFallbackTestCase'),
+            ?assert(is_binary(Result)),
+            ?assertNotEqual(nomatch, binary:match(Result, <<"2 tests, 1 passed, 1 failed">>))
+        end},
+        {"run_single/2 passes a genuinely passing test", fun() ->
+            Result = beamtalk_test_case:run_single('BifFallbackTestCase', testPasses),
+            ?assert(is_binary(Result)),
+            ?assertNotEqual(nomatch, binary:match(Result, <<"1 tests, 1 passed">>))
+        end},
+        {"run_single/2 fails a genuinely failing test", fun() ->
+            Result = beamtalk_test_case:run_single('BifFallbackTestCase', testFails),
+            ?assert(is_binary(Result)),
+            ?assertNotEqual(nomatch, binary:match(Result, <<"1 tests, 0 passed, 1 failed">>))
+        end},
+        {"run_all_structured/1 reports the same pass/fail split", fun() ->
+            %% Exercises check_lifecycle_methods/2 and
+            %% check_suite_lifecycle_methods/2 too (the fixture has
+            %% setUp/tearDown and setUpOnce/tearDownOnce), not just
+            %% discover_test_methods_from_module/1.
+            Result = beamtalk_test_case:run_all_structured('BifFallbackTestCase'),
+            ?assert(is_map(Result)),
+            ?assertEqual('BifFallbackTestCase', maps:get(class, Result)),
+            ?assertEqual(2, maps:get(total, Result)),
+            ?assertEqual(1, maps:get(passed, Result)),
+            ?assertEqual(1, maps:get(failed, Result))
+        end}
+    ]}.
+
+%%% ============================================================================
 %%% extract_error_kind/1 clauses via should_raise/2
 %%%
 %%% extract_error_kind/1 is private but reachable via the public should_raise/2

@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3251: a real TestCase subclass compiled through the actual Beamtalk
+// pipeline (Core Erlang → `compile:forms(..., [from_core | Opts])`, no
+// `module_info/1`) — used to exercise `beamtalk_test_case`'s "BIF fallback"
+// path (`run_all/1`, `run_single/2`, `run_all_structured/1`) against a
+// genuinely compiled module. A hand-written `.erl` test double (like
+// `bt@tc_stub.erl`) gets `module_info` auto-injected by the ordinary erlc
+// pipeline and can't reproduce the bug this fixture was added to catch.
+//
+// setUp and setUpOnce actually set observable state (rather than returning
+// nil) so the regression test can tell `check_lifecycle_methods/2` and
+// `check_suite_lifecycle_methods/2` genuinely ran them on the BIF fallback
+// path, not merely that discovering them didn't crash — a nil-returning
+// setUp is `is_valid_setUp_result/2`-rejected and falls back to the
+// pre-setUp instance either way, so it wouldn't tell the two cases apart.
+TestCase subclass: BifFallbackTestCase
+  field: setUpRan = false
+
+  setUp => self withSetUpRan: true
+
+  tearDown => nil
+
+  setUpOnce => #{#suite => "fixture"}
+
+  tearDownOnce => nil
+
+  testPasses =>
+    self assert: self.setUpRan equals: true
+    self assert: (self suiteFixture at: #suite) equals: "fixture"
+
+  testFails =>
+    self assert: self.setUpRan equals: true
+    self assert: 1 equals: 2
