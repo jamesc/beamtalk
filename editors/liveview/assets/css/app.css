@@ -215,6 +215,33 @@
   color: var(--muted);
 }
 .panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
+/* BT-3247: the title used to be a bare text node — the only shrinkable flex
+   item in `.panel-head` — so it wrapped to two lines under pressure from the
+   mode/view segs and source select, overflowing the fixed 30px header. Give
+   it its own flex item that can shrink (min-width: 0 removes the text's
+   intrinsic-content floor) but never wraps, truncating with an ellipsis
+   instead once the column is narrowed via the splitter. */
+.panel-head .panel-title { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* BT-3247 (follow-up): `.seg` (the Classes/Native/Type-Aliases + Hier/Cats
+   toggles) looked non-shrinkable but was actually a default flex item
+   (flex-shrink: 1) whose `<button>`s had no `white-space` override — once
+   `.panel-title` was squeezed to its floor there was still a width deficit
+   at the 286px default (BT-3256: the mode/view segs + source select + icon
+   buttons simultaneously visible in the default :classes browser_mode
+   already exceed the 266px content box, title or no title), and the
+   flexbox shrink algorithm pushed the rest onto `.seg`, wrapping a button's
+   label onto a second line and overflowing the head the same way the title
+   used to. `white-space: nowrap` stops that internal wrap — the header's
+   height is the thing BT-3247 is about — and `min-width: 0` +
+   `text-overflow: ellipsis` degrade a label gracefully instead of silently
+   overflowing if a future change ever does force `.seg` narrower than its
+   natural width. It does NOT fix the pre-existing (and pre-dating this fix
+   — confirmed still present, and worse, before `.panel-title` existed)
+   horizontal deficit: at the 286px default the row's natural content width
+   already exceeds the panel, so `.panel`'s `overflow: hidden` clips a few
+   pixels off the trailing `+`/`×` buttons regardless. That's tracked
+   separately in BT-3256. */
+.panel-head .seg button { white-space: nowrap; min-width: 0; text-overflow: ellipsis; overflow: hidden; }
 .panel-head .spacer { flex: 1; }
 .panel-head .panel-close {
   border: 0; background: transparent; cursor: pointer; color: var(--faint);
