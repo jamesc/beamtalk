@@ -138,6 +138,35 @@ pub struct MethodCategory {
     pub methods: Vec<CategorizedMethod>,
 }
 
+impl MethodCategory {
+    /// The category's container span: the divider's own banner line merged
+    /// with every method in the category, in source order.
+    ///
+    /// Shared by every consumer that needs "the range this category covers"
+    /// — [`crate::queries::document_symbols_provider`] (the
+    /// `DocumentSymbolKind::Category` container) and
+    /// [`crate::queries::folding_range_provider`] (BT-3237) both call this
+    /// rather than re-deriving the merge, so outline and foldingRange always
+    /// agree exactly.
+    ///
+    /// Returns `None` when there is neither a located `divider_span` nor any
+    /// methods to merge. For a *named* category this should not happen in
+    /// practice — [`categorize_methods`] only ever creates one while
+    /// processing a member that starts a new category, and a divider is only
+    /// surfaced when at least one method follows it — but a category can be
+    /// constructed with neither in principle, so this stays `Option` rather
+    /// than panicking or silently falling back to a caller-supplied default.
+    #[must_use]
+    pub fn span(&self) -> Option<Span> {
+        self.methods
+            .iter()
+            .map(|m| m.span)
+            .fold(self.divider_span, |acc, s| {
+                Some(acc.map_or(s, |a| a.merge(s)))
+            })
+    }
+}
+
 /// Parses `content` — the already-`//`-stripped text of a leading line
 /// comment — as a `// === Name ===` section divider, the canonical format
 /// this module locks down for every surface (LSP outline, Cockpit, REPL,
@@ -654,5 +683,39 @@ Object subclass: Counter
             .divider_span
             .expect("divider span located past the @expect line");
         assert_eq!(&src[span.as_range()], "  // === Section ===\n");
+    }
+
+    // --- MethodCategory::span ---
+
+    #[test]
+    fn span_merges_divider_and_every_method_in_the_category() {
+        let src = "\
+Object subclass: Counter
+  // === Section ===
+  bar => 2
+  baz => 3
+";
+        let class = parse_class(src);
+        let categories = categorize_methods(&class, src);
+        let span = categories[0].span().expect("named category has a span");
+        // Starts at the divider's own banner line, ends at the last method.
+        assert!(&src[span.as_range()].starts_with("  // === Section ==="));
+        assert!(&src[span.as_range()].trim_end().ends_with("baz => 3"));
+    }
+
+    #[test]
+    fn span_of_unnamed_leading_category_merges_only_its_methods() {
+        // The implicit leading category has no divider line, so its span is
+        // just the merge of its methods' own spans.
+        let src = "Object subclass: Counter\n  foo => 1\n  bar => 2\n";
+        let class = parse_class(src);
+        let categories = categorize_methods(&class, src);
+        assert_eq!(categories[0].name, None);
+        let span = categories[0]
+            .span()
+            .expect("unnamed category still has methods to merge");
+        let text = &src[span.as_range()];
+        assert!(text.starts_with("foo => 1"));
+        assert!(text.ends_with("bar => 2"));
     }
 }

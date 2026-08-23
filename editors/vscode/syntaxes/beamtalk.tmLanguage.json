@@ -21,6 +21,16 @@
     "comments": {
       "patterns": [
         {
+          "comment": "BT-3237: `// === Name ===` section-divider banner (BT-2601's category-recognition rule, source_analysis::method_category::parse_divider_name) — matched ahead of the plain line-comment pattern below so it renders visually distinct (bold heading name, dimmed border) instead of as an ordinary comment. `(?!/)` after the slashes excludes `///` doc comments, which BT-2601 never treats as dividers.",
+          "name": "comment.line.double-slash.section-divider.beamtalk",
+          "match": "//(?!/)\\s*(=+)\\s+(.+?)\\s+(=+)\\s*$",
+          "captures": {
+            "1": { "name": "punctuation.section.divider.beamtalk" },
+            "2": { "name": "entity.name.section.beamtalk markup.heading.beamtalk" },
+            "3": { "name": "punctuation.section.divider.beamtalk" }
+          }
+        },
+        {
           "name": "comment.line.double-slash.beamtalk",
           "match": "//.*$"
         },

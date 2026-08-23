@@ -1002,6 +1002,9 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "references_provider" => vec!["textDocument/references".into()],
         "implementation_provider" => vec!["textDocument/implementation".into()],
         "document_symbol_provider" => vec!["textDocument/documentSymbol".into()],
+        // BT-3237: AST-only, no REPL-op binding — documented as an
+        // `LSP-Only Capabilities` row instead of an `Operations` table cell.
+        "folding_range_provider" => vec!["textDocument/foldingRange".into()],
         "workspace_symbol_provider" => vec!["workspace/symbol".into()],
         "document_formatting_provider" => vec!["textDocument/formatting".into()],
         "document_range_formatting_provider" => vec!["textDocument/rangeFormatting".into()],
