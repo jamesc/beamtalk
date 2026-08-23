@@ -63,12 +63,12 @@ sealed typed Value subclass: ChangeEntry
   /// ```
   selector -> Symbol | Nil => self.selector
 
-  /// The kind of patch: #instance, #class, #'new-class', #'remove-method',
-  /// #'remove-class', or #unknown.
+  /// The kind of patch: #instance, #class, #'new-class', #'class-def',
+  /// #'remove-method', #'remove-class', or #unknown.
   kind -> Symbol => self.kind
 
   /// Which method table this entry targets: #instance or #class, or nil for
-  /// an entry with no side (#'new-class', #unknown) (ADR 0112).
+  /// an entry with no side (#'new-class', #'class-def', #unknown) (ADR 0112).
   ///
   /// For a #'remove-method' entry (`removeSelector:`) this is recorded
   /// explicitly; for a legacy #instance/#class-kind patch entry it mirrors
@@ -169,6 +169,11 @@ sealed typed Value subclass: ChangeEntry
   /// Whether this entry created a new class (kind `#'new-class'`, no selector).
   isNewClass -> Boolean => self.kind =:= #'new-class'
 
+  /// Whether this entry redefined an *existing* class's whole definition
+  /// (kind `#'class-def'`, no selector — the cockpit `:def` tab's "Compile"
+  /// action against an already-loaded class, ADR 0082 extension, BT-3248).
+  isClassDef -> Boolean => self.kind =:= #'class-def'
+
   /// Whether this entry removed a method (`removeSelector:`, ADR 0112).
   isRemoveMethod -> Boolean => self.kind =:= #'remove-method'
 
@@ -178,7 +183,7 @@ sealed typed Value subclass: ChangeEntry
   // === Printing ===
 
   /// Developer-readable representation, e.g. "Counter>>increment",
-  /// "Counter (new-class)", or "Counter (remove-class)".
+  /// "Counter (new-class)", "Counter (class-def)", or "Counter (remove-class)".
   ///
   /// ## Examples
   /// ```beamtalk
@@ -187,8 +192,12 @@ sealed typed Value subclass: ChangeEntry
   printString -> String =>
     self.selector isNil
       ifTrue: [
-        self isRemoveClass ifTrue: [
-          self.className asString ++ " (remove-class)"
-        ] ifFalse: [self.className asString ++ " (new-class)"]
+        self isRemoveClass
+          ifTrue: [self.className asString ++ " (remove-class)"]
+          ifFalse: [
+            self isClassDef ifTrue: [
+              self.className asString ++ " (class-def)"
+            ] ifFalse: [self.className asString ++ " (new-class)"]
+          ]
       ]
       ifFalse: [self.className asString ++ ">>" ++ self.selector asString]

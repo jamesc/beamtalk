@@ -28,6 +28,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_ffi_sites_in_source/5,
     find_announce_sites_in_source/2,
     resolve_method_span/5,
+    resolve_class_span/3,
     reindent_method_source/3,
     close/1
 ]).
@@ -886,6 +887,75 @@ handle_method_span_response(Other) ->
         domain => [beamtalk, runtime], response => Other
     }),
     {error, port_error, <<"Unexpected compiler response">>}.
+
+-doc """
+Resolve the byte span of a class's header + state declarations in `Source'
+(ADR 0082 extension, BT-3248) — never its methods.
+
+Given the current on-disk source of a `.bt' file and a target `ClassName',
+returns the byte span of that class's declaration line through its last
+`state:'/`field:' declaration, plus the bytes currently occupying it
+(`prev_source'). Backs the CHANGES dock's disk-vs-memory diff for a
+`'class-def'' entry (the cockpit `:def' tab's redefinition of an *existing*
+class) — see `beamtalk_core::source_analysis::resolve_class_span''s module
+doc for why the span must stop before any method.
+
+Returns `{ok, #{start := S, end := E}, PrevSource}' on success. Resolution
+failures (class not found, ambiguous) come back as `{error, Reason, Message}'
+with `Reason' an atom — the hook downgrades to a memory-only patch rather than
+failing the install. Transport failures (port down, timeout) return
+`{error, port_error, Message}'.
+""".
+-spec resolve_class_span(port(), binary(), atom() | binary()) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_class_span(Port, Source, ClassName) when
+    is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
+->
+    Request = #{
+        command => resolve_class_span,
+        source => Source,
+        class_name => to_binary(ClassName)
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_method_span_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (class span)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during class-span query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (class span)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (class span)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+resolve_class_span(_Port, _Source, _ClassName) ->
+    {error, bad_argument, <<"resolve_class_span: source/class must be binary or atom">>}.
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

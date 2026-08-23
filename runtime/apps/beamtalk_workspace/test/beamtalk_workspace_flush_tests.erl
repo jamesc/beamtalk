@@ -62,6 +62,9 @@ flush_test_() ->
         fun filter_by_class_object_non_class_is_error/1,
         fun filter_by_selector_symbol/1,
         fun flush_kinds_by_class_entry_kind/1,
+        %% BT-3248: classify_kind('class-def') -> entry, plus the generic
+        %% splice path handling a whole-class (no-selector) entry correctly.
+        fun flush_kinds_by_class_def_entry_kind/1,
         fun flush_kinds_by_human_author_kind/1,
         fun filter_dict_with_list_file/1,
         fun filter_dict_missing_file_key_is_error/1,
@@ -1130,6 +1133,43 @@ flush_kinds_by_class_entry_kind(#{proj_dir := ProjDir}) ->
         )
     ].
 
+%% classify_kind('class-def') -> entry (BT-3248): exercise the `#'class-def'`
+%% entry-kind branch and confirm the generic splice path (prepare_splice/
+%% apply_splices/replacement_for) handles a no-selector, class-level entry
+%% exactly like a method patch, purely at the flush layer.
+%%
+%% `beamtalk_repl_loader` itself never actually produces a `flushable: true`
+%% `'class-def'` entry today — `add_class_def_flushability/2` hardcodes
+%% `flushable: false` for every one, because the cockpit `:def` tab's
+%% resubmitted skeleton drops modifier keywords/type annotations that no
+%% flush can safely reconstruct yet (see that function's doc). This test
+%% constructs a synthetic flushable entry directly (bypassing the loader) so
+%% the flush layer's own `'class-def'` handling — which the loader will reuse
+%% once the skeleton is made round-trip-safe — has coverage now rather than
+%% only once that follow-up ships.
+flush_kinds_by_class_def_entry_kind(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"/// Doc.\nObject subclass: Counter\n  state: value = 0\n">>,
+    ok = file:write_file(File, Original),
+    {S, E, Old} = locate(Original, <<"Object subclass: Counter\n  state: value = 0\n">>),
+    ClassDefEntry = class_def_input(
+        <<"Counter">>,
+        <<"Object subclass: Counter\n  state: value = 1\n">>,
+        Old,
+        list_to_binary(File),
+        S,
+        E
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(ClassDefEntry),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['class-def']),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(
+            {ok, <<"/// Doc.\nObject subclass: Counter\n  state: value = 1\n">>},
+            file:read_file(File)
+        )
+    ].
+
 %% classify_kind(human) -> author: exercise the `#human` author-kind branch.
 flush_kinds_by_human_author_kind(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "counter.bt"]),
@@ -1863,6 +1903,26 @@ new_class_input(ClassName, Source, File) ->
         author => <<"sess-test">>,
         author_kind => agent,
         source_file => File
+    }.
+
+%% A synthetic *flushable* `'class-def'` entry (ADR 0082 extension, BT-3248) —
+%% no `selector`/`side` (a class-level redefinition, not a single method), a
+%% `span`/`prev_source` against the on-disk region it replaces. Exercises the
+%% flush layer's `'class-def'` handling directly; `beamtalk_repl_loader`
+%% itself never actually builds an entry with `flushable => true` here today
+%% (see `flush_kinds_by_class_def_entry_kind/1`'s doc for why).
+class_def_input(Class, NewSource, OldSource, File, Start, End) ->
+    #{
+        class => Class,
+        kind => 'class-def',
+        source => NewSource,
+        prev_source => OldSource,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-test">>,
+        author_kind => human,
+        source_file => File,
+        span => #{start => Start, 'end' => End}
     }.
 
 %% A flushable `'remove-class'` entry (ADR 0113, BT-3206/BT-3207), shaped like

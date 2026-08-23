@@ -4095,6 +4095,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (`beamtalk_workspace_changelog.erl`).
   defp change_kind_label(%{kind: "remove-method"} = c), do: "remove (#{c[:side] || "?"})"
   defp change_kind_label(%{kind: "new-class"}), do: "new class"
+  # ADR 0082 extension (BT-3248): redefining an *existing* class's whole
+  # definition (the cockpit `:def` tab's "Compile" action) — kept distinct
+  # from "new class" above so the dock doesn't misreport a redefinition as a
+  # brand-new class.
+  defp change_kind_label(%{kind: "class-def"}), do: "class definition"
   # ADR 0113 Phase 4 (BT-3210): a Tier-2 (destructive, file-deleting)
   # `removeFromSystem` entry — kept a distinct label from "remove (...)"
   # above (Tier 1's `removeSelector:`) since the two carry very different

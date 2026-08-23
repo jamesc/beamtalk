@@ -376,6 +376,9 @@ classify_kinds([Other | _], _EKs, _AKs, _Unknowns) ->
 classify_kind(instance) -> entry;
 classify_kind(class) -> entry;
 classify_kind('new-class') -> entry;
+%% ADR 0082 extension (BT-3248): redefining an *existing* class's whole
+%% definition composes exactly like any other entry-kind filter.
+classify_kind('class-def') -> entry;
 %% ADR 0113 Phase 2 (BT-3207): `flushKinds:` accepts both removal kinds too —
 %% `#'remove-method'` (Tier 1) composes exactly like any other entry-kind
 %% filter; `#'remove-class'` (Tier 2) still needs `confirmDestructive: true`
@@ -396,8 +399,9 @@ unknown_kind_error(Unknowns) ->
             <<"flushKinds: unrecognised kind symbol(s): ">>,
             Joined,
             <<
-                ". Allowed: #instance, #class, #'new-class', #'remove-method', "
-                "#'remove-class' (entry kinds); #human, #agent (author kinds)"
+                ". Allowed: #instance, #class, #'new-class', #'class-def', "
+                "#'remove-method', #'remove-class' (entry kinds); #human, #agent "
+                "(author kinds)"
             >>
         ])
     ).

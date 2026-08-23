@@ -1240,6 +1240,20 @@ loader_integration_test_() ->
             end},
             {"repeated install_method chains store generations", fun() ->
                 t_install_method_chains_signature_generations(Proj)
+            end},
+            %% BT-3248: redefining an existing class (the cockpit `:def` tab)
+            %% records a pending, non-flushable 'class-def' ChangeLog entry.
+            {"load_class_module/3 redefinition emits class-def entry", fun() ->
+                t_load_class_module_redefinition_emits_class_def_entry(Proj)
+            end},
+            {"load_class_module/3 redefinition never flushes over existing methods", fun() ->
+                t_load_class_module_redefinition_preserves_existing_methods(Proj)
+            end},
+            {"load_class_module/3 multi-class eval logs no class-def entry", fun() ->
+                t_load_class_module_multi_class_eval_no_class_def_entry(Proj)
+            end},
+            {"load_class_module/3 brand-new inline class has no class-def entry", fun() ->
+                t_load_class_module_brand_new_inline_no_class_def_entry(Proj)
             end}
         ]
     end}.
@@ -1604,3 +1618,142 @@ t_new_method_appends_indented(_Proj) ->
 %% True iff Needle occurs anywhere in Haystack.
 contains(Haystack, Needle) ->
     binary:match(Haystack, Needle) =/= nomatch.
+
+%%====================================================================
+%% BT-3248: 'class-def' ChangeLog entry for redefining an existing class
+%%====================================================================
+
+%% Compiling a changed class definition for an *existing* class (the cockpit
+%% `:def` tab's "Compile" action — a plain eval that classifies as a class
+%% definition and routes through load_class_module/3) must record a pending
+%% `'class-def'` ChangeLog entry — previously this path installed the new
+%% class body with NO ChangeLog entry at all (the bug this issue fixes). The
+%% entry is `flushable: false` — see add_class_def_flushability/2's doc for
+%% why disk-flush isn't safe yet (the `:def` tab's resubmitted skeleton drops
+%% modifiers/type annotations, and an earlier version of this feature that
+%% DID mark such entries flushable also had a span bug that would have
+%% deleted every method's source on flush — see
+%% t_load_class_module_redefinition_preserves_existing_methods below).
+t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
+    %% Use the live workspace project_path so the redefined class's sourceFile
+    %% is populated (robust against any workspace_meta restart between setup
+    %% and execution — same convention as t_new_method_appends_indented /
+    %% t_new_class_success).
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Path = write_bt_under(
+        Proj, "src", "DefRedefine.bt", <<"Actor subclass: DefRedefine\n  state: x = 0\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    NewSource = "Actor subclass: DefRedefine\n  state: x = 1\n",
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefRedefine">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefRedefine">>
+    ],
+    ?assertEqual('class-def', beamtalk_workspace_changelog:entry_kind(Entry)),
+    ?assertEqual(undefined, beamtalk_workspace_changelog:entry_selector(Entry)),
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"class_def_flush_not_yet_supported">>,
+        beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    ?assertEqual(
+        list_to_binary(Path), beamtalk_workspace_changelog:entry_source_file(Entry)
+    ).
+
+%% BT-3248 regression guard (adversarial review finding): a `'class-def'`
+%% redefinition must never be flushable when the class has methods already
+%% installed — an earlier version of this feature resolved a whole-class span
+%% (header through the last *method*) and marked such entries flushable,
+%% which would have spliced the `:def` tab's header+state-only skeleton over
+%% the header+state+methods region on flush, permanently deleting every
+%% method's source from disk. Proves the fix: flushing after a redefinition
+%% of a class with a live method leaves the file, and the method, untouched.
+t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Original =
+        <<
+            "Actor subclass: DefWithMethod\n"
+            "  state: x = 0\n"
+            "\n"
+            "  double -> Integer =>\n"
+            "    self.x * 2\n"
+        >>,
+    Path = write_bt_under(Proj, "src", "DefWithMethod.bt", Original),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% The `:def` tab's synthesized skeleton — header + state only, exactly
+    %% like `beamtalk_repl_ops_browse:class_definition_text/3` produces —
+    %% carries no methods.
+    NewSource = "Actor subclass: DefWithMethod\n  state: x = 1\n",
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    {ok, <<"DefWithMethod">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefWithMethod">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    %% Non-flushable: flush must report nothing written for this entry.
+    ?assertEqual(0, maps:get(flushed, Summary)),
+    {ok, Final} = file:read_file(Path),
+    ?assertEqual(Original, Final).
+
+%% Redefining more than one class in a single eval (an unusual REPL-typed
+%% multi-class expression, not the `:def` tab's own shape — that tab always
+%% edits exactly one class) records no 'class-def' entry at all, rather than
+%% logging N misleading entries that all share the same whole-expression
+%% `source` text (see emit_class_def_entries/3's doc). Exercises
+%% emit_class_def_entries/3 directly (exported for testing) since driving two
+%% classes through one real eval is an orthogonal compiler-support question
+%% this test isn't about.
+t_load_class_module_multi_class_eval_no_class_def_entry(_Proj) ->
+    ok = beamtalk_workspace_changelog:clear(),
+    Classes = [#{name => "DefMultiA"}, #{name => "DefMultiB"}],
+    PrevSources = #{
+        <<"DefMultiA">> => "Object subclass: DefMultiA\n",
+        <<"DefMultiB">> => "Object subclass: DefMultiB\n"
+    },
+    Expression = "Object subclass: DefMultiA\nObject subclass: DefMultiB\n",
+    AnyEmitted = beamtalk_repl_loader:emit_class_def_entries(Classes, Expression, PrevSources),
+    ?assertEqual(false, AnyEmitted),
+    ?assertEqual([], beamtalk_workspace_changelog:active_entries()).
+
+%% A brand-new class defined inline (never previously loaded, no prior
+%% tracked source) is out of this issue's scope — see
+%% emit_class_def_entries/3's doc — so no 'class-def' entry is recorded for
+%% it. (It also doesn't get a 'new-class' entry either; that's the
+%% pre-existing, unrelated gap this issue does not close.)
+t_load_class_module_brand_new_inline_no_class_def_entry(_Proj) ->
+    ok = beamtalk_workspace_changelog:clear(),
+    Source = "Object subclass: DefBrandNew\n  v => 1\n",
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        Source, "inline", false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, <<"DefBrandNew">>, no_trailing, _NewState} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, Source, State
+    ),
+    ClassDefEntries = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefBrandNew">>
+    ],
+    ?assertEqual([], ClassDefEntries).

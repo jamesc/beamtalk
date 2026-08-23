@@ -42,6 +42,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_ffi_sites_in_source/4,
     find_announce_sites_in_source/1,
     resolve_method_span/4,
+    resolve_class_span/2,
     reindent_method_source/2
 ]).
 
@@ -383,6 +384,39 @@ Backs the `>>' / `compile:source:' install hook.
     | {error, atom(), binary()}.
 resolve_method_span(Source, ClassName, Selector, Side) ->
     beamtalk_compiler_server:resolve_method_span(Source, ClassName, Selector, Side).
+
+-doc """
+Resolve the byte span of a class's declaration line through its last
+`state:'/`field:' declaration in `Source', against the current on-disk `.bt'
+file (ADR 0082 extension, BT-3248).
+
+Backs the CHANGES dock's disk-vs-memory diff for a `'class-def'' ChangeEntry
+(the cockpit `:def' tab's "Compile" action against an *existing* class):
+given the current on-disk source and a target `ClassName', resolves the byte
+span of that class's header + state declarations — deliberately **never**
+its methods; see
+`beamtalk_core::source_analysis::resolve_class_span''s own module doc for the
+data-loss bug that boundary avoids — plus the bytes currently occupying it.
+On success: `{ok, Span, PrevSource}'.
+
+Not used for an actual `Workspace flush' splice today: the `:def' tab's
+resubmitted skeleton also drops modifier keywords, the `field:'/`state:'
+keyword choice, and `::' type annotations, so a byte-accurate span alone
+isn't enough to flush safely yet —
+`beamtalk_repl_loader:add_class_def_flushability/2' marks every
+`'class-def'' entry `flushable: false' unconditionally until that's fixed.
+This resolver only backs the dock's read-only diff for now.
+
+A `class_not_found' error means the disk file no longer declares this class
+(renamed/moved out from under the live class); `ambiguous' means the file
+declares the class more than once. Either degrades the diff to "not
+computable" — never blocks or undoes anything, since nothing here writes.
+""".
+-spec resolve_class_span(binary(), atom() | binary()) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_class_span(Source, ClassName) ->
+    beamtalk_compiler_server:resolve_class_span(Source, ClassName).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

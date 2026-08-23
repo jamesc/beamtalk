@@ -101,7 +101,11 @@ Extracted from beamtalk_repl_eval (BT-863).
     was_leaf_class/1,
     publish_leaf_change_recheck_outcome/2,
     %% ADR 0108 hot-reload re-check trigger (BT-2899): publish helper.
-    publish_alias_change_recheck_outcome/2
+    publish_alias_change_recheck_outcome/2,
+    %% ADR 0082 extension (BT-3248): class-redefinition ChangeLog entry helpers.
+    snapshot_class_def_prev_sources/1,
+    emit_class_def_entries/3,
+    add_class_def_flushability/2
 ]).
 -endif.
 
@@ -218,6 +222,11 @@ load_class_module(ClassInfo, Expression, State) ->
     %% beamtalk_workspace_shape_store's moduledoc "Two-phase capture" for why
     %% this must run before code:load_binary, not after.
     prime_shape_capture(Classes),
+    %% BT-3248: snapshot each class's currently-tracked source BEFORE
+    %% store_class_sources below overwrites it — see emit_class_def_entries/3's
+    %% doc for why a redefinition of an already-loaded class needs the OLD
+    %% source captured ahead of the install, not after.
+    PrevSources = snapshot_class_def_prev_sources(Classes),
     %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: load_class_binary/4
     %% bakes the "superclasses_losing_leaf_status/1 before code:load_binary/3"
     %% ordering requirement into one call — see its own doc and
@@ -229,6 +238,15 @@ load_class_module(ClassInfo, Expression, State) ->
             {ClassName, NewState2} = store_class_sources(
                 Classes, ClassModName, Expression, NewState1
             ),
+            %% BT-3248: log a pending 'class-def' ChangeLog entry for each
+            %% class in this eval that redefined an already-loaded class (the
+            %% cockpit `:def` tab's "Compile" action against an *existing*
+            %% class). Best-effort: a ChangeLog write must never fail or undo
+            %% the in-memory install, which already succeeded above.
+            case emit_class_def_entries(Classes, Expression, PrevSources) of
+                true -> maybe_autoflush(durable);
+                false -> ok
+            end,
             TrailingInfo = extract_trailing_info(ClassInfo),
             {ok, ClassName, TrailingInfo, NewState2};
         {error, Reason} ->
@@ -483,6 +501,16 @@ verify_class_present(ExpectedClassName, ClassNames, Path) ->
 %%% Internal functions
 
 %% Load a compiled module into BEAM, register its classes, and update REPL state.
+%%
+%% BT-3248: deliberately does NOT emit a `'class-def'` ChangeLog entry, unlike
+%% `load_class_module/3`. Every caller of this function (`handle_load/2,3`,
+%% `handle_load_source/3`) compiles `Source` from `SourcePath` itself — a
+%% `:load <file>` (or the initial project load) installs a class from the
+%% SAME file `Workspace flush` would otherwise write it back to, so the live
+%% image is, by construction, already in sync with disk: there is nothing
+%% pending to log or flush. Logging here would produce a ChangeEntry whose
+%% `source`/`prev_source` are byte-identical (a no-op diff) on every ordinary
+%% project load — pure log noise, not a fix for anything.
 -spec load_compiled_module(
     binary(),
     [map()],
@@ -628,6 +656,163 @@ normalize_class_source_key(Name) when is_binary(Name) -> Name;
 normalize_class_source_key(Name) when is_atom(Name) -> atom_to_binary(Name, utf8);
 normalize_class_source_key(Name) when is_list(Name) -> list_to_binary(Name).
 
+%%% ----------------------------------------------------------------------------
+%%% Class-redefinition ChangeLog entry (ADR 0082 extension, BT-3248)
+%%% ----------------------------------------------------------------------------
+
+%% Snapshot each class's currently-tracked source (workspace_meta's
+%% `class_sources`) before an inline class-body install overwrites it via
+%% `store_class_sources/4`. `undefined` for a class with no prior tracked
+%% source — see `emit_class_def_entries/3`'s doc for why that case is
+%% excluded from logging.
+-spec snapshot_class_def_prev_sources([map()]) -> #{binary() => string() | undefined}.
+snapshot_class_def_prev_sources(Classes) ->
+    maps:from_list([
+        {NameBin, beamtalk_workspace_meta:get_class_source(NameBin)}
+     || #{name := Name} <- Classes, NameBin <- [normalize_class_source_key(Name)]
+    ]).
+
+-doc """
+Log a pending `'class-def'` ChangeLog entry for each class in `Classes` that
+*redefined* an already-loaded class (ADR 0082 extension, BT-3248).
+
+Called from `load_class_module/3` after a successful inline class-body
+install — the cockpit `:def` tab's "Compile" action against an *existing*
+class routes through here
+(`beamtalk_repl_eval:handle_class_definition/7` → `load_class_module/3`), and
+previously installed the new class body with no ChangeLog entry at all: the
+CHANGES dock stayed at "No pending changes" and `Workspace flush` silently
+discarded the edit.
+
+Only classes with a PRIOR tracked source (`PrevSources`, snapshotted by
+`snapshot_class_def_prev_sources/1` before this install overwrote it) are
+logged here — a class with no prior source is a genuinely brand-new class
+defined inline (`Foo subclass: Bar [...]` typed directly, never installed
+before), which is out of this issue's scope: BT-3248's acceptance criteria is
+scoped to redefining an "*existing*" class, and `newClass:at:`'s own
+`emit_new_class_entry/3` already covers the brand-new-class case for the one
+FFI chokepoint that creates a file for it. A REPL-typed brand-new inline class
+recording no ChangeLog entry is the same pre-existing (unrelated) gap it
+always was, not a regression introduced here.
+
+Also skips logging entirely when `Classes` has more than one entry. The `:def`
+tab always edits exactly one class; a multi-class inline eval (typed directly
+at the REPL, not through the tab) would otherwise log one entry per class,
+each carrying the *same* whole `Expression` text as its `source` — there is
+no per-class slice of a raw multi-class eval to attribute correctly, and
+logging the same shared text under N different classes would be misleading
+audit history, not a fix. This is the same "out of scope" carve-out as the
+brand-new-class case above, not a data-loss concern (see
+`add_class_def_flushability/2`'s doc — no `'class-def'` entry is ever
+flushed to disk yet regardless).
+
+Returns `true` iff at least one entry was appended, so the caller knows
+whether an autoflush pass is worth triggering.
+""".
+-spec emit_class_def_entries([map()], string(), #{binary() => string() | undefined}) -> boolean().
+emit_class_def_entries([#{name := Name}], Expression, PrevSources) ->
+    NameBin = normalize_class_source_key(Name),
+    case maps:get(NameBin, PrevSources, undefined) of
+        undefined ->
+            false;
+        PrevSource ->
+            emit_class_def_entry(NameBin, Expression, PrevSource),
+            true
+    end;
+emit_class_def_entries(_MultipleOrNoClasses, _Expression, _PrevSources) ->
+    false.
+
+%% Emit the durable `'class-def'` ChangeEntry for one redefined class. Best
+%% effort: a ChangeLog write must never fail or undo the in-memory install
+%% (the class is already live), mirroring emit_change_entry/1's contract.
+-spec emit_class_def_entry(binary(), string(), string()) -> ok.
+emit_class_def_entry(ClassNameBin, NewSource, PrevSource) ->
+    try
+        NewSourceBin = unicode:characters_to_binary(NewSource),
+        PrevSourceBin = unicode:characters_to_binary(PrevSource),
+        Base0 = #{
+            class => ClassNameBin,
+            kind => 'class-def',
+            source => NewSourceBin,
+            intent => durable,
+            %% Reuses the generic (despite its name) newClass:at: author
+            %% helpers below — both read the same `$beamtalk_author(_kind)`
+            %% process-dictionary convention an eval-driven install (this
+            %% path) shares with the FFI chokepoint, defaulting to
+            %% human/repl when unset.
+            author => new_class_author(),
+            author_kind => new_class_author_kind()
+        },
+        Base = maybe_put_prev_source(Base0, PrevSourceBin),
+        Entry = add_class_def_flushability(Base, ClassNameBin),
+        _ = beamtalk_workspace_changelog:append(Entry),
+        ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for class redefinition (class still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class_name => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-doc """
+Classify a `'class-def'` entry's flushability — always `flushable: false` for
+now (BT-3248 Phase 1), regardless of whether the class is genuinely an
+in-project file the entry could, in principle, ever target.
+
+Reuses `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
+(the same classification `add_flushability/4` uses for a method patch) only
+to populate `sourceFile` when the class IS an in-project file — informational,
+so the CHANGES dock can show a path and `beamtalk_workspace_changelog:
+disk_class_body/2` can compute a diff against it — never to decide
+`flushable`, which is hardcoded `false` here on purpose.
+
+Why: the cockpit `:def` tab recompiles a *synthesized* skeleton
+(`beamtalk_repl_ops_browse:class_definition_text/3` — `{Superclass}
+subclass: {Name}` plus one bare `state: {field} = {default}` line per
+instance variable) that is missing information no flush can safely
+reconstruct — modifier keywords (`sealed`/`typed`/`abstract`), the
+`field:'/`state:' keyword choice, and `::' type annotations are all silently
+dropped from what gets resubmitted at Compile. An earlier version of this
+function resolved a real on-disk span (`beamtalk_compiler:resolve_class_span/2`)
+and marked the entry flushable whenever that span resolved — even with a span
+correctly bounded to exclude every method (a first, more dangerous version of
+that resolver did not, and would have deleted a class's methods from disk on
+flush; see `crates/beamtalk-core/src/source_analysis/class_span.rs`'s module
+doc), splicing the skeleton in would still have silently downgraded e.g.
+`sealed typed Value subclass: Foo` + `field: x :: Integer` to
+`Value subclass: Foo` + `state: x` on every ordinary flush, for any class
+using those features — caught in adversarial review before this shipped
+(BT-3248). Fixing that needs the `:def` tab's skeleton itself made
+round-trip-safe first (tracked as a follow-up); until then, every
+`'class-def'` entry stays visible in the CHANGES dock (with a computed diff —
+see `disk_class_body/2`) but is never a `Workspace flush` candidate.
+""".
+-spec add_class_def_flushability(map(), binary()) -> map().
+add_class_def_flushability(Base, ClassNameBin) ->
+    case class_source_file(ClassNameBin) of
+        nil ->
+            Base#{flushable => false, not_flushable_reason => no_source_reason(ClassNameBin)};
+        SourceFile when is_binary(SourceFile) ->
+            case classify_source_file(SourceFile) of
+                {flushable, _AbsPath} ->
+                    Base#{
+                        flushable => false,
+                        not_flushable_reason => <<"class_def_flush_not_yet_supported">>,
+                        source_file => SourceFile
+                    };
+                {not_flushable, Reason} ->
+                    Base#{flushable => false, not_flushable_reason => Reason}
+            end
+    end.
+
 %% Extract trailing expression info from a class definition result (BT-885).
 -spec extract_trailing_info(map()) ->
     no_trailing | {trailing, atom(), binary()}.
@@ -726,6 +911,17 @@ reload_class_file_impl(Path, ExpectedClassName) ->
     end.
 
 %% Compile and load a file for stateless reload.
+%%
+%% BT-3248: deliberately does NOT emit a `'class-def'` ChangeLog entry, same
+%% reasoning as `load_compiled_module/6`. Both of this function's callers
+%% compile `Source` straight from `Path` — `reload_class_file_impl/2` backs
+%% `Counter reload` / `:reload Counter` (an explicit reload FROM the on-disk
+%% file after an external edit) and `remove_method/3`'s "reload the class
+%% WITHOUT the removed method" (which recompiles a spliced *in-memory* source
+%% but is followed by its own `emit_remove_change_entry/5` call at the
+%% `removeSelector:` call site, ADR 0112 Phase 3 BT-3187 — already logged via
+%% a different, more specific kind). Neither case has a class-definition edit
+%% pending relative to disk that a `'class-def'` entry would newly capture.
 -spec reload_compile_and_load(
     string(), string(), binary() | undefined, atom() | undefined
 ) -> {ok, [map()]} | {error, term()}.
