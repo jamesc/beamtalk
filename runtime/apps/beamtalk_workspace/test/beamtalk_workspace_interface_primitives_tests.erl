@@ -1132,7 +1132,10 @@ changelog_live_test_() ->
         fun flush_filter_via_dispatch/1,
         fun flush_kinds_valid_list_with_empty_log/1,
         fun revert_no_active_entry_raises_state_error/1,
-        fun revert_via_object_keyed_map/1
+        fun revert_via_object_keyed_map/1,
+        fun flush_confirm_destructive_via_dispatch/1,
+        fun flush_including_destructive_via_dispatch/1,
+        fun recheck_image_via_dispatch/1
     ]}.
 
 %% changeLogClear/0 returns nil and is idempotent on an empty log.
@@ -1201,6 +1204,40 @@ flush_filter_via_dispatch(_Ctx) ->
     [
         ?_assert(is_map(Summary)),
         ?_assertEqual(0, maps:get(flushed, Summary))
+    ].
+
+%% dispatch('flush:confirmDestructive:', [Filter, Bool]) routes to flush/2.
+%% Over an empty log the summary has flushed=0 (BT-3456: routing arm coverage).
+flush_confirm_destructive_via_dispatch(_Ctx) ->
+    Summary = beamtalk_workspace_interface_primitives:dispatch(
+        'flush:confirmDestructive:', ['new-class', false], fake_self(self())
+    ),
+    [
+        ?_assert(is_map(Summary)),
+        ?_assertEqual(0, maps:get(flushed, Summary))
+    ].
+
+%% dispatch(flushIncludingDestructive, []) routes to flushIncludingDestructive/0.
+%% Over an empty log the summary has flushed=0 (BT-3456: routing arm coverage).
+flush_including_destructive_via_dispatch(_Ctx) ->
+    Summary = beamtalk_workspace_interface_primitives:dispatch(
+        flushIncludingDestructive, [], fake_self(self())
+    ),
+    [
+        ?_assert(is_map(Summary)),
+        ?_assertEqual(0, maps:get(flushed, Summary))
+    ].
+
+%% dispatch(recheckImage, []) routes to recheckImage/0 → beamtalk_recheck:trigger_image/0.
+%% With no live class sources the result is the empty-findings map (BT-3456).
+recheck_image_via_dispatch(_Ctx) ->
+    Result = beamtalk_workspace_interface_primitives:dispatch(
+        recheckImage, [], fake_self(self())
+    ),
+    [
+        ?_assert(is_map(Result)),
+        ?_assertEqual([], maps:get(findings, Result)),
+        ?_assertEqual(0, maps:get(checked, Result))
     ].
 
 %% changeLogFlushKinds/1 with a valid List of kind Symbols flows through to
@@ -1430,6 +1467,60 @@ start_bare_workspace_sup() ->
 %% supervisor init/1 callback used only by start_bare_workspace_sup/0.
 init(bare_sup) ->
     {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
+
+%%====================================================================
+%% dispatch(supervisors, []) routing arm (BT-3456)
+%%
+%% supervisors/0 calls supervisor:which_children/1 on beamtalk_workspace_sup,
+%% so this test starts a bare workspace_sup when none is already running —
+%% mirroring the existing supervisors_returns_list_test/supervisors_empty_*
+%% pattern. The dispatch/3 routing arm was previously exercised only by
+%% supervisors/0's direct callers; this test covers the dispatch path itself.
+%%====================================================================
+
+supervisors_via_dispatch_test() ->
+    Self = fake_self(self()),
+    case whereis(beamtalk_workspace_sup) of
+        undefined ->
+            {ok, SupPid} = start_bare_workspace_sup(),
+            try
+                Result = beamtalk_workspace_interface_primitives:dispatch(
+                    supervisors, [], Self
+                ),
+                ?assert(is_list(Result))
+            after
+                stop_proc(SupPid)
+            end;
+        _ ->
+            Result = beamtalk_workspace_interface_primitives:dispatch(
+                supervisors, [], Self
+            ),
+            ?assert(is_list(Result))
+    end.
+
+%%====================================================================
+%% revert_side_field/1 binary-argument branches (BT-3456)
+%%
+%% revert_side_field/1 is private. The binary <<"instance">> / <<"class">>
+%% arms (LiveView phx-value-side, ADR 0112 BT-3187) are exercised via
+%% revert_method/3, which calls revert_side_field(SideArg) before the
+%% selector-atom lookup. A never-compiled selector makes existing_selector_atom/1
+%% return `error` (pure — no changelog needed), so the test reaches
+%% revert_side_field/1 and returns {error, #beamtalk_error{}} without touching
+%% any gen_server.
+%%====================================================================
+
+revert_side_field_binary_test() ->
+    %% <<"instance">> arm: revert_side_field/1 called before selector lookup.
+    {error, #beamtalk_error{kind = revert_not_possible}} =
+        beamtalk_workspace_interface_primitives:revert_method(
+            <<"NoClass">>, <<"__no_such_selector__">>, <<"instance">>
+        ),
+    %% <<"class">> arm.
+    {error, #beamtalk_error{kind = revert_not_possible}} =
+        beamtalk_workspace_interface_primitives:revert_method(
+            <<"NoClass">>, <<"__no_such_selector__">>, <<"class">>
+        ).
 
 %%====================================================================
 %% safe_existing_atom/1 + class_object_for/1 via changeLogRevert
