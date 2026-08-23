@@ -12,9 +12,10 @@
 //! `/* */` instead of a plain `//` line comment — silently fails to parse as
 //! a divider and falls back to an ordinary leading comment, with no
 //! diagnostic anywhere in the pipeline (see that function's module doc,
-//! "Known limitations"). The methods that follow are then silently absorbed
-//! into whichever category was already open, rather than starting the
-//! section the author intended.
+//! "Known limitations", BT-2601). The methods that follow are then silently
+//! absorbed into whichever category was already open, rather than starting
+//! the section the author intended — this whole module is BT-3240, the
+//! fix for that gap.
 //!
 //! This pass calls [`parse_divider_name`] directly as the single source of
 //! truth for "is this a valid divider" — it never reimplements that
