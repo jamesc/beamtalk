@@ -127,6 +127,17 @@ pub trait LanguageService {
     /// Should respond in <50ms for typical file sizes.
     fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol>;
 
+    /// Returns folding ranges for a file's `// === Name ===` section
+    /// dividers (BT-3237).
+    ///
+    /// One range per named category, spanning the divider's own banner line
+    /// through the end of its last method — see
+    /// [`crate::queries::folding_range_provider`]. Empty for a file with no
+    /// dividers.
+    ///
+    /// Should respond in <50ms for typical file sizes.
+    fn folding_ranges(&self, file: &Utf8PathBuf) -> Vec<Span>;
+
     /// Returns code actions available at the given byte range in a file.
     ///
     /// Returns "Add annotation: -> `ClassName`" quick-fixes for unannotated
@@ -2004,6 +2015,17 @@ impl LanguageService for SimpleLanguageService {
         };
 
         crate::queries::document_symbols_provider::compute_document_symbols(
+            &file_data.module,
+            &file_data.source,
+        )
+    }
+
+    fn folding_ranges(&self, file: &Utf8PathBuf) -> Vec<Span> {
+        let Some(file_data) = self.get_file(file) else {
+            return Vec::new();
+        };
+
+        crate::queries::folding_range_provider::compute_folding_ranges(
             &file_data.module,
             &file_data.source,
         )

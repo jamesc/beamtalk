@@ -47,12 +47,14 @@ use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, DocumentChangeOperation, DocumentChanges, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
-    ExecuteCommandOptions, ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverContents, HoverParams, HoverProviderCapability, ImplementationProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType,
-    OneOf, OptionalVersionedTextDocumentIdentifier, ParameterInformation, ParameterLabel, Position,
-    Range, ReferenceParams, ResourceOp, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind, TextDocumentEdit,
+    ExecuteCommandOptions, ExecuteCommandParams, FoldingRange, FoldingRangeKind,
+    FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    ImplementationProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    MarkupContent, MarkupKind, MessageType, OneOf, OptionalVersionedTextDocumentIdentifier,
+    ParameterInformation, ParameterLabel, Position, Range, ReferenceParams, ResourceOp,
+    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, SymbolInformation, SymbolKind, TextDocumentEdit,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
     TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkDoneProgressOptions,
@@ -1451,6 +1453,10 @@ impl LanguageServer for Backend {
                 // helper and the same `nav-query` REPL op.
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                // BT-3237: `textDocument/foldingRange` — one range per
+                // `// === Name ===` section divider, AST-only (see
+                // `Backend::folding_range`'s doc comment).
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 // BT-2242: `textDocument/prepareTypeHierarchy` +
                 // `typeHierarchy/{supertypes,subtypes}` — the class under
                 // the cursor → `Behaviour superclassChain` / `allSubclasses`.
@@ -2557,6 +2563,61 @@ impl LanguageServer for Backend {
             Ok(None)
         } else {
             Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
+        }
+    }
+
+    /// Returns folding ranges for a file's `// === Name ===` section
+    /// dividers (BT-3237).
+    ///
+    /// AST-only — unlike `document_symbol`, there is no runtime-delegation
+    /// path here (see `docs/development/surface-parity.md`'s `nav-symbols`
+    /// row, which documents BT-2601's outline nesting as AST-only for the
+    /// same reason: folding ranges are inter-method file structure, not a
+    /// property surfaced by a loaded class with no source in hand).
+    ///
+    /// Returning `Ok(None)` (JSON `null`) rather than `Ok(Some(vec![]))` for
+    /// a divider-less file is load-bearing, not a style choice: `null` is
+    /// how a `textDocument/foldingRange` response tells VS Code "this
+    /// provider has nothing to say," which is what lets the editor fall
+    /// back to its own indentation-based folding for that request. An empty
+    /// array is a *real, if vacuous, answer* and editors are not obligated
+    /// to fall back on one. Do not simplify away the `is_empty()` branch
+    /// below.
+    ///
+    /// Known limitation (review finding, BT-3237): registering
+    /// `folding_range_provider` at all opts every `.bt` file — including
+    /// ones with no dividers — out of VS Code's default indentation-based
+    /// folding strategy once `editor.foldingStrategy` is `"auto"` (the
+    /// default), per the LSP folding spec's provider-registration model.
+    /// This handler answers only the divider-category ranges the BT-3237
+    /// acceptance criteria call for, not per-class/per-method ranges, so a
+    /// file that used to fold at every method (via indentation) may fold
+    /// only at its divider banners after this ships. Tracked for follow-up
+    /// rather than fixed here, since restoring parity would mean emitting
+    /// class/method ranges too — a materially larger scope change than
+    /// this issue's stated contract ("`None`/empty for a class with
+    /// [dividers]").
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = &params.text_document.uri;
+        let Some(path) = self.resolve_path_for_uri(uri) else {
+            return Ok(None);
+        };
+
+        let ranges = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(src) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            svc.folding_ranges(&path)
+                .into_iter()
+                .map(|span| span_to_folding_range(span, &src))
+                .collect::<Vec<_>>()
+        };
+
+        if ranges.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ranges))
         }
     }
 
@@ -4299,6 +4360,25 @@ fn span_to_range(span: Span, source: &str) -> Range {
     let start = offset_to_position(span.start() as usize, source);
     let end = offset_to_position(span.end() as usize, source);
     Range { start, end }
+}
+
+/// Converts a [`Span`] to an LSP [`FoldingRange`] (BT-3237).
+///
+/// Line-only, matching typical LSP folding-range providers: `start_line` is
+/// the divider's own banner line, `end_line` is the line of the category's
+/// last method. Character offsets are left unset (defaults to the full
+/// line), and `kind` is `Region` — VS Code's default fold-gutter affordance,
+/// distinct from `Comment`/`Imports`.
+fn span_to_folding_range(span: Span, source: &str) -> FoldingRange {
+    let range = span_to_range(span, source);
+    FoldingRange {
+        start_line: range.start.line,
+        start_character: None,
+        end_line: range.end.line,
+        end_character: None,
+        kind: Some(FoldingRangeKind::Region),
+        collapsed_text: None,
+    }
 }
 
 /// BT-2243: serializable shape of a [`CallHierarchyTarget`] stored on the
@@ -8290,6 +8370,66 @@ mod tests {
         let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"increment"), "got {names:?}");
         assert!(names.contains(&"value"), "got {names:?}");
+    }
+
+    #[tokio::test]
+    async fn folding_range_returns_one_range_per_divider() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-3237-folding-range").with_extension("bt"),
+        )
+        .expect("utf8 path");
+        let source = "\
+Object subclass: Counter
+  // === Alpha ===
+  foo => 1
+  bar => 2
+
+  // === Beta ===
+  baz => 3
+";
+        let uri = open_test_file(backend, &path, source);
+
+        let params = FoldingRangeParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response = backend.folding_range(params).await.expect("rpc ok");
+        let ranges = response.expect("Some(ranges)");
+        assert_eq!(ranges.len(), 2);
+        // "Alpha" starts at the divider line (line 1, 0-based) and ends at
+        // "bar => 2" (line 3).
+        assert_eq!(ranges[0].start_line, 1);
+        assert_eq!(ranges[0].end_line, 3);
+        // "Beta" starts at its divider line (line 5) and ends at "baz => 3"
+        // (line 6).
+        assert_eq!(ranges[1].start_line, 5);
+        assert_eq!(ranges[1].end_line, 6);
+    }
+
+    #[tokio::test]
+    async fn folding_range_is_none_for_a_class_without_dividers() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-3237-folding-range-none").with_extension("bt"),
+        )
+        .expect("utf8 path");
+        let source = "Object subclass: Counter\n  foo => 1\n  bar => 2";
+        let uri = open_test_file(backend, &path, source);
+
+        let params = FoldingRangeParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response = backend.folding_range(params).await.expect("rpc ok");
+        assert!(
+            response.is_none(),
+            "a class with no dividers has no folding ranges"
+        );
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@
 //! - [`definition_provider`] - Go-to-definition (single-file and cross-file)
 //! - [`diagnostic_provider`] - Collect errors and warnings
 //! - [`document_symbols_provider`] - Return document outline symbols
+//! - [`folding_range_provider`] - Return foldable ranges for section dividers
 //! - [`hover_provider`] - Show information on hover
 //! - [`implementors_provider`] - Find every class that defines a given selector (BT-2241)
 //! - [`references_provider`] - Find all references to a symbol across files
@@ -37,6 +38,7 @@ pub mod document_symbols_provider;
 mod erlang_modules;
 pub mod ffi_sites_query;
 pub mod field_accesses_query;
+pub mod folding_range_provider;
 pub mod hover_provider;
 pub mod implementors_provider;
 pub mod references_provider;

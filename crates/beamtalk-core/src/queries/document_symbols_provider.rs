@@ -55,25 +55,19 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
 
         if has_dividers {
             for category in categories {
+                // The container's range is the divider banner line merged
+                // with every method in the category — computed by
+                // `MethodCategory::span` so it stays identical to the span
+                // `folding_range_provider` emits for the same category
+                // (BT-3237). Computed before the match below since matching
+                // `category.name` by value partially moves `category`,
+                // which would leave `category.span()` unable to borrow the
+                // whole struct.
+                let span = category.span().unwrap_or(class.span);
                 match category.name {
                     Some(name) => {
                         let method_children: Vec<DocumentSymbol> =
                             category.methods.iter().map(method_symbol).collect();
-                        // The container's range is the divider banner line
-                        // merged with every method in the category. A named
-                        // category always has at least one method (it is only
-                        // created while processing one), so this always
-                        // resolves to a real span even when `divider_span` is
-                        // `None` — defensively, if the banner line couldn't be
-                        // re-found in `source` (see
-                        // `method_category::find_divider_span`).
-                        let span = method_children
-                            .iter()
-                            .map(|c| c.span)
-                            .fold(category.divider_span, |acc, s| {
-                                Some(acc.map_or(s, |a| a.merge(s)))
-                            })
-                            .unwrap_or(class.span);
                         children.push(DocumentSymbol {
                             name: name.into(),
                             kind: DocumentSymbolKind::Category,
