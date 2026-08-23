@@ -1725,6 +1725,38 @@ save_section_renames_existing_divider_test() ->
         teardown_project_class(Proj)
     end.
 
+%% BT-3238 review finding: `finish_section_write/4` must re-read the target
+%% file immediately before writing and reject the write if it no longer
+%% matches the `Source` the edit was computed from — e.g. a concurrent
+%% method-body flush landed on the file after this op's own read. Exercises
+%% `finish_section_write/4` directly (exported under `-ifdef(TEST)`) since
+%% racing a real concurrent write against the near-instantaneous read-then-
+%% write window inside `save_section/5` isn't reliably reproducible.
+save_section_write_rejects_stale_source_test() ->
+    Dir = make_temp_dir(),
+    try
+        OriginalSource = <<"Object subclass: BtSectionConflictClass\n\n  foo => 1\n">>,
+        Path = write_temp_file(Dir, "bt_section_conflict_class.bt", OriginalSource),
+        %% Simulate a concurrent write (e.g. another session's ADR 0082 flush)
+        %% landing on `Path` after this op's own read but before its write.
+        ConcurrentSource = <<"Object subclass: BtSectionConflictClass\n\n  foo => 99\n">>,
+        ok = file:write_file(Path, ConcurrentSource),
+        NewSource = <<"Object subclass: BtSectionConflictClass\n\n  // === New ===\n\n  foo => 1\n">>,
+        Result = beamtalk_repl_ops_load:finish_section_write(
+            Path, <<"BtSectionConflictClass">>, OriginalSource, NewSource
+        ),
+        ?assertMatch(
+            {error, {beamtalk_error, external_edit, 'WorkspaceInterface', _, _, _, _}}, Result
+        ),
+        %% Nothing was written: disk still holds the concurrent write, not
+        %% this op's `NewSource` (which would have silently reverted it) and
+        %% not the original stale `Source` either.
+        {ok, OnDisk} = file:read_file(Path),
+        ?assertEqual(ConcurrentSource, OnDisk)
+    after
+        rm_temp_dir(Dir)
+    end.
+
 save_section_inserts_new_divider_before_method_test() ->
     Src = <<
         "Object subclass: BtSectionInsertClass\n"

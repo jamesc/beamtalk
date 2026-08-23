@@ -1041,7 +1041,7 @@ categorize_methods(_Port, _Source, _ClassName) ->
 handle_categorize_methods_response(#{status := ok, categories := Categories}) when
     is_list(Categories)
 ->
-    {ok, [normalize_category(C) || C <- Categories]};
+    normalize_categories(Categories);
 handle_categorize_methods_response(#{status := error, reason := Reason} = Resp) ->
     Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
     {error, Reason, Message};
@@ -1050,6 +1050,28 @@ handle_categorize_methods_response(Other) ->
         domain => [beamtalk, runtime], response => Other
     }),
     {error, port_error, <<"Unexpected compiler response">>}.
+
+%% Review finding (BT-3238): `normalize_category/1`/`normalize_categorized_method/1`
+%% used to have no catch-all clause, unlike this function's own `Other ->
+%% {error, port_error, ...}` fallback above — a category or method map
+%% missing an expected key (or an unrecognized `side`) raised `function_clause`
+%% instead of degrading, crashing the calling `beamtalk_compiler_server`
+%% `gen_server:call` for every caller sharing that process rather than
+%% returning a structured error to just this one. Wrapping the comprehension
+%% in a `try` and giving both normalizers a catch-all that throws a tagged
+%% term converts that crash into the same `{error, port_error, _}` shape
+%% `handle_categorize_methods_response/1`'s own catch-all already returns.
+-spec normalize_categories([map()]) -> {ok, [map()]} | {error, port_error, binary()}.
+normalize_categories(Categories) ->
+    try
+        {ok, [normalize_category(C) || C <- Categories]}
+    catch
+        error:{malformed_categorize_methods_response, Malformed} ->
+            ?LOG_ERROR("Malformed categorize-methods category/method", #{
+                domain => [beamtalk, runtime], malformed => Malformed
+            }),
+            {error, port_error, <<"Unexpected compiler response">>}
+    end.
 
 %% Reshape one raw decoded category map into its canonical Erlang-side
 %% contract: `#{name := binary() | undefined, divider_span := #{start :=
@@ -1072,7 +1094,9 @@ normalize_category(#{name := Name, divider_span := DividerSpan, methods := Metho
         name => Name,
         divider_span => normalize_span(DividerSpan),
         methods => [normalize_categorized_method(M) || M <- Methods]
-    }.
+    };
+normalize_category(Other) ->
+    error({malformed_categorize_methods_response, Other}).
 
 -spec normalize_span(map() | undefined) -> map() | undefined.
 normalize_span(undefined) ->
@@ -1084,7 +1108,9 @@ normalize_span(#{start := Start, 'end' := End}) ->
 normalize_categorized_method(#{selector := Selector, side := Side, span := Span}) when
     Side =:= instance; Side =:= class
 ->
-    #{selector => Selector, side => Side, span => normalize_span(Span)}.
+    #{selector => Selector, side => Side, span => normalize_span(Span)};
+normalize_categorized_method(Other) ->
+    error({malformed_categorize_methods_response, Other}).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).

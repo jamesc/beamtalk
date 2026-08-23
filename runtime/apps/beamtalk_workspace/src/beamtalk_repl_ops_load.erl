@@ -51,7 +51,8 @@ respectively.
     collect_stale_dep_provenance/1,
     stamp_matches_current/1,
     read_provenance_stamp/1,
-    current_otp_release/0
+    current_otp_release/0,
+    finish_section_write/4
 ]).
 -endif.
 
@@ -730,10 +731,17 @@ a client-supplied path — and rejects a class with no editable, in-project
 atomic (temp file + rename, `atomic_write_file/2`). A comment-only change
 never affects the compiled class, so nothing is recompiled or reloaded.
 
+Guards against clobbering a concurrent write to the same file: immediately
+before writing, `finish_section_write/4` re-reads `Path` and requires it to
+still byte-match the source this edit was computed from, mirroring the ADR
+0082 flush pipeline's `prev_source` check. A mismatch (e.g. another
+session's method-body flush landed on this file in between) is rejected as
+a conflict with nothing written, rather than silently overwritten.
+
 Returns `{value, #{<<"class">> => _, <<"source_file">> => _, <<"ok">> =>
 true}}` on success. Failure (class not found/not editable, missing/blank
-params, `old_name` not found, `before_selector` not found, disk I/O error)
-returns `{error, #beamtalk_error{}}`.
+params, `old_name` not found, `before_selector` not found, concurrent
+external edit, disk I/O error) returns `{error, #beamtalk_error{}}`.
 """.
 -spec save_section(binary(), binary(), binary(), binary(), binary()) ->
     {value, map()} | {error, #beamtalk_error{}}.
@@ -903,7 +911,7 @@ rename_section(Path, Source, ClassBin, ClassName, NewName, OldName) ->
                     Before = binary:part(Source, 0, Start),
                     After = binary:part(Source, End, byte_size(Source) - End),
                     NewSource = <<Before/binary, NewLine/binary, After/binary>>,
-                    finish_section_write(Path, ClassBin, NewSource)
+                    finish_section_write(Path, ClassBin, Source, NewSource)
             end;
         {error, Reason, Message} ->
             {error, section_locate_error(ClassBin, Reason, Message)}
@@ -988,7 +996,7 @@ do_insert_section(Path, Source, ClassBin, ClassName, NewName, BeforeSelector, Si
             Before = binary:part(Source, 0, Start),
             After = binary:part(Source, Start, byte_size(Source) - Start),
             NewSource = <<Before/binary, DividerLine/binary, After/binary>>,
-            finish_section_write(Path, ClassBin, NewSource);
+            finish_section_write(Path, ClassBin, Source, NewSource);
         {error, Reason, Message} ->
             {error, section_locate_error(ClassBin, Reason, Message)}
     end.
@@ -1024,18 +1032,36 @@ leading_indent(Bin, N) when N < byte_size(Bin) ->
 leading_indent(Bin, N) ->
     binary:part(Bin, 0, N).
 
--spec finish_section_write(string(), binary(), binary()) ->
+%% Review finding (BT-3238): re-read `Path` immediately before writing and
+%% require it to still byte-match `Source` (the content this write's
+%% `NewSource` was spliced from, read at the start of the op) — mirrors the
+%% ADR 0082 flush pipeline's `prev_source` check
+%% (`beamtalk_workspace_flush.erl`). Without this, a concurrent flush that
+%% lands on `Path` between this op's read and its write is silently
+%% overwritten: `NewSource` was built from stale bytes, so the write reverts
+%% the other write with no error to either side. A section edit is
+%% comment-only, but it splices into and rewrites the *entire* file, so a
+%% stale write clobbers unrelated method bodies elsewhere in the same file,
+%% not just the divider line.
+-spec finish_section_write(string(), binary(), binary(), binary()) ->
     {value, map()} | {error, #beamtalk_error{}}.
-finish_section_write(Path, ClassBin, NewSource) ->
-    case atomic_write_file(Path, NewSource) of
-        ok ->
-            {value, #{
-                <<"class">> => ClassBin,
-                <<"source_file">> => list_to_binary(Path),
-                <<"ok">> => true
-            }};
-        {error, WriteReason} ->
-            {error, section_io_error(ClassBin, <<"writing">>, WriteReason)}
+finish_section_write(Path, ClassBin, Source, NewSource) ->
+    case file:read_file(Path) of
+        {ok, Source} ->
+            case atomic_write_file(Path, NewSource) of
+                ok ->
+                    {value, #{
+                        <<"class">> => ClassBin,
+                        <<"source_file">> => list_to_binary(Path),
+                        <<"ok">> => true
+                    }};
+                {error, WriteReason} ->
+                    {error, section_io_error(ClassBin, <<"writing">>, WriteReason)}
+            end;
+        {ok, _Changed} ->
+            {error, section_conflict_error(ClassBin)};
+        {error, ReadReason} ->
+            {error, section_io_error(ClassBin, <<"reading">>, ReadReason)}
     end.
 
 -spec section_not_found_error(binary(), binary()) -> #beamtalk_error{}.
@@ -1062,6 +1088,19 @@ section_ambiguous_error(ClassBin, OldName) ->
             <<"'.">>
         ]),
         <<"Rename one of the duplicate dividers directly in the source file to disambiguate.">>
+    ).
+
+-spec section_conflict_error(binary()) -> #beamtalk_error{}.
+section_conflict_error(ClassBin) ->
+    beamtalk_repl_errors:make(
+        external_edit,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Class '">>,
+            ClassBin,
+            <<"' was modified on disk while this section edit was in progress.">>
+        ]),
+        <<"Refresh the class source and retry; nothing was written.">>
     ).
 
 -spec section_locate_error(binary(), atom(), binary()) -> #beamtalk_error{}.
