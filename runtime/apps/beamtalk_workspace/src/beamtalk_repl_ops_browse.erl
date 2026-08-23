@@ -101,7 +101,8 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     package_of_module/1,
     alias_visible/2,
     alias_row/3,
-    package_type_aliases/1
+    package_type_aliases/1,
+    class_definition_text/5
 ]).
 -endif.
 
@@ -545,11 +546,12 @@ method_field(MethodObj, Key) ->
 %%% ====================================================================
 
 %% The class-definition pane: class header, state slots, and full comment. State
-%% is field reflection (ADR 0035) — names + default expressions, no user code.
-%% The definition string is the class skeleton (`Super subclass: Name` + state
-%% slots), method bodies excluded (Pharo convention), synthesized from reflection
-%% for every loaded class. File-less (ClassBuilder) and stdlib classes keep the
-%% skeleton; `origin = runtime` (not the definition) is what flags no disk source.
+%% is field reflection (ADR 0035) — names, types, and default expressions, no
+%% user code. The definition string is the class skeleton (`typed Super
+%% subclass: Name` + `field:`/`state:` slots per ADR 0067), method bodies
+%% excluded (Pharo convention), synthesized from reflection for every loaded
+%% class. File-less (ClassBuilder) and stdlib classes keep the skeleton;
+%% `origin = runtime` (not the definition) is what flags no disk source.
 -spec browse_class_definition(atom()) -> beamtalk_repl_ops:op_result().
 browse_class_definition(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
@@ -563,13 +565,18 @@ browse_class_definition(ClassName) ->
             ModName = origin_module(ClassName, beamtalk_runtime_api:module_name(ClassPid)),
             SourceFile = source_file_of(ModName),
             SourceOrigin = source_origin_of(ModName, SourceFile),
-            State = state_slots(ClassPid),
-            Definition = class_definition_text(ClassName, Super, State),
             %% BT-2578: native-backed classes (ADR 0056) carry their backing
             %% Erlang module name so the System Browser can badge them and offer
             %% `browse-native-source`. Read from the facade module's
             %% `__beamtalk_meta/0` (`native => true, backing_module => atom()`).
-            NativeMeta = native_meta_of(ModName),
+            %% BT-3255: the same map also carries `kind` (object|value|actor,
+            %% ADR 0070) and `field_types` (ADR 0067) — reused below to pick the
+            %% `field:`/`state:` keyword and per-field `:: Type` annotations, so
+            %% the skeleton is built from one `__beamtalk_meta/0` read.
+            Meta = native_meta_of(ModName),
+            IsTyped = safe_bool(fun() -> beamtalk_runtime_api:is_typed(ClassPid) end),
+            State = state_slots(ClassPid, Meta),
+            Definition = class_definition_text(ClassName, Super, State, IsTyped, Meta),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"superclass">> => atom_or_null(Super),
@@ -577,16 +584,16 @@ browse_class_definition(ClassName) ->
                 <<"definition">> => Definition,
                 <<"state">> => State,
                 <<"comment">> => class_doc(ClassPid),
-                <<"native">> => meta_is_native(NativeMeta),
+                <<"native">> => meta_is_native(Meta),
                 <<"backing_module">> =>
-                    atom_or_null(beamtalk_class_registry:meta_backing_module(NativeMeta)),
+                    atom_or_null(beamtalk_class_registry:meta_backing_module(Meta)),
                 %% BT-2605: reflected class modifiers for the IDE's editor-header
                 %% modifier badges. The synthesized `definition` skeleton above
                 %% carries no leading modifier keywords, so these come from the
                 %% same runtime reflection op 1 (`browse-classes`) uses — not a
                 %% string parse.
                 <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
-                <<"typed">> => safe_bool(fun() -> beamtalk_runtime_api:is_typed(ClassPid) end),
+                <<"typed">> => IsTyped,
                 <<"abstract">> =>
                     safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
                 %% BT-2639: a structural reflection boolean (not a header
@@ -620,10 +627,13 @@ class_definition_disk_differs(_SourceFile) ->
     null.
 
 %% State slots: field names (ADR 0035 reflection) paired with their default
-%% expression text where the live class object carries one. Field reflection
-%% only — no user code run.
--spec state_slots(pid()) -> [map()].
-state_slots(ClassPid) ->
+%% expression text where the live class object carries one, and their declared
+%% type (BT-3255) read from the class module's `__beamtalk_meta/0` `field_types`
+%% map (`Meta`, already resolved by the caller — the same source
+%% `beamtalk_workspace_shape_store:read_shape_from_meta/1` reads for hot-reload
+%% shape diffing). Field reflection only — no user code run.
+-spec state_slots(pid(), map()) -> [map()].
+state_slots(ClassPid, Meta) ->
     Fields = safe_class_call(ClassPid, instance_variables),
     Defaults = safe_class_call(ClassPid, field_defaults),
     FieldList =
@@ -636,13 +646,25 @@ state_slots(ClassPid) ->
             M when is_map(M) -> M;
             _ -> #{}
         end,
+    FieldTypes = maps:get(field_types, Meta, #{}),
     [
         #{
             <<"name">> => atom_to_binary(F, utf8),
-            <<"default">> => default_text(maps:get(F, DefaultsMap, undefined))
+            <<"default">> => default_text(maps:get(F, DefaultsMap, undefined)),
+            <<"type">> => field_type_text(maps:get(F, FieldTypes, undefined))
         }
      || F <- FieldList
     ].
+
+%% A field's declared type from `field_types`: `null` when untyped (the
+%% generator's own `'none'` sentinel, see `meta_field_types_map` in
+%% `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs`) or
+%% absent from the map (no `__beamtalk_meta/0`, e.g. a file-less ClassBuilder
+%% class), else the type name as text.
+-spec field_type_text(atom() | undefined) -> binary() | null.
+field_type_text(none) -> null;
+field_type_text(undefined) -> null;
+field_type_text(Type) when is_atom(Type) -> atom_to_binary(Type, utf8).
 
 -spec default_text(term()) -> binary() | null.
 default_text(undefined) ->
@@ -660,19 +682,51 @@ default_text(Value) ->
 %% runtime/disk distinction lives in `origin` (null SourceFile → runtime), not in
 %% the skeleton: a class that is loaded always has a representable shape, and
 %% returning null here only stranded stdlib classes on an empty editor.
--spec class_definition_text(atom(), atom() | none, [map()]) -> binary().
-class_definition_text(ClassName, Super, State) ->
+%%
+%% BT-3255: matches the real `.bt` source syntax post-ADR-0067 — `typed ` is
+%% prepended when `IsTyped`, the state-declaration keyword is `field:` for a
+%% Value class and `state:` for everything else (Actor, and the Object/unknown
+%% fallback, which under the ADR carries no data anyway), and each field's
+%% `:: Type` suffix comes from its own entry in `State` (present iff that field
+%% was declared with a type — independent of `IsTyped`, which only gates the
+%% header prefix).
+-spec class_definition_text(atom(), atom() | none, [map()], boolean(), map()) -> binary().
+class_definition_text(ClassName, Super, State, IsTyped, Meta) ->
     SuperName =
         case Super of
             none -> <<"Object">>;
             S -> atom_to_binary(S, utf8)
         end,
-    Header = [SuperName, <<" subclass: ">>, atom_to_binary(ClassName, utf8)],
+    Header = [
+        typed_prefix(IsTyped),
+        SuperName,
+        <<" subclass: ">>,
+        atom_to_binary(ClassName, utf8)
+    ],
+    Keyword = state_keyword(Meta),
     StateLines = [
-        [<<"\n  state: ">>, Name, default_suffix(Default)]
-     || #{<<"name">> := Name, <<"default">> := Default} <- State
+        [<<"\n  ">>, Keyword, <<": ">>, Name, type_suffix(Type), default_suffix(Default)]
+     || #{<<"name">> := Name, <<"default">> := Default, <<"type">> := Type} <- State
     ],
     iolist_to_binary([Header | StateLines]).
+
+-spec typed_prefix(boolean()) -> binary().
+typed_prefix(true) -> <<"typed ">>;
+typed_prefix(false) -> <<>>.
+
+%% ADR 0067: Actor uses `state:`, Value uses `field:`; Object subclasses carry
+%% no instance data under the ADR. `Meta`'s `kind` (ADR 0070, `object | value |
+%% actor`) is the class-kind authority; anything other than `value` (including
+%% a missing/empty `Meta` — a file-less ClassBuilder class, or a module with no
+%% `__beamtalk_meta/0`) falls back to `state:`, matching the pre-BT-3255
+%% behaviour for those classes.
+-spec state_keyword(map()) -> binary().
+state_keyword(#{kind := value}) -> <<"field">>;
+state_keyword(_Meta) -> <<"state">>.
+
+-spec type_suffix(binary() | null) -> iolist().
+type_suffix(null) -> [];
+type_suffix(Type) -> [<<" :: ">>, Type].
 
 -spec default_suffix(binary() | null) -> iolist().
 default_suffix(null) -> [];
