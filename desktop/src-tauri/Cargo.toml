@@ -33,6 +33,14 @@ publish = false
 name = "beamtalk-desktop"
 path = "src/main.rs"
 
+# `harness = false`: see `tests/menu_main_thread.rs`'s own doc comment for
+# why this test needs to run as a plain `fn main` (no libtest worker thread)
+# rather than a normal `#[test]`.
+[[test]]
+name = "menu_main_thread"
+path = "tests/menu_main_thread.rs"
+harness = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -56,3 +64,10 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# "test": unlocks `tauri::test` (`mock_app`/`MockRuntime`) for `menu.rs`'s own
+# unit tests — a headless `App` `menu::build` can run against for real,
+# without needing a display server or webview. Declared only here, not in
+# `[dependencies]` above, so it's unified into `cargo test` builds but never
+# ships in the release binary (edition 2024's per-target feature resolver
+# keeps dev-dependency features out of `cargo build`).
+tauri = { version = "2", features = ["test"] }

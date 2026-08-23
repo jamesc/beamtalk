@@ -19,6 +19,10 @@ desktop/
                          OS-level-quit (Cmd-Q/SIGTERM) detach-all cleanup
       commands.rs       Tauri commands: list_workspaces, attach, detach,
                          create_workspace, quit
+      menu.rs            App-wide menu (BT-3244): swaps the native ⌘/Ctrl+W
+                           "Close Window" item for a plain ⇧⌘W one, freeing
+                           ⌘/Ctrl+W so the LiveView cockpit's own `mod+w`
+                           binding can close the focused editor tab instead
       state.rs          AppState: AttachManager + spawned Child handles
       launcher.rs        Resolves the bundled bt_attach launcher path
                            (`bin/server` on Unix, `bin\bt_attach.bat` on
@@ -40,6 +44,12 @@ desktop/
                          shipped binary application, not a library; see the
                          root .gitignore's Cargo.lock exception and its
                          comment
+    tests/
+      menu_main_thread.rs `harness = false` integration test (BT-3244):
+                           `#[path]`-includes `src/menu.rs` into a plain
+                           `fn main` so it runs on the real OS main thread,
+                           the one thing `src/menu.rs`'s own `#[cfg(test)]`
+                           unit tests can't do — see its doc comment
   ui/                  Frontend: plain HTML/CSS/JS, no build step
   e2e/                 BT-2989 E2E validation scripts (attach-cycle.sh +
                          eval-roundtrip.mjs) — see e2e/README.md for what
@@ -272,6 +282,51 @@ root/sudo access to install them). What that means concretely:
   this is a substitute for actually building and running the app — see
   "Before this ships" below — but it closes the gaps a real compiler and a
   real webview would otherwise have been the first to catch.
+- **BT-3244 (the ⌘W/menu change) was written in a sandbox that, unlike every
+  session above, *does* have a working `cargo`/`rustc` toolchain and Xcode
+  Command Line Tools** — macOS needs no `pkg-config`/`glib-2.0` (that's a
+  Linux/WebKitGTK-only build dependency), so `cargo check`, `cargo clippy
+  --all-targets`, `cargo fmt --check`, and `cargo test` all ran for real
+  against this crate (not just resolved dependencies) and passed, including
+  `menu.rs` and its `main.rs` wiring. This also enabled real test coverage
+  beyond what earlier sessions in this file could get: `menu.rs` builds a
+  real `tauri::menu::Menu` against `tauri::test::mock_app`'s headless
+  `MockRuntime` and asserts the custom "Close Window" item — not the native
+  `PredefinedMenuItem` it replaces — is what actually ends up in the tree.
+  That specific assertion needs a real OS main thread (`muda`, Tauri's menu
+  backend, panics building native items off it, and the standard `#[test]`
+  harness runs each test on its own worker thread) — see
+  `tests/menu_main_thread.rs`'s own doc comment for how that's worked around
+  (`harness = false`, `#[path]`-including `src/menu.rs` into a plain `fn
+  main`) without turning this bin-only crate into a library. Still **not**
+  verified: `cargo tauri dev` itself (no display server here either), so the
+  menu's actual on-screen shape, and whether ⌘W really reaches the LiveView
+  page once the native binding is gone, remain to be confirmed by hand on a
+  real Mac — same as everything else under "Not verified at all" above. The
+  `bundle.resources` path in `tauri.conf.json` also still needs a real
+  `dist-liveview/` (from `just dist-liveview`) to build past the
+  resource-copy step; there's none committed here, so a fresh `cargo tauri
+  build`/`bundle` will fail on that alone until one is produced locally.
+- **BT-3244's own first-pass implementation was adversarially reviewed
+  (fresh Opus subagent) and two real issues it found were fixed before this
+  landed, not just noted:** the menu handler originally used
+  `Manager::get_focused_window`, gated behind Tauri's `unstable` cargo
+  feature — enabling that feature turned out to silently change how *every*
+  webview in the app gets created (`WebviewKind::WindowChild` instead of
+  `WindowContent`, plus manual bounds tracking) and enabled the
+  `create_webview` IPC command app-wide, far beyond what the feature name
+  suggested for this one call site; replaced with the stable
+  `Manager::webview_windows` + `WebviewWindow::is_focused`, which is exactly
+  what the unstable method does internally anyway. Separately, `.menu(...)`
+  was originally called unconditionally — but Tauri only auto-installs a
+  default menu on macOS in the first place, so that would have *added* a
+  File/Edit/Window/Help menu bar to Windows/Linux windows that never had
+  one; now gated to `#[cfg(target_os = "macos")]` in `main.rs`. A
+  lower-severity finding (the desktop picker window has no `CloseRequested`
+  handler, so closing it — now more directly reachable via the global ⇧⌘W
+  binding — can leave the app running with no visible window) was
+  pre-existing, not introduced by this change, and was filed as BT-3252
+  rather than fixed here.
 
 **Before this ships**, someone with a real Linux/macOS/Windows desktop needs
 to: install the Tauri prerequisites (`https://v2.tauri.app/start/prerequisites/`),

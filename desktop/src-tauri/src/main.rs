@@ -24,6 +24,7 @@ mod commands;
 mod dto;
 mod launcher;
 mod logging;
+mod menu;
 mod state;
 
 use std::sync::Mutex;
@@ -46,8 +47,9 @@ fn main() {
     // comment for why).
     let (logging_guard, log_rx) = logging::init_logging();
 
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    #[allow(unused_mut)] // `mut` is only exercised by the macOS-only block below
+    let mut builder =
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch: focus the existing picker rather than starting
             // a second broker (ADR 0097 / BT-2984 spike: "the broker/
             // coordinator process itself should be single-instance").
@@ -55,7 +57,38 @@ fn main() {
                 let _ = window.set_focus();
                 let _ = window.unminimize();
             }
-        }))
+        }));
+
+    // BT-3244: a custom app-wide menu, replacing Tauri's own auto-generated
+    // default — see `menu::build`'s doc comment. Must be set via this
+    // builder hook (not `AppHandle::set_menu` from inside `.setup()` below):
+    // `Builder::build()` only auto-installs its own default menu when no
+    // menu was configured here, so setting one here is what stops the
+    // native ⌘W-bound "Close Window" item from ever being created, rather
+    // than replacing it after the fact (`PredefinedMenuItem` has no
+    // accelerator-override API to do that with anyway).
+    //
+    // macOS-only (adversarial-review follow-up): Tauri's own auto-install of
+    // `Menu::default()` only ever happens on macOS (`Builder::build`'s
+    // `#[cfg(target_os = "macos")]` block) — on Windows/Linux, a
+    // `tauri::Builder` that never calls `.menu(...)` gets no menu bar at
+    // all, since nothing else installs one. Calling `.menu(menu::build)`
+    // unconditionally would therefore *add* a File/Edit/Window/Help menu bar
+    // to every window on Windows/Linux that never had one, which is not
+    // this issue's scope (its Windows/Linux acceptance criterion is limited
+    // to verifying/documenting whether Ctrl+W reaches the page — see
+    // `menu::build`'s doc comment). Gating the call, not `menu::build`
+    // itself, mirrors Tauri's own source shape exactly: `Menu::default` is
+    // written generically over any platform but is only ever *called* from
+    // within that macOS-only block.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .menu(menu::build)
+            .on_menu_event(|app_handle, event| menu::handle_event(app_handle, &event));
+    }
+
+    let app = builder
         .setup(move |app| {
             // The frontend log panel's live feed — needs a real AppHandle,
             // which only exists from here on (see `logging::spawn_log_relay`'s
