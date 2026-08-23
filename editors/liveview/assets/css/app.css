@@ -215,6 +215,13 @@
   color: var(--muted);
 }
 .panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
+/* BT-3247: the title used to be a bare text node — the only shrinkable flex
+   item in `.panel-head` — so it wrapped to two lines under pressure from the
+   mode/view segs and source select, overflowing the fixed 30px header. Give
+   it its own flex item that can shrink (min-width: 0 removes the text's
+   intrinsic-content floor) but never wraps, truncating with an ellipsis
+   instead once the column is narrowed via the splitter. */
+.panel-head .panel-title { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .panel-head .spacer { flex: 1; }
 .panel-head .panel-close {
   border: 0; background: transparent; cursor: pointer; color: var(--faint);
