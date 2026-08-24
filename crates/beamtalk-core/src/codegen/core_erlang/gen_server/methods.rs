@@ -2735,11 +2735,16 @@ impl CoreErlangGenerator {
     /// The send / reference data comes from the existing AST walkers
     /// ([`crate::method_source_walker::find_all_sends_in_source`] and
     /// [`crate::method_source_walker::find_all_references_in_source`]).
-    /// Those operate on the unparsed bare-method source produced by
-    /// [`Self::extract_method_source`] — the *same* source channel and walkers
-    /// the `SystemNavigation` miss-policy fallback uses (ADR 0087 §Read path), so
-    /// the baked line numbers are method-relative and byte-for-byte consistent
-    /// with the fallback. No port round-trip; one in-process walk per method.
+    /// Those operate on a plain `unparse_method(method)` of the method — *not*
+    /// [`Self::extract_method_source`], which (BT-3249) strips any
+    /// writeback-inferred `-> Type` annotation for the human-facing browsable
+    /// source. xref/`referencesTo:` deliberately keeps such annotations (an
+    /// inferred return type is still a real type reference), so this walk's
+    /// source can differ in *content* (an extra `-> Type` token) from what
+    /// `SystemNavigation`'s miss-policy fallback shows — but never in *line
+    /// count* (the annotation is inline on the signature line), so baked line
+    /// numbers stay method-relative and consistent with the fallback. No port
+    /// round-trip; one in-process walk per method.
     ///
     /// Hand-written rows carry `source_status => indexed` and *omit* the
     /// optional `synthetic_origin` key (never emitted as a `null` sentinel).
@@ -2760,10 +2765,10 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let mut entries: Vec<Document<'static>> = Vec::new();
         for method in instance_methods {
-            entries.push(self.build_method_xref_entry(class.name.name.as_str(), method, false));
+            entries.push(self.build_method_xref_entry(method, false));
         }
         for method in class_methods {
-            entries.push(self.build_method_xref_entry(class.name.name.as_str(), method, true));
+            entries.push(self.build_method_xref_entry(method, true));
         }
         // ADR 0087 Phase 6 (BT-2304): synthetic auto-accessor rows.
         entries.extend(self.build_synthetic_accessor_xref_entries(class));
@@ -2890,7 +2895,6 @@ impl CoreErlangGenerator {
     /// Builds one `method_xref` entry map for a single method (ADR 0087 Phase 2).
     fn build_method_xref_entry(
         &self,
-        class_name: &str,
         method: &MethodDefinition,
         class_side: bool,
     ) -> Document<'static> {
@@ -2906,7 +2910,15 @@ impl CoreErlangGenerator {
         // that fails `core_scan` at BEAM-compile time.
         const MAX_ATOM_BYTES: usize = 255;
 
-        let source = self.extract_method_source(class_name, class_side, method);
+        // Unlike `extract_method_source` (used for the *browsable* `methodSource`/
+        // `classMethodSource` maps, BT-3249), this xref walk deliberately keeps any
+        // writeback-inferred `-> Type` annotation: `find_all_references_in_source`
+        // explicitly walks `method.return_type` to record type references for
+        // `referencesTo:`/xref queries, and an inferred-but-unannotated return type
+        // is still a real reference the method's compiled behavior carries — only
+        // the human-facing source text should hide it, not the xref data derived
+        // from the full (annotated) AST.
+        let source = crate::unparse::unparse_method(method);
 
         // The method definition's line within its own (bare) source is line 1:
         // `extract_method_source` emits the signature first (after any doc
