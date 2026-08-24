@@ -423,8 +423,15 @@ pub fn detach(
 /// instead" (same source), which is exactly what every caller here wants —
 /// none of them need the "an outside observer can still intercept/cancel
 /// this close" semantics `close()` exists for.
-pub fn detach_internal(
-    app: &AppHandle,
+///
+/// Generic over `R: tauri::Runtime` (not the plain `AppHandle` alias for
+/// `AppHandle<Wry>` every other command in this file uses) purely so
+/// [`quit_cleanup`]'s test can reach this through `tauri::test::mock_app()`'s
+/// `MockRuntime` — matches the same pattern `menu::handle_event` already
+/// uses for the same reason. Every real call site still passes a plain
+/// `AppHandle` (Wry), inferred here without any change at the call site.
+pub fn detach_internal<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     state: &AppState,
     workspace_id: &str,
 ) -> Result<(), String> {
@@ -483,11 +490,45 @@ pub fn get_launcher_logs(limit: Option<usize>) -> Result<Vec<String>, String> {
 }
 
 /// Quit: detach every tracked workspace (kills every front process, not
-/// just the picker), then exit the app.
+/// just the picker), then exit the app. Thin wrapper around [`quit_app`] —
+/// see its doc comment for why the two are split.
 #[tauri::command(async)]
 pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    quit_app(&app, &state);
+    Ok(())
+}
+
+/// Shared body of "quit the app": detach every tracked workspace (killing
+/// every front process, not just the picker), flush logs, then exit.
+///
+/// Split out from the `quit` command (rather than left inline there) so
+/// [`quit`] and the picker window's own `CloseRequested` handler
+/// (`main.rs`, BT-3252 — closing the picker is treated as equivalent to
+/// quitting the whole app, since it's the app's only always-present window
+/// and there is no tray icon or other affordance to bring it back once
+/// closed) can both run the exact same path without going through Tauri's
+/// IPC command dispatch, which `#[tauri::command]`-wrapped `quit` is not
+/// otherwise callable outside of.
+pub fn quit_app<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState) {
+    quit_cleanup(app, state);
+    app.exit(0);
+}
+
+/// The testable part of [`quit_app`]: everything up to, but not including,
+/// `AppHandle::exit`. Split out purely for [`tests::quit_cleanup_runs_cleanly_with_nothing_attached`]
+/// below: `tauri::test::mock_app()`'s `MockRuntime` implements
+/// `on_window_event` as a stub that never stores the callback (so no test
+/// can fire a simulated `CloseRequested` and observe [`quit_app`] get
+/// invoked that way — the same reason `attach_and_open_window`'s own
+/// `CloseRequested` handler has no test today), and separately,
+/// `RuntimeHandle::request_exit` is `unimplemented!()` under `MockRuntime`,
+/// so calling `AppHandle::exit` — even with nothing attached — panics
+/// unconditionally in a test. This function is as close as a test can get
+/// to exercising "the logic the picker's close handler and the Quit button
+/// both run" without hitting either limitation.
+fn quit_cleanup<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState) {
     tracing::info!("quit requested");
-    detach_all(&app, &state);
+    detach_all(app, state);
     // Best-effort and idempotent (`LoggingGuard::flush` is a `.take()`):
     // flush explicitly here rather than relying solely on `main.rs`'s
     // `RunEvent::ExitRequested` handler, since it's not guaranteed that
@@ -496,8 +537,6 @@ pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     if let Some(guard) = app.try_state::<Mutex<crate::logging::LoggingGuard>>() {
         guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
     }
-    app.exit(0);
-    Ok(())
 }
 
 /// Detach every tracked workspace (kills every front process). Shared by the
@@ -522,7 +561,7 @@ pub fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
 /// worst place in this file to do that: it would leak every still-attached
 /// front for the rest of the OS process's life, on the exact path (quit)
 /// meant to guarantee they get killed.
-pub fn detach_all(app: &AppHandle, state: &AppState) {
+pub fn detach_all<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState) {
     let ids: Vec<String> = locked(&state.children).keys().cloned().collect();
     tracing::info!(count = ids.len(), "detaching all tracked fronts");
     for id in ids {
@@ -756,6 +795,25 @@ fn reflect_connection_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn quit_cleanup_runs_cleanly_with_nothing_attached() {
+        // BT-3252: the picker window's own `CloseRequested` handler
+        // (`main.rs`) calls `quit_app`, whose entire body (besides the
+        // final `app.exit(0)` — see `quit_cleanup`'s doc comment for why
+        // that can't be exercised here) is `quit_cleanup`. This is the
+        // closest a test in this crate can get to "invoke the picker's new
+        // close handler and assert it runs the right quit/detach logic"
+        // without a live Tauri runtime: it confirms the shared path the
+        // picker's close and the in-app "Quit" button both now run
+        // (`detach_all` + best-effort log flush) completes without
+        // panicking against a freshly `mock_app()`-backed `AppHandle` and
+        // an `AppState` with nothing attached — the state both start from.
+        let app = tauri::test::mock_app();
+        let state = AppState::new(PathBuf::from("unused-in-this-test"));
+        quit_cleanup(app.handle(), &state);
+    }
 
     #[test]
     fn locked_recovers_from_a_poisoned_mutex() {

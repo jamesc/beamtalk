@@ -16,9 +16,13 @@ desktop/
   src-tauri/          Rust backend (NOT a Cargo workspace member — see below)
     src/
       main.rs          App setup: single-instance plugin, orphan-sweep, state,
-                         OS-level-quit (Cmd-Q/SIGTERM) detach-all cleanup
+                         OS-level-quit (Cmd-Q/SIGTERM) detach-all cleanup, and
+                         (BT-3252) the picker window's own `CloseRequested`
+                         handler — see "Closing the picker" below
       commands.rs       Tauri commands: list_workspaces, attach, detach,
-                         create_workspace, quit
+                         create_workspace, quit (a thin wrapper around
+                         `quit_app`, the detach-all-then-exit path BT-3252's
+                         picker close handler shares with it)
       menu.rs            App-wide menu (BT-3244): swaps the native ⌘/Ctrl+W
                            "Close Window" item for a plain ⇧⌘W one, freeing
                            ⌘/Ctrl+W so the LiveView cockpit's own `mod+w`
@@ -325,8 +329,8 @@ root/sudo access to install them). What that means concretely:
   lower-severity finding (the desktop picker window has no `CloseRequested`
   handler, so closing it — now more directly reachable via the global ⇧⌘W
   binding — can leave the app running with no visible window) was
-  pre-existing, not introduced by this change, and was filed as BT-3252
-  rather than fixed here.
+  pre-existing, not introduced by this change; filed as BT-3252 and fixed
+  there — see "Closing the picker" below.
 
 **Before this ships**, someone with a real Linux/macOS/Windows desktop needs
 to: install the Tauri prerequisites (`https://v2.tauri.app/start/prerequisites/`),
@@ -370,3 +374,54 @@ only — workspace windows (label `ws-<id>`) load the attached front's own
 that (arbitrary, workspace-authored) content cannot invoke any of this app's
 Tauri commands. Detach/quit/window-title updates for those windows are all
 driven from the Rust side, never from JS running inside them.
+
+## Closing the picker (BT-3252)
+
+Unlike each per-workspace window — which `commands::attach_and_open_window`
+gives its own `on_window_event`/`CloseRequested` handler, wired to
+`detach_internal` — the picker (`tauri.conf.json`'s static `"picker"` window)
+had no such handler at all before BT-3252. Since the picker is the app's only
+always-present window, and there is no tray icon, dock-click handler, or
+other affordance to bring it back once gone, closing it (the traffic-light
+button, or — since BT-3244 — the app-wide "Close Window" menu item/⇧⌘W, which
+targets whichever window has OS focus) just destroyed the window with no
+app-level follow-up: if any workspace window was still attached, the app kept
+running with no visible window and no way back in short of killing the
+process from a terminal.
+
+**Decision: closing the picker is treated as equivalent to quitting the whole
+app.** `main.rs`'s `.setup()` registers a `CloseRequested` handler on the
+picker window that calls `commands::quit_app` — the exact same
+detach-every-tracked-workspace-then-exit path the in-app "Quit" button
+(`commands::quit`) and the OS-level-quit `RunEvent::ExitRequested` handler
+already used, not a separate/duplicated implementation. Considered and
+rejected:
+
+- **Recreate/show the picker on the next single-instance relaunch even with
+  no window open.** Would keep the app alive with literally nothing visible
+  and no menu-bar/dock affordance most users would think to use to bring it
+  back — worse discoverability than just quitting, for no real benefit over
+  option (b) below.
+- **Hide instead of destroy (macOS "no visible window, dock icon still
+  works" pattern), revealed again via a dock-click handler.** The most
+  "native-feeling" option, but needs new dock-click-handler and/or tray-icon
+  infrastructure this app has none of today, and would leave every attached
+  workspace's front process running invisibly forever if the user's actual
+  intent in closing the picker was to quit — a real footgun for a feature
+  this app doesn't otherwise need.
+
+Quitting is simplest, most predictable (no hidden windows, no surprising
+still-running state), needs no new UI affordance, and matches what most
+users intuitively expect from closing what looks like the app's main window.
+Reopening the picker is always just relaunching the app from the Dock/
+Finder/CLI, same as day one.
+
+Tested via `commands::quit_cleanup` (the detach-all-and-flush portion of
+`quit_app`, split out from the final `AppHandle::exit` call it can't reach
+under a live event loop): `cargo test -p beamtalk-desktop` (well,
+`cd desktop/src-tauri && cargo test`, since this crate is deliberately not a
+workspace member — see `Cargo.toml`'s header comment) exercises it against
+`tauri::test::mock_app()`. The picker's actual `on_window_event` wiring
+itself is not (and, given `MockRuntime`'s `on_window_event` is a
+never-stores-the-callback stub, cannot be) exercised this way — the same
+pre-existing gap `attach_and_open_window`'s own per-workspace handler has.
