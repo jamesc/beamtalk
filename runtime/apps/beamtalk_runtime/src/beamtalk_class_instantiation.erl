@@ -499,19 +499,34 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
             %% BT-3243: beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always
             %% links — it doubles as the real OTP supervisor child MFA for
             %% named children (ADR 0079/BT-1990), where that link is the
-            %% restart mechanism. For *this* call site, the caller is a
-            %% class method body executing `self spawnAs:`/
-            %% `self spawnWith:as:` (normally the class's own gen_server
-            %% process, per CLAUDE.md's "Blocks into class methods" rule) —
+            %% restart mechanism. For *this* call site, the caller is
+            %% normally a class method body executing `self spawnAs:`/
+            %% `self spawnWith:as:` inside the class's own gen_server
+            %% process (per CLAUDE.md's "Blocks into class methods" rule) —
             %% not a supervisor, so the link must not survive: a later kill
             %% of the actor must not take the class process down with it.
             %% Sever it immediately; by the time `'spawnAs'/3` returns
             %% `{ok, Pid}` its own await_initialize has already confirmed
             %% the actor started and initialized, so no risk window remains
             %% to protect against.
+            %%
+            %% BT-3243 supervisor-restart follow-up: the exception is a
+            %% `SupervisionSpec withClassMethod:` child (BT-1862) whose
+            %% factory calls `self spawnAs:`/`self spawnWith:as:` — that body
+            %% runs directly inside the real OTP supervisor process via
+            %% `beamtalk_supervisor:start_child_via_class_method/4` (no
+            %% process boundary in between), so unlinking here would break
+            %% the supervisor's restart mechanism exactly like it would for
+            %% plain `self spawn`/`self spawnWith:` (see
+            %% `beamtalk_actor:safe_spawn/2`'s doc). That function marks the
+            %% context via `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`; only unlink
+            %% when it is absent.
             case beamtalk_actor:'spawnAs'(Name, Module, InitArgs) of
                 {ok, Pid} ->
-                    unlink(Pid),
+                    case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
+                        true -> ok;
+                        _ -> unlink(Pid)
+                    end,
                     beamtalk_result:from_tagged_tuple(
                         {ok, #beamtalk_object{
                             class = ClassName,

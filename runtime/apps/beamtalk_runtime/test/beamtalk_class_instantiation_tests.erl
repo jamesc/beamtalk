@@ -85,6 +85,9 @@ instantiation_test_() ->
                 fun test_class_self_spawn_as_success/0},
             {"class_self_spawn_as returns Result error for reserved name",
                 fun test_class_self_spawn_as_reserved/0},
+            %% BT-3243 supervisor-restart follow-up
+            {"class_self_spawn_as stays linked when the supervisor-spawn context is set",
+                fun test_class_self_spawn_as_stays_linked_in_supervisor_context/0},
             {"class_self_spawn_as returns Result error for abstract class",
                 fun test_class_self_spawn_as_abstract/0},
             {"class_self_spawn_with returns Result ok with init args applied",
@@ -468,6 +471,36 @@ test_class_self_spawn_as_success() ->
     {links, CallerLinks} = process_info(self(), links),
     ?assertNot(lists:member(Obj#beamtalk_object.pid, CallerLinks)),
     gen_server:stop(Obj#beamtalk_object.pid).
+
+test_class_self_spawn_as_stays_linked_in_supervisor_context() ->
+    %% BT-3243 supervisor-restart follow-up: when
+    %% beamtalk_supervisor:start_child_via_class_method/4 is on the call
+    %% stack (a `SupervisionSpec withClassMethod:` child's factory calling
+    %% `self spawnAs:`/`self spawnWith:as:`), it marks the process
+    %% dictionary with ?BT_SUPERVISOR_SPAWN_CONTEXT_KEY. do_class_self_named_spawn/6
+    %% must NOT unlink in that case — the link is the supervisor's restart
+    %% mechanism — unlike the ordinary case proved by
+    %% test_class_self_spawn_as_success/0 above (no marker set, unlinks).
+    ok = ensure_counter_loaded(),
+    Name = bt3243_self_spawnas_supervisor_context,
+    unregister_if_present(Name),
+    put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
+    try
+        Result = beamtalk_class_instantiation:class_self_spawn_as(
+            'Counter', 'bt@counter', false, Name
+        ),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := #beamtalk_object{}},
+            Result
+        ),
+        #{'okValue' := Obj} = Result,
+        {links, CallerLinks} = process_info(self(), links),
+        ?assert(lists:member(Obj#beamtalk_object.pid, CallerLinks)),
+        unlink(Obj#beamtalk_object.pid),
+        gen_server:stop(Obj#beamtalk_object.pid)
+    after
+        erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
+    end.
 
 test_class_self_spawn_as_reserved() ->
     ok = ensure_counter_loaded(),
