@@ -33,32 +33,44 @@
 //! (the "no duplicate implementations" rule doesn't apply to the compiler
 //! including one file twice).
 //!
-//! macOS-only: `menu::build` is itself only ever *called* on macOS in
-//! production (`main.rs`'s `.menu(menu::build)` is
-//! `#[cfg(target_os = "macos")]`-gated — see `menu.rs`'s module doc for why:
-//! Tauri never auto-installs a menu on Windows/Linux, so this app never
-//! builds one there either), so scoping this test's real assertions to the
-//! same platform matches what actually ships. That scoping also happens to
-//! route around a real, separately-tracked Windows limitation: an earlier
-//! version of this test ran unconditionally and crashed the compiled
-//! `menu_main_thread.exe` at process startup on `windows-2022` CI with
-//! `STATUS_ENTRYPOINT_NOT_FOUND` — an OS-loader symbol-resolution failure,
-//! not a test assertion, and it happened before any test code executed at
-//! all (see BT-3253 for the investigation and leading theory: `tauri-build`'s
-//! Windows resource/manifest linking likely only reaches the crate's
-//! `[[bin]]` target, not arbitrary `[[test]]` targets, so `muda`'s native
-//! Win32 menu-construction code — genuinely exercised here, unlike in any
-//! other test in this crate — can't resolve a symbol it expects). The same
-//! run's `test-desktop (macos-latest)` and `test-desktop (ubuntu-latest)`
-//! both passed; macOS is the only platform this needs to run on regardless,
-//! so BT-3253 is a test-infra follow-up, not a blocker for this file.
+//! Runs on every platform, not just macOS: `menu::build` itself is
+//! `Runtime`-generic with no `#[cfg(target_os = "macos")]` gating around the
+//! "Window" submenu or [`menu::CLOSE_WINDOW_ITEM_ID`] this test asserts on
+//! (see `menu.rs`'s `build` — only a few *other* items in the menu, e.g. the
+//! macOS app-name submenu, are platform-gated). The fact that `main.rs`
+//! itself only *calls* `menu::build` under `#[cfg(target_os = "macos")]`
+//! (Tauri never auto-installs a menu on Windows/Linux, so this app doesn't
+//! build one there either — see `menu.rs`'s module doc) doesn't make the
+//! function's own correctness a macOS-only concern; exercising it here on
+//! every platform is strictly more coverage of genuinely shared code, not
+//! scope creep.
+//!
+//! This file previously *did* gate its real assertions to
+//! `#[cfg(target_os = "macos")]`, purely as a workaround: an earlier,
+//! unconditional version crashed the compiled `menu_main_thread.exe` at
+//! process startup on `windows-2022` CI with `STATUS_ENTRYPOINT_NOT_FOUND` —
+//! an OS-loader symbol-resolution failure, before any test code ran at all.
+//! BT-3253 tracked that down to a confirmed `tauri-build` limitation (not
+//! ruled out — confirmed, both by reading `tauri-build`/`tauri-winres`
+//! source and by finding the identical failure already reported upstream:
+//! <https://github.com/tauri-apps/tauri/issues/13419>,
+//! <https://github.com/orgs/tauri-apps/discussions/11179>): the Windows
+//! resource `tauri_build::build()` compiles — which embeds the Common
+//! Controls v6 manifest `tauri`'s `common-controls-v6` feature needs for its
+//! native Win32 UI code — is linked via `cargo:rustc-link-arg-bins=...`,
+//! which (per Cargo's own documented behavior) only reaches this crate's
+//! `[[bin]]` target, never a `[[test]]` target. Without that manifest, the
+//! OS loader resolves `comctl32.dll` to the old in-box version, which is
+//! missing symbols (e.g. `SetWindowSubclass`) the v6 DLL exports — exactly
+//! matching the observed crash. `build.rs`'s `embed_manifest_for_tests` now
+//! embeds that same manifest into `[[test]]` targets too (mirroring the
+//! identical fix `tauri` itself uses in its own test suite), which is what
+//! makes running this file's real assertions on Windows possible at all.
 
-#[cfg(target_os = "macos")]
 #[path = "../src/menu.rs"]
 #[allow(dead_code, unused_imports)]
 mod menu;
 
-#[cfg(target_os = "macos")]
 fn main() {
     let app = tauri::test::mock_app();
     let built = menu::build(app.handle()).expect("menu should build against a mock app");
@@ -88,11 +100,3 @@ fn main() {
 
     println!("menu_main_thread: ok");
 }
-
-// Non-macOS: `menu::build` is never called in production here (see the
-// module doc above), and — for Windows specifically — actually calling it
-// from this harness=false binary is the exact thing BT-3253 tracks as
-// broken. Trivially succeed rather than omitting the `[[test]]` target
-// outright, so `cargo test`'s target list stays identical across platforms.
-#[cfg(not(target_os = "macos"))]
-fn main() {}
