@@ -849,7 +849,7 @@ Doc comments flow from source → AST → compiled BEAM module → runtime. They
 
 ### Method Category Dividers (`// === Name ===`)
 
-A `// === Name ===` comment placed between methods introduces a **method category** — a named group that the LSP outline, VS Code breadcrumbs, and sticky-scroll use to organize a class's methods visually.
+A `// === Name ===` comment placed between methods introduces a **method category** — a named group used across all surfaces: the LSP outline (`documentSymbol`), VS Code breadcrumbs/sticky-scroll, LSP folding ranges (`textDocument/foldingRange`), REPL `:help` grouped method listing, and MCP `docs` structured output.
 
 ```beamtalk
 Value subclass: Point
@@ -871,9 +871,9 @@ Value subclass: Point
     Point x: self.x + other x y: self.y + other y
 ```
 
-**Format:** a leading `//` line comment whose trimmed text is `=+ <name> =+`, where the leading and trailing `=` runs are the same length (3 or more) and `<name>` is non-empty. Triple-slash (`///`) and block (`/* */`) comments are not recognized as dividers. A class with no dividers keeps the existing flat outline — no behavior change.
+**Format:** a leading `//` line comment whose trimmed text is `=+ <name> =+`, where the leading and trailing `=` runs are the same length (3 or more) and `<name>` is non-empty. Triple-slash (`///`) and block (`/* */`) comments are not recognized as dividers. A `=`-bordered comment that looks like a divider but doesn't parse as one (mismatched `=` run lengths, too-short runs, `///`/`/* */` instead of `//`) is flagged by `beamtalk lint` as a near-miss (BT-3240). A class with no dividers keeps the existing flat outline — no behavior change.
 
-Methods following a divider belong to that category until the next divider or end of class. Instance-side and class-side methods are merged in true source order (not grouped by side). The stdlib uses this convention throughout (BT-2601, BT-2626).
+Methods following a divider belong to that category until the next divider or end of class. Instance-side and class-side methods are merged in true source order (not grouped by side). The REPL falls back to the flat alphabetical listing when grouping can't be trusted (no on-disk `.bt` file, no dividers, or unflushed `>>` patches). The stdlib uses this convention throughout (BT-2601, BT-2626, BT-3237, BT-3239, BT-3240).
 
 ### Erlang FFI
 
