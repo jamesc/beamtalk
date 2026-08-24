@@ -326,6 +326,7 @@
     "package": "vsce package",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:grammar": "vitest run src/__tests__/sectionDividerGrammar.test.ts",
     "lint": "biome lint src/",
     "format": "biome format --write src/",
     "format:check": "biome format src/"
@@ -342,6 +343,7 @@
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "typescript": "^5.0.0",
-    "vitest": "^4.1.3"
+    "vitest": "^4.1.3",
+    "vscode-oniguruma": "^2.0.1"
   }
 }

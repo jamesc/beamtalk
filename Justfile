@@ -45,7 +45,7 @@ doctor:
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift
+ci: build lint test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-surface-drift test-grammar
 
 [windows]
 ci: build clippy fmt-check-rust test verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -782,6 +782,26 @@ lint-js: fmt-check-js
     @echo "🔍 Running Biome lint..."
     npm run lint
     @echo "✅ Biome lint passed"
+
+# BT-3261: TextMate section-divider grammar vs. parse_divider_name conformance.
+# Runs the comment.line.double-slash.section-divider.beamtalk regex (parsed
+# straight out of beamtalk.tmLanguage.json, never a hand-copied duplicate)
+# through the real Oniguruma engine (vscode-oniguruma) against the shared
+# fixture crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json
+# — the same fixture crates/beamtalk-core/tests/section_divider_grammar_conformance.rs
+# checks against parse_divider_name directly, so the two recognizers can't
+# silently drift apart again.
+[unix]
+[working-directory: 'editors/vscode']
+test-grammar:
+    @echo "🔍 Running TextMate section-divider grammar conformance test..."
+    npm ci --quiet
+    npm run test:grammar
+    @echo "✅ TextMate section-divider grammar conformance test passed"
+
+[windows]
+test-grammar:
+    @echo "test-grammar: skipped on Windows (covered by Linux CI)"
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:

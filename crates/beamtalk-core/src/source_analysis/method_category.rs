@@ -499,6 +499,20 @@ mod tests {
         assert_eq!(parse_divider_name("  ===  Name  ===  "), Some("Name"));
     }
 
+    #[test]
+    fn tolerates_no_whitespace_around_name() {
+        // BT-3261: no whitespace requirement here — only that the trimmed name
+        // between the two `=` runs be non-empty. The TextMate grammar in
+        // editors/vscode/syntaxes/beamtalk.tmLanguage.json used to require
+        // `\s+` on both sides and so missed this shape (a false negative,
+        // safe direction — see that file's `comment.line.double-slash.
+        // section-divider.beamtalk` pattern comment and the shared
+        // conformance fixture at
+        // tests/fixtures/section_divider_grammar_cases.json, also checked by
+        // `tests/section_divider_grammar_conformance.rs`).
+        assert_eq!(parse_divider_name("===Name==="), Some("Name"));
+    }
+
     // --- categorize_methods ---
 
     fn parse_class(source: &str) -> crate::ast::ClassDefinition {
