@@ -64,7 +64,15 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% called from beamtalk_repl_eval:handle_type_alias_definition/3, the
     %% one production site that commits a live alias (re)definition.
     spawn_alias_change_recheck/1,
-    precheck_method/4
+    precheck_method/4,
+    %% BT-3238: the Cockpit section-authoring write path
+    %% (`beamtalk_repl_ops_load:save_section/5`) needs the same "which `.bt`
+    %% file backs this class, and is it inside the project (safe to write)"
+    %% resolution the ADR 0082 install hook already relies on — reused here
+    %% rather than re-derived, per the project's no-duplicate-implementations
+    %% rule.
+    class_source_file/1,
+    classify_source_file/1
 ]).
 
 %% Exported for testing (only in test builds)
@@ -86,7 +94,6 @@ Extracted from beamtalk_repl_eval (BT-863).
     is_path_inside/2,
     method_source_binary/1,
     patch_side/1,
-    classify_source_file/1,
     span_error_entry/3,
     new_method_entry/3,
     sibling_method_indent/1,

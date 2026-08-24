@@ -21,6 +21,7 @@ panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-protocols` | protocol + selector tree | `{value, ProtocolTree}` |
 | `browse-method-source` | method source pane | `{value, MethodSource}` |
 | `browse-class-definition` | class-definition pane | `{value, ClassDefinition}` |
+| `browse-categories` | divider-grouped method view (BT-3238) | `{value, CategoryView}` |
 | `browse-native-source` | read-only native pane | `{value, NativeSource}` |
 | `browse-native-modules` | native-modules section | `{value, [NativeModuleRow]}` |
 | `browse-type-aliases` | type-aliases section | `{value, [AliasRow]}` |
@@ -144,6 +145,13 @@ handle_term(<<"browse-class-definition">>, Params, _Msg, _SessionPid) ->
         {error, Reason} ->
             arg_error(<<"browse-class-definition">>, Reason)
     end;
+handle_term(<<"browse-categories">>, Params, _Msg, _SessionPid) ->
+    case validate_class(Params) of
+        {ok, ClassName} ->
+            browse_categories(ClassName);
+        {error, Reason} ->
+            arg_error(<<"browse-categories">>, Reason)
+    end;
 handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
     %% BT-2648: the native pane can be keyed by a standalone native `module`
     %% (a dependency's hand-written `.erl` with no `native:` class to back it,
@@ -178,6 +186,8 @@ describe_ops() ->
             <<"params">> => [<<"class">>, <<"side">>, <<"selector">>]
         },
         <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]},
+        %% BT-3238: the divider-grouped ("// === Name ===") method view.
+        <<"browse-categories">> => #{<<"params">> => [<<"class">>]},
         %% `selector` is optional: present → also resolve the matching
         %% `handle_call` clause; absent → whole-module view (BT-2578). BT-2648:
         %% `module` is an alternative key (a standalone native module with no
@@ -756,6 +766,103 @@ type_suffix(Type) -> [<<" :: ">>, Type].
 -spec default_suffix(binary() | null) -> iolist().
 default_suffix(null) -> [];
 default_suffix(Default) -> [<<" = ">>, Default].
+
+%%% ====================================================================
+%%% Op 4b — browse-categories (BT-3238)
+%%% ====================================================================
+
+%% Groups a class's methods by `// === Name ===` section divider (BT-2601's
+%% shared, canonical recognizer — `beamtalk_compiler:categorize_methods/2',
+%% bridged from `beamtalk_core::source_analysis::categorize_methods_in_source'
+%% via the compiler port) for the System Browser's grouped method view.
+%%
+%% Unlike ops 1-4, this reads the class's *whole on-disk source text*, not
+%% just its live/reflected metadata — divider categories are file structure,
+%% invisible to a loaded class object (see `method_category.rs''s module doc:
+%% "a class object built from a running system carries no category; that is
+%% intentional, not a gap"). `current_disk_source/2' (already used by op 3's
+%% `disk_differs' diff, BT-2567) supplies that text via a live re-read of the
+%% recorded source file.
+%%
+%% `has_dividers` is `false' whenever `categorize_methods' would return a
+%% single, unnamed leading category (no dividers in source) OR the class has
+%% no on-disk source to read at all (runtime-only class) — either way, the
+%% caller falls back to its pre-existing flat/protocol-grouped rendering,
+%% mirroring `document_symbols_provider.rs''s LSP-side gate so the two
+%% surfaces never disagree about whether a class "has dividers".
+-spec browse_categories(atom()) -> beamtalk_repl_ops:op_result().
+browse_categories(ClassName) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            not_found_error(<<"browse-categories">>, ClassName);
+        _ClassPid ->
+            %% Review finding (BT-3238): resolve the source file the SAME way
+            %% `save-section` does (`beamtalk_repl_loader:class_source_file/1`
+            %% — the ADR 0082 install-hook resolver, not this module's
+            %% `origin_module/2` + `source_file_of/1` reflection pair used by
+            %% ops 1-4). Divergent resolvers for a browse-then-save round trip
+            %% could read one file and write another for the same class (e.g.
+            %% a protocol class, where `origin_module/2` maps to the
+            %% protocol's defining module); a single shared resolver makes
+            %% that structurally impossible.
+            SourceFile =
+                case beamtalk_repl_loader:class_source_file(atom_to_binary(ClassName, utf8)) of
+                    nil -> null;
+                    Path when is_binary(Path) -> Path
+                end,
+            case current_disk_source(SourceFile, ClassName) of
+                undefined ->
+                    {value, #{<<"has_dividers">> => false, <<"categories">> => []}};
+                Source when is_binary(Source) ->
+                    categorize_from_source(Source, ClassName)
+            end
+    end.
+
+-spec categorize_from_source(binary(), atom()) -> beamtalk_repl_ops:op_result().
+categorize_from_source(Source, ClassName) ->
+    case beamtalk_compiler:categorize_methods(Source, ClassName) of
+        {ok, Categories} ->
+            {value, category_view(Categories)};
+        {error, class_not_found, _Message} ->
+            %% The recorded source file no longer declares this class (e.g.
+            %% renamed/moved out from under the live class) — degrade to "no
+            %% grouping available" rather than failing the browse, matching
+            %% `class_definition_disk_differs/1''s "nothing to compare" stance.
+            {value, #{<<"has_dividers">> => false, <<"categories">> => []}};
+        {error, Reason, Message} ->
+            arg_error(
+                <<"browse-categories">>,
+                iolist_to_binary([atom_to_binary(Reason, utf8), <<": ">>, Message])
+            )
+    end.
+
+%% Wire shape: `#{has_dividers, categories}'. `has_dividers' lets the client
+%% branch without re-deriving the "any category named" check itself.
+-spec category_view([map()]) -> map().
+category_view(Categories) ->
+    HasDividers = lists:any(fun(#{name := Name}) -> Name =/= undefined end, Categories),
+    #{
+        <<"has_dividers">> => HasDividers,
+        <<"categories">> => [category_row(C) || C <- Categories]
+    }.
+
+-spec category_row(map()) -> map().
+category_row(#{name := Name, methods := Methods}) ->
+    #{
+        <<"name">> => name_or_null(Name),
+        <<"methods">> => [method_row(M) || M <- Methods]
+    }.
+
+-spec name_or_null(binary() | undefined) -> binary() | null.
+name_or_null(undefined) -> null;
+name_or_null(Name) when is_binary(Name) -> Name.
+
+-spec method_row(map()) -> map().
+method_row(#{selector := Selector, side := Side}) ->
+    #{
+        <<"selector">> => Selector,
+        <<"side">> => atom_to_binary(Side, utf8)
+    }.
 
 %%% ====================================================================
 %%% Op 5 — browse-native-source (BT-2578)

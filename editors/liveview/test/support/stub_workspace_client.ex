@@ -92,6 +92,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # UI panel without a real workspace node. `[]` = no findings
               # (the default, matching a fresh session).
               reload_findings: [],
+              # BT-3238: seeded `browse_categories/1` responses per class (`%{}` =
+              # every class reports `has_dividers: false, categories: []`, the
+              # default no-source/no-dividers shape) and a forced next
+              # `save_section/3` result (`nil` = report success).
+              categories: %{},
+              section_save_result: nil,
               calls: []
   end
 
@@ -1060,6 +1066,39 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def browse_native_module_source(module),
     do: {:error, "module `#{module}` not found"}
+
+  # BT-3238: the divider-grouped method view. No dividers by default (matching
+  # `has_dividers: false`, the every-class-unaffected case); a test seeds a
+  # class's category rows via `seed_categories/2`.
+  def browse_categories(class) do
+    case Map.get(get(:categories) || %{}, class) do
+      nil -> {:value, %{"has_dividers" => false, "categories" => []}}
+      seeded -> {:value, seeded}
+    end
+  end
+
+  @doc """
+  Test helper (BT-3238): seed `browse_categories/1`'s response for `class`.
+  `view` is the raw `%{"has_dividers" => _, "categories" => [...]}` map.
+  """
+  def seed_categories(class, view) when is_binary(class) and is_map(view) do
+    update(:categories, fn map -> Map.put(map || %{}, class, view) end)
+  end
+
+  # BT-3238: add/rename a `// === Name ===` section divider. Records the call
+  # for assertions and, by default, reports success. A test can force a
+  # structured failure via `set_section_save/1`.
+  def save_section(class, new_name, opts) do
+    record({:save_section, class, new_name, opts})
+
+    case get(:section_save_result) do
+      nil -> {:value, %{"class" => class, "source_file" => "src/#{class}.bt", "ok" => true}}
+      result -> result
+    end
+  end
+
+  @doc "Test helper (BT-3238): force the next `save_section/3` result."
+  def set_section_save(result), do: put(:section_save_result, result)
 
   # BT-2670: save (edit → compile → reload → write-back) a project-owned native.
   # Records the call for assertions and, by default, reports a clean compile. A

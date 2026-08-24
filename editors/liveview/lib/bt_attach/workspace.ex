@@ -346,6 +346,26 @@ defmodule BtAttach.Workspace do
     do: dispatch_browse("browse-class-definition", %{"class" => class})
 
   @doc """
+  Return `class`'s methods grouped by `// === Name ===` section-divider
+  category for the System Browser's grouped method view (BT-3238,
+  `browse-categories`) — the same shared, canonical divider recognizer
+  (`source_analysis::method_category::categorize_methods`) the LSP's
+  `documentSymbol` outline already uses (BT-2601), read fresh from the
+  class's on-disk `.bt` source.
+
+  The result carries `has_dividers` (`false` when the class has no dividers
+  at all, or no on-disk source to read — the gate callers use to fall back to
+  the existing flat/protocol-grouped rendering, matching the LSP's own gate)
+  and `categories`: a list of `%{"name" => name_or_nil, "methods" =>
+  [%{"selector" => _, "side" => "instance" | "class"}]}` maps in source
+  order, with `name == nil` for the implicit leading group (methods before
+  the first divider). `{:error, reason}` for an unknown class.
+  """
+  @spec browse_categories(String.t()) :: {:value, term()} | {:error, term()}
+  def browse_categories(class) when is_binary(class),
+    do: dispatch_browse("browse-categories", %{"class" => class})
+
+  @doc """
   Return the backing Erlang source of a `native:` class for the System Browser's
   read-only native pane (BT-2578, `browse-native-source`). The result carries
   `backing_module`, `source_file` (`null` when the `.erl` is not shipped),
@@ -432,6 +452,46 @@ defmodule BtAttach.Workspace do
   @spec save_native_source(String.t(), String.t()) :: {:value, term()} | {:error, term()}
   def save_native_source(module, source) when is_binary(module) and is_binary(source),
     do: dispatch_browse("save-native-source", %{"module" => module, "source" => source})
+
+  @doc """
+  Add or rename a `// === Name ===` section-divider comment in `class`'s
+  `.bt` source file (BT-3238, `save-section`) — the System Browser's
+  file/class-level section-authoring affordance. Per BT-2601's design ("the
+  divider comment is the storage, no sidecar metadata"), this writes the
+  divider text directly into the source file; it is not a method-body edit
+  and does not touch the ADR 0082 patch/ChangeLog/flush pipeline.
+
+  Exactly one of two params selects the mode:
+
+    * `old_name` (non-nil): **rename** the existing category with that
+      divider name to `new_name`.
+    * `before_selector` (+ optional `before_side`, `"instance"` by default,
+      non-nil): **insert** a brand-new `// === new_name ===` divider
+      directly above that method.
+
+  The workspace re-derives the write target (and its project ownership)
+  server-side from the class's own compile-info — never a client-supplied
+  path — and rejects any deps/stdlib/file-less class with a structured
+  `#beamtalk_error{}`.
+
+  Returns `{:value, %{"class" => _, "source_file" => _, "ok" => true}}` on
+  success; `{:error, reason}` for a bad param, an unknown/non-editable
+  class, or a section/method that can't be located.
+  """
+  @spec save_section(String.t(), String.t(), keyword()) :: {:value, term()} | {:error, term()}
+  def save_section(class, new_name, opts \\ [])
+      when is_binary(class) and is_binary(new_name) and is_list(opts) do
+    params =
+      %{"class" => class, "new_name" => new_name}
+      |> maybe_put_param("old_name", Keyword.get(opts, :old_name))
+      |> maybe_put_param("before_selector", Keyword.get(opts, :before_selector))
+      |> maybe_put_param("before_side", Keyword.get(opts, :before_side))
+
+    dispatch_browse("save-section", params)
+  end
+
+  defp maybe_put_param(params, _key, nil), do: params
+  defp maybe_put_param(params, key, value) when is_binary(value), do: Map.put(params, key, value)
 
   # ── navigation-surface: senders/implementors + omni-search index ────────────
   #

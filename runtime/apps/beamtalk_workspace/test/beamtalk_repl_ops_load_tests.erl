@@ -1638,6 +1638,397 @@ save_native_source_requires_source_test() ->
     ).
 
 %%====================================================================
+%% save-section (BT-3238)
+%%
+%% Add/rename a `// === Name ===` divider comment directly in a project-owned
+%% `.bt` source file. Real project + real loaded class (workspace_meta with a
+%% project_path, so `classify_source_file/1` sees the source as flushable) —
+%% mirrors `save-native-source`'s real-project setup above, just for a `.bt`
+%% class instead of a native `.erl` module.
+%%====================================================================
+
+setup_project_class(ClassName, Src) ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    application:ensure_all_started(beamtalk_runtime),
+    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Proj = Tmp ++ "/bt_section_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ok = file:make_dir(Proj),
+    ok = file:write_file(
+        filename:join(Proj, "beamtalk.toml"), <<"[package]\nname = \"sectionpkg\"\n">>
+    ),
+    SrcDir = filename:join(Proj, "src"),
+    ok = filelib:ensure_dir(filename:join(SrcDir, "anchor")),
+    Path = filename:join(SrcDir, atom_to_list(ClassName) ++ ".bt"),
+    ok = file:write_file(Path, Src),
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"section_ws">>,
+        project_path => list_to_binary(Proj),
+        created_at => erlang:system_time(second),
+        %% `repl => false` is "run mode" (see `beamtalk_workspace_meta:init/1`):
+        %% it skips computing a `metadata_path` under the real
+        %% `~/.beamtalk/workspaces/<id>/metadata.json`, so `init/1`'s
+        %% `load_metadata_from_disk/1` never re-loads a STALE `project_path`
+        %% persisted there by an earlier test run using the same
+        %% `workspace_id`. Without this, a second run of this suite silently
+        %% clobbers the freshly-passed `project_path` with whatever an earlier
+        %% run last persisted — a real bug found while writing this test, not
+        %% a hypothetical.
+        repl => false
+    }),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    {Proj, Path}.
+
+teardown_project_class(Proj) ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    rm_temp_dir(Proj).
+
+save_section_renames_existing_divider_test() ->
+    Src = <<
+        "Object subclass: BtSectionRenameClass\n"
+        "\n"
+        "  foo => 1\n"
+        "\n"
+        "  // === Old Section ===\n"
+        "\n"
+        "  bar => 2\n"
+    >>,
+    {Proj, Path} = setup_project_class(bt_section_rename_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionRenameClass">>,
+            <<"new_name">> => <<"New Section">>,
+            <<"old_name">> => <<"Old Section">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({value, #{<<"ok">> := true}}, Result),
+        {ok, NewSrc} = file:read_file(Path),
+        ?assert(binary:match(NewSrc, <<"// === New Section ===">>) =/= nomatch),
+        ?assertEqual(nomatch, binary:match(NewSrc, <<"Old Section">>)),
+        %% Everything else — including the method bodies — is untouched.
+        ?assert(binary:match(NewSrc, <<"foo => 1">>) =/= nomatch),
+        ?assert(binary:match(NewSrc, <<"bar => 2">>) =/= nomatch)
+    after
+        teardown_project_class(Proj)
+    end.
+
+%% BT-3238 review finding: `finish_section_write/4` must re-read the target
+%% file immediately before writing and reject the write if it no longer
+%% matches the `Source` the edit was computed from — e.g. a concurrent
+%% method-body flush landed on the file after this op's own read. Exercises
+%% `finish_section_write/4` directly (exported under `-ifdef(TEST)`) since
+%% racing a real concurrent write against the near-instantaneous read-then-
+%% write window inside `save_section/5` isn't reliably reproducible.
+save_section_write_rejects_stale_source_test() ->
+    Dir = make_temp_dir(),
+    try
+        OriginalSource = <<"Object subclass: BtSectionConflictClass\n\n  foo => 1\n">>,
+        Path = write_temp_file(Dir, "bt_section_conflict_class.bt", OriginalSource),
+        %% Simulate a concurrent write (e.g. another session's ADR 0082 flush)
+        %% landing on `Path` after this op's own read but before its write.
+        ConcurrentSource = <<"Object subclass: BtSectionConflictClass\n\n  foo => 99\n">>,
+        ok = file:write_file(Path, ConcurrentSource),
+        NewSource =
+            <<"Object subclass: BtSectionConflictClass\n\n  // === New ===\n\n  foo => 1\n">>,
+        Result = beamtalk_repl_ops_load:finish_section_write(
+            Path, <<"BtSectionConflictClass">>, OriginalSource, NewSource
+        ),
+        ?assertMatch(
+            {error, {beamtalk_error, external_edit, 'WorkspaceInterface', _, _, _, _}}, Result
+        ),
+        %% Nothing was written: disk still holds the concurrent write, not
+        %% this op's `NewSource` (which would have silently reverted it) and
+        %% not the original stale `Source` either.
+        {ok, OnDisk} = file:read_file(Path),
+        ?assertEqual(ConcurrentSource, OnDisk)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+save_section_inserts_new_divider_before_method_test() ->
+    Src = <<
+        "Object subclass: BtSectionInsertClass\n"
+        "\n"
+        "  foo => 1\n"
+        "\n"
+        "  bar => 2\n"
+    >>,
+    {Proj, Path} = setup_project_class(bt_section_insert_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionInsertClass">>,
+            <<"new_name">> => <<"New Section">>,
+            <<"before_selector">> => <<"bar">>,
+            <<"before_side">> => <<"instance">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({value, #{<<"ok">> := true}}, Result),
+        {ok, NewSrc} = file:read_file(Path),
+        %% The new divider line lands directly above `bar`, at `bar`'s own
+        %% two-space indentation.
+        ?assert(binary:match(NewSrc, <<"  // === New Section ===\n">>) =/= nomatch),
+        {DividerPos, _} = binary:match(NewSrc, <<"// === New Section ===">>),
+        {BarPos, _} = binary:match(NewSrc, <<"bar => 2">>),
+        ?assert(DividerPos < BarPos)
+    after
+        teardown_project_class(Proj)
+    end.
+
+%% Inserting a new divider directly above a method that already starts a
+%% NAMED category would write two divider lines back-to-back with nothing
+%% between them — `find_divider_span` keeps only the nearer one, so the
+%% existing "Old Section" divider would be silently orphaned rather than
+%% cleanly split. This must be rejected, not silently corrupt the file.
+save_section_insert_before_existing_section_start_is_rejected_test() ->
+    Src = <<
+        "Object subclass: BtSectionCollideClass\n"
+        "\n"
+        "  foo => 1\n"
+        "\n"
+        "  // === Old Section ===\n"
+        "\n"
+        "  bar => 2\n"
+    >>,
+    {Proj, Path} = setup_project_class(bt_section_collide_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionCollideClass">>,
+            <<"new_name">> => <<"New Section">>,
+            <<"before_selector">> => <<"bar">>,
+            <<"before_side">> => <<"instance">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({error, _}, Result),
+        %% The source file is untouched — a rejected insert must not partially
+        %% write.
+        ?assertEqual({ok, Src}, file:read_file(Path))
+    after
+        teardown_project_class(Proj)
+    end.
+
+%% Inserting before a method that is NOT a category's first method (i.e. a
+%% later method already inside a named section) is a legitimate split and
+%% must succeed.
+save_section_insert_splits_an_existing_section_test() ->
+    Src = <<
+        "Object subclass: BtSectionSplitClass\n"
+        "\n"
+        "  // === Section ===\n"
+        "\n"
+        "  foo => 1\n"
+        "\n"
+        "  bar => 2\n"
+    >>,
+    {Proj, Path} = setup_project_class(bt_section_split_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionSplitClass">>,
+            <<"new_name">> => <<"Later Half">>,
+            <<"before_selector">> => <<"bar">>,
+            <<"before_side">> => <<"instance">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({value, #{<<"ok">> := true}}, Result),
+        {ok, NewSrc} = file:read_file(Path),
+        ?assert(binary:match(NewSrc, <<"// === Section ===">>) =/= nomatch),
+        ?assert(binary:match(NewSrc, <<"// === Later Half ===">>) =/= nomatch)
+    after
+        teardown_project_class(Proj)
+    end.
+
+save_section_old_name_not_found_test() ->
+    Src = <<"Object subclass: BtSectionMissingClass\n\n  foo => 1\n">>,
+    {Proj, _Path} = setup_project_class(bt_section_missing_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionMissingClass">>,
+            <<"new_name">> => <<"New Section">>,
+            <<"old_name">> => <<"Nonexistent Section">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({error, _}, Result)
+    after
+        teardown_project_class(Proj)
+    end.
+
+save_section_rejects_unknown_class_test() ->
+    Params = #{
+        <<"class">> => <<"BtSectionDefinitelyNotLoadedQwerty">>,
+        <<"new_name">> => <<"New Section">>,
+        <<"old_name">> => <<"Old Section">>
+    },
+    Result = beamtalk_repl_ops_load:handle_term(<<"save-section">>, Params, undefined, self()),
+    ?assertMatch({error, _}, Result).
+
+save_section_requires_class_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>,
+            #{<<"class">> => <<>>, <<"new_name">> => <<"X">>, <<"old_name">> => <<"Y">>},
+            undefined,
+            self()
+        )
+    ).
+
+save_section_requires_new_name_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>,
+            #{<<"class">> => <<"Counter">>, <<"new_name">> => <<>>, <<"old_name">> => <<"Y">>},
+            undefined,
+            self()
+        )
+    ).
+
+save_section_requires_old_name_or_before_selector_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>,
+            #{<<"class">> => <<"Counter">>, <<"new_name">> => <<"X">>},
+            undefined,
+            self()
+        )
+    ).
+
+%% A `new_name` with an embedded newline would inject arbitrary extra source
+%% lines into the file if spliced verbatim — must be rejected, not written.
+save_section_rejects_new_name_with_newline_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>,
+            #{
+                <<"class">> => <<"Counter">>,
+                <<"new_name">> => <<"Bad\nName">>,
+                <<"old_name">> => <<"Y">>
+            },
+            undefined,
+            self()
+        )
+    ).
+
+%% A whitespace-only `new_name` composes a line `parse_divider_name` itself
+%% rejects — the section would silently vanish with no error if allowed.
+save_section_rejects_blank_new_name_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>,
+            #{
+                <<"class">> => <<"Counter">>,
+                <<"new_name">> => <<"   ">>,
+                <<"old_name">> => <<"Y">>
+            },
+            undefined,
+            self()
+        )
+    ).
+
+%% Passing both `old_name` and `before_selector` is an ambiguous request —
+%% the mode dispatch must not silently pick rename over insert.
+save_section_rejects_old_name_and_before_selector_together_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>,
+            #{
+                <<"class">> => <<"Counter">>,
+                <<"new_name">> => <<"X">>,
+                <<"old_name">> => <<"Y">>,
+                <<"before_selector">> => <<"increment">>
+            },
+            undefined,
+            self()
+        )
+    ).
+
+%% Two categories sharing the same divider name — renaming must not silently
+%% pick the first match; the ambiguity has to be surfaced.
+save_section_rename_rejects_duplicate_section_names_test() ->
+    Src = <<
+        "Object subclass: BtSectionDupClass\n"
+        "\n"
+        "  // === Dup ===\n"
+        "\n"
+        "  foo => 1\n"
+        "\n"
+        "  // === Dup ===\n"
+        "\n"
+        "  bar => 2\n"
+    >>,
+    {Proj, Path} = setup_project_class(bt_section_dup_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionDupClass">>,
+            <<"new_name">> => <<"New">>,
+            <<"old_name">> => <<"Dup">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({error, _}, Result),
+        %% Rejected — the source file is untouched.
+        ?assertEqual({ok, Src}, file:read_file(Path))
+    after
+        teardown_project_class(Proj)
+    end.
+
+%% A divider name containing `/`/`=` (all legal per `parse_divider_name`)
+%% must not confuse the rename splice — the line is rebuilt from the
+%% located span's own indentation, never by substring-searching for the old
+%% name inside the divider line's bytes.
+save_section_rename_handles_name_with_slash_and_equals_test() ->
+    Src = <<
+        "Object subclass: BtSectionSlashClass\n"
+        "\n"
+        "  // === A/B = C ===\n"
+        "\n"
+        "  foo => 1\n"
+    >>,
+    {Proj, Path} = setup_project_class(bt_section_slash_class, Src),
+    try
+        Params = #{
+            <<"class">> => <<"BtSectionSlashClass">>,
+            <<"new_name">> => <<"Renamed">>,
+            <<"old_name">> => <<"A/B = C">>
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-section">>, Params, undefined, self()
+        ),
+        ?assertMatch({value, #{<<"ok">> := true}}, Result),
+        {ok, NewSrc} = file:read_file(Path),
+        ?assert(binary:match(NewSrc, <<"// === Renamed ===">>) =/= nomatch),
+        ?assertEqual(nomatch, binary:match(NewSrc, <<"A/B = C">>)),
+        ?assert(binary:match(NewSrc, <<"foo => 1">>) =/= nomatch)
+    after
+        teardown_project_class(Proj)
+    end.
+
+%%====================================================================
 %% ADR 0098 Phase 4 — build-artifact provenance on workspace attach
 %%====================================================================
 

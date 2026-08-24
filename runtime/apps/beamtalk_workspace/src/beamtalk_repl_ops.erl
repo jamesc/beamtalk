@@ -145,7 +145,10 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"load-project">>;
     Op =:= <<"unload">>;
     %% BT-2670: edit → compile → reload → write-back for a project-owned native.
-    Op =:= <<"save-native-source">>
+    Op =:= <<"save-native-source">>;
+    %% BT-3238: add/rename a `// === Name ===` section-divider comment at the
+    %% file/class level.
+    Op =:= <<"save-section">>
 ->
     beamtalk_repl_ops_load:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when
@@ -197,6 +200,8 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"browse-protocols">>;
     Op =:= <<"browse-method-source">>;
     Op =:= <<"browse-class-definition">>;
+    %% BT-3238: divider-grouped ("// === Name ===") method view.
+    Op =:= <<"browse-categories">>;
     %% BT-2578 native pane + BT-2648 native-modules enumeration.
     Op =:= <<"browse-native-source">>;
     Op =:= <<"browse-native-modules">>;

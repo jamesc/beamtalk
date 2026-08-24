@@ -2901,18 +2901,108 @@ fn class_span_error_response(err: &beamtalk_core::source_analysis::ClassSpanReso
     ]))
 }
 
-/// Handle a `categorize_methods` request (BT-3239).
+/// Builds a `#{start => S, end => E}` map term for `span`, the shared shape
+/// used by every span-carrying response in this file (`resolve_method_span`,
+/// `resolve_class_span`, and this command).
+fn span_term(span: beamtalk_core::source_analysis::Span) -> Term {
+    Term::from(Map::from([
+        (
+            atom("start"),
+            int_term(i32::try_from(span.start()).unwrap_or(i32::MAX)),
+        ),
+        (
+            atom("end"),
+            int_term(i32::try_from(span.end()).unwrap_or(i32::MAX)),
+        ),
+    ]))
+}
+
+/// Builds a `#{selector => <<...>>, side => instance | class, span =>
+/// #{start, end}}` map term for one [`CategorizedMethod`](beamtalk_core::source_analysis::CategorizedMethod).
+fn categorized_method_term(method: &beamtalk_core::source_analysis::CategorizedMethod) -> Term {
+    use beamtalk_core::source_analysis::MethodSide;
+    let side = match method.side {
+        MethodSide::Instance => "instance",
+        MethodSide::Class => "class",
+    };
+    Term::from(Map::from([
+        (atom("selector"), binary(&method.selector)),
+        (atom("side"), atom(side)),
+        (atom("span"), span_term(method.span)),
+    ]))
+}
+
+/// Builds a `#{name => <<...>> | undefined, divider_span => #{start, end} |
+/// undefined, methods => [MethodMap, ...]}` map term for one
+/// [`MethodCategory`](beamtalk_core::source_analysis::MethodCategory).
+///
+/// `name`/`divider_span` are always present (using the atom `undefined` as
+/// the "absent" sentinel, never an omitted key) — BT-3238's write-path
+/// caller (the Cockpit's `save-section` op) needs `divider_span` to locate
+/// an existing divider's byte span for a rename, and a consistent key set
+/// makes both consumers' Erlang-side pattern matching uniform. `undefined`
+/// as a value is indistinguishable from an omitted key to `maps:get/3`'s
+/// default-value form (BT-3239's original read-only consumer,
+/// `beamtalk_interface.erl`, already reads `name` that way), so this is a
+/// superset of BT-3239's original "omit, never null" shape, not a breaking
+/// change to it.
+fn category_term(category: &beamtalk_core::source_analysis::MethodCategory) -> Term {
+    let methods: Vec<Term> = category
+        .methods
+        .iter()
+        .map(categorized_method_term)
+        .collect();
+    Term::from(Map::from([
+        (
+            atom("name"),
+            category
+                .name
+                .as_deref()
+                .map_or_else(|| atom("undefined"), binary),
+        ),
+        (
+            atom("divider_span"),
+            category
+                .divider_span
+                .map_or_else(|| atom("undefined"), span_term),
+        ),
+        (atom("methods"), Term::from(List::from(methods))),
+    ]))
+}
+
+/// Handle a `categorize_methods` request (BT-3239, extended by BT-3238).
 ///
 /// Groups a class's methods by its `// === Name ===` section dividers —
 /// `beamtalk_core::source_analysis::categorize_methods_in_source` is the
 /// single, canonical recognizer (BT-2601) already used by the LSP's
-/// `documentSymbol` outline; this command is the bridge that lets the
-/// Erlang REPL surface (which has no Rust parser of its own) reach the same
+/// `documentSymbol` outline; this command is the bridge that lets Erlang
+/// surfaces (which have no Rust parser of their own) reach the same
 /// function instead of reimplementing its recognition grammar — see that
 /// module's doc for why a second implementation is exactly what BT-3239 was
-/// written to avoid.
+/// written to avoid. BT-3238 (the Cockpit's grouped method view + section
+/// authoring) is the second consumer and the reason each category also
+/// carries `divider_span` and each method a `span` (BT-3239's original
+/// REPL/MCP consumer only needed `name`/`selector`/`side`; the Cockpit's
+/// `save-section` write path needs the divider's own byte span to splice a
+/// rename).
+///
+/// Request fields:
+/// - `source` (binary): the current on-disk source text of the `.bt` file
+/// - `class_name` (binary): the target class name (e.g. `Counter`)
+///
+/// Response on success: `#{status => ok, categories => [CategoryMap, ...]}`,
+/// each `CategoryMap` shaped `#{name => <<...>> | undefined, divider_span =>
+/// #{start, end} | undefined, methods => [MethodMap, ...]}` and each
+/// `MethodMap` shaped `#{selector => <<...>>, side => instance | class, span
+/// => #{start, end}}`, all in source order. A class with no dividers comes
+/// back as a single category with `name => undefined` — callers gate on this
+/// (`has_dividers`, mirroring `document_symbols_provider.rs`) to fall back to
+/// their pre-BT-2601 flat rendering. Failure (class not found, or the class
+/// name is ambiguous — more than one class definition with that name in
+/// `source`) comes back as `#{status => error, reason => class_not_found |
+/// ambiguous, message => <<...>>}`.
 fn handle_categorize_methods(request: &Map) -> Term {
-    use beamtalk_core::source_analysis::{MethodSide, categorize_methods_in_source};
+    use beamtalk_core::source_analysis::categorize_methods_in_source;
 
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -2922,41 +3012,12 @@ fn handle_categorize_methods(request: &Map) -> Term {
     };
 
     // Parse diagnostics are intentionally not surfaced as a failure here,
-    // same rationale as `handle_resolve_class_span`: the hook only needs the
-    // categorized methods.
+    // same rationale as `handle_resolve_class_span`: the caller only needs
+    // the categorized methods.
     let (result, _diagnostics) = categorize_methods_in_source(&source, &class_name);
     match result {
         Ok(categories) => {
-            let category_terms: Vec<Term> = categories
-                .iter()
-                .map(|category| {
-                    let method_terms: Vec<Term> = category
-                        .methods
-                        .iter()
-                        .map(|method| {
-                            let side = match method.side {
-                                MethodSide::Instance => atom("instance"),
-                                MethodSide::Class => atom("class"),
-                            };
-                            Term::from(Map::from([
-                                (atom("selector"), binary(&method.selector)),
-                                (atom("side"), side),
-                            ]))
-                        })
-                        .collect();
-                    // The implicit leading (unnamed) category omits `name`
-                    // entirely rather than emitting a `null` sentinel — same
-                    // "omit, never null" convention `build_method_xref_entry`
-                    // already uses for its own optional fields.
-                    let mut fields = vec![(atom("methods"), Term::from(List::from(method_terms)))];
-                    if let Some(name) = &category.name {
-                        fields.push((atom("name"), binary(name)));
-                    }
-                    Term::from(Map {
-                        map: fields.into_iter().collect(),
-                    })
-                })
-                .collect();
+            let category_terms: Vec<Term> = categories.iter().map(category_term).collect();
             Term::from(Map::from([
                 (atom("status"), atom("ok")),
                 (atom("categories"), Term::from(List::from(category_terms))),
@@ -4499,7 +4560,7 @@ Object subclass: Counter
         assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
     }
 
-    // --- categorize_methods tests (BT-3239) ---
+    // --- categorize_methods tests (BT-3239, extended by BT-3238) ---
 
     const CATEGORY_FIXTURE: &str = "\
 Object subclass: Counter
@@ -4509,6 +4570,16 @@ Object subclass: Counter
   // === Arithmetic ===
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
+";
+
+    const DIVIDER_FIXTURE: &str = "\
+Object subclass: Counter
+
+  foo => 1
+
+  // === Section ===
+
+  class bar => 2
 ";
 
     #[test]
@@ -4563,6 +4634,64 @@ Object subclass: Counter
         assert_eq!(second_methods.elements.len(), 2);
     }
 
+    // BT-3238: `divider_span`/method `span` extend BT-3239's original
+    // `name`/`selector`/`side`-only shape — the Cockpit's `save-section`
+    // write path needs the divider's own byte span to splice a rename.
+    #[test]
+    fn categorize_methods_groups_by_divider_includes_spans() {
+        let request = Map::from([
+            (atom("command"), atom("categorize_methods")),
+            (atom("source"), binary(DIVIDER_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+        ]);
+        let response = handle_categorize_methods(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(categories)) = map_get(m, "categories") else {
+            panic!("categories should be a list: {response:?}");
+        };
+        assert_eq!(categories.elements.len(), 2, "{response:?}");
+
+        let Term::Map(ref leading) = categories.elements[0] else {
+            panic!("category should be a map");
+        };
+        assert_eq!(map_get(leading, "name"), Some(&atom("undefined")));
+        let Some(Term::List(leading_methods)) = map_get(leading, "methods") else {
+            panic!("methods should be a list");
+        };
+        assert_eq!(leading_methods.elements.len(), 1);
+
+        let Term::Map(ref section) = categories.elements[1] else {
+            panic!("category should be a map");
+        };
+        assert_eq!(
+            map_get(section, "name").and_then(term_to_string),
+            Some("Section".to_string())
+        );
+        assert!(
+            matches!(map_get(section, "divider_span"), Some(Term::Map(_))),
+            "{response:?}"
+        );
+        let Some(Term::List(section_methods)) = map_get(section, "methods") else {
+            panic!("methods should be a list");
+        };
+        assert_eq!(section_methods.elements.len(), 1);
+        let Term::Map(ref bar) = section_methods.elements[0] else {
+            panic!("method should be a map");
+        };
+        assert_eq!(
+            map_get(bar, "selector").and_then(term_to_string),
+            Some("bar".to_string())
+        );
+        assert_eq!(map_get(bar, "side"), Some(&atom("class")));
+        assert!(
+            matches!(map_get(bar, "span"), Some(Term::Map(_))),
+            "{response:?}"
+        );
+    }
+
     #[test]
     fn categorize_methods_no_dividers_is_single_unnamed_category() {
         let request = Map::from([
@@ -4578,13 +4707,14 @@ Object subclass: Counter
         let Some(Term::List(categories)) = map_get(m, "categories") else {
             panic!("categories should be a list: {response:?}");
         };
-        assert_eq!(categories.elements.len(), 1);
-        let Term::Map(only) = &categories.elements[0] else {
+        assert_eq!(categories.elements.len(), 1, "{response:?}");
+        let Term::Map(ref category) = categories.elements[0] else {
             panic!("category should be a map");
         };
-        // The implicit leading category omits `name` entirely rather than a
-        // `null` sentinel — see `handle_categorize_methods`'s doc.
-        assert_eq!(map_get(only, "name"), None);
+        // BT-3238: `name` is always present, using the atom `undefined` as
+        // the "absent" sentinel — see `handle_categorize_methods`'s doc for
+        // why this supersedes BT-3239's original omitted-key convention.
+        assert_eq!(map_get(category, "name"), Some(&atom("undefined")));
     }
 
     #[test]
