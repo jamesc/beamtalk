@@ -37,9 +37,17 @@ use tracing::warn;
 /// project so that cross-file type/DNU diagnostics match what `build` emits.
 /// Without this, `@expect type` / `@expect all` annotations that suppress real
 /// diagnostics during build would be reported as stale by lint.
+///
+/// `source` is the module's raw source text — BT-3257, mirroring
+/// `queries::diagnostic_provider::compute_project_diagnostics_with_analysis`
+/// (BT-3240): needed so the near-miss `// === Name ===` divider check can
+/// scan `source` directly (`beamtalk_core::lint::check_near_miss_dividers`)
+/// instead of relying on the AST's `Comment::span`, which is actually the
+/// *following declaration's* span, not the comment's own.
 #[allow(clippy::too_many_arguments)] // BT-2910 added pre_loaded_protocols/pre_loaded_aliases; each param is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
+    source: &str,
     parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
@@ -103,6 +111,14 @@ fn collect_diagnostics(
     // Note: apply_expect_directives may inject Severity::Warning for stale
     // @expect annotations, so we include those in the output.
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut lint_diags);
+
+    // BT-3257: mirrors `compute_project_diagnostics_with_analysis`'s
+    // placement — appended after `apply_expect_directives` because a
+    // near-miss-divider comment's span (the comment's own line) can never
+    // be contained in any `@expect`-annotated declaration's target span, so
+    // running it through that pass first would be a no-op at best. See that
+    // function's BT-3240 comment for the full reasoning.
+    beamtalk_core::lint::check_near_miss_dividers(source, &mut lint_diags);
 
     lint_diags
 }
@@ -269,6 +285,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
 
         let lint_diags = collect_diagnostics(
             &module,
+            &source,
             parse_diags,
             cross_file_classes,
             all_protocol_infos.clone(),
@@ -735,6 +752,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
     let (module, parse_diags) = parse(tokens);
     collect_diagnostics(
         &module,
+        source,
         parse_diags,
         vec![],
         vec![],
@@ -810,6 +828,70 @@ mod tests {
         );
     }
 
+    // ── near-miss `// === Name ===` divider (BT-3240/BT-3257) ──────────────
+    //
+    // These exercise `collect_diagnostics` through its real entry point
+    // (`collect_lint_diagnostics`, mirroring `run_lint`'s Pass 2 call), not
+    // `near_miss_divider::scan_source` directly (already covered by that
+    // module's own `scan_source_locates_the_near_miss_comment_line_precisely`
+    // test) — proving the CLI wiring itself, not just the underlying scan.
+
+    #[test]
+    fn near_miss_divider_span_points_at_the_comment_line_not_the_declaration() {
+        // BT-3240/BT-3257: before `source` was threaded through
+        // `collect_diagnostics`, this diagnostic's span came from the
+        // AST's `Comment::span`, which is actually `bar`'s token span (the
+        // *following* declaration), not the comment's own line. Slicing
+        // `source` by the reported span proves it now covers exactly the
+        // comment line.
+        let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
+        let diags = collect_lint_diagnostics(source);
+        let near_misses: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("section divider"))
+            .collect();
+        assert_eq!(
+            near_misses.len(),
+            1,
+            "expected exactly one near-miss-divider diagnostic: {diags:?}"
+        );
+        assert_eq!(
+            &source[near_misses[0].span.as_range()],
+            "  // === Section ====\n",
+            "span should cover exactly the comment's own line, not the method below it"
+        );
+    }
+
+    #[test]
+    fn near_miss_divider_multiple_occurrences_get_distinct_correctly_attributed_spans() {
+        // Two near-misses in one file must not get their spans mixed up —
+        // each diagnostic's span must slice back to its own comment line,
+        // not the other one's.
+        let source = "Object subclass: Foo\n  // === First ====\n  bar => 1\n\n  // == Second ==\n  baz => 2\n";
+        let diags = collect_lint_diagnostics(source);
+        let mut near_misses: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("section divider"))
+            .collect();
+        assert_eq!(
+            near_misses.len(),
+            2,
+            "expected exactly two near-miss-divider diagnostics: {diags:?}"
+        );
+        near_misses.sort_by_key(|d| d.span.start());
+
+        assert_eq!(
+            &source[near_misses[0].span.as_range()],
+            "  // === First ====\n",
+            "first near-miss's span should cover only its own comment line"
+        );
+        assert_eq!(
+            &source[near_misses[1].span.as_range()],
+            "  // == Second ==\n",
+            "second near-miss's span should cover only its own comment line, not the first's"
+        );
+    }
+
     #[test]
     fn expect_all_not_stale_with_cross_file_actor_class() {
         // When cross-file class info tells lint that MyActor is an Actor,
@@ -831,6 +913,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diags = collect_diagnostics(
             &module,
+            test_source,
             parse_diags,
             cross_file_classes,
             vec![],
@@ -1033,6 +1116,7 @@ mod tests {
             );
         let diags = collect_diagnostics(
             &module,
+            &test_source,
             parse_diags,
             cross_file_classes,
             vec![],
@@ -1227,7 +1311,7 @@ mod tests {
             "producer's internal Secret alias must NOT be seeded into consumer's alias table"
         );
 
-        let (file, _source, module, parse_diags) = parsed_files
+        let (file, source, module, parse_diags) = parsed_files
             .into_iter()
             .find(|(f, ..)| *f == consumer_file)
             .expect("consumer.bt should be among the parsed files");
@@ -1235,6 +1319,7 @@ mod tests {
 
         let diags = collect_diagnostics(
             &module,
+            &source,
             parse_diags,
             vec![], // no same-package cross-file classes
             all_protocol_infos,
@@ -1412,7 +1497,7 @@ mod tests {
         );
 
         let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
-        for (_file, _source, module, parse_diags) in parsed_files {
+        for (_file, source, module, parse_diags) in parsed_files {
             let cross_file_classes =
                 beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
                     &all_class_infos,
@@ -1420,6 +1505,7 @@ mod tests {
                 );
             let diags = collect_diagnostics(
                 &module,
+                &source,
                 parse_diags,
                 cross_file_classes,
                 all_protocol_infos.clone(),
@@ -1528,7 +1614,7 @@ mod tests {
 
         let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
         let mut collision_count = 0usize;
-        for (_file, _source, module, parse_diags) in parsed_files {
+        for (_file, source, module, parse_diags) in parsed_files {
             let cross_file_classes =
                 beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
                     &all_class_infos,
@@ -1536,6 +1622,7 @@ mod tests {
                 );
             let diags = collect_diagnostics(
                 &module,
+                &source,
                 parse_diags,
                 cross_file_classes,
                 all_protocol_infos.clone(),
@@ -1694,6 +1781,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diags = collect_diagnostics(
             &module,
+            source,
             parse_diags,
             vec![],
             vec![],
@@ -1744,6 +1832,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diags = collect_diagnostics(
             &module,
+            source,
             parse_diags,
             vec![],
             vec![],
@@ -1808,6 +1897,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diags = collect_diagnostics(
             &module,
+            source,
             parse_diags,
             vec![],
             vec![],

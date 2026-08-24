@@ -17,7 +17,7 @@
 //! the section the author intended — this whole module is BT-3240, the
 //! fix for that gap.
 //!
-//! This pass calls [`parse_divider_name`] directly as the single source of
+//! This check calls [`parse_divider_name`] directly as the single source of
 //! truth for "is this a valid divider" — it never reimplements that
 //! decision. It only adds the extra (purely structural) bookkeeping needed
 //! to: build a useful diagnostic message explaining *why* the parse failed,
@@ -27,98 +27,58 @@
 //! so it was never attempting to be a `// === Name ===` divider in the first
 //! place.
 //!
-//! # Two entry points, one decision function
+//! # Source-text scan, not an AST-walking [`LintPass`]
 //!
-//! [`NearMissDividerPass`] is the [`LintPass`]-conforming, AST-based entry
-//! point used by `beamtalk lint`/MCP `lint` (via [`crate::lint::run_lint_passes`]),
-//! matching every sibling pass in this directory. Its scope mirrors
-//! [`categorize_methods`]'s own: only comments leading a class's
-//! `state:`/`classState:` declarations or instance/class-side methods are
-//! inspected — the same member population divider recognition affects.
+//! Unlike every sibling pass in this directory, this check is not a
+//! [`LintPass`] implementor walking the `Module` — it's [`scan_source`], a
+//! source-text scan re-deriving comments directly from raw lines. That's
+//! deliberate: [`Comment::span`] in the AST is **not** the comment's own
+//! source location. `source_analysis::parser`'s `collect_comment_attachment`
+//! stamps every leading comment with the *following declaration's* token
+//! span — there is no per-comment span anywhere in the lexer's `Trivia`
+//! representation to draw from — so a diagnostic built from `comment.span`
+//! would point at the member the comment precedes (e.g. the method name),
+//! not the comment's own line. `method_category::find_divider_span` solves
+//! the identical "which line is this really" problem for a *valid* divider
+//! by re-scanning `source`, but it matches by re-parsing for an
+//! already-confirmed name — a near-miss, by definition, never parses, so
+//! that helper can't be reused here.
 //!
-//! It has one known imprecision, inherent to the AST: [`Comment::span`] is
-//! **not** the comment's own source location. `source_analysis::parser`'s
-//! `collect_comment_attachment` stamps every leading comment with the
-//! *following declaration's* token span — there is no per-comment span
-//! anywhere in the lexer's `Trivia` representation to draw from — so a
-//! diagnostic built from `comment.span` points at the member the comment
-//! precedes (e.g. the method name), not the comment's own line.
-//! `method_category::find_divider_span` solves the identical "which line is
-//! this really" problem for a *valid* divider by re-scanning `source`, but
-//! it matches by re-parsing for an already-confirmed name — a near-miss, by
-//! definition, never parses, so that helper can't be reused here.
-//!
-//! [`scan_source`] is a second, source-text-based entry point that solves
-//! this precisely: it re-derives comments directly from raw source lines,
-//! so every diagnostic gets an accurate, comment-sized span — and, as a
-//! side effect, also catches a `///`-shaped near-miss written immediately
-//! above a method with no blank line, which the AST swallows whole into
-//! that method's plain-`String` `doc_comment` field (no `Comment`, no span,
-//! invisible to the AST walk above). It is used by
-//! `queries::diagnostic_provider` (the LSP-facing pipeline, which has
-//! `source` on hand) and this module's corpus test. `beamtalk lint`/MCP
-//! `lint` still go through the AST-based path above — threading `source`
-//! through their (multi-crate) call chains too is tracked separately
-//! (BT-3257) rather than done here.
-//!
-//! Both entry points share the same accept/reject decision
-//! ([`check_comment_text`]) so they can never disagree about *whether*
-//! something is a near-miss — only about how precisely they can locate it.
+//! [`scan_source`] solves this by re-deriving comments directly from raw
+//! source lines, so every diagnostic gets an accurate, comment-sized span —
+//! and, as a side effect, also catches a `///`-shaped near-miss written
+//! immediately above a method with no blank line, which the AST swallows
+//! whole into that method's plain-`String` `doc_comment` field (no
+//! `Comment`, no span, invisible to an AST walk). [`crate::lint::check_near_miss_dividers`]
+//! is the thin, `pub` wrapper every caller actually reaches: BT-3240 wired
+//! it into `queries::diagnostic_provider` (the LSP-facing pipeline); BT-3257
+//! threaded `source: &str` through `beamtalk lint`'s `collect_diagnostics`
+//! and MCP's `run_module_analysis` so those two surfaces call it too,
+//! instead of a since-removed AST-based `NearMissDividerPass` that shared
+//! this file's accept/reject decision ([`check_comment_text`]) but inherited
+//! the AST's span imprecision. All three callers now agree, by construction,
+//! on both *whether* something is a near-miss and *where* it is.
 
-use crate::ast::{ClassDefinition, Comment, CommentKind, Module};
-use crate::lint::LintPass;
+use crate::ast::CommentKind;
 use crate::source_analysis::{Diagnostic, Span, parse_divider_name};
-
-/// Lint pass that flags `=`-bordered, named comments that don't parse as a
-/// valid `// === Name ===` section divider. See the module doc for this
-/// entry point's known span imprecision and its more accurate sibling,
-/// [`scan_source`].
-pub(crate) struct NearMissDividerPass;
-
-impl LintPass for NearMissDividerPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for class in &module.classes {
-            check_class(class, diagnostics);
-        }
-    }
-}
-
-fn check_class(class: &ClassDefinition, diagnostics: &mut Vec<Diagnostic>) {
-    for state in class.state.iter().chain(class.class_variables.iter()) {
-        check_comments(&state.comments.leading, diagnostics);
-    }
-    for method in class.methods.iter().chain(class.class_methods.iter()) {
-        check_comments(&method.comments.leading, diagnostics);
-    }
-}
-
-fn check_comments(leading: &[Comment], diagnostics: &mut Vec<Diagnostic>) {
-    for comment in leading {
-        if let Some(diagnostic) = check_comment_text(&comment.content, comment.kind, comment.span) {
-            diagnostics.push(diagnostic);
-        }
-    }
-}
 
 /// Scans `source` for a single-line `//`, `///`, or `/* ... */` comment that
 /// looks like it's trying to be a `// === Name ===` divider but doesn't
 /// parse as one, returning one [`Diagnostic`] per near-miss with an
-/// accurate, comment-sized span — see the module doc for why this exists
-/// alongside [`NearMissDividerPass`].
+/// accurate, comment-sized span.
 ///
-/// Scope is deliberately not limited to class-body member comments (unlike
-/// [`NearMissDividerPass`]) — a plain text scan has no notion of "inside a
-/// class"; a near-miss anywhere in the file (top-level, inside a method
-/// body, before a protocol signature) is still worth flagging, and the
-/// corpus proves this produces no false positives today (zero near-misses
-/// anywhere in `stdlib/`/`examples/`). Multi-line `/* ... */` block
-/// comments are out of scope — a divider is inherently a one-line
-/// construct, so a genuine attempt is always on one line; a block comment
-/// whose opening line has no closing `*/` is skipped rather than
-/// misidentified, and (BT-3240 review) every line up to its matching `*/`
-/// is skipped too — otherwise a `// ...` line of ordinary commentary
-/// *inside* a real block comment would be misread as a genuine `//` line
-/// comment the lexer never sees as one.
+/// Scope is deliberately not limited to class-body member comments — a
+/// plain text scan has no notion of "inside a class"; a near-miss anywhere
+/// in the file (top-level, inside a method body, before a protocol
+/// signature) is still worth flagging, and the corpus proves this produces
+/// no false positives today (zero near-misses anywhere in
+/// `stdlib/`/`examples/`). Multi-line `/* ... */` block comments are out of
+/// scope — a divider is inherently a one-line construct, so a genuine
+/// attempt is always on one line; a block comment whose opening line has no
+/// closing `*/` is skipped rather than misidentified, and (BT-3240 review)
+/// every line up to its matching `*/` is skipped too — otherwise a `// ...`
+/// line of ordinary commentary *inside* a real block comment would be
+/// misread as a genuine `//` line comment the lexer never sees as one.
 #[must_use]
 pub(crate) fn scan_source(source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -240,10 +200,9 @@ fn comment_kind_label(kind: CommentKind) -> &'static str {
 }
 
 /// Shared "is this near-miss-shaped text worth a diagnostic" decision,
-/// parametrized over an already-classified `(content, kind, span)` — used by
-/// both [`check_comments`] (AST path) and [`scan_source`] (source-text
-/// path) so the actual accept/reject logic and message wording live in
-/// exactly one place; only the span each path can supply differs.
+/// parametrized over an already-classified `(content, kind, span)` so the
+/// actual accept/reject logic and message wording live in exactly one
+/// place, called from [`scan_source`] once per classified comment line.
 fn check_comment_text(content: &str, kind: CommentKind, span: Span) -> Option<Diagnostic> {
     let trimmed = content.trim();
     let (left_len, right_len, name) = divider_shape(trimmed)?;
@@ -291,31 +250,12 @@ fn check_comment_text(content: &str, kind: CommentKind, span: Span) -> Option<Di
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
-
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-        let tokens = lex_with_eof(source);
-        let (module, diags) = parse(tokens);
-        assert!(
-            diags.iter().all(|d| d.severity != Severity::Error),
-            "fixture should parse without errors: {diags:?}"
-        );
-        run_lint_passes(&module)
-    }
+    use crate::source_analysis::Severity;
 
     #[test]
-    fn valid_divider_triggers_no_warning() {
-        let diags = lint("Object subclass: Foo\n  // === Section ===\n  bar => 1\n");
-        assert!(
-            diags.is_empty(),
-            "valid divider should not be flagged: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn mismatched_run_lengths_are_flagged() {
-        let diags = lint("Object subclass: Foo\n  // === Section ====\n  bar => 1\n");
+    fn scan_source_mismatched_run_lengths_are_flagged() {
+        let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
+        let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1, "expected one lint diagnostic: {diags:?}");
         assert_eq!(diags[0].severity, Severity::Lint);
         assert!(
@@ -327,8 +267,9 @@ mod tests {
     }
 
     #[test]
-    fn too_short_runs_are_flagged() {
-        let diags = lint("Object subclass: Foo\n  // == Section ==\n  bar => 1\n");
+    fn scan_source_too_short_runs_are_flagged() {
+        let source = "Object subclass: Foo\n  // == Section ==\n  bar => 1\n";
+        let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1, "expected one lint diagnostic: {diags:?}");
         assert!(
             diags[0].message.contains("3 or more"),
@@ -338,71 +279,24 @@ mod tests {
     }
 
     #[test]
-    fn block_comment_near_miss_is_flagged() {
-        let diags = lint("Object subclass: Foo\n  /* === Section === */\n  bar => 1\n");
-        assert_eq!(diags.len(), 1, "expected one lint diagnostic: {diags:?}");
-        assert!(
-            diags[0].message.contains("block comment"),
-            "message: {}",
-            diags[0].message
-        );
-    }
-
-    #[test]
-    fn orphaned_doc_comment_near_miss_is_flagged() {
-        // A blank line between the `///` block and the method keeps it from
-        // being consumed as the method's own `doc_comment` (BT-2924) — it
-        // stays a `Comment::doc` leading comment this pass can inspect.
-        let diags = lint("Object subclass: Foo\n  /// === Section ===\n\n  bar => 1\n");
-        assert_eq!(diags.len(), 1, "expected one lint diagnostic: {diags:?}");
-        assert!(
-            diags[0].message.contains("doc comment"),
-            "message: {}",
-            diags[0].message
-        );
-    }
-
-    #[test]
-    fn plain_comment_with_equals_is_not_flagged() {
-        // False-positive guard: `=` appears, but not as a run at both ends.
-        let diags = lint("Object subclass: Foo\n  // x = y\n  bar => 1\n");
-        assert!(
-            diags.is_empty(),
-            "plain comment should not be flagged: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn pure_border_banner_is_not_flagged() {
-        // The pre-existing, unrelated `====...` / heading / `====...`
-        // 3-line banner convention (BT-2601 leaves it alone) must not be
-        // treated as a near-miss divider either.
-        let diags = lint(
-            "Object subclass: Foo\n  // =========================================================================\n  bar => 1\n",
-        );
-        assert!(
-            diags.is_empty(),
-            "pure border banner should not be flagged: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn near_miss_before_state_declaration_is_flagged() {
-        let diags = lint("Object subclass: Foo\n  // === Section ====\n  state: x = 0\n");
+    fn scan_source_near_miss_before_state_declaration_is_flagged() {
+        let source = "Object subclass: Foo\n  // === Section ====\n  state: x = 0\n";
+        let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1, "expected one lint diagnostic: {diags:?}");
     }
 
     #[test]
-    fn near_miss_before_class_method_is_flagged() {
-        let diags = lint(
-            "Object subclass: Foo\n  // === Section ====\n  Foo class >> create => ^Foo new\n",
-        );
+    fn scan_source_near_miss_before_class_method_is_flagged() {
+        let source =
+            "Object subclass: Foo\n  // === Section ====\n  Foo class >> create => ^Foo new\n";
+        let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1, "expected one lint diagnostic: {diags:?}");
     }
 
     #[test]
-    fn lint_diagnostic_has_lint_category() {
-        let diags = lint("Object subclass: Foo\n  // === Section ====\n  bar => 1\n");
+    fn scan_source_diagnostic_has_lint_category() {
+        let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
+        let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].category,
@@ -410,14 +304,12 @@ mod tests {
         );
     }
 
-    // ── scan_source (accurate, source-text-based entry point) ──────────────
-
     #[test]
     fn scan_source_locates_the_near_miss_comment_line_precisely() {
-        // BT-3240 review: the AST path's `comment.span` is actually the
-        // *following declaration's* token span (see module doc) — `bar`,
-        // not the comment. `scan_source` must point at the comment's own
-        // line instead.
+        // BT-3240/BT-3257: a diagnostic built from the AST's `Comment::span`
+        // would actually point at `bar` (the *following* declaration's
+        // token span — see module doc), not the comment. `scan_source` must
+        // point at the comment's own line instead.
         let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
         let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1, "expected one near-miss: {diags:?}");
@@ -447,10 +339,9 @@ mod tests {
     fn scan_source_catches_a_doc_comment_immediately_above_a_method() {
         // BT-3240 review: without a blank line, `/// === Section ===` is
         // consumed whole into the method's plain-`String` `doc_comment`
-        // field (no `Comment`, no span) — invisible to the AST path
-        // (`orphaned_doc_comment_near_miss_is_flagged` above only exercises
-        // the blank-line-separated case). `scan_source` doesn't depend on
-        // AST comment attachment at all, so it still catches this.
+        // field (no `Comment`, no span) — invisible to any AST walk.
+        // `scan_source` doesn't depend on AST comment attachment at all, so
+        // it still catches this.
         let source = "Object subclass: Foo\n  /// === Section ===\n  bar => 1\n";
         let diags = super::scan_source(source);
         assert_eq!(diags.len(), 1, "expected one near-miss: {diags:?}");
