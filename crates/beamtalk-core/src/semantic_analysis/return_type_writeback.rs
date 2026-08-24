@@ -175,15 +175,11 @@ pub fn clear_return_type_writeback_for_keys(
     for class in &mut module.classes {
         for method in &mut class.methods {
             let key = (class.name.name.clone(), method.selector.name(), false);
-            if written_by.contains_key(&key) {
-                method.return_type = None;
-            }
+            clear_return_type_writeback_for_key(method, &key, written_by);
         }
         for method in &mut class.class_methods {
             let key = (class.name.name.clone(), method.selector.name(), true);
-            if written_by.contains_key(&key) {
-                method.return_type = None;
-            }
+            clear_return_type_writeback_for_key(method, &key, written_by);
         }
     }
 
@@ -193,9 +189,34 @@ pub fn clear_return_type_writeback_for_keys(
             standalone.method.selector.name(),
             standalone.is_class_method,
         );
-        if written_by.contains_key(&key) {
-            standalone.method.return_type = None;
-        }
+        clear_return_type_writeback_for_key(&mut standalone.method, &key, written_by);
+    }
+}
+
+/// Single-method core of [`clear_return_type_writeback_for_keys`]: resets
+/// `method.return_type` to `None` if — and only if — `key` (this method's
+/// `(class_name, selector, is_class_method)` identity) is present in
+/// `written_by`, i.e. was set by [`apply_return_type_writeback_from_map`]
+/// rather than typed by the user.
+///
+/// BT-3249: also called directly by codegen's `extract_method_source`
+/// (`crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs`) on
+/// a throwaway clone of a single method, so the image-resident `__source__`
+/// text it bakes never carries an inferred `-> Type` annotation the user
+/// never wrote — while the method's *real* `return_type` (used for codegen's
+/// `method_return_types` metadata, specs, etc.) is left untouched. Without
+/// this, a save → revert → re-save of a visually-unchanged buffer records a
+/// spurious `ChangeLog` entry whose only diff is the inferred annotation,
+/// because the `ChangeLog`'s `source_ref` is unparsed pre-writeback while the
+/// browsed `__source__` was unparsed post-writeback.
+#[allow(clippy::implicit_hasher)] // concrete HashMap (matches AnalysisResult::method_return_types) is simpler for callers
+pub fn clear_return_type_writeback_for_key(
+    method: &mut crate::ast::MethodDefinition,
+    key: &MethodReturnKey,
+    written_by: &HashMap<MethodReturnKey, InferredType>,
+) {
+    if written_by.contains_key(key) {
+        method.return_type = None;
     }
 }
 

@@ -565,7 +565,8 @@ impl CoreErlangGenerator {
                 if method_idx > 0 {
                     method_source_docs.push(Document::Str(", "));
                 }
-                let source_str = self.extract_method_source(method);
+                let source_str =
+                    self.extract_method_source(class.name.name.as_str(), false, method);
                 method_source_docs.push(docvec![
                     leaf::atom(method.selector.name()),
                     " => ",
@@ -622,7 +623,7 @@ impl CoreErlangGenerator {
                 if method_idx > 0 {
                     class_method_source_docs.push(Document::Str(", "));
                 }
-                let source_str = self.extract_method_source(method);
+                let source_str = self.extract_method_source(class.name.name.as_str(), true, method);
                 class_method_source_docs.push(docvec![
                     leaf::atom(method.selector.name()),
                     " => ",
