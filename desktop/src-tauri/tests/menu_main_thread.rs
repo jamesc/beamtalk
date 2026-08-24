@@ -46,11 +46,12 @@
 //! scope creep.
 //!
 //! This file previously *did* gate its real assertions to
-//! `#[cfg(target_os = "macos")]`, purely as a workaround: an earlier,
-//! unconditional version crashed the compiled `menu_main_thread.exe` at
-//! process startup on `windows-2022` CI with `STATUS_ENTRYPOINT_NOT_FOUND` —
-//! an OS-loader symbol-resolution failure, before any test code ran at all.
-//! BT-3253 tracked that down to a confirmed `tauri-build` limitation (not
+//! `#[cfg(target_os = "macos")]`, purely as a workaround (BT-3253): an
+//! earlier, unconditional version crashed the compiled
+//! `menu_main_thread.exe` at process startup on `windows-2022` CI with
+//! `STATUS_ENTRYPOINT_NOT_FOUND` — an OS-loader symbol-resolution failure,
+//! before any test code ran at all. BT-3253 tracked that down to a
+//! confirmed `tauri-build` limitation (not
 //! ruled out — confirmed, both by reading `tauri-build`/`tauri-winres`
 //! source and by finding the identical failure already reported upstream:
 //! <https://github.com/tauri-apps/tauri/issues/13419>,
