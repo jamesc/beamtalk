@@ -397,7 +397,8 @@ log_compiler_diagnostics_non_binary_message_returns_ok_test() ->
 
 %%====================================================================
 %% instance_selectors/1, validated_own_categories/2, method_sig_line/2
-%% (BT-3239) — grouped `Instance methods:` rendering for `:help`/`docs`.
+%% (BT-3239, partial-trust reconciliation BT-3258) — grouped
+%% `Instance methods:` rendering for `:help`/`docs`.
 %%====================================================================
 
 instance_selectors_filters_to_instance_side_test() ->
@@ -474,16 +475,73 @@ validated_own_categories_single_named_category_is_kept_test() ->
         beamtalk_interface:validated_own_categories(Categories, SealedMap)
     ).
 
-validated_own_categories_selector_mismatch_falls_back_to_undefined_test() ->
-    %% The on-disk source and the live image have diverged (e.g. an
-    %% unflushed `>>` patch) — a partial grouped view could silently hide a
-    %% method, so this must degrade to the always-correct flat rendering.
+validated_own_categories_uncovered_live_selector_becomes_trailing_bucket_test() ->
+    %% BT-3258: the on-disk source and the live image have diverged (e.g. an
+    %% unflushed `>>` patch, or — same root cause — a `Value subclass:`'s
+    %% compiler-generated accessor / an in-file standalone `ClassName >>
+    %% selector` extension method that the AST-based categorizer can never
+    %% see). The live-only selector must still surface — folded into a
+    %% trailing "(uncategorized)" bucket — never silently hidden by a full
+    %% fallback to flat.
     Categories = [
         #{name => <<"Section">>, methods => [#{selector => <<"foo">>, side => instance}]}
     ],
     SealedMap = #{foo => false, bar => false},
     ?assertEqual(
+        [{<<"Section">>, [foo]}, {undefined, [bar]}],
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_uncovered_selectors_fold_into_leading_unnamed_bucket_test() ->
+    %% BT-3258: when a leading implicit (unnamed) bucket already exists —
+    %% hand-written methods declared before the first divider — uncovered
+    %% live selectors fold into that same bucket rather than duplicating a
+    %% second unnamed one.
+    Categories = [
+        #{methods => [#{selector => <<"bar">>, side => instance}]},
+        #{name => <<"Section">>, methods => [#{selector => <<"foo">>, side => instance}]}
+    ],
+    SealedMap = #{foo => false, bar => false, accessorZ => false},
+    ?assertEqual(
+        [{undefined, [bar, accessorZ]}, {<<"Section">>, [foo]}],
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_all_uncovered_collapses_to_flat_undefined_test() ->
+    %% BT-3258: a `Value subclass:` with slots but no hand-written instance
+    %% methods at all (nothing in the AST to categorize) has every live
+    %% selector uncovered; that folds into a single implicit unnamed
+    %% bucket, which is identical to the flat rendering, so this still
+    %% returns `undefined` (never a lone "(uncategorized)" header).
+    Categories = [],
+    SealedMap = #{x => false, withX => false},
+    ?assertEqual(
         undefined,
+        beamtalk_interface:validated_own_categories(Categories, SealedMap)
+    ).
+
+validated_own_categories_drops_selector_not_in_sealed_map_test() ->
+    %% Safety property: a selector present in the on-disk category (parsed
+    %% AST) but absent from `SealedMap` (the live image) — e.g. a brand-new
+    %% `>>` patch method that hasn't been flushed/reloaded yet — must never
+    %% be invented into the rendered output. `ghost` is referenced as an
+    %% atom literal below so it is guaranteed to already be an interned atom
+    %% (mirroring how every real selector reaches this code as an atom from
+    %% the class's own compiled method table), isolating this test to the
+    %% `SealedMap`-membership filter rather than the unknown-atom path
+    %% `instance_selectors_drops_unknown_atom_selector_test` already covers.
+    Categories = [
+        #{
+            name => <<"Section">>,
+            methods => [
+                #{selector => <<"foo">>, side => instance},
+                #{selector => atom_to_binary(ghost, utf8), side => instance}
+            ]
+        }
+    ],
+    SealedMap = #{foo => false},
+    ?assertEqual(
+        [{<<"Section">>, [foo]}],
         beamtalk_interface:validated_own_categories(Categories, SealedMap)
     ).
 

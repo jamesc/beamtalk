@@ -1170,25 +1170,23 @@ existed); the on-disk file can't be read; the compiler port can't
 parse/find the class in it (stale/renamed source); the class's source has
 no `// === Name ===' dividers at all (nothing to group by — the flat,
 alphabetical rendering *is* the BT-3239-compliant output here, per its
-"class with no dividers is unaffected" acceptance criterion); or — the
-safety check that matters most — the categorized selector set doesn't
-exactly match `SealedMap''s keys (the live image and the on-disk file have
-diverged, e.g. an unflushed `>>' patch — **or** a `Value subclass:`'s
-compiler-generated slot accessors, which exist in `SealedMap' via the live
-method table but have no method declaration in the AST
-`categorize_methods_in_source' walks, so they can never appear in a
-category), in which case a *partial* grouped view would silently hide or
-duplicate a method, so this falls back to the always-correct flat
-rendering instead. Conservative by design (a class with generated
-accessors simply never groups, rather than risking an incomplete listing)
-— a follow-up could relax this to append any uncovered live selector under
-a trailing bucket instead of aborting the whole grouping.
+"class with no dividers is unaffected" acceptance criterion); or the whole
+resulting grouping (after `validated_own_categories/2''s BT-3258
+partial-trust reconciliation, see its doc) collapses to a single implicit
+unnamed bucket covering every own selector — which renders identically to
+the flat listing anyway, so there is no point in a lone "(uncategorized)"
+header.
 
 Otherwise returns `[{Name :: binary() | undefined, [atom()]}]` — every
 instance-side selector from `SealedMap`, grouped and ordered exactly as
 `beamtalk_core::source_analysis::categorize_methods' would (source order,
 `undefined' name for the implicit leading category of methods before the
-first divider).
+first divider), **plus** any live selector `SealedMap' has that the
+on-disk categories never mentioned — a `Value subclass:`'s
+compiler-generated slot accessors, an in-file standalone `ClassName >>
+selector' extension method, or an unflushed `>>' patch's added method —
+folded into that leading unnamed bucket (or a synthesized trailing one) so
+a live method is never silently hidden.
 """.
 -spec own_method_categories(atom(), pid(), map()) ->
     undefined | [{binary() | undefined, [atom()]}].
@@ -1216,44 +1214,81 @@ own_method_categories(ClassName, ClassPid, SealedMap) ->
         _:_ -> undefined
     end.
 
-%% Filters the raw compiler-port `Categories` shape to instance-side
-%% methods, converts each selector to its atom, drops now-empty categories,
-%% then applies two safety gates before trusting the grouping:
-%% (1) the resulting selector set must exactly match `SealedMap`'s keys —
-%%     see `own_method_categories/3`'s doc for why a partial match must not
-%%     be silently rendered;
-%% (2) a single, unnamed category (no dividers found at all) returns
-%%     `undefined` so the caller falls back to the identical pre-BT-3239
-%%     flat rendering rather than printing a lone "(uncategorized)" header
-%%     no one asked for.
+%% BT-3258: partial-trust reconciliation between the on-disk categorized
+%% selectors and the live `SealedMap`. Filters the raw compiler-port
+%% `Categories` shape to instance-side methods, converts each selector to
+%% its atom, and — the safety property that matters — keeps a
+%% category-mentioned selector only when it is actually a key of
+%% `SealedMap`; a selector the live image doesn't have (e.g. a brand-new
+%% `>>` patch method not yet flushed/reloaded) is silently dropped rather
+%% than ever being invented into the rendered output. Category buckets left
+%% empty after that filtering (all class-side, or entirely unflushed) are
+%% dropped.
+%%
+%% Any `SealedMap` key that no category ends up covering — a `Value
+%% subclass:`'s compiler-generated slot accessors, an in-file standalone
+%% `ClassName >> selector` extension method (neither has a method
+%% declaration in the AST `categorize_methods_in_source` walks), or an
+%% unflushed `>>` patch that *replaced* a method's source without adding a
+%% new selector — is folded into the leading unnamed bucket when one
+%% exists, else appended as a synthesized trailing unnamed bucket, via
+%% `fold_uncovered/2`. This is what lets a `Value subclass:` or a class with
+%% standalone extensions still group everything the source *does*
+%% categorize instead of the pre-BT-3258 all-or-nothing fallback.
+%%
+%% Finally, a single, unnamed bucket (no dividers found at all, or every
+%% own selector ended up uncovered) returns `undefined` so the caller falls
+%% back to the identical pre-BT-3239 flat rendering rather than printing a
+%% lone "(uncategorized)" header no one asked for.
 -spec validated_own_categories([map()], map()) ->
     undefined | [{binary() | undefined, [atom()]}].
 validated_own_categories(Categories, SealedMap) ->
-    Grouped = lists:filtermap(
+    Grouped0 = lists:filtermap(
         fun(Category) ->
             Methods = maps:get(methods, Category, []),
-            case instance_selectors(Methods) of
+            %% Never invent an entry for a selector the live image doesn't
+            %% have — only a selector that is also a `SealedMap` key is kept.
+            Selectors = [
+                Sel
+             || Sel <- instance_selectors(Methods), maps:is_key(Sel, SealedMap)
+            ],
+            case Selectors of
                 [] -> false;
-                Selectors -> {true, {maps:get(name, Category, undefined), Selectors}}
+                _ -> {true, {maps:get(name, Category, undefined), Selectors}}
             end
         end,
         Categories
     ),
-    AllSelectors = lists:append([Selectors || {_Name, Selectors} <- Grouped]),
-    ExpectedSelectors = lists:sort(maps:keys(SealedMap)),
-    SelectorsMatch = lists:sort(AllSelectors) =:= ExpectedSelectors,
-    case {SelectorsMatch, Grouped} of
-        {true, [{undefined, _OnlyBucket}]} -> undefined;
-        {true, _} -> Grouped;
-        {false, _} -> undefined
+    Covered = lists:append([Selectors || {_Name, Selectors} <- Grouped0]),
+    Uncovered = lists:sort(maps:keys(SealedMap) -- Covered),
+    Grouped1 = fold_uncovered(Grouped0, Uncovered),
+    case Grouped1 of
+        [] -> undefined;
+        [{undefined, _OnlyBucket}] -> undefined;
+        _ -> Grouped1
     end.
+
+%% Folds selectors present in `SealedMap` but not covered by any category
+%% (see `validated_own_categories/2`'s doc) into the grouped-bucket list:
+%% appended into the leading bucket when it is already the implicit unnamed
+%% one, else appended as a new trailing unnamed bucket. A no-op when there
+%% is nothing uncovered.
+-spec fold_uncovered([{binary() | undefined, [atom()]}], [atom()]) ->
+    [{binary() | undefined, [atom()]}].
+fold_uncovered(Grouped, []) ->
+    Grouped;
+fold_uncovered([{undefined, Selectors} | Rest], Uncovered) ->
+    [{undefined, Selectors ++ Uncovered} | Rest];
+fold_uncovered(Grouped, Uncovered) ->
+    Grouped ++ [{undefined, Uncovered}].
 
 %% Instance-side selectors from one category's raw `methods` list, as
 %% atoms, in source order. A selector that isn't a live atom (should be
 %% unreachable — every selector came from the class's own compiled method
-%% table) is dropped rather than crashing this call; the exact-match check
-%% in `validated_own_categories/2` catches the resulting mismatch and falls
-%% back to the flat rendering.
+%% table) is dropped rather than crashing this call; even if it weren't,
+%% `validated_own_categories/2`'s `SealedMap`-membership filter would drop
+%% it right after, since a selector with no live atom can never be a
+%% `SealedMap` key either.
 -spec instance_selectors([map()]) -> [atom()].
 instance_selectors(Methods) ->
     lists:filtermap(
