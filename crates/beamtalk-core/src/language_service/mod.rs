@@ -127,13 +127,13 @@ pub trait LanguageService {
     /// Should respond in <50ms for typical file sizes.
     fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol>;
 
-    /// Returns folding ranges for a file's `// === Name ===` section
-    /// dividers (BT-3237).
-    ///
-    /// One range per named category, spanning the divider's own banner line
-    /// through the end of its last method — see
-    /// [`crate::queries::folding_range_provider`]. Empty for a file with no
-    /// dividers.
+    /// Returns folding ranges for a file: one per `// === Name ===` section
+    /// divider category (BT-3237), plus one per class body and one per
+    /// method body (BT-3260) — see
+    /// [`crate::queries::folding_range_provider`] for why the latter exist
+    /// (indentation-equivalent folding, so registering this provider at all
+    /// doesn't regress a divider-less file's fold arrows). Empty only for a
+    /// file with no classes, or none with anything multi-line to fold.
     ///
     /// Should respond in <50ms for typical file sizes.
     fn folding_ranges(&self, file: &Utf8PathBuf) -> Vec<Span>;
