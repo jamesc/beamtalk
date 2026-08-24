@@ -784,7 +784,7 @@ Authorizes and resolves the write target server-side via
 a client-supplied path — and rejects a class with no editable, in-project
 `.bt` file (deps/stdlib/file-less classes) the same way
 `native_module_editable_target/1` gates `save-native-source`. The write is
-atomic (temp file + rename, `atomic_write_file/2`). A comment-only change
+atomic (temp file + rename, `atomic_write_file/3`). A comment-only change
 never affects the compiled class, so nothing is recompiled or reloaded.
 
 Guards against clobbering a concurrent write to the same file: before
