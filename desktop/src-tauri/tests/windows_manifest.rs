@@ -7,10 +7,20 @@
 //! Common Controls v6 dependency the production `[[bin]]` target gets from
 //! `tauri_build::build()`. That's a "keep in sync" claim with nothing
 //! enforcing it — a future `tauri-build` version bump could change its
-//! default manifest without this vendored copy noticing. Runs on every
-//! platform (it's a static content check, not the Windows-only linker
-//! embedding itself) so a silent desync is caught by ordinary `cargo test`,
-//! not just a Windows CI run.
+//! default manifest without this vendored copy noticing.
+//!
+//! This is a floor check, not a real sync check: it only confirms the
+//! vendored copy still declares Common Controls v6.0.0.0, the one thing
+//! `embed_manifest_for_tests` actually needs from it. It can't catch
+//! `tauri-build` reshaping its manifest in other ways (a changed
+//! `publicKeyToken`, an added `dpiAware`/`trustInfo` entry, ...) while
+//! leaving that dependency intact — that class of drift needs a real diff
+//! against `tauri-build`'s current default, which this doesn't attempt.
+//! Runs on every platform (it's a static content check, not the
+//! Windows-only linker embedding itself), so at least the failure mode
+//! that matters — the vendored copy silently losing what
+//! `common-controls-v6` needs — is caught by ordinary `cargo test`, not
+//! just a Windows CI run.
 
 #[test]
 fn vendored_manifest_declares_common_controls_v6() {
