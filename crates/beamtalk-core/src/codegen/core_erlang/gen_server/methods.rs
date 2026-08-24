@@ -2921,10 +2921,10 @@ impl CoreErlangGenerator {
         let source = crate::unparse::unparse_method(method);
 
         // The method definition's line within its own (bare) source is line 1:
-        // `extract_method_source` emits the signature first (after any doc
-        // comment / @expect lines the unparser prepends). The xref `line` field
-        // is the method-relative definition line, so the first send/ref lines
-        // are already in the same coordinate space.
+        // `unparse_method` emits the signature first (after any doc comment /
+        // @expect lines the unparser prepends). The xref `line` field is the
+        // method-relative definition line, so the first send/ref lines are
+        // already in the same coordinate space.
         let def_line = Self::method_def_line(&source);
 
         let sends = find_all_sends_in_source(&source);
