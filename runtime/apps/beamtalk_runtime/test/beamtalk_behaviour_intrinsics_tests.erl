@@ -2513,6 +2513,83 @@ stop_class_actors_with_registry_test_() ->
     end}.
 
 %%% ============================================================================
+%%% BT-3243: classRemoveFromSystemByName with a real class-spawned live actor
+%%% ============================================================================
+
+%% Unlike stop_class_actors_with_registry_test_ above (a bare `spawn/1` fun,
+%% never linked to anything), this spawns the actor *through* the class
+%% gen_server's real `{spawn, _}` handler — `erlang:apply(Module, spawn, [])`
+%% inside `handle_call({spawn, _}, ...)` — which is exactly how the BT-3243
+%% link used to form (`beamtalk_actor:safe_spawn/2` ran with the class
+%% gen_server as `self()`, and `gen_server:start_link` linked it to the new
+%% actor). Before the fix, `stop_class_actors/1`'s kill below would take the
+%% class process down too, and the unconditional `gen_server:stop(ClassPid)`
+%% a few lines later in `classRemoveFromSystemByName/1` would then crash
+%% this test with `noproc` instead of returning cleanly.
+classremovefromsystembyname_with_class_spawned_actor_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% A disposable class module whose own `spawn/0` delegates to
+                %% the stable `test_class_actor` fixture as the actor's
+                %% backing gen_server — so `code:delete/1` below only ever
+                %% unloads this throwaway module, never a shared test fixture.
+                ModAtom = bt_3243_removable_class_mod,
+                Forms = parse_forms([
+                    "-module(" ++ atom_to_list(ModAtom) ++ ").",
+                    "-export([spawn/0]).",
+                    "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{})."
+                ]),
+                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+                {module, ModAtom} = code:load_binary(
+                    ModAtom, "bt_3243_removable_class_mod.erl", Bin
+                ),
+                ClassName = 'BT3243LiveActorClass',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => ModAtom,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
+
+                %% Real spawn through the class gen_server's own process.
+                {ok, #beamtalk_object{pid = ActorPid}} =
+                    gen_server:call(ClassPid, {spawn, []}),
+                ?assert(is_process_alive(ActorPid)),
+
+                Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
+                register(beamtalk_actor_registry, Registry),
+                try
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                    ),
+                    ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
+                    ?assertNot(is_process_alive(ActorPid))
+                after
+                    catch unregister(beamtalk_actor_registry),
+                    catch exit(Registry, kill),
+                    catch exit(ActorPid, kill)
+                end
+            end)
+        ]
+    end}.
+
+%% Parse a list of complete top-level Erlang source forms (each ending in
+%% `.`) into abstract forms suitable for compile:forms/2.
+parse_forms(SourceLines) ->
+    lists:map(
+        fun(Line) ->
+            {ok, Tokens, _} = erl_scan:string(Line),
+            {ok, Form} = erl_parse:parse_form(Tokens),
+            Form
+        end,
+        SourceLines
+    ).
+
+%%% ============================================================================
 %%% walk_hierarchy/3 — max depth cycle guard
 %%% ============================================================================
 

@@ -34,6 +34,10 @@ instantiation_test_() ->
             {"spawn with too many args returns type_error", fun test_spawn_too_many_args/0},
             {"spawn with no args succeeds", fun test_spawn_no_args/0},
             {"spawn with one arg (spawnWith:) succeeds", fun test_spawn_with_arg/0},
+            %% BT-3243: actor spawned via the class gen_server must not be
+            %% linked to it — killing the actor must not kill the class.
+            {"killing an actor spawned via the class gen_server leaves the class alive",
+                fun test_kill_actor_spawned_via_class_survives_class/0},
             %% handle_new tests
             {"new compiled class delegates to module", fun test_new_compiled/0},
             {"new compiled non-constructible class", fun test_new_compiled_non_constructible/0},
@@ -159,6 +163,34 @@ test_spawn_with_arg() ->
     ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result),
     {ok, Obj} = Result,
     gen_server:stop(Obj#beamtalk_object.pid).
+
+test_kill_actor_spawned_via_class_survives_class() ->
+    %% BT-3243: handle_spawn/4 runs *inside* the class gen_server process
+    %% when reached via the {spawn, Args} dynamic-dispatch handler — the
+    %% exact scenario the bug report describes. Before the fix, safe_spawn
+    %% used gen_server:start_link, linking the new actor to the class
+    %% process; exit(ActorPid, kill) then propagated over that link and
+    %% killed the class gen_server too (losing class vars / hot patches).
+    ok = ensure_counter_loaded(),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
+    {ok, #beamtalk_object{pid = ActorPid} = Obj} = gen_server:call(CounterPid, {spawn, []}),
+    ?assertEqual('Counter', Obj#beamtalk_object.class),
+    ?assert(is_process_alive(ActorPid)),
+    ?assert(is_process_alive(CounterPid)),
+
+    MonRef = erlang:monitor(process, ActorPid),
+    exit(ActorPid, kill),
+    receive
+        {'DOWN', MonRef, process, ActorPid, _Reason} -> ok
+    after 5000 ->
+        error(actor_kill_timeout)
+    end,
+
+    %% The class process must not merely be alive — it must still be a
+    %% functioning gen_server (not a zombie mid-crash), so this call must
+    %% succeed synchronously.
+    ?assert(is_process_alive(CounterPid)),
+    ?assertEqual('Counter', gen_server:call(CounterPid, class_name)).
 
 %%====================================================================
 %% handle_new tests (dynamic classes)
@@ -427,6 +459,14 @@ test_class_self_spawn_as_success() ->
     ),
     #{'okValue' := Obj} = Result,
     ?assert(erlang:whereis(Name) =/= undefined),
+    %% BT-3243: beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always links —
+    %% it doubles as the real OTP supervisor child MFA for named children
+    %% (ADR 0079/BT-1990). do_class_self_named_spawn/6 must sever that link
+    %% right after a successful `self spawnAs:`, since the caller here (this
+    %% test process, standing in for a class method body) is not a
+    %% supervisor — a later kill of the actor must not take it down too.
+    {links, CallerLinks} = process_info(self(), links),
+    ?assertNot(lists:member(Obj#beamtalk_object.pid, CallerLinks)),
     gen_server:stop(Obj#beamtalk_object.pid).
 
 test_class_self_spawn_as_reserved() ->

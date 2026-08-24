@@ -496,8 +496,22 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
                 {error, abstract_class_error(ClassName, Selector)}
             );
         false ->
+            %% BT-3243: beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always
+            %% links — it doubles as the real OTP supervisor child MFA for
+            %% named children (ADR 0079/BT-1990), where that link is the
+            %% restart mechanism. For *this* call site, the caller is a
+            %% class method body executing `self spawnAs:`/
+            %% `self spawnWith:as:` (normally the class's own gen_server
+            %% process, per CLAUDE.md's "Blocks into class methods" rule) —
+            %% not a supervisor, so the link must not survive: a later kill
+            %% of the actor must not take the class process down with it.
+            %% Sever it immediately; by the time `'spawnAs'/3` returns
+            %% `{ok, Pid}` its own await_initialize has already confirmed
+            %% the actor started and initialized, so no risk window remains
+            %% to protect against.
             case beamtalk_actor:'spawnAs'(Name, Module, InitArgs) of
                 {ok, Pid} ->
+                    unlink(Pid),
                     beamtalk_result:from_tagged_tuple(
                         {ok, #beamtalk_object{
                             class = ClassName,

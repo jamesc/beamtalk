@@ -99,12 +99,19 @@ watch(ClassName, Pid) ->
 Stop monitoring `ClassName` ahead of deliberate removal.
 
 `classRemoveFromSystemByName/1` kills the class's live actors before
-stopping the class gen_server, and actors are linked to their class process
-(spawned via `gen_server:start_link` inside the class's `{spawn, _}`
-handler) — so the kill propagates and the class dies with reason `killed`,
-which would otherwise be classified as a crash and eagerly resurrected
-mid-removal. Synchronous (a cast could lose the race against the 'DOWN'
-delivery); a no-op when the monitor is not running.
+stopping the class gen_server itself (`gen_server:stop/1`, reason
+`normal`/`shutdown`). BT-3243 removed the link that used to exist between an
+actor and the class process it was spawned through: dynamic-dispatch
+`{spawn, _}` and `self spawn`/`self spawnWith:` now spawn unlinked
+(`beamtalk_actor:safe_spawn/2` uses `gen_server:start/3`, not
+`start_link/3`), and `self spawnAs:`/`self spawnWith:as:` unlink
+immediately after a successful spawn (`beamtalk_class_instantiation:do_class_self_named_spawn/6`)
+— so an actor kill can no longer take the class process down with it. This
+unwatch stays as defense in depth against the class's own deliberate stop
+racing eager recovery (a kill/crash landing on the class process itself,
+from any other source, in the removal window). Synchronous (a cast could
+lose the race
+against the 'DOWN' delivery); a no-op when the monitor is not running.
 """.
 -spec unwatch(atom()) -> ok.
 unwatch(ClassName) ->
