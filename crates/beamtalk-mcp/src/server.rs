@@ -2504,8 +2504,17 @@ struct LintResult {
 /// `check_alias_leaked_visibility` (E0401/E0402/E0403) actually run — they
 /// are gated on `current_package: Some(_)` and silently emit zero
 /// diagnostics otherwise.
+///
+/// `source` (BT-3257) is the module's raw source text — mirroring
+/// `queries::diagnostic_provider::compute_project_diagnostics_with_analysis`
+/// (BT-3240) and `beamtalk lint`'s `collect_diagnostics`: needed so the
+/// near-miss `// === Name ===` divider check can scan `source` directly
+/// (`beamtalk_core::lint::check_near_miss_dividers`) instead of relying on
+/// the AST's `Comment::span`, which is actually the *following
+/// declaration's* span, not the comment's own.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
+    source: &str,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     has_package_dependencies: bool,
@@ -2540,6 +2549,14 @@ fn run_module_analysis(
     );
 
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
+
+    // BT-3257: mirrors `compute_project_diagnostics_with_analysis`'s
+    // placement — appended after `apply_expect_directives` because a
+    // near-miss-divider comment's span (the comment's own line) can never
+    // be contained in any `@expect`-annotated declaration's target span, so
+    // running it through that pass first would be a no-op at best. See that
+    // function's BT-3240 comment for the full reasoning.
+    beamtalk_core::lint::check_near_miss_dividers(source, &mut diags);
 
     (diags, analysis_result.class_hierarchy)
 }
@@ -2661,7 +2678,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         typed_expressions: 0,
     };
 
-    for (file_str, _source, module, parse_diags) in &parsed_files {
+    for (file_str, source, module, parse_diags) in &parsed_files {
         // Pre-filter to lint-severity parse diagnostics (compute_diagnostic_summary
         // intentionally drops parse errors/warnings here — they're surfaced via
         // other channels).
@@ -2673,6 +2690,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
         let (file_diags, class_hierarchy) = run_module_analysis(
             module,
+            source,
             &all_class_infos,
             initial_diags,
             has_package_dependencies,
@@ -2987,6 +3005,7 @@ fn run_lint_structured(path: &str) -> LintResult {
         // and applies @expect directives (BT-1476).
         let (lint_diags, _) = run_module_analysis(
             &module,
+            &source,
             &all_class_infos,
             initial_diags,
             has_package_dependencies,
@@ -3163,6 +3182,109 @@ mod tests {
         assert!(
             !has_dnu,
             "@expect type should suppress DNU in MCP lint, got: {result:?}",
+        );
+    }
+
+    // ── near-miss `// === Name ===` divider (BT-3240/BT-3257) ──────────────
+    //
+    // These exercise the real `lint`/`diagnostic_summary` entry points
+    // (`run_lint_structured`, `run_module_analysis`), not
+    // `near_miss_divider::scan_source` directly — that's already covered by
+    // that module's own `scan_source_locates_the_near_miss_comment_line_precisely`
+    // test.
+
+    #[test]
+    fn run_lint_structured_near_miss_divider_span_points_at_comment_line() {
+        // BT-3240/BT-3257: before `source` was threaded through
+        // `run_module_analysis`, MCP `lint` reached this check through the
+        // AST-based `NearMissDividerPass`, whose `Comment::span` is actually
+        // `bar`'s token span (line 3), not the comment's own line (line 2).
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("near_miss_test.bt");
+        std::fs::write(
+            &file,
+            "Object subclass: Foo\n  // === Section ====\n  bar => 1\n",
+        )
+        .unwrap();
+        let result = run_lint_structured(file.to_str().unwrap());
+        let near_misses: Vec<_> = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .filter(|d| d.message.contains("section divider"))
+            .collect();
+        assert_eq!(
+            near_misses.len(),
+            1,
+            "expected exactly one near-miss-divider diagnostic: {result:?}"
+        );
+        assert_eq!(
+            near_misses[0].line,
+            Some(2),
+            "span should point at the comment's own line (2), not `bar`'s line (3): {result:?}"
+        );
+    }
+
+    #[test]
+    fn run_lint_structured_multiple_near_miss_dividers_get_distinct_correctly_attributed_lines() {
+        // Two near-misses in one file must not get their lines mixed up.
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("multi_near_miss_test.bt");
+        std::fs::write(
+            &file,
+            "Object subclass: Foo\n  // === First ====\n  bar => 1\n\n  // == Second ==\n  baz => 2\n",
+        )
+        .unwrap();
+        let result = run_lint_structured(file.to_str().unwrap());
+        let mut lines: Vec<u32> = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .filter(|d| d.message.contains("section divider"))
+            .filter_map(|d| d.line)
+            .collect();
+        lines.sort_unstable();
+        assert_eq!(
+            lines,
+            vec![2, 5],
+            "each near-miss should be attributed to its own comment line, not the other's: {result:?}"
+        );
+    }
+
+    /// BT-3257: `compute_diagnostic_summary`'s public JSON output only
+    /// exposes aggregate severity/category counts, not individual
+    /// diagnostic spans — so span accuracy can't be asserted through its
+    /// return value directly. This instead calls `run_module_analysis`,
+    /// the exact shared function `compute_diagnostic_summary`'s Pass 2 loop
+    /// invokes per file (see the call site a few lines below in this
+    /// module), and inspects the diagnostic it produces before that
+    /// information is aggregated away — proving MCP `diagnostic_summary`'s
+    /// code path carries the same accurate, comment-line span as MCP
+    /// `lint` and the LSP, not just that it doesn't crash.
+    #[test]
+    fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
+        let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let initial_diags: Vec<_> = parse_diags
+            .into_iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .collect();
+        let (diags, _) =
+            run_module_analysis(&module, source, &[], initial_diags, false, None, None);
+        let near_misses: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("section divider"))
+            .collect();
+        assert_eq!(
+            near_misses.len(),
+            1,
+            "expected exactly one near-miss-divider diagnostic: {diags:?}"
+        );
+        assert_eq!(
+            near_misses[0].span.line_number(source),
+            2,
+            "span should point at the comment's own line (2), not `bar`'s line (3): {diags:?}"
         );
     }
 
