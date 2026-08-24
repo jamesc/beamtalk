@@ -52,7 +52,9 @@ respectively.
     stamp_matches_current/1,
     read_provenance_stamp/1,
     current_otp_release/0,
-    finish_section_write/4
+    finish_section_write/4,
+    atomic_write_file/2,
+    atomic_write_file/3
 ]).
 -endif.
 
@@ -606,6 +608,14 @@ module's `module_info(compile)` `source` pointing at a deleted temp file. A late
 save re-derives the editable target from that compile-info source
 (`native_module_editable_target/1`), so a stale temp path there would make the
 next save write to the wrong (deleted) file and leave the real `.erl` stale.
+
+Uses `atomic_write_file/2` (no pre-rename recheck, BT-3259): unlike
+`save-section`, `Source` here is the client's freshly edited buffer, not a
+splice computed from a prior read of `ErlPath` — there is no "expected prior
+content" to recheck against, only the already-validated (compiled + loaded)
+new source, which should win regardless of what currently sits on disk. The
+concurrent-writer *corruption* bug (a shared fixed temp path) is still fixed
+here: `atomic_write_file/2` now always uses a unique-per-call temp path.
 """.
 -spec finish_native_write(atom(), binary(), string(), binary(), binary(), string()) ->
     {value, map()}.
@@ -676,23 +686,69 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
 -doc """
 Atomic file write: write to a temp file in the same directory, then rename over
 the target (rename is atomic on POSIX), so a concurrent reader never sees a
-half-written `.erl`. On any failure the temp file is cleaned up.
+half-written file. On any failure the temp file is cleaned up.
+
+Equivalent to `atomic_write_file/3` with no pre-rename recheck.
 """.
 -spec atomic_write_file(string(), binary()) -> ok | {error, term()}.
 atomic_write_file(Path, Content) ->
-    TempPath = Path ++ ".bt_native_write_tmp",
+    atomic_write_file(Path, Content, undefined).
+
+-doc """
+Atomic file write with an optional pre-rename "changed on disk" guard
+(BT-3259).
+
+The temp path is unique per call (`erlang:unique_integer/1`-suffixed), never a
+fixed name — two concurrent writers targeting the same `Path` each get their
+own temp file, so one writer's `file:write_file/2` can never interleave with
+or clobber another's in-flight temp write (the bug: a shared fixed temp name
+let that happen before either side renamed). On any failure — write, recheck,
+or rename — the temp file is deleted so nothing is leaked.
+
+`ExpectedCurrent`, when not `undefined`, is byte-compared against `Path`'s
+*current* on-disk contents immediately before the rename. This closes the
+race window a caller-side check (e.g. a read at the top of the op) cannot: a
+concurrent writer's rename can land in the gap between that earlier check and
+this call's own rename. A mismatch aborts with `{error, changed_on_disk}` —
+nothing is written — rather than silently overwriting a concurrent edit,
+mirroring the ADR 0082 flush pipeline's `prev_source` span check
+(`beamtalk_workspace_flush.erl`).
+""".
+-spec atomic_write_file(string(), binary(), binary() | undefined) -> ok | {error, term()}.
+atomic_write_file(Path, Content, ExpectedCurrent) ->
+    TempPath = Path ++ "." ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp",
     case file:write_file(TempPath, Content) of
         ok ->
-            case file:rename(TempPath, Path) of
+            case recheck_unchanged(Path, ExpectedCurrent) of
                 ok ->
-                    ok;
-                {error, RenameReason} ->
+                    case file:rename(TempPath, Path) of
+                        ok ->
+                            ok;
+                        {error, RenameReason} ->
+                            _ = file:delete(TempPath),
+                            {error, RenameReason}
+                    end;
+                {error, _} = RecheckErr ->
                     _ = file:delete(TempPath),
-                    {error, RenameReason}
+                    RecheckErr
             end;
         {error, WriteReason} ->
             _ = file:delete(TempPath),
             {error, WriteReason}
+    end.
+
+%% `ok` when `ExpectedCurrent` is `undefined` (no recheck requested) or
+%% byte-matches `Path`'s current contents; `{error, changed_on_disk}` on a
+%% byte mismatch (a concurrent writer landed since the caller's own read);
+%% `{error, Reason}` if `Path` can no longer be read at all.
+-spec recheck_unchanged(string(), binary() | undefined) -> ok | {error, term()}.
+recheck_unchanged(_Path, undefined) ->
+    ok;
+recheck_unchanged(Path, ExpectedCurrent) ->
+    case file:read_file(Path) of
+        {ok, ExpectedCurrent} -> ok;
+        {ok, _Other} -> {error, changed_on_disk};
+        {error, Reason} -> {error, Reason}
     end.
 
 -doc """
@@ -728,15 +784,18 @@ Authorizes and resolves the write target server-side via
 a client-supplied path — and rejects a class with no editable, in-project
 `.bt` file (deps/stdlib/file-less classes) the same way
 `native_module_editable_target/1` gates `save-native-source`. The write is
-atomic (temp file + rename, `atomic_write_file/2`). A comment-only change
+atomic (temp file + rename, `atomic_write_file/3`). A comment-only change
 never affects the compiled class, so nothing is recompiled or reloaded.
 
-Guards against clobbering a concurrent write to the same file: immediately
-before writing, `finish_section_write/4` re-reads `Path` and requires it to
-still byte-match the source this edit was computed from, mirroring the ADR
-0082 flush pipeline's `prev_source` check. A mismatch (e.g. another
-session's method-body flush landed on this file in between) is rejected as
-a conflict with nothing written, rather than silently overwritten.
+Guards against clobbering a concurrent write to the same file: before
+writing, `finish_section_write/4` re-reads `Path` and requires it to still
+byte-match the source this edit was computed from, and `atomic_write_file/3`
+repeats that same check immediately before the final rename (BT-3259) — closing
+the narrower race where a concurrent write's rename lands in the gap between
+this first read and that rename. Either check mirrors the ADR 0082 flush
+pipeline's `prev_source` check. A mismatch (e.g. another session's method-body
+flush landed on this file in between) is rejected as a conflict with nothing
+written, rather than silently overwritten.
 
 Returns `{value, #{<<"class">> => _, <<"source_file">> => _, <<"ok">> =>
 true}}` on success. Failure (class not found/not editable, missing/blank
@@ -1048,13 +1107,19 @@ leading_indent(Bin, N) ->
 finish_section_write(Path, ClassBin, Source, NewSource) ->
     case file:read_file(Path) of
         {ok, Source} ->
-            case atomic_write_file(Path, NewSource) of
+            %% BT-3259: pass `Source` through as the expected-current content
+            %% so atomic_write_file/3 repeats this same byte-match check
+            %% immediately before its rename, closing the gap between this
+            %% read and that rename that a check made only here cannot.
+            case atomic_write_file(Path, NewSource, Source) of
                 ok ->
                     {value, #{
                         <<"class">> => ClassBin,
                         <<"source_file">> => list_to_binary(Path),
                         <<"ok">> => true
                     }};
+                {error, changed_on_disk} ->
+                    {error, section_conflict_error(ClassBin)};
                 {error, WriteReason} ->
                     {error, section_io_error(ClassBin, <<"writing">>, WriteReason)}
             end;

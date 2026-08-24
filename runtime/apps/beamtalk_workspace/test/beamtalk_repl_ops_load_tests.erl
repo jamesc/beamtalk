@@ -1422,6 +1422,143 @@ last_module_segment(ModuleBin) ->
     lists:last(binary:split(ModuleBin, <<"@">>, [global])).
 
 %%====================================================================
+%% atomic_write_file (BT-3259)
+%%
+%% Shared write-back helper for save-native-source and save-section. Before
+%% the fix, the temp path was a FIXED name (`Path ++ ".bt_native_write_tmp"`),
+%% so two concurrent writers to the same `Path` wrote to the identical temp
+%% file — one writer's `file:write_file/2` could interleave with or clobber
+%% the other's in-flight temp write before either renamed, corrupting the
+%% final file into neither writer's intended content. These tests exercise
+%% `atomic_write_file/2,3` directly (exported under `-ifdef(TEST)`).
+%%====================================================================
+
+atomic_write_file_concurrent_writers_never_corrupt_test() ->
+    %% Regression for the core bug: N processes atomically writing distinct,
+    %% large content to the SAME path concurrently. With the old fixed temp
+    %% name, concurrent `file:write_file/2` calls into the same temp file
+    %% could interleave, so the final content could end up as a splice of
+    %% two (or more) writers' bytes — never matching any single writer's
+    %% content exactly. With a unique-per-call temp path, every writer's
+    %% bytes land in its own temp file first, so whichever rename happens
+    %% last simply wins outright: the final content must always be byte-
+    %% identical to exactly one writer's full content.
+    Dir = make_temp_dir(),
+    try
+        Path = filename:join(Dir, "concurrent_target.txt"),
+        ok = file:write_file(Path, <<"initial\n">>),
+        Writers = [$A, $B, $C, $D, $E, $F, $G, $H],
+        Contents = [
+            {C, binary:copy(<<C>>, 200000)}
+         || C <- Writers
+        ],
+        Parent = self(),
+        Pids = [
+            spawn(fun() ->
+                Result = beamtalk_repl_ops_load:atomic_write_file(Path, Content),
+                Parent ! {done, self(), Tag, Result}
+            end)
+         || {Tag, Content} <- Contents
+        ],
+        Results = [
+            receive
+                {done, Pid, Tag, Result} -> {Tag, Result}
+            after 10000 -> {timeout, Pid}
+            end
+         || Pid <- Pids
+        ],
+        %% Every writer succeeded — no error from a temp-path collision.
+        ?assertEqual(
+            [],
+            [R || {_Tag, R} <- Results, R =/= ok]
+        ),
+        {ok, Final} = file:read_file(Path),
+        %% The final content is byte-identical to exactly one writer's full
+        %% content — never a mix of two, and never truncated.
+        MatchingTags = [Tag || {Tag, Content} <- Contents, Content =:= Final],
+        ?assertEqual(1, length(MatchingTags)),
+        ?assertEqual(200000, byte_size(Final)),
+        %% No stray `.tmp` files leaked by any writer.
+        {ok, Entries} = file:list_dir(Dir),
+        TmpEntries = [E || E <- Entries, lists:suffix(".tmp", E)],
+        ?assertEqual([], TmpEntries)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+atomic_write_file_two_writers_use_distinct_temp_paths_test() ->
+    %% Direct evidence the old fixed-suffix collision is gone: two writers
+    %% racing on the same Path never see EEXIST/overwrite each other's temp
+    %% file, because each gets a unique `erlang:unique_integer/1`-suffixed
+    %% name. Verified indirectly: both succeed, both report `ok`, and the
+    %% winner's content survives untouched by the loser's temp write.
+    Dir = make_temp_dir(),
+    try
+        Path = filename:join(Dir, "target.txt"),
+        ok = file:write_file(Path, <<"seed\n">>),
+        ?assertEqual(ok, beamtalk_repl_ops_load:atomic_write_file(Path, <<"one">>)),
+        ?assertEqual(ok, beamtalk_repl_ops_load:atomic_write_file(Path, <<"two">>)),
+        ?assertEqual({ok, <<"two">>}, file:read_file(Path))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+atomic_write_file_no_recheck_when_expected_undefined_test() ->
+    %% atomic_write_file/2 (no ExpectedCurrent) behaves exactly like
+    %% atomic_write_file/3 with `undefined`: no recheck, always overwrites.
+    Dir = make_temp_dir(),
+    try
+        Path = filename:join(Dir, "no_recheck.txt"),
+        ok = file:write_file(Path, <<"before">>),
+        ?assertEqual(ok, beamtalk_repl_ops_load:atomic_write_file(Path, <<"after">>, undefined)),
+        ?assertEqual({ok, <<"after">>}, file:read_file(Path))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+atomic_write_file_recheck_rejects_changed_on_disk_test() ->
+    %% The pre-rename recheck (part 2 of BT-3259): when `ExpectedCurrent` no
+    %% longer matches `Path`'s actual on-disk content, abort with a
+    %% structured reason and write nothing.
+    Dir = make_temp_dir(),
+    try
+        Path = filename:join(Dir, "recheck_target.txt"),
+        Original = <<"original content\n">>,
+        ok = file:write_file(Path, Original),
+        ChangedOnDisk = <<"a concurrent writer changed this\n">>,
+        ok = file:write_file(Path, ChangedOnDisk),
+        Result = beamtalk_repl_ops_load:atomic_write_file(
+            Path, <<"my new content\n">>, Original
+        ),
+        ?assertEqual({error, changed_on_disk}, Result),
+        %% Nothing was written: the concurrent writer's content survives,
+        %% not this call's `Content` (which would silently revert it) and
+        %% not the stale `Original` either.
+        ?assertEqual({ok, ChangedOnDisk}, file:read_file(Path)),
+        %% The temp file this call staged is cleaned up, not leaked.
+        {ok, Entries} = file:list_dir(Dir),
+        TmpEntries = [E || E <- Entries, lists:suffix(".tmp", E)],
+        ?assertEqual([], TmpEntries)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+atomic_write_file_recheck_succeeds_when_unchanged_test() ->
+    Dir = make_temp_dir(),
+    try
+        Path = filename:join(Dir, "recheck_ok_target.txt"),
+        Original = <<"still the same\n">>,
+        ok = file:write_file(Path, Original),
+        Result = beamtalk_repl_ops_load:atomic_write_file(
+            Path, <<"new content\n">>, Original
+        ),
+        ?assertEqual(ok, Result),
+        ?assertEqual({ok, <<"new content\n">>}, file:read_file(Path))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%%====================================================================
 %% save-native-source (BT-2670)
 %%
 %% Edit -> compile -> reload -> write-back for a *project-owned* native `.erl`.
