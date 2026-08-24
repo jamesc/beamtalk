@@ -1,0 +1,38 @@
+{
+  "$schema_comment": "BT-3261 shared conformance fixture. Every case here is consumed by BOTH crates/beamtalk-core/tests/section_divider_grammar_conformance.rs (calling parse_divider_name directly) and editors/vscode/src/__tests__/sectionDividerGrammar.test.ts (running the comment.line.double-slash.section-divider.beamtalk regex from editors/vscode/syntaxes/beamtalk.tmLanguage.json through the real Oniguruma engine). Add a case here — not to either test file individually — when either side's divider-recognition rule changes, so the two can never silently drift apart again. `content` is the already-`//`-stripped text parse_divider_name accepts (see its doc comment); the JS side reconstructs the raw source line as `// ` + content, the one canonical form both a hand-written divider and this fixture agree on.",
+  "cases": [
+    { "content": "=== Timeout proxy ===", "name": "Timeout proxy" },
+    {
+      "content": "===== Interval Math (pure, no sleeping) =====",
+      "name": "Interval Math (pure, no sleeping)"
+    },
+    {
+      "content": "===== Element identity is `=:=`, not term order (BT-2997) =====",
+      "name": "Element identity is `=:=`, not term order (BT-2997)"
+    },
+    { "content": "  ===  Name  ===  ", "name": "Name" },
+    { "content": "===== Name =====", "name": "Name" },
+
+    { "content": "===Name===", "name": "Name" },
+    { "content": "===  Name===", "name": "Name" },
+    { "content": "===Name  ===", "name": "Name" },
+    { "content": "=== Name   ===", "name": "Name" },
+    { "content": "===A=B===", "name": "A=B" },
+
+    { "content": "=== Name =====", "name": null },
+    { "content": "===== Name ===", "name": null },
+    { "content": "=====Name ===", "name": null },
+    { "content": "=== Name=====", "name": null },
+
+    { "content": "========================", "name": null },
+    { "content": "======", "name": null },
+    { "content": "===  ===", "name": null },
+    { "content": "===   ===", "name": null },
+
+    { "content": "== Name ==", "name": null },
+    { "content": "= Name =", "name": null },
+
+    { "content": "a plain comment", "name": null },
+    { "content": "TODO: fix this", "name": null }
+  ]
+}

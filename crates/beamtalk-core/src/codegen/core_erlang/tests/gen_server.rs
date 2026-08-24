@@ -2701,6 +2701,55 @@ Actor subclass: Counter
 }
 
 #[test]
+fn test_bt3249_method_source_omits_inferred_return_type_annotation() {
+    // BT-3249: `getValue` has no explicit `-> Type` annotation in source —
+    // return-type writeback infers `Integer` and (correctly) records it in
+    // meta.method_info for chain-based REPL completion. But the *browsable*
+    // `methodSource` text (what the cockpit/System Browser displays, and what
+    // the ChangeLog's `disk_differs`/`body_delta` comparisons diff against)
+    // must stay byte-for-byte what the user wrote — no `-> Integer` leaking
+    // in from writeback. Without this fix, a save -> revert -> re-save of an
+    // unchanged buffer recorded a spurious ChangeLog entry whose only diff
+    // was this inferred annotation (root-caused by `extract_method_source`
+    // unparsing the post-writeback AST while the ChangeLog's own
+    // `source_ref` is unparsed pre-writeback).
+    let src = "
+Actor subclass: Counter
+  state: value :: Integer = 0
+  getValue => value
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    // Inference still ran and is still recorded for meta/REPL completion.
+    assert!(
+        code.contains("'return_type' => 'Integer'"),
+        "inferred return type should still be recorded in meta.method_info. Got:\n{code}"
+    );
+
+    // `methodSource` bakes as a Core Erlang binary literal (per-byte
+    // segments, not a plain string) — compare the whole `'methodSource' =>
+    // ~{'getValue' => #{...}#}~` entry against the same byte-segment
+    // encoding codegen itself produces for the exact bare (unannotated)
+    // source. Scoped to just this entry (rather than a bare "-> Integer"
+    // search over the whole module) since `methodSignatures` legitimately
+    // keeps showing the inferred type for `:help` — only the browsable,
+    // ChangeLog-diffed `methodSource` must drop it.
+    let expected_method_source_entry = format!(
+        "'methodSource' => ~{{'getValue' => #{{{}}}#}}~",
+        CoreErlangGenerator::binary_byte_segments("getValue => value")
+    );
+    assert!(
+        code.contains(&expected_method_source_entry),
+        "methodSource for getValue should round-trip the exact on-disk \
+         (unannotated) source, with no inferred `-> Integer` leaking in. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_bt2524_generated_callbacks_notify_state_change_substrate() {
     // BT-2524: a compiled actor's generated handle_call/handle_cast must call
     // beamtalk_actor:notify_state_change/2 after committing new state, so a
@@ -2831,6 +2880,18 @@ Actor subclass: Counter
             "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~"
         ),
         "Explicitly annotated method should appear in meta.method_info. Got:\n{code}"
+    );
+    // BT-3249: a genuine user-written annotation must still round-trip
+    // untouched into the browsable `methodSource` text (only inference-
+    // written ones get stripped). `methodSource` bakes as a Core Erlang
+    // binary literal (per-byte segments, not a plain string), so compare
+    // against the same byte-segment encoding codegen itself produces.
+    let expected_signature_bytes =
+        CoreErlangGenerator::binary_byte_segments("getValue -> Integer =>");
+    assert!(
+        code.contains(&expected_signature_bytes),
+        "explicit user-written return-type annotation must survive in \
+         methodSource. Got:\n{code}"
     );
 }
 

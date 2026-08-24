@@ -67,7 +67,7 @@ pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
 pub use receiver_knowledge::{KnowledgeScope, ReceiverKnowledge, classify_receiver};
 pub use return_type_writeback::{
     apply_return_type_writeback, apply_return_type_writeback_from_map,
-    clear_return_type_writeback_for_keys,
+    clear_return_type_writeback_for_key, clear_return_type_writeback_for_keys,
 };
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;

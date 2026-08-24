@@ -865,7 +865,7 @@ pub fn generate_module_with_warnings(
     // eliminating a second full type-checking pass per compiled module. `None`
     // preserves the previous self-sufficient behaviour for callers that don't
     // run analysis separately (unit tests, ad-hoc codegen).
-    let (mut hierarchy, analysis_handed_off, driver_method_return_types) =
+    let (mut hierarchy, analysis_handed_off, mut driver_method_return_types) =
         if let Some(analysis) = options.analysis {
             generator.semantic_facts = analysis.semantic_facts;
             // BT-3217: carry the driver's already-computed `TypeMap` through
@@ -924,6 +924,15 @@ pub fn generate_module_with_warnings(
     // possibly incomplete for this generation's fuller view of the hierarchy.
     let mut module_owned;
     let module: &Module = if analysis_handed_off && !added_beam_meta && !added_superclasses {
+        // BT-3249: `module` is used exactly as the driver prepared it (no
+        // clone/re-infer below), so the driver's own `method_return_types`
+        // map is precisely "which methods did inference write a return type
+        // into" for *this* `module` — record it for `extract_method_source`
+        // to strip before baking image-resident `__source__` text. `.take()`
+        // rather than `.clone()`: `driver_method_return_types` is only read
+        // again in the `else` arm below, which this branch never executes.
+        generator.method_return_types_written_back =
+            driver_method_return_types.take().unwrap_or_default();
         module
     } else {
         module_owned = module.clone();
@@ -965,6 +974,10 @@ pub fn generate_module_with_warnings(
             &hierarchy,
             &method_return_types,
         );
+        // BT-3249: record which methods *this* (re-)inference wrote a
+        // return type into, for `extract_method_source` to strip before
+        // emitting image-resident `__source__` text — see the field's doc.
+        generator.method_return_types_written_back = method_return_types;
         &module_owned
     };
 
@@ -1843,6 +1856,20 @@ pub(crate) struct CoreErlangGenerator {
     /// unit-test-only paths); `recv_type` degrades safely to `dynamic` in
     /// that case, matching the runtime live-patch path's precedent.
     pub(super) type_map: crate::semantic_analysis::TypeMap,
+    /// BT-3249: keys of methods whose `return_type` was set by the return-type
+    /// writeback pass (`apply_return_type_writeback_from_map`) rather than
+    /// typed by the user — the same map used to build `module`/`module_owned`
+    /// (whichever this generation's `generate_module_with_warnings` ended up
+    /// using), populated once before codegen begins. Consulted by
+    /// `gen_server/methods.rs::extract_method_source` so the image-resident
+    /// `__source__` text it bakes never carries an inferred `-> Type`
+    /// annotation the user never wrote, while the method's real
+    /// `return_type` (used for `method_return_types` metadata, specs, etc.)
+    /// stays untouched. Empty for codegen contexts that never ran writeback.
+    pub(super) method_return_types_written_back: std::collections::HashMap<
+        crate::semantic_analysis::MethodReturnKey,
+        crate::semantic_analysis::InferredType,
+    >,
 }
 
 impl CoreErlangGenerator {
@@ -1891,6 +1918,7 @@ impl CoreErlangGenerator {
             otp_release: None,
             alias_registry: crate::semantic_analysis::alias_registry::AliasRegistry::new(),
             type_map: crate::semantic_analysis::TypeMap::new(),
+            method_return_types_written_back: std::collections::HashMap::new(),
         }
     }
 

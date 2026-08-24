@@ -2314,7 +2314,7 @@ impl CoreErlangGenerator {
 
             // BT-101: Method source
             let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
-                let source_str = self.extract_method_source(m);
+                let source_str = self.extract_method_source(class.name.name.as_str(), false, m);
                 leaf::binary_lit(&source_str)
             });
 
@@ -2339,7 +2339,7 @@ impl CoreErlangGenerator {
             // instance side. Required by SystemNavigation `sendersOf:` /
             // `referencesTo:` / `methodsMatching:` to scan class-side bodies.
             let class_method_source_doc = Self::build_selector_map(&class_methods_primary, |m| {
-                let source_str = self.extract_method_source(m);
+                let source_str = self.extract_method_source(class.name.name.as_str(), true, m);
                 leaf::binary_lit(&source_str)
             });
 
@@ -2735,11 +2735,16 @@ impl CoreErlangGenerator {
     /// The send / reference data comes from the existing AST walkers
     /// ([`crate::method_source_walker::find_all_sends_in_source`] and
     /// [`crate::method_source_walker::find_all_references_in_source`]).
-    /// Those operate on the unparsed bare-method source produced by
-    /// [`Self::extract_method_source`] — the *same* source channel and walkers
-    /// the `SystemNavigation` miss-policy fallback uses (ADR 0087 §Read path), so
-    /// the baked line numbers are method-relative and byte-for-byte consistent
-    /// with the fallback. No port round-trip; one in-process walk per method.
+    /// Those operate on a plain `unparse_method(method)` of the method — *not*
+    /// [`Self::extract_method_source`], which (BT-3249) strips any
+    /// writeback-inferred `-> Type` annotation for the human-facing browsable
+    /// source. xref/`referencesTo:` deliberately keeps such annotations (an
+    /// inferred return type is still a real type reference), so this walk's
+    /// source can differ in *content* (an extra `-> Type` token) from what
+    /// `SystemNavigation`'s miss-policy fallback shows — but never in *line
+    /// count* (the annotation is inline on the signature line), so baked line
+    /// numbers stay method-relative and consistent with the fallback. No port
+    /// round-trip; one in-process walk per method.
     ///
     /// Hand-written rows carry `source_status => indexed` and *omit* the
     /// optional `synthetic_origin` key (never emitted as a `null` sentinel).
@@ -2905,13 +2910,21 @@ impl CoreErlangGenerator {
         // that fails `core_scan` at BEAM-compile time.
         const MAX_ATOM_BYTES: usize = 255;
 
-        let source = self.extract_method_source(method);
+        // Unlike `extract_method_source` (used for the *browsable* `methodSource`/
+        // `classMethodSource` maps, BT-3249), this xref walk deliberately keeps any
+        // writeback-inferred `-> Type` annotation: `find_all_references_in_source`
+        // explicitly walks `method.return_type` to record type references for
+        // `referencesTo:`/xref queries, and an inferred-but-unannotated return type
+        // is still a real reference the method's compiled behavior carries — only
+        // the human-facing source text should hide it, not the xref data derived
+        // from the full (annotated) AST.
+        let source = crate::unparse::unparse_method(method);
 
         // The method definition's line within its own (bare) source is line 1:
-        // `extract_method_source` emits the signature first (after any doc
-        // comment / @expect lines the unparser prepends). The xref `line` field
-        // is the method-relative definition line, so the first send/ref lines
-        // are already in the same coordinate space.
+        // `unparse_method` emits the signature first (after any doc comment /
+        // @expect lines the unparser prepends). The xref `line` field is the
+        // method-relative definition line, so the first send/ref lines are
+        // already in the same coordinate space.
         let def_line = Self::method_def_line(&source);
 
         let sends = find_all_sends_in_source(&source);
@@ -4463,9 +4476,46 @@ impl CoreErlangGenerator {
     /// which silently dropped leading comments (they appear before `method.span.start()`)
     /// and fell back to the selector name for synthesized methods. The unparser fixes
     /// both deficiencies — see ADR 0044 Phase 4.
-    #[allow(clippy::unused_self)]
-    pub(super) fn extract_method_source(&self, method: &MethodDefinition) -> String {
-        crate::unparse::unparse_method(method)
+    ///
+    /// BT-3249: `class_name`/`is_class_method` identify `method` within
+    /// `self.method_return_types_written_back` (keyed by
+    /// `(class_name, selector, is_class_method)` — the caller's own
+    /// knowledge of which method list `method` came from, rather than
+    /// `method.is_class_method`, which a standalone extension method
+    /// (`Target class >> sel`) does not reliably carry). When present, the
+    /// return-type writeback pass — not the user — wrote `method.return_type`,
+    /// so this unparses a throwaway clone with `return_type` reset to `None`
+    /// instead of `method` itself. Without this, the image-resident
+    /// `__source__` text this feeds (used by the System Browser / cockpit /
+    /// `SystemNavigation` scanners) carries an inferred `-> Type` annotation
+    /// the `ChangeLog`'s canonical `source_ref` (unparsed pre-writeback) never
+    /// had — the divergence that produces a spurious revert-then-resave
+    /// `ChangeLog` entry. `method`'s own `return_type` is never mutated:
+    /// codegen elsewhere (specs, `method_return_types` metadata) still needs
+    /// the inferred type.
+    pub(super) fn extract_method_source(
+        &self,
+        class_name: &str,
+        is_class_method: bool,
+        method: &MethodDefinition,
+    ) -> String {
+        let key: crate::semantic_analysis::MethodReturnKey = (
+            EcoString::from(class_name),
+            method.selector.name(),
+            is_class_method,
+        );
+        if method.return_type.is_some() && self.method_return_types_written_back.contains_key(&key)
+        {
+            let mut stripped = method.clone();
+            crate::semantic_analysis::clear_return_type_writeback_for_key(
+                &mut stripped,
+                &key,
+                &self.method_return_types_written_back,
+            );
+            crate::unparse::unparse_method(&stripped)
+        } else {
+            crate::unparse::unparse_method(method)
+        }
     }
 
     /// BT-851: Checks if an expression is a `value:` call on a Tier 2 block parameter.
@@ -5669,10 +5719,11 @@ mod tests {
     };
     use crate::ast::{
         ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, KeywordPart,
-        Literal, MessageSelector, MethodDefinition, Module, ParameterDefinition, TypeParamDecl,
+        Literal, MessageSelector, MethodDefinition, Module, ParameterDefinition, TypeAnnotation,
+        TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
-    use crate::semantic_analysis::{DynamicReason, InferredType, TypeProvenance};
+    use crate::semantic_analysis::{DynamicReason, InferredType, MethodReturnKey, TypeProvenance};
     use crate::source_analysis::Span;
     use crate::test_helpers::test_support::make_actor_class;
     use ecow::EcoString;
@@ -5692,6 +5743,61 @@ mod tests {
             vec![bare(Expression::Literal(Literal::Integer(42), s()))],
             s(),
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-3249: `extract_method_source` must not leak an inference-written
+    // `-> Type` return-type annotation into the image-resident `__source__`
+    // text, while still round-tripping a genuine user-written annotation
+    // untouched. See `clear_return_type_writeback_for_key`'s doc for the
+    // full root-cause story (ChangeLog's canonical `source_ref` is unparsed
+    // pre-writeback; without this, browsed source was unparsed
+    // post-writeback, so a save -> revert -> re-save of an unchanged buffer
+    // recorded a spurious annotation-only ChangeLog diff).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_method_source_strips_inferred_return_type_annotation() {
+        let mut method = simple_unary_method("greeting");
+        method.return_type = Some(TypeAnnotation::simple(EcoString::from("Hello"), s()));
+
+        let mut generator = CoreErlangGenerator::new("test");
+        let key: MethodReturnKey = (EcoString::from("Hello"), EcoString::from("greeting"), false);
+        generator.method_return_types_written_back.insert(
+            key,
+            InferredType::Known {
+                class_name: EcoString::from("Hello"),
+                type_args: vec![],
+                provenance: TypeProvenance::Inferred(s()),
+            },
+        );
+
+        let source = generator.extract_method_source("Hello", false, &method);
+        assert!(
+            !source.contains("->"),
+            "inferred return-type annotation leaked into extracted source: {source:?}"
+        );
+        // `method`'s own AST is left untouched — codegen elsewhere (specs,
+        // `method_return_types` metadata) still needs the inferred type.
+        assert!(
+            method.return_type.is_some(),
+            "extract_method_source must not mutate the method it was given"
+        );
+    }
+
+    #[test]
+    fn extract_method_source_preserves_explicit_return_type_annotation() {
+        let mut method = simple_unary_method("greeting");
+        method.return_type = Some(TypeAnnotation::simple(EcoString::from("Hello"), s()));
+
+        // No entry in `method_return_types_written_back`: this key was never
+        // written by inference, so the annotation is the user's own.
+        let generator = CoreErlangGenerator::new("test");
+        let source = generator.extract_method_source("Hello", false, &method);
+        assert!(
+            source.contains("-> Hello"),
+            "explicit user-written return-type annotation was stripped: {source:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -5974,8 +6080,6 @@ mod tests {
     }
 
     // ── ADR 0068: MetaTypeRepr tests ──
-
-    use crate::ast::TypeAnnotation;
 
     #[test]
     fn test_meta_type_repr_none_renders_none_atom() {

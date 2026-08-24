@@ -174,7 +174,11 @@ impl CoreErlangGenerator {
     /// atom `'undefined'` when the source text cannot be recovered (preserving
     /// `register/4` semantics — register without source rather than crash).
     fn extension_source_doc(&self, ext: &StandaloneMethodDefinition) -> Document<'static> {
-        let source = self.extract_method_source(&ext.method);
+        let source = self.extract_method_source(
+            ext.class_name.name.as_str(),
+            ext.is_class_method,
+            &ext.method,
+        );
         if source.is_empty() {
             Document::Str("'undefined'")
         } else {

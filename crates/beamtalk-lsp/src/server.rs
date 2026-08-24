@@ -2566,8 +2566,9 @@ impl LanguageServer for Backend {
         }
     }
 
-    /// Returns folding ranges for a file's `// === Name ===` section
-    /// dividers (BT-3237).
+    /// Returns folding ranges for a file: one per `// === Name ===` section
+    /// divider category (BT-3237), plus one per class body and one per
+    /// method body, instance- and class-side (BT-3260).
     ///
     /// AST-only — unlike `document_symbol`, there is no runtime-delegation
     /// path here (see `docs/development/surface-parity.md`'s `nav-symbols`
@@ -2575,28 +2576,35 @@ impl LanguageServer for Backend {
     /// same reason: folding ranges are inter-method file structure, not a
     /// property surfaced by a loaded class with no source in hand).
     ///
-    /// Returning `Ok(None)` (JSON `null`) rather than `Ok(Some(vec![]))` for
-    /// a divider-less file is load-bearing, not a style choice: `null` is
-    /// how a `textDocument/foldingRange` response tells VS Code "this
-    /// provider has nothing to say," which is what lets the editor fall
-    /// back to its own indentation-based folding for that request. An empty
-    /// array is a *real, if vacuous, answer* and editors are not obligated
-    /// to fall back on one. Do not simplify away the `is_empty()` branch
-    /// below.
+    /// **BT-3260:** per the LSP folding spec's provider-registration model,
+    /// registering `folding_range_provider` at all opts every `.bt` file
+    /// out of VS Code's default indentation-based folding strategy once
+    /// `editor.foldingStrategy` is `"auto"` (the default) — there is no
+    /// per-region merge/fallback, and a proposed `disablesIndentation`
+    /// provider opt-out flag exists upstream (microsoft/vscode#265661) but
+    /// has not shipped. A divider-only provider (BT-3237's original scope)
+    /// would therefore have silently regressed every divider-less file's
+    /// per-class/per-method fold arrows the moment this capability was
+    /// registered. To avoid that, `compute_folding_ranges` also emits a
+    /// class-body range and one range per method body for **every** class,
+    /// independent of whether it uses dividers — the indentation-equivalent
+    /// fold points VS Code's built-in strategy would otherwise have
+    /// offered. A class with dividers gets both the divider-category ranges
+    /// and these body ranges (nested folding: class -> category -> method);
+    /// a divider-less class gets only the body ranges, but still folds at
+    /// every class/method exactly as indentation folding used to. A
+    /// single-line class or method contributes no range of its own (nothing
+    /// to collapse), matching indentation folding's own behavior.
     ///
-    /// Known limitation (review finding, BT-3237): registering
-    /// `folding_range_provider` at all opts every `.bt` file — including
-    /// ones with no dividers — out of VS Code's default indentation-based
-    /// folding strategy once `editor.foldingStrategy` is `"auto"` (the
-    /// default), per the LSP folding spec's provider-registration model.
-    /// This handler answers only the divider-category ranges the BT-3237
-    /// acceptance criteria call for, not per-class/per-method ranges, so a
-    /// file that used to fold at every method (via indentation) may fold
-    /// only at its divider banners after this ships. Tracked for follow-up
-    /// rather than fixed here, since restoring parity would mean emitting
-    /// class/method ranges too — a materially larger scope change than
-    /// this issue's stated contract ("`None`/empty for a class with
-    /// [dividers]").
+    /// Returning `Ok(None)` (JSON `null`) rather than `Ok(Some(vec![]))` is
+    /// load-bearing, not a style choice, for the one case that still
+    /// produces zero ranges — a file with no classes, or none with anything
+    /// multi-line to fold: `null` is how a `textDocument/foldingRange`
+    /// response tells VS Code "this provider has nothing to say," which is
+    /// what lets the editor fall back to its own indentation-based folding
+    /// for that request. An empty array is a *real, if vacuous, answer* and
+    /// editors are not obligated to fall back on one. Do not simplify away
+    /// the `is_empty()` branch below.
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = &params.text_document.uri;
         let Some(path) = self.resolve_path_for_uri(uri) else {
@@ -8398,7 +8406,10 @@ Object subclass: Counter
         };
         let response = backend.folding_range(params).await.expect("rpc ok");
         let ranges = response.expect("Some(ranges)");
-        assert_eq!(ranges.len(), 2);
+        // BT-3260: divider-category ranges (Alpha, Beta), plus the
+        // class-body range — `foo`/`bar`/`baz` are all single-line, so none
+        // contributes a method range of its own.
+        assert_eq!(ranges.len(), 3, "got {ranges:?}");
         // "Alpha" starts at the divider line (line 1, 0-based) and ends at
         // "bar => 2" (line 3).
         assert_eq!(ranges[0].start_line, 1);
@@ -8407,14 +8418,25 @@ Object subclass: Counter
         // (line 6).
         assert_eq!(ranges[1].start_line, 5);
         assert_eq!(ranges[1].end_line, 6);
+        // The class body spans the whole file: the header (line 0) through
+        // "baz => 3" (line 6).
+        assert_eq!(ranges[2].start_line, 0);
+        assert_eq!(ranges[2].end_line, 6);
     }
 
     #[tokio::test]
-    async fn folding_range_is_none_for_a_class_without_dividers() {
+    async fn folding_range_still_covers_a_class_without_dividers() {
+        // BT-3260: registering `folding_range_provider` at all opts every
+        // `.bt` file out of VS Code's built-in indentation-based folding
+        // once *any* provider is registered — so a divider-less class must
+        // still get a class-body range here, or its fold arrows regress to
+        // nothing. `Ok(None)` is reserved for a file with no foldable
+        // content at all (see `folding_range_is_none_for_a_trivial_file`
+        // below), not merely "no dividers".
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
         let path = Utf8PathBuf::from_path_buf(
-            unique_temp_dir("bt-3237-folding-range-none").with_extension("bt"),
+            unique_temp_dir("bt-3260-folding-range-no-dividers").with_extension("bt"),
         )
         .expect("utf8 path");
         let source = "Object subclass: Counter\n  foo => 1\n  bar => 2";
@@ -8426,9 +8448,37 @@ Object subclass: Counter
             partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
         };
         let response = backend.folding_range(params).await.expect("rpc ok");
+        let ranges = response.expect("a divider-less class still folds by class body");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start_line, 0);
+        assert_eq!(ranges[0].end_line, 2);
+    }
+
+    #[tokio::test]
+    async fn folding_range_is_none_for_a_trivial_single_line_file() {
+        // A file with nothing multi-line to fold (no dividers, no class/
+        // method body spanning more than one line) still returns `Ok(None)`
+        // — the "this provider has nothing to say" signal `Backend::
+        // folding_range`'s doc comment calls out, distinct from an empty
+        // `Ok(Some(vec![]))`.
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-3260-folding-range-trivial").with_extension("bt"),
+        )
+        .expect("utf8 path");
+        let source = "Object subclass: Empty\n";
+        let uri = open_test_file(backend, &path, source);
+
+        let params = FoldingRangeParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response = backend.folding_range(params).await.expect("rpc ok");
         assert!(
             response.is_none(),
-            "a class with no dividers has no folding ranges"
+            "a single-line class has no foldable content"
         );
     }
 

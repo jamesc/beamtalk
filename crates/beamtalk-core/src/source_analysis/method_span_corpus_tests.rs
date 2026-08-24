@@ -629,7 +629,11 @@ fn corpus_receiver_span_walk_matches_syntactic_send_walk() {
             total_methods += 1;
 
             // The exact same source channel `build_method_xref_entry` feeds
-            // `find_all_sends_in_source` (via `extract_method_source`).
+            // `find_all_sends_in_source` (a direct `unparse_method(method)` call,
+            // deliberately bypassing `extract_method_source`'s BT-3249
+            // inferred-return-type stripping — xref/`referencesTo:` still needs to
+            // see writeback-inferred type references, only the human-facing
+            // browsable source should hide them).
             let bare_source = unparse_method(method);
             let syntactic_hits = find_all_sends_in_source(&bare_source);
             let span_hits = collect_receiver_spans(method);
