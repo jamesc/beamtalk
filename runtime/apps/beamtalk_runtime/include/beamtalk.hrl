@@ -138,6 +138,27 @@
 %% that Rust test fails.
 -define(BT_CLASS_VARS_SHADOW_KEY_ATOM, '$bt_class_vars_shadow').
 
+%% @doc BT-3243 (supervisor-restart follow-up): process-dictionary key marking
+%% "this process is currently executing a `withClassMethod:` child's factory
+%% method on behalf of `beamtalk_supervisor:start_child_via_class_method/4`,
+%% running directly in the real OTP supervisor process (no process boundary
+%% in between — see that function's `put/2` of this key)".
+%%
+%% `beamtalk_actor:safe_spawn/2` and
+%% `beamtalk_class_instantiation:do_class_self_named_spawn/6` check this key
+%% to decide whether a `self spawn`/`self spawnWith:`/`self spawnAs:`/
+%% `self spawnWith:as:` inside the class method must stay LINKED (this key
+%% present — the link is the supervisor's restart mechanism) or must be
+%% unlinked (key absent — the more common case of a class method running
+%% inside the class's own gen_server, or a plain unsupervised spawn, where a
+%% link would incorrectly tie the new actor's lifetime to the caller; see
+%% BT-3243). Deliberately a *dedicated* key, not `beamtalk_class_name` /
+%% `beamtalk_class_module` (also set by `start_child_via_class_method/4`,
+%% but *also* set by every class gen_server's own `init/1` via
+%% `beamtalk_object_class.erl` — so their presence alone cannot distinguish
+%% "inside a real supervisor" from "inside a class's own gen_server").
+-define(BT_SUPERVISOR_SPAWN_CONTEXT_KEY, '$bt_supervisor_spawn_context').
+
 %% @doc BT-3022/BT-3199: is `T` an in-flight `^` non-local return signal?
 %%
 %% Codegen throws the state-carrying 4-tuple `{'$bt_nlr', Token, Value,

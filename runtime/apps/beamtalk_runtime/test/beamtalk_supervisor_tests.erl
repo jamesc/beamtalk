@@ -25,6 +25,10 @@ Tests cover:
 - start_child_via_class_method/4: valid return, invalid return, class_var_result
   unwrap, process dictionary cleanup, child linking, supervisor restart,
   supervisor tuple return (BT-1875, BT-1960)
+- start_child_via_class_method/4 supervisor restart through the REAL compiled
+  `self spawn`/`self spawnWith:` and `self spawnAs:`/`self spawnWith:as:`
+  call chains (not a gen_server:start_link stand-in) — BT-3243 supervisor-
+  restart follow-up
 - ensure_root_table idempotent creation (BT-1960)
 - startLink/1 success, already_started, and error paths (BT-1980)
 - terminateChild/2 class path + terminateChild:class:/:child: aliases (BT-1980)
@@ -64,6 +68,17 @@ Tests cover:
     class_returnWrapped/2,
     class_returnSupervisor/2,
     start_link_fake_child/0
+]).
+
+%% BT-3243 supervisor-restart follow-up: fake class methods that route through
+%% the REAL compiled `self spawn`/`self spawnWith:`/`self spawnAs:`/
+%% `self spawnWith:as:` runtime entry points (beamtalk_class_instantiation:
+%% class_self_spawn/3, class_self_spawn_as/4) instead of a `gen_server:start_link`
+%% stand-in — see start_child_via_class_method_real_self_spawn_supervisor_restart_test/0
+%% and start_child_via_class_method_real_self_spawn_as_supervisor_restart_test/0.
+-export([
+    'class_createViaSpawn:value:'/4,
+    'class_createNamedViaSpawn:value:'/4
 ]).
 
 %% BT-3106: Fake class method that self-sends `new`, mirroring the codegen
@@ -859,6 +874,33 @@ class_returnSupervisor(_ClassSelf, _ClassVars) ->
     {ok, Pid} = start_link_fake_child(),
     {beamtalk_supervisor, 'FakeSupervisorChild', ?MODULE, Pid}.
 
+%% BT-3243 supervisor-restart follow-up: fake class method that calls the REAL
+%% compiled `self spawn`/`self spawnWith:` entry point
+%% (beamtalk_class_instantiation:class_self_spawn/3 — exactly what codegen
+%% emits for those forms inside a class method body), targeting
+%% `test_class_actor` — a generated-actor-shaped fixture whose own `spawn/0,1`
+%% delegates to `beamtalk_actor:safe_spawn/2`, the function this PR's fix
+%% touches. Unlike `'class_create:value:'/4` above (a `gen_server:start_link`
+%% stand-in), this exercises the actual production call chain end to end.
+'class_createViaSpawn:value:'(_ClassSelf, _ClassVars, _Name, _Value) ->
+    beamtalk_class_instantiation:class_self_spawn('BT3243RealSpawnChild', test_class_actor, []).
+
+%% BT-3243 supervisor-restart follow-up: same idea, but for the named-spawn
+%% path — the REAL `self spawnAs:` entry point
+%% (beamtalk_class_instantiation:class_self_spawn_as/4). `class_self_spawn_as/4`
+%% returns a Result tagged map (matching the `Result(Self, Error)` return
+%% type real `startAs:`-style factories declare — see
+%% stdlib/test/fixtures/named_factory_actor.bt), so — exactly like a real
+%% compiled factory calling `.unwrap` on it before returning — this unwraps
+%% the ok value to hand `start_child_via_class_method/4` the bare actor
+%% object it expects.
+'class_createNamedViaSpawn:value:'(_ClassSelf, _ClassVars, Name, _Value) ->
+    #{'isOk' := true, 'okValue' := Obj} =
+        beamtalk_class_instantiation:class_self_spawn_as(
+            'BT3243RealNamedSpawnChild', test_class_actor, false, Name
+        ),
+    Obj.
+
 %% BT-3106: Fake class method: self-sends `new`, exactly as codegen's
 %% `try_instantiation_intrinsic` lowers `self new` inside a class method body —
 %% `beamtalk_class_instantiation:class_self_new(ClassName, Module, Args)` with
@@ -1053,6 +1095,121 @@ start_child_via_class_method_supervisor_restart_test() ->
         end
     after
         cleanup_fake_class('BT1875Restart', FakeClassPid)
+    end.
+
+start_child_via_class_method_real_self_spawn_supervisor_restart_test() ->
+    %% BT-3243 supervisor-restart follow-up: the review-bot-flagged gap.
+    %% start_child_via_class_method_supervisor_restart_test/0 above only
+    %% proves restart works when the fake class method calls
+    %% gen_server:start_link directly — a stand-in, not the real `self
+    %% spawn`/`self spawnWith:` path. This test instead routes through the
+    %% ACTUAL compiled runtime call chain: 'class_createViaSpawn:value:'/4 →
+    %% beamtalk_class_instantiation:class_self_spawn/3 →
+    %% beamtalk_class_instantiation:handle_spawn/4 →
+    %% test_class_actor:spawn/0 → beamtalk_actor:safe_spawn/2 — the exact
+    %% function this PR's fix touches. Before the
+    %% ?BT_SUPERVISOR_SPAWN_CONTEXT_KEY fix, safe_spawn/2 always spawned
+    %% unlinked, so the supervisor below would never observe the killed
+    %% child's exit and this test would fail (ChildPid2 =:= ChildPid1,
+    %% or the child simply never restarts).
+    FakeClassPid = setup_fake_class('BT3243RealSpawnRestart'),
+    try
+        ChildSpec = #{
+            id => 'BT3243RealSpawnRestart',
+            start =>
+                {beamtalk_supervisor, start_child_via_class_method, [
+                    'BT3243RealSpawnRestart', ?MODULE, 'class_createViaSpawn:value:', [test, 1]
+                ]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
+        },
+        SupFlags = #{strategy => one_for_one, intensity => 5, period => 10},
+        {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+        try
+            [{_, ChildPid1, _, _}] = supervisor:which_children(SupPid),
+            ?assert(is_pid(ChildPid1)),
+            ?assert(is_process_alive(ChildPid1)),
+
+            Ref = monitor(process, ChildPid1),
+            exit(ChildPid1, kill),
+            receive
+                {'DOWN', Ref, process, ChildPid1, killed} -> ok
+            after 2000 ->
+                error(child_did_not_die)
+            end,
+
+            timer:sleep(100),
+
+            [{_, ChildPid2, _, _}] = supervisor:which_children(SupPid),
+            ?assert(is_pid(ChildPid2)),
+            ?assert(is_process_alive(ChildPid2)),
+            ?assertNotEqual(ChildPid1, ChildPid2)
+        after
+            gen_server:stop(SupPid)
+        end
+    after
+        cleanup_fake_class('BT3243RealSpawnRestart', FakeClassPid)
+    end.
+
+start_child_via_class_method_real_self_spawn_as_supervisor_restart_test() ->
+    %% BT-3243 supervisor-restart follow-up: the review's own suggested test
+    %% only covered `self spawn`/`self spawnWith:` (above); this covers the
+    %% named-spawn sibling path the review also called out —
+    %% `self spawnAs:`/`self spawnWith:as:` inside a `withClassMethod:`
+    %% factory. Routes through the ACTUAL compiled call chain:
+    %% 'class_createNamedViaSpawn:value:'/4 →
+    %% beamtalk_class_instantiation:class_self_spawn_as/4 →
+    %% do_class_self_named_spawn/6 → beamtalk_actor:'spawnAs'/3
+    %% (safe_spawn_named). Before the fix, do_class_self_named_spawn/6
+    %% unconditionally unlinked regardless of caller context, so this
+    %% supervisor would never see the killed child's exit and the test
+    %% would fail.
+    FakeClassPid = setup_fake_class('BT3243RealNamedSpawnRestart'),
+    try
+        ChildSpec = #{
+            id => 'BT3243RealNamedSpawnRestart',
+            start =>
+                {beamtalk_supervisor, start_child_via_class_method, [
+                    'BT3243RealNamedSpawnRestart',
+                    ?MODULE,
+                    'class_createNamedViaSpawn:value:',
+                    [
+                        bt3243_real_named_spawn_restart_child, 1
+                    ]
+                ]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
+        },
+        SupFlags = #{strategy => one_for_one, intensity => 5, period => 10},
+        {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+        try
+            [{_, ChildPid1, _, _}] = supervisor:which_children(SupPid),
+            ?assert(is_pid(ChildPid1)),
+            ?assert(is_process_alive(ChildPid1)),
+
+            Ref = monitor(process, ChildPid1),
+            exit(ChildPid1, kill),
+            receive
+                {'DOWN', Ref, process, ChildPid1, killed} -> ok
+            after 2000 ->
+                error(child_did_not_die)
+            end,
+
+            timer:sleep(100),
+
+            [{_, ChildPid2, _, _}] = supervisor:which_children(SupPid),
+            ?assert(is_pid(ChildPid2)),
+            ?assert(is_process_alive(ChildPid2)),
+            ?assertNotEqual(ChildPid1, ChildPid2)
+        after
+            gen_server:stop(SupPid)
+        end
+    after
+        cleanup_fake_class('BT3243RealNamedSpawnRestart', FakeClassPid)
     end.
 
 start_child_via_class_method_returns_supervisor_tuple_test() ->

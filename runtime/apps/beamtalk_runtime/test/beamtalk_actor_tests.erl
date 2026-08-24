@@ -1920,6 +1920,62 @@ safe_spawn_success_test() ->
     ?assert(is_process_alive(Pid)),
     gen_server:stop(Pid).
 
+safe_spawn_does_not_link_caller_test() ->
+    %% BT-3243: safe_spawn/2 must not link the spawned actor to its caller —
+    %% gen_server:start/3, not gen_server:start_link/3. A killed actor must
+    %% never be able to take its spawner down via a process link.
+    {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
+    {links, CallerLinks} = process_info(self(), links),
+    {links, ActorLinks} = process_info(Pid, links),
+    ?assertNot(lists:member(Pid, CallerLinks)),
+    ?assertNot(lists:member(self(), ActorLinks)),
+    gen_server:stop(Pid).
+
+safe_spawn_named_still_links_caller_test() ->
+    %% BT-3243: unlike safe_spawn/2 (unnamed), safe_spawn_named/3
+    %% (spawnAs:/spawnWith:as:) deliberately STAYS linked — it doubles as
+    %% the real OTP supervisor child MFA for named children
+    %% (beamtalk_supervisor:spec_to_otp/1, ADR 0079/BT-1990), where the
+    %% link is the restart mechanism. Its own self-spawnAs: risk (a class
+    %% method linking the actor to the class gen_server it runs in) is
+    %% fixed by unlinking at that call site instead — see
+    %% beamtalk_class_instantiation_tests:test_class_self_spawn_as_success/0.
+    Name = bt_3243_named_actor_test,
+    unregister_if_alive(Name),
+    {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, #{init_count => 0}),
+    {links, CallerLinks} = process_info(self(), links),
+    ?assert(lists:member(Pid, CallerLinks)),
+    gen_server:stop(Pid).
+
+safe_spawn_links_caller_when_supervisor_spawn_context_set_test() ->
+    %% BT-3243 supervisor-restart follow-up: when
+    %% beamtalk_supervisor:start_child_via_class_method/4 is on the call
+    %% stack (a `SupervisionSpec withClassMethod:` child's factory calling
+    %% plain `self spawn`/`self spawnWith:`), it marks the process
+    %% dictionary with ?BT_SUPERVISOR_SPAWN_CONTEXT_KEY so safe_spawn/2
+    %% knows this caller really is the OTP supervisor process — unlike the
+    %% common case tested by safe_spawn_does_not_link_caller_test/0 above,
+    %% the link here must survive so the supervisor can detect the child's
+    %% exit and restart it.
+    put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
+    try
+        {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
+        {links, CallerLinks} = process_info(self(), links),
+        {links, ActorLinks} = process_info(Pid, links),
+        ?assert(lists:member(Pid, CallerLinks)),
+        ?assert(lists:member(self(), ActorLinks)),
+        unlink(Pid),
+        gen_server:stop(Pid)
+    after
+        erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
+    end.
+
+unregister_if_alive(Name) ->
+    case erlang:whereis(Name) of
+        undefined -> ok;
+        Pid when is_pid(Pid) -> catch gen_server:stop(Pid)
+    end.
+
 await_initialize_preserves_full_stop_reason_test() ->
     %% When handle_continue returns {stop, {error, function_clause}, State},
     %% await_initialize must return {error, {error, function_clause}} — not

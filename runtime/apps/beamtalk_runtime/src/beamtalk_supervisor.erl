@@ -791,6 +791,24 @@ identity from the process dictionary (e.g. `handle_class_self_call/1`'s
 deadlock-diagnostic hint) when the class method runs correctly in the
 supervisor process instead of the class's own gen_server.
 
+BT-3243 (supervisor-restart follow-up): `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` is
+also set here (and only here). Unlike `beamtalk_class_name`/
+`beamtalk_class_module` — which `beamtalk_object_class`'s `init/1` *also*
+sets, in the class's own gen_server process — this key is exclusive to this
+function, so `beamtalk_actor:safe_spawn/2` and
+`beamtalk_class_instantiation:do_class_self_named_spawn/6` can check it to
+tell "running a supervised child's factory in the real supervisor process"
+(stay linked — that link is the restart mechanism) apart from "running a
+class method inside the class's own gen_server, or a plain unsupervised
+spawn" (unlink — the original BT-3243 fix). This is a plain process
+dictionary read with no process boundary crossed between here and
+`safe_spawn/2`: `call_class_method_direct` below reaches the class method via
+`erlang:apply/3`, and the compiled `self spawn`/`self spawnWith:` body
+reaches `safe_spawn/2` via further direct calls
+(`beamtalk_class_instantiation:handle_spawn/4` → `erlang:apply(Module,
+spawn, Args)` → the generated `spawn/1` wrapper) — all synchronous, same
+process, so the key set here is still visible when `safe_spawn/2` checks it.
+
 BT-3106: `beamtalk_class_is_abstract` is deliberately **not** seeded here.
 `self spawnWith:`/`self spawnAs:`/`self spawnWith:as:` in a compiled class
 method resolve `is_abstract` by class name via
@@ -818,6 +836,14 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     %% excluded — see the doc comment above (BT-3106).
     put(beamtalk_class_name, ClassName),
     put(beamtalk_class_module, Module),
+    %% BT-3243 (supervisor-restart follow-up): mark this process as running a
+    %% withClassMethod: child's factory directly in the real OTP supervisor
+    %% process, so that any `self spawn`/`self spawnWith:`/`self spawnAs:`/
+    %% `self spawnWith:as:` the factory calls (beamtalk_actor:safe_spawn/2,
+    %% beamtalk_class_instantiation:do_class_self_named_spawn/6) stays linked
+    %% to us instead of unlinking — the link is what lets us, the supervisor,
+    %% detect the child's exit and restart it. See ?BT_SUPERVISOR_SPAWN_CONTEXT_KEY.
+    put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
     try
         ClassSelf = make_init_class_self(ClassName, Module),
         ClassVars = #{},
@@ -851,7 +877,8 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
         end
     after
         erase(beamtalk_class_name),
-        erase(beamtalk_class_module)
+        erase(beamtalk_class_module),
+        erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
     end.
 
 -doc """

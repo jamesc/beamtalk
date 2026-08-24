@@ -89,11 +89,43 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 
 | Path | Entry | Context | Initialize? |
 |------|-------|---------|-------------|
-| Module:spawn/0,1 | gen_server:start_link → init/1 | Batch/tests | Yes |
+| Module:spawn/0,1 | gen_server:start → init/1 (unlinked, BT-3243) | Batch/tests | Yes |
 | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
 | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
-| Supervisor child | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
+| self spawn/spawnWith: | safe_spawn/2, unlinked (or linked if inside a `withClassMethod:` supervisor factory — BT-3243 follow-up) | Class method | Yes |
+| self spawnAs:/spawnWith:as: | safe_spawn_named/3, unlinked after (or stays linked, same exception) (BT-3243) | Class method | Yes |
+| withName: supervisor child | safe_spawn_named/3 → gen_server:start_link → init/1 | Supervised | Yes |
+| Supervisor child (unnamed, plain spawn/spawnWith:) | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
+| withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/3, linked | Supervised | Yes |
 | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
+
+BT-3243: unnamed `Module:spawn/0,1` (via `beamtalk_actor:safe_spawn/2`)
+spawns unlinked in the common case — the caller (which can be a class
+gen_server for dynamic dispatch, or a class method body for `self spawn`)
+is never linked to the actor it creates, so killing the actor cannot take
+the caller down with it. `safe_spawn_named/3` (`spawnAs:`/`spawnWith:as:`)
+stays linked, because it doubles as the real OTP supervisor child MFA for
+`SupervisionSpec withName:` children (ADR 0079/BT-1990) — that link is the
+restart mechanism, not a bug. Its own `self`-send risk (a class method's
+`self spawnAs:` running inside the class gen_server) is fixed by unlinking
+right after the spawn succeeds — see
+`beamtalk_class_instantiation:do_class_self_named_spawn/6`. A plain
+(non-`withClassMethod:`) unnamed `Supervisor child` — real OTP supervision
+via `beamtalk_supervisor:spec_to_otp/1` calling `Module:start_link/1`
+directly — links to the supervisor without ever going through
+`safe_spawn/2`, so it was never part of this bug.
+
+BT-3243 supervisor-restart follow-up: `SupervisionSpec withClassMethod:`
+children (BT-1862) are the exception — their factory method runs directly
+inside the real supervisor process
+(`beamtalk_supervisor:start_child_via_class_method/4`), so a plain
+`self spawn`/`self spawnWith:`/`self spawnAs:`/`self spawnWith:as:` call
+inside that factory *does* need the link, or OTP restart silently breaks
+(the supervisor never sees the child exit). `start_child_via_class_method/4`
+marks that context in the process dictionary
+(`?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`) so `safe_spawn/2` and
+`do_class_self_named_spawn/6` can tell it apart from the ordinary
+class-gen-server case and keep the link instead of severing it.
 
 Key invariant: `initialize` dispatch lives in generated `init/1`, not
 in `spawn/0,1`. This ensures supervised children also run initialize.
@@ -357,44 +389,116 @@ await_initialize(Pid) ->
     end.
 
 -doc """
-BT-1541: Spawn an actor with trap_exit + initialize synchronization.
+BT-1541 / BT-3243: Spawn an actor, with initialize synchronization.
 
 Handles the full spawn sequence:
-1. Trap exits so a failed start_link or handle_continue doesn't kill caller
-2. Call gen_server:start_link
-3. If start_link succeeds, wait for handle_continue (initialize) to complete
-4. Restore trap_exit and return {ok, Pid} or {error, Reason}
+1. Choose linked vs unlinked start (see BT-3243 rationale below)
+2. If start succeeds, wait for handle_continue (initialize) to complete
+3. Return {ok, Pid} or {error, Reason}
 
-This consolidates the trap_exit/await_initialize logic so generated spawn
+BT-3243: Deliberately uses `gen_server:start/3` (unlinked), not
+`gen_server:start_link/3`, in the common case. `spawn`/`spawnWith:` can run
+from inside a class gen_server's `{spawn, _}` handler (dynamic dispatch,
+`beamtalk_class_instantiation:handle_spawn/4`) or a class method body
+executing in the class's own process (`self spawn` /
+`class_self_spawn/3,4`) — either way, this function's caller is whatever
+process is evaluating the spawn expression, which linking would tie the
+new actor's lifetime to. A link there meant `exit(ActorPid, kill)` — used
+by REPL actor cleanup and `classRemoveFromSystemByName`'s actor teardown —
+took the caller down with it (e.g. the class gen_server, silently losing
+class vars and hot-patched methods). Lifecycle tracking that needs to know
+when an actor dies (the REPL actor registry, `onExit:`, etc.) already uses
+`erlang:monitor/2`, never the link, so dropping the link changes nothing
+for those consumers.
+
+BT-3243 supervisor-restart follow-up: there IS a competing linked use case
+after all — `SupervisionSpec withClassMethod:` children (BT-1862). A
+`withClassMethod:` factory's body runs directly inside the real OTP
+supervisor process via `beamtalk_supervisor:start_child_via_class_method/4`
+→ `call_class_method_direct` → `erlang:apply/3` (no process boundary), so if
+the factory calls plain `self spawn`/`self spawnWith:`, this function's
+caller really is the supervisor — unlinking there would silently defeat OTP
+restart. `start_child_via_class_method/4` marks that context by setting
+`?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` in the process dictionary before invoking
+the factory; since every hop in between is a plain synchronous call in the
+same process (no `spawn`/`erlang:apply` to a different process, no message
+send-and-receive), the key is still visible here. When it is set, this
+delegates to `safe_spawn_linked/2` instead, staying linked exactly like
+`safe_spawn_named/3` already does for the named-child case.
+
+This consolidates the await_initialize logic so generated spawn
 functions stay simple.
 """.
 -spec safe_spawn(module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn(Module, InitArgs) ->
-    safe_spawn_internal(undefined, Module, InitArgs).
+    case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
+        true ->
+            safe_spawn_linked(Module, InitArgs);
+        _ ->
+            case gen_server:start(Module, InitArgs, []) of
+                {ok, Pid} -> await_initialize_or_kill_unlinked(Pid);
+                {error, Reason} -> {error, Reason};
+                ignore -> {error, ignore}
+            end
+    end.
+
+-doc """
+BT-3243 supervisor-restart follow-up: spawn an actor **linked**, with
+trap_exit + initialize synchronization, for the one `safe_spawn/2` case that
+needs the link — a `withClassMethod:` supervisor child's factory calling
+plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc). Shares the
+trap_exit dance with `safe_spawn_named/3` via `start_link_and_await/1`.
+""".
+-spec safe_spawn_linked(module(), map()) -> {ok, pid()} | {error, term()}.
+safe_spawn_linked(Module, InitArgs) ->
+    start_link_and_await(fun() -> gen_server:start_link(Module, InitArgs, []) end).
 
 -doc """
 BT-1987: Spawn a named actor with trap_exit + initialize synchronization.
 
-Same contract as `safe_spawn/2` but registers the actor under `Name`
-via `gen_server:start_link({local, Name}, ...)`. Reuses the same
-initialize-synchronization machinery so callers see `{ok, Pid}` only
-after `handle_continue(initialize, _)` has completed.
+Handles the full spawn sequence:
+1. Trap exits so a failed start_link or handle_continue doesn't kill caller
+2. Call gen_server:start_link({local, Name}, ...)
+3. If start_link succeeds, wait for handle_continue (initialize) to complete
+4. Restore trap_exit and return {ok, Pid} or {error, Reason}
+
+BT-3243: Unlike `safe_spawn/2` (unnamed) in its common case, this stays
+**linked** (`gen_server:start_link/4`, with the original trap_exit dance) —
+it is the shared implementation behind both `spawnAs:`/`spawnWith:as:` *and*
+the real OTP supervisor child MFA that `beamtalk_supervisor:spec_to_otp/1`
+builds for `SupervisionSpec withName:` children (ADR 0079/BT-1990:
+`{beamtalk_actor, spawnAs, [Name, Module]}` / `[Name, Module, InitArgs]`
+literally names this function as the start callback). That link is not the
+BT-3243 bug — it is exactly the OTP contract a real supervisor relies on to
+detect the child's exit and restart it; removing it would silently break
+supervised named-actor restart (see `beamtalk_supervisor_tests:supervisor_restart_re_registers_name_test/0`).
+
+The BT-3243 risk this shares — a class method's `self spawnAs:` /
+`self spawnWith:as:` running inside the class gen_server and linking the
+new actor to it — is fixed at that specific call site instead: see
+`beamtalk_class_instantiation:do_class_self_named_spawn/6`, which unlinks
+immediately after a successful spawn *unless* it detects the
+`withClassMethod:`-supervisor context via
+`?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`, in which case it stays linked for the
+same reason `safe_spawn_linked/2` above does.
 """.
 -spec safe_spawn_named(atom(), module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn_named(Name, Module, InitArgs) when is_atom(Name) ->
-    safe_spawn_internal({local, Name}, Module, InitArgs).
+    start_link_and_await(fun() -> gen_server:start_link({local, Name}, Module, InitArgs, []) end).
 
--spec safe_spawn_internal(undefined | {local, atom()}, module(), term()) ->
+-doc """
+Shared linked-start + trap_exit + await_initialize dance for
+`safe_spawn_named/3` and `safe_spawn_linked/2`. `StartFun` performs the
+actual `gen_server:start_link/3,4` call (parametrized so the two callers can
+each pass their own registration shape) and is invoked exactly once, with
+`trap_exit` already set, so a crash during `initialize` delivers an `'EXIT'`
+message here instead of taking this process down.
+""".
+-spec start_link_and_await(fun(() -> {ok, pid()} | {error, term()} | ignore)) ->
     {ok, pid()} | {error, term()}.
-safe_spawn_internal(ServerName, Module, InitArgs) ->
+start_link_and_await(StartFun) ->
     OldTrap = erlang:process_flag(trap_exit, true),
-    Result =
-        case ServerName of
-            undefined ->
-                gen_server:start_link(Module, InitArgs, []);
-            {local, _} = SN ->
-                gen_server:start_link(SN, Module, InitArgs, [])
-        end,
+    Result = StartFun(),
     case Result of
         {ok, Pid} ->
             case await_initialize(Pid) of
@@ -419,6 +523,26 @@ safe_spawn_internal(ServerName, Module, InitArgs) ->
         ignore ->
             erlang:process_flag(trap_exit, OldTrap),
             {error, ignore}
+    end.
+
+-doc """
+Shared await_initialize + force-kill-on-timeout tail for the unlinked
+`safe_spawn/2` path (BT-3243). No link exists to fall back on for an
+'EXIT' message on the force-kill path, so this monitors explicitly to
+deterministically observe termination before returning.
+""".
+-spec await_initialize_or_kill_unlinked(pid()) -> {ok, pid()} | {error, term()}.
+await_initialize_or_kill_unlinked(Pid) ->
+    case await_initialize(Pid) of
+        ok ->
+            {ok, Pid};
+        {error, Reason} ->
+            MonRef = erlang:monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', MonRef, process, Pid, _} -> ok
+            end,
+            {error, Reason}
     end.
 
 %%% Message Send Helpers
