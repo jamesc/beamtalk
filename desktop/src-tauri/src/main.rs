@@ -115,6 +115,46 @@ fn main() {
             tracing::info!(launcher = %launcher.display(), "resolved bt_attach launcher path");
             app.manage(AppState::new(launcher));
             app.manage(Mutex::new(logging_guard));
+
+            // BT-3252: the picker (`tauri.conf.json`'s static `"picker"`
+            // window) is the app's only always-present window and has no
+            // tray icon or other affordance to reopen it — unlike each
+            // per-workspace window (`commands::attach_and_open_window`'s own
+            // `on_window_event`), closing it (traffic-light button, or the
+            // app-wide "Close Window" menu item / ⇧⌘W now that it targets
+            // whichever window has OS focus) previously just destroyed that
+            // window with no app-level follow-up, leaving the app running
+            // invisibly whenever a workspace window was still attached.
+            // Closing the picker is therefore treated as equivalent to
+            // quitting the whole app — the simplest, most predictable
+            // behavior, and consistent with what closing what looks like the
+            // app's main window intuitively does. Reuses `commands::quit`'s
+            // exact detach-all-then-exit path (`quit_app`) rather than
+            // duplicating it, the same way this file's own
+            // `RunEvent::ExitRequested` handler below does for an OS-level
+            // quit.
+            if let Some(picker) = app.get_webview_window("picker") {
+                let app_handle_for_close = app.handle().clone();
+                picker.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        let state = app_handle_for_close.state::<AppState>();
+                        commands::quit_app(&app_handle_for_close, &state);
+                    }
+                });
+            } else {
+                // Should be unreachable — `tauri.conf.json` declares
+                // `"picker"` as a static window Tauri creates before
+                // `.setup()` runs — but logged rather than assumed, since a
+                // future config change removing/renaming it would otherwise
+                // silently regress back to this issue's exact bug with no
+                // signal at all.
+                tracing::warn!(
+                    "picker window not found during setup; its CloseRequested handler was not \
+                     registered (BT-3252 regression: closing it would leave the app running \
+                     invisibly)"
+                );
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
