@@ -5,6 +5,13 @@
 // overloads the arithmetic operators `+ - *` (so `aMoney + bMoney` dispatches
 // to `Money>>+`) and the comparison operators `< > <= >=` (so `aMoney < bMoney`
 // dispatches to `Money>><` rather than silently comparing by Erlang term-order).
+//
+// BT-3264 (ADR 0116): also implements the `plusFromNumber:`/`timesFromNumber:`
+// reflected hooks so `5 + aMoney`/`5 * aMoney` (number-on-the-left) dispatch
+// too, plus `divFromNumber:` implemented purely to reject with intent — `5 /
+// aMoney` has no sensible meaning, so rather than leaving the hook unimplemented
+// (which would DNU on the synthesized `divFromNumber:` selector) it raises a
+// deliberate `self error:` naming the actual problem.
 
 Value subclass: Money
   field: cents :: Integer = 0
@@ -20,6 +27,23 @@ Value subclass: Money
 
   /// Scale a money amount by an integer factor.
   * factor :: Integer -> Money => (Money new) withCents: self.cents * factor
+
+  /// `5 + aMoney` (number-on-the-left): broadcast-add `n` to the receiver's
+  /// cents. Receiver is the value that was on the RIGHT of `+`; `n` is the
+  /// number that was on the LEFT (ADR 0116 § Reflected method protocol).
+  plusFromNumber: n :: Number -> Money => (Money new) withCents: n + self.cents
+
+  /// `5 * aMoney` (number-on-the-left): scale by `n`, same as receiver-dispatched `*`.
+  timesFromNumber: n :: Number -> Money => (Money new) withCents: n * self.cents
+
+  /// `5 / aMoney` — "a number divided by a money amount" has no sensible
+  /// meaning, unlike `plusFromNumber:`/`timesFromNumber:` above. Implemented
+  /// anyway, to reject with intent (ADR 0116 § Reflected method protocol):
+  /// a deliberate `self error:` naming the actual problem is more useful than
+  /// leaving the hook unimplemented and letting `does_not_understand` fire on
+  /// the synthesized `divFromNumber:` selector the caller never typed.
+  divFromNumber: n :: Number -> Money =>
+    self error: "Cannot divide a number by Money — did you mean (aMoney / {n})?"
 
   /// Less than, by cents (receiver-dispatched `<`).
   < other :: Money -> Boolean => self.cents < other cents
