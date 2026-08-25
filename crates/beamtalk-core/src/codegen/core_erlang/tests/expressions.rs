@@ -513,6 +513,33 @@ fn test_number_coercion_untyped_self_field_right_operand_stays_bare() {
     );
 }
 
+#[test]
+fn test_number_coercion_untyped_self_fields_both_sides_stay_bare() {
+    // BT-3266 (ADR 0116 addendum, decision: accept the gap): this issue's
+    // own literal example, `self.total + self.extra` with both fields
+    // untyped. `receiver_is_statically_numeric` trusts an untyped
+    // `self.<field>` on either side of the operator identically, so this
+    // stays a bare `erlang:'+'` — no guard, no try/catch — exactly like the
+    // single-field-on-the-right case above. Pinned down as documented,
+    // accepted behavior, not asserted as correct.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = self_field_access("total");
+    let right = self_field_access("extra");
+    let output = generator
+        .generate_binary_op("+", &left, &[right])
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        !output.contains("try ") && !output.contains("send_number_coercion"),
+        "BT-3266: self.total + self.extra (both untyped) stays on the bare-BIF \
+         path on both operands — got: {output}"
+    );
+    assert!(
+        output.contains("call 'erlang':'+'("),
+        "expected a bare erlang:'+' call; got: {output}"
+    );
+}
+
 // BT-2710: comparison operators (`< > <= >=`) are dispatchable messages. The
 // bare-BIF fast path holds for statically-comparable receivers (numeric / char
 // / string literals, `self` in Integer/Float/Character/String, and
