@@ -117,23 +117,29 @@ catch
 end
 ```
 
-`+ - *` never raise `badarith` for two numbers — only `/` does, and only
-when the divisor is `0`. Naively catching every `badarith` and dispatching
-unconditionally would misroute `5 / 0` (divisor `0` *is* a number) to
+`+ - * /` can each raise `badarith` between two genuine numbers, not only
+when the right operand isn't a number: `/` on a zero divisor, and —
+empirically verified against the BEAM runtime, since Erlang floats have no
+IEEE infinity/NaN representation — `+ - *` on float overflow
+(`1.0e308 + 1.0e308` raises `badarith` rather than returning an infinite
+float). Naively catching every `badarith` and dispatching unconditionally
+would misroute `5 / 0` (divisor `0` *is* a number) to
 `beamtalk_message_dispatch:send(0, 'divFromNumber:', [5])`, which fails as
-`does_not_understand: 'divFromNumber:' not understood by Integer` — a
+`does_not_understand`: `Integer does not understand 'divFromNumber:'` — a
 regression of the existing, documented `badarith` → `TypeError` "bad
 arithmetic operation" classification (`beamtalk_exception_handler:wrap_raw/2`,
 ADR 0028), which correctly explains it as an arithmetic error today. The
 `is_number(Right)` check inside the catch handler distinguishes the two
-`badarith` causes: a non-numeric `Right` is a genuine coercion miss and
-dispatches to the reflected method; a numeric `Right` means the failure is
-unrelated to coercion (division by zero being the only such case among
-`+ - * /`), and `erlang:raise/3` re-raises it with its original class,
-reason, and stacktrace — identical to today's uncaught propagation — so it
-reaches the same classification layer unchanged. The `try` and the
-`is_number` check both cost nothing on the `number <op> number` happy path,
-and the `catch` only ever runs on an actual `badarith`.
+`badarith` causes generically, independent of which specific numeric failure
+triggered it: a non-numeric `Right` is a genuine coercion miss and dispatches
+to the reflected method; a numeric `Right` means the failure is a real
+numeric error unrelated to coercion (division by zero or float overflow),
+and `erlang:raise/3` re-raises it with its original class, reason, and
+stacktrace — identical to today's uncaught propagation — so it reaches the
+same classification layer unchanged regardless of which of the two numeric
+causes produced it. The `try` and the `is_number` check both cost nothing on
+the `number <op> number` happy path, and the `catch` only ever runs on an
+actual `badarith`.
 
 This is deliberately the one place BT-2709 avoided (catch-on-failure instead
 of a guard) — correct here specifically because the happy path (number +
@@ -142,16 +148,24 @@ non-numeric receiver is the *common* case a guard has to cover cheaply.
 
 ### REPL example
 
-```
-> 5 + aVector
-Vector(6, 7, 8)
-> 5 + "not a vector"
-does_not_understand: 'plusFromNumber:' not understood by String
-> aVector + 5
-Vector(6, 7, 8)
-> 5 / 0
-Error: TypeError: bad arithmetic operation
-Hint: Arithmetic requires numbers; check for a non-numeric operand or division by zero.
+Using the project's `.btscript` `// =>` assertion convention (the verified
+substring the REPL/eval error message actually contains —
+`beamtalk_error:generate_message/3` for the DNU case,
+`beamtalk_exception_handler:wrap_raw/2` for the `badarith` case; see
+`tests/repl-protocol/cases/errors.btscript`):
+
+```beamtalk
+5 + aVector
+// => Vector(6, 7, 8)
+
+5 + "not a vector"
+// => ERROR: String does not understand 'plusFromNumber:'
+
+aVector + 5
+// => Vector(6, 7, 8)
+
+5 / 0
+// => ERROR: bad arithmetic operation
 ```
 
 ### What this ADR does not do
@@ -185,7 +199,11 @@ Hint: Arithmetic requires numbers; check for a non-numeric operand or division b
   unsupported type becomes an ordinary `does_not_understand`, consistent
   with every other message send in the language, and the success case
   (`Vector` implementing the hook) "just works" without the newcomer needing
-  to know left-vs-right dispatch exists.
+  to know left-vs-right dispatch exists. The rough edge: a newcomer who
+  defines `+` on their own value type and sees `aThing + 5` work will
+  reasonably expect `5 + aThing` to work too, and has to separately learn
+  the `plusFromNumber:` name and add it — Beamtalk doesn't derive one from
+  the other.
 - **Smalltalk developer:** Recognizes the shape (`aVector + 5` and
   `5 + aVector` both dispatching to `Vector`) even though the underlying
   mechanism (`plusFromNumber:` reflected methods vs. `generality`/
@@ -195,7 +213,12 @@ Hint: Arithmetic requires numbers; check for a non-numeric operand or division b
 - **Erlang/Elixir developer:** The generated code is exactly the
   `try`/`catch` idiom they'd write by hand for "try the fast numeric op,
   fall back to a dispatch on failure" — no magic, inspectable in the
-  compiled `.core`/`.beam` output.
+  compiled `.core`/`.beam` output. The one surprise: Erlang's `badarith` is
+  overloaded — a non-numeric operand, a zero divisor, and float overflow
+  all raise the identical reason — so the generated code has to re-inspect
+  `Right` inside the handler to tell them apart (§ Dispatch mechanism
+  above); a BEAM veteran writing this by hand for the first time would
+  plausibly miss that too.
 - **Production operator:** The `try`/`catch` is scoped tightly around the
   single BIF call and re-checks `is_number(Right)` before deciding what to
   do, so an unrelated numeric failure (`5 / 0`) keeps surfacing through the
@@ -206,7 +229,15 @@ Hint: Arithmetic requires numbers; check for a non-numeric operand or division b
 - **Tooling developer:** `plusFromNumber:` is an ordinary typed method, so
   LSP completion, hover types, and static DNU checking all work on it with
   zero special-casing — the same infrastructure that already handles
-  `+`/`-`/`*`/`/` covers the reflected names.
+  `+`/`-`/`*`/`/` covers the reflected names when a caller writes
+  `x plusFromNumber: y` directly. What doesn't carry over for free: the
+  xref index (ADR 0087) is a syntactic AST walk over *literal* selectors in
+  source, and `5 + aVector` never spells `plusFromNumber:` in the user's
+  code — it's synthesized inside the `try`/`catch` at codegen time.
+  `senders_of: #plusFromNumber:` will not surface that call site, so "find
+  all callers of `Vector>>plusFromNumber:`" is incomplete for the
+  number-on-the-left case until a tool special-cases it (out of scope here,
+  but worth flagging for future `SystemNavigation`/xref work).
 
 ## Steelman Analysis
 
@@ -236,17 +267,42 @@ Hint: Arithmetic requires numbers; check for a non-numeric operand or division b
 - 🎨 **Language designer:** "Less boilerplate per type is a real
   maintainability win worth weighing against the type-checker cost."
 
+### Alternative: Static guard on the right operand's type
+- 🧑‍💻 **Newcomer:** "Predictable — the runtime always checks both sides
+  before doing anything, so there's no separate 'this crashed, but only
+  because of an unrelated float overflow' story to learn."
+- 🎩 **Smalltalk purist:** "Neutral — Smalltalk's own generality dispatch
+  is retry-based, not a proactive dual guard, so this isn't more faithful
+  to the tradition either way."
+- ⚙️ **BEAM veteran:** "A guard is the idiomatic BEAM shape — `case
+  is_number(X) of ... end` reads better to most Erlang programmers than a
+  `try`/`catch` used for control flow instead of genuine error handling."
+- 🏭 **Operator:** "No exception machinery on the arithmetic hot path at
+  all, even in the failing case — a guard-based miss is a plain branch, not
+  a raised-and-caught error, which is simpler to reason about under load."
+- 🎨 **Language designer:** "Symmetric: both operands get the same
+  treatment, rather than the left operand's fast path and the right
+  operand's catch handler being different mechanisms."
+
 ### Tension points
-- The Smalltalk-purist case for both rejected alternatives is genuinely the
-  strongest of any cohort — both are more faithful to Pharo/Squeak than the
-  chosen design. Beamtalk's departure is justified by constraint 2 (static
-  typing must stay informed), which is specific to this codebase's gradual
-  typing design (ADR 0025/0068), not a claim that generality or `perform:`
-  are bad ideas in general.
+- The Smalltalk-purist case for both the generality tower and the
+  `perform:`-based alternative is genuinely the strongest of any cohort —
+  both are more faithful to Pharo/Squeak than the chosen design. Beamtalk's
+  departure is justified by constraint 2 (static typing must stay
+  informed), which is specific to this codebase's gradual typing design
+  (ADR 0025/0068), not a claim that generality or `perform:` are bad ideas
+  in general.
 - Language designers and Smalltalk purists would pick the generality tower
   or `perform:`-retry for their elegance/faithfulness; BEAM veterans and
   operators are indifferent-to-negative on both, and side with the chosen
   design once static-typing preservation is on the table.
+- The static-guard alternative is the one place a BEAM veteran's *first*
+  instinct (a guard, not a catch) points away from the chosen design — the
+  decision to use `try`/`catch` anyway rests entirely on the "common case is
+  `total + delta`, don't tax it" cost argument (Alternatives Considered),
+  which a veteran would find persuasive once the guard's always-on cost on
+  that majority case is made concrete, but wouldn't necessarily reach for
+  first.
 
 ## Alternatives Considered
 
@@ -281,6 +337,18 @@ majority case from a zero-cost bare BIF to an always-checked one, which is
 exactly the cost Phase 1 was built to avoid. The catch-on-`badarith`
 approach only pays a cost when the fallback actually fires.
 
+### Status quo — leave `5 + aVector` unhandled
+Do nothing: keep the receiver-dispatch-only behavior from BT-2709/2710 and
+document number-on-the-left arithmetic as unsupported. Rejected: it leaves
+the value-type ergonomics the epic (BT-2708) promised half-finished —
+`aVector + 5` working but `5 + aVector` crashing with a raw `badarith` is
+an asymmetry with no principled justification a user could discover short
+of hitting the crash, and "arithmetic operators are overloadable" becomes
+a claim with an asterisk. The cost of the fix (one codegen change, opt-in
+per type) is low enough that "leave it broken" doesn't clear the bar of a
+genuine alternative, only a fallback if the chosen design had turned out to
+be infeasible.
+
 ### Extend reflection to comparison operators now
 Apply the same `<verb>FromNumber:` pattern to `< > <= >=` in this ADR,
 since they share the guard machinery. Deferred, not rejected: comparison's
@@ -295,9 +363,10 @@ follow-up rather than folding it into this arithmetic-specific design.
 ### Positive
 - `5 + aMoney`, `5 * aVector` and similar number-on-the-left expressions
   resolve to the value type's own arithmetic instead of crashing.
-- The numeric happy path (`number <op> number`) stays a bare BIF call
-  wrapped in a `try` that never actually unwinds — no guard, no regression
-  to Phase 1's zero-cost invariant, pending the benchmark called out below.
+- The numeric happy path (a `number <op> number` that doesn't divide by
+  zero or float-overflow) stays a bare BIF call wrapped in a `try` that
+  never actually unwinds — no guard, no regression to Phase 1's zero-cost
+  invariant, pending the benchmark called out below.
 - Reflected methods are ordinary typed methods: return types are known
   statically, so covariant-return inference (ADR 0068) and compile-time DNU
   checking work on them for free.
@@ -332,11 +401,35 @@ follow-up rather than folding it into this arithmetic-specific design.
   tower type — if one is ever added, it implements `plusFromNumber:` etc.
   like any other type, and any tower-specific promotion logic lives inside
   those method bodies.
+- No hot-code-reload or supervision implications: `plusFromNumber:` is an
+  ordinary method, redefined/reloaded exactly like `+` or any other method
+  under the existing live-image reload path (ADR 0105) — this ADR adds a
+  dispatch target, not a new reload code path.
+- The xref index (ADR 0087/0115) does not see the synthesized
+  `plusFromNumber:` send inside the generated `try`/`catch` — a known,
+  accepted gap for `SystemNavigation`-style tooling (§ User Impact, Tooling
+  developer), not something this ADR's codegen-only scope fixes.
 
 ## Implementation
 
 Affected components: codegen only (no parser, type-checker, or runtime
 protocol changes).
+
+### De-risking spike (do first, report before building)
+
+Mirroring BT-2709's own precedent for this exact call site:
+
+1. Hand-write the target Core Erlang for the `try`/`catch`/`is_number`/
+   re-raise shape (§ Dispatch mechanism), compile it, and confirm it passes
+   `core_lint`.
+2. Extend the BT-2709 guard-vs-bare harness
+   (`runtime/perf/bench_collect_selfhost.escript`,
+   `docs/development/benchmarks.md`) with a `try`/`catch`-vs-bare-BIF
+   measurement on the numeric happy path, and report the number — this ADR's
+   zero-cost claim is asserted, not yet measured, and should be confirmed
+   before wiring the mechanism into `generate_binary_op` rather than after.
+
+Only once both check out does the codegen wiring below proceed.
 
 - `crates/beamtalk-core/src/codegen/core_erlang/operators.rs`:
   - Wrap the always-bare arithmetic path (the `else` branch in
@@ -360,15 +453,11 @@ protocol changes).
     `timesFromNumber:`, asserting `5 + aVector` dispatches correctly.
   - A type with no reflected hook, asserting `5 + aThing` raises
     `does_not_understand` (not a raw `badarith`).
-  - `5 / 0` (and `0 - 0 / 0`-shaped variants exercising both call sites)
-    still raises the existing `TypeError`/"bad arithmetic operation"
-    classification, not a `divFromNumber:` `does_not_understand` — the
+  - `5 / 0` and `1.0e308 + 1.0e308` (a zero divisor and a float-overflow
+    add, exercising both known numeric `badarith` causes on both call
+    sites) still raise the existing `TypeError`/"bad arithmetic operation"
+    classification, not a `…FromNumber:` `does_not_understand` — the
     regression case that motivated the `is_number(Right)` re-raise check.
-- Benchmark: extend the BT-2709 guard-vs-bare harness
-  (`runtime/perf/bench_collect_selfhost.escript`,
-  `docs/development/benchmarks.md`) with a `try`/`catch`-vs-bare-BIF
-  measurement on the numeric happy path, to confirm the zero-cost claim
-  before this ADR moves to Implemented.
 
 No `Number.bt` changes — reflected methods are declared only on the types
 that opt in, not as an abstract protocol entry, since there is no receiver
