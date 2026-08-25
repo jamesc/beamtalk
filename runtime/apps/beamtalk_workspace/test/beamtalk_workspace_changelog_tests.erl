@@ -75,6 +75,7 @@ changelog_test_() ->
         %% ADR 0114 (BT-3269): rename-class / rename-method schema
         fun rename_class_json_round_trip/1,
         fun rename_method_json_round_trip/1,
+        fun rename_method_decode_drops_malformed_candidate_site/1,
         fun rename_class_entry_accessors_expose_fields/1,
         fun rename_method_entry_accessors_expose_fields/1,
         fun rename_class_does_not_shadow_pending_new_class_entry/1,
@@ -819,6 +820,35 @@ rename_method_json_round_trip(_Ctx) ->
         ?_assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(Decoded)),
         ?_assertEqual(<<"increment">>, beamtalk_workspace_changelog:entry_old_selector(Decoded)),
         ?_assertEqual(instance, beamtalk_workspace_changelog:entry_side(Decoded)),
+        ?_assertEqual(2, length(beamtalk_workspace_changelog:entry_sites(Decoded))),
+        ?_assertEqual(1, length(beamtalk_workspace_changelog:entry_candidate_sites(Decoded)))
+    ].
+
+%% A malformed `candidate_sites` element (missing `span`) must not cost the
+%% whole ChangeLog line: `entry_from_json/1` should drop just that element
+%% (logged, per review feedback on PR #3521) and decode everything else —
+%% including `sites`/rename data — intact.
+rename_method_decode_drops_malformed_candidate_site(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
+    Map = json:decode(Json),
+    Corrupted = Map#{
+        <<"candidate_sites">> => [
+            #{<<"sourceFile">> => <<"/proj/src/timer.bt">>},
+            #{
+                <<"sourceFile">> => <<"/proj/src/other.bt">>,
+                <<"span">> => #{
+                    <<"start">> => 1, <<"end">> => 2
+                }
+            }
+        ]
+    },
+    CorruptedJson = json:encode(Corrupted),
+    Decoded = beamtalk_workspace_changelog:entry_from_json(iolist_to_binary(CorruptedJson)),
+    [
+        ?_assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(Decoded)),
+        ?_assertEqual(<<"increment">>, beamtalk_workspace_changelog:entry_old_selector(Decoded)),
         ?_assertEqual(2, length(beamtalk_workspace_changelog:entry_sites(Decoded))),
         ?_assertEqual(1, length(beamtalk_workspace_changelog:entry_candidate_sites(Decoded)))
     ].

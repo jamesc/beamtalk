@@ -60,7 +60,7 @@ Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 | `candidate_sites`      | `[{sourceFile,span},...] \| null`                           | ADR 0114 (BT-3269): `"rename-method"`-only — reported, never auto-rewritten senders; no `source_ref`/`prev_source_ref` since nothing here is ever spliced |
 | `intent`               | `"durable"`\|`"ephemeral"`                                  | |
 | `flushable`            | boolean                                                      | true iff in-project source; for `"rename-class"`/`"rename-method"`, true iff every entry in `sites` (never `candidate_sites`) resolves to a flushable file |
-| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists) |
+| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null — `"extension"` is not reachable there either (ADR 0114 § ChangeLog schema) |
 | `author`               | string                                                       | session/tool id |
 | `author_kind`          | `"human"`\|`"agent"`                                        | audit metadata |
 
@@ -2112,17 +2112,38 @@ sites_from_json(List) when is_list(List) -> [site_from_json(S) || S <- List].
 candidate_site_to_json(#{source_file := SourceFile, span := Span}) ->
     #{<<"sourceFile">> => SourceFile, <<"span">> => span_to_json(Span)}.
 
--spec candidate_site_from_json(map()) -> candidate_site().
+%% Unlike `site_from_json/1`, a `candidate_site()` has no optional-field case
+%% to default (every candidate site always names a real sourceFile/span) —
+%% so a map missing either key is genuinely malformed, not a legitimate
+%% "not applicable" shape. Returns `error` for that case instead of
+%% crashing: `candidate_sites_from_json/1` drops just the malformed element
+%% (logged) rather than letting it propagate up through `entry_from_json/1`
+%% and cost `parse_log/1`'s catch the *entire* ChangeLog line — including
+%% that entry's unrelated `sites`/rename data — over one bad element.
+-spec candidate_site_from_json(map()) -> {ok, candidate_site()} | error.
 candidate_site_from_json(#{<<"sourceFile">> := SourceFile, <<"span">> := Span}) ->
-    #{source_file => SourceFile, span => span_from_json(Span)}.
+    {ok, #{source_file => SourceFile, span => span_from_json(Span)}};
+candidate_site_from_json(Malformed) ->
+    ?LOG_WARNING("Dropping malformed candidate_site (missing sourceFile/span): ~p", [Malformed]),
+    error.
 
 -spec candidate_sites_to_json([candidate_site()] | undefined) -> [map()] | null.
 candidate_sites_to_json(undefined) -> null;
 candidate_sites_to_json(Sites) -> [candidate_site_to_json(S) || S <- Sites].
 
 -spec candidate_sites_from_json([map()] | null) -> [candidate_site()] | undefined.
-candidate_sites_from_json(null) -> undefined;
-candidate_sites_from_json(List) when is_list(List) -> [candidate_site_from_json(S) || S <- List].
+candidate_sites_from_json(null) ->
+    undefined;
+candidate_sites_from_json(List) when is_list(List) ->
+    lists:filtermap(
+        fun(S) ->
+            case candidate_site_from_json(S) of
+                {ok, CandidateSite} -> {true, CandidateSite};
+                error -> false
+            end
+        end,
+        List
+    ).
 
 -spec null_or(binary() | undefined) -> binary() | null.
 null_or(undefined) -> null;
