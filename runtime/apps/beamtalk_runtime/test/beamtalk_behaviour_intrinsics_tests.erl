@@ -2735,8 +2735,7 @@ classRenameTo_collision_refused_test_() ->
                             message =
                                 <<
                                     "cannot rename BT3278RenameEUnitSource to "
-                                    "BT3278RenameEUnitExisting — "
-                                    "BT3278RenameEUnitExisting already exists"
+                                    "BT3278RenameEUnitExisting — BT3278RenameEUnitExisting already exists"/utf8
                                 >>,
                             hint = <<"remove or rename the existing class first">>
                         }

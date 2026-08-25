@@ -1067,7 +1067,7 @@ rename_collision_error(OldName, NewName) ->
             OldBin,
             <<" to ">>,
             NewBin,
-            <<" — ">>,
+            <<" — "/utf8>>,
             NewBin,
             <<" already exists">>
         ])
@@ -1098,7 +1098,7 @@ stdlib_rename_refusal_error(ClassName) ->
     beamtalk_error:with_hint(
         Error1,
         <<
-            "Stdlib classes are protected and cannot be renamed — the xref "
+            "Stdlib classes are protected and cannot be renamed; the xref "
             "index only covers in-project source, so references outside the "
             "project could never be found and rewritten."
         >>
