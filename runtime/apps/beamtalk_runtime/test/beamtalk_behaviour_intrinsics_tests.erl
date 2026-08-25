@@ -2685,3 +2685,72 @@ stub_registry_loop(ClassName, ActorPid) ->
         _ ->
             stub_registry_loop(ClassName, ActorPid)
     end.
+
+%%% ============================================================================
+%%% classRenameTo/2 (ADR 0114 Phase 2, BT-3278)
+%%% ============================================================================
+
+%% A dynamic (ClassBuilder) class is the one classification the plain-EUnit
+%% sandbox above (no live workspace/project) can drive through renameTo:'s
+%% full success path end-to-end (an ordinary project class classifies as
+%% "dependency" with no `beamtalk_workspace_meta` project_path configured,
+%% and is correctly refused — see stdlib/test/rename_to_test.bt's own doc for
+%% the same finding at the BUnit level). Confirms the registry identity
+%% actually moves: old name gone, new name resolves to a *different* pid than
+%% removeFromSystem's teardown-and-recreate would give (same live process,
+%% re-keyed in place — beamtalk_object_class:rename/2's contract).
+classRenameTo_dynamic_class_reregisters_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        {ClassObj, Pid} = register_class('BT3278RenameEUnitTarget', #{}, #{}),
+        Result = beamtalk_behaviour_intrinsics:classRenameTo(
+            ClassObj, 'BT3278RenameEUnitRenamed'
+        ),
+        [
+            ?_assertMatch(#beamtalk_object{class = 'BT3278RenameEUnitRenamed class'}, Result),
+            ?_assertEqual(Pid, erlang:element(4, Result)),
+            ?_assertEqual(
+                undefined, beamtalk_class_registry:whereis_class('BT3278RenameEUnitTarget')
+            ),
+            ?_assertEqual(Pid, beamtalk_class_registry:whereis_class('BT3278RenameEUnitRenamed')),
+            ?_assertEqual('BT3278RenameEUnitRenamed', gen_server:call(Pid, class_name))
+        ]
+    end}.
+
+%% Collision refusal (ADR 0114 § Decision): renaming to an already-loaded
+%% class name raises a structured `class_already_exists` error, matching the
+%% ADR's own worked example's message/hint text exactly (BT-3278's grounding
+%% em-dash, not an escape, to avoid the encoding mismatch a `\u{...}` escape
+%% would introduce in a plain Erlang string).
+classRenameTo_collision_refused_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        {ClassObj, _Pid} = register_class('BT3278RenameEUnitSource', #{}, #{}),
+        {_ExistingObj, _ExistingPid} = register_class('BT3278RenameEUnitExisting', #{}, #{}),
+        [
+            ?_test(
+                ?assertError(
+                    #{
+                        '$beamtalk_class' := _,
+                        error := #beamtalk_error{
+                            kind = class_already_exists,
+                            message =
+                                <<
+                                    "cannot rename BT3278RenameEUnitSource to "
+                                    "BT3278RenameEUnitExisting — "
+                                    "BT3278RenameEUnitExisting already exists"
+                                >>,
+                            hint = <<"remove or rename the existing class first">>
+                        }
+                    },
+                    beamtalk_behaviour_intrinsics:classRenameTo(
+                        ClassObj, 'BT3278RenameEUnitExisting'
+                    )
+                )
+            )
+        ]
+    end}.
+
+%% Stdlib/dependency refusal (ADR 0114 § Refusal vs flushability) is covered
+%% at the BUnit level (stdlib/test/rename_to_test.bt), which runs with the
+%% full stdlib loaded — `beamtalk_runtime`'s own EUnit suite sits below
+%% `beamtalk_stdlib` in the dependency graph and has no stdlib classes
+%% registered to exercise that branch against.
