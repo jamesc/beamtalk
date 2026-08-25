@@ -145,32 +145,52 @@ let BinLeft = <left operand> in
 let BinRight = <right operand> in
 try
     call 'erlang':'+'(BinLeft, BinRight)
+of <TryResult> -> TryResult
 catch <Type, Error, Stack> ->
     case {Type, Error} of
         <{'error', 'badarith'}> when 'true' ->
             case call 'erlang':'is_number'(BinRight) of
-                <'true'> ->
+                <'true'> when 'true' ->
                     %% BinRight IS a number — badarith wasn't a coercion
                     %% miss (e.g. `5 / 0`, or float overflow). Re-raise
                     %% unchanged so the existing badarith classification
                     %% (ADR 0028/BT-2704) still handles it.
                     primop 'raw_raise'(Type, Error, Stack)
-                <'false'> ->
+                <'false'> when 'true' ->
                     call 'beamtalk_message_dispatch':'send'(
                         BinRight, 'plusFromNumber:', [BinLeft])
+                %% is_number/1 is boolean-exhaustive — `erlc`'s own BIF
+                %% return-type inference proves this arm unreachable (it
+                %% warns "clause cannot match" if present, confirmed by the
+                %% spike below) — but `guarded_op_doc`'s existing
+                %% `case_clause_fallback` convention adds it anyway,
+                %% defensively, rather than depending on that inference
+                %% holding across OTP releases. `error({case_clause, _})`,
+                %% not `raw_raise` — this is an internal-invariant guard, not
+                %% a real exception to propagate.
+                <NoMatch> when 'true' ->
+                    call 'erlang':'error'({'case_clause', NoMatch})
             end
         %% Not badarith at all (shouldn't occur for this specific BIF call,
-        %% but the case must be exhaustive per BT-3163's
-        %% `case_clause_fallback` convention — see Implementation). Binds a
-        %% fresh throwaway variable, not `Type`/`Error` again — those are
-        %% already bound by the enclosing `catch` clause and stay in scope
-        %% for `raw_raise` below without needing to be re-destructured here,
-        %% mirroring `on_do_catch_preamble`'s own catch-all arm.
-        <_OtherPair> when 'true' ->
+        %% but the case must be exhaustive). Binds a fresh throwaway
+        %% variable, not `Type`/`Error` again — those are already bound by
+        %% the enclosing `catch` clause and stay in scope for `raw_raise`
+        %% below without needing to be re-destructured here, mirroring
+        %% `on_do_catch_preamble`'s own catch-all arm.
+        <OtherPair> when 'true' ->
             primop 'raw_raise'(Type, Error, Stack)
     end
 end
 ```
+
+**Spike-verified** (see Implementation § De-risking spike results): this
+exact shape — including the mandatory `try ... of ... catch ... end` form
+(Core Erlang, unlike Erlang source, requires the `of` clause explicitly;
+its absence is a syntax error) and the mandatory `when` guard on every
+`case` clause — was hand-compiled with `erlc` and confirmed to core_lint
+cleanly, then functionally exercised end-to-end for all three branches
+(happy-path add, non-numeric-right dispatch, and numeric-right re-raise via
+float overflow).
 
 `+ - * /` can each raise `badarith` between two genuine numbers, not only
 when the right operand isn't a number: `/` on a zero divisor, and —
@@ -196,9 +216,12 @@ two numeric causes produced it. The `catch` block itself only ever runs on
 an actual `badarith`, so its cost is paid exclusively on the
 already-failing path; the `try` wrapper's cost *on the non-failing path,
 restricted to call sites where the right operand's type is genuinely
-unknown* is the open question this ADR asserts as negligible but has not
-yet measured — see the de-risking spike in Implementation, which gates the
-codegen change on confirming that number before it ships.
+unknown* was measured by the de-risking spike (§ Implementation) and found
+comparable to the already-accepted `is_number` guard's cost on those same
+call sites — not the zero-cost claim an unqualified reading of "happy path"
+might suggest, but the correct comparison given the compile-time skip
+already removes the true zero-cost call sites from this mechanism's reach
+entirely.
 
 This is deliberately the one place BT-2709 avoided (catch-on-failure instead
 of a guard) — correct here specifically because the happy path (number +
@@ -482,13 +505,19 @@ follow-up rather than folding it into this arithmetic-specific design.
   future `deriving`/macro mechanism (BT-2714, synthesized-method deriver
   framework) is the right place to reduce this, not a reason to weaken the
   type-checker guarantee now.
-- `try`/`catch` around a BIF call has *some* nonzero runtime cost model
-  even when it never triggers (frame setup for the catch), separate from
-  the `is_number` guard's cost model BT-2709 already measured — this ADR's
-  zero-cost claim needs its own benchmark confirmation before Implemented
-  status (see Implementation). The compile-time skip narrows *how much*
-  code pays this cost (only call sites with a genuinely-unknown-type right
-  operand), but doesn't eliminate the open question for that residual.
+- `try`/`catch` around a BIF call has *some* nonzero runtime cost even when
+  it never triggers (frame setup for the catch) — the de-risking spike
+  (§ Implementation) confirmed this cost is in the same range as the
+  already-accepted `is_number` guard's, not dramatically worse, and that
+  the compile-time skip means it's paid only on the same call sites that
+  already pay a guard-shaped cost today, never on the true bare-BIF fast
+  path. The one thing the spike couldn't produce is a portable absolute
+  ns/add number — the project's real benchmark numbers
+  (`docs/development/benchmarks.md`) need re-measuring on whatever
+  hardware they're normally recorded on as part of implementation, since
+  this spike's own reproduction of the existing, already-shipped
+  `bench_guard/0` came out well outside that doc's recorded range on this
+  sandbox (matching its own "run-dependent" caveat).
 - Asymmetric operators (`5 * aMatrix` vs. `aMatrix * 5` meaning different
   things mathematically) place the burden on each type's author to document
   the semantic difference between its `*` and its `timesFromNumber:` —
@@ -563,23 +592,74 @@ warning is left as-is, including its now-known false positive on newly-valid
 number-on-the-left code (§ Consequences, Negative), rather than folded into
 this ADR's scope.
 
-### De-risking spike (do first, report before building)
+### De-risking spike (done — results below)
 
-Mirroring BT-2709's own precedent for this exact call site:
+Mirroring BT-2709's own precedent for this exact call site, run before
+writing this ADR's Implementation section into real codegen:
 
-1. Hand-write the target Core Erlang for the `try`/`catch`/`is_number`/
-   `primop 'raw_raise'` shape (§ Dispatch mechanism), compile it, and
-   confirm it passes `core_lint` — including the exhaustive `case`
-   structure BT-3163's `case_clause_fallback` convention exists to protect
-   against (see the code comment in § Dispatch mechanism).
-2. Extend the BT-2709 guard-vs-bare harness
-   (`runtime/perf/bench_collect_selfhost.escript`,
-   `docs/development/benchmarks.md`) with a `try`/`catch`-vs-bare-BIF
-   measurement on the numeric happy path, and report the number — this ADR's
-   zero-cost claim is asserted, not yet measured, and should be confirmed
-   before wiring the mechanism into `generate_binary_op` rather than after.
+**1. Hand-written Core Erlang, compiled with `erlc`.** The exact shape in
+§ Dispatch mechanism was hand-written as a standalone `.core` module and
+compiled directly. Two real issues surfaced that the illustrative Erlang in
+earlier drafts of this ADR got wrong, both fixed in that section now:
 
-Only once both check out does the codegen wiring below proceed.
+- `try Expr catch ... end` **without** an `of` clause is a syntax error in
+  Core Erlang — unlike Erlang source, where `try/catch` without `of` is
+  legal sugar, Core Erlang requires the pass-through clause explicitly
+  (confirmed: `erlc` rejects the omission with `syntax error before:
+  'catch'`).
+- Every `case` clause requires an explicit `when` guard — `<'true'> -> ...`
+  without `when 'true'` is also a syntax error (confirmed the same way).
+
+With both fixed, the module compiles cleanly. `core_lint` passes; the only
+diagnostic is the *expected* one — `erlc`'s own note that the inner
+`is_number` case's defensive third arm can't match, confirmed by removing
+that arm and observing the warning disappear entirely. This is the exact
+situation `guarded_op_doc`'s doc comment already describes for the
+identical pattern (an `is_number`-driven boolean case the compiler can
+prove exhaustive without a wildcard, defensively given one anyway) — not a
+new problem, a confirmed instance of an already-accepted one.
+
+**2. Functional verification, end to end.** The compiled module (with a
+one-function stub standing in for `beamtalk_message_dispatch:send/3`) was
+exercised directly for all three branches: a plain numeric add returns the
+correct sum; a non-numeric right operand produces the expected
+`plusFromNumber:` dispatch call with operands in the documented order; and
+`1.0e308 + 1.0e308` (float overflow, both operands genuinely numeric)
+re-raises `badarith` with its *original* stacktrace showing `erlang:'+'`
+as the failing call — bit-for-bit the same shape as today's uncaught
+propagation, confirming the re-raise path doesn't fabricate or lose
+information.
+
+**3. Benchmark, with an important caveat.** Extending the BT-2709
+methodology (same tight-loop shape, same `N`/`Reps`, same `min_us` best-of
+sampling as `bench_guard/0`) to compare bare `erlang:'+'` against this
+ADR's full `try`/`catch`/`is_number` shape gave a ratio in the same
+ballpark as the *already-shipped* `is_number` guard measured the identical
+way, on the identical hardware, in the same run — not dramatically worse,
+and isolating the `try`/`catch` wrapper alone (no `is_number` re-check)
+showed it contributes a small fraction of that cost; the `is_number` check
+itself, not the `try`/`catch`, is where most of the overhead already lives
+in the *existing, accepted* mechanism this ADR reuses that check from.
+
+The one thing this spike does **not** give: a trustworthy absolute ns/add
+number. Reproducing `bench_guard/0` completely unmodified, on this
+sandbox, gave a ratio well outside the `~2.7–3.0×` this repository's own
+`docs/development/benchmarks.md` records for that exact same benchmark —
+confirming the doc's own "(run-dependent)" caveat rather than contradicting
+it. The relative comparison (this ADR's mechanism vs. the guard it's
+layered next to, same run, same hardware) is sound; the absolute number is
+not portable off this sandbox and needs re-measuring wherever the project's
+real benchmark numbers get recorded (`docs/development/benchmarks.md`) as
+part of implementation, not asserted from this spike.
+
+**Conclusion:** the mechanism is real, syntactically valid once corrected,
+functionally correct on all three branches, and costs roughly what the
+already-accepted `is_number` guard costs on the same call sites — which,
+thanks to the compile-time skip (§ Dispatch mechanism), are exactly the
+call sites that already pay a guard-shaped cost today. It does **not**
+touch the true zero-cost fast path (`total + delta`, `2 + 2`) at all —
+that remains a structural guarantee (no `try` emitted there), not a
+benchmark claim. Safe to proceed to the codegen wiring below.
 
 - `crates/beamtalk-core/src/codegen/core_erlang/operators.rs`:
   - The `receiver_is_statically_numeric(right)` skip check gates **both**
