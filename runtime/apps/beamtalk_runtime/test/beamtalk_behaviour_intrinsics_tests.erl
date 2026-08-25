@@ -2753,3 +2753,28 @@ classRenameTo_collision_refused_test_() ->
 %% full stdlib loaded — `beamtalk_runtime`'s own EUnit suite sits below
 %% `beamtalk_stdlib` in the dependency graph and has no stdlib classes
 %% registered to exercise that branch against.
+
+%% TOCTOU guard (review feedback on PR #3523): a target name registered
+%% AFTER `rename/2`'s own `whereis/1` pre-check would previously crash the
+%% class gen_server on the plain `true = erlang:register(...)` inside the
+%% `{rename_class, NewName}` handler. Simulated deterministically here by
+%% calling that handler directly (`gen_server:call/2`, bypassing `rename/2`'s
+%% pre-check entirely) against an already-registered target name — exactly
+%% the state a real race would leave the registry in by the time the
+%% handler runs. Asserts a clean `{error, {already_registered, _}}` reply,
+%% the process stays alive, and its identity rolls back to the OLD name
+%% rather than being left unreachable under either name.
+object_class_rename_class_rejects_toctou_collision_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        {_ClassObj, Pid} = register_class('BT3278RenameToctouSource', #{}, #{}),
+        {_ExistingObj, _ExistingPid} = register_class('BT3278RenameToctouExisting', #{}, #{}),
+        Reply = gen_server:call(Pid, {rename_class, 'BT3278RenameToctouExisting'}),
+        [
+            ?_assertEqual({error, {already_registered, 'BT3278RenameToctouExisting'}}, Reply),
+            ?_assert(erlang:is_process_alive(Pid)),
+            ?_assertEqual('BT3278RenameToctouSource', gen_server:call(Pid, class_name)),
+            ?_assertEqual(
+                Pid, beamtalk_class_registry:whereis_class('BT3278RenameToctouSource')
+            )
+        ]
+    end}.

@@ -1036,7 +1036,7 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     NewNameBin = atom_to_binary(NewName, utf8),
     {DefinitionSite, ReferenceSites} =
         discover_rename_sites(OldName, OldNameBin, NewNameBin, Classification),
-    case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites) of
+    case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
         {ok, RewriteResult} ->
             NewPid = install_class_rename(OldName, NewName, Classification),
             log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
@@ -1131,6 +1131,17 @@ rename_rewrite_failed_error(OldName, workspace_unavailable) ->
     beamtalk_error:with_message(
         Error0,
         <<"Workspace not available; renameTo: requires a running workspace">>
+    );
+%% A non-dynamic classification with neither a definition nor any reference
+%% site — the divergent-classification edge case `rewrite_class_sites/4`'s
+%% own doc describes, falling through to a real `{error, no_sites}` from
+%% `rewrite_sites/2` instead of that function's dynamic-only trivial-success
+%% shortcut.
+rename_rewrite_failed_error(OldName, no_sites) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    beamtalk_error:with_message(
+        Error0,
+        <<"renameTo: found no declaration or reference site to rewrite">>
     );
 rename_rewrite_failed_error(OldName, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
@@ -1375,11 +1386,27 @@ class_source_file_for(ClassNameBin) ->
 %% (`{error, no_sites}`) since it is normally a caller bug, but here it is
 %% the ordinary, legitimate "freestanding dynamic class" case, so it is
 %% special-cased to a trivial success rather than surfaced as an error.
--spec rewrite_class_sites(atom(), map() | undefined, [map()]) ->
+%%
+%% The trivial-success shortcut is gated on `Classification` actually being
+%% `"dynamic"`, NOT merely on the site shape (per review feedback on PR
+%% #3523): `current_class_source/1` (`beamtalk_workspace_meta:
+%% get_class_source/1`) is a separate source of truth from the BEAM-module
+%% check `capture_class_removal_snapshot/1` classifies from, and the two
+%% could in principle diverge for a project class (e.g. tracked source never
+%% set). Were the shortcut keyed on shape alone, that divergence would
+%% silently skip `rewrite_sites/2` for an ORDINARY class too, and
+%% `install_class_rename/3` would then stop and purge the old class with
+%% nothing ever installed under `NewName` — a `class_not_found`-flavoured
+%% crash after the old class is already gone. Falling through to the real
+%% `rewrite_sites/2` call for that shape on a non-dynamic classification
+%% instead surfaces a clean `{error, no_sites}` — translated by
+%% `rename_rewrite_failed_error/2` into a structured error — before any
+%% mutation happens.
+-spec rewrite_class_sites(atom(), map() | undefined, [map()], map()) ->
     {ok, map()} | {error, term()}.
-rewrite_class_sites(_OldName, undefined, []) ->
+rewrite_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
     {ok, #{definition => undefined, sites => []}};
-rewrite_class_sites(_OldName, DefinitionSite, ReferenceSites) ->
+rewrite_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
     try
         erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites])
     catch
@@ -1430,15 +1457,39 @@ install_class_rename(OldName, NewName, #{not_flushable_reason := <<"dynamic">>})
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end;
 install_class_rename(OldName, NewName, _Classification) ->
-    case beamtalk_class_registry:whereis_class(OldName) of
+    %% Defensive backstop (review feedback on PR #3523): a successful
+    %% `rewrite_sites/2` call for an ordinary class is expected to have
+    %% already installed `NewName` via the normal compile/activate pipeline
+    %% (see this function's own doc) — checked here BEFORE touching
+    %% `OldName` so an unexpected miss raises cleanly with the old class
+    %% left intact, rather than retiring `OldName` first and crashing on a
+    %% `pid()`-typed caller (`class_object_from_pid/1`) handed `undefined`.
+    case beamtalk_class_registry:whereis_class(NewName) of
         undefined ->
-            ok;
-        OldPid ->
-            beamtalk_class_monitor:unwatch(OldName),
-            gen_server:stop(OldPid)
-    end,
-    ok = beamtalk_class_lifecycle:purge_class_registries(OldName),
-    beamtalk_class_registry:whereis_class(NewName).
+            beamtalk_error:raise(rename_install_incomplete_error(OldName, NewName));
+        NewPid ->
+            case beamtalk_class_registry:whereis_class(OldName) of
+                undefined ->
+                    ok;
+                OldPid ->
+                    beamtalk_class_monitor:unwatch(OldName),
+                    gen_server:stop(OldPid)
+            end,
+            ok = beamtalk_class_lifecycle:purge_class_registries(OldName),
+            NewPid
+    end.
+
+-spec rename_install_incomplete_error(atom(), atom()) -> #beamtalk_error{}.
+rename_install_incomplete_error(OldName, NewName) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "renameTo: reported success but '~p' was never installed under '~p'; "
+            "the old class was left untouched",
+            [OldName, NewName]
+        )
+    ),
+    beamtalk_error:with_message(Error0, Msg).
 
 %% Best-effort ChangeLog append after a successful `renameTo:` (ADR 0114 §
 %% ChangeLog schema, `kind: "rename-class"`) — mirrors `log_local_removal/3`'s

@@ -967,17 +967,32 @@ handle_call(
     OldRegName = beamtalk_class_registry:registry_name(OldName),
     NewRegName = beamtalk_class_registry:registry_name(NewName),
     true = erlang:unregister(OldRegName),
-    true = erlang:register(NewRegName, self()),
-    put(beamtalk_class_name, NewName),
-    sync_identity(NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
-    seed_runtime_class_methods(NewName, ClassMethods),
-    beamtalk_class_registry:record_class_pid(self(), NewName),
-    beamtalk_class_registry:record_loaded_class(NewName, self()),
-    beamtalk_class_metadata:delete(OldName),
-    _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
-    beamtalk_class_monitor:unwatch(OldName),
-    beamtalk_class_monitor:watch(NewName, self()),
-    {reply, ok, State#class_state{name = NewName}};
+    %% TOCTOU guard (review feedback on PR #3523): `rename/2`'s own
+    %% `erlang:whereis/1` check happens before this call is even sent, so a
+    %% concurrent registration of `NewRegName` in between would otherwise
+    %% crash this gen_server on the plain `true = erlang:register(...)` this
+    %% replaced — after `OldRegName` is already gone, leaving the class
+    %% unreachable under either name. Caught and rolled back here instead,
+    %% so the caller gets the same clean `{error, {already_registered, _}}`
+    %% `rename/2`'s pre-check is meant to produce.
+    case catch erlang:register(NewRegName, self()) of
+        true ->
+            put(beamtalk_class_name, NewName),
+            sync_identity(
+                NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
+            ),
+            seed_runtime_class_methods(NewName, ClassMethods),
+            beamtalk_class_registry:record_class_pid(self(), NewName),
+            beamtalk_class_registry:record_loaded_class(NewName, self()),
+            beamtalk_class_metadata:delete(OldName),
+            _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
+            beamtalk_class_monitor:unwatch(OldName),
+            beamtalk_class_monitor:watch(NewName, self()),
+            {reply, ok, State#class_state{name = NewName}};
+        {'EXIT', _Reason} ->
+            true = erlang:register(OldRegName, self()),
+            {reply, {error, {already_registered, NewName}}, State}
+    end;
 handle_call(
     {method, Selector},
     _From,

@@ -236,7 +236,21 @@ setup_with_changelog() ->
     %% A real (non-run-mode) ChangeLog needs a `workspace_id` AND a HOME it
     %% can resolve `<home>/.beamtalk/workspaces/<id>/changes/` under — mirrors
     %% beamtalk_repl_loader_rewrite_sites_tests.erl's identical setup.
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    %%
+    %% `erlang:unique_integer/1` alone is NOT enough entropy here (unlike its
+    %% usual per-VM-run uses elsewhere in this codebase): its counter resets
+    %% on every fresh `rebar3 eunit` invocation, and this call site is reached
+    %% after a deterministic, fixed number of prior `unique_integer` calls —
+    %% so two SEPARATE test runs can compute the IDENTICAL `WorkspaceId`/
+    %% `ChangelogHome`. Observed directly (review follow-up, PR #3523): the
+    %% real `~/.beamtalk/workspaces/<id>/changes/changes.jsonl` these resolve
+    %% to persists across runs, so `beamtalk_workspace_changelog`'s own
+    %% intentional `load_from_disk` restores a PRIOR run's leftover entries
+    %% into this run's ETS table, and `[Entry] = entries()` intermittently
+    %% sees more than one. `os:getpid()` (the OS process id — genuinely
+    %% distinct per separate VM invocation, unlike the in-VM counter) closes
+    %% the gap.
+    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
     WorkspaceId = list_to_binary("bt-rename-to-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rename-to-changelog-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),
