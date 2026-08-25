@@ -99,6 +99,13 @@ corpus_accuracy_test_() ->
 %% ClassLoaded.bt:17, ClassRemoved.bt:17, FlushCompleted.bt:19,
 %% ObjectStateChanged.bt:26, SupervisionChildAdded.bt:18,
 %% SupervisionChildCrashed.bt:17 — nine direct subclasses, no more, no fewer.
+%% Asserted as a subset, not exact equality: this module runs in ordinary
+%% CI, and an unrelated future PR adding another `Announcement subclass:`
+%% declaration must not fail a spike test whose validation purpose (this
+%% hand audit, dated 2026-08-25) is already served — see the Claude review
+%% bot's finding on PR #3519. The hand-audited set must still be present
+%% (that's the actual accuracy check); growth beyond it is expected and
+%% fine.
 direct_subclasses_announcement() ->
     Expected = lists:sort([
         'ActorSpawned',
@@ -112,17 +119,18 @@ direct_subclasses_announcement() ->
         'SupervisionChildCrashed'
     ]),
     Actual = lists:sort(beamtalk_class_registry:direct_subclasses('Announcement')),
-    ?assertEqual(Expected, Actual).
+    ?assert(ordsets:is_subset(ordsets:from_list(Expected), ordsets:from_list(Actual))).
 
 %% Hand audit (`grep -n "Error subclass:" stdlib/src/*.bt`, 2026-08-25):
 %% BEAMError.bt:20, InstantiationError.bt:13, RuntimeError.bt:14,
 %% TypeError.bt:12 — four direct subclasses. `ExitError`/`ThrowError`
 %% subclass `BEAMError`, not `Error` directly, so they are correctly excluded
 %% here (direct_subclasses/1 is not transitive).
+%% Subset, not exact equality — see direct_subclasses_announcement/0's note.
 direct_subclasses_error() ->
     Expected = lists:sort(['BEAMError', 'InstantiationError', 'RuntimeError', 'TypeError']),
     Actual = lists:sort(beamtalk_class_registry:direct_subclasses('Error')),
-    ?assertEqual(Expected, Actual).
+    ?assert(ordsets:is_subset(ordsets:from_list(Expected), ordsets:from_list(Actual))).
 
 %% Hand audit (`grep -n '\bDuration\b' stdlib/src/*.bt`, 2026-08-25, real code
 %% lines only — every other hit is inside a `///` doc comment and must NOT be
@@ -157,9 +165,13 @@ direct_subclasses_error() ->
 %%     (lines 40/49/57/65/73/87 — return-type-only mentions, one row each)
 %%
 %% 21 rows total across 5 owner classes.
+%% Asserted as a subset, not exact equality — see
+%% direct_subclasses_announcement/0's note: a future PR adding a method
+%% elsewhere in the stdlib that mentions `Duration` in its signature must
+%% not fail this spike test. The hand-audited 21-tuple set (this module's
+%% actual accuracy evidence) must still be present in full.
 references_to_duration() ->
     Sites = beamtalk_xref:references_to('Duration'),
-    ?assertEqual(21, length(Sites)),
     OwnerMethodTally = lists:sort([
         {maps:get(owner, S), maps:get(class_side, S), maps:get(method, S)}
      || S <- Sites
@@ -190,7 +202,7 @@ references_to_duration() ->
         {'Duration', true, 'days:'},
         {'Duration', true, 'fromString:'}
     ]),
-    ?assertEqual(ExpectedTally, OwnerMethodTally).
+    ?assert(multiset_subset(ExpectedTally, OwnerMethodTally)).
 
 %%====================================================================
 %% Group 2 — live-patch gap reproduction (ADR 0114 Constraint 4).
@@ -297,3 +309,22 @@ count_occurrences(Pattern, Bin) ->
     case binary:matches(Bin, Pattern) of
         Matches when is_list(Matches) -> length(Matches)
     end.
+
+%% True iff every element of `Expected` occurs in `Actual` at least as many
+%% times (a multiset subset, not a plain set subset — some hand-audited
+%% tuples above are legitimately duplicated, e.g. a method mentioning
+%% `Duration` on two distinct source lines). Used so the corpus-accuracy
+%% tests keep proving the hand audit's evidence is present without failing
+%% when an unrelated future stdlib change adds more of the same shape.
+-spec multiset_subset([term()], [term()]) -> boolean().
+multiset_subset(Expected, Actual) ->
+    ExpectedCounts = tally(Expected),
+    ActualCounts = tally(Actual),
+    maps:fold(
+        fun(Key, Count, Ok) -> Ok andalso Count =< maps:get(Key, ActualCounts, 0) end,
+        true,
+        ExpectedCounts
+    ).
+
+tally(List) ->
+    lists:foldl(fun(X, Acc) -> maps:update_with(X, fun(C) -> C + 1 end, 1, Acc) end, #{}, List).
