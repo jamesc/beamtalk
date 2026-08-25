@@ -8480,7 +8480,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           <button
             :for={
               {view, label, icon} <- [
-                {"hierarchy", "Hierarchy", "▤"},
+                {"hierarchy", "Hierarchy", "≡"},
                 {"category", "Categories", "▦"}
               ]
             }
