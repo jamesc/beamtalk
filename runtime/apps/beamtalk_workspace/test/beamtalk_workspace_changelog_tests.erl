@@ -824,10 +824,12 @@ rename_method_json_round_trip(_Ctx) ->
         ?_assertEqual(1, length(beamtalk_workspace_changelog:entry_candidate_sites(Decoded)))
     ].
 
-%% A malformed `candidate_sites` element (missing `span`) must not cost the
-%% whole ChangeLog line: `entry_from_json/1` should drop just that element
-%% (logged, per review feedback on PR #3521) and decode everything else —
-%% including `sites`/rename data — intact.
+%% Three distinct malformed `candidate_sites` shapes (missing `span`,
+%% present-but-`null` `span`, and a `span` object missing `end`) must not
+%% cost the whole ChangeLog line: `entry_from_json/1` should drop each
+%% malformed element (logged, per review feedback on PR #3521) and decode
+%% everything else — including `sites`/rename data and the one well-formed
+%% candidate site — intact.
 rename_method_decode_drops_malformed_candidate_site(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
     [Entry] = beamtalk_workspace_changelog:entries(),
@@ -836,6 +838,8 @@ rename_method_decode_drops_malformed_candidate_site(_Ctx) ->
     Corrupted = Map#{
         <<"candidate_sites">> => [
             #{<<"sourceFile">> => <<"/proj/src/timer.bt">>},
+            #{<<"sourceFile">> => <<"/proj/src/timer2.bt">>, <<"span">> => null},
+            #{<<"sourceFile">> => <<"/proj/src/timer3.bt">>, <<"span">> => #{<<"start">> => 1}},
             #{
                 <<"sourceFile">> => <<"/proj/src/other.bt">>,
                 <<"span">> => #{

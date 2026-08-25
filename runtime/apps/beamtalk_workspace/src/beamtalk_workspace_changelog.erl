@@ -2114,17 +2114,33 @@ candidate_site_to_json(#{source_file := SourceFile, span := Span}) ->
 
 %% Unlike `site_from_json/1`, a `candidate_site()` has no optional-field case
 %% to default (every candidate site always names a real sourceFile/span) —
-%% so a map missing either key is genuinely malformed, not a legitimate
+%% so a missing/invalid key is genuinely malformed, not a legitimate
 %% "not applicable" shape. Returns `error` for that case instead of
 %% crashing: `candidate_sites_from_json/1` drops just the malformed element
 %% (logged) rather than letting it propagate up through `entry_from_json/1`
 %% and cost `parse_log/1`'s catch the *entire* ChangeLog line — including
 %% that entry's unrelated `sites`/rename data — over one bad element.
+%%
+%% Guards against two distinct malformed shapes, not just a missing key:
+%% an explicit `"span": null` (`span_from_json/1` returns `undefined`, which
+%% would otherwise silently violate `candidate_site()`'s non-optional
+%% `span := span()` contract) and a `span` object missing `start`/`end`
+%% (`span_from_json/1` has no fallback clause for that shape and raises
+%% `function_clause` — caught here rather than crashing the whole decode).
 -spec candidate_site_from_json(map()) -> {ok, candidate_site()} | error.
-candidate_site_from_json(#{<<"sourceFile">> := SourceFile, <<"span">> := Span}) ->
-    {ok, #{source_file => SourceFile, span => span_from_json(Span)}};
+candidate_site_from_json(#{<<"sourceFile">> := SourceFile, <<"span">> := Span} = Map) ->
+    try span_from_json(Span) of
+        undefined -> drop_malformed_candidate_site(Map);
+        DecodedSpan -> {ok, #{source_file => SourceFile, span => DecodedSpan}}
+    catch
+        _:_ -> drop_malformed_candidate_site(Map)
+    end;
 candidate_site_from_json(Malformed) ->
-    ?LOG_WARNING("Dropping malformed candidate_site (missing sourceFile/span): ~p", [Malformed]),
+    drop_malformed_candidate_site(Malformed).
+
+-spec drop_malformed_candidate_site(term()) -> error.
+drop_malformed_candidate_site(Malformed) ->
+    ?LOG_WARNING("Dropping malformed candidate_site: ~p", [Malformed]),
     error.
 
 -spec candidate_sites_to_json([candidate_site()] | undefined) -> [map()] | null.
