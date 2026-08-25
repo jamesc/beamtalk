@@ -76,13 +76,25 @@ naming convention:
 Value subclass: Vector
   field: components :: Array = #()
 
-  "receiver-dispatch: aVector + 5"
+  "receiver-dispatch: aVector + 5, aVector - 5"
   + other :: Number -> Vector => self collect: [:c | c + other]
+  - other :: Number -> Vector => self collect: [:c | c - other]
 
-  "number-on-the-left: 5 + aVector"
+  "number-on-the-left: 5 + aVector, 5 - aVector"
   plusFromNumber:  n :: Number -> Vector => self collect: [:c | n + c]
   timesFromNumber: n :: Number -> Vector => self collect: [:c | n * c]
+  minusFromNumber: n :: Number -> Vector => self collect: [:c | n - c]
 ```
+
+Operand order matters for non-commutative operators and is easy to get
+backwards: `minusFromNumber:`'s receiver (`self`) is the value that was on
+the **right** of the original expression, and its parameter (`n`) is the
+value that was on the **left** — `5 - aVector` sends `aVector
+minusFromNumber: 5`, computing `n - self` (`5` minus each component), not
+`self - n`. `aVector - 5` (receiver-dispatch `-`, unchanged from BT-2709)
+computes the opposite: each component minus `5`. The two methods above are
+not one implementation reused for both directions — the subtraction is
+genuinely reversed between them, same as `divFromNumber:`.
 
 Each reflected method is an ordinary, fully-typed method — no `perform:`, no
 dynamic selector construction. There is exactly **one** reflected method per
@@ -90,30 +102,73 @@ operator (`plusFromNumber:` / `minusFromNumber:` / `timesFromNumber:` /
 `divFromNumber:`), not the `adaptToInteger:` / `adaptToFloat:` /
 `adaptToFraction:` fan-out Pharo needs — because BEAM fuses int/float into a
 single effective `Number` category on the left, one hook per operator
-suffices.
+suffices. (`divFromNumber:` reflects `/`, Beamtalk's single division
+operator — distinct from the separately-named `div:` keyword message for
+integer division on `Integer`, so the shared "div" substring doesn't
+collide as a selector, just as a reading hazard worth a beat of attention.)
 
 ### Dispatch mechanism (codegen)
 
-The two call sites in `operators.rs` that currently emit a bare
-`erlang:'<op>'(...)` whenever the *left* operand is (statically or
-dynamically) known to be a number — the always-bare fast path, and the
-`is_number`-true branch of the existing Phase 1 guard — both wrap that BIF
-call in a `try`/`catch` on `badarith`:
+**Trigger condition, refined.** `receiver_is_statically_numeric` (BT-2709)
+already exists and takes an arbitrary `Expression`, not just the receiver —
+so the same check applies to the *right* operand for free. The mechanism
+below only engages when the left operand is (statically or dynamically)
+numeric **and** `receiver_is_statically_numeric(right)` is `false` — i.e.
+the right operand's type genuinely isn't known at compile time. When the
+right operand *is* statically numeric too (a literal, a `:: Number`-family
+param, `self` in `Integer`/`Float`, or a numeric/untyped field — the exact
+same rule already applied to the left operand), codegen skips this
+mechanism entirely and emits the bare BIF, identical to today. Concretely:
+`total + delta` where `delta :: Integer` — the common case this ADR must
+not tax — never enters a `try` at all; only a right operand whose type is
+genuinely unknown (`5 + aVector`) does. This also converts the "does the
+`try` cost anything on the happy path" question from "prove it's
+negligible everywhere" to "prove it's negligible on the strictly smaller
+set of already-dynamically-dispatched call sites" — still gated on the
+de-risking spike's benchmark, but over less code.
+
+For that remaining case, the call site wraps the BIF call in a `try`/
+`catch` on `badarith`, following the same catch-clause shape already used
+throughout the codebase (`control_flow/exception_handling.rs`'s
+`on_do_catch_preamble`: bind the raw type/error/stack as variables, `case`-
+match on them with an explicit fallback arm, re-raise via
+`primop 'raw_raise'`, never `erlang:raise/3` — which expects a pre-built
+stacktrace term, not the raw internal trace a catch clause binds). Both
+operands are `let`-bound before the `try` (mirroring `guarded_op_doc`'s own
+`left_var`/`right_var` binding), so the catch handler can reference `Right`
+without re-evaluating it — referencing the inlined expression twice, the
+way the existing bare fast path embeds `left_code`/`right_code` directly,
+would double-evaluate a non-trivial right operand:
 
 ```erlang
+let BinLeft = <left operand> in
+let BinRight = <right operand> in
 try
-    call 'erlang':'+'(Left, Right)
-catch
-    <'error', 'badarith', Stack> ->
-        case call 'erlang':'is_number'(Right) of
-            <'true'> ->
-                %% Right IS a number — badarith wasn't a coercion miss (e.g.
-                %% `5 / 0`). Re-raise unchanged so the existing badarith
-                %% classification (ADR 0028/BT-2704) still handles it.
-                call 'erlang':'raise'('error', 'badarith', Stack)
-            <'false'> ->
-                call 'beamtalk_message_dispatch':'send'(Right, 'plusFromNumber:', [Left])
-        end
+    call 'erlang':'+'(BinLeft, BinRight)
+catch <Type, Error, Stack> ->
+    case {Type, Error} of
+        <{'error', 'badarith'}> when 'true' ->
+            case call 'erlang':'is_number'(BinRight) of
+                <'true'> ->
+                    %% BinRight IS a number — badarith wasn't a coercion
+                    %% miss (e.g. `5 / 0`, or float overflow). Re-raise
+                    %% unchanged so the existing badarith classification
+                    %% (ADR 0028/BT-2704) still handles it.
+                    primop 'raw_raise'(Type, Error, Stack)
+                <'false'> ->
+                    call 'beamtalk_message_dispatch':'send'(
+                        BinRight, 'plusFromNumber:', [BinLeft])
+            end
+        %% Not badarith at all (shouldn't occur for this specific BIF call,
+        %% but the case must be exhaustive per BT-3163's
+        %% `case_clause_fallback` convention — see Implementation). Binds a
+        %% fresh throwaway variable, not `Type`/`Error` again — those are
+        %% already bound by the enclosing `catch` clause and stay in scope
+        %% for `raw_raise` below without needing to be re-destructured here,
+        %% mirroring `on_do_catch_preamble`'s own catch-all arm.
+        <_OtherPair> when 'true' ->
+            primop 'raw_raise'(Type, Error, Stack)
+    end
 end
 ```
 
@@ -129,22 +184,41 @@ would misroute `5 / 0` (divisor `0` *is* a number) to
 regression of the existing, documented `badarith` → `TypeError` "bad
 arithmetic operation" classification (`beamtalk_exception_handler:wrap_raw/2`,
 ADR 0028), which correctly explains it as an arithmetic error today. The
-`is_number(Right)` check inside the catch handler distinguishes the two
+`is_number(BinRight)` check inside the catch handler distinguishes the two
 `badarith` causes generically, independent of which specific numeric failure
-triggered it: a non-numeric `Right` is a genuine coercion miss and dispatches
-to the reflected method; a numeric `Right` means the failure is a real
-numeric error unrelated to coercion (division by zero or float overflow),
-and `erlang:raise/3` re-raises it with its original class, reason, and
-stacktrace — identical to today's uncaught propagation — so it reaches the
-same classification layer unchanged regardless of which of the two numeric
-causes produced it. The `try` and the `is_number` check both cost nothing on
-the `number <op> number` happy path, and the `catch` only ever runs on an
-actual `badarith`.
+triggered it: a non-numeric `BinRight` is a genuine coercion miss and
+dispatches to the reflected method; a numeric `BinRight` means the failure
+is a real numeric error unrelated to coercion (division by zero or float
+overflow), and `primop 'raw_raise'` re-raises it with its original class,
+reason, and stacktrace — identical to today's uncaught propagation — so it
+reaches the same classification layer unchanged regardless of which of the
+two numeric causes produced it. The `catch` block itself only ever runs on
+an actual `badarith`, so its cost is paid exclusively on the
+already-failing path; the `try` wrapper's cost *on the non-failing path,
+restricted to call sites where the right operand's type is genuinely
+unknown* is the open question this ADR asserts as negligible but has not
+yet measured — see the de-risking spike in Implementation, which gates the
+codegen change on confirming that number before it ships.
 
 This is deliberately the one place BT-2709 avoided (catch-on-failure instead
 of a guard) — correct here specifically because the happy path (number +
 number) can never raise, unlike the general receiver-dispatch case where a
-non-numeric receiver is the *common* case a guard has to cover cheaply.
+non-numeric receiver is the *common* case a guard has to cover cheaply, and
+because the refined trigger condition above already removes the
+statically-known-numeric-right-operand cases a guard would otherwise have
+to cover for free.
+
+Compiler-generated exception handling on Beamtalk's own state-threading
+constructs (loops, `on:do:`/`ensure:`, NLR boundaries, class-var
+shadow-writes) is required to lower through `ThreadedIr` and its `verify()`
+(CLAUDE.md, ADR 0111). This `try`/`catch` doesn't: it threads no state
+across the boundary — no class variable, no loop accumulator, no NLR relay
+— and lives entirely inside a single expression's evaluation, the same
+"general expression codegen stays AST-directed" category the existing
+Phase 1 `is_number` guard (`guarded_op_doc`, a plain `case` `Document`) is
+already in. It is built directly as a `Document` from the AST and generator
+state, with no `ThreadedIr` involvement, consistent with that existing
+guard and outside `ThreadedIr`'s scope.
 
 ### REPL example
 
@@ -267,7 +341,7 @@ aVector + 5
 - 🎨 **Language designer:** "Less boilerplate per type is a real
   maintainability win worth weighing against the type-checker cost."
 
-### Alternative: Static guard on the right operand's type
+### Alternative: Always-on runtime guard on the right operand's type
 - 🧑‍💻 **Newcomer:** "Predictable — the runtime always checks both sides
   before doing anything, so there's no separate 'this crashed, but only
   because of an unrelated float overflow' story to learn."
@@ -284,6 +358,12 @@ aVector + 5
   treatment, rather than the left operand's fast path and the right
   operand's catch handler being different mechanisms."
 
+  (This is the *unconditional runtime guard* variant, rejected below. The
+  compile-time skip — reusing `receiver_is_statically_numeric` on the right
+  operand so a typed/literal right never enters a `try` at all — is instead
+  adopted as part of the chosen design; see § Dispatch mechanism's "Trigger
+  condition, refined" and Alternatives Considered.)
+
 ### Tension points
 - The Smalltalk-purist case for both the generality tower and the
   `perform:`-based alternative is genuinely the strongest of any cohort —
@@ -296,13 +376,15 @@ aVector + 5
   or `perform:`-retry for their elegance/faithfulness; BEAM veterans and
   operators are indifferent-to-negative on both, and side with the chosen
   design once static-typing preservation is on the table.
-- The static-guard alternative is the one place a BEAM veteran's *first*
-  instinct (a guard, not a catch) points away from the chosen design — the
-  decision to use `try`/`catch` anyway rests entirely on the "common case is
-  `total + delta`, don't tax it" cost argument (Alternatives Considered),
-  which a veteran would find persuasive once the guard's always-on cost on
-  that majority case is made concrete, but wouldn't necessarily reach for
-  first.
+- The always-on-guard alternative is the one place a BEAM veteran's *first*
+  instinct (a guard, not a catch) points away from the chosen design for the
+  cases that still need a runtime mechanism at all — resolved not by
+  rejecting the veteran's instinct outright but by narrowing where it would
+  even apply: `receiver_is_statically_numeric` already removes the
+  `total + delta` majority case at compile time (no guard, no `try`, no
+  runtime cost), so the guard-vs-`try`/`catch` question only remains live
+  for the residual, genuinely-unknown-right-operand call sites — a smaller
+  and more defensible surface for the `try`/`catch` design to own.
 
 ## Alternatives Considered
 
@@ -326,16 +408,33 @@ keep a static fast path and covariant-return inference (ADR 0068) working
 for arithmetic, and a `perform:`-based retry throws that guarantee away for
 exactly the call sites this ADR touches.
 
-### Static guard on the right operand's type
+### Always-on runtime guard on the right operand's type
 Instead of catching `badarith`, emit a proactive runtime check on the right
-operand (e.g. `is_number(Right)`) alongside the existing left-operand guard,
-so both operands are checked before ever calling the bare BIF. Rejected: the
+operand (e.g. `is_number(Right)`) alongside the existing left-operand guard
+*unconditionally* — every call site with a numeric left operand pays a
+right-operand check, regardless of whether the right operand's type is
+already known at compile time. Rejected in this unconditional form: the
 common case is `total + delta` — a numeric literal or known-numeric
-receiver on the left, an *arbitrary, usually also-numeric* variable on the
-right. Guarding the right operand unconditionally would regress that
-majority case from a zero-cost bare BIF to an always-checked one, which is
-exactly the cost Phase 1 was built to avoid. The catch-on-`badarith`
-approach only pays a cost when the fallback actually fires.
+receiver on the left, and a right operand whose type is *already visible to
+the compiler* (a `:: Number`-family param, another numeric literal, a
+numeric/untyped field — the identical rule the left operand already uses).
+Guarding that right operand at runtime would regress it from a zero-cost
+bare BIF to an always-checked one, for information the compiler already
+has for free.
+
+**Not fully rejected, though — adopted as a compile-time skip instead of a
+runtime guard.** The chosen design reuses exactly this idea
+(`receiver_is_statically_numeric` applied to the right operand), but as a
+*codegen-time* condition that removes the `try`/`catch` from
+`total + delta`-shaped call sites entirely, rather than as a *runtime*
+`is_number` check both operands pay on every call. Only a right operand
+whose type is genuinely unknown at compile time (`5 + aVector`) reaches the
+`try`/`catch` mechanism at all — see § Dispatch mechanism's "Trigger
+condition, refined." The remaining design question is narrower than the
+original framing suggests: not "guard vs. catch, always," but "guard vs.
+catch, only for the already-dynamically-dispatched residual" — and for that
+residual, the catch-on-`badarith` approach still only pays a cost when the
+fallback actually fires, which an always-on runtime guard would not.
 
 ### Status quo — leave `5 + aVector` unhandled
 Do nothing: keep the receiver-dispatch-only behavior from BT-2709/2710 and
@@ -363,10 +462,10 @@ follow-up rather than folding it into this arithmetic-specific design.
 ### Positive
 - `5 + aMoney`, `5 * aVector` and similar number-on-the-left expressions
   resolve to the value type's own arithmetic instead of crashing.
-- The numeric happy path (a `number <op> number` that doesn't divide by
-  zero or float-overflow) stays a bare BIF call wrapped in a `try` that
-  never actually unwinds — no guard, no regression to Phase 1's zero-cost
-  invariant, pending the benchmark called out below.
+- `total + delta`-shaped call sites — a numeric left operand and a right
+  operand whose type is already statically known — never enter a `try` at
+  all (§ Dispatch mechanism's compile-time skip): identical generated code
+  to today, not merely "a `try` that happens not to unwind."
 - Reflected methods are ordinary typed methods: return types are known
   statically, so covariant-return inference (ADR 0068) and compile-time DNU
   checking work on them for free.
@@ -387,16 +486,56 @@ follow-up rather than folding it into this arithmetic-specific design.
   even when it never triggers (frame setup for the catch), separate from
   the `is_number` guard's cost model BT-2709 already measured — this ADR's
   zero-cost claim needs its own benchmark confirmation before Implemented
-  status (see Implementation).
+  status (see Implementation). The compile-time skip narrows *how much*
+  code pays this cost (only call sites with a genuinely-unknown-type right
+  operand), but doesn't eliminate the open question for that residual.
 - Asymmetric operators (`5 * aMatrix` vs. `aMatrix * 5` meaning different
   things mathematically) place the burden on each type's author to document
   the semantic difference between its `*` and its `timesFromNumber:` —
   the language enforces nothing here beyond "both exist and are callable."
+  `minusFromNumber:`/`divFromNumber:` make this concrete: `n minusFromNumber:`
+  computes `n - self`, not `self - n` — the reflected method's parameter is
+  always the number that was on the left, so the receiver is the second
+  operand, an order easy to get backwards without a worked non-commutative
+  example (added to § Reflected method protocol).
+- **Existing type-checker warning becomes a false positive on newly-valid
+  code.** `check_binary_operand_types`
+  (`semantic_analysis/type_checker/validation.rs:2016`) already warns today
+  on `5 + aVector` ("`+` on Integer expects a numeric argument, got
+  Vector") whenever the receiver is numeric and the argument isn't. That
+  check doesn't know about `plusFromNumber:`, so a type correctly
+  implementing the reflected hook still gets a spurious warning at every
+  number-on-the-left call site. This ADR is codegen-only and does not fix
+  it — teaching the type checker that a `<verb>FromNumber:` method on the
+  argument type suppresses the warning is left as follow-up work, tracked
+  against this ADR rather than silently left for someone to rediscover.
+- **`self.<field>` / untyped-param trust boundary interacts with the new
+  catch, not just the guard.** `receiver_is_statically_numeric` already
+  trusts an untyped `self.<field>` or `:: Number`-typed identifier as
+  numeric without a runtime check (BT-2709's existing, accepted gradual-
+  typing gap — not new here). If that trust is wrong at runtime (the field
+  actually holds a non-numeric object), the resulting `badarith` is now
+  caught by this mechanism too: the handler checks `is_number` on the
+  *right* operand, concludes it's a genuine coercion miss or a real
+  numeric error based on the right operand alone, and never reconsiders
+  whether the *left* operand was the actual problem. The user-visible
+  outcome is still reasonable (a `does_not_understand` or the existing
+  `badarith` classification, not a worse crash), but it's a new place this
+  pre-existing trust gap surfaces, worth a one-line callout rather than
+  silence.
 
 ### Neutral
 - Comparison operators (`< > <= >=`) are explicitly out of scope; the
   existing silent-wrong-order behavior for `5 < aVector` is unchanged by
-  this ADR and remains tracked as a separate follow-up.
+  this ADR and remains tracked as a separate follow-up. Its eventual
+  reflected-method convention (if any) should reuse `<verb>FromNumber:`
+  naming, not invent a second scheme — noted here so that follow-up doesn't
+  drift.
+- `%` (`rem`) and `**` (`math:pow`) were never part of BT-2709/2710's
+  dispatchable-operator set to begin with (`generate_binary_op` special-
+  cases `**` and never routes `%` through the guard/dispatch machinery at
+  all) — `5 % aVector` and `5 ** aVector` are unaffected by this ADR in
+  either direction, not a new asymmetry it introduces.
 - No generality/coercion hook is exposed for a hypothetical future numeric
   tower type — if one is ever added, it implements `plusFromNumber:` etc.
   like any other type, and any tower-specific promotion logic lives inside
@@ -409,19 +548,30 @@ follow-up rather than folding it into this arithmetic-specific design.
   `plusFromNumber:` send inside the generated `try`/`catch` — a known,
   accepted gap for `SystemNavigation`-style tooling (§ User Impact, Tooling
   developer), not something this ADR's codegen-only scope fixes.
+- If the reflected method's receiver is an actor (not a Value), the
+  dispatch goes through the same `beamtalk_message_dispatch:send/3` path as
+  any other actor message — including the existing `dispatch_error` rule
+  for a block sent from inside a class method (CLAUDE.md § Blocks into
+  class methods). This ADR doesn't change that rule, only adds another
+  call site that can hit it, same as `aVector + 5` already can today.
 
 ## Implementation
 
 Affected components: codegen only (no parser, type-checker, or runtime
-protocol changes).
+protocol changes) — the type checker's existing `check_binary_operand_types`
+warning is left as-is, including its now-known false positive on newly-valid
+number-on-the-left code (§ Consequences, Negative), rather than folded into
+this ADR's scope.
 
 ### De-risking spike (do first, report before building)
 
 Mirroring BT-2709's own precedent for this exact call site:
 
 1. Hand-write the target Core Erlang for the `try`/`catch`/`is_number`/
-   re-raise shape (§ Dispatch mechanism), compile it, and confirm it passes
-   `core_lint`.
+   `primop 'raw_raise'` shape (§ Dispatch mechanism), compile it, and
+   confirm it passes `core_lint` — including the exhaustive `case`
+   structure BT-3163's `case_clause_fallback` convention exists to protect
+   against (see the code comment in § Dispatch mechanism).
 2. Extend the BT-2709 guard-vs-bare harness
    (`runtime/perf/bench_collect_selfhost.escript`,
    `docs/development/benchmarks.md`) with a `try`/`catch`-vs-bare-BIF
@@ -432,22 +582,39 @@ Mirroring BT-2709's own precedent for this exact call site:
 Only once both check out does the codegen wiring below proceed.
 
 - `crates/beamtalk-core/src/codegen/core_erlang/operators.rs`:
-  - Wrap the always-bare arithmetic path (the `else` branch in
+  - In the always-bare arithmetic path (the `else` branch in
     `generate_binary_op` when `receiver_is_statically_numeric(left)` is
-    true) in the `try`/`catch` on `badarith`, with the `is_number(Right)`
-    re-raise-or-dispatch check described above.
-  - Wrap the `is_number`-true branch of `guarded_op_doc`'s
-    `OperatorGuard::Arithmetic` case the same way, so a *dynamically*
-    numeric left operand gets the same fallback as a *statically* numeric
-    one.
+    true), first check `receiver_is_statically_numeric(right)` — if `true`,
+    emit the bare BIF exactly as today (no change); only if `false` does
+    this call site enter the new mechanism.
+  - For a call site that does enter it (either branch above, or the
+    `is_number`-true branch of `guarded_op_doc`'s `OperatorGuard::Arithmetic`
+    case, so a *dynamically* numeric left operand gets the same fallback as
+    a *statically* numeric one): `let`-bind both operands *before* the
+    `try` (mirroring `guarded_op_doc`'s own `left_var`/`right_var`
+    binding — referencing the inlined operand documents a second time
+    inside the catch handler would double-evaluate a non-trivial right
+    operand), wrap the BIF call in `try`/`catch`, bind the catch clause's
+    type/error/stack as variables (not literal patterns — matching
+    `on_do_catch_preamble`'s convention), `case`-match on `{Type, Error}`
+    with an explicit fallback arm, and use `primop 'raw_raise'` — not
+    `erlang:raise/3`, which expects a pre-built stacktrace term rather than
+    the raw trace a catch clause binds — for both the "not badarith" and
+    "badarith but numeric" re-raise arms. Apply BT-3163's
+    `case_clause_fallback` convention to the inner `is_number` `case`, for
+    the same uniformity `guarded_op_doc`'s own doc comment argues for.
   - New helper mapping `+ - * /` → `plusFromNumber:` / `minusFromNumber:` /
     `timesFromNumber:` / `divFromNumber:`, built with `Document`/`docvec!`
     typed leaves (CLAUDE.md, ADR 0089) — no `format!()`.
 - Codegen regression tests (mirroring the existing
   `tests/expressions.rs` guard tests from BT-2709/2710): assert the
-  `try`/`catch`/`is_number`/re-raise shape is emitted for both call sites,
-  and that a plain `number <op> number` expression's generated Core Erlang
-  is unaffected outside the added wrapper.
+  `try`/`catch`/`is_number`/re-raise shape is emitted only when the right
+  operand's type is statically unknown; assert a `total + delta`-shaped
+  call site (right operand `:: Number`-typed or a literal) still emits the
+  exact bare-BIF Core Erlang it does today, with no `try` at all; assert
+  the right operand isn't evaluated twice for a non-trivial right-operand
+  expression (e.g. a message send), since that would silently duplicate a
+  side effect.
 - `stdlib/test/*.bt` (BUnit):
   - A `Vector`-style value type implementing `plusFromNumber:`/
     `timesFromNumber:`, asserting `5 + aVector` dispatches correctly.
@@ -466,9 +633,30 @@ dynamically on whatever the right operand turns out to be).
 
 ## Migration Path
 
-Not applicable — this only changes behavior for expressions that currently
-crash with a raw `badarith` (number-on-the-left arithmetic against a
-non-numeric right operand). No existing passing code changes behavior.
+No changes required for existing code — this only changes behavior for
+expressions that currently crash with a raw `badarith` (number-on-the-left
+arithmetic against a non-numeric right operand). No previously-successful
+expression's result changes.
+
+One narrow, existing-code-visible effect is worth naming rather than
+glossing over: code that wraps such an expression in `on: TypeError do:`
+(or a broader `on: Error do:`) specifically to recover from today's
+`badarith` will observe a different outcome after this ADR ships, split by
+whether the right operand's type gained the reflected hook —
+- If the right operand's type now implements `plusFromNumber:` (etc.), the
+  expression succeeds and the handler simply doesn't fire — the intended
+  fix, not a regression, though it does mean a handler written as a
+  workaround for the crash becomes dead code worth removing.
+- If it doesn't, the expression still fails, but as `does_not_understand`
+  (`RuntimeError`) instead of `badarith` (`TypeError`) — an `on: TypeError
+  do:` handler that used to catch this specific failure no longer does,
+  and the exception propagates further than it did before. An `on: Error
+  do:` handler (covering both) is unaffected either way.
+This is the same class of change any DNU-instead-of-crash fix produces (the
+exception's class name changes, not just its message), not something
+specific to this ADR's mechanism — noted here because § User Impact
+(Newcomer) already establishes `does_not_understand` as the intended,
+improved failure mode.
 
 ## References
 - Related issues: BT-2712 (this ADR), BT-2708 (epic), BT-2709 (Phase 1,
