@@ -582,15 +582,25 @@ Mirroring BT-2709's own precedent for this exact call site:
 Only once both check out does the codegen wiring below proceed.
 
 - `crates/beamtalk-core/src/codegen/core_erlang/operators.rs`:
-  - In the always-bare arithmetic path (the `else` branch in
-    `generate_binary_op` when `receiver_is_statically_numeric(left)` is
-    true), first check `receiver_is_statically_numeric(right)` — if `true`,
-    emit the bare BIF exactly as today (no change); only if `false` does
-    this call site enter the new mechanism.
-  - For a call site that does enter it (either branch above, or the
-    `is_number`-true branch of `guarded_op_doc`'s `OperatorGuard::Arithmetic`
-    case, so a *dynamically* numeric left operand gets the same fallback as
-    a *statically* numeric one): `let`-bind both operands *before* the
+  - The `receiver_is_statically_numeric(right)` skip check gates **both**
+    call sites the left operand can reach a numeric outcome through, not
+    just one of them:
+    - The always-bare arithmetic path (the `else` branch in
+      `generate_binary_op` when `receiver_is_statically_numeric(left)` is
+      true): check `receiver_is_statically_numeric(right)` first — if
+      `true`, emit the bare BIF exactly as today (no change, no `try`).
+    - The `is_number`-true branch of `guarded_op_doc`'s
+      `OperatorGuard::Arithmetic` case (a *dynamically* numeric left
+      operand): apply the identical `receiver_is_statically_numeric(right)`
+      check before deciding whether to wrap that branch's bare BIF call —
+      if `true`, that branch also stays a bare BIF with no `try`, exactly
+      mirroring the always-bare path's treatment. Skipping this check here
+      would silently wrap every guarded-left call site in an unneeded
+      `try` even when the right operand's type is already known, which
+      would contradict the zero-cost claim in Consequences → Positive.
+  - Only when `receiver_is_statically_numeric(right)` is `false` — on
+    either call site above — does the new mechanism engage. There,
+    `let`-bind both operands *before* the
     `try` (mirroring `guarded_op_doc`'s own `left_var`/`right_var`
     binding — referencing the inlined operand documents a second time
     inside the catch handler would double-evaluate a non-trivial right
