@@ -141,6 +141,20 @@ impl CoreErlangGenerator {
             None
         };
 
+        // ADR 0116/BT-3263: number-on-the-left coercion. Every arithmetic call
+        // site that can reach a bare BIF with the *left* operand numeric (the
+        // always-bare path below, and the `is_number`-true branch inside
+        // `guarded_op_doc`'s Arithmetic case) must also account for a
+        // non-numeric *right* operand — `5 + aVector` — which today emits a
+        // bare `erlang:'+'` with no guard at all and crashes with a raw
+        // `badarith`. `receiver_is_statically_numeric` applied to the right
+        // operand is the same compile-time skip already used for the left
+        // operand: a `total + delta`-shaped call site (right operand a numeric
+        // literal or `:: Number`-family typed) stays a bare BIF, unchanged.
+        // Only a right operand whose type is genuinely unknown reaches the new
+        // `try`/`catch` mechanism (`Self::number_coercion_try_catch`).
+        let right_is_statically_numeric = self.receiver_is_statically_numeric(&arguments[0]);
+
         // BT-1937: Capture both operands in evaluation order. When either
         // operand produces an open let-chain (e.g., a class method self-send
         // mutating a class var), capture_subexpr_sequence force-hoists BOTH
@@ -153,7 +167,20 @@ impl CoreErlangGenerator {
         let left_code = docs.pop().expect("left operand");
 
         let call_doc = if let Some(guard) = guard {
-            self.guarded_op_doc(guard, op, erlang_op, left_code, right_code)
+            self.guarded_op_doc(
+                guard,
+                op,
+                erlang_op,
+                left_code,
+                right_code,
+                right_is_statically_numeric,
+            )
+        } else if is_arithmetic && !right_is_statically_numeric {
+            // ADR 0116/BT-3263: left is statically numeric but the right
+            // operand's type is genuinely unknown — wrap the bare BIF in the
+            // badarith-catching number-on-the-left coercion mechanism instead
+            // of emitting it unguarded.
+            self.number_coercion_bare_path(op, erlang_op, left_code, right_code)
         } else {
             // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
             // format!(). erlang_op is one of the static literals in the match
@@ -301,6 +328,19 @@ impl CoreErlangGenerator {
     /// `Document::Str`); the dispatch selector uses `leaf::atom` for the original
     /// Beamtalk operator.
     ///
+    /// ADR 0116/BT-3263: for the `Arithmetic` guard specifically, the
+    /// `is_number`-true (bare-BIF) branch is itself replaced by the
+    /// number-on-the-left `try`/`catch` coercion wrapper
+    /// ([`Self::number_coercion_try_catch`]) whenever `right_is_statically_numeric`
+    /// is `false` — a numeric-at-runtime *left* operand (`x + y` where `x`
+    /// turns out to be a number) still needs the same badarith-catching
+    /// mechanism the always-bare path uses when the right operand's type
+    /// isn't known at compile time. When `right_is_statically_numeric` is
+    /// `true` (or the guard is `Comparison`), this branch is the bare BIF
+    /// exactly as before — the zero-cost guarantee is structural, not
+    /// approximate. `left_var`/`right_var` are already let-bound above, so
+    /// the wrapper reuses them directly rather than re-binding.
+    ///
     /// BT-3163: this `case` matches only `<'true'>`/`<'false'>`, no wildcard —
     /// the same non-exhaustive-to-the-compiler shape `case_clause_fallback`
     /// exists for (see its doc comment and ADR 0111 Addendum 5, "Production
@@ -322,6 +362,7 @@ impl CoreErlangGenerator {
         erlang_op: &'static str,
         left_code: Document<'static>,
         right_code: Document<'static>,
+        right_is_statically_numeric: bool,
     ) -> Document<'static> {
         let GuardSpec {
             predicate_module: pred_module,
@@ -331,7 +372,7 @@ impl CoreErlangGenerator {
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
 
-        let bif_branch = docvec![
+        let bare_bif = docvec![
             "call 'erlang':'",
             Document::Str(erlang_op),
             "'(",
@@ -340,6 +381,22 @@ impl CoreErlangGenerator {
             var(right_var.clone()),
             ")",
         ];
+        // ADR 0116/BT-3263: see this function's doc comment — the arithmetic
+        // guard's bare-BIF branch becomes the coercion `try`/`catch` when the
+        // right operand's type is genuinely unknown; every other case (the
+        // comparison guard, or a statically-numeric right operand) keeps the
+        // bare BIF unchanged.
+        let bif_branch =
+            if matches!(guard, OperatorGuard::Arithmetic) && !right_is_statically_numeric {
+                self.number_coercion_try_catch(
+                    op,
+                    erlang_op,
+                    var(left_var.clone()),
+                    var(right_var.clone()),
+                )
+            } else {
+                bare_bif
+            };
         let send_branch = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             var(left_var.clone()),
@@ -380,6 +437,194 @@ impl CoreErlangGenerator {
             false_branch,
             no_match_fallback,
             " end",
+        ]
+    }
+
+    /// ADR 0116/BT-3263: maps an arithmetic operator to its number-on-the-left
+    /// reflected-method selector (`n <op>FromNumber: self`, called on the
+    /// *right* operand with the *left* operand as the argument — see the
+    /// ADR's § Reflected method protocol for why the operand order is
+    /// reversed). Callers only reach this for `+ - * /`, already validated by
+    /// `is_arithmetic` in `generate_binary_op`; any other operator is a
+    /// caller bug, not a runtime possibility.
+    fn coercion_selector(op: &str) -> &'static str {
+        match op {
+            "+" => "plusFromNumber:",
+            "-" => "minusFromNumber:",
+            "*" => "timesFromNumber:",
+            "/" => "divFromNumber:",
+            _ => unreachable!("coercion_selector called for non-arithmetic operator: {op}"),
+        }
+    }
+
+    /// ADR 0116/BT-3263: builds the number-on-the-left coercion `try`/`catch`
+    /// around a single arithmetic BIF call, for the residual case where the
+    /// right operand's type is genuinely unknown at compile time.
+    ///
+    /// `left_doc`/`right_doc` **must** already be safe to reference more than
+    /// once — a bound variable, not an arbitrary expression — since both are
+    /// referenced again inside the catch handler (`is_number(right)`, and
+    /// both operands as `send_number_coercion/4` arguments). Callers that
+    /// don't already have bound operands (the always-bare path) must
+    /// `let`-bind them first; see [`Self::number_coercion_bare_path`].
+    /// `guarded_op_doc` already has `left_var`/`right_var` bound and passes
+    /// those directly.
+    ///
+    /// Spike-verified shape (ADR 0116 § Implementation, de-risking spike):
+    /// ```erlang
+    /// try
+    ///     call 'erlang':'+'(BinLeft, BinRight)
+    /// of <TryResult> -> TryResult
+    /// catch <Type, Error, Stack> ->
+    ///     case {Type, Error} of
+    ///         <{'error', 'badarith'}> when 'true' ->
+    ///             case call 'erlang':'is_number'(BinRight) of
+    ///                 <'true'> when 'true' ->
+    ///                     %% BinRight IS a number — badarith wasn't a coercion
+    ///                     %% miss (e.g. `5 / 0`, or float overflow). Re-raise
+    ///                     %% unchanged so the existing badarith classification
+    ///                     %% (ADR 0028/BT-2704) still handles it.
+    ///                     primop 'raw_raise'(Type, Error, Stack)
+    ///                 <'false'> when 'true' ->
+    ///                     call 'beamtalk_message_dispatch':'send_number_coercion'(
+    ///                         BinRight, 'plusFromNumber:', [BinLeft], '+')
+    ///                 <NoMatch> when 'true' ->
+    ///                     call 'erlang':'error'({'case_clause', NoMatch})
+    ///             end
+    ///         <OtherPair> when 'true' ->
+    ///             primop 'raw_raise'(Type, Error, Stack)
+    ///     end
+    /// ```
+    ///
+    /// Note there is **no** trailing `end` for the `try` itself — unlike
+    /// `case`/`let`, Core Erlang's `try...of...catch...` has no closing
+    /// keyword of its own; it terminates wherever the catch clause's body
+    /// expression terminates (confirmed against `erlc`'s own `+to_core`
+    /// output for a hand-written `try`/`catch` — a bare `end` there is a
+    /// dangling token and a syntax error, not the harmless extra bracket the
+    /// ADR's illustrative snippet might suggest).
+    ///
+    /// The mandatory `of <TryResult> -> TryResult` clause (Core Erlang, unlike
+    /// Erlang source, requires it explicitly — its absence is a syntax error)
+    /// and the mandatory `when` guard on every `case` clause were both
+    /// confirmed via `erlc` in the spike. `primop 'raw_raise'` (never
+    /// `erlang:raise/3`, which expects a pre-built stacktrace term rather than
+    /// the raw trace a catch clause binds) mirrors
+    /// `control_flow/exception_handling.rs`'s `on_do_catch_preamble` /
+    /// `emit_raw_raise` convention. BT-3163's `case_clause_fallback`
+    /// convention (`erlang:error({case_clause, _})`, not `raw_raise`) applies
+    /// only to the inner `is_number` boolean case's defensive third arm — an
+    /// internal-invariant guard, not a real exception to propagate — matching
+    /// `guarded_op_doc`'s own precedent for the identical shape. The outer
+    /// `{Type, Error}` case's fallback arm binds a fresh throwaway variable
+    /// (not `Type`/`Error` again) and re-raises via `raw_raise`, since it is a
+    /// real exception (anything that isn't `badarith`) that must propagate
+    /// unchanged.
+    fn number_coercion_try_catch(
+        &mut self,
+        op: &str,
+        erlang_op: &'static str,
+        left_doc: Document<'static>,
+        right_doc: Document<'static>,
+    ) -> Document<'static> {
+        let selector = Self::coercion_selector(op);
+        let try_result_var = self.fresh_temp_var("BinCoerceTry");
+        let type_var = self.fresh_temp_var("BinCoerceType");
+        let error_var = self.fresh_temp_var("BinCoerceError");
+        let stack_var = self.fresh_temp_var("BinCoerceStack");
+        let other_pair_var = self.fresh_temp_var("BinCoerceOther");
+        // BT-3163: explicit wildcard for the inner is_number boolean case —
+        // see this function's doc comment and `case_clause_fallback`'s own.
+        let inner_no_match = self.case_clause_fallback("BinCoerceNoMatch");
+
+        docvec![
+            "try call 'erlang':'",
+            Document::Str(erlang_op),
+            "'(",
+            left_doc.clone(),
+            ", ",
+            right_doc.clone(),
+            ") of <",
+            var(try_result_var.clone()),
+            "> -> ",
+            var(try_result_var),
+            " catch <",
+            var(type_var.clone()),
+            ", ",
+            var(error_var.clone()),
+            ", ",
+            var(stack_var.clone()),
+            "> -> case {",
+            var(type_var.clone()),
+            ", ",
+            var(error_var.clone()),
+            "} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(",
+            right_doc.clone(),
+            ") of <'true'> when 'true' -> primop 'raw_raise'(",
+            var(type_var.clone()),
+            ", ",
+            var(error_var.clone()),
+            ", ",
+            var(stack_var.clone()),
+            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(",
+            right_doc,
+            ", ",
+            atom(selector),
+            ", [",
+            left_doc,
+            "], ",
+            atom(op.to_string()),
+            ")",
+            inner_no_match,
+            " end <",
+            var(other_pair_var),
+            "> when 'true' -> primop 'raw_raise'(",
+            var(type_var),
+            ", ",
+            var(error_var),
+            ", ",
+            var(stack_var),
+            ") end",
+        ]
+    }
+
+    /// ADR 0116/BT-3263: the always-bare arithmetic path's number-on-the-left
+    /// entry point — used by `generate_binary_op` when the *left* operand is
+    /// statically numeric (so no runtime guard is needed for it) but the
+    /// *right* operand's type is genuinely unknown. Unlike `guarded_op_doc`
+    /// (which already has `left_var`/`right_var` bound for its own guard),
+    /// this path's `left_code`/`right_code` may be arbitrary un-hoisted
+    /// expression documents — referencing either twice inside
+    /// [`Self::number_coercion_try_catch`]'s catch handler without binding
+    /// first would double-evaluate a non-trivial right operand (e.g. a
+    /// message send). So both operands are `let`-bound to fresh temporaries
+    /// first, mirroring `guarded_op_doc`'s own `left_var`/`right_var` binding.
+    fn number_coercion_bare_path(
+        &mut self,
+        op: &str,
+        erlang_op: &'static str,
+        left_code: Document<'static>,
+        right_code: Document<'static>,
+    ) -> Document<'static> {
+        let left_var = self.fresh_temp_var("BinLeft");
+        let right_var = self.fresh_temp_var("BinRight");
+        let try_catch = self.number_coercion_try_catch(
+            op,
+            erlang_op,
+            var(left_var.clone()),
+            var(right_var.clone()),
+        );
+        docvec![
+            "let ",
+            var(left_var),
+            " = ",
+            left_code,
+            " in let ",
+            var(right_var),
+            " = ",
+            right_code,
+            " in ",
+            try_catch,
         ]
     }
 
