@@ -107,6 +107,34 @@ operator — distinct from the separately-named `div:` keyword message for
 integer division on `Integer`, so the shared "div" substring doesn't
 collide as a selector, just as a reading hazard worth a beat of attention.)
 
+#### When an operator doesn't apply: implement it anyway, to reject with intent
+
+Not every reflected operator makes sense for every type — `5 / aVector`
+("a number divided by a vector") rarely has an obvious meaning the way
+`5 * aVector` (scale) or `5 + aVector` (broadcast-add) do, and some types
+are point-like rather than vector-space-like (a `Temperature` sensibly
+supports `5 + aTemperature`, an offset, but not `5 * aTemperature`, which
+has no physical meaning). For those, the recommended pattern is to
+implement the method anyway, with a body that rejects explicitly:
+
+```beamtalk
+divFromNumber: n :: Number -> Vector =>
+  self error: "Cannot divide a number by a Vector — did you mean (aVector / n)?"
+```
+
+This is better than simply omitting the method. Omitting it leaves
+`does_not_understand` to fire on the *synthesized* selector
+(`'divFromNumber:'`) — a name the caller never typed (they wrote `5 /
+aVector`) — which is harder to connect back to their own code than an
+ordinary DNU is (see the dispatch-mechanism hint below, which narrows but
+doesn't eliminate this gap for methods left unimplemented). A deliberate
+`self error:` names the actual problem and, where relevant, points at the
+supported alternative. Practically, this means a type author who commits
+to number-on-the-left arithmetic at all will typically implement all four
+methods — some as real arithmetic, the rest as intentional rejections —
+not a variable subset; see § Consequences, Negative for what this means
+for the earlier boilerplate estimate.
+
 ### Dispatch mechanism (codegen)
 
 **Trigger condition, refined.** `receiver_is_statically_numeric` (BT-2709)
@@ -159,8 +187,8 @@ catch <Type, Error, Stack> ->
                     %% (ADR 0028/BT-2704) still handles it.
                     primop 'raw_raise'(Type, Error, Stack)
                 <'false'> when 'true' ->
-                    call 'beamtalk_message_dispatch':'send'(
-                        BinRight, 'plusFromNumber:', [BinLeft])
+                    call 'beamtalk_message_dispatch':'send_number_coercion'(
+                        BinRight, 'plusFromNumber:', [BinLeft], '+')
                 %% is_number/1 is boolean-exhaustive — `erlc`'s own BIF
                 %% return-type inference proves this arm unreachable (it
                 %% warns "clause cannot match" if present, confirmed by the
@@ -185,14 +213,20 @@ catch <Type, Error, Stack> ->
 end
 ```
 
-**Spike-verified** (see Implementation § De-risking spike results): this
-exact shape — including the mandatory `try ... of ... catch ... end` form
-(Core Erlang, unlike Erlang source, requires the `of` clause explicitly;
-its absence is a syntax error) and the mandatory `when` guard on every
-`case` clause — was hand-compiled with `erlc` and confirmed to core_lint
-cleanly, then functionally exercised end-to-end for all three branches
-(happy-path add, non-numeric-right dispatch, and numeric-right re-raise via
-float overflow).
+**Spike-verified** (see Implementation § De-risking spike results): the
+`try`/`catch`/`is_number`/`raw_raise` shape — including the mandatory
+`try ... of ... catch ... end` form (Core Erlang, unlike Erlang source,
+requires the `of` clause explicitly; its absence is a syntax error) and the
+mandatory `when` guard on every `case` clause — was hand-compiled with
+`erlc` and confirmed to core_lint cleanly, then functionally exercised
+end-to-end for all three branches (happy-path add, non-numeric-right
+dispatch, and numeric-right re-raise via float overflow). That spike used a
+bare `send/3` stub, predating the `send_number_coercion/4` wrapper added
+below — the outer `try`/`catch` shape shown above is unchanged by that
+addition (still spike-verified), but `send_number_coercion/4` itself is a
+new, not-yet-compiled function and should go through the same hand-compile-
+and-verify treatment before implementation, not be assumed correct by
+extension.
 
 `+ - * /` can each raise `badarith` between two genuine numbers, not only
 when the right operand isn't a number: `/` on a zero divisor, and —
@@ -245,6 +279,73 @@ already in. It is built directly as a `Document` from the AST and generator
 state, with no `ThreadedIr` involvement, consistent with that existing
 guard and outside `ThreadedIr`'s scope.
 
+#### Hinting the DNU when the reflected method is missing
+
+A plain `beamtalk_message_dispatch:send(BinRight, 'plusFromNumber:',
+[BinLeft])` that finds no `plusFromNumber:` on `BinRight`'s class produces
+an ordinary `does_not_understand`: `"<Class> does not understand
+'plusFromNumber:'"`. That's a real gap for a selector the caller never
+typed — unlike a normal DNU (`foo bar` → `"Foo does not understand 'bar'"`,
+directly traceable to the caller's own source), `plusFromNumber:` is
+synthesized by this mechanism; someone who wrote `5 + aVector` has no
+reason to already know that name.
+
+Rather than teach the general DNU-formatting path (`beamtalk_error.erl`'s
+`generate_message/3` / `maybe_enrich_dnu_hint/1`) about this one synthetic
+selector family — those stay generic, by design, and have no way to
+recover "this was tried because of the `+` on line N" once the failure
+reaches them — the fix lives at the one place that still has that context:
+the coercion-dispatch call site itself. A new runtime helper,
+`beamtalk_message_dispatch:send_number_coercion/4` (`Right, Selector,
+Args, OrigOp`), wraps the existing `send/3`:
+
+```erlang
+send_number_coercion(Right, Selector, Args, OrigOp) ->
+    RightClass = beamtalk_primitive:class_of(Right),
+    try
+        send(Right, Selector, Args)
+    catch
+        error:#{'$beamtalk_class' := _,
+                error := #beamtalk_error{kind = does_not_understand,
+                                          class = RightClass,
+                                          selector = Selector} = Error}:Stack ->
+            %% RightClass and Selector are already bound above/as this
+            %% function's argument — the catch pattern re-uses them, so this
+            %% only matches a does_not_understand for *this exact* class and
+            %% selector, not any DNU that happens to propagate through.
+            Hint = iolist_to_binary(io_lib:format(
+                "~s has no '~s' — implement it to support 'number ~s ~s' arithmetic",
+                [RightClass, Selector, OrigOp, RightClass])),
+            HintedError = beamtalk_error:with_hint(Error, Hint),
+            erlang:raise(error, beamtalk_exception_handler:wrap(HintedError), Stack)
+    end.
+```
+
+This mirrors the real shape a DNU actually propagates as:
+`beamtalk_error:raise/1` (the path every production DNU already goes
+through — e.g. `raise_class_dnu`/`raise_class_self_dnu` in
+`beamtalk_class_dispatch.erl`) wraps the `#beamtalk_error{}` via
+`beamtalk_exception_handler:wrap/1` into a `#{'$beamtalk_class' := ...,
+error := #beamtalk_error{...}}` tagged map *before* calling `erlang:error/1`
+— so a `catch` here has to match that wrapped shape, not the bare record,
+and the re-raise has to re-wrap the hinted error the same way to stay
+consistent with every other exception in the system.
+
+Why match on both fields, not just the selector: if `plusFromNumber:`
+*does* exist on `Right`'s class but its body calls something else that
+itself DNUs (an unrelated bug inside the user's own method), that inner
+failure has a different selector and must propagate unchanged — not get
+relabeled as "coercion hook missing" when the hook was actually present
+and something else broke. Same discipline § Dispatch mechanism already
+applies to `badarith`: narrow matching on the exact failure this call site
+can actually produce, not a broad catch-and-relabel of anything that
+happens to propagate through.
+
+`kind` stays `does_not_understand` (`RuntimeError`) — this only adds a
+`hint`, the same field `format/1` already renders for every DNU
+(§ REPL example below). No new exception class, no change to how `on:
+RuntimeError do:` or `on: Error do:` catch it.
+
 ### REPL example
 
 Using the project's `.btscript` `// =>` assertion convention (the verified
@@ -259,6 +360,7 @@ substring the REPL/eval error message actually contains —
 
 5 + "not a vector"
 // => ERROR: String does not understand 'plusFromNumber:'
+// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic
 
 aVector + 5
 // => Vector(6, 7, 8)
@@ -266,6 +368,13 @@ aVector + 5
 5 / 0
 // => ERROR: bad arithmetic operation
 ```
+
+(Two `// =>` lines shown for `5 + "not a vector"` deliberately — the first
+is the bare DNU message every other DNU in this doc uses, the second is
+the added hint `send_number_coercion/4` attaches to it, on the same
+`format/1` line every DNU's hint already renders on: `"<message>\nHint:
+<hint>"`. A real `.btscript` test asserts against the substring it needs,
+not both.)
 
 ### What this ADR does not do
 
@@ -499,11 +608,23 @@ follow-up rather than folding it into this arithmetic-specific design.
   the runtime already fully supports.
 - A type author who doesn't need number-on-the-left arithmetic pays zero
   cost and needs zero code — the hooks are opt-in.
+- A type that doesn't implement the reflected hook at all still gets a
+  more useful error than a bare DNU: `send_number_coercion/4`
+  (§ Dispatch mechanism) adds a hint naming the original operator, so
+  `5 + aThing` fails with something closer to "`Thing` has no
+  `plusFromNumber:` — implement it to support `number + Thing`
+  arithmetic" than an unexplained `"Thing does not understand
+  'plusFromNumber:'"` referencing a selector the caller never typed.
 
 ### Negative
 - Per-type boilerplate: a value type wanting full bidirectional arithmetic
   writes up to 8 small methods (`+ - * /` and their `…FromNumber:`
-  counterparts) instead of 4. Acceptable per the ticket's own framing — a
+  counterparts) instead of 4 — and, per § Reflected method protocol's
+  "implement it anyway, to reject with intent" guidance, the honest
+  estimate is closer to 8 in practice than to some smaller subset: even an
+  operator that doesn't apply (`divFromNumber:` on a point-like type) is
+  better implemented as a deliberate rejection than left to the generic
+  DNU-plus-hint fallback. Acceptable per the ticket's own framing — a
   future `deriving`/macro mechanism (BT-2714, synthesized-method deriver
   framework) is the right place to reduce this, not a reason to weaken the
   type-checker guarantee now.
@@ -588,11 +709,14 @@ follow-up rather than folding it into this arithmetic-specific design.
 
 ## Implementation
 
-Affected components: codegen only (no parser, type-checker, or runtime
-protocol changes) — the type checker's existing `check_binary_operand_types`
-warning is left as-is, including its now-known false positive on newly-valid
-number-on-the-left code (§ Consequences, Negative), rather than folded into
-this ADR's scope.
+Affected components: codegen, plus one small runtime addition (no parser,
+type-checker, or new runtime protocol/exception-class changes) — the type
+checker's existing `check_binary_operand_types` warning is left as-is,
+including its now-known false positive on newly-valid number-on-the-left
+code (§ Consequences, Negative), rather than folded into this ADR's scope.
+The runtime addition is `beamtalk_message_dispatch:send_number_coercion/4`
+(§ Dispatch mechanism's DNU-hinting subsection) — a thin wrapper around the
+existing `send/3`, not a new dispatch mechanism or exception class.
 
 ### De-risking spike (done — results below)
 
@@ -698,6 +822,21 @@ benchmark claim. Safe to proceed to the codegen wiring below.
   - New helper mapping `+ - * /` → `plusFromNumber:` / `minusFromNumber:` /
     `timesFromNumber:` / `divFromNumber:`, built with `Document`/`docvec!`
     typed leaves (CLAUDE.md, ADR 0089) — no `format!()`.
+  - The dispatch branch calls `beamtalk_message_dispatch:send_number_coercion/4`
+    (below), not bare `send/3`, passing the operator symbol as the fourth
+    argument for the hint text.
+- `runtime/apps/beamtalk_runtime/src/beamtalk_message_dispatch.erl`:
+  - New `send_number_coercion/4` (§ Dispatch mechanism's DNU-hinting
+    subsection): wraps `send/3`, catches only a `does_not_understand` whose
+    class and selector match this exact call's `Right`/`Selector`, and
+    re-raises it with a hint added via `beamtalk_error:with_hint/2` naming
+    the original operator. Any other exception — including a DNU with a
+    *different* selector or class, e.g. a bug inside the reflected method's
+    own body — passes through `erlang:raise/3` unchanged.
+  - EUnit tests: the hint is added when the reflected method is genuinely
+    absent; a DNU raised *inside* a present `plusFromNumber:` (for an
+    unrelated selector) is not rewritten, confirming the class/selector
+    match is doing its job and not over-catching.
 - Codegen regression tests (mirroring the existing
   `tests/expressions.rs` guard tests from BT-2709/2710): assert the
   `try`/`catch`/`is_number`/re-raise shape is emitted only when the right
@@ -706,12 +845,20 @@ benchmark claim. Safe to proceed to the codegen wiring below.
   exact bare-BIF Core Erlang it does today, with no `try` at all; assert
   the right operand isn't evaluated twice for a non-trivial right-operand
   expression (e.g. a message send), since that would silently duplicate a
-  side effect.
+  side effect; assert the dispatch branch calls `send_number_coercion/4`
+  with the correct operator symbol.
 - `stdlib/test/*.bt` (BUnit):
   - A `Vector`-style value type implementing `plusFromNumber:`/
     `timesFromNumber:`, asserting `5 + aVector` dispatches correctly.
   - A type with no reflected hook, asserting `5 + aThing` raises
-    `does_not_understand` (not a raw `badarith`).
+    `does_not_understand` *with the added hint* (not a raw `badarith`, and
+    not a bare hint-less DNU).
+  - A type implementing `divFromNumber:` purely to reject
+    (§ Reflected method protocol's "implement it anyway" guidance),
+    asserting the custom message surfaces, not the generic DNU hint —
+    confirming an intentional rejection isn't accidentally intercepted by
+    `send_number_coercion/4`'s own catch (it only fires on DNU, and a
+    `self error:` body doesn't raise one).
   - `5 / 0` and `1.0e308 + 1.0e308` (a zero divisor and a float-overflow
     add, exercising both known numeric `badarith` causes on both call
     sites) still raise the existing `TypeError`/"bad arithmetic operation"
