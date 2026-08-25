@@ -31010,6 +31010,7 @@
         "mutation",
         "object",
         "set",
+        "setUp",
         "string conversion",
         "subclassing",
         "testResultDuration",
@@ -31024,7 +31025,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BUnit tests for TestRunner and TestResult (BT-762)\n\nTestCase subclass: TestRunnerTest\n\n  testResultTotal =>\n    result := TestRunner run: SampleTestCase\n    self assert: result total equals: 2\n\n  testResultPassed =>\n    result := TestRunner run: SampleTestCase\n    self assert: result passed equals: 2\n\n  testResultFailed =>\n    result := TestRunner run: SampleTestCase\n    self assert: result failed equals: 0\n\n  testResultHasPassed =>\n    result := TestRunner run: SampleTestCase\n    self assert: result hasPassed\n\n  testResultSummary =>\n    result := TestRunner run: SampleTestCase\n    self deny: (result summary == nil)\n\n  testResultDuration =>\n    result := TestRunner run: SampleTestCase\n    self assert: (result duration >= 0.0)\n\n  testResultPrintString =>\n    result := TestRunner run: SampleTestCase\n    self deny: (result printString == nil)\n\n  testResultFailuresEmpty =>\n    result := TestRunner run: SampleTestCase\n    self assert: result failures equals: #()",
+      "source": "// BUnit tests for TestRunner and TestResult (BT-762)\n\nTestCase subclass: TestRunnerTest\n\n  setUp => self.result := TestRunner run: SampleTestCase\n\n  testResultTotal => self assert: self.result total equals: 2\n\n  testResultPassed => self assert: self.result passed equals: 2\n\n  testResultFailed => self assert: self.result failed equals: 0\n\n  testResultHasPassed => self assert: self.result hasPassed\n\n  testResultSummary => self assert: self.result summary class equals: String\n\n  testResultDuration => self assert: (self.result duration >= 0.0)\n\n  testResultPrintString =>\n    self assert: self.result printString class equals: String\n\n  testResultFailuresEmpty => self assert: self.result failures equals: #()",
       "explanation": "BUnit tests for TestRunner and TestResult (BT-762)"
     },
     {

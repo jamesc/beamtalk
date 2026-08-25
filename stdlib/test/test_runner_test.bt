@@ -5,34 +5,21 @@
 
 TestCase subclass: TestRunnerTest
 
-  testResultTotal =>
-    result := TestRunner run: SampleTestCase
-    self assert: result total equals: 2
+  setUp => self.result := TestRunner run: SampleTestCase
 
-  testResultPassed =>
-    result := TestRunner run: SampleTestCase
-    self assert: result passed equals: 2
+  testResultTotal => self assert: self.result total equals: 2
 
-  testResultFailed =>
-    result := TestRunner run: SampleTestCase
-    self assert: result failed equals: 0
+  testResultPassed => self assert: self.result passed equals: 2
 
-  testResultHasPassed =>
-    result := TestRunner run: SampleTestCase
-    self assert: result hasPassed
+  testResultFailed => self assert: self.result failed equals: 0
 
-  testResultSummary =>
-    result := TestRunner run: SampleTestCase
-    self deny: (result summary == nil)
+  testResultHasPassed => self assert: self.result hasPassed
 
-  testResultDuration =>
-    result := TestRunner run: SampleTestCase
-    self assert: (result duration >= 0.0)
+  testResultSummary => self assert: self.result summary class equals: String
+
+  testResultDuration => self assert: (self.result duration >= 0.0)
 
   testResultPrintString =>
-    result := TestRunner run: SampleTestCase
-    self deny: (result printString == nil)
+    self assert: self.result printString class equals: String
 
-  testResultFailuresEmpty =>
-    result := TestRunner run: SampleTestCase
-    self assert: result failures equals: #()
+  testResultFailuresEmpty => self assert: self.result failures equals: #()
