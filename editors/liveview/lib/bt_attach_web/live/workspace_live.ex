@@ -8444,36 +8444,56 @@ defmodule BtAttachWeb.WorkspaceLive do
              own scrollable, filterable browser rather than a collapsed in-tree
              section. Selecting "Native" replaces the class tree body with the
              native-module list (its own origin filter + count). --%>
-        <div class="seg" role="tablist" aria-label="Browser mode">
+        <%!-- BT-3256: icon-only buttons (the seg's text labels were part of the
+             ~119px horizontal deficit at the 286px default — see the BT-3247
+             follow-up comment on `.seg button` above). Each button keeps its
+             full-word `aria-label`/`title` so the meaning that used to be the
+             visible label is still available to screen readers and on hover;
+             only the visible glyph changes. --%>
+        <div class="seg seg-icon" role="tablist" aria-label="Browser mode">
           <button
             :for={
-              {mode, label} <- [
-                {"classes", "Classes"},
-                {"native", "Native"},
-                {"aliases", "Type Aliases"}
+              {mode, label, icon} <- [
+                {"classes", "Classes", "▣"},
+                {"native", "Native", "⚛"},
+                {"aliases", "Type Aliases", "≈"}
               ]
             }
             type="button"
             role="tab"
             class={[to_string(@browser_mode) == mode && "on"]}
             aria-selected={to_string(to_string(@browser_mode) == mode)}
+            aria-label={label}
+            title={label}
             phx-click="browser_mode"
             phx-value-mode={mode}
           >
-            {label}
+            {icon}
           </button>
         </div>
-        <div :if={@browser_mode == :classes} class="seg" role="tablist" aria-label="Class tree view">
+        <div
+          :if={@browser_mode == :classes}
+          class="seg seg-icon"
+          role="tablist"
+          aria-label="Class tree view"
+        >
           <button
-            :for={{view, label} <- [{"hierarchy", "Hier"}, {"category", "Cats"}]}
+            :for={
+              {view, label, icon} <- [
+                {"hierarchy", "Hierarchy", "≡"},
+                {"category", "Categories", "▦"}
+              ]
+            }
             type="button"
             role="tab"
             class={[@browser_view == view && "on"]}
             aria-selected={to_string(@browser_view == view)}
+            aria-label={label}
+            title={label}
             phx-click="browser_view"
             phx-value-view={view}
           >
-            {label}
+            {icon}
           </button>
         </div>
         <%!-- BT-2557: source-origin filter — narrow the tree to project / deps /
