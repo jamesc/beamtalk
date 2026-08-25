@@ -1,7 +1,7 @@
 # ADR 0104: Typed Actor Protocols — the Class Interface Is the Protocol
 
 ## Status
-Accepted (2026-07-07) — implemented via Epic BT-2747 (Phases 1–4,
+Implemented (2026-07-07) — via Epic BT-2747 (Phases 1–4,
 BT-2749…BT-2752).
 
 ## Implementation Tracking

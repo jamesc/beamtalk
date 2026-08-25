@@ -1,7 +1,7 @@
 # ADR 0107: Nil and Type Patterns in `match:`
 
 ## Status
-Accepted (2026-07-12)
+Implemented (2026-07-12) — landed via epic BT-2853 (BT-2854/2855/2856/2857), with follow-ons BT-2870 (Supervisor-subclass extension) and BT-2860 (diagnostics polish)
 
 ## Implementation Tracking
 
@@ -15,7 +15,7 @@ Accepted (2026-07-12)
 | 3 | [BT-2856](https://linear.app/beamtalk/issue/BT-2856) | Exhaustiveness + hot-reload re-check integration | M | BT-2855 |
 | 4 | [BT-2857](https://linear.app/beamtalk/issue/BT-2857) | Docs, LSP, and E2E validation | M | BT-2855, BT-2856 |
 
-**Status:** Planned
+**Status:** Done
 
 ## Context
 

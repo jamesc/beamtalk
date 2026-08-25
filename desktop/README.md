@@ -210,10 +210,15 @@ says plainly it did **not** hands-on validate criterion (e) — webview
 keybinding/rendering parity — because its sandbox had no display server, no
 `cargo-tauri`, and no target OS. **This crate's development sandbox had the
 identical constraint** (see "What was and wasn't verified" below), so nothing
-in this implementation newly confirms (e) either. Treat the Tauri choice as
-still "leaning," not "closed," until someone runs `cargo tauri dev` on a real
-desktop and exercises `Cmd/Ctrl-W` interception and WebKitGTK-on-Linux
-stability under real LiveView traffic.
+in this implementation confirmed (e) at write time.
+
+**Update — confirmed on macOS:** a real hands-on run of `cargo tauri dev`
+(no sandbox constraint) exercised the picker, attach/detach, window-per-
+workspace, `Cmd-W` interception, and WKWebView rendering under real LiveView
+traffic — reported working well. Criterion (e) and the Tauri choice are now
+**closed for macOS**. Linux (WebKitGTK) and Windows (WebView2) are still
+unverified — the same exercise needs to run on those platforms before
+treating the choice as closed there too.
 
 ## What was and wasn't verified
 
@@ -235,20 +240,24 @@ root/sudo access to install them). What that means concretely:
   made it into git; see that file's `desktop/src-tauri/Cargo.lock`
   exception), so the dependency graph is genuinely pinned now, not just
   described as such.
-- **Not verified**: this crate's own Rust source (`main.rs`, `commands.rs`,
-  `state.rs`, `launcher.rs`, `dto.rs`) has **not** been type-checked by
-  `rustc` — the build never got far enough to reach this crate's own
-  compilation unit. The Tauri API usage (window building, event emission,
-  the single-instance plugin's callback signature, command registration) is
-  written from documented Tauri v2 APIs and cross-checked against
-  `beamtalk-desktop-broker`'s actual public signatures (read directly from
-  its source, not guessed), but has not compiled.
-- **Not verified at all**: anything requiring a webview or window manager —
-  the frontend (`ui/`) rendering correctly, IPC payload shapes matching
-  between `dto.rs`'s `serde` output and `main.js`'s field access, the
-  single-instance plugin's runtime focus behavior, `WebviewWindow::set_title`
-  actually updating a real title bar, or criterion (e) (keybinding/rendering
-  parity) at all.
+- **Not verified in any sandboxed session**: this crate's own Rust source
+  (`main.rs`, `commands.rs`, `state.rs`, `launcher.rs`, `dto.rs`) was never
+  type-checked by `rustc` in this repo's development sandboxes — none of them
+  had a display server or the Tauri toolchain. The Tauri API usage (window
+  building, event emission, the single-instance plugin's callback signature,
+  command registration) was written from documented Tauri v2 APIs and
+  cross-checked against `beamtalk-desktop-broker`'s actual public signatures
+  (read directly from its source, not guessed).
+- **Now verified on macOS, via a real hands-on `cargo tauri dev` run outside
+  any sandbox**: the crate compiles; the picker lists workspaces; attach/
+  detach opens and closes windows correctly; each workspace window shows the
+  right title (`WebviewWindow::set_title` works); `Cmd-W` interception
+  behaves as `menu.rs` intends; and WKWebView rendering under real LiveView
+  traffic looks right — reported working well. Criterion (e)
+  (keybinding/rendering parity) is confirmed **on macOS**.
+- **Still not verified**: the same exercise on Linux (WebKitGTK stability,
+  IPC payload shapes, single-instance focus behavior) or Windows (WebView2);
+  see "Windows-specific gaps" below, which remain fully open.
 - **Specific risk flagged by adversarial review, worth checking first**:
   `commands.rs`'s post-attach monitor (`spawn_monitor`) is a raw
   `std::thread::spawn` loop that calls `WebviewWindow::set_title` (via
@@ -256,10 +265,12 @@ root/sudo access to install them). What that means concretely:
   from that background thread, not Tauri's own command-dispatch thread pool.
   Tauri's window handles are documented as safe to call from any thread
   (internally proxied to the main event loop), so this is expected to be
-  fine — but that expectation is unverified here. If `cargo tauri dev`
-  shows title updates not applying, or a panic/hang originating from
-  `spawn_monitor`, route the window-mutating calls through
-  `AppHandle::run_on_main_thread` instead.
+  fine — and the macOS hands-on run above did not report title updates
+  failing to apply or a hang/panic originating from `spawn_monitor`, so
+  treat this as resolved on macOS. If Linux/Windows testing turns up title
+  updates not applying, or a panic/hang originating from `spawn_monitor`,
+  route the window-mutating calls through `AppHandle::run_on_main_thread`
+  instead.
 - **Fully verified**: the shell-agnostic decision logic
   (`beamtalk-desktop-shell`'s `attach`/`empty_state` modules) — that crate has
   no GUI dependency, is a normal workspace member, and its full test suite
@@ -332,13 +343,13 @@ root/sudo access to install them). What that means concretely:
   pre-existing, not introduced by this change; filed as BT-3252 and fixed
   there — see "Closing the picker" below.
 
-**Before this ships**, someone with a real Linux/macOS/Windows desktop needs
-to: install the Tauri prerequisites (`https://v2.tauri.app/start/prerequisites/`),
-run `cargo tauri dev` from this directory, fix whatever `rustc` errors surface
-(expect some — nontrivial Tauri API surface written without compiler
-feedback almost always needs at least minor fixes), and manually exercise the
-picker end-to-end against a real `beamtalk workspace create --background
---persistent` workspace.
+**Before this ships**, someone with a real Linux/Windows desktop needs to
+repeat what's now done on macOS: install the Tauri prerequisites
+(`https://v2.tauri.app/start/prerequisites/`), run `cargo tauri dev` from
+this directory, fix whatever `rustc` errors surface, and manually exercise
+the picker end-to-end against a real `beamtalk workspace create --background
+--persistent` workspace. macOS is confirmed working (see "Shell decision
+status" above); Linux and Windows are the remaining gap.
 
 ## Local development (once you have the Tauri toolchain)
 

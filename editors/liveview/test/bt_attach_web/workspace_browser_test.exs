@@ -862,6 +862,62 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
+  test "the System Browser panel-head controls fit the column width without clipping at the default width (BT-3256)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#system-browser .panel-head")
+    # Same font-swap race as BT-3247's test above — measure only once the real
+    # webfont metrics have settled.
+    |> evaluate("document.fonts.ready.then(() => true)")
+    # At the 286px `--browser-w` default with `browser_mode: :classes` (the
+    # default), the panel-head's Classes/Native/Type-Aliases seg + Hier/Cats
+    # seg + source-origin filter + trailing +/× icon buttons needed ~403px
+    # against ~284px available — a ~119px deficit `.panel`'s `overflow:
+    # hidden` clipped silently rather than visibly wrapping or scrolling.
+    # `scrollWidth > clientWidth` is the horizontal counterpart of the
+    # `scrollHeight`/`clientHeight` check BT-3247 used for the vertical case;
+    # BT-3256 fixed it by making the two segs icon-only instead of widening
+    # `--browser-w` (which must stay at its default) or hiding Hier/Cats.
+    |> assert_eventually(
+      "(() => { const h = document.querySelector('#system-browser .panel-head'); return h.scrollWidth <= h.clientWidth; })()",
+      "the System Browser panel-head overflowed its width at the default column width"
+    )
+    # The rightmost controls — the "+" (new class) and "×" (close panel) icon
+    # buttons — are exactly what silently fell (partially or fully) outside
+    # the clipped/clickable area before the fix. Assert both are fully inside
+    # the panel-head's own box, not merely present somewhere in the DOM.
+    |> evaluate(
+      """
+      (() => {
+        const head = document.querySelector('#system-browser .panel-head');
+        const headRect = head.getBoundingClientRect();
+        const fits = (sel) => {
+          const el = head.querySelector(sel);
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.right <= headRect.right + 0.5;
+        };
+        return fits('.panel-icon') && fits('.panel-close');
+      })()
+      """,
+      fn ok ->
+        assert ok,
+               "the +/× icon buttons are clipped outside the System Browser panel-head"
+      end
+    )
+    # Icon-only toggles (BT-3256) replaced the Classes/Native/Type-Aliases and
+    # Hier/Cats buttons' visible text with a glyph — `aria-label`/`title`
+    # carry the original words so the meaning isn't lost for screen readers
+    # or on hover.
+    |> assert_has("#system-browser .panel-head .seg-icon button[aria-label='Classes']")
+    |> assert_has("#system-browser .panel-head .seg-icon button[aria-label='Native']")
+    |> assert_has("#system-browser .panel-head .seg-icon button[aria-label='Type Aliases']")
+    |> assert_has("#system-browser .panel-head .seg-icon button[aria-label='Hierarchy']")
+    |> assert_has("#system-browser .panel-head .seg-icon button[aria-label='Categories']")
+  end
+
   test "a saved split size is restored on the next load (BT-2576)", %{conn: conn} do
     conn
     |> visit("/")

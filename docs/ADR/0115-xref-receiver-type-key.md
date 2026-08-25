@@ -1,7 +1,7 @@
 # ADR 0115: Receiver-Type Key for `senders_of/1` Lookup
 
 ## Status
-Accepted (2026-08-20)
+Implemented (2026-08-20) — shipped via Epic BT-2798 (BT-3216–BT-3220), plus follow-up BT-3215
 
 ## Context
 
