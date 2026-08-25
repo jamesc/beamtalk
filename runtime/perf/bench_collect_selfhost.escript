@@ -206,7 +206,11 @@ bench_number_coercion() ->
                    end,
                CoerceLoop(K - 1, A2)
         end,
-    Bare(N, 0), CoerceTry(N, 0),   %% warm
+    %% sanity: both produce identical output
+    BareResult = Bare(N, 0),
+    CoerceResult = CoerceTry(N, 0),
+    BareResult =:= CoerceResult orelse
+        error({number_coercion_mismatch, BareResult, CoerceResult}),
     BareUs = min_us(Reps, fun() -> Bare(N, 0) end),
     CoerceUs = min_us(Reps, fun() -> CoerceTry(N, 0) end),
     io:format("~n=== number coercion: try/catch vs bare (N=~p adds/loop, best of ~p) ===~n", [N, Reps]),
