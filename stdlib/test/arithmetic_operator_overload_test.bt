@@ -6,6 +6,15 @@
 // dispatch to `Money>>+` (receiver decides). A type with no operator falls
 // through to a `does_not_understand` DNU rather than a raw `badarith`.
 //
+// BT-3264 (ADR 0116): also covers *number-on-the-left* — `5 + aMoney`, where
+// the numeric literal/receiver is on the LEFT and the value-type is on the
+// right. That case dispatches (via a codegen-generated `try`/`catch`, BT-3263)
+// to a reflected `<verb>FromNumber:` method rather than to `+`/`-`/`*`/`/`
+// directly. See `Money>>plusFromNumber:`/`timesFromNumber:`/`divFromNumber:`
+// in `fixtures/money.bt` for the three shapes: real arithmetic, and the
+// "implement it anyway, to reject with intent" pattern (ADR 0116 § Reflected
+// method protocol).
+//
 // The `Money` and `Widget` value-types live in `fixtures/` (one class per file).
 
 TestCase subclass: ArithmeticOperatorOverloadTest
@@ -41,3 +50,117 @@ TestCase subclass: ArithmeticOperatorOverloadTest
     w := (Widget new) withSize: 5
     @expect dnu
     self should: [w + 1] raise: #does_not_understand
+
+  // ==========================================================================
+  // BT-3264 (ADR 0116): number-on-the-left coercion — `5 + aMoney`, numeric
+  // literal/receiver on the LEFT, value-type on the right.
+  // ==========================================================================
+
+  /// `5 + aMoney` dispatches to `Money>>plusFromNumber:`, not `Money>>+`
+  /// (which would need `aMoney` on the left). `check_binary_operand_types`
+  /// (type checker) doesn't know about `plusFromNumber:` and still flags this
+  /// as a numeric-argument mismatch (ADR 0116 § Consequences, Negative) even
+  /// though it now dispatches correctly at runtime — `@expect type`
+  /// acknowledges that known false positive.
+  testNumberPlusUserTypeDispatches =>
+    a := (Money new) withCents: 150
+    @expect type
+    self assert: (5 + a) cents equals: 155
+
+  /// `5 * aMoney` dispatches to `Money>>timesFromNumber:`.
+  testNumberTimesUserTypeDispatches =>
+    a := (Money new) withCents: 100
+    @expect type
+    self assert: (5 * a) cents equals: 500
+
+  /// A type with no `plusFromNumber:` hook at all (`Widget`) raises
+  /// `does_not_understand` for `5 + aWidget` — not a raw `badarith` — because
+  /// the mechanism's `try`/`catch` (BT-3263) catches the `badarith` from the
+  /// bare `erlang:'+'`, confirms the right operand isn't numeric, and
+  /// dispatches to `beamtalk_message_dispatch:send_number_coercion/4`
+  /// (BT-3262), which finds no `plusFromNumber:` on `Widget` and DNUs.
+  testNumberPlusUnknownTypeRaisesDoesNotUnderstand =>
+    w := (Widget new) withSize: 5
+    @expect type
+    self should: [5 + w] raise: #does_not_understand
+
+  /// Confirms BT-3262 and BT-3263 are wired together end-to-end, not just
+  /// individually unit-tested: `send_number_coercion/4`'s hint (naming the
+  /// synthesized selector and the original operator) survives all the way
+  /// out to `Exception>>hint`, not just the bare DNU message every other DNU
+  /// carries. The synthesized selector (`plusFromNumber:`) never appears in
+  /// this source file — that's exactly the gap the hint exists to close.
+  testNumberPlusUnknownTypeDnuHintNamesReflectedMethod =>
+    w := (Widget new) withSize: 5
+    @expect type
+    hint := [5 + w] on: RuntimeError do: [:e | e hint]
+    self assert: (hint includesSubstring: "plusFromNumber:")
+    self assert: (hint includesSubstring: "implement it")
+
+  /// "Implement it anyway, to reject with intent" (ADR 0116 § Reflected
+  /// method protocol): `Money>>divFromNumber:` exists but deliberately
+  /// rejects via `self error:`. `5 / aMoney` must surface that custom
+  /// message and a `#user_error` kind, NOT the generic
+  /// `send_number_coercion/4` DNU hint — confirming its catch only fires on
+  /// an actual `does_not_understand` and doesn't misfire on an intentional
+  /// `self error:` (which isn't a DNU at all).
+  testNumberDivUserTypeRejectsWithIntent =>
+    a := (Money new) withCents: 100
+    @expect type
+    message := [5 / a] on: Exception do: [:e | e message]
+    self assert: (message includesSubstring: "Cannot divide a number by Money")
+    @expect type
+    kind := [5 / a] on: Exception do: [:e | e kind]
+    self assert: kind equals: #user_error
+
+  // ==========================================================================
+  // BT-3264 (ADR 0116): `badarith` between two genuinely numeric operands
+  // (zero divisor, float overflow) must still raise the existing raw
+  // `#badarith` (the "bad arithmetic operation" classification, ADR 0028 —
+  // `#type_error` at a class-dispatch/actor boundary per
+  // `class_var_nlr_shadow_test.bt`, `#badarith` directly from a plain
+  // instance method per `test_case_assertion_test.bt`/`math_test.bt`; these
+  // tests don't cross such a boundary, so `#badarith` is the one
+  // `should:raise:` actually observes here), NOT misrouted to a
+  // `…FromNumber:` `does_not_understand` — the regression case the
+  // `is_number(Right)` re-raise check inside the generated `try`/`catch`
+  // exists for. Covers both call sites the ADR touches: a
+  // statically-numeric-literal left operand (no guard, no `try` at all —
+  // pre-existing, unaffected behaviour) and a dynamically-numeric left
+  // operand via the guarded path (BT-3263's `guarded_op_doc`
+  // `is_number`-true branch, which DOES wrap in the new `try`/`catch`).
+  // ==========================================================================
+
+  /// Both operands are numeric literals — `receiver_is_statically_numeric`
+  /// is true for both sides, so codegen emits the bare BIF with no `try` at
+  /// all (BT-3263's zero-cost guarantee). Confirms the `badarith` this
+  /// raises is untouched by this ADR's mechanism — not a `divFromNumber:` DNU.
+  testDivisionByZeroStaticStillBadarith =>
+    self should: [5 / 0] raise: #badarith
+
+  /// Float overflow (`badarith` between two genuine numbers, not a coercion
+  /// miss) on the same statically-numeric-literal call site.
+  testFloatOverflowStaticStillBadarith =>
+    self should: [1.0e308 + 1.0e308] raise: #badarith
+
+  /// `a`/`b` are deliberately untyped parameters, so
+  /// `receiver_is_statically_numeric` is false for both — the same technique
+  /// `bt3163_comparison_guard_actor.bt`'s `compareUnsafe:with:` uses to force
+  /// the analogous comparison guard. This forces the *dynamically*-numeric
+  /// left-operand call site: `guarded_op_doc`'s runtime `is_number(Left)`
+  /// check, whose true branch BT-3263 wraps in the coercion `try`/`catch`
+  /// whenever the right operand isn't statically numeric either.
+  divideDynamically: a with: b => a / b
+
+  /// Same shape as `divideDynamically:with:`, for `+` instead of `/`.
+  addDynamically: a with: b => a + b
+
+  /// Division by zero via the dynamically-numeric-left-operand call site —
+  /// still `#badarith`, not a `divFromNumber:` DNU.
+  testDynamicDivisionByZeroStillBadarith =>
+    self should: [self divideDynamically: 5 with: 0] raise: #badarith
+
+  /// Float overflow via the dynamically-numeric-left-operand call site —
+  /// still `#badarith`, not a `plusFromNumber:` DNU.
+  testDynamicFloatOverflowStillBadarith =>
+    self should: [self addDynamically: 1.0e308 with: 1.0e308] raise: #badarith
