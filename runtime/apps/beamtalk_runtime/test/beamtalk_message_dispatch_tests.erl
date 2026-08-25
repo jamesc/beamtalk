@@ -419,3 +419,105 @@ supervisor_generic_dispatch_test() ->
     after
         gen_server:stop(SupPid)
     end.
+
+%% ============================================================================
+%% BT-3262 (ADR 0116): send_number_coercion/4 — DNU hint on missing reflected
+%% method for number-on-the-left arithmetic coercion.
+%% ============================================================================
+
+number_coercion_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"hint added when the reflected method is genuinely absent",
+            fun number_coercion_hints_missing_method/0},
+        {"DNU inside a present reflected method (unrelated selector) is not rewritten",
+            fun number_coercion_does_not_rewrite_inner_dnu/0},
+        {"a non-DNU exception from inside send/3 passes through unchanged",
+            fun number_coercion_passes_through_non_dnu/0},
+        {"success case: send/3's result is returned unchanged",
+            fun number_coercion_returns_result_on_success/0}
+    ]}.
+
+number_coercion_hints_missing_method() ->
+    %% CoercionActor has no 'timesFromNumber:' method at all — this is the
+    %% genuine "hook missing" case: does_not_understand for the exact
+    %% class+selector send_number_coercion/4 was asked to send, so it gets
+    %% the operator-naming hint attached.
+    {ok, Pid} = test_number_coercion_actor:start_link(),
+    Obj = #beamtalk_object{
+        class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
+    },
+    try
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = does_not_understand,
+                    class = 'CoercionActor',
+                    selector = 'timesFromNumber:',
+                    hint =
+                        <<"CoercionActor has no 'timesFromNumber:' — implement it to support 'number * CoercionActor' arithmetic"/utf8>>
+                }
+            },
+            beamtalk_message_dispatch:send_number_coercion(
+                Obj, 'timesFromNumber:', [5], '*'
+            )
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
+number_coercion_does_not_rewrite_inner_dnu() ->
+    %% CoercionActor DOES implement 'plusFromNumber:', but its body sends an
+    %% unrelated selector that itself DNUs. The selector on the propagated
+    %% error ('unrelatedSelector') doesn't match the Selector argument
+    %% ('plusFromNumber:'), so send_number_coercion/4 must not add a hint —
+    %% confirms the class+selector match isn't over-catching.
+    {ok, Pid} = test_number_coercion_actor:start_link(),
+    Obj = #beamtalk_object{
+        class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
+    },
+    try
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = does_not_understand,
+                    class = 'CoercionActor',
+                    selector = unrelatedSelector,
+                    hint = undefined
+                }
+            },
+            beamtalk_message_dispatch:send_number_coercion(
+                Obj, 'plusFromNumber:', [5], '+'
+            )
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
+number_coercion_passes_through_non_dnu() ->
+    %% CoercionActor's 'divFromNumber:' is present and raises a non-DNU
+    %% error (instantiation_error). send_number_coercion/4 only catches
+    %% does_not_understand, so this must propagate unchanged.
+    {ok, Pid} = test_number_coercion_actor:start_link(),
+    Obj = #beamtalk_object{
+        class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
+    },
+    try
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = instantiation_error}
+            },
+            beamtalk_message_dispatch:send_number_coercion(
+                Obj, 'divFromNumber:', [5], '/'
+            )
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
+number_coercion_returns_result_on_success() ->
+    %% On success, send_number_coercion/4 returns send/3's result unchanged.
+    Result = beamtalk_message_dispatch:send_number_coercion(2, '+', [3], '+'),
+    ?assertEqual(5, Result).
