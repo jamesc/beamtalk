@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for BT-3268 (ADR 0114 Phase 1 spike): checks which real,
+// currently-reachable live-patch surfaces actually reproduce the
+// referencesTo: gap Constraint 4 describes
+// (`beamtalk_xref:build_method_entry/5` hard-codes `references => []`).
+//
+// SPIKE FINDING, correcting the ADR's own text: Constraint 4 names
+// "every `>>`/`compile:source:` live patch" as reaching this gap. Measured
+// here against the real, currently-reachable surfaces, in order:
+//
+//   1. `>>` / `compile:source:` — do NOT reproduce the gap. Both route
+//      through `beamtalk_repl_loader:install_method/9` /
+//      `reload_method_definition/4`, which recompile the WHOLE class via
+//      `beamtalk_repl_compiler:compile_method_reload/3` + `code:load_binary/3`,
+//      producing a complete compiler-computed `method_xref` (references
+//      included). Neither surface calls `beamtalk_object_class:put_method/3,4`
+//      in the current codebase (a repo-wide grep confirms zero non-test call
+//      sites) — so `build_method_entry/5`'s narrow reparse is never reached.
+//   2. `beamtalk_extensions:register/5` (source-bearing extensions, ADR
+//      0066) — measured below. Also does NOT reproduce the gap end-to-end,
+//      for a different reason: its xref TABLE row genuinely does carry
+//      `references => []` (confirmed at the EUnit level, see
+//      beamtalk_adr0114_site_discovery_spike_tests.erl), but
+//      `SystemNavigation referencesTo:`'s own Beamtalk-level implementation
+//      has a dedicated, UNCONDITIONAL rescan of every registered extension's
+//      source (`collectExtensionReferencesFor:into:`, BT-2196 — "Extensions
+//      are not in the index yet, so this scan is unconditional") that
+//      bypasses the xref table entirely and finds the reference fresh, every
+//      call, regardless of what the index says.
+//   3. `ClassBuilder` `methodSource:` (ADR 0038) — DOES reproduce the gap.
+//      See `stdlib/test/adr_0114_class_builder_live_patch_gap_test.bt` for
+//      that fixture: a ClassBuilder class is fully indexed (no fallback
+//      rescan, unlike extensions) but with `references => []`, so its real
+//      reference is silently missed by `referencesTo:` end-to-end.
+//
+// This script measures case 2 live, against the exact FFI
+// `workspace_native_api.btscript` already uses for its own (passing)
+// register/5 + referencesTo: coverage.
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// A block whose behaviour is irrelevant — the extension is never invoked,
+// only its `source:` text is scanned for xref purposes (matching
+// workspace_native_api.btscript's `extRefsFun`/`extRefsSource` pattern).
+extTimerFun := [:a :s | s]
+// => _
+
+extTimerSource := "spawnTimer -> Timer => Timer after: 999999 do: [nil]"
+// => _
+
+Erlang beamtalk_extensions register: #Counter selector: #btAdr0114TimerExt fun: extTimerFun owner: #test source: extTimerSource
+// => Result ok: nil
+
+// NOT a gap: referencesTo: Timer DOES surface this extension method as a
+// site, via the unconditional extension rescan described above — even
+// though the xref TABLE row for this method carries `references => []`.
+((SystemNavigation default referencesTo: Timer) collect: [:r | r at: #selector]) includes: #btAdr0114TimerExt
+// => true
+
+// The sends channel finds it too, via the ordinary (non-extension-special-
+// cased) xref path — sends_from_source/1 re-derives sends for every
+// source-bearing extension.
+((SystemNavigation default sendersOf: #after:do:) collect: [:r | r at: #selector]) includes: #btAdr0114TimerExt
+// => true
+
+// Clean up both ETS tables (mirrors workspace_native_api.btscript's own
+// register/5 cleanup so this fixture leaves no residue for later cases in
+// the shared E2E session).
+Erlang ets delete: #beamtalk_extensions key: #(#Counter, #btAdr0114TimerExt)
+// => true
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#Counter, #btAdr0114TimerExt)
+// => true
