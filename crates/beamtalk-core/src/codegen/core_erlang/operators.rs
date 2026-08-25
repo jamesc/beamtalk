@@ -221,6 +221,18 @@ impl CoreErlangGenerator {
     /// the arithmetic path a non-number field would otherwise `badarith`; on the
     /// comparison path the analogous miss is *silently wrong* — see
     /// [`Self::receiver_is_statically_comparable`].)
+    ///
+    /// ADR 0116/BT-3263 reuses this same predicate, unmodified, to gate the
+    /// number-on-the-left coercion mechanism's *right* operand — per the
+    /// ADR's own "Trigger condition, refined" spec, which explicitly folds
+    /// "a numeric/untyped field" into "the exact same rule already applied
+    /// to the left operand." That reuse means the untyped-field leniency
+    /// above (deliberately tuned for the left operand's hot-loop counter
+    /// pattern) reproduces on the right side too: an untyped `self.extra` in
+    /// `self.total + self.extra` is trusted as numeric and never reaches the
+    /// new `try`/`catch`, so a non-numeric `extra` still raw-crashes on
+    /// `badarith` at runtime instead of dispatching to `plusFromNumber:` —
+    /// tracked as BT-3266, not fixed here.
     pub(in crate::codegen::core_erlang) fn receiver_is_statically_numeric(
         &self,
         expr: &Expression,
@@ -507,11 +519,12 @@ impl CoreErlangGenerator {
     /// The mandatory `of <TryResult> -> TryResult` clause (Core Erlang, unlike
     /// Erlang source, requires it explicitly — its absence is a syntax error)
     /// and the mandatory `when` guard on every `case` clause were both
-    /// confirmed via `erlc` in the spike. `primop 'raw_raise'` (never
-    /// `erlang:raise/3`, which expects a pre-built stacktrace term rather than
-    /// the raw trace a catch clause binds) mirrors
-    /// `control_flow/exception_handling.rs`'s `on_do_catch_preamble` /
-    /// `emit_raw_raise` convention. BT-3163's `case_clause_fallback`
+    /// confirmed via `erlc` in the spike. The re-raise arms below call
+    /// `control_flow::exception_handling::CoreErlangGenerator::emit_raw_raise`
+    /// (never `erlang:raise/3`, which expects a pre-built stacktrace term
+    /// rather than the raw trace a catch clause binds) — the same shared
+    /// helper `on_do_catch_preamble` uses, not a re-implementation of its
+    /// `primop 'raw_raise'` shape. BT-3163's `case_clause_fallback`
     /// convention (`erlang:error({case_clause, _})`, not `raw_raise`) applies
     /// only to the inner `is_number` boolean case's defensive third arm — an
     /// internal-invariant guard, not a real exception to propagate — matching
@@ -560,13 +573,9 @@ impl CoreErlangGenerator {
             var(error_var.clone()),
             "} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(",
             right_doc.clone(),
-            ") of <'true'> when 'true' -> primop 'raw_raise'(",
-            var(type_var.clone()),
-            ", ",
-            var(error_var.clone()),
-            ", ",
-            var(stack_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(",
+            ") of <'true'> when 'true' -> ",
+            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
+            " <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(",
             right_doc,
             ", ",
             atom(selector),
@@ -578,13 +587,9 @@ impl CoreErlangGenerator {
             inner_no_match,
             " end <",
             var(other_pair_var),
-            "> when 'true' -> primop 'raw_raise'(",
-            var(type_var),
-            ", ",
-            var(error_var),
-            ", ",
-            var(stack_var),
-            ") end",
+            "> when 'true' -> ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
+            " end",
         ]
     }
 

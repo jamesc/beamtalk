@@ -66,7 +66,19 @@ impl CoreErlangGenerator {
         }
     }
 
-    fn emit_raw_raise(type_var: String, error_var: String, stack_var: String) -> Document<'static> {
+    /// Emits `primop 'raw_raise'(Type, Error, Stack)` — the shared re-raise
+    /// shape for a caught `<Type, Error, Stack>` triple, used by every
+    /// catch-clause fallback arm in the codebase (never `erlang:raise/3`,
+    /// which expects a pre-built stacktrace term rather than the raw trace a
+    /// catch clause binds). `pub(in crate::codegen::core_erlang)` so sibling
+    /// modules building their own `try`/`catch` (e.g. `operators.rs`'s
+    /// number-on-the-left coercion wrapper, ADR 0116/BT-3263) reuse this
+    /// instead of re-emitting the same three-arg primop inline.
+    pub(in crate::codegen::core_erlang) fn emit_raw_raise(
+        type_var: String,
+        error_var: String,
+        stack_var: String,
+    ) -> Document<'static> {
         docvec![
             "primop 'raw_raise'(",
             leaf::var(type_var),

@@ -485,6 +485,34 @@ fn test_number_coercion_try_catch_compiles_through_erlc() {
     crate::test_helpers::assert_compiles_through_erlc("coercion_try", &core_erlang);
 }
 
+#[test]
+fn test_number_coercion_untyped_self_field_right_operand_stays_bare() {
+    // Known, tracked gap (BT-3266, filed from BT-3263 code review): the
+    // right-operand gate reuses `receiver_is_statically_numeric` verbatim —
+    // per ADR 0116's own "Trigger condition, refined" spec ("a numeric/
+    // untyped field — the exact same rule already applied to the left
+    // operand") — so an UNTYPED `self.field` on the right is treated as
+    // statically numeric and skips the new try/catch entirely, exactly like
+    // an untyped left-operand field already does (BT-2709's deliberate
+    // `self.count := self.count + 1` performance trade-off). This means
+    // `self.total + self.extra` with `extra` untyped still raw-crashes on
+    // badarith at runtime if `extra` isn't a number, rather than dispatching
+    // to `plusFromNumber:` — pinned down here as documented, current
+    // behavior, not asserted as correct; BT-3266 tracks whether to close it.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+    let right = self_field_access("extra");
+    let output = generator
+        .generate_binary_op("+", &left, &[right])
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        !output.contains("try ") && !output.contains("send_number_coercion"),
+        "BT-3266: an untyped self.field right operand currently stays on the \
+         bare-BIF path (inherits BT-2709's left-operand leniency) — got: {output}"
+    );
+}
+
 // BT-2710: comparison operators (`< > <= >=`) are dispatchable messages. The
 // bare-BIF fast path holds for statically-comparable receivers (numeric / char
 // / string literals, `self` in Integer/Float/Character/String, and
