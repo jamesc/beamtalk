@@ -71,7 +71,21 @@ changelog_test_() ->
         fun unknown_cast_is_ignored/1,
         fun unknown_info_is_ignored/1,
         fun code_change_returns_state/1,
-        fun new_class_value_has_nil_source_file/1
+        fun new_class_value_has_nil_source_file/1,
+        %% ADR 0114 (BT-3269): rename-class / rename-method schema
+        fun rename_class_json_round_trip/1,
+        fun rename_method_json_round_trip/1,
+        fun rename_method_decode_drops_malformed_candidate_site/1,
+        fun rename_class_entry_accessors_expose_fields/1,
+        fun rename_method_entry_accessors_expose_fields/1,
+        fun rename_class_does_not_shadow_pending_new_class_entry/1,
+        fun dirty_methods_uses_rename_class_placeholder/1,
+        fun change_entries_handles_rename_class_without_crashing/1,
+        fun target_key_single_element_for_ordinary_kind/1,
+        fun target_key_distinct_per_site_for_rename_class/1,
+        fun target_key_distinct_per_site_for_rename_method/1,
+        fun target_key_skips_null_site_for_dynamic_class_rename/1,
+        fun target_key_distinguishes_independent_renames_sharing_a_file/1
     ]}.
 
 %% FFI surface with no gen_server started: must degrade to empty, not crash.
@@ -775,6 +789,234 @@ new_class_value_has_nil_source_file(_Ctx) ->
     ].
 
 %%====================================================================
+%% ADR 0114 (BT-3269): rename-class / rename-method schema
+%%====================================================================
+
+%% JSON round-trip for the new multi-site `'rename-class'` kind, mirroring
+%% `json_round_trip/1`'s existing single-file-kind coverage.
+rename_class_json_round_trip(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
+    Decoded = beamtalk_workspace_changelog:entry_from_json(Json),
+    Reencoded = beamtalk_workspace_changelog:entry_to_json(Decoded),
+    [
+        ?_assertEqual(Json, Reencoded),
+        ?_assertEqual('rename-class', beamtalk_workspace_changelog:entry_kind(Decoded)),
+        ?_assertEqual(<<"Counter">>, beamtalk_workspace_changelog:entry_old_class(Decoded)),
+        ?_assertEqual(2, length(beamtalk_workspace_changelog:entry_sites(Decoded)))
+    ].
+
+%% JSON round-trip for the new multi-site `'rename-method'` kind, including
+%% `candidate_sites` (which round-trips but is never folded into `sites`).
+rename_method_json_round_trip(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
+    Decoded = beamtalk_workspace_changelog:entry_from_json(Json),
+    Reencoded = beamtalk_workspace_changelog:entry_to_json(Decoded),
+    [
+        ?_assertEqual(Json, Reencoded),
+        ?_assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(Decoded)),
+        ?_assertEqual(<<"increment">>, beamtalk_workspace_changelog:entry_old_selector(Decoded)),
+        ?_assertEqual(instance, beamtalk_workspace_changelog:entry_side(Decoded)),
+        ?_assertEqual(2, length(beamtalk_workspace_changelog:entry_sites(Decoded))),
+        ?_assertEqual(1, length(beamtalk_workspace_changelog:entry_candidate_sites(Decoded)))
+    ].
+
+%% Three distinct malformed `candidate_sites` shapes (missing `span`,
+%% present-but-`null` `span`, and a `span` object missing `end`) must not
+%% cost the whole ChangeLog line: `entry_from_json/1` should drop each
+%% malformed element (logged, per review feedback on PR #3521) and decode
+%% everything else — including `sites`/rename data and the one well-formed
+%% candidate site — intact.
+rename_method_decode_drops_malformed_candidate_site(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
+    Map = json:decode(Json),
+    Corrupted = Map#{
+        <<"candidate_sites">> => [
+            #{<<"sourceFile">> => <<"/proj/src/timer.bt">>},
+            #{<<"sourceFile">> => <<"/proj/src/timer2.bt">>, <<"span">> => null},
+            #{<<"sourceFile">> => <<"/proj/src/timer3.bt">>, <<"span">> => #{<<"start">> => 1}},
+            #{
+                <<"sourceFile">> => <<"/proj/src/other.bt">>,
+                <<"span">> => #{
+                    <<"start">> => 1, <<"end">> => 2
+                }
+            }
+        ]
+    },
+    CorruptedJson = json:encode(Corrupted),
+    Decoded = beamtalk_workspace_changelog:entry_from_json(iolist_to_binary(CorruptedJson)),
+    [
+        ?_assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(Decoded)),
+        ?_assertEqual(<<"increment">>, beamtalk_workspace_changelog:entry_old_selector(Decoded)),
+        ?_assertEqual(2, length(beamtalk_workspace_changelog:entry_sites(Decoded))),
+        ?_assertEqual(1, length(beamtalk_workspace_changelog:entry_candidate_sites(Decoded)))
+    ].
+
+%% All six new accessors expose the fields recorded on append (not just what
+%% survives a JSON round-trip).
+rename_class_entry_accessors_expose_fields(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    [
+        ?_assertEqual(<<"Counter">>, beamtalk_workspace_changelog:entry_old_class(Entry)),
+        ?_assertEqual(
+            <<"/proj/src/counter.bt">>, beamtalk_workspace_changelog:entry_old_path(Entry)
+        ),
+        ?_assertEqual(
+            <<"/proj/src/accumulator.bt">>, beamtalk_workspace_changelog:entry_new_path(Entry)
+        ),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_old_selector(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_candidate_sites(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_side(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_selector(Entry))
+    ].
+
+rename_method_entry_accessors_expose_fields(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    [
+        ?_assertEqual(<<"increment">>, beamtalk_workspace_changelog:entry_old_selector(Entry)),
+        ?_assertEqual(<<"incrementBy">>, beamtalk_workspace_changelog:entry_selector(Entry)),
+        ?_assertEqual(instance, beamtalk_workspace_changelog:entry_side(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_old_class(Entry)),
+        ?_assertEqual(undefined, beamtalk_workspace_changelog:entry_old_path(Entry)),
+        ?_assertEqual(1, length(beamtalk_workspace_changelog:entry_candidate_sites(Entry)))
+    ].
+
+%% Regression, mirroring `class_def_entry_does_not_shadow_pending_new_class_entry/1`:
+%% a `'rename-class'` entry (selector = undefined) must not collide on the
+%% shadow key with a `'new-class'` entry for an unrelated pending class —
+%% `shadow_key/1`'s existing kind-tiebreaker for selector-less entries already
+%% covers this without modification, verified here as a regression guard.
+rename_class_does_not_shadow_pending_new_class_entry(_Ctx) ->
+    NewClassInput = #{
+        class => <<"Widget">>,
+        kind => 'new-class',
+        source => <<"Object subclass: Widget\nend\n">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/widget.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
+    [NewClassEntry, RenameClassEntry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual('new-class', maps:get(kind, NewClassEntry)),
+        ?_assertEqual(false, maps:get(shadowed, NewClassEntry)),
+        ?_assertEqual('rename-class', maps:get(kind, RenameClassEntry)),
+        ?_assertEqual(false, maps:get(shadowed, RenameClassEntry))
+    ].
+
+%% dirtyMethods/0 uses a `#'rename-class'` placeholder (not `#'new-class'`) for
+%% a selector-less `'rename-class'` entry, mirroring `'class-def'`'s own
+%% placeholder (BT-3248).
+dirty_methods_uses_rename_class_placeholder(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
+    Dirty = beamtalk_workspace_changelog:dirtyMethods(),
+    Set = maps:get('Accumulator', Dirty),
+    [
+        ?_assertEqual(['rename-class'], maps:get(elements, Set))
+    ].
+
+%% `change_entries/0` (the `Workspace changes` FFI path) must not crash on a
+%% multi-site entry — `method_delta/1`'s catch-all degrades to "no diff"
+%% (BT-3270's rewrite mechanism, not this schema-only issue, will teach it to
+%% do better).
+change_entries_handles_rename_class_without_crashing(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
+    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual('rename-class', maps:get(kind, Entry)),
+        ?_assertEqual(nil, maps:get(selector, Entry)),
+        ?_assertEqual(false, maps:get(clean, Entry)),
+        ?_assertEqual(nil, maps:get(diff, Entry))
+    ].
+
+%% target_key/1: every pre-0114 kind still returns a single-element list
+%% wrapping the existing per-entry shadow key.
+target_key_single_element_for_ordinary_kind(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Keys = beamtalk_workspace_changelog:target_key(Entry),
+    [?_assertEqual(1, length(Keys))].
+
+%% target_key/1: a `'rename-class'` entry yields one distinct key per site.
+target_key_distinct_per_site_for_rename_class(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Keys = beamtalk_workspace_changelog:target_key(Entry),
+    [
+        ?_assertEqual(2, length(Keys)),
+        ?_assertEqual(2, length(lists:usort(Keys)))
+    ].
+
+%% target_key/1: a `'rename-method'` entry yields one distinct key per `sites`
+%% entry — `candidate_sites` are never keyed (they have no shadow-detection
+%% role, since flush never rewrites them).
+target_key_distinct_per_site_for_rename_method(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Keys = beamtalk_workspace_changelog:target_key(Entry),
+    [
+        ?_assertEqual(2, length(Keys)),
+        ?_assertEqual(2, length(lists:usort(Keys)))
+    ].
+
+%% target_key/1: a `null` site (ADR 0114's dynamic-class "no declaration site"
+%% case) contributes no key — only the real site is keyed.
+target_key_skips_null_site_for_dynamic_class_rename(_Ctx) ->
+    DynamicInput = (rename_class_input())#{
+        old_path => undefined,
+        new_path => undefined,
+        sites => [
+            undefined,
+            site_map(<<"/proj/src/widget.bt">>, #{start => 40, 'end' => 55})
+        ]
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(DynamicInput),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    Keys = beamtalk_workspace_changelog:target_key(Entry),
+    [?_assertEqual(1, length(Keys))].
+
+%% The scenario ADR 0114 explicitly calls out: two independent renames whose
+%% site lists happen to share a reference file must not collide on the same
+%% per-site key (each key also carries the entry's own rename identity, not
+%% just the site's file/span).
+target_key_distinguishes_independent_renames_sharing_a_file(_Ctx) ->
+    RenameCounter = (rename_class_input())#{
+        class => <<"Accumulator">>,
+        old_class => <<"Counter">>,
+        sites => [
+            site_map(<<"/proj/src/accumulator.bt">>, #{start => 0, 'end' => 20}),
+            site_map(<<"/proj/src/widget.bt">>, #{start => 40, 'end' => 55})
+        ]
+    },
+    RenameWidget = (rename_class_input())#{
+        class => <<"Gadget">>,
+        old_class => <<"Widget">>,
+        old_path => <<"/proj/src/widget.bt">>,
+        new_path => <<"/proj/src/gadget.bt">>,
+        sites => [
+            site_map(<<"/proj/src/gadget.bt">>, #{start => 0, 'end' => 18}),
+            %% Same file as RenameCounter's second site, different span.
+            site_map(<<"/proj/src/widget.bt">>, #{start => 60, 'end' => 75})
+        ]
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(RenameCounter),
+    {ok, _} = beamtalk_workspace_changelog:append(RenameWidget),
+    [E1, E2] = beamtalk_workspace_changelog:entries(),
+    Keys1 = beamtalk_workspace_changelog:target_key(E1),
+    Keys2 = beamtalk_workspace_changelog:target_key(E2),
+    [?_assertEqual([], [K || K <- Keys1, lists:member(K, Keys2)])].
+
+%%====================================================================
 %% Restart semantics (separate fixture: stop + restart same workspace)
 %%====================================================================
 
@@ -1087,10 +1329,62 @@ known_kinds_decode_to_atoms() ->
     ClassDef = beamtalk_workspace_changelog:entry_from_json(
         line_json_with(#{<<"kind">> => <<"class-def">>})
     ),
+    %% ADR 0114 (BT-3269).
+    RenameClass = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"kind">> => <<"rename-class">>})
+    ),
+    RenameMethod = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"kind">> => <<"rename-method">>})
+    ),
     ?assertEqual(instance, beamtalk_workspace_changelog:entry_kind(Instance)),
     ?assertEqual(class, beamtalk_workspace_changelog:entry_kind(Class)),
     ?assertEqual('new-class', beamtalk_workspace_changelog:entry_kind(NewClass)),
-    ?assertEqual('class-def', beamtalk_workspace_changelog:entry_kind(ClassDef)).
+    ?assertEqual('class-def', beamtalk_workspace_changelog:entry_kind(ClassDef)),
+    ?assertEqual('rename-class', beamtalk_workspace_changelog:entry_kind(RenameClass)),
+    ?assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(RenameMethod)).
+
+%%====================================================================
+%% sites_flushable/1 (ADR 0114, BT-3269): pure fold, no gen_server needed
+%%====================================================================
+
+sites_flushable_test_() ->
+    [
+        fun sites_flushable_all_flushable_is_true/0,
+        fun sites_flushable_empty_list_is_true/0,
+        fun sites_flushable_mixed_stdlib_and_project_returns_false_with_reason/0,
+        fun sites_flushable_first_reason_wins_when_multiple_non_flushable/0
+    ].
+
+sites_flushable_all_flushable_is_true() ->
+    ?assertEqual(
+        {true, undefined},
+        beamtalk_workspace_changelog:sites_flushable([flushable, flushable, flushable])
+    ).
+
+sites_flushable_empty_list_is_true() ->
+    ?assertEqual({true, undefined}, beamtalk_workspace_changelog:sites_flushable([])).
+
+%% AC: "flushable computed correctly for a mixed stdlib+project sites list".
+sites_flushable_mixed_stdlib_and_project_returns_false_with_reason() ->
+    ?assertEqual(
+        {false, <<"stdlib">>},
+        beamtalk_workspace_changelog:sites_flushable([
+            flushable,
+            {not_flushable, <<"stdlib">>},
+            flushable
+        ])
+    ).
+
+%% Deterministic ordering: the first non-flushable classification wins,
+%% matching sites[0]-first append order.
+sites_flushable_first_reason_wins_when_multiple_non_flushable() ->
+    ?assertEqual(
+        {false, <<"dynamic">>},
+        beamtalk_workspace_changelog:sites_flushable([
+            {not_flushable, <<"dynamic">>},
+            {not_flushable, <<"dependency:/dep/foo.bt">>}
+        ])
+    ).
 
 %%====================================================================
 %% Table-absent guards (no gen_server started)
@@ -1156,6 +1450,62 @@ durable_input(Class, Selector) ->
         author_kind => human,
         source_file => <<"/proj/src/counter.bt">>,
         span => #{start => 0, 'end' => 10}
+    }.
+
+%%====================================================================
+%% ADR 0114 (BT-3269) helpers: rename-class / rename-method fixtures
+%%====================================================================
+
+%% A `site()` map with no recorded source_ref/prev_source_ref — schema-only,
+%% no site-discovery/rewrite mechanism exists yet (BT-3270).
+site_map(SourceFile, Span) ->
+    #{
+        source_file => SourceFile,
+        span => Span,
+        source_ref => undefined,
+        prev_source_ref => undefined
+    }.
+
+%% A minimal, valid `'rename-class'` append_input: two sites — the class's own
+%% (post-rename) declaration and one foreign reference in another file.
+rename_class_input() ->
+    #{
+        class => <<"Accumulator">>,
+        kind => 'rename-class',
+        old_class => <<"Counter">>,
+        old_path => <<"/proj/src/counter.bt">>,
+        new_path => <<"/proj/src/accumulator.bt">>,
+        sites => [
+            site_map(<<"/proj/src/accumulator.bt">>, #{start => 0, 'end' => 20}),
+            site_map(<<"/proj/src/widget.bt">>, #{start => 40, 'end' => 55})
+        ],
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human
+    }.
+
+%% A minimal, valid `'rename-method'` append_input: definition site + one
+%% confirmed self/super sender site, plus one reported (never rewritten)
+%% candidate sender.
+rename_method_input() ->
+    #{
+        class => <<"Counter">>,
+        selector => <<"incrementBy">>,
+        old_selector => <<"increment">>,
+        kind => 'rename-method',
+        side => instance,
+        sites => [
+            site_map(<<"/proj/src/counter.bt">>, #{start => 10, 'end' => 30}),
+            site_map(<<"/proj/src/sub_counter.bt">>, #{start => 5, 'end' => 25})
+        ],
+        candidate_sites => [
+            #{source_file => <<"/proj/src/timer.bt">>, span => #{start => 2, 'end' => 12}}
+        ],
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => agent
     }.
 
 %% Create an isolated workspace: a unique id + a temp HOME so the changelog
