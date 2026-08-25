@@ -28,10 +28,10 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
 
 'sumTo:'/2 = fun (Self, _limit15) ->
     let Sum = 0 in
-    let _CountedLoopResult25 = let _temp16 = 1 in let _temp17 = _limit15 in letrec 'loop'/2 = fun (_loopidx18, Sum) -> case call 'erlang':'=<'(_loopidx18, _temp17) of <'true'> when 'true' -> let _Sum22 = let _BinLeft19 = Sum in let _BinRight20 = _loopidx18 in case call 'erlang':'is_number'(_BinLeft19) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft19, _BinRight20) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft19, '+', [_BinRight20]) <_BinOpNoMatch21> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch21}) end in  apply 'loop'/2 (call 'erlang':'+'(_loopidx18, 1), _Sum22) <'false'> when 'true' -> let _ExitSA23 = call 'maps':'new'() in let _ExitSA24 = call 'maps':'put'('__local__sum', Sum, _ExitSA23) in {'nil', _ExitSA24} end in apply 'loop'/2 (_temp16, Sum) in
-    let _CountedLoopState26 = call 'erlang':'element'(2, _CountedLoopResult25) in
-    let _sum27 = call 'maps':'get'('__local__sum', _CountedLoopState26) in
-    _sum27
+    let _CountedLoopResult31 = let _temp16 = 1 in let _temp17 = _limit15 in letrec 'loop'/2 = fun (_loopidx18, Sum) -> case call 'erlang':'=<'(_loopidx18, _temp17) of <'true'> when 'true' -> let _Sum28 = let _BinLeft19 = Sum in let _BinRight20 = _loopidx18 in case call 'erlang':'is_number'(_BinLeft19) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft19, _BinRight20) of <_BinCoerceTry21> -> _BinCoerceTry21 catch <_BinCoerceType22, _BinCoerceError23, _BinCoerceStack24> -> case {_BinCoerceType22, _BinCoerceError23} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight20) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType22, _BinCoerceError23, _BinCoerceStack24) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight20, 'plusFromNumber:', [_BinLeft19], '+') <_BinCoerceNoMatch26> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch26}) end <_BinCoerceOther25> when 'true' -> primop 'raw_raise'(_BinCoerceType22, _BinCoerceError23, _BinCoerceStack24) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft19, '+', [_BinRight20]) <_BinOpNoMatch27> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch27}) end in  apply 'loop'/2 (call 'erlang':'+'(_loopidx18, 1), _Sum28) <'false'> when 'true' -> let _ExitSA29 = call 'maps':'new'() in let _ExitSA30 = call 'maps':'put'('__local__sum', Sum, _ExitSA29) in {'nil', _ExitSA30} end in apply 'loop'/2 (_temp16, Sum) in
+    let _CountedLoopState32 = call 'erlang':'element'(2, _CountedLoopResult31) in
+    let _sum33 = call 'maps':'get'('__local__sum', _CountedLoopState32) in
+    _sum33
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

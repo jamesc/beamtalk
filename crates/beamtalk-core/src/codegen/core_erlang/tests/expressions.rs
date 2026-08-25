@@ -146,12 +146,19 @@ fn test_arith_bare_bif_for_numeric_literal_receiver() {
 #[test]
 fn test_arith_bare_bif_for_self_in_numeric_class() {
     use crate::ast::Identifier;
+    // ADR 0116/BT-3263: `self <op> other` in Integer/Float stays a bare BIF
+    // with no `try` only when the right operand is ALSO statically numeric —
+    // here `other :: Number`, so `receiver_is_statically_numeric(right)` is
+    // `true` and the always-bare path never engages the coercion mechanism.
     for class in ["Integer", "Float"] {
         let mut generator = CoreErlangGenerator::new("test");
         generator.set_class_identity(Some(util::ClassIdentity::new(class)));
+        generator
+            .current_method_param_types
+            .insert("other".to_string(), "Number".to_string());
         let left = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
         let right = vec![Expression::Identifier(Identifier::new(
-            "Other",
+            "other",
             Span::new(7, 12),
         ))];
         let output = generator
@@ -159,10 +166,46 @@ fn test_arith_bare_bif_for_self_in_numeric_class() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains("call 'erlang':'*'(") && !output.contains("is_number"),
-            "`self * x` in {class} must be a bare BIF; got: {output}"
+            output.contains("call 'erlang':'*'(")
+                && !output.contains("is_number")
+                && !output.contains("try "),
+            "`self * other` in {class} with other :: Number must be a bare BIF; got: {output}"
         );
     }
+}
+
+#[test]
+fn test_arith_coercion_try_for_self_in_numeric_class_unknown_right() {
+    use crate::ast::Identifier;
+    // ADR 0116/BT-3263: `self * x` in a numeric class with an UNTYPED right
+    // operand must wrap the bare BIF in the number-on-the-left coercion
+    // try/catch — a statically-numeric left operand no longer means "skip all
+    // guards" once the right operand's type is genuinely unknown (`5 *
+    // aVector`).
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_class_identity(Some(util::ClassIdentity::new("Integer")));
+    let left = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "Other",
+        Span::new(7, 12),
+    ))];
+    let output = generator
+        .generate_binary_op("*", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("try call 'erlang':'*'("),
+        "unknown right operand must wrap the bare BIF in try/catch; got: {output}"
+    );
+    assert!(
+        output.contains("call 'erlang':'is_number'("),
+        "coercion try must re-check is_number on the right operand; got: {output}"
+    );
+    assert!(
+        output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
+            && output.contains("'timesFromNumber:'"),
+        "non-numeric right operand must dispatch to timesFromNumber:; got: {output}"
+    );
 }
 
 #[test]
@@ -187,9 +230,16 @@ fn test_arith_bare_bif_for_numeric_param() {
 }
 
 #[test]
-fn test_arith_guard_for_unknown_receiver() {
+fn test_arith_guard_for_unknown_receiver_numeric_right_no_try() {
     use crate::ast::Identifier;
+    // ADR 0116/BT-3263: the right operand is statically numeric (`:: Number`)
+    // here, so the guard's is_number-true branch stays a bare BIF — the
+    // coercion try/catch never engages because the right operand's type is
+    // already known at compile time.
     let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .current_method_param_types
+        .insert("y".to_string(), "Number".to_string());
     let left = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
     let right = vec![Expression::Identifier(Identifier::new(
         "y",
@@ -210,7 +260,43 @@ fn test_arith_guard_for_unknown_receiver() {
     );
     assert!(
         !output.contains("try "),
-        "guard must not use try/catch; got: {output}"
+        "statically-numeric right operand must not enter the coercion try; got: {output}"
+    );
+}
+
+#[test]
+fn test_arith_guard_for_unknown_receiver_and_unknown_right_uses_coercion_try() {
+    use crate::ast::Identifier;
+    // ADR 0116/BT-3263: both operands are genuinely unknown here, so the
+    // guard's is_number-true (bare BIF) branch must itself become the
+    // number-on-the-left coercion try/catch — a numeric-at-runtime `x` could
+    // still meet a non-numeric `y`.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "y",
+        Span::new(4, 5),
+    ))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'erlang':'is_number'("),
+        "unknown receiver must emit an is_number guard; got: {output}"
+    );
+    assert!(
+        output.contains("call 'beamtalk_message_dispatch':'send'(") && output.contains("'+'"),
+        "guard must dispatch '+' as a message on the false arm; got: {output}"
+    );
+    assert!(
+        output.contains("try call 'erlang':'+'("),
+        "unknown right operand must wrap the guard's bare-BIF branch in try/catch; got: {output}"
+    );
+    assert!(
+        output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
+            && output.contains("'plusFromNumber:'"),
+        "coercion try must dispatch to plusFromNumber: when right isn't a number; got: {output}"
     );
 }
 
@@ -232,6 +318,198 @@ fn test_arith_guard_for_self_in_non_numeric_class() {
     assert!(
         output.contains("call 'erlang':'is_number'("),
         "`self + x` in a non-numeric class must be guarded; got: {output}"
+    );
+}
+
+// ADR 0116/BT-3263: number-on-the-left coercion. `5 + aVector` — a
+// statically-numeric left operand and a right operand whose type is
+// genuinely unknown — must wrap the bare arithmetic BIF in a badarith-
+// catching try/catch that dispatches to the right operand's
+// `<verb>FromNumber:` reflected method instead of crashing.
+
+#[test]
+fn test_number_coercion_try_for_literal_left_unknown_right() {
+    use crate::ast::Identifier;
+    // The always-bare path: left is a numeric literal (no guard at all today),
+    // right is an untyped identifier — genuinely unknown at compile time.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "aVector",
+        Span::new(4, 11),
+    ))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("try call 'erlang':'+'("),
+        "numeric literal left with unknown right must wrap in try/catch; got: {output}"
+    );
+    assert!(
+        output.contains("of <") && output.contains("> -> "),
+        "try must use the mandatory `of <Var> -> Var` clause; got: {output}"
+    );
+    assert!(
+        output.contains("catch <") && output.contains("case_clause"),
+        "catch must bind Type/Error/Stack and include the BT-3163 case_clause fallback; got: {output}"
+    );
+    assert!(
+        output.contains("call 'erlang':'is_number'("),
+        "badarith arm must re-check is_number on the right operand; got: {output}"
+    );
+    assert!(
+        output.contains("primop 'raw_raise'("),
+        "a genuinely numeric badarith (e.g. div-by-zero) must re-raise unchanged; got: {output}"
+    );
+    assert!(
+        output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
+            && output.contains("'plusFromNumber:'")
+            && output.contains(", '+')"),
+        "non-numeric right must dispatch via send_number_coercion/4 with the '+' op symbol; got: {output}"
+    );
+}
+
+#[test]
+fn test_number_coercion_bare_bif_unaffected_for_total_plus_delta() {
+    use crate::ast::Identifier;
+    // ADR 0116 § Consequences, Positive: `total + delta`-shaped call sites —
+    // numeric literal left, `:: Number`-typed right — must emit byte-for-byte
+    // the same bare BIF as before this ADR, with no try at all.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .current_method_param_types
+        .insert("delta".to_string(), "Integer".to_string());
+    let left = Expression::Literal(Literal::Integer(3), Span::new(0, 1));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "delta",
+        Span::new(4, 9),
+    ))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        !output.contains("try "),
+        "a statically-numeric right operand must never enter the coercion try; got: {output}"
+    );
+    assert!(
+        output.starts_with("call 'erlang':'+'("),
+        "must be the exact bare-BIF shape with no wrapping; got: {output}"
+    );
+}
+
+#[test]
+fn test_number_coercion_selector_per_operator() {
+    use crate::ast::Identifier;
+    // New helper mapping `+ - * /` -> `plusFromNumber:` / `minusFromNumber:` /
+    // `timesFromNumber:` / `divFromNumber:`.
+    for (op, selector) in [
+        ("+", "plusFromNumber:"),
+        ("-", "minusFromNumber:"),
+        ("*", "timesFromNumber:"),
+        ("/", "divFromNumber:"),
+    ] {
+        let mut generator = CoreErlangGenerator::new("test");
+        let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let right = vec![Expression::Identifier(Identifier::new(
+            "aVector",
+            Span::new(4, 11),
+        ))];
+        let output = generator
+            .generate_binary_op(op, &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        let expected_selector_atom = format!("'{selector}'");
+        assert!(
+            output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
+                && output.contains(&expected_selector_atom),
+            "operator {op} must dispatch to {selector}; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_number_coercion_does_not_double_evaluate_right_operand() {
+    use crate::ast::Identifier;
+    // A non-trivial right operand (a message send) must be evaluated exactly
+    // once — referencing it a second time inside the catch handler would
+    // silently duplicate a side effect.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+    let right_expr = Expression::MessageSend {
+        receiver: Box::new(Expression::Identifier(Identifier::new(
+            "factory",
+            Span::new(4, 11),
+        ))),
+        selector: MessageSelector::Unary("makeVector".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(4, 24),
+    };
+    let output = generator
+        .generate_binary_op("+", &left, &[right_expr])
+        .unwrap()
+        .to_pretty_string();
+    let dispatch_call_count = output.matches("'makeVector'").count();
+    assert_eq!(
+        dispatch_call_count, 1,
+        "the right operand's message send must be evaluated exactly once; got: {output}"
+    );
+}
+
+#[test]
+fn test_number_coercion_try_catch_compiles_through_erlc() {
+    use crate::ast::Identifier;
+    // ADR 0116 § Implementation de-risking spike: the exact try/catch shape
+    // must round-trip through `erlc`, not just look right as a string —
+    // Core Erlang's mandatory `of <Var> -> Var` clause and mandatory `when`
+    // guard on every case clause are both syntax errors if omitted, and
+    // `erlc` is the only real check for that.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "aVector",
+        Span::new(4, 11),
+    ))];
+    let body = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    // The generated expression reads `aVector` via `maps:get('aVector',
+    // State)` (identifiers resolve through the workspace `State` map in this
+    // generator context) — bind a `State` so the module is self-contained.
+    let core_erlang = format!(
+        "module 'coercion_try' ['f'/0]\n    attributes []\n'f'/0 =\n    ( fun () ->\n\t  let State = ~{{}}~ in\n\t  {body}\n      -| [] )\nend\n"
+    );
+    crate::test_helpers::assert_compiles_through_erlc("coercion_try", &core_erlang);
+}
+
+#[test]
+fn test_number_coercion_untyped_self_field_right_operand_stays_bare() {
+    // Known, tracked gap (BT-3266, filed from BT-3263 code review): the
+    // right-operand gate reuses `receiver_is_statically_numeric` verbatim —
+    // per ADR 0116's own "Trigger condition, refined" spec ("a numeric/
+    // untyped field — the exact same rule already applied to the left
+    // operand") — so an UNTYPED `self.field` on the right is treated as
+    // statically numeric and skips the new try/catch entirely, exactly like
+    // an untyped left-operand field already does (BT-2709's deliberate
+    // `self.count := self.count + 1` performance trade-off). This means
+    // `self.total + self.extra` with `extra` untyped still raw-crashes on
+    // badarith at runtime if `extra` isn't a number, rather than dispatching
+    // to `plusFromNumber:` — pinned down here as documented, current
+    // behavior, not asserted as correct; BT-3266 tracks whether to close it.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+    let right = self_field_access("extra");
+    let output = generator
+        .generate_binary_op("+", &left, &[right])
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        !output.contains("try ") && !output.contains("send_number_coercion"),
+        "BT-3266: an untyped self.field right operand currently stays on the \
+         bare-BIF path (inherits BT-2709's left-operand leniency) — got: {output}"
     );
 }
 

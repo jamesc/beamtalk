@@ -2486,12 +2486,21 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     )
     .expect("should compile (BT-2814)");
 
+    // ADR 0116/BT-3263: the right operand (`blk value: x`) is not statically
+    // numeric, so this call site now let-binds it to `_BinRight<N>` before
+    // wrapping the addition in the number-on-the-left coercion try/catch —
+    // the underlying BT-2814 fix (the block's `{Result, NewState}` tuple is
+    // unpacked to a plain value via `element(1, ...)`, never leaked raw into
+    // the arithmetic) still holds; it's just bound to a variable ahead of
+    // the `try` now instead of inlined directly as `erlang:'+'`'s 2nd arg.
     assert!(
-        regex::Regex::new(r"call 'erlang':'\+'\(10, let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple")
-            .unwrap()
-            .is_match(&code),
+        regex::Regex::new(
+            r"let _BinRight\w* = let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple\w*\) in try call 'erlang':'\+'\("
+        )
+        .unwrap()
+        .is_match(&code),
         "the local-var Tier2 block's value: call in argument position must \
-         be wrapped in a self-contained let-chain that extracts element(1) \
+         be let-bound to a self-contained let-chain that extracts element(1) \
          of the returned tuple before the addition, not the raw tuple. \
          Got: {code}"
     );

@@ -240,7 +240,7 @@ module 'typed_class_warnings' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
         <'add:'> when 'true' ->
             case Args of
                 <[_amount2]> when 'true' ->
-                    let _Val3 = call 'erlang':'+'(call 'maps':'get'('value', State), _amount2) in let State1 = call 'maps':'put'('value', _Val3, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
+                    let _Val3 = let _BinLeft4 = call 'maps':'get'('value', State) in let _BinRight5 = _amount2 in try call 'erlang':'+'(_BinLeft4, _BinRight5) of <_BinCoerceTry6> -> _BinCoerceTry6 catch <_BinCoerceType7, _BinCoerceError8, _BinCoerceStack9> -> case {_BinCoerceType7, _BinCoerceError8} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight5) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType7, _BinCoerceError8, _BinCoerceStack9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight5, 'plusFromNumber:', [_BinLeft4], '+') <_BinCoerceNoMatch11> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch11}) end <_BinCoerceOther10> when 'true' -> primop 'raw_raise'(_BinCoerceType7, _BinCoerceError8, _BinCoerceStack9) end in let State1 = call 'maps':'put'('value', _Val3, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
