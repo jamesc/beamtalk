@@ -1,7 +1,7 @@
 # ADR 0097: Desktop Attach Client — One Front Node per Workspace
 
 ## Status
-Accepted (in progress, 2026-06-13) — all 4 phases + spike landed (BT-2983–BT-2989): front hooks, broker core, Tauri picker UI, Linux/macOS/Windows packaging. Not yet verified end-to-end in a display-server sandbox; CI release lanes are `workflow_dispatch`-only.
+Accepted (in progress, 2026-06-13) — all 4 phases + spike landed (BT-2983–BT-2989): front hooks, broker core, Tauri picker UI, Linux/macOS/Windows packaging. Verified end-to-end on macOS (real hands-on `cargo tauri dev` run: picker, attach/detach, window-per-workspace, `Cmd-W` interception, WKWebView rendering under real LiveView traffic — see `desktop/README.md` § Shell decision status). Linux and Windows still unverified; CI release lanes remain `workflow_dispatch`-only pending those.
 
 Builds on [ADR 0091 — Connection Security for Remote Workspace Access](0091-remote-workspace-access-phoenix-authenticated-front.md)
 (the Attach topology and its cookie boundary) and

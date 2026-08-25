@@ -123,7 +123,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0094](0094-object-string-representation-protocols.md) | Object String Representation Protocols (printString / displayString / inspect) | Implemented | 2026-06-07 |
 | [0095](0095-rich-navigable-inspector.md) | Rich Navigable Inspector — Drillable, Live-Refreshing Object Views | Implemented | 2026-06-11 |
 | [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Implemented (live-mode; cold-mode Phase 2 pending) | 2026-06-10 |
-| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Accepted (in progress) | 2026-06-13 |
+| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Accepted (in progress — verified on macOS, Linux/Windows pending) | 2026-06-13 |
 | [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Implemented | 2026-06-23 |
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Implemented | 2026-06-26 |
 | [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented (WS3 cross-package metadata pending) | 2026-06-27 |
