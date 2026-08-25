@@ -1,0 +1,33 @@
+<!--
+  Copyright 2026 James Casey
+  SPDX-License-Identifier: Apache-2.0
+
+  Vendored copy of tauri-build's default Windows application manifest
+  (tauri-build-2.6.3/src/windows-app-manifest.xml), which `tauri_build::build()`
+  already embeds into this crate's `[[bin]]` target via `WindowsResource`
+  (since `build.rs` never overrides `WindowsAttributes::app_manifest`, so
+  tauri-build's own default applies). `build.rs` embeds this same file a
+  second time, scoped to `[[test]]` targets only, via the MSVC linker's
+  `/MANIFEST:EMBED` + `/MANIFESTINPUT:` switches — see `embed_manifest_for_tests`
+  in `build.rs` for why, and BT-3253 for the investigation this addresses.
+
+  Keeping this file's content identical to tauri-build's default is
+  intentional: it must declare the same Common Controls v6 dependency the
+  production binary gets, or a test binary could still exercise a
+  differently-manifested (or unmanifested) code path than what actually
+  ships.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>
