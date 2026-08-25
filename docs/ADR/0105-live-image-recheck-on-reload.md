@@ -1,7 +1,7 @@
 # ADR 0105: Live Image Re-Checking on Hot Reload
 
 ## Status
-Accepted (2026-07-11) — implemented via Epic BT-2775 (Phases 0–4,
+Implemented (2026-07-11) — via Epic BT-2775 (Phases 0–4,
 BT-2776…BT-2783).
 
 ## Implementation Tracking

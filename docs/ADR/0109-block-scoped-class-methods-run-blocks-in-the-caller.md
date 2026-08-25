@@ -1,7 +1,7 @@
 # ADR 0109: Block-Scoped Class Methods Run Their Block in the Caller's Process
 
 ## Status
-Accepted (2026-07-28)
+Implemented (2026-07-28) — base decision (BT-3018) and the BT-3047 amendment shipped; BT-3020 (handle-ownership follow-up) partial
 
 ## Implementation Tracking
 

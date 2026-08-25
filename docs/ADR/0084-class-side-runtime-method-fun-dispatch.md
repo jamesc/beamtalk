@@ -1,7 +1,7 @@
 # ADR 0084: Class-Side Runtime Method Installation and Fun Dispatch
 
 ## Status
-Accepted (in progress, 2026-05-24) — implementation epic BT-2259
+Implemented (2026-05-24) — epic BT-2259 complete, all issues Done (see [ADR 0038 Implementation Tracking](0038-subclass-classbuilder-protocol.md))
 
 ## Context
 
@@ -440,7 +440,7 @@ the previously-inert `classMethods:` builder key and the parsed-but-unwired
 ## Implementation Tracking
 
 **Epic:** BT-2259 (Programmatic ClassBuilder parity)
-**Status:** In progress
+**Status:** Done
 
 | Phase | Issue | Scope |
 |-------|-------|-------|

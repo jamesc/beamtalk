@@ -1,7 +1,7 @@
 # ADR 0108: Named Union Type Aliases (`type` Declarations)
 
 ## Status
-Accepted (2026-07-15)
+Implemented (2026-07-15) — all 10 planned phases (BT-2894–BT-2905) shipped
 
 ## Implementation Tracking
 
@@ -23,7 +23,7 @@ Accepted (2026-07-15)
 | 9 | [BT-2904](https://linear.app/beamtalk/issue/BT-2904) | Docs: language features, syntax rationale, surface parity | S | BT-2901, BT-2902, BT-2903 |
 | 10 | [BT-2905](https://linear.app/beamtalk/issue/BT-2905) | E2E btscript test (required final phase) | S | BT-2899, BT-2900, BT-2901, BT-2902 |
 
-**Status:** Planned
+**Status:** Done
 
 **Downstream:** BT-2827 (`Json.parse:`/`Yaml.parse:`/`HTTPResponse.bodyAsJson` typed returns) is blocked by this epic and will retarget once it lands.
 

@@ -107,41 +107,41 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Implemented | 2026-04-12 |
 | [0079](0079-named-actor-registration.md) | Named Actor Registration | Implemented | 2026-04-15 |
 | [0080](0080-supervisor-lifecycle-result.md) | Migrate Supervisor Lifecycle to Result | Implemented | 2026-04-16 |
-| [0081](0081-first-class-session-object.md) | First-Class Session Object — Walkable Binding Layers | Proposed | 2026-05-09 |
+| [0081](0081-first-class-session-object.md) | First-Class Session Object — Walkable Binding Layers | Implemented | 2026-05-09 |
 | [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Implemented | 2026-05-17 |
 | [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
-| [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Accepted (in progress) | 2026-05-24 |
+| [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Implemented | 2026-05-24 |
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
 | [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
-| [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Accepted | 2026-05-26 |
+| [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Implemented | 2026-05-26 |
 | [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Phases 1–4 Rejected; Wire Deferred | 2026-05-26 |
-| [0089](0089-typed-document-leaves.md) | Typed Document Leaves for Core Erlang Codegen | Accepted | 2026-05-28 |
-| [0090](0090-array-canonical-representation.md) | Canonical Array Representation for O(log n) `at:put:` | Accepted | 2026-06-02 |
-| [0091](0091-remote-workspace-access-phoenix-authenticated-front.md) | Connection Security for Remote Workspace Access — Phoenix as Authenticated Front | Accepted | 2026-06-06 |
+| [0089](0089-typed-document-leaves.md) | Typed Document Leaves for Core Erlang Codegen | Implemented | 2026-05-28 |
+| [0090](0090-array-canonical-representation.md) | Canonical Array Representation for O(log n) `at:put:` | Implemented | 2026-06-02 |
+| [0091](0091-remote-workspace-access-phoenix-authenticated-front.md) | Connection Security for Remote Workspace Access — Phoenix as Authenticated Front | Implemented | 2026-06-06 |
 | [0092](0092-supervision-tree-introspection.md) | Supervision Tree Introspection API (Runtime Query Surface) | Implemented | 2026-06-07 |
-| [0093](0093-announcements-event-substrate.md) | Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer) | Accepted | 2026-06-07 |
-| [0094](0094-object-string-representation-protocols.md) | Object String Representation Protocols (printString / displayString / inspect) | Proposed | 2026-06-07 |
-| [0095](0095-rich-navigable-inspector.md) | Rich Navigable Inspector — Drillable, Live-Refreshing Object Views | Accepted | 2026-06-11 |
-| [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Proposed | 2026-06-10 |
-| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Proposed | 2026-06-13 |
-| [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Accepted | 2026-06-23 |
-| [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Accepted | 2026-06-26 |
-| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Proposed | 2026-06-27 |
-| [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Accepted | 2026-06-28 |
+| [0093](0093-announcements-event-substrate.md) | Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer) | Implemented | 2026-06-07 |
+| [0094](0094-object-string-representation-protocols.md) | Object String Representation Protocols (printString / displayString / inspect) | Implemented | 2026-06-07 |
+| [0095](0095-rich-navigable-inspector.md) | Rich Navigable Inspector — Drillable, Live-Refreshing Object Views | Implemented | 2026-06-11 |
+| [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Implemented (live-mode; cold-mode Phase 2 pending) | 2026-06-10 |
+| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Accepted (in progress — verified on macOS, Linux/Windows pending) | 2026-06-13 |
+| [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Implemented | 2026-06-23 |
+| [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Implemented | 2026-06-26 |
+| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented (WS3 cross-package metadata pending) | 2026-06-27 |
+| [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Implemented | 2026-06-28 |
 | [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Implemented (Phases 1, 2, 4, 5; Phase 1b deferred) | 2026-07-06 |
-| [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Proposed | 2026-07-05 |
-| [0104](0104-typed-actor-protocols.md) | Typed Actor Protocols — the Class Interface Is the Protocol | Accepted | 2026-07-07 |
-| [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Accepted | 2026-07-11 |
+| [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Implemented (Phases 0–3) | 2026-07-05 |
+| [0104](0104-typed-actor-protocols.md) | Typed Actor Protocols — the Class Interface Is the Protocol | Implemented | 2026-07-07 |
+| [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Implemented | 2026-07-11 |
 | [0106](0106-opt-in-match-exhaustiveness-assertion.md) | Opt-In Asserted `match:` Exhaustiveness (`matchExhaustive:`) | Implemented | 2026-07-07 |
-| [0107](0107-nil-and-type-patterns-in-match.md) | Nil and Type Patterns in `match:` | Accepted | 2026-07-12 |
-| [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Accepted | 2026-07-15 |
-| [0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md) | Block-Scoped Class Methods Run Their Block in the Caller's Process | Accepted | 2026-07-28 |
-| [0110](0110-class-var-shadow-write-through-for-nlr-relay.md) | Class-Variable Shadow Write-Through for Foreign NLR Relay | Accepted | 2026-08-02 |
+| [0107](0107-nil-and-type-patterns-in-match.md) | Nil and Type Patterns in `match:` | Implemented | 2026-07-12 |
+| [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Implemented | 2026-07-15 |
+| [0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md) | Block-Scoped Class Methods Run Their Block in the Caller's Process | Implemented | 2026-07-28 |
+| [0110](0110-class-var-shadow-write-through-for-nlr-relay.md) | Class-Variable Shadow Write-Through for Foreign NLR Relay | Implemented | 2026-08-02 |
 | [0111](0111-lowered-ir-verifier-for-state-threading.md) | Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return | Implemented | 2026-08-11 |
-| [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Accepted | 2026-08-15 |
-| [0113](0113-destructive-workspace-operations.md) | Destructive Workspace Operations — File Deletion in Flush | Accepted | 2026-08-18 |
+| [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Implemented | 2026-08-15 |
+| [0113](0113-destructive-workspace-operations.md) | Destructive Workspace Operations — File Deletion in Flush | Implemented | 2026-08-18 |
 | [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Proposed | 2026-08-18 |
-| [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Accepted | 2026-08-20 |
+| [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Implemented | 2026-08-20 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

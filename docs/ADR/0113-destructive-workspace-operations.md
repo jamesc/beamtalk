@@ -1,7 +1,7 @@
 # ADR 0113: Destructive Workspace Operations — File Deletion in Flush
 
 ## Status
-Accepted (2026-08-18)
+Implemented (2026-08-18) — shipped via Epic BT-3205, Phases 1–4 (BT-3206–BT-3212)
 
 ## Context
 
@@ -332,5 +332,5 @@ For ADR 0046 (VSCode sidebar): no migration — it consumes `workspace/applyEdit
 ## Implementation Tracking
 
 **Epic:** BT-3205
-**Issues:** BT-3206 (Phase 1 — Foundation), BT-3207 (Phase 2 — Core mechanism), BT-3208 (Phase 3 — Undo), BT-3209 (Phase 4 — Surfaces), BT-3210 (Phase 4 — Surfaces), BT-3211 (Phase 4 — Validation)
-**Status:** Planned
+**Issues:** BT-3206 (Phase 1 — Foundation), BT-3207 (Phase 2 — Core mechanism), BT-3208 (Phase 3 — Undo), BT-3209 (Phase 4 — Surfaces), BT-3210 (Phase 4 — Surfaces), BT-3211 (Phase 4 — Validation), BT-3212 (Phase 4 — LSP `fileKinds`/`CreateFile` follow-up)
+**Status:** Shipped — all phases complete (BT-3206–BT-3212)
