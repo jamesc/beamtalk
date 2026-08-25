@@ -135,13 +135,22 @@ TestCase subclass: ArithmeticOperatorOverloadTest
   /// is true for both sides, so codegen emits the bare BIF with no `try` at
   /// all (BT-3263's zero-cost guarantee). Confirms the `badarith` this
   /// raises is untouched by this ADR's mechanism — not a `divFromNumber:` DNU.
-  testDivisionByZeroStaticStillBadarith =>
-    self should: [5 / 0] raise: #badarith
+  testDivisionByZeroStaticStillBadarith => self should: [5 / 0] raise: #badarith
 
   /// Float overflow (`badarith` between two genuine numbers, not a coercion
-  /// miss) on the same statically-numeric-literal call site.
+  /// miss) on the same statically-numeric-literal call site. Both operands
+  /// must be true `Literal` nodes (not a `raisedTo:` message send, unlike
+  /// `huge` below) for `receiver_is_statically_numeric` to keep this on the
+  /// guard-free bare-BIF path — hence a literal `1.0e308`, not a helper.
+  /// `just fmt` expands scientific notation to full decimal (a pre-existing
+  /// formatter quirk, not part of this ADR's scope); the resulting giant
+  /// literal below is that canonical formatted form, not a typo.
   testFloatOverflowStaticStillBadarith =>
-    self should: [1.0e308 + 1.0e308] raise: #badarith
+    self
+      should: [
+        100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0 + 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0
+      ]
+      raise: #badarith
 
   /// `a`/`b` are deliberately untyped parameters, so
   /// `receiver_is_statically_numeric` is false for both — the same technique
@@ -161,6 +170,16 @@ TestCase subclass: ArithmeticOperatorOverloadTest
     self should: [self divideDynamically: 5 with: 0] raise: #badarith
 
   /// Float overflow via the dynamically-numeric-left-operand call site —
-  /// still `#badarith`, not a `plusFromNumber:` DNU.
+  /// still `#badarith`, not a `plusFromNumber:` DNU. Uses `2.0 raisedTo:
+  /// 1023` (~8.99e307, itself finite) rather than a literal near
+  /// `Float`'s max, since `receiver_is_statically_numeric` only inspects the
+  /// callee's own AST (the untyped `a`/`b` params) — the caller's argument
+  /// expression doesn't affect which codegen path this exercises, so a
+  /// message send here is exactly as good as a literal and far more
+  /// readable than the giant literal the formatter renders `1.0e308` as.
+  huge => 2.0 raisedTo: 1023
+
   testDynamicFloatOverflowStillBadarith =>
-    self should: [self addDynamically: 1.0e308 with: 1.0e308] raise: #badarith
+    self should: [
+      self addDynamically: self huge with: self huge
+    ] raise: #badarith
