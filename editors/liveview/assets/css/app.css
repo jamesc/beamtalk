@@ -235,13 +235,24 @@
    height is the thing BT-3247 is about — and `min-width: 0` +
    `text-overflow: ellipsis` degrade a label gracefully instead of silently
    overflowing if a future change ever does force `.seg` narrower than its
-   natural width. It does NOT fix the pre-existing (and pre-dating this fix
+   natural width. It did NOT fix the pre-existing (and pre-dating this fix
    — confirmed still present, and worse, before `.panel-title` existed)
    horizontal deficit: at the 286px default the row's natural content width
-   already exceeds the panel, so `.panel`'s `overflow: hidden` clips a few
-   pixels off the trailing `+`/`×` buttons regardless. That's tracked
-   separately in BT-3256. */
+   already exceeded the panel, so `.panel`'s `overflow: hidden` clipped a few
+   pixels off the trailing `+`/`×` buttons regardless. BT-3256 closed that gap
+   below via `.seg-icon`. */
 .panel-head .seg button { white-space: nowrap; min-width: 0; text-overflow: ellipsis; overflow: hidden; }
+/* BT-3256: icon-only mode/view toggles (Classes/Native/Type-Aliases +
+   Hier/Cats), replacing the BT-3247 comment's tracked horizontal deficit. The
+   text labels moved to `aria-label`/`title` on each button (still exposed to
+   ATs and on hover); the glyph alone needs less horizontal padding than the
+   words it replaces, which is most of what closes the ~119px gap at the
+   286px default. Scoped to `.seg-icon` (not all `.panel-head .seg`) so the
+   still-text-labelled `.actionbar.sb-side .seg` (Instance/Class) and the
+   top-bar `.insp-mode` seg are unaffected. */
+.panel-head .seg-icon button {
+  padding: 2px 6px; font-size: 12px; text-align: center;
+}
 .panel-head .spacer { flex: 1; }
 .panel-head .panel-close {
   border: 0; background: transparent; cursor: pointer; color: var(--faint);
