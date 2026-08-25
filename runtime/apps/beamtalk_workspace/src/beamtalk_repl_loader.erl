@@ -2082,7 +2082,13 @@ validate_no_overlaps(Class, Sites, SourceSize) ->
     %% replacement) sort the same way regardless of the caller's original
     %% site-list order — per review feedback on PR #3522, a comparator keyed
     %% on `start` alone made overlap acceptance order-dependent for that tie
-    %% case, even though `lists:sort/2` itself is stable.
+    %% case, even though `lists:sort/2` itself is stable. `apply_site_splices/2`
+    %% below MUST use the same `{start, 'end'}` key (reversed, since it applies
+    %% rightmost-first) — a same-start tie this function accepts but that
+    %% function orders differently can silently corrupt the spliced source.
+    %% See that function's own comment for the concrete corrupting scenario a
+    %% mismatch between the two produces (this was caught by review AFTER an
+    %% earlier version of this fix touched only this function).
     Spans = lists:sort(
         fun(#{start := A, 'end' := AEnd}, #{start := B, 'end' := BEnd}) ->
             {A, AEnd} =< {B, BEnd}
@@ -2108,10 +2114,27 @@ validate_spans(Class, [#{start := Start, 'end' := End} = Span | Rest], Min, Size
 %% the same class (e.g. a method-rename's definition plus a same-class
 %% self-send) merge into one recompile instead of two independent ones that
 %% would silently clobber each other.
+%%
+%% Ties on `start` (e.g. a zero-length insertion sharing a start with a
+%% same-position replacement — `validate_no_overlaps/3` deterministically
+%% accepts exactly this shape) break on `'end'`, descending: the larger-`end`
+%% span (the "real" replacement) is applied first, so the zero-length
+%% insertion is spliced against an accumulator where that replacement's new
+%% text already begins at `start` — landing cleanly at that boundary rather
+%% than being applied against the ORIGINAL span first and then having a
+%% same-start sibling slice into already-shifted, no-longer-original-relative
+%% bytes. Per review feedback on PR #3522: before this comparator existed,
+%% `apply_site_splices/2`'s ties fell back to `lists:sort/2`'s stability
+%% (the caller's original list order), which could corrupt the merged source
+%% for the caller-order half of that tie that put the zero-length site first.
+%% This MUST stay `{start, 'end'}`-keyed the same way `validate_no_overlaps/3`
+%% is (mirrored, not merely similar) — see that function's own comment.
 -spec apply_site_splices(binary(), [rewrite_site()]) -> binary().
 apply_site_splices(Source, Sites) ->
     RightmostFirst = lists:sort(
-        fun(#{span := #{start := A}}, #{span := #{start := B}}) -> A >= B end,
+        fun(#{span := #{start := A, 'end' := AEnd}}, #{span := #{start := B, 'end' := BEnd}}) ->
+            {A, AEnd} >= {B, BEnd}
+        end,
         Sites
     ),
     lists:foldl(

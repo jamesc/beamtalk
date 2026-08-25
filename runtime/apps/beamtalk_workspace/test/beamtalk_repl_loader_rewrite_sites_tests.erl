@@ -230,6 +230,81 @@ rewrite_sites_success(#{counter_path := CounterPath, sub_counter_path := SubCoun
     ].
 
 %%====================================================================
+%% Same-start tie: a zero-length insertion sharing a `start` with a
+%% same-position replacement, in both caller-supplied orders (ADR 0114,
+%% BT-3270 — review feedback on PR #3522). `validate_no_overlaps/3`
+%% deterministically accepts this pair; `apply_site_splices/2` must
+%% therefore apply them in a well-defined order (the larger-`end` span
+%% first) regardless of which order the caller lists them in, or one of
+%% the two orders would splice the zero-length site's ORIGINAL-source-
+%% relative span against an already-shifted accumulator and corrupt the
+%% result. Two separate test cases — one per caller-list order — each
+%% asserting the correct merged text, not merely "no crash".
+%%====================================================================
+
+%% A zero-length insertion of "XX" immediately before the definition site's
+%% "increment", sharing that site's `start`. The only byte-correct merge of
+%% these two sites replaces the shared span's original text with
+%% "XXincrementBy" and leaves everything else untouched — computed directly
+%% from `CounterSource` (not re-derived via the mechanism under test) so this
+%% is an independent expected value, not a tautology.
+same_start_tie_sites_and_expected(CounterSource) ->
+    [DefSpan | _] = word_spans(CounterSource, <<"increment">>),
+    #{start := Start, 'end' := End} = DefSpan,
+    ZeroLengthInsert = #{
+        class => <<"Counter">>,
+        source_file => undefined,
+        span => #{start => Start, 'end' => Start},
+        new_text => <<"XX">>
+    },
+    Replacement = #{
+        class => <<"Counter">>,
+        source_file => undefined,
+        span => DefSpan,
+        new_text => <<"incrementBy">>
+    },
+    <<Before:Start/binary, _Old:(End - Start)/binary, After/binary>> = CounterSource,
+    Expected = <<Before/binary, "XXincrementBy", After/binary>>,
+    {ZeroLengthInsert, Replacement, Expected}.
+
+rewrite_sites_same_start_tie_insert_first_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun rewrite_sites_same_start_tie_insert_first/1}.
+
+rewrite_sites_same_start_tie_insert_first(_Fixture) ->
+    CounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    {ZeroLengthInsert, Replacement, Expected} = same_start_tie_sites_and_expected(CounterSource),
+    Result = beamtalk_repl_loader:rewrite_sites(undefined, [ZeroLengthInsert, Replacement]),
+    NewCounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    [
+        ?_assertMatch({ok, _}, Result),
+        ?_assertEqual(Expected, NewCounterSource)
+    ].
+
+rewrite_sites_same_start_tie_replacement_first_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun rewrite_sites_same_start_tie_replacement_first/1}.
+
+rewrite_sites_same_start_tie_replacement_first(_Fixture) ->
+    CounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    {ZeroLengthInsert, Replacement, Expected} = same_start_tie_sites_and_expected(CounterSource),
+    %% Same two sites, opposite caller-list order — must produce the
+    %% identical, correct merge, not a different (and possibly corrupted)
+    %% result.
+    Result = beamtalk_repl_loader:rewrite_sites(undefined, [Replacement, ZeroLengthInsert]),
+    NewCounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    [
+        ?_assertMatch({ok, _}, Result),
+        ?_assertEqual(Expected, NewCounterSource)
+    ].
+
+%%====================================================================
 %% ChangeLog entry construction (`emit_rewrite_change_entry/2`) — produces a
 %% `sites`-shaped entry using the `rename-method` schema (ADR 0114, BT-3269).
 %%====================================================================
