@@ -32,6 +32,8 @@ main(_) ->
     bench_reduce(),
     bench_guard(),
     bench_guard_fold(),
+    bench_number_coercion(),
+    bench_number_coercion_dispatch(),
     ok.
 
 run_size(N, Blk, Pred) ->
@@ -144,6 +146,103 @@ bench_guard_fold() ->
 
 %% Never reached for numeric input; present so the guard's false arm is live.
 guard_fallback(A, B) -> A + B.
+
+%% --- BT-3265 (ADR 0116): number-on-the-left coercion, against the real
+%% codegen shape BT-3263 wired up (generate_binary_op in
+%% crates/beamtalk-core/src/codegen/core_erlang/operators.rs), not the ADR's
+%% own hand-written spike module. Two call-site shapes:
+%%
+%%   - `total + delta` (right operand statically numeric, e.g. `:: Number`-
+%%     typed or a literal): the compile-time skip means codegen emits the
+%%     exact bare BIF with no try at all — byte-for-byte the same code as
+%%     before this ADR (verified by
+%%     test_number_coercion_bare_bif_unaffected_for_total_plus_delta in
+%%     tests/expressions.rs). This is `Bare` below, identical in shape to
+%%     bench_guard/0's own `Bare` loop.
+%%   - `5 + aVector` (right operand's type is genuinely unknown): codegen
+%%     wraps the BIF in try/catch/is_number/send_number_coercion, mirroring
+%%     test_number_coercion_try_for_literal_left_unknown_right. `CoerceTry`
+%%     below hand-mirrors that exact shape (as bench_guard/0 already does
+%%     for its own is_number guard) on the never-failing path, since real
+%%     code at an already-dynamically-dispatched call site pays this cost on
+%%     every add regardless of whether the fallback ever fires.
+%%
+%% The dispatch-triggering (catch actually fires) case is measured
+%% separately in bench_number_coercion_dispatch/0 below, using the real
+%% beamtalk_message_dispatch:send_number_coercion/4 (not a stub) — a
+%% reference data point for the strictly rarer path, not a zero-cost claim.
+bench_number_coercion() ->
+    N = 5000000,
+    Reps = 25,
+    Bare = fun BareLoop(0, A) -> A; BareLoop(K, A) -> BareLoop(K - 1, A + K) end,
+    %% Mirrors the generated try/catch: try the bare BIF; on badarith,
+    %% re-check is_number(Right) — true means an unrelated numeric failure
+    %% (re-raise unchanged), false means a genuine coercion miss (dispatch to
+    %% plusFromNumber:). Every iteration here adds two real integers, so the
+    %% try always succeeds and the catch handler never runs.
+    CoerceTry =
+        fun CoerceLoop(0, A) ->
+               A;
+           CoerceLoop(K, A) ->
+               A2 =
+                   try
+                       A + K
+                   of
+                       Result -> Result
+                   catch
+                       Type:Error:Stack ->
+                           case {Type, Error} of
+                               {error, badarith} when true ->
+                                   case is_number(K) of
+                                       true -> erlang:raise(Type, Error, Stack);
+                                       false ->
+                                           beamtalk_message_dispatch:send_number_coercion(
+                                               K, 'plusFromNumber:', [A], '+'
+                                           )
+                                   end;
+                               _ ->
+                                   erlang:raise(Type, Error, Stack)
+                           end
+                   end,
+               CoerceLoop(K - 1, A2)
+        end,
+    %% sanity: both produce identical output
+    BareResult = Bare(N, 0),
+    CoerceResult = CoerceTry(N, 0),
+    BareResult =:= CoerceResult orelse
+        error({number_coercion_mismatch, BareResult, CoerceResult}),
+    BareUs = min_us(Reps, fun() -> Bare(N, 0) end),
+    CoerceUs = min_us(Reps, fun() -> CoerceTry(N, 0) end),
+    io:format("~n=== number coercion: try/catch vs bare (N=~p adds/loop, best of ~p) ===~n", [N, Reps]),
+    io:format("bare  erlang:'+'  (total + delta)     : ~8.1f us/loop~n", [float(BareUs)]),
+    io:format("coercion try/catch (5 + aVector, happy): ~8.1f us/loop~n", [float(CoerceUs)]),
+    io:format("overhead                               : ~.3f ns/add | ratio ~.2fx~n",
+              [(CoerceUs - BareUs) * 1000 / N, CoerceUs / BareUs]).
+
+%% --- BT-3265 (ADR 0116): reference data point for the dispatch-triggering
+%% (catch actually fires) case — the ADR's own REPL example, `5 + "not a
+%% vector"` (§ REPL example): String implements no `plusFromNumber:`, so
+%% every call raises does_not_understand with the added hint. Exercises the
+%% real send_number_coercion/4 (RightClass lookup, DNU class/selector match,
+%% hint formatting, re-raise), not a stub — orders of magnitude slower than
+%% the happy path above (exception raise/unwind dominates), which is exactly
+%% the point: this cost is paid only on the already-failing path, never on
+%% the try/catch's own happy path measured by bench_number_coercion/0.
+bench_number_coercion_dispatch() ->
+    N = 20000,
+    Reps = 10,
+    Miss = fun() -> lists:foreach(fun coercion_miss/1, lists:seq(1, N)) end,
+    Miss(),   %% warm
+    Us = min_us(Reps, Miss),
+    io:format("~n=== number coercion: DNU+hint dispatch reference (N=~p, best of ~p) ===~n", [N, Reps]),
+    io:format("send_number_coercion/4 (5 + \"not a vector\") : ~8.2f us/op~n", [Us / N]).
+
+coercion_miss(K) ->
+    try
+        beamtalk_message_dispatch:send_number_coercion(<<"not a vector">>, 'plusFromNumber:', [K], '+')
+    catch
+        error:_ -> ok
+    end.
 
 min_us(Reps, F) ->
     lists:min([element(1, timer:tc(F)) || _ <- lists:seq(1, Reps)]).
