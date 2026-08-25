@@ -897,6 +897,65 @@ specific to this ADR's mechanism — noted here because § User Impact
 (Newcomer) already establishes `does_not_understand` as the intended,
 improved failure mode.
 
+## Addendum (2026-08-25): BT-3266 — right-operand untyped `self.<field>` gap, accepted
+
+`receiver_is_statically_numeric` (BT-2709) treats an untyped `self.<field>`
+as statically numeric to keep `self.count := self.count + 1`-shaped counter
+arithmetic on the bare-BIF fast path. § Dispatch mechanism's "Trigger
+condition, refined" deliberately reuses that same predicate, unmodified, to
+gate this ADR's *right*-operand coercion check — so the identical leniency
+reproduces on the right side: `self.total + self.extra` with `extra`
+untyped stays a bare `erlang:'+'`, no guard and no `try`/`catch`, and raw-
+crashes on `badarith` if `extra` ever holds a non-number. BT-3263 code
+review (PR #3515) flagged this as a real, if narrow, gap and filed it as
+BT-3266 rather than folding a fix into that PR.
+
+**Decision: accept the gap as specified; do not diverge the right-operand
+check from the left-operand one.** Concretely, this addendum closes BT-3266
+without a code change to the trigger condition — the codegen already
+matches what's decided here (see "What already shipped" below).
+
+**Rationale:**
+- **Symmetry.** A right-operand-specific stricter check would make
+  `self.a + self.b` guard asymmetrically depending on which side of `+`
+  each field sits — the same untyped field trusted as a left operand and
+  guarded as a right operand at different call sites. That's a more
+  confusing model than "both operands get the same rule," for a gap that's
+  already accepted on the left (§ Consequences, Negative — the `self.
+  <field>`/untyped-param trust boundary bullet already covers exactly this
+  class of risk, just from the left-operand side).
+- **Performance.** Closing the gap taxes precisely the accumulator/counter
+  call shape (`self.total + self.extra`, `self.total + self.count`) that
+  BT-2709 designed the untyped-field leniency around in the first place —
+  paying a guard on every untyped-field read on *either* side of an
+  operator undoes that trade-off for hot self-field arithmetic, not just
+  for the narrow case this issue names.
+- **Scope.** Closing the gap for the right operand only, while leaving the
+  left operand as-is, is the one option this ADR's dispatch mechanism
+  doesn't already support cleanly — it would need `receiver_is_statically_
+  numeric` split into left/right variants, and raises its own unresolved
+  question of whether the left operand should then tighten too for
+  consistency. That's a wider redesign than a follow-up issue's scope, not
+  a decision to make silently inside this addendum.
+- **Blast radius stays the accepted one.** When the trust is wrong, the
+  user-visible outcome is the same `badarith` this ADR's own Negative
+  consequences section already accepts for the left operand — not a new
+  failure mode, just the existing one reachable from one more operand
+  position.
+
+**What already shipped** (landed in BT-3263, commit 871eac5, ahead of this
+addendum): `receiver_is_statically_numeric`'s own doc comment
+(`operators.rs`) names this exact asymmetry and cross-references BT-3266;
+`test_number_coercion_untyped_self_field_right_operand_stays_bare`
+(`codegen/core_erlang/tests/expressions.rs`) pins the current, accepted
+behavior down as a regression test, and a second test using `self.<field>`
+on *both* operands (`self.total + self.extra`, this issue's literal
+example) was added closing out BT-3266's coverage criterion.
+
+If untyped-field arithmetic's silent-badarith risk ever becomes a real
+problem in practice, revisit both operands together as one design pass —
+not the right operand alone.
+
 ## Implementation Tracking
 
 **Parent:** BT-2712 (Phase 4 of BT-2708, already tracked this ADR's spec —
@@ -907,6 +966,7 @@ duplicate Epic)
 - BT-3263 — Wire number-on-the-left coercion into `operators.rs` codegen (Phase 2, codegen; blocked by BT-3262)
 - BT-3264 — BUnit tests for number-on-the-left arithmetic coercion (Phase 3; blocked by BT-3263)
 - BT-3265 — Benchmark + language docs for number-on-the-left arithmetic (Phase 4; blocked by BT-3263)
+- BT-3266 — Right-operand untyped `self.<field>` gap: design decision (accepted, not fixed — see Addendum above)
 
 **Status:** Planned
 
