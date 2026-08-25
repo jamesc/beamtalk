@@ -2778,3 +2778,57 @@ object_class_rename_class_rejects_toctou_collision_test_() ->
             )
         ]
     end}.
+
+%% Closes the exact coverage gap the prior review round on PR #3523 flagged:
+%% the test above calls the `{rename_class, ...}` handler DIRECTLY, bypassing
+%% `beamtalk_object_class:rename/2`'s own `whereis/1` pre-check entirely — so
+%% it never exercised the bug that pre-check's caller actually had (`ok =
+%% gen_server:call(...)` badmatch-crashing on the handler's `{error, _}`
+%% reply, moving the crash one process further out instead of fixing it).
+%% This test goes through the real public `rename/2` API and forces the
+%% precise TOCTOU window deterministically via `sys:suspend/resume` (a
+%% standard technique for testing gen_server races without timing luck)
+%% rather than bypassing anything: `Pid` is suspended before `rename/2` is
+%% even called, so its `whereis/1` pre-check genuinely observes the target
+%% name as free and proceeds to the (now-blocked) `gen_server:call`; the
+%% colliding class is registered under that name while `Pid` is suspended;
+%% only then is `Pid` resumed, so the handler's own `erlang:register/2`
+%% genuinely loses the race `rename/2`'s pre-check could not have caught.
+object_class_rename_toctou_through_public_api_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        {_ClassObj, Pid} = register_class('BT3278RenamePublicApiSource', #{}, #{}),
+        ok = sys:suspend(Pid),
+        Caller = self(),
+        _ = spawn(fun() ->
+            Result = beamtalk_object_class:rename(
+                'BT3278RenamePublicApiSource', 'BT3278RenamePublicApiExisting'
+            ),
+            Caller ! {rename_result, Result}
+        end),
+        %% `Pid` is suspended, so the spawned call's `whereis/1` pre-check
+        %% (unaffected by suspension — a registry lookup, not a message to
+        %% `Pid`) has already run and it is now blocked inside
+        %% `gen_server:call/2` well before this sleep matters; this margin
+        %% just guards against the spawned process not yet having been
+        %% scheduled at all.
+        timer:sleep(50),
+        {_ExistingObj, _ExistingPid} = register_class(
+            'BT3278RenamePublicApiExisting', #{}, #{}
+        ),
+        ok = sys:resume(Pid),
+        RenameResult =
+            receive
+                {rename_result, R} -> R
+            after 5000 -> timeout
+            end,
+        [
+            ?_assertEqual(
+                {error, {already_registered, 'BT3278RenamePublicApiExisting'}}, RenameResult
+            ),
+            ?_assert(erlang:is_process_alive(Pid)),
+            ?_assertEqual('BT3278RenamePublicApiSource', gen_server:call(Pid, class_name)),
+            ?_assertEqual(
+                Pid, beamtalk_class_registry:whereis_class('BT3278RenamePublicApiSource')
+            )
+        ]
+    end}.

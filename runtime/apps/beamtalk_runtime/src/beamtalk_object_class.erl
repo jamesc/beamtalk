@@ -230,8 +230,19 @@ rename(OldName, NewName) ->
             NewRegName = beamtalk_class_registry:registry_name(NewName),
             case erlang:whereis(NewRegName) of
                 undefined ->
-                    ok = gen_server:call(Pid, {rename_class, NewName}),
-                    {ok, Pid};
+                    %% The handler can still lose a registration race that
+                    %% opens between this `whereis/1` check and its own
+                    %% `erlang:register/2` (review feedback on PR #3523) — it
+                    %% replies `{error, {already_registered, NewName}}`
+                    %% cleanly rather than crashing when that happens, so
+                    %% this call must actually handle that reply instead of
+                    %% pattern-matching only the `ok` case (a `badmatch` here
+                    %% would just move the crash from the class gen_server to
+                    %% THIS caller, defeating the handler's own fix).
+                    case gen_server:call(Pid, {rename_class, NewName}) of
+                        ok -> {ok, Pid};
+                        {error, _} = Err -> Err
+                    end;
                 _ ->
                     {error, {already_registered, NewName}}
             end
@@ -990,6 +1001,15 @@ handle_call(
             beamtalk_class_monitor:watch(NewName, self()),
             {reply, ok, State#class_state{name = NewName}};
         {'EXIT', _Reason} ->
+            %% Residual gap, not closed here (review feedback on PR #3523):
+            %% this rollback assumes `OldRegName` is still free. Another
+            %% process registering under `OldRegName` in the narrow window
+            %% since `erlang:unregister/1` above would crash this same
+            %% gen_server the same way the guard above was written to
+            %% avoid — one level deeper. Accepted as out of scope: closing
+            %% it fully would need the same guard nested again with no
+            %% further fallback once nesting runs out, for a race
+            %% narrower than the one this function already targets.
             true = erlang:register(OldRegName, self()),
             {reply, {error, {already_registered, NewName}}, State}
     end;
