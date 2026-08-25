@@ -1,7 +1,7 @@
 # ADR 0114: Class and Method Rename in the Live Workspace
 
 ## Status
-Proposed (2026-08-18)
+Accepted (2026-08-25)
 
 ## Context
 
@@ -369,6 +369,12 @@ See Steelman above. Rejected for v1, not dismissed as unsound — `beamtalk_alia
 | **5** | LSP `RenameFile` + per-site `TextDocumentEdit`; MCP tools; REPL meta-commands; browser actions. Surface-parity audit. | M | LSP command tests; MCP integration tests; browser e2e; surface-parity drift check passes. |
 
 Total: ~L across 5 phases. Phase 1 (the validation spike) is the load-bearing risk — if `referencesTo:`/`direct_subclasses/1` prove unreliable against real code (partial coverage, xref gaps beyond what's already known), the design may need to fall back to a narrower v1 for *both* rename primitives (rewrite the definition only, leave references as a `Workspace changes` follow-up list for the caller to apply manually) before committing to the full transactional shape. Building the mechanism once, via the lower-blast-radius class-rename case, before Phase 3 reuses it for method rename, is a deliberate risk-ordering choice.
+
+## Implementation Tracking
+
+**Epic:** BT-3267
+**Issues:** BT-3268, BT-3269, BT-3270, BT-3278, BT-3271, BT-3272, BT-3279, BT-3273, BT-3274, BT-3275, BT-3276, BT-3277
+**Status:** Planned
 
 ## References
 - Related issues: BT-3204 (this ADR), BT-2192 (ADR 0113 — the split predecessor, owns `confirmDestructive`/two-phase-flush/undo this ADR extends), BT-2191 / BT-3183 (ADR 0112 — method-level removal, the primitive-design template), BT-3105 / BT-3107 (single-class teardown / metadata-write paths this ADR's implementation plan reuses)
