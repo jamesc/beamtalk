@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn nonexistent_pid_is_not_alive() {
         // PID 4_194_304 (4M) fits in i32 but no system ever has this many processes.
-        // kill(pid, 0) returns ESRCH, so the EPERM check on line 28 returns false.
+        // kill(pid, 0) returns ESRCH, so the EPERM fallback returns false.
         assert!(!is_process_alive(4_194_304));
     }
 
