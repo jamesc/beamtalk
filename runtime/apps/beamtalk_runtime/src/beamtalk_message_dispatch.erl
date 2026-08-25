@@ -5,6 +5,8 @@
 
 %%% **DDD Context:** Object System Context
 
+-include("beamtalk.hrl").
+
 -moduledoc """
 Unified message dispatch entry point.
 
@@ -38,16 +40,26 @@ to the normal synchronous path.
 | Class object     | (silently ignored) | ok |
 | Primitive        | (silently ignored) | ok |
 
+### send_number_coercion/4 (sync — returns value) (BT-3262, ADR 0116)
+
+Wraps send/3 for number-on-the-left arithmetic coercion (`5 + aVector`):
+delegates to send/3, and on a `does_not_understand` for the exact
+`Right`/`Selector` this call was for, re-raises it with a hint naming the
+original operator before it reaches the caller. Any other exception
+propagates unchanged.
+
 ## Usage (from generated Core Erlang)
 
 ```erlang
 call 'beamtalk_message_dispatch':'send'(Receiver, 'selector', [Args])
 call 'beamtalk_message_dispatch':'cast'(Receiver, 'selector', [Args])
+call 'beamtalk_message_dispatch':'send_number_coercion'(
+    Right, 'plusFromNumber:', [Left], '+')
 ```
 
 See: ADR 0006 (Unified Method Dispatch), BT-430, ADR 0043 (BT-918)
 """.
--export([send/3, send/4, cast/3]).
+-export([send/3, send/4, cast/3, send_number_coercion/4]).
 
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
@@ -195,6 +207,63 @@ cast(Receiver, Selector, Args) ->
         {dead, _ClassName} ->
             %% Dead actor: cast is fire-and-forget, silently ignore
             ok
+    end.
+
+-doc """
+Send a reflected number-on-the-left coercion message, hinting the DNU if the
+reflected method is genuinely missing (ADR 0116 § Dispatch mechanism).
+
+Wraps send/3 for the `<verb>FromNumber:` call sites codegen emits for
+`5 + aVector`-shaped expressions: `Right` is the non-numeric right operand,
+`Selector` the synthesized reflected-method name (e.g. `'plusFromNumber:'`),
+`Args` its argument list (the original left operand), and `OrigOp` the
+original source operator symbol (e.g. `'+'`) used only for the hint text.
+
+On success, returns send/3's result unchanged. On a `does_not_understand`
+whose class and selector match `Right`'s actual class and this exact
+`Selector` — i.e. the reflected method is genuinely absent from `Right`'s
+class — re-raises the same error with a hint naming the original operator,
+so `5 + aThing` fails with something closer to "`Thing` has no
+`plusFromNumber:` — implement it to support `number + Thing` arithmetic"
+than an unexplained DNU referencing a selector the caller never typed.
+
+Any other exception propagates unchanged via erlang:raise/3: a DNU for a
+*different* selector or class (e.g. a bug inside a *present* reflected
+method's own body that itself DNUs on something else), or a non-DNU error
+entirely. `kind` stays `does_not_understand` on the re-raised error — only
+`hint` changes, so `on: RuntimeError do:`/`on: Error do:` catch it exactly
+as before.
+
+A DNU raised via `beamtalk_error:raise/1` is wrapped by
+`beamtalk_exception_handler:wrap/1` into a `#{'$beamtalk_class' := _, error
+:= #beamtalk_error{}}` tagged map *before* being raised (mirroring every
+other DNU in the system, e.g. `raise_class_dnu` in
+beamtalk_class_dispatch.erl) — the catch clause below matches that wrapped
+shape, not the bare record, and the re-raise re-wraps the hinted error the
+same way.
+""".
+-spec send_number_coercion(term(), atom(), list(), atom()) -> term().
+send_number_coercion(Right, Selector, Args, OrigOp) ->
+    RightClass = beamtalk_primitive:class_of(Right),
+    try
+        send(Right, Selector, Args)
+    catch
+        error:#{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = RightClass,
+                selector = Selector
+            } = Error
+        }:Stack ->
+            Hint = unicode:characters_to_binary(
+                io_lib:format(
+                    "~s has no '~s' — implement it to support 'number ~s ~s' arithmetic",
+                    [RightClass, Selector, OrigOp, RightClass]
+                )
+            ),
+            HintedError = beamtalk_error:with_hint(Error, Hint),
+            erlang:raise(error, beamtalk_exception_handler:wrap(HintedError), Stack)
     end.
 
 -doc """
