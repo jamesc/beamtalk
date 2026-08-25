@@ -73,6 +73,15 @@ module loading to beamtalk_repl_loader (BT-863).
 %% (`class_source_file/1` / `classify_source_file/1`) these functions reuse.
 -export([emit_remove_change_entry/5, emit_extension_remove_change_entry/7]).
 
+%% ADR 0114 (BT-3270) — the shared multi-site rewrite mechanism generalizing
+%% remove_method/3,4 above, plus its best-effort ChangeLog append. Thin
+%% forwarding wrappers over beamtalk_repl_loader, routed through this module
+%% for the same compile-time-dependency reason (a future `beamtalk_behaviour_
+%% intrinsics:classRenameTo/2`/`classRenameSelector/3`, BT-3271/BT-3272, will
+%% call these via erlang:apply the same way remove_selector/2 already calls
+%% remove_method/3,4).
+-export([rewrite_sites/2, emit_rewrite_change_entry/2]).
+
 %% BT-3206 — best-effort snapshot + ChangeLog append for a successful
 %% `removeFromSystem` (class removal). Called via erlang:apply from
 %% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
@@ -1004,6 +1013,28 @@ Routed through this module (rather than called directly from
     ok.
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     beamtalk_repl_loader:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
+
+-doc """
+Rewrite a definition site plus N reference/sender sites transactionally, in
+memory (ADR 0114, BT-3270). Thin forwarding wrapper — see
+`beamtalk_repl_loader:rewrite_sites/2` for the full contract, including the
+in-memory atomicity protocol.
+""".
+-spec rewrite_sites(
+    beamtalk_repl_loader:rewrite_site() | undefined, [beamtalk_repl_loader:rewrite_site()]
+) ->
+    {ok, beamtalk_repl_loader:rewrite_result()} | {error, term()}.
+rewrite_sites(DefinitionSite, ReferenceSites) ->
+    beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites).
+
+-doc """
+Best-effort ChangeLog append for a completed `rewrite_sites/2` call (ADR
+0114, BT-3270). Thin forwarding wrapper — see
+`beamtalk_repl_loader:emit_rewrite_change_entry/2` for the full contract.
+""".
+-spec emit_rewrite_change_entry(map(), beamtalk_repl_loader:rewrite_result()) -> ok.
+emit_rewrite_change_entry(Spec, RewriteResult) ->
+    beamtalk_repl_loader:emit_rewrite_change_entry(Spec, RewriteResult).
 
 -doc """
 Best-effort ChangeLog append for a completed extension-method `removeSelector:`
