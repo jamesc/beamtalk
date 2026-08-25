@@ -82,7 +82,7 @@ eval expression.
 -spec decode(binary()) -> {ok, protocol_msg()} | {error, term()}.
 decode(Data) when is_binary(Data) ->
     Trimmed = string:trim(Data),
-    case parse_json(Trimmed) of
+    case beamtalk_repl_json:parse_json(Trimmed) of
         {ok, Map} when is_map(Map) ->
             decode_map(Map);
         {ok, _NonMap} ->
@@ -638,16 +638,6 @@ base_response(#protocol_msg{id = Id, session = Session}) ->
     case Session of
         undefined -> M1;
         _ -> M1#{<<"session">> => Session}
-    end.
-
--doc "Parse a JSON binary into a decoded term.".
--spec parse_json(binary()) -> {ok, term()} | {error, term()}.
-parse_json(Data) ->
-    try
-        Decoded = json:decode(Data),
-        {ok, Decoded}
-    catch
-        _:_ -> {error, not_json}
     end.
 
 -doc "Add output field to response map only when non-empty.".
