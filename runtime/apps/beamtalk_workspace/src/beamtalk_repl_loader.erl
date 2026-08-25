@@ -2077,8 +2077,16 @@ build_class_group(Class, Sites) ->
 -spec validate_no_overlaps(binary(), [rewrite_site()], non_neg_integer()) ->
     ok | {error, {invalid_or_overlapping_span, binary(), rewrite_span()}}.
 validate_no_overlaps(Class, Sites, SourceSize) ->
+    %% Secondary sort key on `'end'` (not just `start`) so two sites with the
+    %% same start (e.g. a zero-length insertion alongside a same-position
+    %% replacement) sort the same way regardless of the caller's original
+    %% site-list order — per review feedback on PR #3522, a comparator keyed
+    %% on `start` alone made overlap acceptance order-dependent for that tie
+    %% case, even though `lists:sort/2` itself is stable.
     Spans = lists:sort(
-        fun(#{start := A}, #{start := B}) -> A =< B end,
+        fun(#{start := A, 'end' := AEnd}, #{start := B, 'end' := BEnd}) ->
+            {A, AEnd} =< {B, BEnd}
+        end,
         [maps:get(span, S) || S <- Sites]
     ),
     validate_spans(Class, Spans, 0, SourceSize).
