@@ -124,8 +124,10 @@ not tax — never enters a `try` at all; only a right operand whose type is
 genuinely unknown (`5 + aVector`) does. This also converts the "does the
 `try` cost anything on the happy path" question from "prove it's
 negligible everywhere" to "prove it's negligible on the strictly smaller
-set of already-dynamically-dispatched call sites" — still gated on the
-de-risking spike's benchmark, but over less code.
+set of already-dynamically-dispatched call sites" — the de-risking spike
+(§ Implementation) measured exactly that narrower question and found the
+cost comparable to the already-accepted `is_number` guard's on those same
+call sites.
 
 For that remaining case, the call site wraps the BIF call in a `try`/
 `catch` on `badarith`, following the same catch-clause shape already used
