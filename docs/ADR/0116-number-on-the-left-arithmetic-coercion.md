@@ -104,17 +104,36 @@ call in a `try`/`catch` on `badarith`:
 try
     call 'erlang':'+'(Left, Right)
 catch
-    <'error', 'badarith', _Stack> ->
-        call 'beamtalk_message_dispatch':'send'(Right, 'plusFromNumber:', [Left])
+    <'error', 'badarith', Stack> ->
+        case call 'erlang':'is_number'(Right) of
+            <'true'> ->
+                %% Right IS a number — badarith wasn't a coercion miss (e.g.
+                %% `5 / 0`). Re-raise unchanged so the existing badarith
+                %% classification (ADR 0028/BT-2704) still handles it.
+                call 'erlang':'raise'('error', 'badarith', Stack)
+            <'false'> ->
+                call 'beamtalk_message_dispatch':'send'(Right, 'plusFromNumber:', [Left])
+        end
 end
 ```
 
-`number + number` never raises `badarith`, so the `try` costs nothing on the
-happy path and the `catch` only ever fires when `Right` isn't a number — at
-which point it becomes a normal message send to `Right`, resolved through
-the existing dispatch layer. If `Right`'s class has no `plusFromNumber:`, the
-dispatch layer's ordinary `does_not_understand` handling applies — no new
-error path to build.
+`+ - *` never raise `badarith` for two numbers — only `/` does, and only
+when the divisor is `0`. Naively catching every `badarith` and dispatching
+unconditionally would misroute `5 / 0` (divisor `0` *is* a number) to
+`beamtalk_message_dispatch:send(0, 'divFromNumber:', [5])`, which fails as
+`does_not_understand: 'divFromNumber:' not understood by Integer` — a
+regression of the existing, documented `badarith` → `TypeError` "bad
+arithmetic operation" classification (`beamtalk_exception_handler:wrap_raw/2`,
+ADR 0028), which correctly explains it as an arithmetic error today. The
+`is_number(Right)` check inside the catch handler distinguishes the two
+`badarith` causes: a non-numeric `Right` is a genuine coercion miss and
+dispatches to the reflected method; a numeric `Right` means the failure is
+unrelated to coercion (division by zero being the only such case among
+`+ - * /`), and `erlang:raise/3` re-raises it with its original class,
+reason, and stacktrace — identical to today's uncaught propagation — so it
+reaches the same classification layer unchanged. The `try` and the
+`is_number` check both cost nothing on the `number <op> number` happy path,
+and the `catch` only ever runs on an actual `badarith`.
 
 This is deliberately the one place BT-2709 avoided (catch-on-failure instead
 of a guard) — correct here specifically because the happy path (number +
@@ -130,6 +149,9 @@ Vector(6, 7, 8)
 does_not_understand: 'plusFromNumber:' not understood by String
 > aVector + 5
 Vector(6, 7, 8)
+> 5 / 0
+Error: TypeError: bad arithmetic operation
+Hint: Arithmetic requires numbers; check for a non-numeric operand or division by zero.
 ```
 
 ### What this ADR does not do
@@ -175,10 +197,12 @@ Vector(6, 7, 8)
   fall back to a dispatch on failure" — no magic, inspectable in the
   compiled `.core`/`.beam` output.
 - **Production operator:** The `try`/`catch` is scoped tightly around the
-  single BIF call, so a crash report distinguishing "genuine badarith bug"
-  from "number-on-the-left dispatch" stays legible in stack traces —
-  the catch only ever re-raises as `does_not_understand`, never masks an
-  unrelated error.
+  single BIF call and re-checks `is_number(Right)` before deciding what to
+  do, so an unrelated numeric failure (`5 / 0`) keeps surfacing through the
+  existing `badarith` classification (ADR 0028) with its original class,
+  reason, and stacktrace — it is never silently reinterpreted as a
+  does-not-understand. Only a genuine non-numeric right operand takes the
+  new dispatch path.
 - **Tooling developer:** `plusFromNumber:` is an ordinary typed method, so
   LSP completion, hover types, and static DNU checking all work on it with
   zero special-casing — the same infrastructure that already handles
@@ -317,8 +341,8 @@ protocol changes).
 - `crates/beamtalk-core/src/codegen/core_erlang/operators.rs`:
   - Wrap the always-bare arithmetic path (the `else` branch in
     `generate_binary_op` when `receiver_is_statically_numeric(left)` is
-    true) in the `try`/`catch` on `badarith`, re-dispatching to
-    `<verb>FromNumber:` on the right operand.
+    true) in the `try`/`catch` on `badarith`, with the `is_number(Right)`
+    re-raise-or-dispatch check described above.
   - Wrap the `is_number`-true branch of `guarded_op_doc`'s
     `OperatorGuard::Arithmetic` case the same way, so a *dynamically*
     numeric left operand gets the same fallback as a *statically* numeric
@@ -328,13 +352,18 @@ protocol changes).
     typed leaves (CLAUDE.md, ADR 0089) — no `format!()`.
 - Codegen regression tests (mirroring the existing
   `tests/expressions.rs` guard tests from BT-2709/2710): assert the
-  `try`/`catch` shape is emitted for both call sites, and that a plain
-  `number <op> number` expression's generated Core Erlang is unaffected
-  outside the added `try`/`catch` wrapper.
-- `stdlib/test/*.bt` (BUnit): a `Vector`-style value type implementing
-  `plusFromNumber:`/`timesFromNumber:`, asserting `5 + aVector` dispatches
-  correctly; a type with no reflected hook, asserting `5 + aThing` raises
-  `does_not_understand` (not a raw `badarith`).
+  `try`/`catch`/`is_number`/re-raise shape is emitted for both call sites,
+  and that a plain `number <op> number` expression's generated Core Erlang
+  is unaffected outside the added wrapper.
+- `stdlib/test/*.bt` (BUnit):
+  - A `Vector`-style value type implementing `plusFromNumber:`/
+    `timesFromNumber:`, asserting `5 + aVector` dispatches correctly.
+  - A type with no reflected hook, asserting `5 + aThing` raises
+    `does_not_understand` (not a raw `badarith`).
+  - `5 / 0` (and `0 - 0 / 0`-shaped variants exercising both call sites)
+    still raises the existing `TypeError`/"bad arithmetic operation"
+    classification, not a `divFromNumber:` `does_not_understand` — the
+    regression case that motivated the `is_number(Right)` re-raise check.
 - Benchmark: extend the BT-2709 guard-vs-bare harness
   (`runtime/perf/bench_collect_selfhost.escript`,
   `docs/development/benchmarks.md`) with a `try`/`catch`-vs-bare-BIF
