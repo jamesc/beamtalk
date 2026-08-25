@@ -897,6 +897,19 @@ specific to this ADR's mechanism — noted here because § User Impact
 (Newcomer) already establishes `does_not_understand` as the intended,
 improved failure mode.
 
+## Implementation Tracking
+
+**Parent:** BT-2712 (Phase 4 of BT-2708, already tracked this ADR's spec —
+reused as the parent for the issues below rather than creating a
+duplicate Epic)
+**Issues:**
+- BT-3262 — Add `send_number_coercion/4` to `beamtalk_message_dispatch.erl` (Phase 1, runtime)
+- BT-3263 — Wire number-on-the-left coercion into `operators.rs` codegen (Phase 2, codegen; blocked by BT-3262)
+- BT-3264 — BUnit tests for number-on-the-left arithmetic coercion (Phase 3; blocked by BT-3263)
+- BT-3265 — Benchmark + language docs for number-on-the-left arithmetic (Phase 4; blocked by BT-3263)
+
+**Status:** Planned
+
 ## References
 - Related issues: BT-2712 (this ADR), BT-2708 (epic), BT-2709 (Phase 1,
   receiver-dispatch arithmetic), BT-2710 (Phase 2, comparison operators —
