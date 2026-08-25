@@ -1,7 +1,7 @@
 # ADR 0097: Desktop Attach Client — One Front Node per Workspace
 
 ## Status
-Proposed (2026-06-13)
+Accepted (in progress, 2026-06-13) — all 4 phases + spike landed (BT-2983–BT-2989): front hooks, broker core, Tauri picker UI, Linux/macOS/Windows packaging. Not yet verified end-to-end in a display-server sandbox; CI release lanes are `workflow_dispatch`-only.
 
 Builds on [ADR 0091 — Connection Security for Remote Workspace Access](0091-remote-workspace-access-phoenix-authenticated-front.md)
 (the Attach topology and its cookie boundary) and

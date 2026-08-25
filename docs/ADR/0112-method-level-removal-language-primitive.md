@@ -1,7 +1,7 @@
 # ADR 0112: Method-Level Removal Language Primitive (`Behaviour removeSelector:`)
 
 ## Status
-Accepted (2026-08-15)
+Implemented (2026-08-15) — shipped via Epic BT-3183, Phases 1–5 (BT-3184–BT-3190)
 
 ## Context
 
@@ -399,4 +399,4 @@ Considered and deferred, not rejected outright. Symmetric with `compile:source:`
 
 **Epic:** BT-3183
 **Issues:** BT-3184, BT-3185 (Phase 1 — Foundation), BT-3186 (Phase 2 — Core primitive), BT-3187 (Phase 3 — ChangeLog), BT-3188, BT-3189 (Phase 4 — Tool surfaces), BT-3190 (Phase 5 — Validation)
-**Status:** Planned
+**Status:** Shipped — all phases complete (BT-3184–BT-3190)

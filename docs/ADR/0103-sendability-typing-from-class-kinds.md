@@ -1,7 +1,7 @@
 # ADR 0103: Sendability Typing from Class Kinds
 
 ## Status
-Accepted (2026-07-07)
+Implemented (2026-07-07) — Phases 0–3 landed
 
 ## Implementation Tracking
 
