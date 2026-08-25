@@ -1,7 +1,7 @@
 # ADR 0116: Double-Dispatch Coercion for Number-on-the-Left Arithmetic
 
 ## Status
-Proposed (2026-08-25)
+Accepted (2026-08-25)
 
 ## Context
 
