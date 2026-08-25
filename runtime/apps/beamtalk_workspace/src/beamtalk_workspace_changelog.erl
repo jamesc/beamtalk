@@ -100,7 +100,10 @@ release nodes do not start a workspace, so this code is a no-op there.
     epoch/0,
     clear/0,
     find_revert_target/2,
-    find_revert_target/3
+    find_revert_target/3,
+    %% ADR 0114 (BT-3270): per-site body persistence for the shared
+    %% multi-site rewrite mechanism — see this function's doc.
+    store_site_body/1
 ]).
 
 %% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
@@ -164,7 +167,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 ]).
 
 %% Exported for tests only.
--export([changes_dir/1, entry_to_json/1, entry_from_json/1, body_delta/2]).
+-export([changes_dir/1, entry_to_json/1, entry_from_json/1, body_delta/2, read_source_file/1]).
 
 -define(ETS_TABLE, beamtalk_changelog_entries).
 %% Bounded ring: keep at most this many entries on disk before rotating older
@@ -1357,6 +1360,57 @@ read_source_file(Ref) ->
         undefined ->
             {error, no_workspace}
     end.
+
+-doc """
+Persist one rewrite site's body to the ChangeLog's `sources/` directory and
+return its ref filename, for building a `'rename-class'`/`'rename-method'`
+entry's `sites` list (ADR 0114, BT-3270).
+
+Generalizes the single-body persistence `do_append/2` already performs for a
+whole entry's `source`/`prev_source` (`write_optional_source/3`) to the
+N-body case a multi-site rewrite needs — one call per site per body (a site
+typically has both a `source` and a `prev_source` body). Callers write every
+site's bodies via this function BEFORE calling `append/1`: a `site()`'s
+`source_ref`/`prev_source_ref` fields are already-persisted refs by the time
+`append/1`'s `append_input()` map is built, unlike the top-level `source`/
+`prev_source` keys, which name raw bodies `do_append/2` persists itself
+against the entry's own `seq` — not yet assigned at the point a caller is
+still assembling a multi-site `sites` list.
+
+Returns `undefined` for `undefined` (nothing to write — mirrors
+`write_optional_source/3`'s no-op for an absent body) and in run mode (no
+workspace; nothing durable to persist a ref against, and every reader of a
+`site()`'s refs already tolerates an absent one). Returns `{error, Reason}`
+on a write failure — callers should log and drop to `undefined` rather than
+fail the whole rewrite, mirroring how a ChangeLog write failure elsewhere is
+already best-effort from its caller's point of view.
+""".
+-spec store_site_body(binary() | undefined) -> {ok, binary()} | undefined | {error, term()}.
+store_site_body(undefined) ->
+    undefined;
+store_site_body(Body) when is_binary(Body) ->
+    case gen_server:call(?MODULE, get_sources_dir) of
+        undefined ->
+            undefined;
+        {ok, SourcesDir} ->
+            Ref = site_body_ref_filename(),
+            Path = filename:join(SourcesDir, binary_to_list(Ref)),
+            case write_file_atomic(Path, Body) of
+                ok -> {ok, Ref};
+                {error, _} = Err -> Err
+            end
+    end.
+
+%% sources/site-<unique>.bt — a rewrite site's body ref filename. Unlike
+%% `source_ref_filename/2` (keyed by the owning entry's own `seq`, assigned
+%% only once `do_append/2` runs), a site's body must be written BEFORE the
+%% entry's `seq` is known (see `store_site_body/1`'s doc) — `erlang:unique_
+%% integer/1` gives a monotonic, collision-free name with no such ordering
+%% dependency.
+-spec site_body_ref_filename() -> binary().
+site_body_ref_filename() ->
+    Unique = erlang:unique_integer([positive, monotonic]),
+    iolist_to_binary([<<"site-">>, integer_to_binary(Unique), <<".bt">>]).
 
 %%% ----------------------------------------------------------------------------
 %%% gen_server callbacks

@@ -27,6 +27,12 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% this is a separate call rather than folded into remove_method/3 itself.
     emit_remove_change_entry/5,
     emit_extension_remove_change_entry/7,
+    %% ADR 0114 (BT-3270): the shared multi-site rewrite mechanism —
+    %% generalizes remove_method/3 for `renameTo:`/`renameSelector:to:`
+    %% (future issues) to call with different site lists. See
+    %% rewrite_sites/2's doc for the in-memory atomicity protocol.
+    rewrite_sites/2,
+    emit_rewrite_change_entry/2,
     %% BT-3206: best-effort snapshot + ChangeLog append for a successful
     %% `removeFromSystem` (class removal) — see
     %% capture_class_removal_snapshot/1's doc for why the snapshot is a
@@ -118,6 +124,61 @@ Extracted from beamtalk_repl_eval (BT-863).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+%%% ----------------------------------------------------------------------------
+%%% Multi-site rewrite types (ADR 0114, BT-3270) — see rewrite_sites/2's doc.
+%%% ----------------------------------------------------------------------------
+
+-type rewrite_span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
+
+%% One site a multi-site rewrite must touch: `Class`'s CURRENT
+%% `beamtalk_workspace_meta:get_class_source/1` text has `NewText` spliced in
+%% at `Span` (the same "current in-memory merged source" convention
+%% `remove_method/3` already uses for its own single-site span — NOT
+%% necessarily the on-disk byte offsets; resolving a site's span against
+%% whatever source a caller's site-discovery step used is that step's own
+%% responsibility, out of scope here per BT-3270's issue text).
+%% `SourceFile` is carried through only for ChangeLog attribution
+%% (`beamtalk_workspace_changelog`'s `site()` shape) — it plays no role in
+%% the splice/compile/install mechanism itself.
+-type rewrite_site() :: #{
+    class := binary(),
+    source_file := binary() | undefined,
+    span := rewrite_span(),
+    new_text := binary()
+}.
+
+%% A `rewrite_site()` after a successful `rewrite_sites/2` call: `prev_source`
+%% is the text that occupied `span` before the rewrite (sliced from the
+%% class's pre-rewrite source) and `source` is `new_text` again, surfaced
+%% under the ChangeLog's own field name — together these are exactly a
+%% ChangeLog `site()`'s `prev_source_ref`/`source_ref` bodies before they are
+%% written to `sources/` and turned into refs (see `emit_rewrite_change_entry/2`).
+-type installed_rewrite_site() :: #{
+    class := binary(),
+    source_file := binary() | undefined,
+    span := rewrite_span(),
+    prev_source := binary(),
+    source := binary()
+}.
+
+%% `rewrite_sites/2`'s success result: `definition` is the installed
+%% definition site (`undefined` when the caller passed no definition site —
+%% mirrors the ChangeLog schema's `sites[0] = null` dynamic-class case) and
+%% `sites` is every installed reference/sender site, in the order their
+%% owning class-groups were installed (see `rewrite_sites/2`'s doc for why
+%% that is not always the caller's exact original interleaving).
+-type rewrite_result() :: #{
+    definition := installed_rewrite_site() | undefined,
+    sites := [installed_rewrite_site()]
+}.
+
+-export_type([
+    rewrite_span/0,
+    rewrite_site/0,
+    installed_rewrite_site/0,
+    rewrite_result/0
+]).
 
 %%% Public API
 
@@ -1206,37 +1267,79 @@ reload_class_file_impl(Path, ExpectedClassName) ->
     string(), string(), binary() | undefined, atom() | undefined
 ) -> {ok, [map()]} | {error, term()}.
 reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
+    case compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) of
+        {ok, _Tag, _} = ProtocolResult ->
+            install_reload_result(ProtocolResult, Path);
+        {ok, _Tag, _, _, _} = CompiledResult ->
+            install_reload_result(CompiledResult, Path);
+        {error, _} = Err ->
+            Err
+    end.
+
+-doc """
+Compile half of `reload_compile_and_load/4` — split out for BT-3270's
+in-memory atomicity protocol (ADR 0114 § Decision, final paragraph), which
+needs to compile/validate every site in a multi-site rewrite batch *before*
+installing any of them (see `rewrite_sites/2`'s doc). Never touches
+`code:load_binary/3` or any other mutating step — a caller can call this as
+many times as it likes (one per candidate rewrite) with no risk of leaving a
+class half-installed, unlike `reload_compile_and_load/4` itself, which always
+compiles and installs in one step.
+
+Returns the same shapes `beamtalk_repl_compiler:compile_file/4` does (tagged
+so `install_reload_result/2` can dispatch on them), or `{error, Reason}` on a
+compile failure — this function's whole contract is "tell me whether this
+source is installable", so a compile failure here is reported, never raised.
+""".
+-spec compile_reload_source(string(), string(), binary() | undefined, atom() | undefined) ->
+    {ok, protocol_definition, map()}
+    | {ok, compiled, binary(), [map()], atom()}
+    | {error, term()}.
+compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     StdlibMode = is_stdlib_path(Path),
     case beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
         %% BT-1950: Protocol definition — must match before generic 4-tuple.
         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
-            load_protocol_module_stateless(ProtocolInfo, Path);
+            {ok, protocol_definition, ProtocolInfo};
         {ok, Binary, ClassNames, ModuleName} ->
             case verify_class_present(ExpectedClassName, ClassNames, Path) of
-                ok ->
-                    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's
-                    %% identical comment. Covers both callers of this helper:
-                    %% reload_class_file_impl/2 (file reload after an
-                    %% on-disk edit) and remove_method/3's "reload the class
-                    %% WITHOUT the removed method" — the latter never changes
-                    %% `state:`/`field:` slots, so priming it is harmless
-                    %% (the subsequent capture/1 always diffs an unchanged
-                    %% shape to itself, `no_op`).
-                    prime_shape_capture(ClassNames),
-                    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see
-                    %% load_class_binary/4's doc.
-                    case load_class_binary(ModuleName, Path, Binary, ClassNames) of
-                        {ok, NewlyNonLeafSuperclasses} ->
-                            activate_module(ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses),
-                            {ok, ClassNames};
-                        {error, Reason} ->
-                            {error, {load_error, Reason}}
-                    end;
-                {error, _} = Err ->
-                    Err
+                ok -> {ok, compiled, Binary, ClassNames, ModuleName};
+                {error, _} = Err -> Err
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+-doc """
+Install half of `reload_compile_and_load/4` — see `compile_reload_source/4`'s
+doc for why this is split out. Takes a successful `compile_reload_source/4`
+result and performs the mutating half: `load_class_binary/4` +
+`activate_module/4` (or the protocol-module equivalent). Never called on a
+value that failed `compile_reload_source/4` — callers gate on `{ok, ...}`
+first, which is exactly BT-3270's atomicity protocol: nothing calls this
+until every site in a batch has independently validated.
+""".
+-spec install_reload_result(
+    {ok, protocol_definition, map()} | {ok, compiled, binary(), [map()], atom()}, string()
+) -> {ok, [map()]} | {error, term()}.
+install_reload_result({ok, protocol_definition, ProtocolInfo}, Path) ->
+    load_protocol_module_stateless(ProtocolInfo, Path);
+install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
+    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's identical
+    %% comment. Covers every caller of this helper: reload_class_file_impl/2
+    %% (file reload after an on-disk edit), remove_method/3's "reload the
+    %% class WITHOUT the removed method", and rewrite_sites/2's per-site
+    %% install (BT-3270) — none of these change `state:`/`field:` slots, so
+    %% priming it is harmless (the subsequent capture/1 always diffs an
+    %% unchanged shape to itself, `no_op`).
+    prime_shape_capture(ClassNames),
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    case load_class_binary(ModuleName, Path, Binary, ClassNames) of
+        {ok, NewlyNonLeafSuperclasses} ->
+            activate_module(ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses),
+            {ok, ClassNames};
+        {error, Reason} ->
+            {error, {load_error, Reason}}
     end.
 
 %% Recompile a class with a new method definition.
@@ -1714,11 +1817,20 @@ reload_class_without_method(ClassNameBin, NewSourceBin) ->
     end.
 
 %% Cut the bytes `[start, end)' out of `Source', joining the surrounding text.
--spec splice_out_span(binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}) ->
-    binary().
-splice_out_span(Source, #{start := Start, 'end' := End}) ->
-    <<Before:Start/binary, _Removed:(End - Start)/binary, After/binary>> = Source,
-    <<Before/binary, After/binary>>.
+%% A thin wrapper over `splice_replace/3` (BT-3270) — removal is replacement
+%% with the empty binary.
+-spec splice_out_span(binary(), rewrite_span()) -> binary().
+splice_out_span(Source, Span) ->
+    splice_replace(Source, Span, <<>>).
+
+%% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
+%% surrounding text. Shared leaf primitive (CLAUDE.md's no-duplicate-
+%% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
+%% and `rewrite_sites/2`'s per-site splice (ADR 0114, BT-3270).
+-spec splice_replace(binary(), rewrite_span(), binary()) -> binary().
+splice_replace(Source, #{start := Start, 'end' := End}, NewText) ->
+    <<Before:Start/binary, _Old:(End - Start)/binary, After/binary>> = Source,
+    <<Before/binary, NewText/binary, After/binary>>.
 
 -spec method_selector_binary(atom() | binary()) -> binary().
 method_selector_binary(Sel) when is_binary(Sel) -> Sel;
@@ -1750,6 +1862,496 @@ source_path_binary(Path) -> list_to_binary(Path).
 -spec source_path_or_empty(string() | undefined) -> string().
 source_path_or_empty(undefined) -> "";
 source_path_or_empty(Path) -> Path.
+
+%%% ----------------------------------------------------------------------------
+%%% Shared multi-site rewrite mechanism (ADR 0114, BT-3270)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Rewrite a definition site plus N reference/sender sites transactionally, in
+memory, generalizing `remove_method/3`'s single-site splice+recompile+
+hot-reload for the multi-site case ADR 0114's `renameTo:`/
+`renameSelector:to:` both need (BT-3271/BT-3272, not yet built — this is the
+shared mechanism both will call with different, already-computed site lists;
+site *discovery* itself is out of scope here, per this issue's text).
+
+`DefinitionSite` is the primary target's own declaration/definition
+(`undefined` only for a dynamic, source-less class being renamed — mirrors
+the ChangeLog schema's `sites[0] = null` case, ADR 0114 § ChangeLog schema).
+`ReferenceSites` is every other site to rewrite alongside it. Both are plain
+`rewrite_site()` maps — this function has no opinion on WHY a site is being
+rewritten (a class name, a selector, anything else a future primitive needs);
+it only knows how to splice `new_text` into `class`'s current source at
+`span`, recompile, and hot-reload.
+
+## The in-memory atomicity protocol (ADR 0114 § Decision, final paragraph)
+
+The ADR explicitly leaves open how to avoid leaving a rename half-applied in
+memory if rewriting confirmed site 5 of 10 fails partway through — before any
+flush happens, across N separate class gen_servers, with no OTP cross-process
+transaction primitive to roll back a hot-reloaded module once live actors may
+hold references to it (same precedent ADR 0082 already established). This
+function's answer, per the ADR's own steer:
+
+1. **Group sites by owning class.** Two sites can legitimately target the
+   SAME class (e.g. a method-rename's definition and a same-class self-send
+   both live in `Counter`'s own file) — these MUST be merged into one splice
+   + one recompile, never two independent ones, or the second recompile
+   would silently discard the first's edit (it would start again from the
+   unmodified `beamtalk_workspace_meta` source). `group_sites_by_class/1`
+   also rejects overlapping/out-of-bounds spans within a class up front —
+   a structural bug in the caller's site list, not a compile failure, so it
+   is reported before any compile is even attempted.
+2. **Validate every class-group's rewritten source FIRST — a pure,
+   non-mutating pass.** Each group's post-splice source is compiled via
+   `compile_reload_source/4` (the same `beamtalk_repl_compiler:compile_file/4`
+   + `verify_class_present/3` step `reload_compile_and_load/4` already runs
+   for the single-site case) but NEVER installed at this stage — no
+   `code:load_binary/3`, no `activate_module/4`, nothing observable to any
+   other process. If ANY group fails to compile, `rewrite_sites/2` returns
+   `{error, {validation_failed, PerClassReasons}}` immediately and NOTHING
+   has been mutated: every class's `beamtalk_workspace_meta` source and
+   loaded module are exactly as they were before this call. This is what
+   gives the "no class left in a half-rewritten state" guarantee.
+3. **Only once every group has validated does the install pass run** —
+   `install_reload_result/2` (load + hot-reload) for each group in turn,
+   updating `beamtalk_workspace_meta`'s tracked source to match. Since every
+   group already compiled successfully, `install_reload_result/2` failing
+   here is expected to be rare (see its own doc — `code:load_binary/3`
+   failing on a binary that just came out of a successful compile is a
+   BEAM-level anomaly, not a source problem). It is still handled
+   defensively: **the pathological case where install fails after
+   validation passed** leaves every group installed BEFORE the failing one
+   already live (there is still no cross-gen-server rollback — the ADR's own
+   accepted limit) while the failing group and everything after it in
+   install order never installed. `rewrite_sites/2` reports exactly this via
+   `{error, {partial_install_failure, FailedClass, Reason, InstalledClasses}}`
+   so the caller (and its ChangeLog bookkeeping) can tell a documented,
+   bounded partial application apart from "nothing happened" — it must NOT
+   be treated as equivalent to a clean validation-phase abort.
+
+Known, accepted limitation this protocol does NOT close: `compile_file/4`
+itself has a side effect independent of installation — it registers each
+compiled class's `referenced_aliases` into `beamtalk_alias_xref` (BT-2952,
+`compile_file_core/4`'s own doc) as part of merely COMPILING, not installing.
+A class-group that validates but is never installed (because an earlier or
+later group in the same batch failed validation) can therefore still leave a
+stale alias-xref registration behind. This is not a regression BT-3270
+introduces — `reload_compile_and_load/4`'s existing single-site path already
+has this exact property today (compile-time alias registration happens
+before the install half runs) — so generalizing to N sites does not make it
+qualitatively worse. Fixing it is `beamtalk_alias_xref` bookkeeping
+robustness, not the class-reinstallation atomicity ADR 0114 asks this issue
+to design.
+
+## What this function does NOT do
+
+No ChangeLog entry (see `emit_rewrite_change_entry/2`, a separate best-effort
+call mirroring `emit_remove_change_entry/5`'s placement after `remove_method/3`)
+and no `beamtalk_class_lifecycle`-style purge of a class's OLD registered
+name — that only applies when a rename changes what name a class is
+registered under, which is `renameTo:`'s own concern (out of scope: this
+function never touches `beamtalk_class_registry`). Per-site xref reindexing
+IS covered, but not via an explicit purge call: `activate_module/4`'s
+`register_classes/2` → generated `register_class/0` → `beamtalk_object_class:
+update_class/2` → `refresh_xref/2` already purges-then-reregisters a class's
+xref rows on every ordinary recompile (ADR 0087 Phase 2) — this function's
+job is simply to make sure THAT existing pipeline runs for every rewritten
+site's own class, not just a single primary target, which is exactly the
+"must be wired in explicitly" gap ADR 0114's Consequences section names.
+Calling `beamtalk_class_lifecycle:purge_compiler_cache/1` additionally here
+would be actively wrong, not merely redundant: it unconditionally drops a
+class's `beamtalk_compiler_server` cache entry, which would immediately
+erase the entry `activate_module/4`'s own `register_class/0` call just
+freshly (re-)registered for a same-name class-group.
+""".
+-spec rewrite_sites(rewrite_site() | undefined, [rewrite_site()]) ->
+    {ok, rewrite_result()}
+    | {error,
+        no_sites
+        | {class_source_unavailable, binary()}
+        | {invalid_or_overlapping_span, binary(), rewrite_span()}
+        | {validation_failed, [{binary(), term()}]}
+        | {partial_install_failure, binary(), term(), [binary()]}}.
+rewrite_sites(undefined, []) ->
+    {error, no_sites};
+rewrite_sites(DefinitionSite, ReferenceSites) when is_list(ReferenceSites) ->
+    AllSites =
+        case DefinitionSite of
+            undefined -> ReferenceSites;
+            _ -> [DefinitionSite | ReferenceSites]
+        end,
+    case group_sites_by_class(AllSites) of
+        {ok, Groups} ->
+            case validate_rewrite_groups(Groups) of
+                {ok, Validated} -> install_rewrite_groups(Validated, DefinitionSite);
+                {error, _} = Err -> Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+%% One class's worth of a multi-site rewrite: every site targeting `class`,
+%% merged into a single pre-computed post-splice source ready to compile.
+-record(rewrite_class_group, {
+    class :: binary(),
+    module_name_override :: binary() | undefined,
+    source_path :: string() | undefined,
+    original_source :: binary(),
+    new_source :: binary(),
+    sites :: [rewrite_site()]
+}).
+
+%% Partition `Sites` by their `class` field, preserving first-seen class
+%% order (so install order is deterministic) and each class's own sites in
+%% their original relative order, then build a `#rewrite_class_group{}` per
+%% class: fetch that class's CURRENT tracked source once, validate its sites'
+%% spans don't overlap or run past the end of that source, and pre-compute
+%% the merged post-splice source (`apply_site_splices/2`).
+-spec group_sites_by_class([rewrite_site()]) ->
+    {ok, [#rewrite_class_group{}]}
+    | {error,
+        {class_source_unavailable, binary()}
+        | {invalid_or_overlapping_span, binary(), rewrite_span()}}.
+group_sites_by_class(Sites) ->
+    {ClassOrderRev, Grouped} = lists:foldl(
+        fun(#{class := Class} = Site, {OrderAcc, MapAcc}) ->
+            case maps:is_key(Class, MapAcc) of
+                true -> {OrderAcc, MapAcc#{Class => [Site | maps:get(Class, MapAcc)]}};
+                false -> {[Class | OrderAcc], MapAcc#{Class => [Site]}}
+            end
+        end,
+        {[], #{}},
+        Sites
+    ),
+    build_class_groups(lists:reverse(ClassOrderRev), Grouped, []).
+
+-spec build_class_groups([binary()], #{binary() => [rewrite_site()]}, [#rewrite_class_group{}]) ->
+    {ok, [#rewrite_class_group{}]}
+    | {error,
+        {class_source_unavailable, binary()}
+        | {invalid_or_overlapping_span, binary(), rewrite_span()}}.
+build_class_groups([], _Grouped, Acc) ->
+    {ok, lists:reverse(Acc)};
+build_class_groups([Class | Rest], Grouped, Acc) ->
+    ClassSites = lists:reverse(maps:get(Class, Grouped)),
+    case build_class_group(Class, ClassSites) of
+        {ok, Group} -> build_class_groups(Rest, Grouped, [Group | Acc]);
+        {error, _} = Err -> Err
+    end.
+
+-spec build_class_group(binary(), [rewrite_site()]) ->
+    {ok, #rewrite_class_group{}}
+    | {error,
+        {class_source_unavailable, binary()}
+        | {invalid_or_overlapping_span, binary(), rewrite_span()}}.
+build_class_group(Class, Sites) ->
+    case beamtalk_workspace_meta:get_class_source(Class) of
+        undefined ->
+            {error, {class_source_unavailable, Class}};
+        Source ->
+            SourceBin = unicode:characters_to_binary(Source),
+            case validate_no_overlaps(Class, Sites, byte_size(SourceBin)) of
+                ok ->
+                    {ModuleNameOverride, SourcePath} = patch_module_target(Class),
+                    {ok, #rewrite_class_group{
+                        class = Class,
+                        module_name_override = ModuleNameOverride,
+                        source_path = SourcePath,
+                        original_source = SourceBin,
+                        new_source = apply_site_splices(SourceBin, Sites),
+                        sites = Sites
+                    }};
+                {error, _} = Err ->
+                    Err
+            end
+    end.
+
+%% Every span for one class must be well-formed (`start =< end =< SourceSize`)
+%% and disjoint from every other span for that same class — two sites
+%% touching overlapping text is a structural bug in the caller's site list
+%% (site discovery, out of scope here), not something a splice can resolve.
+%% Sorting by start first turns pairwise overlap-checking into a single
+%% linear "does the next span start at or after where the last one ended"
+%% fold.
+-spec validate_no_overlaps(binary(), [rewrite_site()], non_neg_integer()) ->
+    ok | {error, {invalid_or_overlapping_span, binary(), rewrite_span()}}.
+validate_no_overlaps(Class, Sites, SourceSize) ->
+    Spans = lists:sort(
+        fun(#{start := A}, #{start := B}) -> A =< B end,
+        [maps:get(span, S) || S <- Sites]
+    ),
+    validate_spans(Class, Spans, 0, SourceSize).
+
+-spec validate_spans(binary(), [rewrite_span()], non_neg_integer(), non_neg_integer()) ->
+    ok | {error, {invalid_or_overlapping_span, binary(), rewrite_span()}}.
+validate_spans(_Class, [], _Min, _Size) ->
+    ok;
+validate_spans(Class, [#{start := Start, 'end' := End} = Span | Rest], Min, Size) ->
+    case Start =< End andalso End =< Size andalso Start >= Min of
+        true -> validate_spans(Class, Rest, End, Size);
+        false -> {error, {invalid_or_overlapping_span, Class, Span}}
+    end.
+
+%% Apply every site's splice to `Source` in one pass. Sites are applied
+%% rightmost-span-first so that an earlier (lower-offset) site's byte offsets
+%% are never invalidated by a splice whose replacement text has a different
+%% length than the span it replaces — this is exactly what lets two sites in
+%% the same class (e.g. a method-rename's definition plus a same-class
+%% self-send) merge into one recompile instead of two independent ones that
+%% would silently clobber each other.
+-spec apply_site_splices(binary(), [rewrite_site()]) -> binary().
+apply_site_splices(Source, Sites) ->
+    RightmostFirst = lists:sort(
+        fun(#{span := #{start := A}}, #{span := #{start := B}}) -> A >= B end,
+        Sites
+    ),
+    lists:foldl(
+        fun(#{span := Span, new_text := NewText}, Acc) -> splice_replace(Acc, Span, NewText) end,
+        Source,
+        RightmostFirst
+    ).
+
+%% Phase 1 of the atomicity protocol: compile (never install) every group's
+%% pre-computed post-splice source. All-or-nothing — a single failure aborts
+%% before any group's `{Group, Compiled}` pair is even assembled, let alone
+%% installed.
+-spec validate_rewrite_groups([#rewrite_class_group{}]) ->
+    {ok, [{#rewrite_class_group{}, term()}]} | {error, {validation_failed, [{binary(), term()}]}}.
+validate_rewrite_groups(Groups) ->
+    Results = [{Group, compile_rewrite_group(Group)} || Group <- Groups],
+    %% Every element of Results is either `{G, {error, Reason}}` or
+    %% `{G, {ok, ...}}` (compile_rewrite_group/1's only two return shapes) —
+    %% when no failures exist, Results IS already the all-`{ok, ...}` list
+    %% install_rewrite_groups/2 expects, in original group order.
+    case [{G#rewrite_class_group.class, Reason} || {G, {error, Reason}} <- Results] of
+        [] -> {ok, Results};
+        Failures -> {error, {validation_failed, Failures}}
+    end.
+
+-spec compile_rewrite_group(#rewrite_class_group{}) ->
+    {ok, protocol_definition, map()} | {ok, compiled, binary(), [map()], atom()} | {error, term()}.
+compile_rewrite_group(#rewrite_class_group{
+    module_name_override = ModuleNameOverride,
+    source_path = SourcePath,
+    new_source = NewSourceBin
+}) ->
+    LoadPath = source_path_or_empty(SourcePath),
+    NewSourceStr = unicode:characters_to_list(NewSourceBin),
+    compile_reload_source(NewSourceStr, LoadPath, ModuleNameOverride, undefined).
+
+%% Phase 2 of the atomicity protocol: install every already-validated group,
+%% in class-group order, updating `beamtalk_workspace_meta`'s tracked source
+%% to match each newly-installed class. See `rewrite_sites/2`'s doc for the
+%% pathological partial-install-failure case this handles defensively.
+-spec install_rewrite_groups([{#rewrite_class_group{}, term()}], rewrite_site() | undefined) ->
+    {ok, rewrite_result()}
+    | {error, {partial_install_failure, binary(), term(), [binary()]}}.
+install_rewrite_groups(ValidatedGroups, DefinitionSite) ->
+    install_rewrite_groups(ValidatedGroups, DefinitionSite, []).
+
+-spec install_rewrite_groups(
+    [{#rewrite_class_group{}, term()}], rewrite_site() | undefined, [#rewrite_class_group{}]
+) ->
+    {ok, rewrite_result()}
+    | {error, {partial_install_failure, binary(), term(), [binary()]}}.
+install_rewrite_groups([], DefinitionSite, InstalledRev) ->
+    {ok, build_rewrite_result(DefinitionSite, lists:reverse(InstalledRev))};
+install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev) ->
+    #rewrite_class_group{class = Class, source_path = SourcePath, new_source = NewSource} = Group,
+    LoadPath = source_path_or_empty(SourcePath),
+    case install_reload_result(Compiled, LoadPath) of
+        {ok, ClassNames} ->
+            NewSourceStr = unicode:characters_to_list(NewSource),
+            lists:foreach(
+                fun(#{name := Name}) ->
+                    beamtalk_workspace_meta:set_class_source(
+                        normalize_class_source_key(Name), NewSourceStr
+                    )
+                end,
+                ClassNames
+            ),
+            install_rewrite_groups(Rest, DefinitionSite, [Group | InstalledRev]);
+        {error, Reason} ->
+            InstalledClasses = [G#rewrite_class_group.class || G <- lists:reverse(InstalledRev)],
+            {error, {partial_install_failure, Class, Reason, InstalledClasses}}
+    end.
+
+%% Build `rewrite_sites/2`'s success result from the installed groups: split
+%% each group's sites back into "the definition site" (matched by
+%% `{class, span}` against the caller's original `DefinitionSite`) and
+%% "everything else", recording each site's pre-rewrite text (sliced from
+%% its group's `original_source`, before any splice) alongside its `new_text`
+%% under the ChangeLog's own `prev_source`/`source` field names.
+-spec build_rewrite_result(rewrite_site() | undefined, [#rewrite_class_group{}]) ->
+    rewrite_result().
+build_rewrite_result(DefinitionSite, InstalledGroups) ->
+    IndexedSites = lists:flatmap(
+        fun(#rewrite_class_group{original_source = OrigSource, sites = Sites}) ->
+            [installed_site(OrigSource, Site) || Site <- Sites]
+        end,
+        InstalledGroups
+    ),
+    case DefinitionSite of
+        undefined ->
+            #{definition => undefined, sites => IndexedSites};
+        #{class := DefClass, span := DefSpan} ->
+            {DefList, RefList} = lists:partition(
+                fun(#{class := C, span := S}) -> C =:= DefClass andalso S =:= DefSpan end,
+                IndexedSites
+            ),
+            case DefList of
+                [DefInstalled | _] -> #{definition => DefInstalled, sites => RefList};
+                [] -> #{definition => undefined, sites => IndexedSites}
+            end
+    end.
+
+-spec installed_site(binary(), rewrite_site()) -> installed_rewrite_site().
+installed_site(OriginalSource, #{
+    class := Class, source_file := SourceFile, span := Span, new_text := NewText
+}) ->
+    #{
+        class => Class,
+        source_file => SourceFile,
+        span => Span,
+        prev_source => slice(OriginalSource, Span),
+        source => NewText
+    }.
+
+-spec slice(binary(), rewrite_span()) -> binary().
+slice(Source, #{start := Start, 'end' := End}) ->
+    Len = End - Start,
+    <<_Before:Start/binary, Text:Len/binary, _After/binary>> = Source,
+    Text.
+
+-doc """
+Emit a `'rename-class'`/`'rename-method'` ChangeLog entry for a just-completed
+`rewrite_sites/2` call (ADR 0114, BT-3270) — mirrors `emit_remove_change_entry/5`'s
+placement (called by the caller AFTER the rewrite is already live; a
+ChangeLog write failure never undoes an installed rewrite) and its best-
+effort/self-swallowing failure handling.
+
+`Spec` carries the identity fields the `sites`/`candidate_sites` schema
+itself does not (ADR 0114 § ChangeLog schema) — `kind` (`'rename-class'` |
+`'rename-method'`), the new `class` name, `intent`/`author`/`author_kind`,
+and whichever of `selector`/`old_selector`/`side` (rename-method) or
+`old_class`/`old_path`/`new_path` (rename-class) apply; `candidate_sites`
+(rename-method's reported-never-rewritten senders) passes through verbatim —
+this function neither computes nor validates it, since candidate-site
+discovery is a future primitive's concern, not this mechanism's.
+
+`flushable`/`not_flushable_reason` are derived generically from `RewriteResult`
+via `classify_installed_site/1` + `beamtalk_workspace_changelog:sites_flushable/1`
+— true iff every site (definition included) resolves to a flushable file,
+matching both kinds' documented rule exactly. A `Definition` of `undefined`
+(the dynamic-class case) always classifies the whole entry
+`{not_flushable, <<"dynamic">>}`, matching both schemas' `not_flushable_reason:
+"dynamic"` case. Each site's body is persisted to the ChangeLog's `sources/`
+directory via `beamtalk_workspace_changelog:store_site_body/1` before the
+entry itself is appended (a site's `source_ref`/`prev_source_ref` must
+already be a written ref by the time `append/1` sees it — see that
+function's doc).
+""".
+-spec emit_rewrite_change_entry(map(), rewrite_result()) -> ok.
+emit_rewrite_change_entry(Spec, RewriteResult) ->
+    try
+        do_emit_rewrite_change_entry(Spec, RewriteResult)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for multi-site rewrite (rewrite still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    spec => Spec,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-spec do_emit_rewrite_change_entry(map(), rewrite_result()) -> ok.
+do_emit_rewrite_change_entry(Spec, #{definition := Definition, sites := Sites}) ->
+    #{
+        kind := Kind,
+        class := ClassNameBin,
+        intent := Intent,
+        author := Author,
+        author_kind := AuthorKind
+    } = Spec,
+    AllInstalled = [Definition | Sites],
+    {Flushable, NotFlushableReason} =
+        beamtalk_workspace_changelog:sites_flushable(
+            [classify_installed_site(S) || S <- AllInstalled]
+        ),
+    Entry = #{
+        class => ClassNameBin,
+        kind => Kind,
+        selector => maps:get(selector, Spec, undefined),
+        old_selector => maps:get(old_selector, Spec, undefined),
+        side => maps:get(side, Spec, undefined),
+        old_class => maps:get(old_class, Spec, undefined),
+        old_path => maps:get(old_path, Spec, undefined),
+        new_path => maps:get(new_path, Spec, undefined),
+        sites => [site_append_input(S) || S <- AllInstalled],
+        candidate_sites => maps:get(candidate_sites, Spec, undefined),
+        intent => Intent,
+        flushable => Flushable,
+        not_flushable_reason => NotFlushableReason,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    _ = beamtalk_workspace_changelog:append(Entry),
+    ok.
+
+%% `undefined` (the dynamic-class definition-site case) always classifies as
+%% not-flushable/"dynamic", matching both `'rename-class'`'s and
+%% `'rename-method'`'s documented dynamic-class row (ADR 0114 § Refusal vs
+%% flushability) — a class with no backing file can never be flushed
+%% regardless of what its other sites look like. Reuses `classify_source_file/1`
+%% (already exported for exactly this kind of reuse — see its own callers)
+%% rather than re-deriving stdlib/dependency/project classification.
+-spec classify_installed_site(installed_rewrite_site() | undefined) ->
+    flushable | {not_flushable, binary()}.
+classify_installed_site(undefined) ->
+    {not_flushable, <<"dynamic">>};
+classify_installed_site(#{source_file := undefined}) ->
+    {not_flushable, <<"dynamic">>};
+classify_installed_site(#{source_file := SourceFile}) ->
+    case classify_source_file(SourceFile) of
+        {flushable, _AbsPath} -> flushable;
+        {not_flushable, Reason} -> {not_flushable, Reason}
+    end.
+
+-spec site_append_input(installed_rewrite_site() | undefined) ->
+    beamtalk_workspace_changelog:site() | undefined.
+site_append_input(undefined) ->
+    undefined;
+site_append_input(#{
+    source_file := SourceFile, span := Span, prev_source := PrevSource, source := Source
+}) ->
+    #{
+        source_file => SourceFile,
+        span => Span,
+        source_ref => store_rewrite_site_ref(Source),
+        prev_source_ref => store_rewrite_site_ref(PrevSource)
+    }.
+
+-spec store_rewrite_site_ref(binary()) -> binary() | undefined.
+store_rewrite_site_ref(Body) ->
+    case beamtalk_workspace_changelog:store_site_body(Body) of
+        {ok, Ref} ->
+            Ref;
+        undefined ->
+            undefined;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Failed to persist rewrite-site body to ChangeLog sources/ (site recorded without a body ref)",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            undefined
+    end.
 
 %% Load a recompiled method-patched class binary into BEAM.
 -spec load_recompiled_method(
