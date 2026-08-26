@@ -78,6 +78,19 @@ fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
     ]
 }
 
+/// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg1, Arg2)` Document.
+fn intrinsic_self_arg2(func: &str, arg1: &str, arg2: &str) -> Document<'static> {
+    docvec![
+        "call 'beamtalk_behaviour_intrinsics':'",
+        leaf::var(func.to_owned()),
+        "'(Self, ",
+        leaf::var(arg1.to_owned()),
+        ", ",
+        leaf::var(arg2.to_owned()),
+        ")"
+    ]
+}
+
 /// Generates Core Erlang for a Behaviour / Class / Metaclass tower primitive.
 ///
 /// One table for the whole metaclass tower (BT-2234): the registry routes all
@@ -94,6 +107,9 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
         | "classSetDoc"
         | "classConformsTo"
         | "classRemoveSelector"
+        // ADR 0114 Phase 2 (BT-3278): renameTo: — a single Symbol argument,
+        // same shape as classRemoveSelector.
+        | "classRenameTo"
         | "metaclassIncludesSelector" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
@@ -127,6 +143,30 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             Some(docvec![
                 "call 'beamtalk_behaviour_intrinsics':'classRemoveSelectorIfAbsent'(Self, ",
                 leaf::var(sel.clone()),
+                ", ",
+                leaf::var(absent_block.clone()),
+                ")"
+            ])
+        }
+        // ADR 0114 Phase 3 (BT-3279): renameSelector:to: — two Symbol
+        // arguments (old selector, new selector).
+        "classRenameSelector" => {
+            let old_sel = params.first()?;
+            let new_sel = params.get(1)?;
+            Some(intrinsic_self_arg2(selector, old_sel, new_sel))
+        }
+        // ADR 0114 Phase 3 (BT-3279): renameSelector:to:ifAbsent: — old/new
+        // selector Symbols plus the block, mirroring
+        // classRemoveSelectorIfAbsent's shape above.
+        "classRenameSelectorIfAbsent" => {
+            let old_sel = params.first()?;
+            let new_sel = params.get(1)?;
+            let absent_block = params.get(2)?;
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'classRenameSelectorIfAbsent'(Self, ",
+                leaf::var(old_sel.clone()),
+                ", ",
+                leaf::var(new_sel.clone()),
                 ", ",
                 leaf::var(absent_block.clone()),
                 ")"
@@ -412,6 +452,18 @@ mod tests {
                 "call 'beamtalk_behaviour_intrinsics':'classRemoveSelector'(Self, Selector)"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn test_class_rename_to() {
+        let result = doc_to_string(generate_tower_bif(
+            "classRenameTo",
+            &["NewName".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classRenameTo'(Self, NewName)".to_string())
         );
     }
 

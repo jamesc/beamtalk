@@ -79,6 +79,9 @@ into REPL session state. Workspace readiness is detected via
 -export([sync/0]).
 %% New-class creation (ADR 0082 Phase 1, BT-2285)
 -export([newClass/2]).
+%% Class file move — pure path change, no identity change (ADR 0114 Phase 2,
+%% BT-3272).
+-export([moveClass/2]).
 %% Workspace flush (ADR 0082 Phase 2, BT-2286; destructive tiering ADR 0113
 %% Phase 2, BT-3207).
 -export([flush/0, flush/1, flush/2, flushIncludingDestructive/0]).
@@ -141,6 +144,8 @@ dispatch(sync, [], _Self) ->
     sync();
 dispatch('newClass:at:', [Source, Path], _Self) ->
     newClass(Source, Path);
+dispatch('moveClass:to:', [ClassArg, NewPath], _Self) ->
+    moveClass(ClassArg, NewPath);
 dispatch(flush, [], _Self) ->
     flush();
 dispatch('flush:', [Filter], _Self) ->
@@ -247,6 +252,65 @@ new_class_arg_type_error(ArgName, Value) ->
         Err1,
         iolist_to_binary([
             <<"newClass:at: expects a String ">>, ArgName, <<", got ">>, TypeName
+        ])
+    ).
+
+-doc """
+Move `aClass`'s `.bt` file to `aNewPath` without changing its name (ADR 0114
+Phase 2, BT-3272).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) moveClass:
+aClass to: aNewPath`, backing `Workspace moveClass:to:` — a pure filesystem-
+organization operation modelled on `newClass:at:` (ADR 0082) the same way
+`newClass:at:` itself is: a `Workspace`-level concern, not a class-protocol
+message, since the class itself is completely unaffected (no name change, no
+reference rewrite — every existing call site still names the class
+correctly, because the class's own identity never changes).
+
+Delegates classification, span resolution, and ChangeLog bookkeeping to
+`beamtalk_repl_loader:move_class/2` (via `beamtalk_repl_eval:move_class/2`)
+— see that function's doc for the full refusal table (`no_source_file` for a
+dynamic class, stdlib/dependency refusal mirroring `renameTo:`) and for why
+this never needs to reinstall or re-resolve a class object: the class's own
+pid never moves, so `aClass` itself is still the correct return value.
+
+Raises a structured `#beamtalk_error{}` for a non-class-object `aClass`, a
+non-String `aNewPath`, or any failure `move_class/2` reports. Returns `aClass`
+unchanged on success.
+""".
+-spec moveClass(term(), term()) -> #beamtalk_object{}.
+moveClass(ClassArg, NewPath) ->
+    case beamtalk_class_registry:is_class_object(ClassArg) of
+        false ->
+            beamtalk_error:raise(move_class_arg_type_error(<<"a Behaviour for aClass">>, ClassArg));
+        true ->
+            ok
+    end,
+    NewPathBin =
+        case NewPath of
+            P when is_binary(P) ->
+                P;
+            _ ->
+                beamtalk_error:raise(
+                    move_class_arg_type_error(<<"a String for aNewPath">>, NewPath)
+                )
+        end,
+    ClassPid = erlang:element(4, ClassArg),
+    ClassName = beamtalk_object_class:class_name(ClassPid),
+    case beamtalk_repl_eval:move_class(ClassName, NewPathBin) of
+        ok -> ClassArg;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
+
+-spec move_class_arg_type_error(binary(), term()) -> #beamtalk_error{}.
+move_class_arg_type_error(Expected, Value) ->
+    TypeName = value_type_name(Value),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'moveClass:to:'),
+    beamtalk_error:with_message(
+        Err1,
+        iolist_to_binary([
+            <<"moveClass:to: expects ">>, Expected, <<", got ">>, TypeName
         ])
     ).
 
@@ -600,6 +664,12 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             %% recompiling and reinstalling the whole class from its recorded
             %% prior source — a class-level target, not a single-method patch.
             reinstall_reverted_class(ClassNameBin, PrevBody, Entry);
+        {revert_rename, Entry} ->
+            %% A `'rename-class'`/`'rename-method'` revert (ADR 0114,
+            %% BT-3274): a multi-site target, not a single prior body — undo
+            %% by rewriting every one of `Entry`'s own `sites` back to its own
+            %% recorded `prev_source_ref`.
+            revert_rename_entry(ClassNameBin, Entry);
         {error, no_entry} ->
             beamtalk_error:raise(
                 revert_state_error(
@@ -888,6 +958,69 @@ retire_reverted_remove_class_entry(ClassNameBin, Entry) ->
                         ClassNameBin,
                         <<
                             " was reinstalled, but its old removal entry could not be "
+                            "retired (ChangeLog unreachable); it may still show as "
+                            "pending until a future flush or manual cleanup"
+                        >>
+                    ])
+                )
+            )
+    end.
+
+-doc """
+Undo a `'rename-class'`/`'rename-method'` entry (ADR 0114, BT-3274):
+delegates the actual multi-site reverse-splice to `beamtalk_repl_eval:
+revert_rename_sites/1` (see that function's own doc for the full mechanism —
+locating each site's current position, resolving its owning class, and, for
+`'rename-class'`, restoring the class's registry identity), then retires the
+original entry on success — mirroring `reinstall_reverted_class_body/4`'s
+"undoing an add emits no new entry, so the original entry must be retired
+here" convention for `'remove-class'`, since a rename revert is symmetric:
+the reverted state IS the pre-rename state, nothing new needs recording.
+""".
+-spec revert_rename_entry(binary(), beamtalk_workspace_changelog:entry()) -> term().
+revert_rename_entry(ClassNameBin, Entry) ->
+    case beamtalk_repl_eval:revert_rename_sites(Entry) of
+        {ok, RevertedClassBin} ->
+            retire_reverted_rename_entry(RevertedClassBin, Entry);
+        {error, Reason} ->
+            beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+    end.
+
+%% The class is already reinstalled/reverted live by the time this runs — a
+%% ChangeLog write failure here must never surface as a raw crash (or, worse,
+%% leave the original entry silently stuck active/pending forever). Mirrors
+%% `retire_reverted_remove_class_entry/2`'s identical handling exactly, just
+%% generalized to name either rename kind rather than assuming "remove-class".
+-spec retire_reverted_rename_entry(binary(), beamtalk_workspace_changelog:entry()) -> term().
+retire_reverted_rename_entry(RevertedClassBin, Entry) ->
+    MarkResult =
+        try
+            beamtalk_workspace_changelog:mark_flushed([
+                beamtalk_workspace_changelog:entry_seq(Entry)
+            ])
+        catch
+            exit:ExitReason -> {error, {changelog_unreachable, ExitReason}}
+        end,
+    case MarkResult of
+        ok ->
+            class_object_for(RevertedClassBin);
+        {error, Reason} ->
+            ?LOG_ERROR(
+                "revert: reverted rename but failed to retire its rename entry",
+                #{
+                    class => RevertedClassBin,
+                    seq => beamtalk_workspace_changelog:entry_seq(Entry),
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_error:raise(
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: ">>,
+                        RevertedClassBin,
+                        <<
+                            " was reverted, but its old rename entry could not be "
                             "retired (ChangeLog unreachable); it may still show as "
                             "pending until a future flush or manual cleanup"
                         >>

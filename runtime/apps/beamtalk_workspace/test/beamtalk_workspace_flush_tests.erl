@@ -94,11 +94,35 @@ flush_test_() ->
         fun remove_class_mixed_with_patch_is_conflict/1,
         fun remove_class_abort_restores_staged_file_on_other_file_conflict/1,
         fun remove_class_staged_delete_crash_recovery/1,
+        %% ADR 0114 Phase 2 (BT-3271): rename-class multi-file destructive flush
+        fun rename_class_flush_without_confirm_is_skipped_destructive/1,
+        fun rename_class_moves_file_rewrites_declaration_and_reference/1,
+        fun rename_class_new_path_exists_as_unrelated_file_is_conflict/1,
+        fun rename_class_self_reference_folds_into_move/1,
+        fun rename_class_self_reference_move_noop_after_old_path_gone/1,
+        fun rename_class_external_edit_on_declaration_aborts_with_no_partial_writes/1,
+        fun rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes/1,
+        fun rename_class_mixed_with_ordinary_patch_is_conflict/1,
+        fun rename_class_two_renames_colliding_on_new_path_is_conflict/1,
+        fun rename_class_new_path_collides_with_other_rename_old_path_is_conflict/1,
+        fun rename_class_resumes_after_simulated_partial_phase_b/1,
+        %% ADR 0114 Phase 3 (BT-3273): rename-method multi-file destructive flush
+        fun rename_method_flush_without_confirm_is_skipped_destructive/1,
+        fun rename_method_rewrites_definition_and_confirmed_senders/1,
+        fun rename_method_candidate_sites_are_never_written/1,
+        fun rename_method_external_edit_on_confirmed_site_aborts_whole_batch/1,
+        fun rename_method_mixed_with_ordinary_patch_is_conflict/1,
+        fun rename_method_mixed_with_rename_class_is_conflict/1,
+        fun rename_method_two_entries_merge_in_same_file/1,
         fun flush_two_rejects_non_boolean_confirm/1,
         fun flush_kinds_two_rejects_non_boolean_confirm/1,
         %% BT-3212 (ADR 0113 LSP follow-up): per-file operation kind on the
         %% `FlushCompleted` wire payload
-        fun flush_announces_file_kinds_for_mixed_entries/1
+        fun flush_announces_file_kinds_for_mixed_entries/1,
+        %% BT-3275 (ADR 0114 LSP follow-up): `oldFile` on a `'rename-class'`
+        %% move, and per-site `'rename-method'` kinds, on the same payload
+        fun flush_announces_old_file_for_rename_class_move/1,
+        fun flush_announces_rename_method_kind_for_confirmed_sites/1
     ]}.
 
 unit_test_() ->
@@ -110,7 +134,14 @@ unit_test_() ->
         fun filter_shadowed_keeps_only_renamed_survivors/0,
         fun filter_shadowed_drops_unrenamed_survivors/0,
         fun entry_tier_classifies_remove_class_as_tier2/0,
-        fun entry_tier_classifies_other_kinds_as_tier1/0
+        fun entry_tier_classifies_other_kinds_as_tier1/0,
+        %% ADR 0114 Phase 2 (BT-3271)
+        fun entry_tier_classifies_rename_class_as_tier2/0,
+        %% ADR 0114 Phase 3 (BT-3273)
+        fun entry_tier_classifies_rename_method_as_tier2/0,
+        fun resolve_new_path_prefers_recorded_value/0,
+        fun resolve_new_path_derives_exact_style_from_old_path/0,
+        fun resolve_new_path_derives_snake_case_style_from_old_path/0
     ].
 
 new_class_directory_target_test_() ->
@@ -118,6 +149,222 @@ new_class_directory_target_test_() ->
 
 mark_flushed_failure_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun mark_flushed_failure_is_reported/1}.
+
+%% BT-3526 review Blocker regression coverage: a REAL compiled class (not a
+%% ChangeLog-entry fixture) is required here, unlike every other test in this
+%% module — the bug is specifically that a rename-class flush commit never
+%% recompiled the renamed class, leaving its compiled module's `beamtalk_source`
+%% attribute pointing at the pre-move path. Heavier suite-level setup mirrors
+%% `beamtalk_workspace_revert_tests.erl`'s own `suite_setup/0` /
+%% `case_setup/0` split (start the compiler + runtime once; an isolated
+%% workspace + temp HOME per case).
+rename_class_reload_test_() ->
+    {setup, fun reload_suite_setup/0, fun reload_suite_teardown/1,
+        {foreach, fun reload_case_setup/0, fun reload_case_teardown/1, [
+            fun rename_class_move_commit_refreshes_stale_source_attribute/1,
+            fun rename_class_sequential_rename_after_flush_succeeds/1
+        ]}}.
+
+reload_suite_setup() ->
+    {ok, _} = application:ensure_all_started(compiler),
+    ok = ensure_beamtalk_runtime_started(),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    %% Let the runtime register bootstrap classes before compiling user code
+    %% (mirrors beamtalk_workspace_revert_tests:suite_setup/0).
+    timer:sleep(300),
+    ok.
+
+%% Never tear down or restart a shared, already-live runtime here — this
+%% module runs alongside every other `beamtalk_workspace` EUnit module in one
+%% shared-VM `rebar3 eunit --app=beamtalk_workspace` invocation, and other
+%% test modules' own bootstrap (e.g. `beamtalk_test_boot:boot_real_stdlib/1`)
+%% may already have booted the runtime and be relying on that SAME instance
+%% staying up for the rest of the run; killing it here to force our own clean
+%% start would orphan that state for everything that runs after us (an
+%% earlier version of this fix did exactly that and cost 36 unrelated test
+%% failures elsewhere in the app suite — `Integer`/`Subprocess` no longer
+%% registered — found by running `rebar3 eunit --app=beamtalk_workspace`,
+%% not just this module in isolation).
+%%
+%% `'Object'` already resolving is the signal that some prior boot (this
+%% run's own, or another test module's) already did the work — reuse it
+%% as-is. Only when NOTHING is up yet do we attempt our own start, in which
+%% case this module's own lightweight `announce_flush_completed_emits_typed_
+%% event_test/0` may have already brought up `beamtalk_announcements`
+%% standalone/unsupervised (its own `ensure_started/0` contract, meant for a
+%% bare BUnit/REPL context with no full runtime) — blocking `beamtalk_
+%% runtime`'s supervisor from starting its OWN, properly-supervised child
+%% under the same registered name. Stopping it is safe ONLY in this branch:
+%% since `'Object'` is not yet registered, nothing else in this run can be
+%% relying on that standalone instance either.
+ensure_beamtalk_runtime_started() ->
+    case beamtalk_class_registry:whereis_class('Object') of
+        Pid when is_pid(Pid) ->
+            ok;
+        _NotYetBooted ->
+            case application:ensure_all_started(beamtalk_runtime) of
+                {ok, _} ->
+                    ok;
+                {error, _Reason} ->
+                    case whereis(beamtalk_announcements) of
+                        undefined ->
+                            error(beamtalk_runtime_start_failed);
+                        AnnouncementsPid ->
+                            stop(AnnouncementsPid),
+                            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+                            ok
+                    end
+            end
+    end.
+
+reload_suite_teardown(_) ->
+    _ = application:stop(beamtalk_compiler),
+    ok.
+
+reload_case_setup() ->
+    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    WorkspaceId = list_to_binary("test-ws-flush-reload-" ++ Unique),
+    Tmp = filename:join(temp_dir(), "bt-flush-reload-" ++ Unique),
+    ProjDir = filename:join(Tmp, "proj"),
+    ok = filelib:ensure_path(filename:join(ProjDir, "src")),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", Tmp),
+    {ok, ClogPid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WorkspaceId,
+        project_path => list_to_binary(ProjDir),
+        created_at => erlang:system_time(second),
+        last_activity => erlang:system_time(second)
+    }),
+    #{
+        clog_pid => ClogPid,
+        meta_pid => MetaPid,
+        workspace_id => WorkspaceId,
+        tmp_home => Tmp,
+        old_home => OldHome,
+        proj_dir => ProjDir
+    }.
+
+reload_case_teardown(#{
+    clog_pid := ClogPid, meta_pid := MetaPid, tmp_home := Tmp, old_home := OldHome
+}) ->
+    stop(MetaPid),
+    stop(ClogPid),
+    restore_home(OldHome),
+    del_tree(Tmp),
+    ok.
+
+%% Compile+load a real, in-project-backed class from `Path` (reusing the
+%% tested `beamtalk_repl_loader:reload_class_file/1` path directly, the same
+%% mechanism `Counter reload`/`:reload` and `beamtalk_workspace_revert_tests:
+%% define_project_class/3` use) so its compiled module carries a real
+%% `beamtalk_source` attribute pointing at `Path`.
+compile_project_class(Path, Source) ->
+    ok = file:write_file(Path, Source),
+    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
+    ok.
+
+%% THE root-cause regression test. Before the fix, `beamtalk_repl_loader:
+%% class_source_file/1` for the renamed class (`Bar`) still returns
+%% `OldPath` after a successful `flush_including_destructive/0` — the
+%% compiled module was never recompiled, so its embedded `beamtalk_source`
+%% attribute is stale even though the file has genuinely moved to `NewPath`
+%% on disk. After the fix (`maybe_reload_renamed_class_source/1`), it
+%% correctly reads `NewPath`.
+rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath = filename:join([ProjDir, "src", "bar.bt"]),
+    OldSource = <<"Object subclass: Foo\n  greet => 1\n">>,
+    ok = compile_project_class(OldPath, OldSource),
+    %% Precondition: the freshly-compiled class's attribute matches reality —
+    %% the bug only manifests once the file has moved out from under it.
+    PreSourceFile = beamtalk_repl_loader:class_source_file(<<"Foo">>),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Foo">>),
+    DeclSite = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Bar">>, <<"Foo">>),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath), list_to_binary(NewPath), [DeclSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    PostSourceFile = beamtalk_repl_loader:class_source_file(<<"Bar">>),
+    [
+        ?_assertEqual(list_to_binary(OldPath), PreSourceFile),
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual(false, filelib:is_regular(OldPath)),
+        ?_assertEqual(true, filelib:is_regular(NewPath)),
+        %% THE fix: the renamed class's own sourceFile attribute now reflects
+        %% where the file actually lives, not the pre-move path.
+        ?_assertEqual(list_to_binary(NewPath), PostSourceFile)
+    ].
+
+%% The full sequential-rename scenario (BT-3526 Blocker) at the flush level:
+%% `OldPath2` is read from the class's REAL, current `class_source_file/1`
+%% attribute — exactly what `beamtalk_behaviour_intrinsics:classRenameTo/2`'s
+%% `capture_class_removal_snapshot/1` reads in production — rather than a
+%% value hardcoded by the test. Before the fix that attribute is stale
+%% (`OldPath1`, already deleted by the first flush's move-commit) and this
+%% second flush would hit the unresolvable `source_missing` conflict the
+%% Blocker describes; after the fix it correctly reads `NewPath1` (still
+%% present) and the second flush completes cleanly. This is what makes the
+%% test a genuine regression test for the ROOT CAUSE rather than one that
+%% tests around it (see BT-3526's own note on this distinction) — it
+%% exercises the same read path the bug is about, even though it does not
+%% go through `classRenameTo/2` itself.
+rename_class_sequential_rename_after_flush_succeeds(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath1 = filename:join([ProjDir, "src", "bar.bt"]),
+    NewPath2 = filename:join([ProjDir, "src", "baz.bt"]),
+    OldSource = <<"Object subclass: Foo\n  greet => 1\n">>,
+    ok = compile_project_class(OldPath1, OldSource),
+    {Decl1Start, Decl1End, _} = locate(OldSource, <<"Foo">>),
+    DeclSite1 = rename_site(list_to_binary(OldPath1), Decl1Start, Decl1End, <<"Bar">>, <<"Foo">>),
+    {ok, _Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath1), list_to_binary(NewPath1), [DeclSite1]
+        )
+    ),
+    {ok, Summary1} = beamtalk_workspace_flush:flush_including_destructive(),
+    %% The class's REAL current sourceFile — correct (NewPath1) after the
+    %% fix, stale (OldPath1, already deleted) without it. Coerced to `<<>>`
+    %% on a non-binary result (the class was never even reloaded, i.e. the
+    %% fix never ran) so this constructs a well-formed, if wrong, ChangeLog
+    %% entry rather than crashing on `binary_to_list(nil)` below — the
+    %% second flush then reports a clean `source_missing` conflict instead
+    %% of an opaque test-body exception, and either way `Summary2` fails the
+    %% "flushed with no conflicts" assertions below.
+    OldPath2 =
+        case beamtalk_repl_loader:class_source_file(<<"Bar">>) of
+            Bin when is_binary(Bin) -> Bin;
+            _NotReloaded -> <<>>
+        end,
+    {ok, BarBodyOnDisk} = file:read_file(NewPath1),
+    {Decl2Start, Decl2End, _} = locate(BarBodyOnDisk, <<"Bar">>),
+    DeclSite2 = rename_site(OldPath2, Decl2Start, Decl2End, <<"Baz">>, <<"Bar">>),
+    {ok, _Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(<<"Baz">>, <<"Bar">>, OldPath2, list_to_binary(NewPath2), [DeclSite2])
+    ),
+    {ok, Summary2} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary1)),
+        ?_assertEqual([], maps:get(conflicts, Summary1)),
+        %% The precise assertion this whole scenario is about: the second
+        %% rename's old_path (read from the live class, as production code
+        %% does) must be the CURRENT file (NewPath1), not the already-deleted
+        %% OldPath1.
+        ?_assertEqual(list_to_binary(NewPath1), OldPath2),
+        ?_assertEqual(1, maps:get(flushed, Summary2)),
+        ?_assertEqual([], maps:get(conflicts, Summary2)),
+        ?_assertEqual(false, filelib:is_regular(NewPath1)),
+        ?_assertEqual(true, filelib:is_regular(NewPath2)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Baz\n  greet => 1\n">>}, file:read_file(NewPath2)
+        )
+    ].
 
 setup() ->
     {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
@@ -1722,6 +1969,918 @@ remove_class_staged_delete_crash_recovery(#{proj_dir := ProjDir}) ->
         ?_assert(entry_flushed(Seq))
     ].
 
+%%====================================================================
+%% Tests — rename-class multi-file destructive flush (ADR 0114, BT-3271)
+%%====================================================================
+
+%% Tier 2 gating, mirroring `remove_class_flush_without_confirm_is_skipped_
+%% destructive/1`: an ordinary `flush/0` never applies a pending
+%% `rename-class` entry — neither `old_path` nor `new_path` is touched.
+rename_class_flush_without_confirm_is_skipped_destructive(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    Skipped = maps:get(skipped, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(Skipped)),
+        ?_assertEqual(<<"destructive">>, maps:get(reason, hd(Skipped))),
+        ?_assertEqual(true, filelib:is_regular(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath)),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% BUnit acceptance-criteria coverage (this module's own EUnit-level slice —
+%% the real `Counter renameTo: #Accumulator` + `Workspace
+%% flushIncludingDestructive` round trip needs a real, in-project-classified
+%% compiled class and lives in `tests/repl-protocol/cases/`, since BUnit's
+%% `beamtalk test` runner has no project configured — see
+%% `stdlib/test/rename_to_test.bt`'s own doc comment). Exercises this
+%% module's actual flush mechanics directly: the moved file exists with its
+%% declaration rewritten (rest byte-identical), the old file is gone, and a
+%% cross-file reference is rewritten too.
+rename_class_moves_file_rewrites_declaration_and_reference(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    RefSource = <<"Object subclass: Widget\n  makeCounter => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {RefStart, RefEnd, _} = locate(RefSource, <<"Counter new">>),
+    RefSite = rename_site(
+        list_to_binary(RefPath), RefStart, RefEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, NewBody} = file:read_file(NewPath),
+    {ok, RefBody} = file:read_file(RefPath),
+    Files = maps:get(files, Summary),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual([], maps:get(skipped, Summary)),
+        ?_assertEqual(false, filelib:is_regular(OldPath)),
+        ?_assertEqual(<<"Object subclass: Accumulator\n  value => 0\nend\n">>, NewBody),
+        ?_assertEqual(
+            <<"Object subclass: Widget\n  makeCounter => Accumulator new\nend\n">>, RefBody
+        ),
+        ?_assert(lists:member(list_to_binary(NewPath), Files)),
+        ?_assert(lists:member(list_to_binary(RefPath), Files)),
+        ?_assert(entry_flushed(Seq)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertEqual(false, filelib:is_regular(RefPath ++ ".tmp"))
+    ].
+
+%% BT-3526 review round 4 Blocker: `new_path` already existing as an
+%% UNRELATED file (never touched by any pending rename entry — a plain
+%% pre-existing scratch file, not a resumed prior attempt) must refuse the
+%% flush rather than silently overwriting it once Phase B's bare
+%% `file:rename/2` replaces whatever is already there. Mirrors
+%% `prepare_new_class/3`'s `target_exists` guard.
+rename_class_new_path_exists_as_unrelated_file_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    UnrelatedContent = <<"this file has nothing to do with the rename\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(NewPath, UnrelatedContent),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>, <<"Counter">>, list_to_binary(OldPath), list_to_binary(NewPath), [
+                DeclSite
+            ]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"rename_target_exists">>, maps:get(reason, hd(Conflicts))),
+        %% The unrelated file at new_path is completely untouched, old_path
+        %% is untouched too (whole batch aborted), and no .tmp is left behind.
+        ?_assertEqual({ok, UnrelatedContent}, file:read_file(NewPath)),
+        ?_assertEqual({ok, OldSource}, file:read_file(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% A site whose OWN file equals `old_path` (a class referencing its own name
+%% inside one of its own methods) must fold into the SAME `new_path.tmp`
+%% write, never an independent `old_path.tmp` — `old_path` is being unlinked
+%% as part of this same operation, so a separate write-then-rename targeting
+%% it would race the move's own unlink (ADR 0114 § "Atomicity (class
+%% rename)").
+rename_class_self_reference_folds_into_move(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\n  self2 => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {SelfStart, SelfEnd, _} = locate(OldSource, <<"Counter new">>),
+    SelfSite = rename_site(
+        list_to_binary(OldPath), SelfStart, SelfEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, SelfSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, NewBody} = file:read_file(NewPath),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual(false, filelib:is_regular(OldPath)),
+        ?_assertEqual(
+            <<"Object subclass: Accumulator\n  self2 => Accumulator new\nend\n">>, NewBody
+        ),
+        %% Exactly one file was written for this whole entry (the two sites
+        %% merged into one splice) — never a spurious second `old_path`
+        %% write.
+        ?_assertEqual([list_to_binary(NewPath)], maps:get(files, Summary)),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% BT-3526 review round 5 Blocker: `all_units_already_applied/2` (the
+%% "old_path already gone" recovery check) must account for the cumulative
+%% byte-length shift a same-file self-reference site picks up from an
+%% EARLIER (lower-offset) site's own splice — checking each unit's raw
+%% recorded offset independently against the fully-spliced final body
+%% misreads a genuinely-completed rename as unresolvable once the class
+%% name changes length (the common case: "Counter" (7) -> "Accumulator"
+%% (11)). Mirrors `rename_class_resumes_after_simulated_partial_phase_b`'s
+%% own technique — construct the "already fully moved, crashed before
+%% mark_flushed" on-disk state directly, without going through
+%% `beamtalk_workspace_flush` at all — but for the self-reference-folded
+%% single-file move shape `rename_class_self_reference_folds_into_move/1`
+%% covers on the happy path, not the multi-file shape `rename_class_
+%% resumes_after_simulated_partial_phase_b/1` already covers.
+rename_class_self_reference_move_noop_after_old_path_gone(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\n  self2 => Counter new\nend\n">>,
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {SelfStart, SelfEnd, _} = locate(OldSource, <<"Counter new">>),
+    SelfSite = rename_site(
+        list_to_binary(OldPath), SelfStart, SelfEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, SelfSite]
+        )
+    ),
+    %% `old_path` is never created — this simulates a Phase B `move` commit
+    %% that already succeeded (renamed `<new_path>.tmp` into place, unlinked
+    %% `old_path`) and crashed before `mark_flushed` landed, exactly the
+    %% recovery state `resolve_missing_rename_source/4` must recognise as
+    %% `move_noop`, not a conflict.
+    ExpectedBody = <<"Object subclass: Accumulator\n  self2 => Accumulator new\nend\n">>,
+    ok = file:write_file(NewPath, ExpectedBody),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, NewBodyAfter} = file:read_file(NewPath),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        %% Already-correct content is left byte-identical, not corrupted by
+        %% a redundant re-splice against the wrong (unshifted) offset.
+        ?_assertEqual(ExpectedBody, NewBodyAfter),
+        ?_assert(entry_flushed(Seq)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp"))
+    ].
+
+%% Forced Phase A staleness on the declaration span: a Phase A failure
+%% aborts the whole batch before any Phase B write happens — neither file is
+%% touched, no `.tmp` is left behind, and the entry stays pending.
+rename_class_external_edit_on_declaration_aborts_with_no_partial_writes(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    RefSource = <<"Object subclass: Widget\n  makeCounter => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {RefStart, RefEnd, _} = locate(RefSource, <<"Counter new">>),
+    RefSite = rename_site(
+        list_to_binary(RefPath), RefStart, RefEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    %% Forced Phase A staleness: edit the declaration span externally between
+    %% the rename and the flush. A run of `X`s is long enough to cover the
+    %% recorded span regardless of its exact offset and cannot coincidentally
+    %% match either the recorded prior text or the rewritten new text.
+    ExternalEdit = binary:copy(<<"X">>, 80),
+    ok = file:write_file(OldPath, ExternalEdit),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"external_edit">>, maps:get(reason, hd(Conflicts))),
+        ?_assertEqual(false, filelib:is_regular(NewPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertEqual(false, filelib:is_regular(RefPath ++ ".tmp")),
+        ?_assertEqual({ok, ExternalEdit}, file:read_file(OldPath)),
+        ?_assertEqual({ok, RefSource}, file:read_file(RefPath)),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% Same shape, staleness on the OTHER (non-declaration) site instead —
+%% exercises `prepare_rename_site_group/2`'s own conflict path, and confirms
+%% the move's own (already-valid) declaration splice is still rolled back
+%% (no `.tmp` left over) when a SIBLING site conflicts.
+rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes(#{
+    proj_dir := ProjDir
+}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    RefSource = <<"Object subclass: Widget\n  makeCounter => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {RefStart, RefEnd, _} = locate(RefSource, <<"Counter new">>),
+    RefSite = rename_site(
+        list_to_binary(RefPath), RefStart, RefEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    ExternalEdit = binary:copy(<<"Y">>, 80),
+    ok = file:write_file(RefPath, ExternalEdit),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"external_edit">>, maps:get(reason, hd(Conflicts))),
+        %% The move's OWN splice was valid — it must still be rolled back
+        %% (no `.tmp`, `old_path` untouched) once the sibling site conflicts.
+        ?_assertEqual(false, filelib:is_regular(NewPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertEqual({ok, OldSource}, file:read_file(OldPath)),
+        ?_assertEqual({ok, ExternalEdit}, file:read_file(RefPath)),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% Cross-pipeline collision guard: a rename-class entry sharing a target
+%% file with a pending ORDINARY patch aborts the whole flush rather than
+%% racing "rewrite this file" against "this file is moving away".
+rename_class_mixed_with_ordinary_patch_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    RefSource = <<"Object subclass: Widget\n  foo => 1\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    %% The rename ALSO touches RefPath (a reference site) — the same file an
+    %% independent, unrelated patch below is targeting. This is the actual
+    %% collision: without the guard, both pipelines would stage a `.tmp` for
+    %% RefPath and Phase B would apply only whichever happened to commit
+    %% last, silently discarding the other.
+    RefSite = rename_site(
+        list_to_binary(RefPath), 0, byte_size(<<"Object subclass: Widget">>), <<"ref">>, <<"ref">>
+    ),
+    {ok, RenameSeq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    {PatchStart, PatchEnd, PatchOld} = locate(RefSource, <<"foo => 1\n">>),
+    {ok, PatchSeq} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Widget">>,
+            <<"foo">>,
+            <<"foo => 2\n">>,
+            PatchOld,
+            list_to_binary(RefPath),
+            PatchStart,
+            PatchEnd
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(true, filelib:is_regular(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath)),
+        ?_assertEqual({ok, RefSource}, file:read_file(RefPath)),
+        ?_assertNot(entry_flushed(RenameSeq)),
+        ?_assertNot(entry_flushed(PatchSeq))
+    ].
+
+%% BT-3526 review Suggestion: two INDEPENDENT rename-class entries (different
+%% classes, different `old_path`s) whose `new_path`s happen to coincide must
+%% conflict the same way a rename-vs-ordinary-patch collision does — a `.tmp`
+%% write from one would otherwise silently clobber the other's. Unreachable
+%% via the real `classRenameTo/2` primitive today (its own collision refusal
+%% prevents two co-pending renames targeting the same class name), but
+%% `resolve_new_path/1` explicitly records `new_path` when the entry itself
+%% supplies one, so a future producer that does could construct exactly this
+%% shape — constructed directly here the same way `resolve_new_path_prefers_
+%% recorded_value/0` does.
+rename_class_two_renames_colliding_on_new_path_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    OldPath2 = filename:join([ProjDir, "src", "bar.bt"]),
+    SharedNewPath = filename:join([ProjDir, "src", "shared.bt"]),
+    OldSource1 = <<"Object subclass: Foo\nend\n">>,
+    OldSource2 = <<"Object subclass: Bar\nend\n">>,
+    ok = file:write_file(OldPath1, OldSource1),
+    ok = file:write_file(OldPath2, OldSource2),
+    {DeclStart1, DeclEnd1, _} = locate(OldSource1, <<"Foo">>),
+    DeclSite1 = rename_site(list_to_binary(OldPath1), DeclStart1, DeclEnd1, <<"X">>, <<"Foo">>),
+    {DeclStart2, DeclEnd2, _} = locate(OldSource2, <<"Bar">>),
+    DeclSite2 = rename_site(list_to_binary(OldPath2), DeclStart2, DeclEnd2, <<"Y">>, <<"Bar">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"X">>,
+            <<"Foo">>,
+            list_to_binary(OldPath1),
+            list_to_binary(SharedNewPath),
+            [DeclSite1]
+        )
+    ),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Y">>,
+            <<"Bar">>,
+            list_to_binary(OldPath2),
+            list_to_binary(SharedNewPath),
+            [DeclSite2]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"mixed_rename_and_rename_edit">>, maps:get(reason, hd(Conflicts))),
+        %% Whole batch aborted — neither original file moved, and the shared
+        %% target was never written.
+        ?_assertEqual(true, filelib:is_regular(OldPath1)),
+        ?_assertEqual(true, filelib:is_regular(OldPath2)),
+        ?_assertEqual(false, filelib:is_regular(SharedNewPath)),
+        ?_assertEqual(false, filelib:is_regular(SharedNewPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2))
+    ].
+
+%% BT-3526 review round 2 Blocker: the write-vs-write guard above does not
+%% catch the more dangerous shape — entry A's `new_path` equal to entry B's
+%% `old_path`. Phase B's `move` commit unlinks `old_path` only AFTER its own
+%% `new_path.tmp` rename succeeds, so committing A (writes `bar.bt`) then B
+%% (unlinks its own `old_path`, `bar.bt`) would silently destroy the content
+%% A just wrote there — both entries would still report as cleanly flushed.
+%% This must be refused up front, exactly like the write-vs-write case.
+rename_class_new_path_collides_with_other_rename_old_path_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    SharedPath = filename:join([ProjDir, "src", "bar.bt"]),
+    NewPath2 = filename:join([ProjDir, "src", "baz.bt"]),
+    OldSource1 = <<"Object subclass: Foo\nend\n">>,
+    OldSource2 = <<"Object subclass: Bar\nend\n">>,
+    ok = file:write_file(OldPath1, OldSource1),
+    ok = file:write_file(SharedPath, OldSource2),
+    {DeclStart1, DeclEnd1, _} = locate(OldSource1, <<"Foo">>),
+    %% Entry A: Foo (foo.bt) -> X, writing its new content to SharedPath.
+    DeclSite1 = rename_site(list_to_binary(OldPath1), DeclStart1, DeclEnd1, <<"X">>, <<"Foo">>),
+    {DeclStart2, DeclEnd2, _} = locate(OldSource2, <<"Bar">>),
+    %% Entry B: Bar (SharedPath) -> Y, moving AWAY from the exact file A is
+    %% about to write into.
+    DeclSite2 = rename_site(list_to_binary(SharedPath), DeclStart2, DeclEnd2, <<"Y">>, <<"Bar">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"X">>, <<"Foo">>, list_to_binary(OldPath1), list_to_binary(SharedPath), [DeclSite1]
+        )
+    ),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Y">>, <<"Bar">>, list_to_binary(SharedPath), list_to_binary(NewPath2), [DeclSite2]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"mixed_rename_and_rename_edit">>, maps:get(reason, hd(Conflicts))),
+        %% Whole batch aborted — neither original file touched, and Bar's
+        %% real content (at SharedPath) was never clobbered or moved.
+        ?_assertEqual(true, filelib:is_regular(OldPath1)),
+        ?_assertEqual({ok, OldSource2}, file:read_file(SharedPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath2)),
+        ?_assertEqual(false, filelib:is_regular(SharedPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2))
+    ].
+
+%% Crash-recovery / partial-Phase-B-then-retry (ADR 0114 § "Atomicity (class
+%% rename)"): simulate a flush attempt that committed the move and ONE of two
+%% reference sites, then crashed before committing the second site or
+%% marking the entry flushed (the entry is still pending — exactly what a
+%% `flush_marker_failed`/mid-loop Phase B stop leaves behind). Re-issuing
+%% `flushIncludingDestructive` must recognise the already-done work as a
+%% no-op (not `external_edit`), finish the remaining site, and mark the
+%% entry flushed — "retries only what's left", not "fails forever".
+rename_class_resumes_after_simulated_partial_phase_b(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath1 = filename:join([ProjDir, "src", "widget.bt"]),
+    RefPath2 = filename:join([ProjDir, "src", "gadget.bt"]),
+    OldSource = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    RefSource1 = <<"Object subclass: Widget\n  makeCounter => Counter new\nend\n">>,
+    RefSource2 = <<"Object subclass: Gadget\n  makeCounter => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath1, RefSource1),
+    ok = file:write_file(RefPath2, RefSource2),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {Ref1Start, Ref1End, _} = locate(RefSource1, <<"Counter new">>),
+    RefSite1 = rename_site(
+        list_to_binary(RefPath1), Ref1Start, Ref1End, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {Ref2Start, Ref2End, _} = locate(RefSource2, <<"Counter new">>),
+    RefSite2 = rename_site(
+        list_to_binary(RefPath2), Ref2Start, Ref2End, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite1, RefSite2]
+        )
+    ),
+    %% Simulate a flush attempt that committed the move and RefPath1, then
+    %% crashed before RefPath2 and before `mark_flushed` — WITHOUT going
+    %% through `beamtalk_workspace_flush` at all, so this is a pure on-disk
+    %% state fixture, not a call into the code under test.
+    NewBodyExpected = <<"Object subclass: Accumulator\n  value => 0\nend\n">>,
+    ok = file:write_file(NewPath, NewBodyExpected),
+    ok = file:delete(OldPath),
+    RefBody1Expected = <<"Object subclass: Widget\n  makeCounter => Accumulator new\nend\n">>,
+    ok = file:write_file(RefPath1, RefBody1Expected),
+    %% RefPath2 is left exactly as it was — this is the "what's left" half.
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, NewBodyAfter} = file:read_file(NewPath),
+    {ok, RefBody1After} = file:read_file(RefPath1),
+    {ok, RefBody2After} = file:read_file(RefPath2),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        %% Already-correct files are left byte-identical, not corrupted by a
+        %% redundant re-splice.
+        ?_assertEqual(NewBodyExpected, NewBodyAfter),
+        ?_assertEqual(RefBody1Expected, RefBody1After),
+        %% The one file that was genuinely left behind is now correct too.
+        ?_assertEqual(
+            <<"Object subclass: Gadget\n  makeCounter => Accumulator new\nend\n">>, RefBody2After
+        ),
+        ?_assert(entry_flushed(Seq)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertEqual(false, filelib:is_regular(RefPath1 ++ ".tmp")),
+        ?_assertEqual(false, filelib:is_regular(RefPath2 ++ ".tmp"))
+    ].
+
+%%====================================================================
+%% Tests — rename-method multi-file destructive flush (ADR 0114, BT-3273)
+%%====================================================================
+
+%% Tier 2 gating, mirroring `rename_class_flush_without_confirm_is_skipped_
+%% destructive/1`: an ordinary `flush/0` never applies a pending
+%% `rename-method` entry — neither the definition nor any confirmed sender
+%% site is touched.
+rename_method_flush_without_confirm_is_skipped_destructive(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Source = <<"Object subclass: Counter\n  increment => self.value := self.value + 1\nend\n">>,
+    ok = file:write_file(File, Source),
+    {DefStart, DefEnd, _} = locate(Source, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(File), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite], []
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    Skipped = maps:get(skipped, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(Skipped)),
+        ?_assertEqual(<<"destructive">>, maps:get(reason, hd(Skipped))),
+        ?_assertEqual({ok, Source}, file:read_file(File)),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% BUnit/BT-3273 acceptance-criteria coverage (this module's own EUnit-level
+%% slice — the real `Counter renameSelector: #increment to: #incrementBy` +
+%% `flush: Counter confirmDestructive: true` round trip against a real,
+%% in-project-classified compiled class lives in `tests/repl-protocol/cases/`,
+%% mirroring `rename_class_moves_file_rewrites_declaration_and_reference/1`'s
+%% own documented reason for the same split — BUnit's `beamtalk test` runner
+%% has no project configured). Exercises this module's actual flush mechanics
+%% directly: the fixture graph named in the ADR's own Phase 3 acceptance
+%% criteria — a definition plus a same-file confirmed self-send plus a
+%% cross-file confirmed super-send — all rewritten in one flush, with
+%% `candidate_sites` left completely untouched on disk.
+rename_method_rewrites_definition_and_confirmed_senders(#{proj_dir := ProjDir}) ->
+    DefFile = filename:join([ProjDir, "src", "counter.bt"]),
+    SubFile = filename:join([ProjDir, "src", "sub_counter.bt"]),
+    DefSource = <<
+        "Object subclass: Counter\n"
+        "  increment => self.value := self.value + 1\n"
+        "  bump => self increment\n"
+        "end\n"
+    >>,
+    SubSource = <<
+        "Counter subclass: SubCounter\n"
+        "  bumpTwice => super increment\n"
+        "end\n"
+    >>,
+    ok = file:write_file(DefFile, DefSource),
+    ok = file:write_file(SubFile, SubSource),
+    {DefStart, DefEnd, _} = locate(DefSource, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(DefFile), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {SelfStart, SelfEnd, _} = locate(DefSource, <<"self increment">>),
+    SelfSite = rename_site(
+        list_to_binary(DefFile), SelfStart, SelfEnd, <<"self incrementBy">>, <<"self increment">>
+    ),
+    {SuperStart, SuperEnd, _} = locate(SubSource, <<"super increment">>),
+    SuperSite = rename_site(
+        list_to_binary(SubFile),
+        SuperStart,
+        SuperEnd,
+        <<"super incrementBy">>,
+        <<"super increment">>
+    ),
+    %% An unrelated candidate site — an arbitrary-receiver send of the same
+    %% selector name that must never be auto-rewritten. No source_ref/
+    %% prev_source_ref: candidate sites are reported, never spliced.
+    CandidatePath = filename:join([ProjDir, "src", "widget.bt"]),
+    CandidateSource = <<"Object subclass: Widget\n  bump => aCounter increment\nend\n">>,
+    ok = file:write_file(CandidatePath, CandidateSource),
+    {CandStart, CandEnd, _} = locate(CandidateSource, <<"increment">>),
+    CandidateSite = candidate_site(list_to_binary(CandidatePath), CandStart, CandEnd),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>,
+            <<"incrementBy">>,
+            <<"increment">>,
+            instance,
+            [DefSite, SelfSite, SuperSite],
+            [CandidateSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, DefBody} = file:read_file(DefFile),
+    {ok, SubBody} = file:read_file(SubFile),
+    {ok, CandidateBody} = file:read_file(CandidatePath),
+    Files = maps:get(files, Summary),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual([], maps:get(skipped, Summary)),
+        ?_assertEqual(
+            <<
+                "Object subclass: Counter\n"
+                "  incrementBy => self.value := self.value + 1\n"
+                "  bump => self incrementBy\n"
+                "end\n"
+            >>,
+            DefBody
+        ),
+        ?_assertEqual(
+            <<
+                "Counter subclass: SubCounter\n"
+                "  bumpTwice => super incrementBy\n"
+                "end\n"
+            >>,
+            SubBody
+        ),
+        %% The candidate site's file is completely untouched — `#increment`
+        %% verbatim, never rewritten to `#incrementBy`.
+        ?_assertEqual(CandidateSource, CandidateBody),
+        ?_assert(lists:member(list_to_binary(DefFile), Files)),
+        ?_assert(lists:member(list_to_binary(SubFile), Files)),
+        ?_assertNot(lists:member(list_to_binary(CandidatePath), Files)),
+        ?_assert(entry_flushed(Seq)),
+        ?_assertEqual(false, filelib:is_regular(DefFile ++ ".tmp")),
+        ?_assertEqual(false, filelib:is_regular(SubFile ++ ".tmp"))
+    ].
+
+%% Explicit acceptance-criteria coverage: `candidate_sites` must never be
+%% staged, written, or otherwise touched by flush "under any circumstance" —
+%% verified directly against a `.tmp` check, not just the final body, so a
+%% regression that stages-then-cleans-up a candidate site would still be
+%% caught mid-flush by an equivalent test with a forced abort (see the next
+%% test) even though the happy-path test above cannot observe an intermediate
+%% `.tmp`.
+rename_method_candidate_sites_are_never_written(#{proj_dir := ProjDir}) ->
+    DefFile = filename:join([ProjDir, "src", "counter.bt"]),
+    DefSource = <<"Object subclass: Counter\n  increment => self.value := self.value + 1\nend\n">>,
+    ok = file:write_file(DefFile, DefSource),
+    {DefStart, DefEnd, _} = locate(DefSource, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(DefFile), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    CandidatePath = filename:join([ProjDir, "src", "widget.bt"]),
+    CandidateSource = <<"Object subclass: Widget\n  bump => aCounter increment\nend\n">>,
+    ok = file:write_file(CandidatePath, CandidateSource),
+    {CandStart, CandEnd, _} = locate(CandidateSource, <<"increment">>),
+    CandidateSite = candidate_site(list_to_binary(CandidatePath), CandStart, CandEnd),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite], [CandidateSite]
+        )
+    ),
+    {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual({ok, CandidateSource}, file:read_file(CandidatePath)),
+        ?_assertEqual(false, filelib:is_regular(CandidatePath ++ ".tmp"))
+    ].
+
+%% Acceptance criterion: "A Phase A failure (a confirmed site's span no
+%% longer resolves) aborts the whole batch". Externally edit the cross-file
+%% confirmed sender site so its recorded span no longer matches, then verify
+%% neither file was written — not even the definition site's file, which
+%% would have staged cleanly on its own.
+rename_method_external_edit_on_confirmed_site_aborts_whole_batch(#{proj_dir := ProjDir}) ->
+    DefFile = filename:join([ProjDir, "src", "counter.bt"]),
+    SubFile = filename:join([ProjDir, "src", "sub_counter.bt"]),
+    DefSource = <<"Object subclass: Counter\n  increment => self.value := self.value + 1\nend\n">>,
+    SubSource = <<"Counter subclass: SubCounter\n  bumpTwice => super increment\nend\n">>,
+    ok = file:write_file(DefFile, DefSource),
+    ok = file:write_file(SubFile, SubSource),
+    {DefStart, DefEnd, _} = locate(DefSource, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(DefFile), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {SuperStart, SuperEnd, _} = locate(SubSource, <<"super increment">>),
+    SuperSite = rename_site(
+        list_to_binary(SubFile),
+        SuperStart,
+        SuperEnd,
+        <<"super incrementBy">>,
+        <<"super increment">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite, SuperSite], []
+        )
+    ),
+    %% Externally edit SubFile so the recorded span no longer matches.
+    ok = file:write_file(
+        SubFile, <<"Counter subclass: SubCounter\n  bumpTwice => super somethingElse\nend\n">>
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        %% The whole batch aborted: DefFile is untouched even though its own
+        %% splice would have staged cleanly in isolation.
+        ?_assertEqual({ok, DefSource}, file:read_file(DefFile)),
+        ?_assertEqual(false, filelib:is_regular(DefFile ++ ".tmp")),
+        ?_assertEqual(false, filelib:is_regular(SubFile ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq))
+    ].
+
+%% Collision guard: a `'rename-method'` entry sharing a target file with a
+%% pending ordinary patch aborts the whole flush rather than racing the two
+%% splice mechanisms — mirrors `rename_class_mixed_with_ordinary_patch_is_
+%% conflict/1`.
+rename_method_mixed_with_ordinary_patch_is_conflict(#{proj_dir := ProjDir}) ->
+    DefFile = filename:join([ProjDir, "src", "counter.bt"]),
+    DefSource = <<
+        "Object subclass: Counter\n"
+        "  increment => self.value := self.value + 1\n"
+        "  other => 1\n"
+        "end\n"
+    >>,
+    ok = file:write_file(DefFile, DefSource),
+    {DefStart, DefEnd, _} = locate(DefSource, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(DefFile), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {ok, RenameSeq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite], []
+        )
+    ),
+    {PatchStart, PatchEnd, PatchOld} = locate(DefSource, <<"other => 1\n">>),
+    {ok, PatchSeq} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"other">>,
+            <<"other => 2\n">>,
+            PatchOld,
+            list_to_binary(DefFile),
+            PatchStart,
+            PatchEnd
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"mixed_rename_method_and_pending_edit">>, maps:get(reason, hd(Conflicts))),
+        ?_assertEqual({ok, DefSource}, file:read_file(DefFile)),
+        ?_assertNot(entry_flushed(RenameSeq)),
+        ?_assertNot(entry_flushed(PatchSeq))
+    ].
+
+%% Collision guard, the OTHER branch: a `'rename-method'` entry's own
+%% confirmed-site file collides with a pending `'rename-class'` entry's
+%% touched file (not merely an ordinary patch) — verifies the `OtherFiles`
+%% union in `run_flush/2` actually reaches the rename-class side, not just
+%% the ordinary-patch side `rename_method_mixed_with_ordinary_patch_is_
+%% conflict/1` already covers. Mirrors a real scenario: `Widget.bt`
+%% references `Counter` (a pending class rename's reference site) AND
+%% separately has its own method being renamed.
+rename_method_mixed_with_rename_class_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    RefSource = <<
+        "Object subclass: Widget\n"
+        "  bump => Counter new\n"
+        "  poke => 1\n"
+        "end\n"
+    >>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {RefStart, RefEnd, _} = locate(RefSource, <<"Counter new">>),
+    RefSite = rename_site(
+        list_to_binary(RefPath), RefStart, RefEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, ClassRenameSeq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    {PokeStart, PokeEnd, _} = locate(RefSource, <<"poke">>),
+    PokeSite = rename_site(list_to_binary(RefPath), PokeStart, PokeEnd, <<"poked">>, <<"poke">>),
+    {ok, MethodRenameSeq} = beamtalk_workspace_changelog:append(
+        rename_method_input(<<"Widget">>, <<"poked">>, <<"poke">>, instance, [PokeSite], [])
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"mixed_rename_method_and_pending_edit">>, maps:get(reason, hd(Conflicts))),
+        ?_assertEqual({ok, OldSource}, file:read_file(OldPath)),
+        ?_assertEqual({ok, RefSource}, file:read_file(RefPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath)),
+        ?_assertNot(entry_flushed(ClassRenameSeq)),
+        ?_assertNot(entry_flushed(MethodRenameSeq))
+    ].
+
+%% Two DIFFERENT `'rename-method'` entries whose confirmed sites both land in
+%% the same file are NOT a collision (unlike `'rename-class'`, which guards
+%% rename-vs-rename because a move can race another move's own unlink) — they
+%% simply merge into one splice via `group_units_by_file/1`, exactly like
+%% multiple ordinary patches against one file already merge via
+%% `group_by_file/1`. Verifies the moduledoc's own claim to this effect.
+rename_method_two_entries_merge_in_same_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Source = <<
+        "Object subclass: Counter\n"
+        "  increment => 1\n"
+        "  decrement => 2\n"
+        "end\n"
+    >>,
+    ok = file:write_file(File, Source),
+    {IncStart, IncEnd, _} = locate(Source, <<"increment">>),
+    IncSite = rename_site(
+        list_to_binary(File), IncStart, IncEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {DecStart, DecEnd, _} = locate(Source, <<"decrement">>),
+    DecSite = rename_site(
+        list_to_binary(File), DecStart, DecEnd, <<"decrementBy">>, <<"decrement">>
+    ),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [IncSite], []
+        )
+    ),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"decrementBy">>, <<"decrement">>, instance, [DecSite], []
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, FinalBody} = file:read_file(File),
+    [
+        ?_assertEqual(2, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual([list_to_binary(File)], maps:get(files, Summary)),
+        ?_assertEqual(
+            <<
+                "Object subclass: Counter\n"
+                "  incrementBy => 1\n"
+                "  decrementBy => 2\n"
+                "end\n"
+            >>,
+            FinalBody
+        ),
+        ?_assert(entry_flushed(Seq1)),
+        ?_assert(entry_flushed(Seq2))
+    ].
+
 %% `confirmDestructive` must be a literal Boolean at both `flush/2` and
 %% `flush_kinds/2` — anything else is a structured type error, never coerced.
 flush_two_rejects_non_boolean_confirm(_Ctx) ->
@@ -1781,6 +2940,130 @@ entry_tier_classifies_other_kinds_as_tier1() ->
         Entries = beamtalk_workspace_changelog:flushable_pending(),
         Tiers = [beamtalk_workspace_flush:entry_tier(E) || E <- Entries],
         ?assertEqual([tier1, tier1, tier1], Tiers)
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% ADR 0114 Phase 2 (BT-3271): `'rename-class'` joins `'remove-class'` in
+%% Tier 2 — a destructive flush gate, since it moves (and unlinks) a file.
+entry_tier_classifies_rename_class_as_tier2() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        {ok, _} = beamtalk_workspace_changelog:append(
+            rename_class_input(
+                <<"Accumulator">>,
+                <<"Counter">>,
+                <<"/proj/src/counter.bt">>,
+                <<"/proj/src/accumulator.bt">>,
+                [rename_site(<<"/proj/src/counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+            )
+        ),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(Entry))
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% ADR 0114 Phase 3 (BT-3273): `'rename-method'` joins `'remove-class'`/
+%% `'rename-class'` in Tier 2 — a destructive flush gate, since it rewrites
+%% every confirmed sender site across the project, not just the definition.
+entry_tier_classifies_rename_method_as_tier2() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        {ok, _} = beamtalk_workspace_changelog:append(
+            rename_method_input(
+                <<"Counter">>,
+                <<"incrementBy">>,
+                <<"increment">>,
+                instance,
+                [rename_site(<<"/proj/src/counter.bt">>, 0, 9, <<"incrementBy">>, <<"increment">>)],
+                []
+            )
+        ),
+        [MethodEntry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(MethodEntry))
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% `resolve_new_path/1` prefers a recorded `new_path` verbatim over deriving
+%% one — forward-compatible with a future producer (e.g. `moveClass:to:`)
+%% that records an explicit target path.
+resolve_new_path_prefers_recorded_value() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        {ok, _} = beamtalk_workspace_changelog:append(
+            rename_class_input(
+                <<"Accumulator">>,
+                <<"Counter">>,
+                <<"/proj/src/counter.bt">>,
+                <<"/proj/src/somewhere_else.bt">>,
+                [rename_site(<<"/proj/src/counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+            )
+        ),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(
+            <<"/proj/src/somewhere_else.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+        )
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% `resolve_new_path/1` derives a target path when the entry itself did not
+%% record one (today's only producer, `classRenameTo/2`, always logs
+%% `new_path => undefined`) — preserving an EXACT-match old basename style
+%% (`Counter.bt`) for the new one (`Accumulator.bt`), not forcing snake_case.
+resolve_new_path_derives_exact_style_from_old_path() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        Input = rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            <<"/proj/src/Counter.bt">>,
+            undefined,
+            [rename_site(<<"/proj/src/Counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(Input),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(
+            <<"/proj/src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+        )
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% Same, but the old file used the snake_case convention (`counter.bt`) — the
+%% derived new path follows suit (`accumulator.bt`), not `Accumulator.bt`.
+resolve_new_path_derives_snake_case_style_from_old_path() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        Input = rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            <<"/proj/src/counter.bt">>,
+            undefined,
+            [rename_site(<<"/proj/src/counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(Input),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(
+            <<"/proj/src/accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+        )
     after
         stop(Pid),
         restore_home(OldHome),
@@ -1944,6 +3227,72 @@ remove_class_input(ClassName, PrevSource, File) ->
         prev_source => PrevSource
     }.
 
+%% A flushable `'rename-class'` append_input (ADR 0114, BT-3269/BT-3271):
+%% `sites[0]` is always the class's own declaration site, whose `sourceFile`
+%% is `OldPath` — matching what `beamtalk_behaviour_intrinsics:classRenameTo/2`
+%% actually records (`capture_class_removal_snapshot/1` captures the OLD
+%% class's source file BEFORE any rename happens), NOT `NewPath` — see
+%% `beamtalk_workspace_flush`'s own "Atomicity (class rename)" moduledoc
+%% section for why this matters (the declaration's own splice reads from
+%% `OldPath`, not `NewPath`, since the file hasn't moved yet at flush time).
+rename_class_input(NewClass, OldClass, OldPath, NewPath, Sites) ->
+    #{
+        class => NewClass,
+        kind => 'rename-class',
+        old_class => OldClass,
+        old_path => OldPath,
+        new_path => NewPath,
+        sites => Sites,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-test">>,
+        author_kind => human
+    }.
+
+%% One `site()` map for a `'rename-class'`/`'rename-method'` entry, with its
+%% `source_ref`/`prev_source_ref` bodies actually persisted to the ChangeLog's
+%% `sources/` directory (via `store_site_body/1`) so `beamtalk_workspace_flush`
+%% can read them back through `read_site_body/1` — unlike
+%% `beamtalk_workspace_changelog_tests.erl`'s own `site_map/2` fixture, which
+%% is schema-only and leaves both refs `undefined` (it never round-trips
+%% through flush).
+rename_site(SourceFile, Start, End, NewText, PrevText) ->
+    {ok, NewRef} = beamtalk_workspace_changelog:store_site_body(NewText),
+    {ok, PrevRef} = beamtalk_workspace_changelog:store_site_body(PrevText),
+    #{
+        source_file => SourceFile,
+        span => #{start => Start, 'end' => End},
+        source_ref => NewRef,
+        prev_source_ref => PrevRef
+    }.
+
+%% A flushable `'rename-method'` append_input (ADR 0114, BT-3269/BT-3273):
+%% `sites[0]` is always the definition site, `sites[1..]` are every
+%% *confirmed* self/super sender site; `CandidateSites` are reported-only —
+%% flush must never stage, write, or otherwise touch them.
+rename_method_input(Class, NewSelector, OldSelector, Side, Sites, CandidateSites) ->
+    #{
+        class => Class,
+        selector => NewSelector,
+        old_selector => OldSelector,
+        kind => 'rename-method',
+        side => Side,
+        sites => Sites,
+        candidate_sites => CandidateSites,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-test">>,
+        author_kind => human
+    }.
+
+%% One `candidate_site()` map (ADR 0114, BT-3269): reported for human/agent
+%% review, never spliced — no `source_ref`/`prev_source_ref`.
+candidate_site(SourceFile, Start, End) ->
+    #{
+        source_file => SourceFile,
+        span => #{start => Start, 'end' => End}
+    }.
+
 %% Build the sources/ filename for a seq (mirrors the changelog's zero-padded
 %% naming): "000042-source.bt" / "000042-prev.bt".
 source_ref_name(Seq, Suffix) ->
@@ -1965,7 +3314,17 @@ entry_flushed(Seq) ->
     beamtalk_workspace_changelog:entry_flushed(Entry).
 
 fresh_workspace() ->
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    %% `os:getpid()` mixed in alongside `erlang:unique_integer/1` (not that
+    %% counter alone): the counter resets on every fresh `rebar3 eunit` VM
+    %% invocation, so two separate test runs reaching this call site after
+    %% the same fixed number of prior `unique_integer` calls can compute an
+    %% IDENTICAL workspace id — and `beamtalk_workspace_changelog`'s own
+    %% `load_from_disk` would then restore a prior run's leftover ChangeLog
+    %% entries into this run's ETS table. Same bug, same fix as BT-3278's
+    %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl:setup_with_
+    %% changelog/0`. `os:getpid()` (the OS process id) is genuinely distinct
+    %% per separate VM invocation, unlike the in-VM counter.
+    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
     WorkspaceId = list_to_binary("test-ws-flush-" ++ Unique),
     Tmp = filename:join(temp_dir(), "bt-flush-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
@@ -2098,6 +3457,148 @@ flush_announces_file_kinds_for_mixed_entries(#{proj_dir := ProjDir}) ->
             ?_assertEqual('new-class', KindOf(NewClassFile)),
             ?_assertEqual(instance, KindOf(PatchFile)),
             ?_assertEqual('remove-class', KindOf(RemoveFile))
+        ]
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% ADR 0114 LSP follow-up (BT-3275): a real `'rename-class'` flush's
+%% `fileKinds` entries distinguish the moved declaration file (kind
+%% `'rename-class'` PLUS `oldFile`, the file `file_kind_map/1` builds from the
+%% one `op = move` `#prepared{}` record) from the ordinary same-batch
+%% reference-rewrite file (kind `'rename-class'`, no `oldFile` — its own
+%% `#prepared{}` record has `op = write`) — the only signal on the wire that
+%% lets the LSP tell "this file needs a `RenameFile`" apart from "this file
+%% needs an ordinary patch" when both share the same entry kind.
+flush_announces_old_file_for_rename_class_move(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    RefSource = <<"Object subclass: Widget\n  makeCounter => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {RefStart, RefEnd, _} = locate(RefSource, <<"Counter new">>),
+    RefSite = rename_site(
+        list_to_binary(RefPath), RefStart, RefEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
+    ),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    try
+        {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+        Event =
+            receive
+                {flush_evt, E} -> E
+            after 1000 -> ?assert(false)
+            end,
+        FileKinds = maps:get(fileKinds, Event),
+        EntryFor = fun(FilePath) ->
+            [M] = [M || M <- FileKinds, maps:get(file, M) =:= list_to_binary(FilePath)],
+            M
+        end,
+        MovedEntry = EntryFor(NewPath),
+        RefEntry = EntryFor(RefPath),
+        [
+            ?_assertEqual(1, maps:get(flushed, Summary)),
+            ?_assertEqual('rename-class', maps:get(kind, MovedEntry)),
+            ?_assertEqual(list_to_binary(OldPath), maps:get(oldFile, MovedEntry)),
+            ?_assertEqual('rename-class', maps:get(kind, RefEntry)),
+            ?_assertNot(maps:is_key(oldFile, RefEntry))
+        ]
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% ADR 0114 LSP follow-up (BT-3275): a real `'rename-method'` flush's
+%% `fileKinds` carries a `'rename-method'` entry for the definition site and
+%% every CONFIRMED sender site — never for a `candidate_sites` entry, which
+%% is never staged/written at all and so can never appear in `Files`/
+%% `fileKinds` in the first place.
+flush_announces_rename_method_kind_for_confirmed_sites(#{proj_dir := ProjDir}) ->
+    DefFile = filename:join([ProjDir, "src", "counter.bt"]),
+    SubFile = filename:join([ProjDir, "src", "sub_counter.bt"]),
+    CandidatePath = filename:join([ProjDir, "src", "widget.bt"]),
+    DefSource = <<
+        "Object subclass: Counter\n"
+        "  increment => self.value := self.value + 1\n"
+        "  bump => self increment\n"
+        "end\n"
+    >>,
+    SubSource = <<
+        "Counter subclass: SubCounter\n"
+        "  bumpTwice => super increment\n"
+        "end\n"
+    >>,
+    CandidateSource = <<"Object subclass: Widget\n  bump => aCounter increment\nend\n">>,
+    ok = file:write_file(DefFile, DefSource),
+    ok = file:write_file(SubFile, SubSource),
+    ok = file:write_file(CandidatePath, CandidateSource),
+    {DefStart, DefEnd, _} = locate(DefSource, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(DefFile), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {SuperStart, SuperEnd, _} = locate(SubSource, <<"super increment">>),
+    SuperSite = rename_site(
+        list_to_binary(SubFile),
+        SuperStart,
+        SuperEnd,
+        <<"super incrementBy">>,
+        <<"super increment">>
+    ),
+    {CandStart, CandEnd, _} = locate(CandidateSource, <<"increment">>),
+    CandidateSite = candidate_site(list_to_binary(CandidatePath), CandStart, CandEnd),
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
+    ),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>,
+            <<"incrementBy">>,
+            <<"increment">>,
+            instance,
+            [DefSite, SuperSite],
+            [CandidateSite]
+        )
+    ),
+    try
+        {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+        Event =
+            receive
+                {flush_evt, E} -> E
+            after 1000 -> ?assert(false)
+            end,
+        FileKinds = maps:get(fileKinds, Event),
+        KindsByFile = [{maps:get(file, M), maps:get(kind, M)} || M <- FileKinds],
+        [
+            ?_assertEqual(1, maps:get(flushed, Summary)),
+            ?_assertEqual(
+                {'rename-method', 'rename-method'},
+                {
+                    proplists:get_value(list_to_binary(DefFile), KindsByFile),
+                    proplists:get_value(list_to_binary(SubFile), KindsByFile)
+                }
+            ),
+            ?_assertEqual(
+                undefined, proplists:get_value(list_to_binary(CandidatePath), KindsByFile)
+            )
         ]
     after
         beamtalk_announcements:unsubscribe(SubRef)

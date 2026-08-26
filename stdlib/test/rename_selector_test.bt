@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Behaviour >> renameSelector:to: / renameSelector:to:ifAbsent:
+// (ADR 0114 Phase 3, BT-3279)
+//
+// The cross-hierarchy false-positive, intra-hierarchy override-shadowing,
+// and basic multi-class self/super-rewrite happy-path scenarios (ADR 0114's
+// own acceptance criteria) need a real multi-file fixture graph so
+// `beamtalk_xref:senders_of/1`/`implementors_of/1` are genuinely populated —
+// those live in
+// runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_selector_tests.erl,
+// mirroring how `rename_to_test.bt`/`beamtalk_behaviour_intrinsics_rename_to_tests.erl`
+// split the same way for `renameTo:`. This file covers what a single-class
+// ClassBuilder fixture can exercise directly: collision refusal, the
+// `ifAbsent:` escape hatch, and a real, documented limitation — a dynamic
+// (ClassBuilder) class has no tracked `.bt` source to splice a definition
+// rewrite against, so `renameSelector:to:` refuses it rather than silently
+// no-op-succeeding (mirroring `removeSelector:`'s own existing behavior for
+// a dynamic class, see `beamtalk_behaviour_intrinsics:definition_selector_sites/4`'s
+// doc for the full "why").
+
+TestCase subclass: RenameSelectorTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  // A dynamic class has no backing source for the definition-site splice
+  // mechanism to rewrite — refused cleanly rather than pretending success.
+  testRenameRefusesDynamicClassNoSource =>
+    self.cls := Object classBuilder name: #Bt3279DynNoSource;
+      superclass: Object;
+      methods: #{#bump => [:_self | 1]};
+      register
+
+    self should: [
+      self.cls renameSelector: #bump to: #boost
+    ] raise: #runtime_error
+
+  // Collision refusal (ADR 0114 § Decision): `NewSelector` already locally
+  // defined raises rather than silently overwriting.
+  testRenameRefusesCollisionWithExistingSelector =>
+    self.cls := Object classBuilder name: #Bt3279Collision;
+      superclass: Object;
+      methods: #{#foo => [:_self | 1], #bar => [:_self | 2]};
+      register
+
+    self should: [
+      self.cls renameSelector: #foo to: #bar
+    ] raise: #selector_already_exists
+
+  // Bare form raises selector_not_found (ADR 0112's kind, reused) when
+  // OldSelector resolves nowhere locally.
+  testRenameRefusesAbsentSelector =>
+    self.cls := Object classBuilder name: #Bt3279Absent;
+      superclass: Object;
+      methods: #{#onlyThis => [:_self | 1]};
+      register
+
+    self should: [
+      self.cls renameSelector: #missing to: #stillMissing
+    ] raise: #selector_not_found
+
+  // renameSelector:to:ifAbsent: runs the block instead of raising when
+  // OldSelector is absent — the collision/dynamic-source refusals above are
+  // NOT substituted by this escape hatch, only "not found" is.
+  testRenameSelectorIfAbsentRunsBlockWhenAbsent =>
+    self.cls := Object classBuilder name: #Bt3279IfAbsent;
+      superclass: Object;
+      methods: #{#onlyThis => [:_self | 1]};
+      register
+
+    result := self.cls
+      renameSelector: #missing
+      to: #stillMissing
+      ifAbsent: ["not found"]
+    self assert: result equals: "not found"

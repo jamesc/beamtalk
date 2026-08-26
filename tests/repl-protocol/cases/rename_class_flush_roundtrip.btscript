@@ -1,0 +1,261 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3271 (ADR 0114 Phase 2, class-rename multi-file flush): required e2e
+// validation for the full `renameTo:` + `Workspace flushIncludingDestructive`
+// chain against a real, file-backed class with a cross-file reference.
+//
+// `Behaviour>>renameTo:` (BT-3278) only ever produces a `flushable: true`
+// `'rename-class'` ChangeLog entry for a class the xref index actually
+// covers — an ordinary in-project class, not a BUnit fixture (BUnit's
+// `beamtalk test` runner has no project configured at all, so every
+// compiled `.bt` fixture there classifies as "dependency" and `renameTo:`
+// correctly refuses it before any mutation — see
+// `stdlib/test/rename_to_test.bt`'s own doc comment). This harness DOES run
+// with a real project path (`beamtalk_workspace_meta`'s `project_path`,
+// already relied on by `remove_class_flush_roundtrip.btscript`), so it is
+// the one place the full disk-flush half of BT-3271's acceptance criteria
+// can actually be exercised end to end, mirroring that companion test's own
+// "write a real .bt file inside the project tree, `Workspace load:` it"
+// pattern.
+//
+// Two files, one reference relationship (mirrors
+// `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own fixture graph,
+// EUnit-side coverage of the identical mechanism):
+//
+//   Bt3271RenameFlushDemo.bt:
+//     Value subclass: Bt3271RenameFlushDemo
+//       greet -> String => "hi from the rename-flush e2e"
+//
+//   Bt3271RenameFlushDemoUser.bt (references the class being renamed):
+//     Value subclass: Bt3271RenameFlushDemoUser
+//       makeDemo -> Bt3271RenameFlushDemo => Bt3271RenameFlushDemo new
+//
+// After `Bt3271RenameFlushDemo renameTo: #Bt3271RenameFlushDemoRenamed` and
+// `Workspace flushIncludingDestructive`:
+//   - `Bt3271RenameFlushDemo.bt` is gone; `Bt3271RenameFlushDemoRenamed.bt`
+//     exists with its declaration line rewritten (rest byte-identical).
+//   - `Bt3271RenameFlushDemoUser.bt`'s cross-file reference is rewritten too.
+//   - Reloading the renamed class and its referrer from their new paths
+//     resolves cleanly — no dangling `class_not_found`.
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE TWO REAL .bt FILES INSIDE THE PROJECT TREE AND LOAD THEM
+// ===========================================================================
+
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_rename_class_flush_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_demoPath := _projDir ++ "/Bt3271RenameFlushDemo.bt"
+// => _
+
+_userPath := _projDir ++ "/Bt3271RenameFlushDemoUser.bt"
+// => _
+
+// A genuine LF byte built via the Erlang FFI (BT-3214: `(Character value:
+// 10) asString` empirically returns the two-character string "10" here, not
+// a newline — see `remove_class_flush_roundtrip.btscript`'s identical note).
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_demoSource := "Value subclass: Bt3271RenameFlushDemo" ++ _nl ++ "  greet -> String => ""hi from the rename-flush e2e"""
+// => _
+
+_userSource := "Value subclass: Bt3271RenameFlushDemoUser" ++ _nl ++ "  makeDemo -> Bt3271RenameFlushDemo => Bt3271RenameFlushDemo new"
+// => _
+
+File writeAll: _demoPath contents: _demoSource
+// => Result ok: nil
+
+File writeAll: _userPath contents: _userSource
+// => Result ok: nil
+
+Workspace load: _demoPath
+// => _
+
+Workspace load: _userPath
+// => _
+
+Object allSubclasses includes: Bt3271RenameFlushDemo
+// => true
+
+Bt3271RenameFlushDemoUser new makeDemo greet
+// => hi from the rename-flush e2e
+
+// ===========================================================================
+// STEP 2 — renameTo: RE-REGISTERS IN MEMORY AND LOGS A rename-class ENTRY
+// (ADR 0114 Phase 2, BT-3278)
+// ===========================================================================
+
+Bt3271RenameFlushDemo renameTo: #Bt3271RenameFlushDemoRenamed
+// => _
+
+Object allSubclasses includes: Bt3271RenameFlushDemoRenamed
+// => true
+
+Bt3271RenameFlushDemoUser new makeDemo greet
+// => hi from the rename-flush e2e
+
+_renameEntry := (Workspace changes select: [:e | e className =:= #Bt3271RenameFlushDemoRenamed]) first
+// => _
+
+_renameEntry kind
+// => rename-class
+
+_renameEntry isFlushable
+// => true
+
+// The in-memory rename does not touch disk — only flush does.
+File exists: _demoPath
+// => true
+
+File exists: _userPath
+// => true
+
+// ===========================================================================
+// STEP 3 — Workspace flush REPORTS IT skipped: destructive, FILES SURVIVE
+// (ADR 0113 Phase 2 tier reused verbatim by ADR 0114 Phase 2)
+// ===========================================================================
+
+_tier1Flush := Workspace flush
+// => _
+
+Erlang maps get: #flushed with: _tier1Flush
+// => 0
+
+_skipped := Erlang maps get: #skipped with: _tier1Flush
+// => _
+
+_skipped size
+// => 1
+
+_skippedFirst := _skipped first
+// => _
+
+Erlang maps get: #reason with: _skippedFirst
+// => destructive
+
+File exists: _demoPath
+// => true
+
+// ===========================================================================
+// STEP 4 — Workspace flushIncludingDestructive MOVES THE FILE AND REWRITES
+// THE CROSS-FILE REFERENCE (ADR 0114 Phase 2, BT-3271)
+// ===========================================================================
+
+_destructiveFlush := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _destructiveFlush
+// => 1
+
+(Erlang maps get: #skipped with: _destructiveFlush) isEmpty
+// => true
+
+(Erlang maps get: #conflicts with: _destructiveFlush) isEmpty
+// => true
+
+Workspace changes isEmpty
+// => true
+
+// The old file is gone; the moved file exists with the declaration rewritten
+// and the rest of the body byte-identical.
+File exists: _demoPath
+// => false
+
+_renamedPath := _projDir ++ "/Bt3271RenameFlushDemoRenamed.bt"
+// => _
+
+File exists: _renamedPath
+// => true
+
+_renamedBody := (File readAll: _renamedPath) unwrap
+// => _
+
+_expectedRenamedSource := "Value subclass: Bt3271RenameFlushDemoRenamed" ++ _nl ++ "  greet -> String => ""hi from the rename-flush e2e"""
+// => _
+
+_renamedBody =:= _expectedRenamedSource
+// => true
+
+// The referencing file's cross-file reference was rewritten too.
+_userBody := (File readAll: _userPath) unwrap
+// => _
+
+_expectedUserSource := "Value subclass: Bt3271RenameFlushDemoUser" ++ _nl ++ "  makeDemo -> Bt3271RenameFlushDemoRenamed => Bt3271RenameFlushDemoRenamed new"
+// => _
+
+_userBody =:= _expectedUserSource
+// => true
+
+// ===========================================================================
+// STEP 5 — NO DANGLING class_not_found: A FRESH RE-LOAD OF BOTH (NOW-MOVED)
+// FILES RESOLVES CLEANLY — the end-to-end point of this test.
+// ===========================================================================
+
+Bt3271RenameFlushDemoRenamed removeFromSystem
+// => nil
+
+Bt3271RenameFlushDemoUser removeFromSystem
+// => nil
+
+Workspace changes clear
+// => _
+
+Workspace load: _renamedPath
+// => _
+
+Workspace load: _userPath
+// => _
+
+Bt3271RenameFlushDemoUser new makeDemo greet
+// => hi from the rename-flush e2e
+
+Bt3271RenameFlushDemoUser new makeDemo class name
+// => Bt3271RenameFlushDemoRenamed
+
+// The old name no longer resolves to anything — renamed away, and its file
+// no longer exists on disk for a fresh compiler/REPL run to find either.
+Bt3271RenameFlushDemo
+// => ERROR: Class 'Bt3271RenameFlushDemo' not found
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Bt3271RenameFlushDemoRenamed removeFromSystem
+// => nil
+
+Bt3271RenameFlushDemoUser removeFromSystem
+// => nil
+
+(Erlang file) delete: _renamedPath
+// => _
+
+(Erlang file) delete: _userPath
+// => _
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _

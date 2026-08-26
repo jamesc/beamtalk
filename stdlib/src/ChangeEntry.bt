@@ -64,7 +64,8 @@ sealed typed Value subclass: ChangeEntry
   selector -> Symbol | Nil => self.selector
 
   /// The kind of patch: #instance, #class, #'new-class', #'class-def',
-  /// #'remove-method', #'remove-class', or #unknown.
+  /// #'remove-method', #'remove-class', #'rename-class', #'rename-method',
+  /// or #unknown.
   kind -> Symbol => self.kind
 
   /// Which method table this entry targets: #instance or #class, or nil for
@@ -180,10 +181,18 @@ sealed typed Value subclass: ChangeEntry
   /// Whether this entry removed a class (`removeFromSystem`, ADR 0113).
   isRemoveClass -> Boolean => self.kind =:= #'remove-class'
 
+  /// Whether this entry renamed a class (`renameTo:`/`Workspace
+  /// moveClass:to:`, ADR 0114).
+  isRenameClass -> Boolean => self.kind =:= #'rename-class'
+
+  /// Whether this entry renamed a method (`renameSelector:to:`, ADR 0114).
+  isRenameMethod -> Boolean => self.kind =:= #'rename-method'
+
   // === Printing ===
 
   /// Developer-readable representation, e.g. "Counter>>increment",
-  /// "Counter (new-class)", "Counter (class-def)", or "Counter (remove-class)".
+  /// "Counter (new-class)", "Counter (class-def)", "Counter (remove-class)",
+  /// "Accumulator (rename-class)", or "Counter>>incrementBy (rename-method)".
   ///
   /// ## Examples
   /// ```beamtalk
@@ -195,9 +204,19 @@ sealed typed Value subclass: ChangeEntry
         self isRemoveClass
           ifTrue: [self.className asString ++ " (remove-class)"]
           ifFalse: [
-            self isClassDef ifTrue: [
-              self.className asString ++ " (class-def)"
-            ] ifFalse: [self.className asString ++ " (new-class)"]
+            self isRenameClass
+              ifTrue: [self.className asString ++ " (rename-class)"]
+              ifFalse: [
+                self isClassDef ifTrue: [
+                  self.className asString ++ " (class-def)"
+                ] ifFalse: [self.className asString ++ " (new-class)"]
+              ]
           ]
       ]
-      ifFalse: [self.className asString ++ ">>" ++ self.selector asString]
+      ifFalse: [
+        self isRenameMethod
+          ifTrue: [
+            self.className asString ++ ">>" ++ self.selector asString ++ " (rename-method)"
+          ]
+          ifFalse: [self.className asString ++ ">>" ++ self.selector asString]
+      ]

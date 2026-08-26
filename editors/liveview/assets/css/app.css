@@ -1226,15 +1226,16 @@ body.col-resizing .cockpit { transition: none; }
 .diff-toggle:hover { color: var(--ink); }
 .bt-changes-table .diff-row > td { padding-top: 0; }
 
-/* Destructive-tier ChangeLog row (ADR 0113 Phase 4, BT-3210): flags a
-   `remove-class` row as needing its own "Delete file" confirmation — it
-   does not flush with the rest of the pending set on an ordinary "Save All
-   to Disk" click, so it must read as visibly different from a routine
-   patch row rather than blending in as another dirty entry. Purely
-   presentational (a tinted left border on the row + a badge appended to
-   the Kind cell via `::after`, both driven off the `.destructive-row`
-   class alone) so no `<td>`'s own markup changes — the Kind column
-   (4th `<td>` in the row) is exact-matched verbatim by
+/* Destructive-tier ChangeLog row (ADR 0113 Phase 4 BT-3210, joined by ADR
+   0114 Phase 5 BT-3277's rename-class/rename-method): flags a `remove-class`/
+   `rename-class`/`rename-method` row as needing its own "Delete file"/"Apply
+   rename" confirmation — none of the three flush with the rest of the
+   pending set on an ordinary "Save All to Disk" click, so each must read as
+   visibly different from a routine patch row rather than blending in as
+   another dirty entry. Purely presentational (a tinted left border on the
+   row + a badge appended to the Kind cell via `::after`, both driven off the
+   `.destructive-row` class alone) so no `<td>`'s own markup changes — the
+   Kind column (4th `<td>` in the row) is exact-matched verbatim by
    `workspace_changes_side_test.exs` (BT-3195) for every other row. */
 .bt-changes-table tr.destructive-row {
   box-shadow: inset 3px 0 0 var(--err);

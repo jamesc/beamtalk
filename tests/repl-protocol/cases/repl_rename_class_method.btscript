@@ -1,0 +1,129 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for the `:rename-class <Class> <NewName>` and `:rename-method
+// <Class> <selector> <newSelector>` REPL meta-commands (ADR 0114 Phase 5,
+// BT-3276).
+//
+// These CLI-side aliases desugar to the Beamtalk expressions:
+//   :rename-class <Class> <NewName>            → <Class> renameTo: #<NewName>
+//   :rename-method <Class> <sel> <newSel>       → <Class> renameSelector: #<sel> to: #<newSel>
+//
+// Both are memory-mutating only, matching ADR 0113's two-prompt shape (reused
+// verbatim by ADR 0114): the `:rename-class`/`:rename-method` prompt below
+// confirms the in-memory rename; reaching disk requires the separate,
+// already-shipped `:flush-destructive` gate exercised by
+// `repl_remove_class_flush_destructive.btscript` — `rename-class`/
+// `rename-method` join `remove-class` in the same Tier 2 flush tier (ADR
+// 0114 "Flush"), so this test does not re-exercise that gate's own dispatch;
+// it only confirms the rename aliases themselves round-trip and log the
+// expected ChangeLog `kind`.
+//
+// IMPORTANT: meta-commands are dispatched by the REPL/test harness only when
+// the entire line is `:rename-class <Class> <NewName>` /
+// `:rename-method <Class> <sel> <newSel>` — see
+// repl_flush_changes_dirty.btscript for the same caveat about composability.
+// The interactive `y/N` terminal confirmation the real REPL prompts with is
+// not exercised here — the protocol test harness talks to the workspace
+// directly, bypassing the terminal, the same way it already does for
+// `:remove-class`/`:remove-method`/`:flush`.
+//
+// Full disk-flush coverage (file move, cross-file reference rewrite,
+// candidate_sites left untouched) is out of scope here and lives in
+// `rename_class_flush_roundtrip.btscript` (BT-3271) and
+// `rename_method_flush_roundtrip.btscript` (BT-3273) — both of those run
+// against real project files; a unique inline class/selector name (rather
+// than a shared fixture) here avoids interfering with other REPL-protocol
+// cases, which share one long-lived workspace session. Like
+// `repl_remove_class_flush_destructive.btscript`, these classes are never
+// backed by an on-disk file (no active project context in the shared e2e
+// workspace), so their `rename-class`/`rename-method` entries are
+// `flushable: false` — a real project's disk-flush half is covered
+// separately, as noted above.
+
+// ===========================================================================
+// :rename-class — alias for `<Class> renameTo: #<NewName>`
+// ===========================================================================
+
+Value subclass: ReplRenameClassDemo
+  greet => "hi"
+// => _
+
+ReplRenameClassDemo new greet
+// => hi
+
+Object allSubclasses includes: ReplRenameClassDemo
+// => true
+
+// :rename-class renames the class in memory (wildcard: meta-commands aren't
+// composable, so the harness can only verify the call doesn't raise an error
+// — same pattern as :remove-class/:remove-method/:flush).
+:rename-class ReplRenameClassDemo ReplRenameClassRenamed
+// => _
+
+Object allSubclasses includes: ReplRenameClassRenamed
+// => true
+
+ReplRenameClassRenamed new greet
+// => hi
+
+// The old name no longer resolves.
+ReplRenameClassDemo
+// => ERROR: Class 'ReplRenameClassDemo' not found
+
+// renameTo: logged a durable `rename-class` ChangeLog entry (ADR 0114 Phase
+// 2, BT-3278) — filtered by className because REPL-protocol cases share one
+// long-lived ChangeLog (same convention as
+// repl_remove_class_flush_destructive.btscript).
+_replRenameClassEntry := (Workspace changes select: [:e | e className =:= #ReplRenameClassRenamed]) last
+// => _
+
+_replRenameClassEntry kind
+// => rename-class
+
+// Dynamically-defined (no on-disk source file) → not flushable.
+_replRenameClassEntry isFlushable
+// => false
+
+// ===========================================================================
+// :rename-method — alias for
+// `<Class> renameSelector: #<selector> to: #<newSelector>`
+// ===========================================================================
+
+Value subclass: ReplRenameMethodDemo
+  greet => "hi"
+// => _
+
+ReplRenameMethodDemo new greet
+// => hi
+
+:rename-method ReplRenameMethodDemo greet sayHi
+// => _
+
+ReplRenameMethodDemo new sayHi
+// => hi
+
+// The old selector no longer resolves.
+ReplRenameMethodDemo new greet
+// => ERROR: does not understand
+
+// renameSelector:to: logged a durable `rename-method` ChangeLog entry (ADR
+// 0114 Phase 3, BT-3279).
+_replRenameMethodEntry := (Workspace changes select: [:e | e className =:= #ReplRenameMethodDemo]) last
+// => _
+
+_replRenameMethodEntry kind
+// => rename-method
+
+_replRenameMethodEntry isFlushable
+// => false
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+ReplRenameClassRenamed removeFromSystem
+// => nil
+
+ReplRenameMethodDemo removeFromSystem
+// => nil

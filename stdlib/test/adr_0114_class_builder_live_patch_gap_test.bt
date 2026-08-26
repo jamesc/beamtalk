@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3268 (ADR 0114 Phase 1 spike): confirms the referencesTo: live-patch
+// gap Constraint 4 describes reproduces end-to-end via ClassBuilder's
+// `methodSource:` install path — the one real, currently-reachable surface
+// this spike found that actually hits it (see
+// tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript and
+// runtime/apps/beamtalk_workspace/test/beamtalk_adr0114_site_discovery_spike_tests.erl
+// for the two surfaces that do NOT: `>>`/`compile:source:` recompile the
+// whole class with a complete xref, and `register/5` sourced extensions are
+// unconditionally rescanned by SystemNavigation.bt's `referencesTo:` itself
+// (BT-2196), bypassing the xref table's gap entirely).
+//
+// A ClassBuilder class built with a real block-literal method body (BT-2246
+// auto-populates its source from the literal) is fully INDEXED
+// (`beamtalk_class_builder.erl`'s `source_map_to_xref/3` calls
+// `beamtalk_xref:build_method_entry/5` with `SourceStatus = indexed`) — so,
+// unlike a loaded-but-unindexed class, it is never re-scanned by
+// `referencesTo:`'s fallback path either. Its xref row's `references` field
+// is hard-coded `[]` by `build_method_entry/5` (Constraint 4), and nothing
+// compensates for it the way the extension-specific rescan does — so the
+// real reference below is silently missed end-to-end.
+
+TestCase subclass: Adr0114ClassBuilderLivePatchGapTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  // The installed method's body is a genuine, real reference to
+  // `AtomicCounter` (a real, always-loaded stdlib class) via a constructor
+  // send — exactly the reference form `referencesTo:` is documented to
+  // catch for an ordinary file-defined method (ADR 0114 Decision section's
+  // own examples). `referencesTo: AtomicCounter` must NOT list this class as
+  // an owner, confirming the gap reproduces exactly as Constraint 4
+  // describes: the whole `references` channel is empty for this live-
+  // installed method, not merely incomplete.
+  testClassBuilderMethodReferenceIsMissedByReferencesTo =>
+    self.cls := Object classBuilder name: #Adr0114BuilderGapProbe;
+      superclass: Object;
+      methods: #{
+        #makeCounter => [:_self | AtomicCounter new: #adr0114BuilderProbe]
+      };
+      register
+    nav := SystemNavigation default
+    refs := nav referencesTo: AtomicCounter
+    owners := refs collect: [:r | r at: #class]
+    // THE GAP: the just-registered class's method plainly references
+    // AtomicCounter, yet it is completely absent from referencesTo:'s
+    // result — not partially represented, absent.
+    self deny: (owners includes: self.cls)

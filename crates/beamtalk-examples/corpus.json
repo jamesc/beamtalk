@@ -1116,63 +1116,35 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-175",
+      "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Counter renameTo: #Accumulator\nCounter renameSelector: #increment to: #incrementBy\nCounter class renameSelector: #ofSize: to: #withCapacity:",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-176",
+      "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "Counter renameTo: #Accumulator\n// => Error: cannot rename Counter to Accumulator — Accumulator already exists\n\nCounter renameSelector: #increment to: #decrement\n// => Error: Counter already defines #decrement locally — refusing to overwrite\n\nCounter renameSelector: #bogus to: #anything\n// => Error: selector_not_found\n\nCounter renameSelector: #bogus to: #anything ifAbsent: [\"not found\"]\n// => \"not found\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-179",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "Workspace flushIncludingDestructive               // unscoped: applies every pending\n                                                    //   Tier 1 + Tier 2 entry\nWorkspace flush: Counter confirmDestructive: true  // scoped to one class\nWorkspace changes flushKinds: #( #'remove-class' ) confirmDestructive: true\n                                                    // scoped to one kind",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-176",
-      "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "mutate",
-        "mutation",
-        "process",
-        "set",
-        "string conversion",
-        "toString",
-        "to_string"
-      ],
-      "source": "nav := SystemNavigation default\n\nnav implementorsOf: #printString\n// => [Object, Integer, String, ...]\n\nnav sendersOf: #increment\n// => [#{#class => CounterTest, #selector => #testIncrement, #line => 12}, ...]\n\nnav referencesTo: Counter\n// => [#{#class => CounterTest, #selector => #setUp, #line => 5}, ...]\n\nnav methodsMatching: (Regex from: \"printString\") unwrap\n// => [#{#class => Object, #selector => #printString}, ...]\n\nnav selectorsMatching: \"print\"\n// => [#printString, #printOn:, ...]\n\nnav messagesSentBy: (Counter >> #increment)\n// => [#{#selector => #+, #line => 2}, ...]\n\nnav announcementsSentBy: PriceTracker\n// => [PriceChanged, ...]  (distinct Announcement subclasses PriceTracker emits)\n\nnav announcementSitesSentBy: PriceTracker\n// => [#{#class => PriceTracker, #selector => #notify, #line => 4, #announcementClass => PriceChanged}, ...]\n\nnav unimplementedSelectors\n// => []  (empty = no typos in the loaded registry)\n\nnav unusedSelectors\n// => [#{#class => MyLib, #selector => #helperNoOneCalls}, ...]\n\nnav actorClasses\n// => [Actor, ClassBuilder, MyActor, ...]\n\nnav dnuHandlers\n// => [ErlangModule, ProtoObject, TimeoutProxy, ...]\n\nnav extendersOf: String\n// => [Package(my_lib v1.0.0), ...]\n\nnav extensionsBy: (Package named: \"my_lib\")\n// => [#{#class => String, #selector => #asJson}, ...]\n\nnav classesInPackage: #stdlib\n// => [Actor, Array, ...]\n\nnav subclassesOf: Number in: #stdlib\n// => [Float, Integer]\n\nnav fieldReadersOf: #value in: Counter\n// => [#{#class => Counter, #selector => #getValue, #line => 5}, ...]\n\nnav fieldWritersOf: #value in: Counter\n// => [#{#class => Counter, #selector => #increment, #line => 3}, ...]\n\nnav ffiSitesFor: \"lists:reverse\"\n// => [#{#class => MyList, #selector => #reversed, #line => 7}, ...]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-177",
-      "title": "Session — a first-class session value (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "mutate",
-        "mutation",
-        "raise",
-        "set",
-        "throw"
-      ],
-      "source": "x := 42\n// => 42\n\nSession current bindings keys\n// => #(#x)\n\nSession current bindings at: #x\n// => 42\n\nSession current resolve: #Transcript\n// => the Transcript singleton\n\nSession current resolve: #notDefinedAnywhere\n// => Error: Undefined variable: notDefinedAnywhere\n\nSession current clear\n// => nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-179",
-      "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Session-local write — DEFERRED to end of eval, visible on the NEXT line:\nSession current bindings at: #y put: 99\n// => 99\ny\n// => 99\n\n// Workspace-global write — SYNCHRONOUS (routes through bind:as:),\n// visible immediately on the next line:\nWorkspace globals at: #answer put: 42\n// => 42\nanswer\n// => 42",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1205,7 +1177,58 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-180",
+      "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set",
+        "string conversion",
+        "toString",
+        "to_string"
+      ],
+      "source": "nav := SystemNavigation default\n\nnav implementorsOf: #printString\n// => [Object, Integer, String, ...]\n\nnav sendersOf: #increment\n// => [#{#class => CounterTest, #selector => #testIncrement, #line => 12}, ...]\n\nnav referencesTo: Counter\n// => [#{#class => CounterTest, #selector => #setUp, #line => 5}, ...]\n\nnav methodsMatching: (Regex from: \"printString\") unwrap\n// => [#{#class => Object, #selector => #printString}, ...]\n\nnav selectorsMatching: \"print\"\n// => [#printString, #printOn:, ...]\n\nnav messagesSentBy: (Counter >> #increment)\n// => [#{#selector => #+, #line => 2}, ...]\n\nnav announcementsSentBy: PriceTracker\n// => [PriceChanged, ...]  (distinct Announcement subclasses PriceTracker emits)\n\nnav announcementSitesSentBy: PriceTracker\n// => [#{#class => PriceTracker, #selector => #notify, #line => 4, #announcementClass => PriceChanged}, ...]\n\nnav unimplementedSelectors\n// => []  (empty = no typos in the loaded registry)\n\nnav unusedSelectors\n// => [#{#class => MyLib, #selector => #helperNoOneCalls}, ...]\n\nnav actorClasses\n// => [Actor, ClassBuilder, MyActor, ...]\n\nnav dnuHandlers\n// => [ErlangModule, ProtoObject, TimeoutProxy, ...]\n\nnav extendersOf: String\n// => [Package(my_lib v1.0.0), ...]\n\nnav extensionsBy: (Package named: \"my_lib\")\n// => [#{#class => String, #selector => #asJson}, ...]\n\nnav classesInPackage: #stdlib\n// => [Actor, Array, ...]\n\nnav subclassesOf: Number in: #stdlib\n// => [Float, Integer]\n\nnav fieldReadersOf: #value in: Counter\n// => [#{#class => Counter, #selector => #getValue, #line => 5}, ...]\n\nnav fieldWritersOf: #value in: Counter\n// => [#{#class => Counter, #selector => #increment, #line => 3}, ...]\n\nnav ffiSitesFor: \"lists:reverse\"\n// => [#{#class => MyList, #selector => #reversed, #line => 7}, ...]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-181",
+      "title": "Session — a first-class session value (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "mutate",
+        "mutation",
+        "raise",
+        "set",
+        "throw"
+      ],
+      "source": "x := 42\n// => 42\n\nSession current bindings keys\n// => #(#x)\n\nSession current bindings at: #x\n// => 42\n\nSession current resolve: #Transcript\n// => the Transcript singleton\n\nSession current resolve: #notDefinedAnywhere\n// => Error: Undefined variable: notDefinedAnywhere\n\nSession current clear\n// => nil",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-183",
+      "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Session-local write — DEFERRED to end of eval, visible on the NEXT line:\nSession current bindings at: #y put: 99\n// => 99\ny\n// => 99\n\n// Workspace-global write — SYNCHRONOUS (routes through bind:as:),\n// visible immediately on the next line:\nWorkspace globals at: #answer put: 42\n// => 42\nanswer\n// => 42",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-185",
       "title": "Cross-session access (read-only) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1229,7 +1252,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-182",
+      "id": "docs-beamtalk-language-features-block-186",
       "title": "Tracing Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1239,7 +1262,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-183",
+      "id": "docs-beamtalk-language-features-block-187",
       "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1254,7 +1277,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-184",
+      "id": "docs-beamtalk-language-features-block-188",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1272,7 +1295,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-185",
+      "id": "docs-beamtalk-language-features-block-189",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1287,7 +1310,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-186",
+      "id": "docs-beamtalk-language-features-block-190",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1302,7 +1325,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-187",
+      "id": "docs-beamtalk-language-features-block-191",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1312,7 +1335,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-188",
+      "id": "docs-beamtalk-language-features-block-192",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1332,7 +1355,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-189",
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1361,7 +1384,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-190",
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1392,7 +1415,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-196",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1411,7 +1434,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1439,7 +1462,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-198",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1460,7 +1483,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-196",
+      "id": "docs-beamtalk-language-features-block-2",
+      "title": "String Operations (Grapheme-Aware) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-200",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1470,7 +1503,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-197",
+      "id": "docs-beamtalk-language-features-block-201",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1485,7 +1518,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-198",
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1500,17 +1533,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-2",
-      "title": "String Operations (Grapheme-Aware) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1531,7 +1554,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1552,7 +1575,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-207",
+      "id": "docs-beamtalk-language-features-block-211",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1573,7 +1596,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-208",
+      "id": "docs-beamtalk-language-features-block-212",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1591,7 +1614,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-210",
+      "id": "docs-beamtalk-language-features-block-214",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1601,7 +1624,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1620,46 +1643,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-216",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-218",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "find",
-        "first match",
-        "search"
-      ],
-      "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-219",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1677,6 +1667,39 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-220",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-222",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "find",
+        "first match",
+        "search"
+      ],
+      "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-223",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1692,7 +1715,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-225",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1716,7 +1739,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1735,7 +1758,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1756,7 +1779,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1769,7 +1792,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1782,69 +1805,6 @@
         "where"
       ],
       "source": "(Stream from: 1) printString\n// => Stream(from: 1)\n\n(Stream on: #(1, 2, 3)) printString\n// => Stream(on: [...])\n\n((Stream from: 1) select: [:n | n isEven]) printString\n// => Stream(from: 1) | select: [...]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-226",
-      "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "where"
-      ],
-      "source": "// Eager — List methods return a List immediately\n#(1, 2, 3, 4, 5) select: [:n | n > 2]\n// => [3,4,5]  (a List)\n\n// Lazy — stream methods return a Stream (unevaluated)\n(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]\n// => Stream  (unevaluated — call asList or take: to materialize)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-227",
-      "title": "File Streaming (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "where"
-      ],
-      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-228",
-      "title": "File I/O and Directory Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-229",
-      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1879,6 +1839,69 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-230",
+      "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "where"
+      ],
+      "source": "// Eager — List methods return a List immediately\n#(1, 2, 3, 4, 5) select: [:n | n > 2]\n// => [3,4,5]  (a List)\n\n// Lazy — stream methods return a Stream (unevaluated)\n(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]\n// => Stream  (unevaluated — call asList or take: to materialize)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-231",
+      "title": "File Streaming (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "where"
+      ],
+      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-232",
+      "title": "File I/O and Directory Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-233",
+      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1897,7 +1920,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-232",
+      "id": "docs-beamtalk-language-features-block-236",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1915,7 +1938,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-237",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1930,7 +1953,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-234",
+      "id": "docs-beamtalk-language-features-block-238",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1940,7 +1963,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-235",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1958,7 +1981,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-24",
+      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-242",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1981,7 +2019,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-243",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1991,22 +2029,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-24",
-      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-240",
+      "id": "docs-beamtalk-language-features-block-244",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2016,7 +2039,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-241",
+      "id": "docs-beamtalk-language-features-block-245",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2039,7 +2062,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-243",
+      "id": "docs-beamtalk-language-features-block-247",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2054,7 +2077,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-244",
+      "id": "docs-beamtalk-language-features-block-248",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2064,7 +2087,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-246",
+      "id": "docs-beamtalk-language-features-block-25",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-250",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2077,7 +2115,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-247",
+      "id": "docs-beamtalk-language-features-block-251",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2100,7 +2138,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-248",
+      "id": "docs-beamtalk-language-features-block-252",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2123,7 +2161,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-249",
+      "id": "docs-beamtalk-language-features-block-253",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2146,22 +2184,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-25",
-      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-250",
+      "id": "docs-beamtalk-language-features-block-254",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2192,7 +2215,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-251",
+      "id": "docs-beamtalk-language-features-block-255",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -12481,6 +12504,43 @@
       "explanation": "BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback blocks correctly route through the actor mailbox, not via safe_dispatch on a stale captured state."
     },
     {
+      "id": "stdlib-test-adr-0114-class-builder-live-patch-gap-test",
+      "title": "Adr0114ClassBuilderLivePatchGapTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "Adr0114ClassBuilderLivePatchGapTest",
+        "TestCase",
+        "adr_0114_class_builder_live_patch_gap_test",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "object",
+        "property",
+        "set",
+        "subclassing",
+        "tearDown",
+        "testClassBuilderMethodReferenceIsMissedByReferencesTo",
+        "transform",
+        "unless"
+      ],
+      "source": "// BT-3268 (ADR 0114 Phase 1 spike): confirms the referencesTo: live-patch\n// gap Constraint 4 describes reproduces end-to-end via ClassBuilder's\n// `methodSource:` install path — the one real, currently-reachable surface\n// this spike found that actually hits it (see\n// tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript and\n// runtime/apps/beamtalk_workspace/test/beamtalk_adr0114_site_discovery_spike_tests.erl\n// for the two surfaces that do NOT: `>>`/`compile:source:` recompile the\n// whole class with a complete xref, and `register/5` sourced extensions are\n// unconditionally rescanned by SystemNavigation.bt's `referencesTo:` itself\n// (BT-2196), bypassing the xref table's gap entirely).\n//\n// A ClassBuilder class built with a real block-literal method body (BT-2246\n// auto-populates its source from the literal) is fully INDEXED\n// (`beamtalk_class_builder.erl`'s `source_map_to_xref/3` calls\n// `beamtalk_xref:build_method_entry/5` with `SourceStatus = indexed`) — so,\n// unlike a loaded-but-unindexed class, it is never re-scanned by\n// `referencesTo:`'s fallback path either. Its xref row's `references` field\n// is hard-coded `[]` by `build_method_entry/5` (Constraint 4), and nothing\n// compensates for it the way the extension-specific rescan does — so the\n// real reference below is silently missed end-to-end.\n\nTestCase subclass: Adr0114ClassBuilderLivePatchGapTest\n  field: cls = nil\n\n  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]\n\n  // The installed method's body is a genuine, real reference to\n  // `AtomicCounter` (a real, always-loaded stdlib class) via a constructor\n  // send — exactly the reference form `referencesTo:` is documented to\n  // catch for an ordinary file-defined method (ADR 0114 Decision section's\n  // own examples). `referencesTo: AtomicCounter` must NOT list this class as\n  // an owner, confirming the gap reproduces exactly as Constraint 4\n  // describes: the whole `references` channel is empty for this live-\n  // installed method, not merely incomplete.\n  testClassBuilderMethodReferenceIsMissedByReferencesTo =>\n    self.cls := Object classBuilder name: #Adr0114BuilderGapProbe;\n      superclass: Object;\n      methods: #{\n        #makeCounter => [:_self | AtomicCounter new: #adr0114BuilderProbe]\n      };\n      register\n    nav := SystemNavigation default\n    refs := nav referencesTo: AtomicCounter\n    owners := refs collect: [:r | r at: #class]\n    // THE GAP: the just-registered class's method plainly references\n    // AtomicCounter, yet it is completely absent from referencesTo:'s\n    // result — not partially represented, absent.\n    self deny: (owners includes: self.cls)",
+      "explanation": "BT-3268 (ADR 0114 Phase 1 spike): confirms the referencesTo: live-patch gap Constraint 4 describes reproduces end-to-end via ClassBuilder's `methodSource:` install path — the one real, currently-reachable surface this spike found that actually hits it (see tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript and runtime/apps/beamtalk_workspace/test/beamtalk_adr0114_site_discovery_spike_tests.erl for the two surfaces that do NOT: `>>`/`compile:source:` recompile the whole class with a complete xref, and `register/5` sourced extensions are unconditionally rescanned by SystemNavigation.bt's `referencesTo:` itself (BT-2196), bypassing the xref table's gap entirely).  A ClassBuilder class built with a real block-literal method body (BT-2246 auto-populates its source from the literal) is fully INDEXED (`beamtalk_class_builder.erl`'s `source_map_to_xref/3` calls `beamtalk_xref:build_method_entry/5` with `SourceStatus = indexed`) — so, unlike a loaded-but-unindexed class, it is never re-scanned by `referencesTo:`'s fallback path either. Its xref row's `references` field is hard-coded `[]` by `build_method_entry/5` (Constraint 4), and nothing compensates for it the way the extension-specific rescan does — so the real reference below is silently missed end-to-end."
+    },
+    {
       "id": "stdlib-test-announcements-introspection-test",
       "title": "AnnouncementsIntrospectionTest",
       "category": "stdlib-tests",
@@ -14006,6 +14066,8 @@
         "newClassEntry",
         "object",
         "orphanEntry",
+        "renameClassEntry",
+        "renameMethodEntry",
         "set",
         "shadowedEntry",
         "shadowedLog",
@@ -14043,8 +14105,12 @@
         "testEntryIsNotShadowedByDefault",
         "testEntryPrintStringForMethodPatch",
         "testEntryPrintStringForNewClass",
+        "testEntryPrintStringForRenameClass",
+        "testEntryPrintStringForRenameMethod",
         "testEntrySelector",
         "testMethodEntryIsNotNewClass",
+        "testMethodEntryIsNotRenameClass",
+        "testMethodEntryIsNotRenameMethod",
         "testMixedLogIsEmptyIsFalse",
         "testMixedLogNotEmpty",
         "testMixedLogPrintStringCountsActive",
@@ -14054,6 +14120,10 @@
         "testOrphanEntryIsNotActive",
         "testOrphanEntryIsOrphan",
         "testOrphanEntryIsPriorEpoch",
+        "testRenameClassEntryIsRenameClass",
+        "testRenameClassEntrySelectorIsNil",
+        "testRenameMethodEntryIsRenameMethod",
+        "testRenameMethodEntryKind",
         "testSelectActiveSubset",
         "testSelectByAuthorKind",
         "testSelectCanReachClean",
@@ -14073,7 +14143,7 @@
         "to_string",
         "where"
       ],
-      "source": "// BUnit tests for the ChangeLog / ChangeEntry collection protocol\n// (ADR 0082 Phase 1, BT-2284).\n//\n// The live `Workspace changes` path requires the workspace singleton + the\n// changelog gen_server, which are not available in the BUnit context\n// (workspace_mode: false). These tests therefore construct ChangeLog /\n// ChangeEntry value objects directly (via `new:`) to cover the collection\n// protocol and the active-vs-full (orphan / prior-epoch) filtering. The live\n// end-to-end path (`Workspace changes` returning a populated ChangeLog) is\n// covered by the gen_server's EUnit tests and the WorkspaceInterface facade\n// selector checks below.\n\nTestCase subclass: ChangeLogTest\n\n  // --- Fixtures: build ChangeEntry value objects directly ---\n\n  // An active, durable, human method patch (Counter>>increment).\n  activeEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 1,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A second active entry (Counter>>decrement, agent-authored).\n  activeAgentEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 2,\n        #className => #Counter,\n        #selector => #decrement,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // An orphan entry from a prior epoch (excluded from the default view).\n  orphanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Widget,\n        #selector => #render,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => true,\n        #priorEpoch => true,\n        #active => false\n      }\n\n  // A new-class entry (no selector).\n  newClassEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 3,\n        #className => #DoubleCounter,\n        #selector => nil,\n        #kind => #'new-class',\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A shadowed active entry: an older Counter>>increment superseded by a newer\n  // patch (or revert — a revert is itself a patch, ADR 0082 \"Undo\"). Active but\n  // excluded from the default pending view so the view collapses to one row per\n  // method (BT-2574).\n  shadowedEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #shadowed => true\n      }\n\n  // A ChangeLog holding two active entries plus one orphan.\n  mixedLog =>\n    ChangeLog new: #{\n      #entries => #(self orphanEntry, self activeEntry, self activeAgentEntry)\n    }\n\n  // A ChangeLog holding the latest Counter>>increment plus its shadowed\n  // predecessor (the patch-then-revert shape that motivated BT-2574).\n  shadowedLog =>\n    ChangeLog new: #{#entries => #(self shadowedEntry, self activeEntry)}\n\n  // A clean active entry: reverted back to its on-disk body, so there is no net\n  // change. Active but excluded from the pending view (\"disappear when clean\",\n  // BT-2575) — still reachable via select: for audit.\n  cleanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 4,\n        #className => #Counter,\n        #selector => #reset,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #clean => true\n      }\n\n  // An active entry carrying a net-vs-disk diff (BT-2575).\n  diffEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 5,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #diff => \"- self.v + 1\\n+ self.v + 2\\n\"\n      }\n\n  // A ChangeLog holding one dirty entry plus one clean (reverted-to-disk) entry.\n  cleanLog => ChangeLog new: #{#entries => #(self cleanEntry, self activeEntry)}\n\n  emptyLog => ChangeLog new\n\n  // --- Empty ChangeLog ---\n  testEmptyLogSizeIsZero => self assert: self emptyLog size equals: 0\n\n  testEmptyLogIsEmpty => self assert: self emptyLog isEmpty\n\n  testEmptyLogNotEmptyIsFalse => self deny: self emptyLog notEmpty\n\n  testEmptyLogDirtyMethodsThroughActiveEntries =>\n    // dirtyMethods delegates to FFI in the live path; here we verify the\n    // empty-log collection views directly.\n    self assert: self emptyLog activeEntries equals: #()\n\n  // --- size / isEmpty / notEmpty reflect the ACTIVE subset ---\n  testMixedLogSizeCountsOnlyActive =>\n    // 2 active + 1 orphan => size is 2 (active only).\n    self assert: self mixedLog size equals: 2\n\n  testMixedLogNotEmpty => self assert: self mixedLog notEmpty\n\n  testMixedLogIsEmptyIsFalse => self deny: self mixedLog isEmpty\n\n  testActiveEntriesExcludeOrphan =>\n    self assert: self mixedLog activeEntries size equals: 2\n\n  testAllEntriesIncludeOrphan =>\n    self assert: self mixedLog allEntries size equals: 3\n\n  // --- shadowed entries collapse the pending view to one row per method (BT-2574) ---\n  testShadowedExcludedFromActiveEntries =>\n    self assert: self shadowedLog activeEntries size equals: 1\n\n  testShadowedSurvivorIsLatest =>\n    self assert: self shadowedLog activeEntries first seq equals: 1\n\n  testShadowedLogSizeCountsOnlyLatest =>\n    self assert: self shadowedLog size equals: 1\n\n  testShadowedLogAllEntriesIncludeShadowed =>\n    self assert: self shadowedLog allEntries size equals: 2\n\n  testSelectCanReachShadowed =>\n    shadowed := self shadowedLog select: [:e | e isShadowed]\n    self assert: shadowed size equals: 1\n\n  // --- clean entries disappear from the pending view (BT-2575) ---\n  testCleanExcludedFromActiveEntries =>\n    self assert: self cleanLog activeEntries size equals: 1\n\n  testCleanLogSizeExcludesClean => self assert: self cleanLog size equals: 1\n\n  testCleanLogAllEntriesIncludeClean =>\n    self assert: self cleanLog allEntries size equals: 2\n\n  testSelectCanReachClean =>\n    cleans := self cleanLog select: [:e | e isClean]\n    self assert: cleans size equals: 1\n\n  testActiveSurvivorOfCleanLogIsDirty =>\n    self assert: self cleanLog activeEntries first isClean not\n\n  // --- do: iterates only ACTIVE entries ---\n  testDoVisitsOnlyActiveEntries =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self assert: visited size equals: 2\n\n  testDoSkipsOrphanClass =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self deny: (visited includes: #Widget)\n\n  // --- select: ranges over the FULL set, so it can reach orphans ---\n  testSelectCanReachOrphans =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans size equals: 1\n\n  testSelectOrphanIsExpectedClass =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans first className equals: #Widget\n\n  testSelectActiveSubset =>\n    actives := self mixedLog select: [:e | e isActive]\n    self assert: actives size equals: 2\n\n  testSelectByAuthorKind =>\n    agentChanges := self mixedLog select: [:e | e isAgent]\n    self assert: agentChanges size equals: 1\n\n  testSelectEmptyWhenNoMatch =>\n    none := self mixedLog select: [:e | e className =:= #Nonexistent]\n    self assert: none isEmpty\n\n  // --- ChangeEntry predicates ---\n  testEntryClassName => self assert: self activeEntry className equals: #Counter\n\n  testEntrySelector => self assert: self activeEntry selector equals: #increment\n\n  testEntryIsDurable => self assert: self activeEntry isDurable\n\n  testEntryIsNotEphemeral => self deny: self activeEntry isEphemeral\n\n  testEntryIsFlushable => self assert: self activeEntry isFlushable\n\n  testEntryIsHuman => self assert: self activeEntry isHuman\n\n  testEntryIsAgent => self assert: self activeAgentEntry isAgent\n\n  testEntryIsActive => self assert: self activeEntry isActive\n\n  testEntryIsNotShadowedByDefault => self deny: self activeEntry isShadowed\n\n  testShadowedEntryIsShadowed => self assert: self shadowedEntry isShadowed\n\n  testEntryIsNotCleanByDefault => self deny: self activeEntry isClean\n\n  testCleanEntryIsClean => self assert: self cleanEntry isClean\n\n  testEntryDiffNilByDefault => self assert: self activeEntry diff isNil\n\n  testEntryDiffAccessor =>\n    self assert: self diffEntry diff equals: \"- self.v + 1\\n+ self.v + 2\\n\"\n\n  testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan\n\n  testOrphanEntryIsPriorEpoch => self assert: self orphanEntry isPriorEpoch\n\n  testOrphanEntryIsNotActive => self deny: self orphanEntry isActive\n\n  testNewClassEntryIsNewClass => self assert: self newClassEntry isNewClass\n\n  testNewClassEntrySelectorIsNil =>\n    self assert: self newClassEntry selector isNil\n\n  testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass\n\n  // --- printString ---\n  testEntryPrintStringForMethodPatch =>\n    self assert: self activeEntry printString equals: \"Counter>>increment\"\n\n  testEntryPrintStringForNewClass =>\n    self assert: self newClassEntry printString equals: \"DoubleCounter (new-class)\"\n\n  testEmptyLogPrintString =>\n    self assert: self emptyLog printString equals: \"ChangeLog with 0 entries\"\n\n  testMixedLogPrintStringCountsActive =>\n    self assert: self mixedLog printString equals: \"ChangeLog with 2 entries\"\n\n  // --- WorkspaceInterface facade: `changes` selector exists ---\n  testWorkspaceIncludesSelectorChanges =>\n    self assert: (WorkspaceInterface includesSelector: #changes)\n\n  // --- ADR 0082 Phase 4 (BT-2290) ChangeLog operations exist ---\n  testChangeLogIncludesSelectorRevert =>\n    self assert: (ChangeLog includesSelector: #revert:)\n\n  testChangeLogIncludesSelectorClear =>\n    self assert: (ChangeLog includesSelector: #clear)\n\n  testChangeLogIncludesSelectorFlushKinds =>\n    self assert: (ChangeLog includesSelector: #flushKinds:)\n\n  // --- ADR 0113 Phase 2 (BT-3207) destructive-tier flush facade ---\n  // Live tiering (skipped:destructive, flushIncludingDestructive applying a\n  // pending remove-class entry, remove-method flushing under ordinary\n  // flush with no gate) requires a live workspace + project tree; that is\n  // covered end-to-end in the beamtalk_workspace_flush_tests EUnit suite and\n  // tests/repl-protocol/cases/workspace_flush_destructive.btscript. BUnit\n  // only verifies the new selectors are present on the facade\n  // (WorkspaceInterface's own flushIncludingDestructive / flush:confirmDestructive:\n  // selectors are checked in workspace_interface_test.bt).\n  testChangeLogIncludesSelectorFlushKindsConfirmDestructive =>\n    self assert: (ChangeLog includesSelector: #flushKinds:confirmDestructive:)\n\n  testChangeEntryIncludesSelectorIsRemoveClass =>\n    self assert: (ChangeEntry includesSelector: #isRemoveClass)\n\n  // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---\n  testWorkspaceIncludesSelectorAutoflush =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush)\n\n  testWorkspaceIncludesSelectorAutoflushSetter =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush:)",
+      "source": "// BUnit tests for the ChangeLog / ChangeEntry collection protocol\n// (ADR 0082 Phase 1, BT-2284).\n//\n// The live `Workspace changes` path requires the workspace singleton + the\n// changelog gen_server, which are not available in the BUnit context\n// (workspace_mode: false). These tests therefore construct ChangeLog /\n// ChangeEntry value objects directly (via `new:`) to cover the collection\n// protocol and the active-vs-full (orphan / prior-epoch) filtering. The live\n// end-to-end path (`Workspace changes` returning a populated ChangeLog) is\n// covered by the gen_server's EUnit tests and the WorkspaceInterface facade\n// selector checks below.\n\nTestCase subclass: ChangeLogTest\n\n  // --- Fixtures: build ChangeEntry value objects directly ---\n\n  // An active, durable, human method patch (Counter>>increment).\n  activeEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 1,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A second active entry (Counter>>decrement, agent-authored).\n  activeAgentEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 2,\n        #className => #Counter,\n        #selector => #decrement,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // An orphan entry from a prior epoch (excluded from the default view).\n  orphanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Widget,\n        #selector => #render,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => true,\n        #priorEpoch => true,\n        #active => false\n      }\n\n  // A new-class entry (no selector).\n  newClassEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 3,\n        #className => #DoubleCounter,\n        #selector => nil,\n        #kind => #'new-class',\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A rename-class entry (ADR 0114, BT-3269): the class was renamed to\n  // Accumulator (no selector — a class-identity change, mirroring newClassEntry's\n  // shape).\n  renameClassEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 6,\n        #className => #Accumulator,\n        #selector => nil,\n        #kind => #'rename-class',\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A rename-method entry (ADR 0114, BT-3269): Counter>>increment was renamed\n  // to Counter>>incrementBy — `selector` holds the new name.\n  renameMethodEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 7,\n        #className => #Counter,\n        #selector => #incrementBy,\n        #kind => #'rename-method',\n        #side => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A shadowed active entry: an older Counter>>increment superseded by a newer\n  // patch (or revert — a revert is itself a patch, ADR 0082 \"Undo\"). Active but\n  // excluded from the default pending view so the view collapses to one row per\n  // method (BT-2574).\n  shadowedEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #shadowed => true\n      }\n\n  // A ChangeLog holding two active entries plus one orphan.\n  mixedLog =>\n    ChangeLog new: #{\n      #entries => #(self orphanEntry, self activeEntry, self activeAgentEntry)\n    }\n\n  // A ChangeLog holding the latest Counter>>increment plus its shadowed\n  // predecessor (the patch-then-revert shape that motivated BT-2574).\n  shadowedLog =>\n    ChangeLog new: #{#entries => #(self shadowedEntry, self activeEntry)}\n\n  // A clean active entry: reverted back to its on-disk body, so there is no net\n  // change. Active but excluded from the pending view (\"disappear when clean\",\n  // BT-2575) — still reachable via select: for audit.\n  cleanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 4,\n        #className => #Counter,\n        #selector => #reset,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #clean => true\n      }\n\n  // An active entry carrying a net-vs-disk diff (BT-2575).\n  diffEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 5,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #diff => \"- self.v + 1\\n+ self.v + 2\\n\"\n      }\n\n  // A ChangeLog holding one dirty entry plus one clean (reverted-to-disk) entry.\n  cleanLog => ChangeLog new: #{#entries => #(self cleanEntry, self activeEntry)}\n\n  emptyLog => ChangeLog new\n\n  // --- Empty ChangeLog ---\n  testEmptyLogSizeIsZero => self assert: self emptyLog size equals: 0\n\n  testEmptyLogIsEmpty => self assert: self emptyLog isEmpty\n\n  testEmptyLogNotEmptyIsFalse => self deny: self emptyLog notEmpty\n\n  testEmptyLogDirtyMethodsThroughActiveEntries =>\n    // dirtyMethods delegates to FFI in the live path; here we verify the\n    // empty-log collection views directly.\n    self assert: self emptyLog activeEntries equals: #()\n\n  // --- size / isEmpty / notEmpty reflect the ACTIVE subset ---\n  testMixedLogSizeCountsOnlyActive =>\n    // 2 active + 1 orphan => size is 2 (active only).\n    self assert: self mixedLog size equals: 2\n\n  testMixedLogNotEmpty => self assert: self mixedLog notEmpty\n\n  testMixedLogIsEmptyIsFalse => self deny: self mixedLog isEmpty\n\n  testActiveEntriesExcludeOrphan =>\n    self assert: self mixedLog activeEntries size equals: 2\n\n  testAllEntriesIncludeOrphan =>\n    self assert: self mixedLog allEntries size equals: 3\n\n  // --- shadowed entries collapse the pending view to one row per method (BT-2574) ---\n  testShadowedExcludedFromActiveEntries =>\n    self assert: self shadowedLog activeEntries size equals: 1\n\n  testShadowedSurvivorIsLatest =>\n    self assert: self shadowedLog activeEntries first seq equals: 1\n\n  testShadowedLogSizeCountsOnlyLatest =>\n    self assert: self shadowedLog size equals: 1\n\n  testShadowedLogAllEntriesIncludeShadowed =>\n    self assert: self shadowedLog allEntries size equals: 2\n\n  testSelectCanReachShadowed =>\n    shadowed := self shadowedLog select: [:e | e isShadowed]\n    self assert: shadowed size equals: 1\n\n  // --- clean entries disappear from the pending view (BT-2575) ---\n  testCleanExcludedFromActiveEntries =>\n    self assert: self cleanLog activeEntries size equals: 1\n\n  testCleanLogSizeExcludesClean => self assert: self cleanLog size equals: 1\n\n  testCleanLogAllEntriesIncludeClean =>\n    self assert: self cleanLog allEntries size equals: 2\n\n  testSelectCanReachClean =>\n    cleans := self cleanLog select: [:e | e isClean]\n    self assert: cleans size equals: 1\n\n  testActiveSurvivorOfCleanLogIsDirty =>\n    self assert: self cleanLog activeEntries first isClean not\n\n  // --- do: iterates only ACTIVE entries ---\n  testDoVisitsOnlyActiveEntries =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self assert: visited size equals: 2\n\n  testDoSkipsOrphanClass =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self deny: (visited includes: #Widget)\n\n  // --- select: ranges over the FULL set, so it can reach orphans ---\n  testSelectCanReachOrphans =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans size equals: 1\n\n  testSelectOrphanIsExpectedClass =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans first className equals: #Widget\n\n  testSelectActiveSubset =>\n    actives := self mixedLog select: [:e | e isActive]\n    self assert: actives size equals: 2\n\n  testSelectByAuthorKind =>\n    agentChanges := self mixedLog select: [:e | e isAgent]\n    self assert: agentChanges size equals: 1\n\n  testSelectEmptyWhenNoMatch =>\n    none := self mixedLog select: [:e | e className =:= #Nonexistent]\n    self assert: none isEmpty\n\n  // --- ChangeEntry predicates ---\n  testEntryClassName => self assert: self activeEntry className equals: #Counter\n\n  testEntrySelector => self assert: self activeEntry selector equals: #increment\n\n  testEntryIsDurable => self assert: self activeEntry isDurable\n\n  testEntryIsNotEphemeral => self deny: self activeEntry isEphemeral\n\n  testEntryIsFlushable => self assert: self activeEntry isFlushable\n\n  testEntryIsHuman => self assert: self activeEntry isHuman\n\n  testEntryIsAgent => self assert: self activeAgentEntry isAgent\n\n  testEntryIsActive => self assert: self activeEntry isActive\n\n  testEntryIsNotShadowedByDefault => self deny: self activeEntry isShadowed\n\n  testShadowedEntryIsShadowed => self assert: self shadowedEntry isShadowed\n\n  testEntryIsNotCleanByDefault => self deny: self activeEntry isClean\n\n  testCleanEntryIsClean => self assert: self cleanEntry isClean\n\n  testEntryDiffNilByDefault => self assert: self activeEntry diff isNil\n\n  testEntryDiffAccessor =>\n    self assert: self diffEntry diff equals: \"- self.v + 1\\n+ self.v + 2\\n\"\n\n  testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan\n\n  testOrphanEntryIsPriorEpoch => self assert: self orphanEntry isPriorEpoch\n\n  testOrphanEntryIsNotActive => self deny: self orphanEntry isActive\n\n  testNewClassEntryIsNewClass => self assert: self newClassEntry isNewClass\n\n  testNewClassEntrySelectorIsNil =>\n    self assert: self newClassEntry selector isNil\n\n  testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass\n\n  // --- ADR 0114 (BT-3269/BT-3277): rename-class / rename-method kind ---\n  testRenameClassEntryIsRenameClass =>\n    self assert: self renameClassEntry isRenameClass\n\n  testRenameClassEntrySelectorIsNil =>\n    self assert: self renameClassEntry selector isNil\n\n  testMethodEntryIsNotRenameClass => self deny: self activeEntry isRenameClass\n\n  testRenameMethodEntryIsRenameMethod =>\n    self assert: self renameMethodEntry isRenameMethod\n\n  testMethodEntryIsNotRenameMethod => self deny: self activeEntry isRenameMethod\n\n  testRenameMethodEntryKind =>\n    self assert: self renameMethodEntry kind equals: #'rename-method'\n\n  // --- printString ---\n  testEntryPrintStringForMethodPatch =>\n    self assert: self activeEntry printString equals: \"Counter>>increment\"\n\n  testEntryPrintStringForNewClass =>\n    self assert: self newClassEntry printString equals: \"DoubleCounter (new-class)\"\n\n  testEntryPrintStringForRenameClass =>\n    self assert: self renameClassEntry printString equals: \"Accumulator (rename-class)\"\n\n  testEntryPrintStringForRenameMethod =>\n    self assert: self renameMethodEntry printString equals: \"Counter>>incrementBy (rename-method)\"\n\n  testEmptyLogPrintString =>\n    self assert: self emptyLog printString equals: \"ChangeLog with 0 entries\"\n\n  testMixedLogPrintStringCountsActive =>\n    self assert: self mixedLog printString equals: \"ChangeLog with 2 entries\"\n\n  // --- WorkspaceInterface facade: `changes` selector exists ---\n  testWorkspaceIncludesSelectorChanges =>\n    self assert: (WorkspaceInterface includesSelector: #changes)\n\n  // --- ADR 0082 Phase 4 (BT-2290) ChangeLog operations exist ---\n  testChangeLogIncludesSelectorRevert =>\n    self assert: (ChangeLog includesSelector: #revert:)\n\n  testChangeLogIncludesSelectorClear =>\n    self assert: (ChangeLog includesSelector: #clear)\n\n  testChangeLogIncludesSelectorFlushKinds =>\n    self assert: (ChangeLog includesSelector: #flushKinds:)\n\n  // --- ADR 0113 Phase 2 (BT-3207) destructive-tier flush facade ---\n  // Live tiering (skipped:destructive, flushIncludingDestructive applying a\n  // pending remove-class entry, remove-method flushing under ordinary\n  // flush with no gate) requires a live workspace + project tree; that is\n  // covered end-to-end in the beamtalk_workspace_flush_tests EUnit suite and\n  // tests/repl-protocol/cases/workspace_flush_destructive.btscript. BUnit\n  // only verifies the new selectors are present on the facade\n  // (WorkspaceInterface's own flushIncludingDestructive / flush:confirmDestructive:\n  // selectors are checked in workspace_interface_test.bt).\n  testChangeLogIncludesSelectorFlushKindsConfirmDestructive =>\n    self assert: (ChangeLog includesSelector: #flushKinds:confirmDestructive:)\n\n  testChangeEntryIncludesSelectorIsRemoveClass =>\n    self assert: (ChangeEntry includesSelector: #isRemoveClass)\n\n  // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---\n  testWorkspaceIncludesSelectorAutoflush =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush)\n\n  testWorkspaceIncludesSelectorAutoflushSetter =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush:)",
       "explanation": "BUnit tests for the ChangeLog / ChangeEntry collection protocol (ADR 0082 Phase 1, BT-2284).  The live `Workspace changes` path requires the workspace singleton + the changelog gen_server, which are not available in the BUnit context (workspace_mode: false). These tests therefore construct ChangeLog / ChangeEntry value objects directly (via `new:`) to cover the collection protocol and the active-vs-full (orphan / prior-epoch) filtering. The live end-to-end path (`Workspace changes` returning a populated ChangeLog) is covered by the gen_server's EUnit tests and the WorkspaceInterface facade selector checks below."
     },
     {
@@ -28623,6 +28693,85 @@
       "explanation": "Tests for Behaviour >> removeFromSystem (BT-785)  Tests the safety checks: stdlib class rejection and subclass rejection Full integration tests (actual removal and cleanup) are in the e2e suite  Fixtures:   stdlib/test/fixtures/removal_test_parent.bt  — RemovalTestParent   stdlib/test/fixtures/removal_test_child.bt   — RemovalTestChild (subclass of RemovalTestParent)"
     },
     {
+      "id": "stdlib-test-rename-selector-test",
+      "title": "RenameSelectorTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "RenameSelectorTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "object",
+        "property",
+        "rename_selector_test",
+        "set",
+        "subclassing",
+        "tearDown",
+        "testRenameRefusesAbsentSelector",
+        "testRenameRefusesCollisionWithExistingSelector",
+        "testRenameRefusesDynamicClassNoSource",
+        "testRenameSelectorIfAbsentRunsBlockWhenAbsent",
+        "unless"
+      ],
+      "source": "// Tests for Behaviour >> renameSelector:to: / renameSelector:to:ifAbsent:\n// (ADR 0114 Phase 3, BT-3279)\n//\n// The cross-hierarchy false-positive, intra-hierarchy override-shadowing,\n// and basic multi-class self/super-rewrite happy-path scenarios (ADR 0114's\n// own acceptance criteria) need a real multi-file fixture graph so\n// `beamtalk_xref:senders_of/1`/`implementors_of/1` are genuinely populated —\n// those live in\n// runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_selector_tests.erl,\n// mirroring how `rename_to_test.bt`/`beamtalk_behaviour_intrinsics_rename_to_tests.erl`\n// split the same way for `renameTo:`. This file covers what a single-class\n// ClassBuilder fixture can exercise directly: collision refusal, the\n// `ifAbsent:` escape hatch, and a real, documented limitation — a dynamic\n// (ClassBuilder) class has no tracked `.bt` source to splice a definition\n// rewrite against, so `renameSelector:to:` refuses it rather than silently\n// no-op-succeeding (mirroring `removeSelector:`'s own existing behavior for\n// a dynamic class, see `beamtalk_behaviour_intrinsics:definition_selector_sites/4`'s\n// doc for the full \"why\").\n\nTestCase subclass: RenameSelectorTest\n  field: cls = nil\n\n  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]\n\n  // A dynamic class has no backing source for the definition-site splice\n  // mechanism to rewrite — refused cleanly rather than pretending success.\n  testRenameRefusesDynamicClassNoSource =>\n    self.cls := Object classBuilder name: #Bt3279DynNoSource;\n      superclass: Object;\n      methods: #{#bump => [:_self | 1]};\n      register\n\n    self should: [\n      self.cls renameSelector: #bump to: #boost\n    ] raise: #runtime_error\n\n  // Collision refusal (ADR 0114 § Decision): `NewSelector` already locally\n  // defined raises rather than silently overwriting.\n  testRenameRefusesCollisionWithExistingSelector =>\n    self.cls := Object classBuilder name: #Bt3279Collision;\n      superclass: Object;\n      methods: #{#foo => [:_self | 1], #bar => [:_self | 2]};\n      register\n\n    self should: [\n      self.cls renameSelector: #foo to: #bar\n    ] raise: #selector_already_exists\n\n  // Bare form raises selector_not_found (ADR 0112's kind, reused) when\n  // OldSelector resolves nowhere locally.\n  testRenameRefusesAbsentSelector =>\n    self.cls := Object classBuilder name: #Bt3279Absent;\n      superclass: Object;\n      methods: #{#onlyThis => [:_self | 1]};\n      register\n\n    self should: [\n      self.cls renameSelector: #missing to: #stillMissing\n    ] raise: #selector_not_found\n\n  // renameSelector:to:ifAbsent: runs the block instead of raising when\n  // OldSelector is absent — the collision/dynamic-source refusals above are\n  // NOT substituted by this escape hatch, only \"not found\" is.\n  testRenameSelectorIfAbsentRunsBlockWhenAbsent =>\n    self.cls := Object classBuilder name: #Bt3279IfAbsent;\n      superclass: Object;\n      methods: #{#onlyThis => [:_self | 1]};\n      register\n\n    result := self.cls\n      renameSelector: #missing\n      to: #stillMissing\n      ifAbsent: [\"not found\"]\n    self assert: result equals: \"not found\"",
+      "explanation": "Tests for Behaviour >> renameSelector:to: / renameSelector:to:ifAbsent: (ADR 0114 Phase 3, BT-3279)  The cross-hierarchy false-positive, intra-hierarchy override-shadowing, and basic multi-class self/super-rewrite happy-path scenarios (ADR 0114's own acceptance criteria) need a real multi-file fixture graph so `beamtalk_xref:senders_of/1`/`implementors_of/1` are genuinely populated — those live in runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_selector_tests.erl, mirroring how `rename_to_test.bt`/`beamtalk_behaviour_intrinsics_rename_to_tests.erl` split the same way for `renameTo:`. This file covers what a single-class ClassBuilder fixture can exercise directly: collision refusal, the `ifAbsent:` escape hatch, and a real, documented limitation — a dynamic (ClassBuilder) class has no tracked `.bt` source to splice a definition rewrite against, so `renameSelector:to:` refuses it rather than silently no-op-succeeding (mirroring `removeSelector:`'s own existing behavior for a dynamic class, see `beamtalk_behaviour_intrinsics:definition_selector_sites/4`'s doc for the full \"why\")."
+    },
+    {
+      "id": "stdlib-test-rename-to-test",
+      "title": "RenameToTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "RenameToTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "object",
+        "process",
+        "property",
+        "rename_to_test",
+        "set",
+        "subclassing",
+        "tearDown",
+        "testRenameRefusesCollisionWithExistingClass",
+        "testRenameRefusesStdlibClass",
+        "testRenameRefusesStdlibClassObject",
+        "testRenameSucceedsAndReRegisters",
+        "unless"
+      ],
+      "source": "// Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)\n//\n// `beamtalk test`'s BUnit runner has no project configured\n// (`workspace_mode: false`), so an ordinary compiled `.bt` fixture class's\n// source file always classifies as a \"dependency\" (ADR 0114 § Refusal vs\n// flushability) rather than a flushable project class, and `renameTo:`\n// correctly refuses those before any mutation — a dynamic (ClassBuilder)\n// class is the one classification this sandbox can drive through the full\n// success path. The ordinary-project-class success path — a real `.bt`\n// file's own declaration-header rewrite, plus `referencesTo:`/\n// `direct_subclasses:`-discovered reference sites across a small fixture\n// graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list —\n// is exercised with `project_path` configured (so those files classify as\n// flushable) by\n// runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl,\n// mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl`\n// fixture pattern.\n//\n// Full integration coverage (disk flush, reference-site rewrite committed to\n// files) is out of scope here (BT-3271) and lives in the e2e suite.\n\nTestCase subclass: RenameToTest\n  field: renamedClass = nil\n\n  tearDown =>\n    self.renamedClass isNil ifFalse: [self.renamedClass removeFromSystem]\n\n  // Dynamic-class success path: re-registers under the new name, and the\n  // old name no longer resolves.\n  testRenameSucceedsAndReRegisters =>\n    target := Object classBuilder name: #Bt3278RenameFixtureTarget;\n      superclass: Actor;\n      register\n\n    self.renamedClass := target renameTo: #Bt3278RenameFixtureRenamed\n\n    self assert: self.renamedClass name equals: #Bt3278RenameFixtureRenamed\n    self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureRenamed) notNil\n    self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureTarget) isNil\n\n  // Collision refusal (ADR 0114 § Decision): renaming to an already-loaded\n  // class name raises rather than silently overwriting.\n  testRenameRefusesCollisionWithExistingClass =>\n    self.renamedClass := Object classBuilder name: #Bt3278RenameFixtureTarget;\n      superclass: Object;\n      register\n\n    self should: [\n      self.renamedClass renameTo: #Integer\n    ] raise: #class_already_exists\n\n  // Stdlib refusal (ADR 0114 § Refusal vs flushability): refused before any\n  // memory mutation, unlike removeSelector:'s \"flushable, not refusal\" rule.\n  testRenameRefusesStdlibClass =>\n    self should: [Integer renameTo: #Whole] raise: #runtime_error\n\n  testRenameRefusesStdlibClassObject =>\n    self should: [Object renameTo: #Thing] raise: #runtime_error",
+      "explanation": "Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)  `beamtalk test`'s BUnit runner has no project configured (`workspace_mode: false`), so an ordinary compiled `.bt` fixture class's source file always classifies as a \"dependency\" (ADR 0114 § Refusal vs flushability) rather than a flushable project class, and `renameTo:` correctly refuses those before any mutation — a dynamic (ClassBuilder) class is the one classification this sandbox can drive through the full success path. The ordinary-project-class success path — a real `.bt` file's own declaration-header rewrite, plus `referencesTo:`/ `direct_subclasses:`-discovered reference sites across a small fixture graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list — is exercised with `project_path` configured (so those files classify as flushable) by runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl, mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl` fixture pattern.  Full integration coverage (disk flush, reference-site rewrite committed to files) is out of scope here (BT-3271) and lives in the e2e suite."
+    },
+    {
       "id": "stdlib-test-result-match-actor-test",
       "title": "ResultMatchActorTest",
       "category": "stdlib-tests",
@@ -32455,6 +32604,7 @@
         "testIncludesSelectorFlushIncludingDestructive",
         "testIncludesSelectorGlobals",
         "testIncludesSelectorLoadColon",
+        "testIncludesSelectorMoveClassTo",
         "testIncludesSelectorNewClassAt",
         "testIncludesSelectorSessions",
         "testIncludesSelectorTest",
@@ -32464,7 +32614,7 @@
         "testInheritsFromObject",
         "workspace_interface_test"
       ],
-      "source": "// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, globals, load:, test, test:, actors,\n//         actorAt:, actorsOf:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceInterfaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (WorkspaceInterface includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (WorkspaceInterface includesSelector: #testClasses)\n\n  testIncludesSelectorGlobals =>\n    self assert: (WorkspaceInterface includesSelector: #globals)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (WorkspaceInterface includesSelector: #load:)\n\n  // ADR 0082 Phase 1 (BT-2285): new-class creation facade method. The live\n  // happy path + the four validation errors require a workspace + project tree\n  // and are covered in tests/repl-protocol/cases/workspace_new_class.btscript\n  // and the loader's EUnit tests; BUnit only verifies the selector exists.\n  testIncludesSelectorNewClassAt =>\n    self assert: (WorkspaceInterface includesSelector: #newClass:at:)\n\n  // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic\n  // rename + external-edit detection are covered in the\n  // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the\n  // selectors are present on the facade.\n  testIncludesSelectorFlush =>\n    self assert: (WorkspaceInterface includesSelector: #flush)\n\n  testIncludesSelectorFlushColon =>\n    self assert: (WorkspaceInterface includesSelector: #flush:)\n\n  // ADR 0113 Phase 2 (BT-3207): destructive-tier flush selectors. Live\n  // tiering behaviour is covered in beamtalk_workspace_flush_tests (EUnit)\n  // and tests/repl-protocol/cases/workspace_flush_destructive.btscript;\n  // BUnit only verifies the selectors are present on the facade.\n  testIncludesSelectorFlushIncludingDestructive =>\n    self assert: (WorkspaceInterface includesSelector: #flushIncludingDestructive)\n\n  testIncludesSelectorFlushConfirmDestructive =>\n    self assert: (WorkspaceInterface includesSelector: #flush:confirmDestructive:)\n\n  testIncludesSelectorTest =>\n    self assert: (WorkspaceInterface includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (WorkspaceInterface includesSelector: #test:)\n\n  testIncludesSelectorActors =>\n    self assert: (WorkspaceInterface includesSelector: #actors)\n\n  testIncludesSelectorActorAt =>\n    self assert: (WorkspaceInterface includesSelector: #actorAt:)\n\n  testIncludesSelectorActorsOf =>\n    self assert: (WorkspaceInterface includesSelector: #actorsOf:)\n\n  testIncludesSelectorBindAs =>\n    self assert: (WorkspaceInterface includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (WorkspaceInterface includesSelector: #unbind:)\n\n  // ADR 0081 Phases 5 & 7 (BT-2368): session navigation. BUnit only verifies\n  // the selectors exist on the facade. Live behaviour (currentSession value\n  // inside an eval vs nil outside, sessions enumeration, cross-session\n  // reads/writes) is covered by the beamtalk_session_primitives /\n  // beamtalk_workspace_interface_primitives EUnit suites and the e2e btscript.\n  testIncludesSelectorCurrentSession =>\n    self assert: (WorkspaceInterface includesSelector: #currentSession)\n\n  testIncludesSelectorSessions =>\n    self assert: (WorkspaceInterface includesSelector: #sessions)\n\n  testInheritsFromObject =>\n    self assert: (WorkspaceInterface inheritsFrom: Object)",
+      "source": "// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, globals, load:, test, test:, actors,\n//         actorAt:, actorsOf:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceInterfaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (WorkspaceInterface includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (WorkspaceInterface includesSelector: #testClasses)\n\n  testIncludesSelectorGlobals =>\n    self assert: (WorkspaceInterface includesSelector: #globals)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (WorkspaceInterface includesSelector: #load:)\n\n  // ADR 0082 Phase 1 (BT-2285): new-class creation facade method. The live\n  // happy path + the four validation errors require a workspace + project tree\n  // and are covered in tests/repl-protocol/cases/workspace_new_class.btscript\n  // and the loader's EUnit tests; BUnit only verifies the selector exists.\n  testIncludesSelectorNewClassAt =>\n    self assert: (WorkspaceInterface includesSelector: #newClass:at:)\n\n  // ADR 0114 Phase 2 (BT-3272): pure file-move facade method. Like\n  // `newClass:at:` above, the live success/refusal paths need a project\n  // tree + real class objects and are covered in\n  // beamtalk_repl_loader_move_class_tests (EUnit) — the `Workspace` singleton\n  // is not available in this BUnit context (see this file's own header\n  // comment), so BUnit only verifies the selector is present on the facade.\n  testIncludesSelectorMoveClassTo =>\n    self assert: (WorkspaceInterface includesSelector: #moveClass:to:)\n\n  // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic\n  // rename + external-edit detection are covered in the\n  // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the\n  // selectors are present on the facade.\n  testIncludesSelectorFlush =>\n    self assert: (WorkspaceInterface includesSelector: #flush)\n\n  testIncludesSelectorFlushColon =>\n    self assert: (WorkspaceInterface includesSelector: #flush:)\n\n  // ADR 0113 Phase 2 (BT-3207): destructive-tier flush selectors. Live\n  // tiering behaviour is covered in beamtalk_workspace_flush_tests (EUnit)\n  // and tests/repl-protocol/cases/workspace_flush_destructive.btscript;\n  // BUnit only verifies the selectors are present on the facade.\n  testIncludesSelectorFlushIncludingDestructive =>\n    self assert: (WorkspaceInterface includesSelector: #flushIncludingDestructive)\n\n  testIncludesSelectorFlushConfirmDestructive =>\n    self assert: (WorkspaceInterface includesSelector: #flush:confirmDestructive:)\n\n  testIncludesSelectorTest =>\n    self assert: (WorkspaceInterface includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (WorkspaceInterface includesSelector: #test:)\n\n  testIncludesSelectorActors =>\n    self assert: (WorkspaceInterface includesSelector: #actors)\n\n  testIncludesSelectorActorAt =>\n    self assert: (WorkspaceInterface includesSelector: #actorAt:)\n\n  testIncludesSelectorActorsOf =>\n    self assert: (WorkspaceInterface includesSelector: #actorsOf:)\n\n  testIncludesSelectorBindAs =>\n    self assert: (WorkspaceInterface includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (WorkspaceInterface includesSelector: #unbind:)\n\n  // ADR 0081 Phases 5 & 7 (BT-2368): session navigation. BUnit only verifies\n  // the selectors exist on the facade. Live behaviour (currentSession value\n  // inside an eval vs nil outside, sessions enumeration, cross-session\n  // reads/writes) is covered by the beamtalk_session_primitives /\n  // beamtalk_workspace_interface_primitives EUnit suites and the e2e btscript.\n  testIncludesSelectorCurrentSession =>\n    self assert: (WorkspaceInterface includesSelector: #currentSession)\n\n  testIncludesSelectorSessions =>\n    self assert: (WorkspaceInterface includesSelector: #sessions)\n\n  testInheritsFromObject =>\n    self assert: (WorkspaceInterface inheritsFrom: Object)",
       "explanation": "BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt  Covers: classes, testClasses, globals, load:, test, test:, actors,         actorAt:, actorsOf:, bind:as:, unbind:"
     },
     {

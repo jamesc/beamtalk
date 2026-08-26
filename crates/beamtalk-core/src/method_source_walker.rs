@@ -35,7 +35,7 @@ use crate::ast::{
     CascadeMessage, Expression, MessageSelector, MethodDefinition, Pattern, StringSegment,
     TypeAnnotation,
 };
-use crate::source_analysis::{Span, lex_with_eof, parse};
+use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, parse};
 
 // ---------------------------------------------------------------------------
 // selector_span helper (previously in `queries/mod.rs`)
@@ -400,6 +400,442 @@ fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u3
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)
+}
+
+// ---------------------------------------------------------------------------
+// Selector-send span extraction (ADR 0114, BT-3279)
+// ---------------------------------------------------------------------------
+
+/// One rewrite target within a single matched self/super send of the target
+/// selector: for a keyword selector, one entry per keyword part (each
+/// keyword token can be renamed independently — the multi-site rewrite
+/// mechanism in `beamtalk_repl_loader:rewrite_sites/2` already handles
+/// multiple spans per file); for unary/binary, one entry covering the bare
+/// selector token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectorSendSpan {
+    /// The exact byte span to splice, in the caller's own coordinate space
+    /// (the *unwrapped* `method_source`/definition `source` the caller
+    /// passed in — synthetic-prefix/wrapper offsets are already corrected
+    /// out before this is returned).
+    pub span: Span,
+    /// The exact replacement text for this span (a keyword token like
+    /// `"at:"`, or the whole unary/binary selector).
+    pub new_text: String,
+}
+
+/// Splits a plain selector string into its keyword parts, re-appending the
+/// trailing colon to each (the inverse of [`MessageSelector::name`]'s
+/// concatenation for the `Keyword` case). `"at:put:"` -> `["at:", "put:"]`;
+/// a unary/binary selector (no `:`) yields a single-element vec containing
+/// the selector unchanged — callers needing the *keyword* shape check
+/// `parts.len()` against the matched selector's own `KeywordPart` count and
+/// treat a mismatch as "not this shape" per both resolvers' documented
+/// skip-don't-panic contract.
+fn split_keyword_parts(selector: &str) -> Vec<String> {
+    selector
+        .split(':')
+        .filter(|part| !part.is_empty())
+        .map(|part| format!("{part}:"))
+        .collect()
+}
+
+/// The span of the first real (non-trivia) token starting at or after
+/// `pos`, translated back into `source`'s own absolute coordinates.
+///
+/// Re-lexes `source[pos..]` rather than scanning bytes for whitespace: a
+/// `BeamTalk` `//`/`/* */` comment is lexer TRIVIA attached to the token that
+/// follows it, not a token of its own (`Token::span()` excludes trivia by
+/// construction — see `token.rs`), so this is exact regardless of how much
+/// whitespace *or* how many comments sit between `pos` and the real next
+/// token. Mirrors `find_definition_selector_spans`'s own modifier-skipping
+/// re-lex, generalized to "take the first token" (index 0) instead of
+/// "skip N known modifier tokens".
+///
+/// Returns `None` only if `source[pos..]` has no token at all (e.g. `pos`
+/// is at/past EOF) — not expected for a well-formed send (there is always
+/// at least the selector token following the receiver), but never panics.
+fn first_token_span_after(source: &str, pos: u32) -> Option<Span> {
+    let tail = source.get(pos as usize..)?;
+    let tail_tokens = lex_with_eof(tail);
+    let tok_span = tail_tokens.first()?.span();
+    Some(Span::new(pos + tok_span.start(), pos + tok_span.end()))
+}
+
+/// Find every self/super-directed send of `old_selector` within
+/// `method_source`, returning the splice spans needed to rewrite each
+/// occurrence to `new_selector` (ADR 0114 § "`renameSelector:to:` auto-
+/// rewrites only `self`/`super` sends", BT-3279).
+///
+/// `senders_of/1` (`beamtalk_xref.erl`) only carries a *line* number per
+/// sending method, not a byte span — and a whole-method span
+/// (`resolve_method_span`) is too coarse to splice a single send's selector
+/// token(s) without corrupting the rest of the method body. This resolver
+/// closes that gap with a small, precisely-scoped AST walk: it is NOT a
+/// regex/text search, because a multi-keyword selector like `at:put:` can
+/// have arbitrary nested expressions (including sends that coincidentally
+/// reuse the same keyword text) between its keyword parts — only the AST
+/// tells us where the token boundaries actually are.
+///
+/// Reuses `find_all_sends_in_source`'s wrap-in-synthetic-class / lex / parse
+/// / `ast_walker::for_each_expr_seq` pattern so the same parser entry point
+/// backs both resolvers. Unlike that function, no line-number correction is
+/// needed (this returns byte spans, not lines) — but the synthetic prefix's
+/// byte length must still be subtracted from every returned span so callers
+/// see offsets in their own `method_source`'s coordinate space.
+///
+/// Both selectors MUST be the same [`MessageSelector`] shape (unary/binary/
+/// keyword) and the same arity — callers are responsible for that invariant
+/// (the Erlang caller only reaches this after confirming the rename target
+/// selector already resolves against the class, so a shape/arity mismatch
+/// is not expected in practice). A mismatched keyword arity for one matched
+/// send yields no spans for *that* occurrence (skipped, not panicked) —
+/// a selector rename that changes arity is out of scope for this resolver;
+/// it surfaces upstream as "no confirmed site found" rather than a special
+/// error.
+///
+/// Only a send whose receiver is written literally as `self` or `super`
+/// counts — a cascade's non-first cascaded message (`self foo: 1; bar: 2`'s
+/// `bar: 2`) is not walked as its own `Expression::MessageSend` node and is
+/// therefore NOT found by this resolver (only the cascade's first message,
+/// folded into `receiver` by the parser, is an ordinary `MessageSend` and IS
+/// found). This is a deliberate, documented scope limit — cascaded self/
+/// super sends of a renamed selector are rare — rather than a correctness
+/// bug: an unresolved occurrence is simply never added to the confirmed
+/// rewrite set, the same "accepted completeness gap" category ADR 0114
+/// already names for `renameTo:`'s live-patch/string-literal blind spots,
+/// never a corruption risk.
+///
+/// Returns an empty vector if `method_source` contains no matching sends or
+/// cannot be parsed at all (mirrors `find_all_sends_in_source`'s contract).
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the synthetic prefix is a short fixed constant, never near u32::MAX"
+)]
+pub fn find_selector_send_spans(
+    method_source: &str,
+    old_selector: &str,
+    new_selector: &str,
+) -> Vec<Vec<SelectorSendSpan>> {
+    let wrapped = format!("{SENDS_SYNTHETIC_PREFIX}{method_source}");
+    let tokens = lex_with_eof(&wrapped);
+    let (module, _diags) = parse(tokens);
+
+    let mut occurrences: Vec<Vec<SelectorSendSpan>> = Vec::new();
+
+    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+        for stmt in seq {
+            collect_selector_send_spans(
+                &stmt.expression,
+                &wrapped,
+                old_selector,
+                new_selector,
+                &mut occurrences,
+            );
+        }
+    });
+
+    let prefix_len = SENDS_SYNTHETIC_PREFIX.len() as u32;
+    occurrences
+        .into_iter()
+        .map(|spans| {
+            spans
+                .into_iter()
+                .map(|hit| SelectorSendSpan {
+                    span: Span::new(hit.span.start() - prefix_len, hit.span.end() - prefix_len),
+                    new_text: hit.new_text,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Mirrors [`collect_sends`]'s recursive shape, but only records a match
+/// (pushing one whole occurrence's worth of [`SelectorSendSpan`]s) at a
+/// direct self/super-receiver `MessageSend` of `old_selector`; every other
+/// node is walked purely for recursion, never itself pushed. Pattern-nested
+/// expressions (a `Match` arm's constructor-pattern keyword defaults, a
+/// binary-pattern segment's size expression) are not walked — self/super
+/// sends there are vanishingly rare and, per this function's own doc,
+/// missing one is a completeness gap, not a corruption risk.
+fn collect_selector_send_spans(
+    expr: &Expression,
+    source: &str,
+    old_selector: &str,
+    new_selector: &str,
+    out: &mut Vec<Vec<SelectorSendSpan>>,
+) {
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            if !receiver_rooted_in_error(receiver)
+                && self_or_super_kind(receiver).is_some()
+                && selector.name() == old_selector
+            {
+                if let Some(spans) =
+                    selector_send_spans_for_match(selector, receiver, source, new_selector)
+                {
+                    out.push(spans);
+                }
+            }
+            collect_selector_send_spans(receiver, source, old_selector, new_selector, out);
+            for arg in arguments {
+                collect_selector_send_spans(arg, source, old_selector, new_selector, out);
+            }
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            collect_selector_send_spans(receiver, source, old_selector, new_selector, out);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    collect_selector_send_spans(arg, source, old_selector, new_selector, out);
+                }
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_selector_send_spans(target, source, old_selector, new_selector, out);
+            collect_selector_send_spans(value, source, old_selector, new_selector, out);
+        }
+        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+            collect_selector_send_spans(value, source, old_selector, new_selector, out);
+        }
+        Expression::Block(block) => {
+            for stmt in &block.body {
+                collect_selector_send_spans(
+                    &stmt.expression,
+                    source,
+                    old_selector,
+                    new_selector,
+                    out,
+                );
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            collect_selector_send_spans(expression, source, old_selector, new_selector, out);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            collect_selector_send_spans(receiver, source, old_selector, new_selector, out);
+        }
+        Expression::Match { value, arms, .. } => {
+            collect_selector_send_spans(value, source, old_selector, new_selector, out);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_selector_send_spans(guard, source, old_selector, new_selector, out);
+                }
+                collect_selector_send_spans(&arm.body, source, old_selector, new_selector, out);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for segment in segments {
+                if let StringSegment::Interpolation(inner) = segment {
+                    collect_selector_send_spans(inner, source, old_selector, new_selector, out);
+                }
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for element in elements {
+                collect_selector_send_spans(element, source, old_selector, new_selector, out);
+            }
+            if let Some(tail_expr) = tail {
+                collect_selector_send_spans(tail_expr, source, old_selector, new_selector, out);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_selector_send_spans(element, source, old_selector, new_selector, out);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_selector_send_spans(&pair.key, source, old_selector, new_selector, out);
+                collect_selector_send_spans(&pair.value, source, old_selector, new_selector, out);
+            }
+        }
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. }
+        | Expression::Error { .. } => {}
+    }
+}
+
+/// Builds the per-occurrence rewrite spans for one matched self/super send
+/// (already confirmed to have `selector.name() == old_selector`), per this
+/// module's shape-specific rules — see [`find_selector_send_spans`]'s doc.
+fn selector_send_spans_for_match(
+    selector: &MessageSelector,
+    receiver: &Expression,
+    source: &str,
+    new_selector: &str,
+) -> Option<Vec<SelectorSendSpan>> {
+    match selector {
+        MessageSelector::Keyword(parts) => {
+            let new_parts = split_keyword_parts(new_selector);
+            if new_parts.len() != parts.len() {
+                // Arity mismatch: skip this occurrence, never panic (see
+                // this function's own doc and `find_selector_send_spans`'s).
+                return None;
+            }
+            Some(
+                parts
+                    .iter()
+                    .zip(new_parts)
+                    .map(|(part, new_text)| SelectorSendSpan {
+                        span: part.span,
+                        new_text,
+                    })
+                    .collect(),
+            )
+        }
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+            // Neither shape carries its own selector span from the parser
+            // (unlike `Keyword`'s per-part spans) — re-lex from just after
+            // the receiver and take the first real token. This is exact
+            // even when a `//`/`/* */` comment sits between the receiver
+            // and the selector (review finding on PR #3529: a prior
+            // whitespace-only byte scan swallowed such a comment into the
+            // splice span, silently deleting it on rewrite) — see
+            // `first_token_span_after`'s own doc for why re-lexing rather
+            // than scanning bytes is exact here regardless of trivia.
+            let span = first_token_span_after(source, receiver.span().end())?;
+            Some(vec![SelectorSendSpan {
+                span,
+                new_text: new_selector.to_string(),
+            }])
+        }
+    }
+}
+
+/// Resolve `class`'s `(old_selector, side)` method DEFINITION's own bare
+/// selector-token span(s) within `source`, paired with the replacement text
+/// for a rename to `new_selector` (ADR 0114 § `ChangeLog` schema's `sites[0]`
+/// note, BT-3279) — the narrow-rewrite counterpart to
+/// [`find_selector_send_spans`] for the definition site itself.
+///
+/// A method's own signature is not a self/super *send* — `MethodDefinition`
+/// has no receiver at all — so it needs its own resolver rather than reusing
+/// the send-walker above. The definition site MUST be a narrow
+/// selector-token splice, never the whole method body: `emit_rewrite_change_
+/// entry`/`rewrite_sites` treat a rewrite site's `new_text` as replacing
+/// exactly the bytes at `span`, so passing the method's full text here would
+/// corrupt its own parameter names/body on rewrite.
+///
+/// For a keyword selector, returns one [`SelectorSendSpan`] per
+/// `KeywordPart` — each keyword token already carries its own exact span
+/// from the parser, no text-scanning needed (mirrors
+/// [`find_selector_send_spans`]'s keyword case exactly).
+///
+/// For unary/binary, [`MessageSelector::Unary`]/[`MessageSelector::Binary`]
+/// carry only the selector's name, not a span, so this walks forward from
+/// the definition's own AST span start (`MethodDefinition::span`, which the
+/// parser sets to start at the first modifier token — `class`/`internal`/
+/// `sealed` — or the selector token itself when there are no modifiers),
+/// skipping exactly as many leading modifier identifier tokens as the
+/// resolved definition's own `is_sealed`/`is_internal`/`is_class_method`
+/// flags say are present, via a small re-lex of that prefix. This is exact
+/// and immune to a doc comment or method body coincidentally repeating the
+/// selector's own name as a substring: the doc comment lives entirely
+/// before `MethodDefinition::span` (per `resolve_method_span`'s module doc),
+/// and the body lives entirely after the selector token this walk stops at
+/// — so, unlike `renameTo:`'s `word_occurrence_spans` regex approach (safe
+/// there only because a bare class name can't appear as a modifier), no
+/// text search of ambiguous scope is needed here at all.
+///
+/// Returns `Ok(vec![])` — never a panic — when the matched definition's
+/// selector and `new_selector` have different keyword arities (mirrors
+/// [`find_selector_send_spans`]'s "skip, don't panic" contract for the same
+/// case).
+///
+/// # Errors
+///
+/// Returns the same [`SpanResolveError`] variants `resolve_method_span`
+/// does: `ClassNotFound` when `class` does not appear in `source` at all,
+/// `SelectorNotFound` when `class` exists but has no `(old_selector, side)`
+/// definition, and `Ambiguous` when more than one definition matches.
+pub fn find_definition_selector_spans(
+    source: &str,
+    class: &str,
+    old_selector: &str,
+    new_selector: &str,
+    side: MethodSide,
+) -> Result<Vec<SelectorSendSpan>, SpanResolveError> {
+    let tokens = lex_with_eof(source);
+    let (module, _diags) = parse(tokens);
+    let (class_seen, matches) = crate::source_analysis::method_span::find_matching_definitions(
+        &module,
+        class,
+        old_selector,
+        side,
+    );
+
+    let method = match matches.len() {
+        0 if !class_seen => {
+            return Err(SpanResolveError::ClassNotFound {
+                class: class.to_string(),
+            });
+        }
+        0 => {
+            return Err(SpanResolveError::SelectorNotFound {
+                class: class.to_string(),
+                selector: old_selector.to_string(),
+                side,
+            });
+        }
+        1 => matches[0].method,
+        count => {
+            return Err(SpanResolveError::Ambiguous {
+                class: class.to_string(),
+                selector: old_selector.to_string(),
+                side,
+                count,
+            });
+        }
+    };
+
+    match &method.selector {
+        MessageSelector::Keyword(parts) => {
+            let new_parts = split_keyword_parts(new_selector);
+            if new_parts.len() != parts.len() {
+                return Ok(Vec::new());
+            }
+            Ok(parts
+                .iter()
+                .zip(new_parts)
+                .map(|(part, new_text)| SelectorSendSpan {
+                    span: part.span,
+                    new_text,
+                })
+                .collect())
+        }
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+            let modifier_count = usize::from(method.is_sealed)
+                + usize::from(method.is_internal)
+                + usize::from(method.is_class_method);
+            let start = method.span.start();
+            let tail = &source[start as usize..];
+            let tail_tokens = lex_with_eof(tail);
+            match tail_tokens.get(modifier_count) {
+                Some(token) => {
+                    let tok_span = token.span();
+                    let span = Span::new(start + tok_span.start(), start + tok_span.end());
+                    Ok(vec![SelectorSendSpan {
+                        span,
+                        new_text: new_selector.to_string(),
+                    }])
+                }
+                None => Ok(Vec::new()),
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -899,5 +1335,240 @@ fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut V
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. } => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Selector-send / definition span tests (ADR 0114, BT-3279)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slice(source: &str, span: Span) -> &str {
+        &source[span.start() as usize..span.end() as usize]
+    }
+
+    // ---- find_selector_send_spans ----
+
+    #[test]
+    fn unary_self_send_is_found() {
+        let src = "increment => self bump";
+        let occurrences = find_selector_send_spans(src, "bump", "increase");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        assert_eq!(occurrences[0].len(), 1);
+        let hit = &occurrences[0][0];
+        assert_eq!(slice(src, hit.span), "bump");
+        assert_eq!(hit.new_text, "increase");
+    }
+
+    #[test]
+    fn block_comment_between_receiver_and_unary_selector_is_not_swallowed() {
+        // Review finding on PR #3529: a whitespace-only byte scan for the
+        // unary/binary selector's start treated a `/* ... */` block comment
+        // (legal BeamTalk lexer trivia between any two tokens on the same
+        // line) as part of the splice span, so a rewrite would silently
+        // delete the comment along with the old selector text.
+        // `first_token_span_after` fixes this by re-lexing rather than
+        // scanning bytes. (A `//` line comment can't occur in this position
+        // in the first place — verified independently: a bare newline
+        // between receiver and selector already splits them into two
+        // separate statements before any comment is involved, since
+        // BeamTalk newlines are significant statement terminators — so
+        // there is no reachable "line comment mid-send" case to cover.)
+        let src = "increment => self /* why */ bump";
+        let occurrences = find_selector_send_spans(src, "bump", "increase");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let hit = &occurrences[0][0];
+        assert_eq!(
+            slice(src, hit.span),
+            "bump",
+            "span should be JUST the selector token"
+        );
+    }
+
+    #[test]
+    fn comment_between_receiver_and_binary_selector_is_not_swallowed() {
+        let src = "combine: n => self /* why */ + n";
+        let occurrences = find_selector_send_spans(src, "+", "plus");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let hit = &occurrences[0][0];
+        assert_eq!(
+            slice(src, hit.span),
+            "+",
+            "span should be JUST the operator token"
+        );
+    }
+
+    #[test]
+    fn unary_super_send_is_found() {
+        let src = "increment => super bump";
+        let occurrences = find_selector_send_spans(src, "bump", "increase");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let hit = &occurrences[0][0];
+        assert_eq!(slice(src, hit.span), "bump");
+        assert_eq!(hit.new_text, "increase");
+    }
+
+    #[test]
+    fn binary_self_send_is_found() {
+        let src = "combine: n => self + n";
+        let occurrences = find_selector_send_spans(src, "+", "plus");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let hit = &occurrences[0][0];
+        assert_eq!(slice(src, hit.span), "+");
+        assert_eq!(hit.new_text, "plus");
+    }
+
+    #[test]
+    fn keyword_self_send_with_multiple_parts_is_found() {
+        let src = "store: k value: v => self at: k put: v";
+        let occurrences = find_selector_send_spans(src, "at:put:", "setAt:to:");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let spans = &occurrences[0];
+        assert_eq!(spans.len(), 2);
+        assert_eq!(slice(src, spans[0].span), "at:");
+        assert_eq!(spans[0].new_text, "setAt:");
+        assert_eq!(slice(src, spans[1].span), "put:");
+        assert_eq!(spans[1].new_text, "to:");
+    }
+
+    #[test]
+    fn other_receiver_send_is_not_matched() {
+        // `anObject increment` — same selector name, but not a self/super
+        // send, so this resolver (deliberately) never finds it; the caller's
+        // xref-driven cross-hierarchy check is what routes this to
+        // `candidate_sites` instead.
+        let src = "run: anObject => anObject increment";
+        let occurrences = find_selector_send_spans(src, "increment", "bump");
+        assert!(occurrences.is_empty(), "got {occurrences:?}");
+    }
+
+    #[test]
+    fn different_selector_on_self_is_not_matched() {
+        let src = "run => self decrement";
+        let occurrences = find_selector_send_spans(src, "increment", "bump");
+        assert!(occurrences.is_empty(), "got {occurrences:?}");
+    }
+
+    #[test]
+    fn two_occurrences_of_same_self_send_are_both_found() {
+        let src = "run => self bump. self bump";
+        let occurrences = find_selector_send_spans(src, "bump", "increase");
+        assert_eq!(occurrences.len(), 2, "got {occurrences:?}");
+        for occurrence in &occurrences {
+            assert_eq!(occurrence.len(), 1);
+            assert_eq!(slice(src, occurrence[0].span), "bump");
+            assert_eq!(occurrence[0].new_text, "increase");
+        }
+    }
+
+    #[test]
+    fn mismatched_keyword_arity_returns_no_spans_for_that_occurrence() {
+        let src = "store: k value: v => self at: k put: v";
+        // `setAt:` has one keyword part; `at:put:` has two — arity mismatch,
+        // skipped rather than panicking.
+        let occurrences = find_selector_send_spans(src, "at:put:", "setAt:");
+        assert!(occurrences.is_empty(), "got {occurrences:?}");
+    }
+
+    #[test]
+    fn unparseable_source_returns_empty() {
+        let occurrences = find_selector_send_spans(")@!", "foo", "bar");
+        assert!(occurrences.is_empty());
+    }
+
+    // ---- find_definition_selector_spans ----
+
+    #[test]
+    fn definition_unary_selector_span_is_found() {
+        let src = "Object subclass: Counter\n  increment => self.value := self.value + 1\n";
+        let spans = find_definition_selector_spans(
+            src,
+            "Counter",
+            "increment",
+            "bump",
+            MethodSide::Instance,
+        )
+        .expect("resolves");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(slice(src, spans[0].span), "increment");
+        assert_eq!(spans[0].new_text, "bump");
+    }
+
+    #[test]
+    fn definition_binary_selector_span_is_found() {
+        let src = "Object subclass: Vec\n  + other => self\n";
+        let spans = find_definition_selector_spans(src, "Vec", "+", "plus", MethodSide::Instance)
+            .expect("resolves");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(slice(src, spans[0].span), "+");
+        assert_eq!(spans[0].new_text, "plus");
+    }
+
+    #[test]
+    fn definition_keyword_selector_spans_are_found() {
+        let src = "Object subclass: D\n  at: k put: v => self\n";
+        let spans =
+            find_definition_selector_spans(src, "D", "at:put:", "setAt:to:", MethodSide::Instance)
+                .expect("resolves");
+        assert_eq!(spans.len(), 2);
+        assert_eq!(slice(src, spans[0].span), "at:");
+        assert_eq!(spans[0].new_text, "setAt:");
+        assert_eq!(slice(src, spans[1].span), "put:");
+        assert_eq!(spans[1].new_text, "to:");
+    }
+
+    #[test]
+    fn definition_keyword_selector_span_skips_class_sealed_modifiers() {
+        let src = "Object subclass: Counter\n  class sealed new: name => self\n";
+        let spans =
+            find_definition_selector_spans(src, "Counter", "new:", "make:", MethodSide::Class)
+                .expect("resolves");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(slice(src, spans[0].span), "new:");
+        assert_eq!(spans[0].new_text, "make:");
+    }
+
+    #[test]
+    fn definition_unary_selector_span_skips_class_sealed_modifiers() {
+        // Real stdlib shape (`Actor.bt`'s `class sealed spawn`): the bare
+        // selector token has no dedicated AST span, so this exercises the
+        // modifier-skipping re-lex.
+        let src = "Object subclass: Counter\n  class sealed reset => self\n";
+        let spans =
+            find_definition_selector_spans(src, "Counter", "reset", "clear", MethodSide::Class)
+                .expect("resolves");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(slice(src, spans[0].span), "reset");
+        assert_eq!(spans[0].new_text, "clear");
+    }
+
+    #[test]
+    fn definition_selector_not_found_is_structured_error() {
+        let src = "Object subclass: Counter\n  increment => self\n";
+        let err =
+            find_definition_selector_spans(src, "Counter", "missing", "x", MethodSide::Instance)
+                .expect_err("missing selector");
+        assert!(matches!(err, SpanResolveError::SelectorNotFound { .. }));
+    }
+
+    #[test]
+    fn definition_class_not_found_is_structured_error() {
+        let src = "Object subclass: Counter\n  increment => self\n";
+        let err =
+            find_definition_selector_spans(src, "NoSuch", "increment", "x", MethodSide::Instance)
+                .expect_err("missing class");
+        assert!(matches!(err, SpanResolveError::ClassNotFound { .. }));
+    }
+
+    #[test]
+    fn definition_mismatched_keyword_arity_returns_empty() {
+        let src = "Object subclass: D\n  at: k put: v => self\n";
+        let spans =
+            find_definition_selector_spans(src, "D", "at:put:", "setAt:", MethodSide::Instance)
+                .expect("resolves");
+        assert!(spans.is_empty(), "got {spans:?}");
     }
 }
