@@ -2411,8 +2411,9 @@ discover_rename_selector_sites(
                 ClassName | beamtalk_class_registry:all_subclasses(ClassName)
             ]),
             {InHierarchySelfSuper, OutOfHierarchySelfSuper} = lists:partition(
-                fun(#{owner := Owner, class_side := CS}) ->
-                    CS =:= IsClassSide andalso sets:is_element(Owner, HierarchySet)
+                fun(#{owner := Owner, class_side := CS} = Site) ->
+                    CS =:= IsClassSide andalso sets:is_element(Owner, HierarchySet) andalso
+                        not is_unreachable_super_send(Site, ClassName)
                 end,
                 SelfSuperSites
             ),
@@ -2487,6 +2488,32 @@ confirmed_owners_already_defining(
 is_self_or_super_site(#{recv_kind := RecvKind}) ->
     RecvKind =:= self_recv orelse RecvKind =:= super_recv;
 is_self_or_super_site(_) ->
+    false.
+
+%% Review finding on PR #3529 (round 3): a `super OldSelector` send sited
+%% INSIDE the class being renamed itself can never dispatch to that
+%% class's own implementation — `beamtalk_dispatch:super/5`'s own doc says
+%% it "does NOT check the CurrentClass's method table", always starting
+%% the lookup at `CurrentClass`'s superclass instead (`CurrentClass` here
+%% being the class where the SENDING method is lexically defined, i.e.
+%% this site's `owner` — a compile-time-fixed reference point, unlike
+%% `self`'s late-bound receiver class). So when `Owner =:= ClassName`, a
+%% `super OldSelector` site is necessarily calling some ANCESTOR's
+%% same-named method (the classic override-then-call-`super` idiom) — not
+%% `ClassName`'s own, just-renamed one — and rewriting it would silently
+%% target a selector the ancestor never defined. Every OTHER owner in
+%% `HierarchySet` (any subclass at any depth) is unaffected: `super`
+%% there starts its walk at that subclass's OWN immediate superclass,
+%% which the override-freedom check already guarantees resolves up to
+%% `ClassName`'s implementation with nothing intervening.
+%%
+%% Excluding this shape entirely (regardless of override-freedom) folds it
+%% into `candidate_sites` — human/agent review, never auto-rewritten —
+%% exactly like every other structurally-unprovable site this ADR reports.
+-spec is_unreachable_super_send(map(), atom()) -> boolean().
+is_unreachable_super_send(#{owner := Owner, recv_kind := super_recv}, ClassName) ->
+    Owner =:= ClassName;
+is_unreachable_super_send(_Site, _ClassName) ->
     false.
 
 %% The override-freedom check (ADR 0114 § Decision): sound iff no class in

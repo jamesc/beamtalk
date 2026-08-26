@@ -105,6 +105,80 @@ tracked_source(ClassNameBin) ->
     unicode:characters_to_binary(beamtalk_workspace_meta:get_class_source(ClassNameBin)).
 
 %%====================================================================
+%% `super` send sited INSIDE the class being renamed itself (review finding
+%% on PR #3529, round 3): `beamtalk_dispatch:super/5` always skips the
+%% sending method's own class and starts at its superclass, so this site
+%% can never dispatch to `ClassName`'s own (just-renamed) implementation —
+%% it targets an ancestor's same-named method (the classic override-then-
+%% call-`super` idiom). Must land in `candidate_sites`, never `sites`,
+%% regardless of override-freedom; only the definition itself is renamed.
+%%====================================================================
+
+super_in_self_grandbase_source() ->
+    <<
+        "Value subclass: Bt3279SuperInSelfGrandBase\n"
+        "  bump -> String => \"grand-bump\""
+    >>.
+
+super_in_self_base_source() ->
+    <<
+        "Bt3279SuperInSelfGrandBase subclass: Bt3279SuperInSelfBase\n"
+        "  bump -> String => super bump"
+    >>.
+
+rename_selector_super_in_self_test_() ->
+    {setup, fun setup_super_in_self/0, fun teardown_super_in_self/1,
+        fun rename_selector_super_in_self/1}.
+
+setup_super_in_self() ->
+    Fixture = start_fixture("bt3279-superinself", [
+        {"bt3279_superinself_grandbase.bt", super_in_self_grandbase_source()},
+        {"bt3279_superinself_base.bt", super_in_self_base_source()}
+    ]),
+    start_changelog(Fixture, "bt3279-superinself-cl").
+
+teardown_super_in_self(Fixture) ->
+    stop_changelog(Fixture),
+    stop_classes(['Bt3279SuperInSelfGrandBase', 'Bt3279SuperInSelfBase']),
+    stop_meta().
+
+rename_selector_super_in_self(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+        class_object('Bt3279SuperInSelfBase'), bump, boost
+    ),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    CandidateSourceFiles = [
+        maps:get(source_file, C)
+     || C <- beamtalk_workspace_changelog:entry_candidate_sites(Entry)
+    ],
+    [
+        %% The definition itself IS still renamed — sites[0] is always the
+        %% definition site, unconditionally.
+        ?_assertEqual(
+            <<
+                "Bt3279SuperInSelfGrandBase subclass: Bt3279SuperInSelfBase\n"
+                "  boost -> String => super bump"
+            >>,
+            tracked_source(<<"Bt3279SuperInSelfBase">>)
+        ),
+        %% ...but the `super bump` call inside it is NOT rewritten — it
+        %% cannot possibly target this class's own (just-renamed)
+        %% implementation, so rewriting it to `super boost` would target a
+        %% selector the ancestor never defined.
+        ?_assert(
+            lists:any(
+                fun(F) -> binary:match(F, <<"bt3279_superinself_base">>) =/= nomatch end,
+                CandidateSourceFiles
+            )
+        ),
+        %% The ancestor is completely untouched.
+        ?_assertEqual(
+            super_in_self_grandbase_source(),
+            tracked_source(<<"Bt3279SuperInSelfGrandBase">>)
+        )
+    ].
+
+%%====================================================================
 %% Happy path: unoverridden selector, self-sends in the defining class AND
 %% a subclass — both confirmed, rewritten, and live post-rename.
 %%====================================================================
