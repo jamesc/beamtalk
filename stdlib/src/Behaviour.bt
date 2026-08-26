@@ -526,3 +526,34 @@ abstract Object subclass: Behaviour
   /// Integer removeFromSystem   // => Error: cannot remove stdlib class
   /// ```
   sealed removeFromSystem -> Nil => @primitive "classRemoveFromSystem"
+
+  // === Class rename (ADR 0114 Phase 2) ===
+
+  /// Rename this class to `aNewName`, rewriting every in-project reference
+  /// site and re-registering it under the new name.
+  ///
+  /// Site discovery is the union of `SystemNavigation default referencesTo:
+  /// self` (body/type-annotation/extension references) and
+  /// `direct_subclasses:` (superclass-declaration references) — the one
+  /// reference kind `referencesTo:` doesn't cover — reusing already-shipped
+  /// xref infrastructure rather than a new query (ADR 0087). This primitive
+  /// is in-memory only; flushing the rename to disk (file move, on-disk
+  /// reference rewrite) is a separate operation (`Workspace
+  /// flushIncludingDestructive`).
+  ///
+  /// A collision with an existing class name is refused loudly rather than
+  /// silently overwritten, the same way `removeFromSystem` refuses a name it
+  /// can't act on. Stdlib and dependency classes are also refused — the
+  /// xref index only covers in-project source, so site discovery for either
+  /// could never be complete. A dynamic (`ClassBuilder`) class is allowed:
+  /// it has no external file-based referents beyond what's already indexed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter renameTo: #Accumulator   // => Accumulator (Counter's old name is gone)
+  /// Counter renameTo: #Existing
+  /// // => error: cannot rename Counter to Existing — Existing already exists
+  /// //    hint: remove or rename the existing class first
+  /// Integer renameTo: #Whole   // => Error: cannot rename stdlib class
+  /// ```
+  sealed renameTo: aNewName :: Symbol -> Behaviour => @primitive "classRenameTo"

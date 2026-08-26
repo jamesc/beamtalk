@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)
+//
+// `beamtalk test`'s BUnit runner has no project configured
+// (`workspace_mode: false`), so an ordinary compiled `.bt` fixture class's
+// source file always classifies as a "dependency" (ADR 0114 § Refusal vs
+// flushability) rather than a flushable project class, and `renameTo:`
+// correctly refuses those before any mutation — a dynamic (ClassBuilder)
+// class is the one classification this sandbox can drive through the full
+// success path. The ordinary-project-class success path — a real `.bt`
+// file's own declaration-header rewrite, plus `referencesTo:`/
+// `direct_subclasses:`-discovered reference sites across a small fixture
+// graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list —
+// is exercised with `project_path` configured (so those files classify as
+// flushable) by
+// runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl,
+// mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl`
+// fixture pattern.
+//
+// Full integration coverage (disk flush, reference-site rewrite committed to
+// files) is out of scope here (BT-3271) and lives in the e2e suite.
+
+TestCase subclass: RenameToTest
+  field: renamedClass = nil
+
+  tearDown =>
+    self.renamedClass isNil ifFalse: [self.renamedClass removeFromSystem]
+
+  // Dynamic-class success path: re-registers under the new name, and the
+  // old name no longer resolves.
+  testRenameSucceedsAndReRegisters =>
+    target := Object classBuilder name: #Bt3278RenameFixtureTarget;
+      superclass: Actor;
+      register
+
+    self.renamedClass := target renameTo: #Bt3278RenameFixtureRenamed
+
+    self assert: self.renamedClass name equals: #Bt3278RenameFixtureRenamed
+    self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureRenamed) notNil
+    self assert: (SystemNavigation default findClass: #Bt3278RenameFixtureTarget) isNil
+
+  // Collision refusal (ADR 0114 § Decision): renaming to an already-loaded
+  // class name raises rather than silently overwriting.
+  testRenameRefusesCollisionWithExistingClass =>
+    self.renamedClass := Object classBuilder name: #Bt3278RenameFixtureTarget;
+      superclass: Object;
+      register
+
+    self should: [
+      self.renamedClass renameTo: #Integer
+    ] raise: #class_already_exists
+
+  // Stdlib refusal (ADR 0114 § Refusal vs flushability): refused before any
+  // memory mutation, unlike removeSelector:'s "flushable, not refusal" rule.
+  testRenameRefusesStdlibClass =>
+    self should: [Integer renameTo: #Whole] raise: #runtime_error
+
+  testRenameRefusesStdlibClassObject =>
+    self should: [Object renameTo: #Thing] raise: #runtime_error

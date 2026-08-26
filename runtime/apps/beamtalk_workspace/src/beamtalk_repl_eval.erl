@@ -80,7 +80,7 @@ module loading to beamtalk_repl_loader (BT-863).
 %% intrinsics:classRenameTo/2`/`classRenameSelector/3`, BT-3271/BT-3272, will
 %% call these via erlang:apply the same way remove_selector/2 already calls
 %% remove_method/3,4).
--export([rewrite_sites/2, emit_rewrite_change_entry/2]).
+-export([rewrite_sites/2, validate_sites/2, emit_rewrite_change_entry/2]).
 
 %% BT-3206 — best-effort snapshot + ChangeLog append for a successful
 %% `removeFromSystem` (class removal). Called via erlang:apply from
@@ -1026,6 +1026,17 @@ in-memory atomicity protocol.
     {ok, beamtalk_repl_loader:rewrite_result()} | {error, term()}.
 rewrite_sites(DefinitionSite, ReferenceSites) ->
     beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites).
+
+-doc """
+Validate a `rewrite_sites/2` call without installing anything (ADR 0114,
+BT-3278 review follow-up). Thin forwarding wrapper — see
+`beamtalk_repl_loader:validate_sites/2` for the full contract.
+""".
+-spec validate_sites(
+    beamtalk_repl_loader:rewrite_site() | undefined, [beamtalk_repl_loader:rewrite_site()]
+) -> ok | {error, term()}.
+validate_sites(DefinitionSite, ReferenceSites) ->
+    beamtalk_repl_loader:validate_sites(DefinitionSite, ReferenceSites).
 
 -doc """
 Best-effort ChangeLog append for a completed `rewrite_sites/2` call (ADR

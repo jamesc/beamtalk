@@ -94,6 +94,9 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
         | "classSetDoc"
         | "classConformsTo"
         | "classRemoveSelector"
+        // ADR 0114 Phase 2 (BT-3278): renameTo: — a single Symbol argument,
+        // same shape as classRemoveSelector.
+        | "classRenameTo"
         | "metaclassIncludesSelector" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
@@ -412,6 +415,18 @@ mod tests {
                 "call 'beamtalk_behaviour_intrinsics':'classRemoveSelector'(Self, Selector)"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn test_class_rename_to() {
+        let result = doc_to_string(generate_tower_bif(
+            "classRenameTo",
+            &["NewName".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classRenameTo'(Self, NewName)".to_string())
         );
     }
 

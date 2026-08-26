@@ -5,7 +5,8 @@
 
 -moduledoc """
 Tests for the shared multi-site rewrite mechanism (ADR 0114, BT-3270):
-`beamtalk_repl_loader:rewrite_sites/2` and `emit_rewrite_change_entry/2`.
+`beamtalk_repl_loader:rewrite_sites/2`, its validate-only counterpart
+`validate_sites/2` (BT-3278 review follow-up), and `emit_rewrite_change_entry/2`.
 
 Integration tests against the real compiler port + a real
 `beamtalk_workspace_meta`, mirroring `beamtalk_repl_loader_precheck_tests.erl`'s
@@ -498,5 +499,137 @@ rewrite_sites_validation_failure(#{counter_path := CounterPath, sub_counter_path
         ?_assertMatch(
             {ok, _, _, _, _},
             beamtalk_repl_eval:do_eval("SubCounter new bump", beamtalk_repl_state:new(undefined, 0))
+        )
+    ].
+
+%%====================================================================
+%% validate_sites/2 (BT-3278 review follow-up): rewrite_sites/2's own
+%% validate-only prefix, exposed standalone. Same fixture and same forced
+%% failure as rewrite_sites_validation_failure_test_ above, but asserting
+%% NOTHING is ever installed even on success — that's the whole point of a
+%% validate-only call, not merely the validation-failure case's existing
+%% "aborted before install" guarantee.
+%%====================================================================
+
+validate_sites_success_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun validate_sites_success/1}.
+
+validate_sites_success(#{counter_path := CounterPath, sub_counter_path := SubCounterPath}) ->
+    CounterSourceBefore = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSourceBefore = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [DefSpan, RefSpan1, RefSpan2] = word_spans(CounterSourceBefore, <<"increment">>),
+    [SubRefSpan] = word_spans(SubCounterSourceBefore, <<"increment">>),
+
+    DefinitionSite = #{
+        class => <<"Counter">>,
+        source_file => list_to_binary(CounterPath),
+        span => DefSpan,
+        new_text => <<"incrementBy">>
+    },
+    ReferenceSites = [
+        #{
+            class => <<"Counter">>,
+            source_file => list_to_binary(CounterPath),
+            span => RefSpan1,
+            new_text => <<"incrementBy">>
+        },
+        #{
+            class => <<"Counter">>,
+            source_file => list_to_binary(CounterPath),
+            span => RefSpan2,
+            new_text => <<"incrementBy">>
+        },
+        #{
+            class => <<"SubCounter">>,
+            source_file => list_to_binary(SubCounterPath),
+            span => SubRefSpan,
+            new_text => <<"incrementBy">>
+        }
+    ],
+
+    Result = beamtalk_repl_loader:validate_sites(DefinitionSite, ReferenceSites),
+
+    CounterSourceAfter = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSourceAfter = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [
+        ?_assertEqual(ok, Result),
+        %% Validation says this WOULD succeed, but nothing was installed:
+        %% both classes' tracked source is byte-for-byte unchanged, and live
+        %% dispatch still answers to the OLD selector.
+        ?_assertEqual(CounterSourceBefore, CounterSourceAfter),
+        ?_assertEqual(SubCounterSourceBefore, SubCounterSourceAfter),
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Counter new increment", beamtalk_repl_state:new(undefined, 0)
+            )
+        )
+    ].
+
+validate_sites_validation_failure_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun validate_sites_validation_failure/1}.
+
+validate_sites_validation_failure(#{counter_path := CounterPath, sub_counter_path := SubCounterPath}) ->
+    CounterSourceBefore = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSourceBefore = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [DefSpan, RefSpan1, RefSpan2] = word_spans(CounterSourceBefore, <<"increment">>),
+    [SubRefSpan] = word_spans(SubCounterSourceBefore, <<"increment">>),
+
+    DefinitionSite = #{
+        class => <<"Counter">>,
+        source_file => list_to_binary(CounterPath),
+        span => DefSpan,
+        new_text => <<"incrementBy">>
+    },
+    ReferenceSites = [
+        #{
+            class => <<"Counter">>,
+            source_file => list_to_binary(CounterPath),
+            span => RefSpan1,
+            new_text => <<"incrementBy">>
+        },
+        #{
+            class => <<"Counter">>,
+            source_file => list_to_binary(CounterPath),
+            span => RefSpan2,
+            new_text => <<"incrementBy">>
+        },
+        #{
+            class => <<"SubCounter">>,
+            source_file => list_to_binary(SubCounterPath),
+            span => SubRefSpan,
+            new_text => <<"!!! not a valid selector or expression (((">>
+        }
+    ],
+
+    Result = beamtalk_repl_loader:validate_sites(DefinitionSite, ReferenceSites),
+
+    CounterSourceAfter = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSourceAfter = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [
+        ?_assertMatch({error, {validation_failed, [{<<"SubCounter">>, _}]}}, Result),
+        ?_assertEqual(CounterSourceBefore, CounterSourceAfter),
+        ?_assertEqual(SubCounterSourceBefore, SubCounterSourceAfter),
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Counter new increment", beamtalk_repl_state:new(undefined, 0)
+            )
         )
     ].
