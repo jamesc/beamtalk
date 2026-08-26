@@ -22,12 +22,13 @@ Every flushable entry classifies into one of two tiers (`entry_tier/1`):
     `'new-class'`, and `'remove-method'` (excising a recorded span leaves the
     file in place, mechanically identical to a patch). Applied by ordinary
     `flush/0` / `flush/1` / `flush_kinds/1` with no gate.
-  - **Tier 2** — destroys a file: `'remove-class'`. Only applied when the
-    caller passes `ConfirmDestructive = true` (`flush/2`, `flush_kinds/2`) or
-    calls the unscoped `flush_including_destructive/0`. Never silently
-    reached — no workspace setting or environment variable can imply it. A
-    pending Tier 2 entry left out of the applied set is reported in the
-    summary's `skipped` field with `reason => <<"destructive">>`.
+  - **Tier 2** — destroys a file: `'remove-class'`; or moves one:
+    `'rename-class'` (ADR 0114, BT-3271). Only applied when the caller passes
+    `ConfirmDestructive = true` (`flush/2`, `flush_kinds/2`) or calls the
+    unscoped `flush_including_destructive/0`. Never silently reached — no
+    workspace setting or environment variable can imply it. A pending Tier 2
+    entry left out of the applied set is reported in the summary's `skipped`
+    field with `reason => <<"destructive">>`.
 
 ## Selection
 
@@ -117,6 +118,89 @@ back to `<file>` — never the unlink, and never a stage left behind by a
 different (earlier, crashed) attempt, which stays exactly as found for a
 future flush to resume.
 
+## Atomicity (class rename — ADR 0114, BT-3271)
+
+A `'rename-class'` entry is the first Tier-2 kind that genuinely spans more
+than one file: `sites[0]` is the class's own declaration line (in the file
+being moved, `old_path` -> `new_path`); `sites[1..]` are every other
+in-project file with a rewritten reference (`entry_old_path/1`,
+`entry_new_path/1`, `entry_sites/1`, `beamtalk_workspace_changelog:site()`).
+It is only ever flushable when `entry_flushable/1` is true, which the
+schema guarantees means `old_path`/`new_path` are real paths and every site
+resolves to a flushable file (a dynamic class's rename is `flushable: false`
+and never reaches this code, via `flushable_pending/0`) — so this module
+never has to special-case a `sites[0] = null` dynamic-class shape.
+
+| Phase A (stage) | Phase B (commit) |
+|---|---|
+| Read `old_path`, splice the declaration span (and any *other* site whose own file happens to equal `old_path` — a class that references its own name inside one of its own methods, folded into the SAME write since the file is moving as a unit), write `<new_path>.tmp`; write `<file>.tmp` per *other* site file, each an ordinary splice | Rename `<new_path>.tmp` → `<new_path>`, `unlink <old_path>`, then rename each remaining site `<file>.tmp` → `<file>` |
+
+Phase A never touches `old_path` itself — only reads it — so a crash
+anywhere during Phase A leaves the on-disk tree exactly as flush found it
+(mirrors ordinary patch/new-class Phase A, not `remove-class`'s stage-rename,
+which mutates `old_path` immediately). This is deliberately simpler than
+`remove-class`'s epoch/seq-keyed staged-file disambiguation: a rename's own
+"did a prior attempt already finish this" signal is `new_path` itself, not a
+separate marker file.
+
+**Crash-recovery design decision.** Three states `old_path`/`new_path` can be
+in when Phase A runs, and what each means:
+
+  - **Both exist** (the ordinary case, including a retry after ANY earlier
+    partial attempt that got no further than writing `.tmp` files): read
+    `old_path`, resolve every site's splice against it (see the idempotent
+    check below), write `<new_path>.tmp`. Retrying this state is always safe
+    and idempotent — `old_path` is never mutated by Phase A, only read, so
+    re-deriving `<new_path>.tmp` from it and overwriting whatever is already
+    at `new_path` (correct or not) is exactly the recovery this ADR's flush
+    table describes.
+  - **`old_path` gone, `new_path` present**: since Phase A never touches
+    `old_path` and Phase B's own ordering renames `<new_path>.tmp` into place
+    *before* unlinking `old_path`, the ONLY way `old_path` can be gone is a
+    Phase B commit that already completed the move (in this attempt or an
+    earlier, crashed one whose `mark_flushed` never landed — the same
+    `flush_marker_failed` shape ordinary patches already document). Phase A
+    checks whether `new_path`'s current bytes already carry every move-group
+    site's recorded new text at its expected offset
+    (`all_units_already_applied/2`); if so, the move is treated as already
+    done (`op = move_noop`, no I/O) rather than an error — this is what lets
+    "re-issuing the same destructive flush call retries only what's left"
+    hold for the multi-file case, since the class's OTHER sites may still be
+    unwritten. If the bytes do not match, this is a genuine, unresolvable
+    conflict (`reason => <<"rename_target_mismatch">>`) — something else put
+    unrelated content at `new_path`.
+  - **Both gone**: nothing to recover from — `reason =>
+    <<"source_missing">>`, a hard conflict rather than a soft success (unlike
+    `remove-class`'s "already gone" case, a rename's desired end state is
+    "the class exists at `new_path`", which does not hold here and cannot be
+    reconstructed).
+
+**Idempotent per-site splice check.** Every site's splice (the declaration
+line and every other reference) uses a three-way check, not the ordinary
+two-way external-edit check: the recorded span either still holds the prior
+text (apply normally), already holds the new text (a previously-committed
+site from a partially-failed attempt — treated as a no-op, not a conflict),
+or neither (a genuine external edit). Without the middle case, re-flushing
+after a partial Phase B failure would see an already-correctly-rewritten
+site's `prev_source` permanently mismatch and report it as `external_edit`
+forever, defeating the "retry only what's left" guarantee.
+
+**Per-entry, not per-file, flushed marking.** A `'rename-class'` entry is
+only marked flushed once *every* file it touches (the move's own target
+plus every other rewritten site file) has committed in the SAME Phase B
+pass — `rename_class_fully_committed/3`. A Phase B failure partway through
+leaves the entry pending in its entirety (even though some of its files are
+now correctly on disk); the per-file `files`/`conflicts` summary still
+reports exactly which files committed, and the idempotent check above means
+re-flushing the same entry only re-writes the files that did not.
+
+**A `'rename-class'` entry sharing a target file with an ordinary pending
+patch (or another rename)** in the same flush batch surfaces as a
+`mixed_rename_and_ordinary_edit` conflict, aborting the whole batch — the
+same defensive posture `remove-class`'s `mixed_remove_class_and_splice`
+guard already takes for the identical reason (reordering "write" and "move
+away" within one Phase A/B pass is undesigned).
+
 ## Conflict detection
 
 External-edit conflict: the recorded `prev_source` does not byte-match the
@@ -193,7 +277,11 @@ set. A pending `'remove-class'` entry left out of the applied set because
     %% ADR 0113 Phase 2: lets a crash-recovery test construct the exact
     %% staged path a real flush attempt would have produced, without
     %% duplicating the naming format in the test module.
-    delete_staging_path/3
+    delete_staging_path/3,
+    %% ADR 0114 Phase 2 (BT-3271): rename-class multi-file staging, exported
+    %% for direct unit coverage independent of a full flush round-trip.
+    resolve_new_path/1,
+    is_rename_class_entry/1
 ]).
 
 -type filter() ::
@@ -546,15 +634,32 @@ run_flush(Pending, ConfirmDestructive) ->
             false -> {Tier1, Tier2}
         end,
     Skipped = [skipped_entry(E) || E <- SkippedTier2],
-    Groups = group_by_file(ToApply),
-    case phase_a(Groups) of
-        {ok, Prepared} ->
-            phase_b(Prepared, Shadowed, Skipped);
-        {error, _} = Err ->
-            Err;
-        {conflict, Conflicts} ->
-            {ok, conflict_summary(Conflicts, Skipped)}
+    %% ADR 0114 (BT-3271): a `'rename-class'` entry's top-level `sourceFile`
+    %% is always null (schema: ambiguous for a multi-file entry) so it can
+    %% never land in `group_by_file/1`'s grouping — pulled out up front and
+    %% staged through its own multi-file pipeline instead, then merged back
+    %% into one Phase A / Phase B pass with the ordinary entries.
+    {RenameEntries, OrdinaryEntries} = lists:partition(fun is_rename_class_entry/1, ToApply),
+    OrdinaryGroups = group_by_file(OrdinaryEntries),
+    case check_no_rename_file_collisions(RenameEntries, OrdinaryGroups) of
+        {conflict, Conflicts0} ->
+            {ok, conflict_summary(Conflicts0, Skipped)};
+        ok ->
+            Combined = combine_phase_a(phase_a(OrdinaryGroups), phase_a_renames(RenameEntries)),
+            case Combined of
+                {ok, Prepared} ->
+                    RenameExpectedFiles = rename_expected_files_map(RenameEntries),
+                    phase_b(Prepared, Shadowed, Skipped, RenameExpectedFiles);
+                {error, _} = Err ->
+                    Err;
+                {conflict, Conflicts} ->
+                    {ok, conflict_summary(Conflicts, Skipped)}
+            end
     end.
+
+-spec is_rename_class_entry(term()) -> boolean().
+is_rename_class_entry(E) ->
+    beamtalk_workspace_changelog:entry_kind(E) =:= 'rename-class'.
 
 %%% ----------------------------------------------------------------------------
 %%% Tiering (ADR 0113 Phase 2)
@@ -565,13 +670,15 @@ Classify a ChangeEntry into flush's destructive-confirmation tier.
 
 Tier 1 — edits a still-existing file (`instance`, `class`, `'new-class'`,
 `'remove-method'`) — applies under ordinary `flush/0` / `flush/1` /
-`flush_kinds/1` with no gate. Tier 2 — destroys a file (`'remove-class'`) —
-only applies when the caller passes `ConfirmDestructive = true`.
+`flush_kinds/1` with no gate. Tier 2 — destroys a file (`'remove-class'`) or
+moves one (`'rename-class'`, ADR 0114 BT-3271) — only applies when the
+caller passes `ConfirmDestructive = true`.
 """.
 -spec entry_tier(term()) -> tier1 | tier2.
 entry_tier(E) ->
     case beamtalk_workspace_changelog:entry_kind(E) of
         'remove-class' -> tier2;
+        'rename-class' -> tier2;
         _ -> tier1
     end.
 
@@ -680,25 +787,36 @@ group_by_file(Entries) ->
 %%% ----------------------------------------------------------------------------
 
 -record(prepared, {
-    %% Absolute target path on disk.
+    %% Absolute target path on disk. For `op = move`/`move_noop` (ADR 0114,
+    %% BT-3271) this is `new_path` — the file this operation ultimately
+    %% leaves on disk — not the file Phase A read from.
     file :: binary(),
-    %% The staging path Phase A produced: `<file>.tmp` for `op = write`,
-    %% `<file>.tmp-delete-<epoch>-<seq>` for `op = delete` (ADR 0113), unused
-    %% for `op = noop`.
-    tmp :: string(),
+    %% The staging path Phase A produced: `<file>.tmp` for `op = write` (and
+    %% `move`, staged at `<new_path>.tmp`), `<file>.tmp-delete-<epoch>-<seq>`
+    %% for `op = delete` (ADR 0113), unused for `op = noop`/`move_noop`.
+    tmp :: string() | undefined,
     %% The entries whose patches were merged into this file's new body (or,
-    %% for `op = delete` / `op = noop`, the single `'remove-class'` entry).
+    %% for `op = delete` / `op = noop` / `move` / `move_noop`, the owning
+    %% `'remove-class'`/`'rename-class'` entry/entries).
     entries :: [term()],
     %% Whether the target file existed prior to flush (informational for
     %% `op = write`; for `op = delete` distinguishes "this attempt performed
     %% the stage-rename" (`true`) from "a prior attempt already staged it,
     %% this run only resumed" (`false`) — see `cleanup_one/1`).
     pre_existing :: boolean(),
-    %% Phase B commit action (ADR 0113): `write` renames `tmp` into `file`
-    %% (patches, `'new-class'`, `'remove-method'`); `delete` unlinks the
-    %% staged `tmp` (class removal); `noop` performs no I/O (the target file
-    %% was already gone — external-edit soft success).
-    op = write :: write | delete | noop
+    %% Phase B commit action: `write` renames `tmp` into `file` (patches,
+    %% `'new-class'`, `'remove-method'`); `delete` unlinks the staged `tmp`
+    %% (class removal, ADR 0113); `noop` performs no I/O (the target file was
+    %% already gone — external-edit soft success); `move` renames `tmp` into
+    %% `file` (= `new_path`) THEN unlinks `old_file` (class rename, ADR 0114
+    %% BT-3271); `move_noop` performs no I/O (the move already completed in
+    %% an earlier, crashed/marker-failed attempt — see the moduledoc's
+    %% "Atomicity (class rename)" section).
+    op = write :: write | delete | noop | move | move_noop,
+    %% ADR 0114 (BT-3271): `op = move`-only — the pre-rename path Phase B
+    %% unlinks after the `tmp` -> `file` (`new_path`) rename succeeds.
+    %% `undefined` for every other op.
+    old_file :: binary() | undefined
 }).
 
 -spec phase_a([{binary(), [term()]}]) ->
@@ -933,6 +1051,593 @@ delete_staging_path(AbsPath, Epoch, Seq) ->
     AbsPath ++ ".tmp-delete-" ++ integer_to_list(Epoch) ++ "-" ++ integer_to_list(Seq).
 
 %%% ----------------------------------------------------------------------------
+%%% Class rename (Tier 2) — multi-file staged move (ADR 0114, BT-3271)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Cross-pipeline collision guard (ADR 0114): abort the whole flush, before any
+Phase A I/O runs, if a `'rename-class'` entry's target files (`old_path`,
+`new_path`, and every site's `sourceFile`) overlap any file an *ordinary*
+entry in the same batch is about to splice. Mirrors `prepare_file/2`'s
+`mixed_remove_class_and_splice` defensive guard for the identical reason —
+reordering "write a patch into this file" and "this file is moving/being
+deleted" within one Phase A/B pass is undesigned, so it is refused rather
+than silently racing.
+
+Two independent `'rename-class'` entries touching the same file (e.g. two
+unrelated renames each rewriting a reference in the same third file) are NOT
+a collision here — `group_units_by_file/1` (inside `phase_a_renames/1`)
+already merges their sites into one combined splice, the same way
+`group_by_file/1` already merges multiple ordinary entries against one file.
+""".
+-spec check_no_rename_file_collisions([term()], [{binary(), [term()]}]) ->
+    ok | {conflict, [map()]}.
+check_no_rename_file_collisions([], _OrdinaryGroups) ->
+    ok;
+check_no_rename_file_collisions(RenameEntries, OrdinaryGroups) ->
+    OrdinaryFiles = sets:from_list([F || {F, _} <- OrdinaryGroups], [{version, 2}]),
+    case
+        lists:filtermap(
+            fun(Entry) -> rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) end,
+            RenameEntries
+        )
+    of
+        [] -> ok;
+        Conflicts -> {conflict, Conflicts}
+    end.
+
+-spec rename_entry_ordinary_collision(term(), sets:set(binary()), [{binary(), [term()]}]) ->
+    {true, map()} | false.
+rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) ->
+    case [F || F <- rename_entry_all_files(Entry), sets:is_element(F, OrdinaryFiles)] of
+        [] ->
+            false;
+        [Collided | _] ->
+            {Collided, OrdEntries} = lists:keyfind(Collided, 1, OrdinaryGroups),
+            {true,
+                conflict_map(
+                    Collided,
+                    <<"mixed_rename_and_ordinary_edit">>,
+                    [Entry | OrdEntries],
+                    iolist_to_binary([
+                        <<"Cannot flush a rename-class entry (">>,
+                        beamtalk_workspace_changelog:entry_old_class(Entry),
+                        <<" -> ">>,
+                        beamtalk_workspace_changelog:entry_class(Entry),
+                        <<
+                            ") alongside a pending ordinary patch against the same file "
+                            "in the same operation; flush or discard the other pending "
+                            "entry first, then re-flush the rename"
+                        >>
+                    ])
+                )}
+    end.
+
+%% Every file `Entry`'s rename touches in any way — read (`old_path`),
+%% written (`new_path` and every other site's file). Used only for the
+%% cross-pipeline collision check above; `rename_entry_all_files_to_write/1`
+%% (excludes `old_path`) is the one that matters for "which files must
+%% commit for this entry to count as flushed" (`rename_expected_files_map/1`).
+-spec rename_entry_all_files(term()) -> [binary()].
+rename_entry_all_files(Entry) ->
+    OldPath = beamtalk_workspace_changelog:entry_old_path(Entry),
+    lists:usort([F || F <- [OldPath | rename_entry_all_files_to_write(Entry)], F =/= undefined]).
+
+-spec rename_entry_all_files_to_write(term()) -> [binary()].
+rename_entry_all_files_to_write(Entry) ->
+    NewPath = resolve_new_path(Entry),
+    SiteFiles = [maps:get(source_file, S) || S <- other_sites(Entry)],
+    lists:usort([F || F <- [NewPath | SiteFiles], F =/= undefined]).
+
+%% The `sites` entries whose own file is NOT the file being moved — an
+%% ordinary reference site in a different file. See `move_sites/1` for the
+%% complementary set (sites whose file IS `old_path`, folded into the move's
+%% own splice instead — ADR 0114 § "Atomicity (class rename)").
+-spec other_sites(term()) -> [beamtalk_workspace_changelog:site()].
+other_sites(Entry) ->
+    OldPath = beamtalk_workspace_changelog:entry_old_path(Entry),
+    [
+        S
+     || S <- beamtalk_workspace_changelog:entry_sites(Entry),
+        S =/= undefined,
+        maps:get(source_file, S) =/= OldPath
+    ].
+
+%% The `sites` entries whose own file IS `old_path` — the declaration site
+%% itself (`sites[0]`, always this) plus any OTHER reference the class makes
+%% to its own name inside its own file (a self-send/self-reference).
+%% Multiple entries here must be merged into ONE splice against `old_path`,
+%% never independent ones, or the second would silently discard the first's
+%% edit (mirrors `beamtalk_repl_loader:group_sites_by_class/1`'s identical
+%% same-class merge rule for the in-memory half of this mechanism, BT-3270).
+-spec move_sites(term()) -> [beamtalk_workspace_changelog:site()].
+move_sites(Entry) ->
+    OldPath = beamtalk_workspace_changelog:entry_old_path(Entry),
+    [
+        S
+     || S <- beamtalk_workspace_changelog:entry_sites(Entry),
+        S =/= undefined,
+        maps:get(source_file, S) =:= OldPath
+    ].
+
+-doc """
+Resolve `Entry`'s post-rename path, deriving one when the entry itself did
+not record `new_path` (ADR 0114 § ChangeLog schema documents `new_path` as
+"basename derived from new_class, same directory as old_path" as a RULE, not
+necessarily something the writer must have already computed — today's only
+producer, `classRenameTo/2`, always logs `new_path => undefined`, per its own
+`old_path => ..., new_path => undefined` ChangeLog spec). Preserves whichever
+of the project's two established file-naming conventions `old_path` itself
+used (`beamtalk_repl_loader`'s own `newClass:at:` basename check accepts
+either an exact `Counter.bt` match or a `to_snake_case/1` `greeter.bt`
+match) rather than forcing one style on the renamed file.
+""".
+-spec resolve_new_path(term()) -> binary() | undefined.
+resolve_new_path(Entry) ->
+    case beamtalk_workspace_changelog:entry_new_path(Entry) of
+        undefined ->
+            derive_new_path(
+                beamtalk_workspace_changelog:entry_old_path(Entry),
+                beamtalk_workspace_changelog:entry_old_class(Entry),
+                beamtalk_workspace_changelog:entry_class(Entry)
+            );
+        Path ->
+            Path
+    end.
+
+-spec derive_new_path(binary() | undefined, binary() | undefined, binary()) ->
+    binary() | undefined.
+derive_new_path(undefined, _OldClassBin, _NewClassBin) ->
+    undefined;
+derive_new_path(OldPath, OldClassBin, NewClassBin) ->
+    Dir = filename:dirname(binary_to_list(OldPath)),
+    OldBase = filename:basename(binary_to_list(OldPath), ".bt"),
+    NewStem =
+        case OldClassBin =/= undefined andalso list_to_binary(OldBase) =:= OldClassBin of
+            true -> binary_to_list(NewClassBin);
+            false -> beamtalk_repl_loader:to_snake_case(binary_to_list(NewClassBin))
+        end,
+    list_to_binary(filename:join(Dir, NewStem ++ ".bt")).
+
+-doc """
+Per-entry expected file set: every file that must appear in a Phase B
+commit for `Entry`'s `'rename-class'` to be considered fully flushed
+(`rename_class_fully_committed/3`). Keyed by `seq` since `#prepared{}`
+records carry the raw `entry()`, not a convenient lookup key.
+""".
+-spec rename_expected_files_map([term()]) -> #{non_neg_integer() => sets:set(binary())}.
+rename_expected_files_map(RenameEntries) ->
+    lists:foldl(
+        fun(Entry, Acc) ->
+            Seq = beamtalk_workspace_changelog:entry_seq(Entry),
+            Files = sets:from_list(rename_entry_all_files_to_write(Entry), [{version, 2}]),
+            Acc#{Seq => Files}
+        end,
+        #{},
+        RenameEntries
+    ).
+
+-doc """
+Phase A for every pending `'rename-class'` entry in this flush, combined
+across entries the same way `phase_a/1` combines ordinary file groups:
+build every entry's move task plus every OTHER-site file group (merged
+across entries, ADR 0114 § "Atomicity (class rename)"), prepare each in
+turn, and abort-with-cleanup on the first conflict or hard error exactly
+like `phase_a_loop/3` does for ordinary groups.
+""".
+-spec phase_a_renames([term()]) ->
+    {ok, [#prepared{}]} | {error, #beamtalk_error{}} | {conflict, [map()]}.
+phase_a_renames([]) ->
+    {ok, []};
+phase_a_renames(RenameEntries) ->
+    {MoveTasks, SiteGroups} = build_rename_tasks(RenameEntries),
+    Tasks = [{move, T} || T <- MoveTasks] ++ [{site_group, G} || G <- SiteGroups],
+    phase_a_renames_loop(Tasks, [], []).
+
+phase_a_renames_loop([], Prepared, []) ->
+    {ok, lists:reverse(Prepared)};
+phase_a_renames_loop([], Prepared, Conflicts) ->
+    cleanup_tmps(Prepared),
+    {conflict, lists:reverse(Conflicts)};
+phase_a_renames_loop([{move, {Entry, MoveUnits}} | Rest], Prepared, Conflicts) ->
+    case prepare_rename_move(Entry, MoveUnits) of
+        {ok, Rec} ->
+            phase_a_renames_loop(Rest, [Rec | Prepared], Conflicts);
+        {conflict, C} ->
+            phase_a_renames_loop(Rest, Prepared, [C | Conflicts]);
+        {error, _} = Err ->
+            cleanup_tmps(Prepared),
+            Err
+    end;
+phase_a_renames_loop([{site_group, {File, Units}} | Rest], Prepared, Conflicts) ->
+    case prepare_rename_site_group(File, Units) of
+        {ok, Rec} ->
+            phase_a_renames_loop(Rest, [Rec | Prepared], Conflicts);
+        {conflict, C} ->
+            phase_a_renames_loop(Rest, Prepared, [C | Conflicts]);
+        {error, _} = Err ->
+            cleanup_tmps(Prepared),
+            Err
+    end.
+
+%% Fan `RenameEntries` out into `{MoveTasks, SiteGroups}`:
+%%   - `MoveTasks`: one `{Entry, MoveUnits}` per entry (`move_sites/1` — the
+%%     declaration plus any self-reference in the same file).
+%%   - `SiteGroups`: `{File, [{Site, OwnerEntry}]}` merged ACROSS every
+%%     entry's `other_sites/1`, keyed by file, mirroring `group_by_file/1`'s
+%%     merge for ordinary entries — two different renames touching the same
+%%     referencing file compose into one splice, not two racing writes.
+-spec build_rename_tasks([term()]) ->
+    {[{term(), [beamtalk_workspace_changelog:site()]}], [
+        {binary(), [{beamtalk_workspace_changelog:site(), term()}]}
+    ]}.
+build_rename_tasks(RenameEntries) ->
+    {MoveTasksRev, OtherUnitsRev} = lists:foldl(
+        fun(Entry, {MoveAcc, OtherAcc}) ->
+            MoveUnits = move_sites(Entry),
+            OtherUnits = [{S, Entry} || S <- other_sites(Entry)],
+            {[{Entry, MoveUnits} | MoveAcc], lists:reverse(OtherUnits) ++ OtherAcc}
+        end,
+        {[], []},
+        RenameEntries
+    ),
+    {lists:reverse(MoveTasksRev), group_units_by_file(lists:reverse(OtherUnitsRev))}.
+
+-spec group_units_by_file([{beamtalk_workspace_changelog:site(), term()}]) ->
+    [{binary(), [{beamtalk_workspace_changelog:site(), term()}]}].
+group_units_by_file(Units) ->
+    lists:foldr(
+        fun({Site, _Entry} = Unit, Acc) ->
+            File = maps:get(source_file, Site),
+            case lists:keyfind(File, 1, Acc) of
+                {File, Us} -> lists:keyreplace(File, 1, Acc, {File, [Unit | Us]});
+                false -> [{File, [Unit]} | Acc]
+            end
+        end,
+        [],
+        Units
+    ).
+
+-doc """
+Stage a `'rename-class'` entry's move: splice `MoveUnits` (the declaration
+line, plus any self-reference sites in the same file) against `old_path`'s
+current content and write the result to `<new_path>.tmp`.
+
+Three outcomes, matching the moduledoc's "Atomicity (class rename)" table:
+`old_path` exists (the ordinary case — read, splice, stage); `old_path` is
+gone but `new_path` already carries every unit's expected new text (a prior
+attempt's move already completed — `op = move_noop`, no I/O); or neither
+resolves (a hard, unrecoverable conflict).
+""".
+-spec prepare_rename_move(term(), [beamtalk_workspace_changelog:site()]) ->
+    {ok, #prepared{}} | {conflict, map()} | {error, #beamtalk_error{}}.
+prepare_rename_move(Entry, MoveUnits) ->
+    OldPath = beamtalk_workspace_changelog:entry_old_path(Entry),
+    NewPath = resolve_new_path(Entry),
+    Units = [{Site, Entry} || Site <- MoveUnits],
+    case file:read_file(binary_to_list(OldPath)) of
+        {ok, OldBody} ->
+            case apply_site_units(OldBody, Units) of
+                {ok, NewFileBody} ->
+                    case write_tmp(binary_to_list(NewPath), NewFileBody) of
+                        {ok, Tmp} ->
+                            {ok, #prepared{
+                                file = NewPath,
+                                old_file = OldPath,
+                                tmp = Tmp,
+                                entries = [Entry],
+                                pre_existing = true,
+                                op = move
+                            }};
+                        {error, _} = Err ->
+                            wrap_io_error(Err, NewPath)
+                    end;
+                {conflict, _} = C ->
+                    C;
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, enoent} ->
+            resolve_missing_rename_source(Entry, OldPath, NewPath, Units);
+        {error, Reason} ->
+            wrap_io_error({error, Reason}, OldPath)
+    end.
+
+%% See moduledoc's "Atomicity (class rename)" — `old_path` gone disambiguates
+%% into "already fully moved" (op = move_noop) vs. an unresolvable conflict.
+-spec resolve_missing_rename_source(
+    term(), binary(), binary() | undefined, [{beamtalk_workspace_changelog:site(), term()}]
+) ->
+    {ok, #prepared{}} | {conflict, map()} | {error, #beamtalk_error{}}.
+resolve_missing_rename_source(Entry, OldPath, undefined, _Units) ->
+    {conflict,
+        conflict_map(
+            OldPath,
+            <<"rename_target_unresolvable">>,
+            [Entry],
+            <<
+                "Could not determine the renamed class's target path (new_path was not "
+                "recorded and could not be derived); the rename cannot be flushed"
+            >>
+        )};
+resolve_missing_rename_source(Entry, OldPath, NewPath, Units) ->
+    case file:read_file(binary_to_list(NewPath)) of
+        {ok, NewBody} ->
+            case all_units_already_applied(NewBody, Units) of
+                true ->
+                    {ok, #prepared{
+                        file = NewPath,
+                        old_file = undefined,
+                        tmp = binary_to_list(NewPath) ++ ".tmp",
+                        entries = [Entry],
+                        pre_existing = false,
+                        op = move_noop
+                    }};
+                false ->
+                    {conflict,
+                        conflict_map(
+                            OldPath,
+                            <<"rename_target_mismatch">>,
+                            [Entry],
+                            iolist_to_binary([
+                                <<"Neither ">>,
+                                OldPath,
+                                <<" (old path) exists, nor does ">>,
+                                NewPath,
+                                <<
+                                    " (new path) already carry the expected renamed text; "
+                                    "the rename cannot be resumed automatically. Re-issue "
+                                    "the rename or resolve the target manually."
+                                >>
+                            ])
+                        )}
+            end;
+        {error, enoent} ->
+            {conflict,
+                conflict_map(
+                    OldPath,
+                    <<"source_missing">>,
+                    [Entry],
+                    iolist_to_binary([
+                        <<"Neither the old path (">>,
+                        OldPath,
+                        <<") nor the new path (">>,
+                        NewPath,
+                        <<
+                            ") exists; the rename cannot be completed automatically. "
+                            "Something external deleted both."
+                        >>
+                    ])
+                )};
+        {error, Reason} ->
+            wrap_io_error({error, Reason}, NewPath)
+    end.
+
+-doc """
+Stage one OTHER-site file group's splice: read `File`, resolve every unit's
+splice against it (idempotent — see `resolve_site_unit/2`), write
+`<File>.tmp`. Ordinary Tier-1-shaped splice, just sourced from `site()`
+maps carrying their own `span`/`source_ref`/`prev_source_ref` instead of an
+entry's own top-level fields.
+""".
+-spec prepare_rename_site_group(binary(), [{beamtalk_workspace_changelog:site(), term()}]) ->
+    {ok, #prepared{}} | {conflict, map()} | {error, #beamtalk_error{}}.
+prepare_rename_site_group(File, Units) ->
+    AbsPath = binary_to_list(File),
+    case file:read_file(AbsPath) of
+        {ok, Disk} ->
+            case apply_site_units(Disk, Units) of
+                {ok, NewBody} ->
+                    case write_tmp(AbsPath, NewBody) of
+                        {ok, Tmp} ->
+                            OwnerEntries = lists:usort(
+                                fun(A, B) ->
+                                    beamtalk_workspace_changelog:entry_seq(A) =<
+                                        beamtalk_workspace_changelog:entry_seq(B)
+                                end,
+                                [E || {_S, E} <- Units]
+                            ),
+                            {ok, #prepared{
+                                file = File,
+                                tmp = Tmp,
+                                entries = OwnerEntries,
+                                pre_existing = true
+                            }};
+                        {error, _} = Err ->
+                            wrap_io_error(Err, File)
+                    end;
+                {conflict, _} = C ->
+                    C;
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, Reason} ->
+            {conflict,
+                conflict_map(
+                    File,
+                    <<"source_file_unreadable">>,
+                    [E || {_S, E} <- Units],
+                    iolist_to_binary([
+                        <<"Could not read source file: ">>, atom_to_binary(Reason, utf8)
+                    ])
+                )}
+    end.
+
+%% Apply every `{Site, OwnerEntry}` unit's splice to `Body`, rightmost-span-
+%% first (mirrors `apply_splices/2`/`beamtalk_repl_loader:apply_site_splices/2`'s
+%% identical tie-break: a later, higher-offset splice must land before an
+%% earlier one so a length-changing replacement never invalidates a
+%% not-yet-applied earlier span's recorded byte offsets).
+-spec apply_site_units(binary(), [{beamtalk_workspace_changelog:site(), term()}]) ->
+    {ok, binary()} | {conflict, map()} | {error, #beamtalk_error{}}.
+apply_site_units(Body, Units) ->
+    Sorted = lists:sort(
+        fun(
+            {#{span := #{start := A, 'end' := AEnd}}, _},
+            {#{span := #{start := B, 'end' := BEnd}}, _}
+        ) ->
+            {A, AEnd} >= {B, BEnd}
+        end,
+        Units
+    ),
+    apply_site_units_loop(Body, Sorted).
+
+apply_site_units_loop(Body, []) ->
+    {ok, Body};
+apply_site_units_loop(Body, [Unit | Rest]) ->
+    case resolve_site_unit(Body, Unit) of
+        {ok, NewBody} -> apply_site_units_loop(NewBody, Rest);
+        Other -> Other
+    end.
+
+-doc """
+Idempotent three-way splice check for one rewrite site (ADR 0114 §
+"Atomicity (class rename)"): the recorded span either still holds the prior
+text (splice normally), already holds the new text (a previously-committed
+site from a partially-failed flush attempt — a no-op, not a conflict), or
+neither (a genuine external edit or invalid span). The middle case is what
+lets a re-issued destructive flush retry only the sites that never
+committed instead of permanently misreporting an already-correct site as an
+external edit.
+""".
+-spec resolve_site_unit(binary(), {beamtalk_workspace_changelog:site(), term()}) ->
+    {ok, binary()} | {conflict, map()} | {error, #beamtalk_error{}}.
+resolve_site_unit(Body, {Site, OwnerEntry}) ->
+    #{source_file := File, span := #{start := Start, 'end' := End}} = Site,
+    NewRef = maps:get(source_ref, Site, undefined),
+    PrevRef = maps:get(prev_source_ref, Site, undefined),
+    case beamtalk_workspace_changelog:read_site_body(NewRef) of
+        {ok, NewText} ->
+            case beamtalk_workspace_changelog:read_site_body(PrevRef) of
+                {ok, PrevText} ->
+                    resolve_site_unit_2(Body, File, Start, End, PrevText, NewText, OwnerEntry);
+                {error, Reason} ->
+                    {error, prev_source_error(File, Reason)}
+            end;
+        {error, Reason} ->
+            {error, source_body_error(File, Reason)}
+    end.
+
+resolve_site_unit_2(Body, File, Start, End, PrevText, NewText, OwnerEntry) ->
+    case in_range(Body, Start, End) of
+        false ->
+            {conflict,
+                conflict_map(
+                    File,
+                    <<"span_out_of_range">>,
+                    [OwnerEntry],
+                    iolist_to_binary([
+                        <<"Recorded byte span ">>,
+                        (integer_to_binary(Start)),
+                        <<"..">>,
+                        (integer_to_binary(End)),
+                        <<" is outside the current ">>,
+                        (integer_to_binary(byte_size(Body))),
+                        <<"-byte file; the file changed externally">>
+                    ])
+                )};
+        true ->
+            Actual = binary:part(Body, Start, End - Start),
+            case Actual =:= PrevText of
+                true ->
+                    {ok, splice(Body, {Start, End}, NewText)};
+                false ->
+                    case already_applied_at(Body, Start, NewText) of
+                        true ->
+                            {ok, Body};
+                        false ->
+                            {conflict,
+                                conflict_map(
+                                    File,
+                                    <<"external_edit">>,
+                                    [OwnerEntry],
+                                    <<
+                                        "External edit detected: the bytes at the recorded "
+                                        "span no longer match the rewrite's recorded "
+                                        "prev_source, and do not already carry the rewritten "
+                                        "text either. Re-flush after reconciling, or use "
+                                        "`Workspace changes clear` to discard the pending "
+                                        "entries"
+                                    >>
+                                )}
+                    end
+            end
+    end.
+
+-spec already_applied_at(binary(), non_neg_integer(), binary()) -> boolean().
+already_applied_at(Body, Start, NewText) ->
+    NewLen = byte_size(NewText),
+    Start + NewLen =< byte_size(Body) andalso
+        binary:part(Body, Start, NewLen) =:= NewText.
+
+-spec all_units_already_applied(binary(), [{beamtalk_workspace_changelog:site(), term()}]) ->
+    boolean().
+all_units_already_applied(Body, Units) ->
+    lists:all(
+        fun({Site, _Entry}) ->
+            #{span := #{start := Start}} = Site,
+            NewRef = maps:get(source_ref, Site, undefined),
+            case beamtalk_workspace_changelog:read_site_body(NewRef) of
+                {ok, NewText} -> already_applied_at(Body, Start, NewText);
+                {error, _} -> false
+            end
+        end,
+        Units
+    ).
+
+%% A rename-class entry is only considered fully flushed once EVERY file it
+%% touches (`rename_entry_all_files_to_write/1`) has committed in the SAME
+%% Phase B pass — a non-rename-class entry has no multi-file fan-out (every
+%% other kind targets exactly one file) so it trivially satisfies this the
+%% moment it appears in `Committed` at all.
+-spec rename_class_fully_committed(
+    term(), #{non_neg_integer() => sets:set(binary())}, sets:set(binary())
+) -> boolean().
+rename_class_fully_committed(Entry, RenameExpectedFiles, CommittedFilesSet) ->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'rename-class' ->
+            Seq = beamtalk_workspace_changelog:entry_seq(Entry),
+            Expected = maps:get(Seq, RenameExpectedFiles, sets:new([{version, 2}])),
+            sets:is_subset(Expected, CommittedFilesSet);
+        _ ->
+            true
+    end.
+
+%% Combine the ordinary-groups and rename-classes Phase A results into one
+%% `{ok, [#prepared{}]} | {error, _} | {conflict, [map()]}`, matching
+%% `phase_a_loop/3`'s own "any conflict/error aborts the whole batch, cleaning
+%% up every tmp already written" rule across BOTH pipelines — a Phase A
+%% conflict discovered while preparing ordinary files must clean up
+%% successfully-staged rename `.tmp`s too, and vice versa. Each side already
+%% cleans up its OWN tmps internally on an internal conflict/error
+%% (`phase_a_loop/3`, `phase_a_renames_loop/3`), so only the OTHER side's
+%% tmps need cleaning up here.
+-spec combine_phase_a(
+    {ok, [#prepared{}]} | {error, term()} | {conflict, [map()]},
+    {ok, [#prepared{}]} | {error, term()} | {conflict, [map()]}
+) -> {ok, [#prepared{}]} | {error, term()} | {conflict, [map()]}.
+combine_phase_a({ok, P1}, {ok, P2}) ->
+    {ok, P1 ++ P2};
+combine_phase_a({error, _} = Err, Other) ->
+    cleanup_other_prepared(Other),
+    Err;
+combine_phase_a(Other, {error, _} = Err) ->
+    cleanup_other_prepared(Other),
+    Err;
+combine_phase_a({conflict, C1}, {conflict, C2}) ->
+    {conflict, C1 ++ C2};
+combine_phase_a({conflict, C1}, {ok, P2}) ->
+    cleanup_tmps(P2),
+    {conflict, C1};
+combine_phase_a({ok, P1}, {conflict, C2}) ->
+    cleanup_tmps(P1),
+    {conflict, C2}.
+
+-spec cleanup_other_prepared({ok, [#prepared{}]} | term()) -> ok.
+cleanup_other_prepared({ok, P}) -> cleanup_tmps(P);
+cleanup_other_prepared(_) -> ok.
+
+%%% ----------------------------------------------------------------------------
 %%% Method splice
 %%% ----------------------------------------------------------------------------
 
@@ -1133,27 +1838,39 @@ append_method(Body, NewSrc) ->
 %% on-disk state is the new authoritative source for those files. `Skipped`
 %% (ADR 0113: pending Tier 2 entries left out of this flush) passes straight
 %% through to the summary — Phase B does nothing with it but report it.
--spec phase_b([#prepared{}], [term()], [map()]) -> {ok, map()}.
-phase_b(Prepared, Shadowed, Skipped) ->
-    phase_b_loop(Prepared, Shadowed, [], [], Skipped).
+-spec phase_b([#prepared{}], [term()], [map()], #{non_neg_integer() => sets:set(binary())}) ->
+    {ok, map()}.
+phase_b(Prepared, Shadowed, Skipped, RenameExpectedFiles) ->
+    phase_b_loop(Prepared, Shadowed, [], [], Skipped, RenameExpectedFiles).
 
-phase_b_loop([], Shadowed, Committed, Failed, Skipped) ->
+phase_b_loop([], Shadowed, Committed, Failed, Skipped, RenameExpectedFiles) ->
     Files = lists:reverse([P#prepared.file || P <- Committed]),
+    CommittedFilesSet = sets:from_list(Files, [{version, 2}]),
     CommittedEntries = lists:flatten([P#prepared.entries || P <- Committed]),
+    %% ADR 0114 (BT-3271): a `'rename-class'` entry spans multiple files (the
+    %% move target plus every other rewritten site), so appearing in
+    %% `CommittedEntries` at all (from ONE of its files) is not enough —
+    %% every file it touches must have committed in THIS pass. A non-rename
+    %% entry trivially satisfies this (every other kind targets one file).
+    FullyCommitted = [
+        E
+     || E <- CommittedEntries,
+        rename_class_fully_committed(E, RenameExpectedFiles, CommittedFilesSet)
+    ],
     %% Only mark shadowed entries whose survivor (same class+selector) was
     %% actually committed in this Phase B. When Phase B aborts mid-loop, a
     %% shadowed entry whose survivor never made it to disk must stay pending
     %% — otherwise we silently lose the change from the active view while it
     %% is not on disk. See Copilot review on PR #2325.
-    SurvivorKeys = renamed_target_keys(CommittedEntries),
+    SurvivorKeys = renamed_target_keys(FullyCommitted),
     AppliedShadowed = filter_shadowed_by_survivor(Shadowed, SurvivorKeys),
-    EntriesToMark = CommittedEntries ++ AppliedShadowed,
-    Seqs = [beamtalk_workspace_changelog:entry_seq(E) || E <- EntriesToMark],
+    EntriesToMark = FullyCommitted ++ AppliedShadowed,
+    Seqs = lists:usort([beamtalk_workspace_changelog:entry_seq(E) || E <- EntriesToMark]),
     complete_flush(Files, lists:reverse(Committed), Failed, Seqs, Skipped);
-phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped) ->
+phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped, RenameExpectedFiles) ->
     case commit(P) of
         ok ->
-            phase_b_loop(Rest, Shadowed, [P | Committed], Failed, Skipped);
+            phase_b_loop(Rest, Shadowed, [P | Committed], Failed, Skipped, RenameExpectedFiles);
         {error, Reason} ->
             ?LOG_ERROR(
                 "Workspace flush: Phase B commit failed",
@@ -1174,7 +1891,9 @@ phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped) ->
             %% Clean up any unattempted tmps so we do not leave stale files
             %% behind for the next flush to trip over.
             cleanup_tmps([P | Rest]),
-            phase_b_loop([], Shadowed, Committed, [FailedHere | Failed], Skipped)
+            phase_b_loop(
+                [], Shadowed, Committed, [FailedHere | Failed], Skipped, RenameExpectedFiles
+            )
     end.
 
 %% Phase B's commit action, dispatched by `P#prepared.op`:
@@ -1185,12 +1904,29 @@ phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped) ->
 %%     earlier one's), so this is the operation that finally makes the
 %%     removal durable.
 %%   - `noop`   — the external-edit soft success (already gone); no I/O.
+%%   - `move`   — rename `tmp` into `file` (= `new_path`) THEN unlink
+%%     `old_file` (ADR 0114, BT-3271): in THAT order, so a crash or failure
+%%     between the two never loses the file's content — `old_file` is only
+%%     ever removed once its content is durably present at the new name. If
+%%     the unlink itself fails, `old_file` simply lingers (still untouched,
+%%     still matching its recorded `prev_source`) and the next flush attempt
+%%     harmlessly re-derives and overwrites `new_path.tmp` before retrying
+%%     the unlink — see the moduledoc's "Atomicity (class rename)" section.
+%%   - `move_noop` — the move already completed in an earlier, crashed or
+%%     marker-failed attempt; no I/O.
 -spec commit(#prepared{}) -> ok | {error, term()}.
 commit(#prepared{op = write, tmp = Tmp, file = File}) ->
     file:rename(Tmp, binary_to_list(File));
 commit(#prepared{op = delete, tmp = Tmp}) ->
     file:delete(Tmp);
 commit(#prepared{op = noop}) ->
+    ok;
+commit(#prepared{op = move, tmp = Tmp, file = NewPath, old_file = OldPath}) ->
+    case file:rename(Tmp, binary_to_list(NewPath)) of
+        ok -> file:delete(binary_to_list(OldPath));
+        {error, _} = Err -> Err
+    end;
+commit(#prepared{op = move_noop}) ->
     ok.
 
 %% Build a set of {Class, Selector} target keys from the entries whose file
@@ -1249,7 +1985,7 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
         end,
     case MarkResult of
         ok ->
-            {ok, success_summary(Files, Renamed, Failed, Skipped)};
+            {ok, success_summary(Files, Renamed, Failed, Skipped, Seqs)};
         {error, Reason} ->
             ?LOG_ERROR(
                 "Workspace flush: mark_flushed failed after successful rename",
@@ -1274,7 +2010,7 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
                     io_lib:format("~p", [Reason])
                 ])
             },
-            {ok, success_summary(Files, Renamed, [MarkerFailure | Failed], Skipped)}
+            {ok, success_summary(Files, Renamed, [MarkerFailure | Failed], Skipped, Seqs)}
     end.
 
 %% Announce `FlushCompleted` on the `SystemAnnouncer` bus after a flush has
@@ -1370,6 +2106,16 @@ cleanup_one(#prepared{op = delete, pre_existing = false}) ->
     ok;
 %% `noop` (already-gone soft success): no I/O happened, nothing to undo.
 cleanup_one(#prepared{op = noop}) ->
+    ok;
+%% `move` (class rename, ADR 0114 BT-3271): delete the freshly-written
+%% `<new_path>.tmp` — Phase A never touches `old_path` for a move (only
+%% reads it), so, exactly like `write`, there is nothing else to undo.
+cleanup_one(#prepared{op = move, tmp = Tmp}) ->
+    _ = file:delete(Tmp),
+    ok;
+%% `move_noop` (the move already completed in an earlier attempt): no I/O
+%% happened this round, nothing to undo.
+cleanup_one(#prepared{op = move_noop}) ->
     ok.
 
 -spec span_start(term()) -> integer().
@@ -1391,9 +2137,31 @@ seq(E) ->
 empty_summary() ->
     base_summary(0, [], 0, 0, [], []).
 
--spec success_summary([binary()], [#prepared{}], [map()], [map()]) -> map().
-success_summary(Files, Committed, Failed, Skipped) ->
-    AllEntries = lists:flatten([P#prepared.entries || P <- Committed]),
+-doc """
+`Flushed`/`newClasses`/`removedClasses` are counted over `Seqs` — the seqs
+`complete_flush/5` actually asked `mark_flushed/1` to mark, i.e. exactly
+the entries `phase_b_loop/6` decided are fully committed — rather than
+naively flattening `Committed`'s `.entries` fields. For every existing
+single-file kind these two sets always coincide (each entry belongs to
+exactly one `#prepared{}` record) so this is a no-op change in behaviour;
+for a `'rename-class'` entry (ADR 0114, BT-3271) the SAME entry legitimately
+appears in `Committed` once per file it touches (the move plus every other
+rewritten site), and must count once, not once per file — and not at all if
+`phase_b_loop/6` excluded it for not having ALL of its files committed yet.
+""".
+-spec success_summary([binary()], [#prepared{}], [map()], [map()], [non_neg_integer()]) -> map().
+success_summary(Files, Committed, Failed, Skipped, Seqs) ->
+    SeqSet = sets:from_list(Seqs, [{version, 2}]),
+    AllEntries = lists:usort(
+        fun(A, B) ->
+            beamtalk_workspace_changelog:entry_seq(A) =< beamtalk_workspace_changelog:entry_seq(B)
+        end,
+        [
+            E
+         || E <- lists:flatten([P#prepared.entries || P <- Committed]),
+            sets:is_element(beamtalk_workspace_changelog:entry_seq(E), SeqSet)
+        ]
+    ),
     Flushed = length(AllEntries),
     NewClassCount = length([E || E <- AllEntries, is_new_class_entry(E)]),
     RemovedClassCount = length([E || E <- AllEntries, is_remove_class_entry(E)]),

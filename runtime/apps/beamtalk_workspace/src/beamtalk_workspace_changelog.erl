@@ -140,6 +140,11 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_prev_source_ref/1,
     read_source_body/1,
     read_prev_source_body/1,
+    %% ADR 0114 (BT-3271): reads a `site()`'s own ref directly, for
+    %% `beamtalk_workspace_flush`'s multi-site rename-class splice — see this
+    %% function's own doc for why it cannot reuse `read_source_body/1`/
+    %% `read_prev_source_body/1` verbatim.
+    read_site_body/1,
     %% ADR 0114 (BT-3269).
     entry_old_class/1,
     entry_old_selector/1,
@@ -1360,6 +1365,32 @@ read_source_file(Ref) ->
         undefined ->
             {error, no_workspace}
     end.
+
+-doc """
+Read one rewrite site's own recorded body (its `source_ref` or
+`prev_source_ref`) from `<workspace>/changes/sources/<ref>.bt` (ADR 0114,
+BT-3271).
+
+Generalizes `read_source_body/1`/`read_prev_source_body/1` to a `site()`'s
+own per-site ref, rather than the OWNING ENTRY's top-level `source_ref`/
+`prev_source_ref` — which are always `undefined` for a `'rename-class'`/
+`'rename-method'` entry (the per-site bodies live under `sites` instead, see
+the ChangeEntry schema doc's `source_ref`/`sites` rows). `beamtalk_workspace_
+flush`'s multi-site rename-class splice needs to read a specific site's ref
+directly, so this takes the raw `binary() | undefined` ref rather than an
+`entry()` — reuses `read_source_file/1` verbatim (CLAUDE.md's no-duplicate-
+implementations rule) rather than re-deriving the `sources/` path lookup.
+
+Returns `{error, no_source}` for `undefined` — mirroring `read_source_body/1`'s
+handling of an absent top-level `source_ref` — rather than crashing on a
+missing filename: a site legitimately has an `undefined` `source_ref` or
+`prev_source_ref` (e.g. a site discovered but never itself given a body ref).
+""".
+-spec read_site_body(binary() | undefined) -> {ok, binary()} | {error, term()}.
+read_site_body(undefined) ->
+    {error, no_source};
+read_site_body(Ref) when is_binary(Ref) ->
+    read_source_file(Ref).
 
 -doc """
 Persist one rewrite site's body to the ChangeLog's `sources/` directory and
