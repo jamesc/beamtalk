@@ -285,6 +285,85 @@ rename_to_changelog(_Fixture) ->
     ].
 
 %%====================================================================
+%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` undoes a pending
+%% `'rename-class'` entry — restores the class's original name AND every
+%% rewritten site, including the SAME-CLASS multi-site case (`bt3278_widget_
+%% user.bt`'s two same-line occurrences, both rewritten within the ONE
+%% `Bt3278WidgetUser` class-group), which is exactly the shape `beamtalk_
+%% repl_loader:current_spans_for_group/1`'s cumulative-offset math exists to
+%% get right — reverting the SECOND occurrence correctly only if it accounts
+%% for the length delta the FIRST occurrence's own reverse-splice introduced.
+%%====================================================================
+
+rename_to_revert_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1, fun rename_to_revert/1}.
+
+rename_to_revert(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3278WidgetRenamed">>, <<"new-class">>
+    ),
+    [
+        ?_assertMatch({ok, _}, RevertResult),
+        %% The old name is live again; the new name is gone.
+        ?_assertMatch(P when is_pid(P), beamtalk_class_registry:whereis_class('Bt3278Widget')),
+        ?_assertEqual(undefined, beamtalk_class_registry:whereis_class('Bt3278WidgetRenamed')),
+        %% Every site restored to its exact pre-rename text.
+        ?_assertEqual(
+            widget_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278Widget">>)
+            )
+        ),
+        ?_assertEqual(
+            widget_sub_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278WidgetSub">>)
+            )
+        ),
+        ?_assertEqual(
+            widget_user_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278WidgetUser">>)
+            )
+        ),
+        ?_assertEqual(
+            'Bt3278Widget',
+            gen_server:call(beamtalk_class_registry:whereis_class('Bt3278WidgetSub'), superclass)
+        ),
+        %% No active entry remains — revert retired the original one, mirroring
+        %% `'remove-class'` revert's own "undo emits no new entry" convention.
+        ?_assertEqual([], beamtalk_workspace_changelog:active_entries()),
+        %% Genuinely live: dispatch resolves through the reverted class again.
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Bt3278WidgetUser new makeWidget class name",
+                beamtalk_repl_state:new(undefined, 0)
+            )
+        )
+    ].
+
+%% Post-flush revert is unsupported by design (ADR 0082/0113/0114:
+%% "best-effort, pre-flush semantics only") — once `flushIncludingDestructive/0`
+%% has actually committed the rename to disk, the entry is flushed and drops
+%% out of the active view, same degrade `'remove-class'`/`'remove-method'`
+%% revert already have.
+rename_to_revert_after_flush_is_unsupported_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1,
+        fun rename_to_revert_after_flush_is_unsupported/1}.
+
+rename_to_revert_after_flush_is_unsupported(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3278WidgetRenamed">>, <<"new-class">>
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%%====================================================================
 %% Reordering fix (review rounds 3 and 4, PR #3523): for a DYNAMIC class
 %% that IS referenced by an in-project file, `classRenameTo/2` must
 %% validate the reference-site rewrite FIRST (`beamtalk_repl_eval:
@@ -441,6 +520,135 @@ bt3278_drain_call_order(Acc) ->
             bt3278_drain_call_order([rename | Acc]);
         {trace, _Pid, call, {beamtalk_repl_eval, rewrite_sites, _Args}} ->
             bt3278_drain_call_order([rewrite_sites | Acc])
+    after 200 ->
+        lists:reverse(Acc)
+    end.
+
+%%====================================================================
+%% ADR 0114 Phase 4 (BT-3274), review follow-up: `revert_rename_sites/1`
+%% has the SAME dynamic-class ordering hazard `do_rename_and_rewrite/7` was
+%% fixed for on PR #3523 (see that function's own doc, mirrored above) —
+%% except in reverse. A dynamic class's identity restore
+%% (`finish_rename_revert/1` -> `beamtalk_object_class:rename/2`) is a
+%% separate mutation from its reference-site reversal (no definition site
+%% of its own to fold into the same `rewrite_sites/2` transaction). Splicing
+%% the reference sites back FIRST and restoring identity SECOND — the order
+%% that is correct for an ordinary class — would leave those sites pointing
+%% at a name nothing answers to if the identity restore then failed, with
+%% no way to retry (the sites are already spliced, so `verify_current_
+%% spans/1`'s drift check refuses a second attempt). Fixed the same way:
+%% validate the splice first (non-mutating), restore identity second,
+%% splice last. Reuses `setup_dynamic_with_reference/0`'s exact fixture
+%% (a dynamic class referenced by an in-project file) plus a real
+%% ChangeLog, and asserts the ordering itself via call tracing — same
+%% happy-path-tracing approach as the forward-rename test above, for the
+%% same reason (forcing the identity-restore failure deterministically
+%% through the full revert call chain isn't practical here either).
+%%====================================================================
+
+setup_dynamic_with_reference_and_changelog() ->
+    Fixture = setup_dynamic_with_reference(),
+    case whereis(beamtalk_workspace_changelog) of
+        undefined -> ok;
+        LogPid -> gen_server:stop(LogPid)
+    end,
+    %% Same `os:getpid()` entropy fix `setup_with_changelog/0` documents.
+    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    WorkspaceId = list_to_binary("bt-rename-to-dyn-changelog-" ++ Unique),
+    ChangelogHome = filename:join(temp_dir(), "bt-rename-to-dyn-changelog-home-" ++ Unique),
+    ok = filelib:ensure_path(ChangelogHome),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", ChangelogHome),
+    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    Fixture#{old_home => OldHome}.
+
+teardown_dynamic_with_reference_and_changelog(#{old_home := OldHome} = Fixture) ->
+    case whereis(beamtalk_workspace_changelog) of
+        undefined -> ok;
+        LogPid -> gen_server:stop(LogPid)
+    end,
+    case OldHome of
+        false -> os:unsetenv("HOME");
+        _ -> os:putenv("HOME", OldHome)
+    end,
+    teardown_dynamic_with_reference(Fixture).
+
+dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite_test_() ->
+    {setup, fun setup_dynamic_with_reference_and_changelog/0,
+        fun teardown_dynamic_with_reference_and_changelog/1,
+        fun dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite/1}.
+
+dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite(#{class_obj := ClassObj}) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameTo(ClassObj, 'Bt3278DynRenamed'),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    'rename-class' = beamtalk_workspace_changelog:entry_kind(Entry),
+
+    Self = self(),
+    Worker = spawn(fun() ->
+        receive
+            go ->
+                Result = beamtalk_workspace_interface_primitives:revert_method(
+                    <<"Bt3278DynRenamed">>, <<"new-class">>
+                ),
+                Self ! {bt3278_revert_reorder_result, Result}
+        end
+    end),
+    1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
+    1 = erlang:trace_pattern({beamtalk_repl_loader, validate_sites, 2}, true, [local]),
+    1 = erlang:trace_pattern({beamtalk_object_class, rename, 2}, true, [global]),
+    1 = erlang:trace_pattern({beamtalk_repl_loader, rewrite_sites, 2}, true, [local]),
+    Worker ! go,
+    Result =
+        receive
+            {bt3278_revert_reorder_result, R} -> R
+        after 5000 ->
+            erlang:error(bt3278_revert_reorder_worker_timeout)
+        end,
+    _ = erlang:trace_pattern({beamtalk_repl_loader, validate_sites, 2}, false, [local]),
+    _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),
+    _ = erlang:trace_pattern({beamtalk_repl_loader, rewrite_sites, 2}, false, [local]),
+    (try
+        erlang:trace(Worker, false, [call])
+    catch
+        error:badarg -> ok
+    end),
+    CallOrder = bt3278_drain_revert_call_order(),
+    [
+        ?_assertMatch({ok, _}, Result),
+        %% The old name is live again; the new name is gone.
+        ?_assertMatch(P when is_pid(P), beamtalk_class_registry:whereis_class('Bt3278DynSource')),
+        ?_assertEqual(undefined, beamtalk_class_registry:whereis_class('Bt3278DynRenamed')),
+        %% The reference site was reverted too, and is genuinely live.
+        ?_assertEqual(
+            dyn_user_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278DynUser">>)
+            )
+        ),
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Bt3278DynUser new makeThing class name",
+                beamtalk_repl_state:new(undefined, 0)
+            )
+        ),
+        ?_assertEqual([], beamtalk_workspace_changelog:active_entries()),
+        %% Validate (non-mutating) THEN the identity move THEN the reference
+        %% splice — the reverse-of-forward ordering this fix establishes.
+        ?_assertEqual([validate_sites, rename, rewrite_sites], CallOrder)
+    ].
+
+bt3278_drain_revert_call_order() ->
+    bt3278_drain_revert_call_order([]).
+
+bt3278_drain_revert_call_order(Acc) ->
+    receive
+        {trace, _Pid, call, {beamtalk_repl_loader, validate_sites, _Args}} ->
+            bt3278_drain_revert_call_order([validate_sites | Acc]);
+        {trace, _Pid, call, {beamtalk_object_class, rename, _Args}} ->
+            bt3278_drain_revert_call_order([rename | Acc]);
+        {trace, _Pid, call, {beamtalk_repl_loader, rewrite_sites, _Args}} ->
+            bt3278_drain_revert_call_order([rewrite_sites | Acc])
     after 200 ->
         lists:reverse(Acc)
     end.

@@ -107,7 +107,17 @@ that the Behaviour/Class libraries can rely on.
     classRenameSelector/3,
     classRenameSelectorIfAbsent/4,
     %% ADR 0079 / BT-1988: exposed for cross-module hierarchy checks
-    walk_hierarchy/3
+    walk_hierarchy/3,
+    %% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:`'s
+    %% `'rename-class'` undo needs the SAME identity-move-then-retire
+    %% sequence `classRenameTo/2`'s own forward path uses (`beamtalk_
+    %% repl_loader:finish_rename_class_revert/1` calls this directly —
+    %% `beamtalk_workspace` already depends on `beamtalk_runtime` at compile
+    %% time, so no `erlang:apply/3` indirection is needed here, unlike the
+    %% reverse direction this module's other cross-app calls use) rather
+    %% than duplicating its whereis/stop/purge sequence (CLAUDE.md's
+    %% no-duplicate-implementations rule).
+    install_class_rename/3
 ]).
 
 %%% ============================================================================
@@ -1531,6 +1541,15 @@ validate_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) 
 Move the class registry identity from `OldName` to `NewName` after a
 successful `rewrite_sites/2` install, returning the pid now serving
 `NewName`.
+
+Exported (ADR 0114 Phase 4, BT-3274) beyond `classRenameTo/2`'s own forward
+path: reverting a pending `'rename-class'` ChangeEntry re-splices the
+definition site's `prev_source_ref` back in, which makes `rewrite_sites/2`'s
+own install pipeline register a fresh pid under `old_class` exactly the same
+way the forward rename's splice originally registered `NewName` — so undo
+only needs the identical retire-the-stale-registration step below, called
+with the two names swapped (`beamtalk_repl_loader:finish_rename_class_
+revert/1`), not a second copy of it.
 
 Ordinary (project) class: the definition site's recompile already installed
 a fresh class-object process under `NewName` as an ordinary side effect of

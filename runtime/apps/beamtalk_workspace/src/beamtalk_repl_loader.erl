@@ -38,6 +38,11 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% move, reusing rewrite_sites/2 + emit_rewrite_change_entry/2 above with
     %% a single byte-identical definition site. See move_class/2's own doc.
     move_class/2,
+    %% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` for a pending
+    %% `'rename-class'`/`'rename-method'` entry — rewrites every recorded
+    %% `sites` entry back to its own `prev_source_ref`, reusing rewrite_sites/2
+    %% (BT-3270) in reverse. See revert_rename_sites/1's own doc.
+    revert_rename_sites/1,
     %% BT-3206: best-effort snapshot + ChangeLog append for a successful
     %% `removeFromSystem` (class removal) — see
     %% capture_class_removal_snapshot/1's doc for why the snapshot is a
@@ -123,7 +128,11 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% ADR 0082 extension (BT-3248): class-redefinition ChangeLog entry helpers.
     snapshot_class_def_prev_sources/1,
     emit_class_def_entries/3,
-    add_class_def_flushability/2
+    add_class_def_flushability/2,
+    %% ADR 0114 Phase 4 (BT-3274): multi-site rewrite revert helpers.
+    class_names_by_source_file/0,
+    current_spans_for_group/1,
+    build_revert_sites/1
 ]).
 -endif.
 
@@ -2099,6 +2108,24 @@ build_class_group(Class, Sites) ->
             end
     end.
 
+-doc """
+The shared `{start, 'end'}` sort key for a `rewrite_span()` (ADR 0114,
+BT-3270/BT-3274) — the ONE place every function that must order same-class
+sites consistently derives its comparator from: `validate_no_overlaps/3`
+(ascending, overlap detection), `apply_site_splices/2` (descending, so it
+applies rightmost-first), and revert's own `current_spans_for_group/1`
+(ascending — the inverse of `apply_site_splices/2`'s own ordering, needed to
+replay the same cumulative-offset math left-to-right). A same-start tie (a
+zero-length insertion sharing a start with a same-position replacement) MUST
+sort identically across all three, or a mismatch can silently corrupt a
+spliced source (PR #3522's finding) or misplace a reverted one — each call
+site still picks its own ascending/descending direction (a genuine semantic
+difference), but none may re-derive the KEY itself, which is what actually
+needs to stay identical.
+""".
+-spec span_start_end(rewrite_span()) -> {non_neg_integer(), non_neg_integer()}.
+span_start_end(#{start := Start, 'end' := End}) -> {Start, End}.
+
 %% Every span for one class must be well-formed (`start =< end =< SourceSize`)
 %% and disjoint from every other span for that same class — two sites
 %% touching overlapping text is a structural bug in the caller's site list
@@ -2109,22 +2136,13 @@ build_class_group(Class, Sites) ->
 -spec validate_no_overlaps(binary(), [rewrite_site()], non_neg_integer()) ->
     ok | {error, {invalid_or_overlapping_span, binary(), rewrite_span()}}.
 validate_no_overlaps(Class, Sites, SourceSize) ->
-    %% Secondary sort key on `'end'` (not just `start`) so two sites with the
-    %% same start (e.g. a zero-length insertion alongside a same-position
-    %% replacement) sort the same way regardless of the caller's original
-    %% site-list order — per review feedback on PR #3522, a comparator keyed
-    %% on `start` alone made overlap acceptance order-dependent for that tie
-    %% case, even though `lists:sort/2` itself is stable. `apply_site_splices/2`
-    %% below MUST use the same `{start, 'end'}` key (reversed, since it applies
-    %% rightmost-first) — a same-start tie this function accepts but that
-    %% function orders differently can silently corrupt the spliced source.
-    %% See that function's own comment for the concrete corrupting scenario a
-    %% mismatch between the two produces (this was caught by review AFTER an
-    %% earlier version of this fix touched only this function).
+    %% Secondary sort key on `'end'` (not just `start`), via the shared
+    %% `span_start_end/1` key — see that function's own doc for why two sites
+    %% sharing a start (e.g. a zero-length insertion alongside a same-position
+    %% replacement) must sort the same way here as in `apply_site_splices/2`
+    %% (reversed, since it applies rightmost-first).
     Spans = lists:sort(
-        fun(#{start := A, 'end' := AEnd}, #{start := B, 'end' := BEnd}) ->
-            {A, AEnd} =< {B, BEnd}
-        end,
+        fun(A, B) -> span_start_end(A) =< span_start_end(B) end,
         [maps:get(span, S) || S <- Sites]
     ),
     validate_spans(Class, Spans, 0, SourceSize).
@@ -2159,13 +2177,14 @@ validate_spans(Class, [#{start := Start, 'end' := End} = Span | Rest], Min, Size
 %% `apply_site_splices/2`'s ties fell back to `lists:sort/2`'s stability
 %% (the caller's original list order), which could corrupt the merged source
 %% for the caller-order half of that tie that put the zero-length site first.
-%% This MUST stay `{start, 'end'}`-keyed the same way `validate_no_overlaps/3`
-%% is (mirrored, not merely similar) — see that function's own comment.
+%% This uses the SAME `span_start_end/1` key `validate_no_overlaps/3` does
+%% (only the direction differs) — see that function's own doc for why the key
+%% itself must never be re-derived independently.
 -spec apply_site_splices(binary(), [rewrite_site()]) -> binary().
 apply_site_splices(Source, Sites) ->
     RightmostFirst = lists:sort(
-        fun(#{span := #{start := A, 'end' := AEnd}}, #{span := #{start := B, 'end' := BEnd}}) ->
-            {A, AEnd} >= {B, BEnd}
+        fun(#{span := SpanA}, #{span := SpanB}) ->
+            span_start_end(SpanA) >= span_start_end(SpanB)
         end,
         Sites
     ),
@@ -2681,6 +2700,487 @@ move_class_rewrite_failed_error(ClassName, Reason) ->
             io_lib:format("Could not move class '~s': ~p", [ClassNameBin, Reason])
         )
     ).
+
+%%% ----------------------------------------------------------------------------
+%%% Multi-site rewrite revert (ADR 0114, BT-3274)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Revert a pending `'rename-class'`/`'rename-method'` ChangeEntry (ADR 0114 §
+Undo): rewrite every recorded `sites` entry back to its own `prev_source_ref`,
+against that site's own recorded location — not by re-running `renameTo:`/
+`renameSelector:to:`, which would re-execute xref discovery against
+POST-rename state and could compute a different site list than the original
+rename touched (a referencing file could have been independently edited in
+between, per the ADR's own reasoning). `candidate_sites` are never touched —
+they were never rewritten in the first place (ADR 0114: reported, never
+auto-rewritten senders).
+
+## Locating each site's CURRENT position
+
+A `site()`'s own recorded `span` is where it sat in its owning class's source
+BEFORE the original rewrite (`rewrite_sites/2`'s `installed_site/2` records
+the caller's PRE-splice span verbatim — see that function's own doc). By the
+time revert runs, that class's tracked source
+(`beamtalk_workspace_meta:get_class_source/1`) has the NEW text (`source_ref`)
+sitting there instead, at a position shifted by however much EARLIER
+(lower-offset) sites in the SAME class-group changed length. `current_spans_
+for_group/1` recomputes each site's live position by replaying that same
+per-class cumulative-offset math forward from every site's own recorded
+`span`/`source_ref` length — the same rightmost-first non-interference
+property `apply_site_splices/2` relies on for splicing, run left-to-right
+here to LOCATE positions instead.
+
+## Resolving each site's owning class
+
+A persisted `site()` carries `sourceFile`, not the class name that owns it
+(dropped when `installed_site/2`'s own `class` field is flattened into the
+ChangeLog's `site()` shape — see `site_append_input/1`) — and a file's
+basename is not a safe class-name guess (`newClass:at:` accepts a
+`to_snake_case/1` basename too, per `beamtalk_workspace_flush:derive_new_
+path/3`'s doc). `class_names_by_source_file/0` asks the registry the same way
+`class_source_file/1` resolves the FORWARD direction, for every currently
+live class, and inverts it.
+
+## Class-identity restoration (`'rename-class'` only)
+
+Reference-site reversal alone is enough for `'rename-method'` (no identity
+ever changed there). For `'rename-class'`, the definition site's own
+reverse-splice (`sites[0]`'s `prev_source_ref`) already re-declares
+`old_class` in the class's own source — `rewrite_sites/2`'s own install
+pipeline therefore registers a fresh pid under `old_class` as an ordinary
+side effect of that recompile, exactly mirroring how the FORWARD rename's own
+definition-site splice is what originally registered the NEW name
+(`beamtalk_behaviour_intrinsics:install_class_rename/3`'s doc). `finish_
+rename_class_revert/1` only needs to retire the now-stale registration under
+the CURRENT (post-rename) name — reusing `install_class_rename/3` itself,
+called with the two names swapped, rather than a second copy of its
+whereis/stop/purge sequence.
+
+A dynamic class renamed with zero reference sites (`sites = [undefined]`,
+ADR 0114's `sites[0] = null` case) has nothing to splice either way —
+`do_revert_rewrite/2` mirrors `rewrite_class_sites/4`'s own trivial-success
+shortcut for that shape, so only the identity move runs.
+
+Returns `{ok, RevertedClassNameBin}` (the class's name AFTER revert —
+`old_class` for `'rename-class'`, the entry's own stable `class` for
+`'rename-method'`) on success, or `{error, Reason}` on any resolution/read/
+rewrite failure — never a partial revert: a `rewrite_sites/2` validation
+failure (the shared mechanism's own all-or-nothing guarantee) or a single
+site whose owning class can no longer be resolved, or whose recorded body can
+no longer be read, aborts before anything is spliced. The caller (`beamtalk_
+workspace_interface_primitives:revert_rename_entry/2`) wraps any `{error, _}`
+into a structured `#beamtalk_error{}` and retires the original entry
+(`mark_flushed/1`, mirroring `'remove-class'` revert's own "undo emits no
+fresh entry" convention) on success.
+
+Before splicing, every touched class's CURRENT tracked source is verified to
+still hold exactly the bytes the original rewrite left there
+(`current_spans_for_group/1` → `verify_current_spans/1` — see that function's
+own doc): an intervening, UNRELATED edit to one of those same classes between
+the rename and this revert is refused loudly here rather than spliced over.
+This is revert's own analogue of `'remove-class'` revert's explicit drift
+check (`check_no_external_drift/3`, BT-3213), applied to a tracked-source
+SPAN rather than a whole disk file, since a rename revert can touch several
+classes' sources rather than one file. Ordinary method-patch revert
+(`install_revert_patch/4`) still has no equivalent check and re-installs
+`PrevBody` unconditionally — this function does not mirror that.
+""".
+-spec revert_rename_sites(beamtalk_workspace_changelog:entry()) ->
+    {ok, binary()} | {error, term()}.
+revert_rename_sites(Entry) ->
+    case build_revert_sites(Entry) of
+        {ok, {DefinitionSite, ReferenceSites}} ->
+            revert_rename_sites(Entry, DefinitionSite, ReferenceSites);
+        {error, _} = Err ->
+            Err
+    end.
+
+%% `DefinitionSite =:= undefined` with a NON-empty `ReferenceSites` is the
+%% dynamic-class `'rename-class'` signature (ADR 0114's `sites[0] = null`
+%% shape, filtered out by `resolve_revert_sites/2` before this point — see
+%% this section's own doc). That is the one shape where identity restore
+%% (`finish_rename_revert/1`) and the reference-site splice are separate
+%% mutations with no shared rollback, mirroring the forward path's identical
+%% split (`beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s
+%% dynamic-class clause). Splicing first and moving identity second — safe
+%% for an ordinary class, whose definition-site splice performs the identity
+%% move as a side effect of the SAME `rewrite_sites/2` transaction — would
+%% leave reference sites pointing at a name nothing answers to if the
+%% identity move then failed, with no way to retry (the sites are already
+%% spliced, so `verify_current_spans/1`'s drift check refuses a second
+%% attempt on the next call). Fixed the same way `do_rename_and_rewrite/7`
+%% was: validate the splice FIRST (non-mutating), move identity second,
+%% splice the reference sites (now expected to succeed) last. Every other
+%% shape — an ordinary-class `'rename-class'` (`DefinitionSite` defined) or
+%% any `'rename-method'` (identity never changes) — keeps the original
+%% splice-then-finish order.
+-spec revert_rename_sites(
+    beamtalk_workspace_changelog:entry(), rewrite_site() | undefined, [rewrite_site()]
+) -> {ok, binary()} | {error, term()}.
+revert_rename_sites(Entry, undefined, [_ | _] = ReferenceSites) ->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'rename-class' -> revert_dynamic_class_rename_sites(Entry, ReferenceSites);
+        'rename-method' -> revert_rename_sites_splice_first(Entry, undefined, ReferenceSites)
+    end;
+revert_rename_sites(Entry, DefinitionSite, ReferenceSites) ->
+    revert_rename_sites_splice_first(Entry, DefinitionSite, ReferenceSites).
+
+-spec revert_dynamic_class_rename_sites(beamtalk_workspace_changelog:entry(), [rewrite_site()]) ->
+    {ok, binary()} | {error, term()}.
+revert_dynamic_class_rename_sites(Entry, ReferenceSites) ->
+    case validate_sites(undefined, ReferenceSites) of
+        ok ->
+            case finish_rename_revert(Entry) of
+                {ok, _RevertedClassNameBin} = Ok ->
+                    case do_revert_rewrite(undefined, ReferenceSites) of
+                        {ok, _RewriteResult} -> Ok;
+                        {error, _} = Err -> Err
+                    end;
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec revert_rename_sites_splice_first(
+    beamtalk_workspace_changelog:entry(), rewrite_site() | undefined, [rewrite_site()]
+) -> {ok, binary()} | {error, term()}.
+revert_rename_sites_splice_first(Entry, DefinitionSite, ReferenceSites) ->
+    case do_revert_rewrite(DefinitionSite, ReferenceSites) of
+        {ok, _RewriteResult} -> finish_rename_revert(Entry);
+        {error, _} = Err -> Err
+    end.
+
+%% Trivial-success shortcut mirroring `rewrite_class_sites/4`'s own
+%% dynamic-class-with-nothing-to-rewrite case (see this section's own doc).
+-spec do_revert_rewrite(rewrite_site() | undefined, [rewrite_site()]) ->
+    {ok, rewrite_result()} | {error, term()}.
+do_revert_rewrite(undefined, []) ->
+    {ok, #{definition => undefined, sites => []}};
+do_revert_rewrite(DefinitionSite, ReferenceSites) ->
+    rewrite_sites(DefinitionSite, ReferenceSites).
+
+-spec finish_rename_revert(beamtalk_workspace_changelog:entry()) ->
+    {ok, binary()} | {error, term()}.
+finish_rename_revert(Entry) ->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'rename-class' -> finish_rename_class_revert(Entry);
+        'rename-method' -> {ok, beamtalk_workspace_changelog:entry_class(Entry)}
+    end.
+
+%% Retire the stale post-rename registration and confirm `old_class` is now
+%% live, reusing `install_class_rename/3` with the two names swapped (see
+%% this section's own doc for why that is sound, not a coincidental fit).
+-spec finish_rename_class_revert(beamtalk_workspace_changelog:entry()) ->
+    {ok, binary()} | {error, term()}.
+finish_rename_class_revert(Entry) ->
+    CurrentNameBin = beamtalk_workspace_changelog:entry_class(Entry),
+    OldNameBin = beamtalk_workspace_changelog:entry_old_class(Entry),
+    case
+        {
+            beamtalk_repl_server:safe_to_existing_atom(CurrentNameBin),
+            beamtalk_repl_server:safe_to_existing_atom(OldNameBin)
+        }
+    of
+        {{ok, CurrentName}, {ok, OldName}} ->
+            Classification = capture_class_removal_snapshot(CurrentNameBin),
+            try
+                _ = beamtalk_behaviour_intrinsics:install_class_rename(
+                    CurrentName, OldName, Classification
+                ),
+                {ok, OldNameBin}
+            catch
+                error:#{error := #beamtalk_error{} = Err} -> {error, Err};
+                Class:Reason -> {error, {rename_identity_restore_failed, Class, Reason}}
+            end;
+        _ ->
+            {error,
+                {rename_identity_restore_failed, unresolvable_class_atom,
+                    {CurrentNameBin, OldNameBin}}}
+    end.
+
+%% Build the reversed `rewrite_site()` list from `Entry`'s recorded `sites`:
+%% resolve each site's owning class + read both its recorded bodies (aborting
+%% on the first unresolvable/unreadable one), recompute current positions per
+%% class-group and verify each one still holds exactly the text the original
+%% rewrite left there (`assign_current_spans/1` — an intervening, unrelated
+%% edit to a touched class between the rename and this revert is refused
+%% loudly here rather than spliced over), then split the result back into
+%% `{DefinitionSite, ReferenceSites}` for `rewrite_sites/2`.
+-spec build_revert_sites(beamtalk_workspace_changelog:entry()) ->
+    {ok, {rewrite_site() | undefined, [rewrite_site()]}} | {error, term()}.
+build_revert_sites(Entry) ->
+    Sites = beamtalk_workspace_changelog:entry_sites(Entry),
+    ClassMap = class_names_by_source_file(),
+    case resolve_revert_sites(Sites, ClassMap) of
+        {ok, Resolved} ->
+            case assign_current_spans(Resolved) of
+                {ok, WithSpans} -> {ok, split_definition(WithSpans)};
+                {error, _} = Err -> Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+%% A `SourceFile -> ClassNameBin` reverse map built from every currently live
+%% class (see this section's own doc for why a basename guess is not safe
+%% here instead).
+-spec class_names_by_source_file() -> #{binary() => binary()}.
+class_names_by_source_file() ->
+    lists:foldl(
+        fun({Name, ModuleName, _Pid}, Acc) ->
+            case beamtalk_reflection:source_file_from_module(ModuleName) of
+                nil ->
+                    Acc;
+                SourceFile when is_binary(SourceFile) ->
+                    Acc#{SourceFile => atom_to_binary(Name, utf8)}
+            end
+        end,
+        #{},
+        beamtalk_class_registry:live_class_entries()
+    ).
+
+%% One resolved (but not yet position-adjusted) revert site, as a plain map:
+%% `is_definition` (was this `Entry`'s `sites[0]`?), `class` (this site's own
+%% resolved owning class), `source_file`, `orig_span` (the recorded pre-rewrite
+%% span), `cur_len` (the byte length of what's occupying that span NOW —
+%% `source_ref`'s own body), `new_text` (what to splice back in —
+%% `prev_source_ref`'s own body).
+-type revert_site() :: #{
+    is_definition := boolean(),
+    class := binary(),
+    source_file := binary(),
+    orig_span := rewrite_span(),
+    cur_len := non_neg_integer(),
+    expected_current := binary(),
+    new_text := binary()
+}.
+
+-spec resolve_revert_sites(
+    [beamtalk_workspace_changelog:site() | undefined] | undefined, #{binary() => binary()}
+) -> {ok, [revert_site()]} | {error, term()}.
+resolve_revert_sites(Sites, ClassMap) ->
+    %% `undefined` (never actually produced today — `entry_sites/1` is always
+    %% a list, possibly `[undefined]` for a sourceless dynamic-class
+    %% definition — BT-3269 § ChangeLog schema) degrades to "no sites",
+    %% defensively, rather than crashing on a future producer that omits it.
+    IndexedSites = lists:zip(
+        lists:seq(0, length(sites_or_undefined(Sites)) - 1), sites_or_undefined(Sites)
+    ),
+    resolve_revert_sites(IndexedSites, ClassMap, []).
+
+-spec sites_or_undefined([beamtalk_workspace_changelog:site() | undefined] | undefined) ->
+    [beamtalk_workspace_changelog:site() | undefined].
+sites_or_undefined(undefined) -> [];
+sites_or_undefined(Sites) when is_list(Sites) -> Sites.
+
+-spec resolve_revert_sites(
+    [{non_neg_integer(), beamtalk_workspace_changelog:site() | undefined}],
+    #{binary() => binary()},
+    [revert_site()]
+) -> {ok, [revert_site()]} | {error, term()}.
+resolve_revert_sites([], _ClassMap, Acc) ->
+    {ok, lists:reverse(Acc)};
+resolve_revert_sites([{0, undefined} | Rest], ClassMap, Acc) ->
+    %% `sites[0] = null`: the dynamic-class "no declaration site" case — never
+    %% legitimately anywhere else in the list (ADR 0114 § ChangeLog schema).
+    resolve_revert_sites(Rest, ClassMap, Acc);
+resolve_revert_sites([{_Index, undefined} | _Rest], _ClassMap, _Acc) ->
+    %% An `undefined` site past index 0 would violate the invariant the
+    %% clause above relies on — refuse loudly (this module's own convention
+    %% elsewhere: `verify_current_spans/1`, `check_no_external_drift/3`, ...)
+    %% rather than silently under-reverting one site. Unreachable under every
+    %% current ChangeLog producer; a defensive backstop, not a live path.
+    {error, revert_site_unexpectedly_undefined};
+resolve_revert_sites([{Index, Site} | Rest], ClassMap, Acc) ->
+    case resolve_revert_site(Site, ClassMap, Index =:= 0) of
+        {ok, Resolved} -> resolve_revert_sites(Rest, ClassMap, [Resolved | Acc]);
+        {error, _} = Err -> Err
+    end.
+
+-spec resolve_revert_site(
+    beamtalk_workspace_changelog:site(), #{binary() => binary()}, boolean()
+) -> {ok, revert_site()} | {error, term()}.
+resolve_revert_site(#{source_file := undefined}, _ClassMap, _IsDefinition) ->
+    %% A NON-null site (this clause never reaches the dynamic-class
+    %% `sites[0] = null` case — that is filtered out by index before this
+    %% function is ever called) can still legitimately carry `source_file =
+    %% undefined`: `rewrite_site()`'s own doc says the field is
+    %% ChangeLog-attribution-only, and `class_source_file_for/1` returns
+    %% `undefined` for a class with no backing file — reachable if a
+    %% `'rename-method'` confirmed sender site lives in a sourceless dynamic
+    %% subclass. `class_names_by_source_file/0`'s reverse lookup has no file
+    %% to key by in that case, so this is reported distinctly from a
+    %% resolvable-but-unrecognised file rather than folded into the generic
+    %% `revert_site_malformed` catch-all below.
+    {error, revert_site_no_source_file};
+resolve_revert_site(#{source_file := SourceFile, span := Span} = Site, ClassMap, IsDefinition) when
+    is_binary(SourceFile), is_map(Span)
+->
+    case maps:get(SourceFile, ClassMap, undefined) of
+        undefined ->
+            {error, {revert_site_class_unresolved, SourceFile}};
+        ClassBin ->
+            case
+                {
+                    beamtalk_workspace_changelog:read_site_body(
+                        maps:get(source_ref, Site, undefined)
+                    ),
+                    beamtalk_workspace_changelog:read_site_body(
+                        maps:get(prev_source_ref, Site, undefined)
+                    )
+                }
+            of
+                {{ok, CurrentBody}, {ok, PrevBody}} ->
+                    {ok, #{
+                        is_definition => IsDefinition,
+                        class => ClassBin,
+                        source_file => SourceFile,
+                        orig_span => Span,
+                        cur_len => byte_size(CurrentBody),
+                        expected_current => CurrentBody,
+                        new_text => PrevBody
+                    }};
+                _ ->
+                    {error, {revert_site_body_unreadable, SourceFile, Span}}
+            end
+    end;
+resolve_revert_site(_Site, _ClassMap, _IsDefinition) ->
+    {error, revert_site_malformed}.
+
+%% Group `RevertSites` by owning class and recompute + verify each group's
+%% CURRENT spans (`current_spans_for_group/1`) — `rewrite_sites/2`'s own
+%% grouping re-derives class membership from each `rewrite_site()`'s own
+%% `class` field regardless of input order, so the flattened output order
+%% here does not matter to correctness. Aborts on the first group whose
+%% drift check fails, before any group is spliced.
+-spec assign_current_spans([revert_site()]) ->
+    {ok, [{revert_site(), rewrite_span()}]} | {error, term()}.
+assign_current_spans(RevertSites) ->
+    Grouped = lists:foldr(
+        fun(#{class := Class} = S, Acc) ->
+            maps:update_with(Class, fun(L) -> [S | L] end, [S], Acc)
+        end,
+        #{},
+        RevertSites
+    ),
+    assign_current_spans_by_group(maps:values(Grouped), []).
+
+-spec assign_current_spans_by_group([[revert_site()]], [{revert_site(), rewrite_span()}]) ->
+    {ok, [{revert_site(), rewrite_span()}]} | {error, term()}.
+assign_current_spans_by_group([], Acc) ->
+    {ok, Acc};
+assign_current_spans_by_group([Group | Rest], Acc) ->
+    case current_spans_for_group(Group) of
+        {ok, WithSpans} -> assign_current_spans_by_group(Rest, WithSpans ++ Acc);
+        {error, _} = Err -> Err
+    end.
+
+-doc """
+Within one class-group, sorted by each site's ORIGINAL span via the SAME
+shared `span_start_end/1` key `validate_no_overlaps/3`/`apply_site_splices/2`
+use (see that function's own doc for why the key itself must never be
+re-derived independently): a site's CURRENT start offset is its own original
+start plus the sum of every EARLIER (lower-original-offset) site's own length
+delta (`cur_len - original span length`) — the same non-interference property
+`apply_site_splices/2`'s rightmost-first application relies on for splicing,
+replayed left-to-right here to LOCATE positions instead.
+
+Once every site's current span is computed, `verify_current_spans/1` confirms
+each one's owning class's CURRENT tracked source actually holds the exact
+bytes the original rewrite left there (`expected_current`, the site's own
+recorded `source_ref` body) before this group is trusted for splicing — an
+intervening, unrelated edit to a touched class between the original rename
+and this revert (e.g. an ordinary `compile:source:` patch landing on the
+same file while the rename sat pending) would otherwise silently shift what
+this cumulative-offset math computes as "current", corrupting the class on
+splice rather than merely producing a stale result. This is revert's own
+analogue of `check_no_external_drift/3`'s `'remove-class'`-specific disk
+comparison (BT-3213) — same "never guess, refuse loudly" posture, applied to
+a tracked-source SPAN rather than a whole disk file, since a rename revert
+can touch several classes' sources rather than one file.
+""".
+-spec current_spans_for_group([revert_site()]) ->
+    {ok, [{revert_site(), rewrite_span()}]} | {error, term()}.
+current_spans_for_group(Group) ->
+    Sorted = lists:sort(
+        fun(#{orig_span := SpanA}, #{orig_span := SpanB}) ->
+            span_start_end(SpanA) =< span_start_end(SpanB)
+        end,
+        Group
+    ),
+    %% `lists:mapfoldl/3` returns `{MappedList, FinalAcc}` — the mapped list
+    %% FIRST, the accumulator SECOND (easy to get backwards; got it backwards
+    %% once already during development, per this comment's own existence).
+    {WithSpans, _Delta} = lists:mapfoldl(
+        fun(#{orig_span := #{start := S, 'end' := E}, cur_len := CurLen} = Site, Delta) ->
+            CurStart = S + Delta,
+            CurEnd = CurStart + CurLen,
+            NewDelta = Delta + (CurLen - (E - S)),
+            {{Site, #{start => CurStart, 'end' => CurEnd}}, NewDelta}
+        end,
+        0,
+        Sorted
+    ),
+    verify_current_spans(WithSpans).
+
+%% Read the group's shared owning class's CURRENT tracked source ONCE and
+%% confirm every site's computed span holds exactly its recorded
+%% `expected_current` bytes there.
+-spec verify_current_spans([{revert_site(), rewrite_span()}]) ->
+    {ok, [{revert_site(), rewrite_span()}]} | {error, term()}.
+verify_current_spans([]) ->
+    {ok, []};
+verify_current_spans([{#{class := Class}, _} | _] = WithSpans) ->
+    case beamtalk_workspace_meta:get_class_source(Class) of
+        undefined ->
+            {error, {revert_class_source_unavailable, Class}};
+        Source ->
+            check_spans_match(WithSpans, unicode:characters_to_binary(Source))
+    end.
+
+-spec check_spans_match([{revert_site(), rewrite_span()}], binary()) ->
+    {ok, [{revert_site(), rewrite_span()}]} | {error, term()}.
+check_spans_match([], _SourceBin) ->
+    {ok, []};
+check_spans_match(
+    [
+        {#{class := Class, expected_current := Expected} = Site, #{start := S, 'end' := E} = Span}
+        | Rest
+    ],
+    SourceBin
+) ->
+    Len = E - S,
+    case SourceBin of
+        <<_:S/binary, Expected:Len/binary, _/binary>> ->
+            case check_spans_match(Rest, SourceBin) of
+                {ok, More} -> {ok, [{Site, Span} | More]};
+                {error, _} = Err -> Err
+            end;
+        _ ->
+            {error, {revert_site_drifted, Class, Span}}
+    end.
+
+-spec split_definition([{revert_site(), rewrite_span()}]) ->
+    {rewrite_site() | undefined, [rewrite_site()]}.
+split_definition(SitesWithSpans) ->
+    lists:foldl(
+        fun({#{is_definition := IsDef} = Site, CurSpan}, {DefAcc, RefAcc}) ->
+            RewriteSite = to_rewrite_site(Site, CurSpan),
+            case IsDef of
+                true -> {RewriteSite, RefAcc};
+                false -> {DefAcc, [RewriteSite | RefAcc]}
+            end
+        end,
+        {undefined, []},
+        SitesWithSpans
+    ).
+
+-spec to_rewrite_site(revert_site(), rewrite_span()) -> rewrite_site().
+to_rewrite_site(#{class := Class, source_file := SourceFile, new_text := NewText}, CurSpan) ->
+    #{class => Class, source_file => SourceFile, span => CurSpan, new_text => NewText}.
 
 %% Load a recompiled method-patched class binary into BEAM.
 -spec load_recompiled_method(

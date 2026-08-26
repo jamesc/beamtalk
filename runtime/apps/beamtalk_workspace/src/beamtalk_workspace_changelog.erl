@@ -292,9 +292,11 @@ release nodes do not start a workspace, so this code is a no-op there.
     author_kind :: author_kind(),
     %% True once a `Workspace flush` has written this entry's patch to disk
     %% (ADR 0082 Phase 2) — OR, for a `'remove-class'` entry specifically,
-    %% once `Workspace changes revert:` has undone it (ADR 0113, BT-3208):
-    %% no disk write happened, but the entry's effect is equally resolved and
-    %% must equally drop out of the active/pending view. Persisted so the
+    %% once `Workspace changes revert:` has undone it (ADR 0113, BT-3208), OR,
+    %% the same way, for a `'rename-class'`/`'rename-method'` entry once its
+    %% own `revert:` has undone it (ADR 0114, BT-3274): no disk write
+    %% happened, but the entry's effect is equally resolved and must equally
+    %% drop out of the active/pending view. Persisted so the
     %% entry stays excluded from the active view across workspace restarts:
     %% history is preserved in the log for audit, but the entry is no longer
     %% considered "dirty". Don't read this field alone as "this reached disk"
@@ -520,6 +522,12 @@ must be restored. Returns:
     recorded body itself is unreadable, e.g. pruned by ChangeLog rotation).
     Revert recompiles and reinstalls the whole class from `PrevBody`, not a
     single-method patch.
+  - `{revert_rename, Entry}` when the most recent active entry is a
+    `'rename-class'`/`'rename-method'` (ADR 0114, BT-3274): a multi-site
+    target, not a single prior body — the caller (`beamtalk_repl_loader:
+    revert_rename_sites/1`) rewrites every one of `Entry`'s own `sites` back
+    to its own recorded `prev_source_ref`, against that site's own recorded
+    location, rather than a single `PrevBody` this function could return.
   - `{error, no_entry}` when no active entry targets `(Class, Selector)`
     (nothing to revert: either never patched, or already reverted/flushed).
   - `{error, no_prev_source}` when the most recent entry is a *modify* whose
@@ -554,6 +562,7 @@ whichever has the higher `seq` — would be selected.
     {ok, binary(), entry()}
     | {remove, entry()}
     | {reinstall_class, binary(), entry()}
+    | {revert_rename, entry()}
     | {error, no_entry | no_prev_source}.
 find_revert_target(Class, Selector) ->
     find_revert_target(Class, Selector, undefined).
@@ -571,6 +580,7 @@ side-agnostic behavior (used by callers, such as `revert_method/2`'s
     {ok, binary(), entry()}
     | {remove, entry()}
     | {reinstall_class, binary(), entry()}
+    | {revert_rename, entry()}
     | {error, no_entry | no_prev_source}.
 find_revert_target(Class, Selector, Side) when is_binary(Class) ->
     SelectorBin = revert_selector_binary(Selector),
@@ -610,6 +620,15 @@ find_revert_target(Class, Selector, Side) when is_binary(Class) ->
                 {ok, Body} -> {reinstall_class, Body, Entry};
                 {error, _} -> recover_class_prev_from_disk(Entry)
             end;
+        [#entry{kind = Kind} = Entry | _] when
+            Kind =:= 'rename-class'; Kind =:= 'rename-method'
+        ->
+            %% ADR 0114 (BT-3274): a multi-site target — the caller rewrites
+            %% every one of `Entry`'s own `sites` back to its own recorded
+            %% `prev_source_ref`, so there is no single `PrevBody` for this
+            %% function to resolve the way the modify/reinstall-class arms
+            %% above do.
+            {revert_rename, Entry};
         [#entry{prev_source_ref = undefined} = Entry | _] ->
             %% No recorded prior body. Either the method existed on disk before
             %% the patch (a modify, whose unflushed disk body IS its pre-patch

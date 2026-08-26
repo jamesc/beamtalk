@@ -664,6 +664,12 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             %% recompiling and reinstalling the whole class from its recorded
             %% prior source — a class-level target, not a single-method patch.
             reinstall_reverted_class(ClassNameBin, PrevBody, Entry);
+        {revert_rename, Entry} ->
+            %% A `'rename-class'`/`'rename-method'` revert (ADR 0114,
+            %% BT-3274): a multi-site target, not a single prior body — undo
+            %% by rewriting every one of `Entry`'s own `sites` back to its own
+            %% recorded `prev_source_ref`.
+            revert_rename_entry(ClassNameBin, Entry);
         {error, no_entry} ->
             beamtalk_error:raise(
                 revert_state_error(
@@ -952,6 +958,69 @@ retire_reverted_remove_class_entry(ClassNameBin, Entry) ->
                         ClassNameBin,
                         <<
                             " was reinstalled, but its old removal entry could not be "
+                            "retired (ChangeLog unreachable); it may still show as "
+                            "pending until a future flush or manual cleanup"
+                        >>
+                    ])
+                )
+            )
+    end.
+
+-doc """
+Undo a `'rename-class'`/`'rename-method'` entry (ADR 0114, BT-3274):
+delegates the actual multi-site reverse-splice to `beamtalk_repl_eval:
+revert_rename_sites/1` (see that function's own doc for the full mechanism —
+locating each site's current position, resolving its owning class, and, for
+`'rename-class'`, restoring the class's registry identity), then retires the
+original entry on success — mirroring `reinstall_reverted_class_body/4`'s
+"undoing an add emits no new entry, so the original entry must be retired
+here" convention for `'remove-class'`, since a rename revert is symmetric:
+the reverted state IS the pre-rename state, nothing new needs recording.
+""".
+-spec revert_rename_entry(binary(), beamtalk_workspace_changelog:entry()) -> term().
+revert_rename_entry(ClassNameBin, Entry) ->
+    case beamtalk_repl_eval:revert_rename_sites(Entry) of
+        {ok, RevertedClassBin} ->
+            retire_reverted_rename_entry(RevertedClassBin, Entry);
+        {error, Reason} ->
+            beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+    end.
+
+%% The class is already reinstalled/reverted live by the time this runs — a
+%% ChangeLog write failure here must never surface as a raw crash (or, worse,
+%% leave the original entry silently stuck active/pending forever). Mirrors
+%% `retire_reverted_remove_class_entry/2`'s identical handling exactly, just
+%% generalized to name either rename kind rather than assuming "remove-class".
+-spec retire_reverted_rename_entry(binary(), beamtalk_workspace_changelog:entry()) -> term().
+retire_reverted_rename_entry(RevertedClassBin, Entry) ->
+    MarkResult =
+        try
+            beamtalk_workspace_changelog:mark_flushed([
+                beamtalk_workspace_changelog:entry_seq(Entry)
+            ])
+        catch
+            exit:ExitReason -> {error, {changelog_unreachable, ExitReason}}
+        end,
+    case MarkResult of
+        ok ->
+            class_object_for(RevertedClassBin);
+        {error, Reason} ->
+            ?LOG_ERROR(
+                "revert: reverted rename but failed to retire its rename entry",
+                #{
+                    class => RevertedClassBin,
+                    seq => beamtalk_workspace_changelog:entry_seq(Entry),
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_error:raise(
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: ">>,
+                        RevertedClassBin,
+                        <<
+                            " was reverted, but its old rename entry could not be "
                             "retired (ChangeLog unreachable); it may still show as "
                             "pending until a future flush or manual cleanup"
                         >>
