@@ -89,7 +89,7 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% rule.
     class_source_file/1,
     classify_source_file/1,
-    %% BT-3280: exported (not merely -ifdef(TEST)) so `install_rewrite_group/7`
+    %% BT-3280: exported (not merely -ifdef(TEST)) so `install_rewrite_group/5`
     %% can call it as `?MODULE:install_reload_result/2` — a genuine external
     %% call, needed so `beamtalk_repl_loader_rewrite_sites_tests.erl` can
     %% `meck:new(?MODULE, [passthrough])` + `meck:expect/3` it to exercise
@@ -1346,12 +1346,12 @@ value that failed `compile_reload_source/4` — callers gate on `{ok, ...}`
 first, which is exactly BT-3270's atomicity protocol: nothing calls this
 until every site in a batch has independently validated.
 
-Exported (BT-3280) purely so `install_rewrite_group/7`'s own
+Exported (BT-3280) purely so `install_rewrite_group/5`'s own
 `?MODULE:install_reload_result/2` call can be intercepted by `meck` in
 `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
 coverage — not part of this module's intended public API otherwise; every
 other caller (`reload_class_file_impl/2`, `remove_method/3`,
-`install_rewrite_group/7`) is itself already inside this module.
+`install_rewrite_group/5`) is itself already inside this module.
 """.
 -spec install_reload_result(
     {ok, protocol_definition, map()} | {ok, compiled, binary(), [map()], atom()}, string()
@@ -1981,19 +1981,36 @@ function's answer, per the ADR's own steer:
    install comes up). Rather than a distributed lock (explicitly out of
    scope — this is detect-and-reject, not a mutex), each group re-checks its
    own class's CURRENT tracked source against its snapshot immediately
-   before that group's own install call. A mismatch (or the class no longer
-   having a tracked source at all) means some other write landed in the
-   validate-or-earlier-install window; `rewrite_sites/2` reports
-   `{error, {stale_snapshot, Class}}` for that group and stops the batch
-   there — installing this group's precomputed `new_source` anyway would
-   silently discard the concurrent edit (the lost-update bug this exists to
-   close). Groups already installed earlier in this same call stay
-   installed (same bounded-partial-application shape point 3 already
-   documents); nothing after the stale group installs. The caller can always
-   retry safely: re-run site discovery against current state and call
-   `rewrite_sites/2` again — a rejected install never corrupts anything, it
-   only refuses to overwrite what it can no longer prove is still the
-   snapshot it validated against.
+   before `?MODULE:install_reload_result/2` starts for that group. A
+   mismatch (or the class no longer having a tracked source at all) means
+   some other write landed in the validate-or-earlier-install window;
+   `rewrite_sites/2` reports `{error, {stale_snapshot, Class}}` for that
+   group and stops the batch there — installing this group's precomputed
+   `new_source` anyway would silently discard the concurrent edit (the
+   lost-update bug this exists to close). Groups already installed earlier
+   in this same call stay installed (same bounded-partial-application shape
+   point 3 already documents); nothing after the stale group installs. The
+   caller can always retry safely: re-run site discovery against current
+   state and call `rewrite_sites/2` again — a rejected install never
+   corrupts anything, it only refuses to overwrite what it can no longer
+   prove is still the snapshot it validated against.
+
+   This check narrows the race window but does not fully close it: a writer
+   that lands strictly BETWEEN `install_reload_result/2` returning
+   (`code:load_binary/3` + `activate_module/4` — real work, not
+   instantaneous) and this group's own `set_class_source/2` call a few lines
+   later is not detected — that write's own tracked source is silently
+   overwritten by this group's `set_class_source/2`, the one gap
+   `class_source_unchanged/1`'s single check-before-install placement does
+   not cover. Closing that residual gap would mean re-running the check
+   again immediately before `set_class_source/2`, but by then this group's
+   OWN code is already loaded and live (`install_reload_result/2` already
+   ran) — failing at that point cannot "undo" the load, so it would trade one
+   silent-overwrite bug for a different inconsistency (code live, tracked
+   source refused) with no clean recovery story of its own. Left as a known,
+   narrower residual instance of the same accepted-limitation class this
+   module's `capture/4`/`rollback/4` comment already documents for the
+   single-site path, rather than introduced as a new one.
 
 Known, accepted limitation this protocol does NOT close: `compile_file/4`
 itself has a side effect independent of installation — it registers each
