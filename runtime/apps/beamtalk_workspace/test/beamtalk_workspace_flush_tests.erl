@@ -97,6 +97,7 @@ flush_test_() ->
         %% ADR 0114 Phase 2 (BT-3271): rename-class multi-file destructive flush
         fun rename_class_flush_without_confirm_is_skipped_destructive/1,
         fun rename_class_moves_file_rewrites_declaration_and_reference/1,
+        fun rename_class_new_path_exists_as_unrelated_file_is_conflict/1,
         fun rename_class_self_reference_folds_into_move/1,
         fun rename_class_external_edit_on_declaration_aborts_with_no_partial_writes/1,
         fun rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes/1,
@@ -2041,6 +2042,44 @@ rename_class_moves_file_rewrites_declaration_and_reference(#{proj_dir := ProjDir
         ?_assert(entry_flushed(Seq)),
         ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
         ?_assertEqual(false, filelib:is_regular(RefPath ++ ".tmp"))
+    ].
+
+%% BT-3526 review round 4 Blocker: `new_path` already existing as an
+%% UNRELATED file (never touched by any pending rename entry — a plain
+%% pre-existing scratch file, not a resumed prior attempt) must refuse the
+%% flush rather than silently overwriting it once Phase B's bare
+%% `file:rename/2` replaces whatever is already there. Mirrors
+%% `prepare_new_class/3`'s `target_exists` guard.
+rename_class_new_path_exists_as_unrelated_file_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    UnrelatedContent = <<"this file has nothing to do with the rename\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(NewPath, UnrelatedContent),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>, <<"Counter">>, list_to_binary(OldPath), list_to_binary(NewPath), [
+                DeclSite
+            ]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"rename_target_exists">>, maps:get(reason, hd(Conflicts))),
+        %% The unrelated file at new_path is completely untouched, old_path
+        %% is untouched too (whole batch aborted), and no .tmp is left behind.
+        ?_assertEqual({ok, UnrelatedContent}, file:read_file(NewPath)),
+        ?_assertEqual({ok, OldSource}, file:read_file(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq))
     ].
 
 %% A site whose OWN file equals `old_path` (a class referencing its own name

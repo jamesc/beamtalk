@@ -146,14 +146,25 @@ separate marker file.
 **Crash-recovery design decision.** Three states `old_path`/`new_path` can be
 in when Phase A runs, and what each means:
 
-  - **Both exist** (the ordinary case, including a retry after ANY earlier
-    partial attempt that got no further than writing `.tmp` files): read
-    `old_path`, resolve every site's splice against it (see the idempotent
-    check below), write `<new_path>.tmp`. Retrying this state is always safe
-    and idempotent — `old_path` is never mutated by Phase A, only read, so
-    re-deriving `<new_path>.tmp` from it and overwriting whatever is already
-    at `new_path` (correct or not) is exactly the recovery this ADR's flush
-    table describes.
+  - **`old_path` exists** (the ordinary case, including a retry after ANY
+    earlier partial attempt that got no further than writing `.tmp` files):
+    read `old_path`, resolve every site's splice against it (see the
+    idempotent check below). If `new_path` does not exist yet, write
+    `<new_path>.tmp` — the ordinary case. If `new_path` ALSO already exists
+    (review round 4 on PR #3526 — `old_path` still being present here means
+    THIS attempt's own Phase B has not yet renamed `<new_path>.tmp` into
+    place, so a pre-existing `new_path` can only be an unrelated file that
+    happens to occupy the derived target, or — the one legitimate case — an
+    EARLIER attempt's Phase B rename that already succeeded but whose
+    subsequent unlink of `old_path` then failed, per `commit/1`'s `op =
+    move` doc), `check_rename_target_safe/3` compares `new_path`'s current
+    bytes against the FULL post-splice body Phase A just computed — an exact
+    match means this is that legitimate resume (harmless to overwrite with
+    the same bytes, or skip), anything else is a hard, unresolvable conflict
+    (`reason => <<"rename_target_exists">>`), mirroring `prepare_new_class/3`'s
+    `target_exists` guard for the identical reason. `old_path` is never
+    mutated by Phase A, only read, so a legitimate retry is always safe and
+    idempotent either way.
   - **`old_path` gone, `new_path` present**: since Phase A never touches
     `old_path` and Phase B's own ordering renames `<new_path>.tmp` into place
     *before* unlinking `old_path`, the ONLY way `old_path` can be gone is a
@@ -1440,18 +1451,23 @@ prepare_rename_move(Entry, MoveUnits) ->
         {ok, OldBody} ->
             case apply_site_units(OldBody, Units) of
                 {ok, NewFileBody} ->
-                    case write_tmp(binary_to_list(NewPath), NewFileBody) of
-                        {ok, Tmp} ->
-                            {ok, #prepared{
-                                file = NewPath,
-                                old_file = OldPath,
-                                tmp = Tmp,
-                                entries = [Entry],
-                                pre_existing = true,
-                                op = move
-                            }};
-                        {error, _} = Err ->
-                            wrap_io_error(Err, NewPath)
+                    case check_rename_target_safe(NewPath, NewFileBody, Entry) of
+                        ok ->
+                            case write_tmp(binary_to_list(NewPath), NewFileBody) of
+                                {ok, Tmp} ->
+                                    {ok, #prepared{
+                                        file = NewPath,
+                                        old_file = OldPath,
+                                        tmp = Tmp,
+                                        entries = [Entry],
+                                        pre_existing = true,
+                                        op = move
+                                    }};
+                                {error, _} = Err ->
+                                    wrap_io_error(Err, NewPath)
+                            end;
+                        {conflict, _} = C ->
+                            C
                     end;
                 {conflict, _} = C ->
                     C;
@@ -1462,6 +1478,54 @@ prepare_rename_move(Entry, MoveUnits) ->
             resolve_missing_rename_source(Entry, OldPath, NewPath, Units);
         {error, Reason} ->
             wrap_io_error({error, Reason}, OldPath)
+    end.
+
+-doc """
+Refuse to stage a move over an unrelated pre-existing file at `NewPath`
+(review round 4 on PR #3526): `old_path` still existing here means Phase B
+has not yet renamed `<new_path>.tmp` into place for THIS attempt, so
+`NewPath` already existing can only mean one of two things — an earlier
+attempt's own Phase B rename already succeeded but its subsequent unlink of
+`old_path` failed (the documented "unlink itself fails" recovery case,
+`commit/1`'s `op = move` doc), in which case `NewPath` already holds
+EXACTLY `NewFileBody`; or an unrelated file that happens to already occupy
+the derived target path, which this rename must never silently overwrite —
+mirrors `prepare_new_class/3`'s `target_exists` guard for the identical
+reason (`'new-class'` already refuses this; a rename creating a file at a
+brand-new path is not fundamentally different).
+
+Byte-for-byte equality against the ALREADY-COMPUTED `NewFileBody` (not just
+"a file exists") is what tells the two cases apart without a false
+positive on the legitimate resume — content merely existing doesn't mean
+this is ours.
+""".
+-spec check_rename_target_safe(binary(), binary(), term()) -> ok | {conflict, map()}.
+check_rename_target_safe(NewPath, NewFileBody, Entry) ->
+    AbsNewPath = binary_to_list(NewPath),
+    case file:read_file_info(AbsNewPath) of
+        {error, enoent} ->
+            ok;
+        _Exists ->
+            case file:read_file(AbsNewPath) of
+                {ok, NewFileBody} ->
+                    ok;
+                _NotAlreadyOurs ->
+                    {conflict,
+                        conflict_map(
+                            NewPath,
+                            <<"rename_target_exists">>,
+                            [Entry],
+                            iolist_to_binary([
+                                <<"Cannot rename to ">>,
+                                NewPath,
+                                <<
+                                    "; a file already exists at that path with "
+                                    "different content; move or remove it first, "
+                                    "then re-flush the rename"
+                                >>
+                            ])
+                        )}
+            end
     end.
 
 %% See moduledoc's "Atomicity (class rename)" — `old_path` gone disambiguates
