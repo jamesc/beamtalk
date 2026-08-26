@@ -81,6 +81,42 @@ TestCase subclass: ChangeLogTest
         #active => true
       }
 
+  // A rename-class entry (ADR 0114, BT-3269): the class was renamed to
+  // Accumulator (no selector — a class-identity change, mirroring newClassEntry's
+  // shape).
+  renameClassEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 6,
+        #className => #Accumulator,
+        #selector => nil,
+        #kind => #'rename-class',
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true
+      }
+
+  // A rename-method entry (ADR 0114, BT-3269): Counter>>increment was renamed
+  // to Counter>>incrementBy — `selector` holds the new name.
+  renameMethodEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 7,
+        #className => #Counter,
+        #selector => #incrementBy,
+        #kind => #'rename-method',
+        #side => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true
+      }
+
   // A shadowed active entry: an older Counter>>increment superseded by a newer
   // patch (or revert — a revert is itself a patch, ADR 0082 "Undo"). Active but
   // excluded from the default pending view so the view collapses to one row per
@@ -288,12 +324,35 @@ TestCase subclass: ChangeLogTest
 
   testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass
 
+  // --- ADR 0114 (BT-3269/BT-3277): rename-class / rename-method kind ---
+  testRenameClassEntryIsRenameClass =>
+    self assert: self renameClassEntry isRenameClass
+
+  testRenameClassEntrySelectorIsNil =>
+    self assert: self renameClassEntry selector isNil
+
+  testMethodEntryIsNotRenameClass => self deny: self activeEntry isRenameClass
+
+  testRenameMethodEntryIsRenameMethod =>
+    self assert: self renameMethodEntry isRenameMethod
+
+  testMethodEntryIsNotRenameMethod => self deny: self activeEntry isRenameMethod
+
+  testRenameMethodEntryKind =>
+    self assert: self renameMethodEntry kind equals: #'rename-method'
+
   // --- printString ---
   testEntryPrintStringForMethodPatch =>
     self assert: self activeEntry printString equals: "Counter>>increment"
 
   testEntryPrintStringForNewClass =>
     self assert: self newClassEntry printString equals: "DoubleCounter (new-class)"
+
+  testEntryPrintStringForRenameClass =>
+    self assert: self renameClassEntry printString equals: "Accumulator (rename-class)"
+
+  testEntryPrintStringForRenameMethod =>
+    self assert: self renameMethodEntry printString equals: "Counter>>incrementBy (rename-method)"
 
   testEmptyLogPrintString =>
     self assert: self emptyLog printString equals: "ChangeLog with 0 entries"
