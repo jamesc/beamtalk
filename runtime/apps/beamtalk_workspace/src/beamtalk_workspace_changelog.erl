@@ -126,6 +126,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_class/1,
     entry_selector/1,
     entry_kind/1,
+    known_entry_kinds/0,
     entry_side/1,
     entry_intent/1,
     entry_flushable/1,
@@ -1237,6 +1238,35 @@ entry_selector(#entry{selector = V}) -> V.
 
 -spec entry_kind(entry()) -> kind().
 entry_kind(#entry{kind = V}) -> V.
+
+-doc """
+Every atom `kind()` admits, exactly matching that type's literal union above
+— the single runtime-introspectable source of truth for the wire-string
+conformance corpus (`runtime/apps/beamtalk_workspace/test/fixtures/
+flush_file_kind_wire_corpus.json`, BT-3275) that pins the Rust LSP consumer's
+`FlushFileKind::from_wire` (`crates/beamtalk-lsp/src/runtime.rs`) to this
+module's `kind()` domain: `beamtalk_workspace_changelog_tests` asserts this
+list's `atom_to_binary` image equals the corpus's wire-string set exactly (so
+adding, removing, or renaming a `kind()` alternative without updating this
+function — the two are directly adjacent, unlike the corpus in a different
+app's test tree — fails a fast, obvious Erlang test), and the Rust side
+asserts `from_wire` against the same corpus in
+`FlushFileKind::from_wire`'s own test module. Neither side hand-derives the
+other's expected values — both are pinned to the shared file.
+""".
+-spec known_entry_kinds() -> [kind()].
+known_entry_kinds() ->
+    [
+        instance,
+        class,
+        'new-class',
+        'class-def',
+        'remove-method',
+        'remove-class',
+        'rename-class',
+        'rename-method',
+        unknown
+    ].
 
 -doc """
 The side (`instance` | `class`) a method-shaped entry targets, or `undefined`

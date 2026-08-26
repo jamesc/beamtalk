@@ -1275,8 +1275,45 @@ forward_compat_test_() ->
         fun unknown_intent_preserved_as_unknown/0,
         fun unknown_author_kind_preserved_as_unknown/0,
         fun known_intents_decode_to_atoms/0,
-        fun known_author_kinds_decode_to_atoms/0
+        fun known_author_kinds_decode_to_atoms/0,
+        fun known_entry_kinds_matches_shared_wire_corpus/0
     ].
+
+%% BT-3275 conformance: `known_entry_kinds/0` — the runtime-introspectable
+%% image of the `kind()` type's literal union — must have exactly the same
+%% atom set as the shared wire-string corpus's `"wire"` column pins (each
+%% converted to an atom the same way `beamtalk_ws_handler:
+%% normalise_file_kind_entry/1` converts it going the other way,
+%% `atom_to_binary/2`). The Rust LSP consumer's `FlushFileKind::from_wire`
+%% pins the same corpus's `"rust_variant"` column in
+%% `FlushFileKind::from_wire`'s own test module
+%% (`crates/beamtalk-lsp/src/runtime.rs`) — this is the single source of
+%% truth both language-side implementations are pinned to, per
+%% `docs/development/architecture-principles.md` §6: a rule crossing the
+%% Rust/Erlang boundary needs a shared conformance fixture, not a comment.
+known_entry_kinds_matches_shared_wire_corpus() ->
+    Cases = load_flush_file_kind_wire_corpus(),
+    ?assert(length(Cases) > 0),
+    CorpusKinds = lists:sort([
+        binary_to_atom(maps:get(<<"wire">>, Case), utf8)
+     || Case <- Cases
+    ]),
+    KnownKinds = lists:sort(beamtalk_workspace_changelog:known_entry_kinds()),
+    ?assertEqual(KnownKinds, CorpusKinds).
+
+%% Load the shared flush-file-kind wire-string conformance corpus from the
+%% repo tree. `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to
+%% the project root (the dir holding `Cargo.toml`), then reads the fixture
+%% both surfaces share.
+load_flush_file_kind_wire_corpus() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "flush_file_kind_wire_corpus.json"
+    ]).
 
 known_intents_decode_to_atoms() ->
     Durable = beamtalk_workspace_changelog:entry_from_json(

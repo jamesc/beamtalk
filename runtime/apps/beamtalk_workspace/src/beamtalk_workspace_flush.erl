@@ -2621,10 +2621,14 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
 %% one `#{file => Path, kind => Kind}` map per entry in `Files`, where `Kind`
 %% is `beamtalk_workspace_changelog:entry_kind/1`'s own enum value verbatim
 %% (`'new-class'`, `'remove-class'`, `instance`, `class`, `'remove-method'`,
-%% `unknown`) — forwarded as-is rather than collapsed into a new taxonomy, so
-%% a consumer buckets it itself (the LSP: `'new-class'` -> `CreateFile`,
-%% `'remove-class'` -> `DeleteFile`, anything else -> an ordinary patch).
-%% `file_kind_map/1` builds each entry from the Phase B `#prepared{}` record.
+%% `'rename-class'`, `'rename-method'` (ADR 0114, BT-3275), `unknown`) —
+%% forwarded as-is rather than collapsed into a new taxonomy, so a consumer
+%% buckets it itself (the LSP: `'new-class'` -> `CreateFile`, `'remove-class'`
+%% -> `DeleteFile`, `'rename-class'` with an `oldFile` -> `RenameFile`,
+%% `'rename-method'` -> a `TextDocumentEdit` per confirmed site, anything
+%% else -> an ordinary patch). `file_kind_map/1` builds each entry from the
+%% Phase B `#prepared{}` record, adding `oldFile` (BT-3275) for the one
+%% `op = move` record a `'rename-class'` flush produces.
 %%
 %% Skipped for an empty file list (parity with `on_files_flushed/1`). Guarded
 %% by a `whereis` check (the announcements worker may be absent on a minimal
@@ -2658,9 +2662,24 @@ announce_flush_completed(Files, FileKinds) ->
 %% yields the same LSP-relevant bucket ("an ordinary patch"). Taking the
 %% first entry's `entry_kind/1` is therefore always representative, not just
 %% a convenient default.
+%%
+%% ADR 0114 LSP follow-up (BT-3275): `op = move`'s `old_file` is also
+%% forwarded as `oldFile` — the ONLY signal on the wire that distinguishes
+%% "this `'rename-class'`-kind file IS the moved declaration file" (needs a
+%% `RenameFile` resource operation) from "this `'rename-class'`-kind file is
+%% an ordinary same-batch reference rewrite in a file that didn't move"
+%% (needs an ordinary patch) — both share the same `kind` (`entry_kind/1`
+%% reports the owning entry's kind for every file it touches, not a
+%% per-file distinction). `op = move_noop` has no `old_file` (the move
+%% already completed in an earlier attempt — see the moduledoc's
+%% "Atomicity (class rename)" section) so it correctly degrades to the
+%% no-`oldFile` / ordinary-patch shape rather than re-emitting a `RenameFile`
+%% for an `old_path` that is already gone.
 -spec file_kind_map(#prepared{}) -> map().
-file_kind_map(#prepared{file = File, entries = [Entry | _]}) ->
-    #{file => File, kind => beamtalk_workspace_changelog:entry_kind(Entry)}.
+file_kind_map(#prepared{file = File, entries = [Entry | _], old_file = undefined}) ->
+    #{file => File, kind => beamtalk_workspace_changelog:entry_kind(Entry)};
+file_kind_map(#prepared{file = File, entries = [Entry | _], old_file = OldFile}) ->
+    #{file => File, kind => beamtalk_workspace_changelog:entry_kind(Entry), oldFile => OldFile}.
 
 %%% ----------------------------------------------------------------------------
 %%% Helpers

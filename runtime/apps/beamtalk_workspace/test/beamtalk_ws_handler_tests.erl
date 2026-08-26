@@ -716,6 +716,43 @@ flush_completed_normalises_file_kinds_test() ->
         Out
     ).
 
+%% ADR 0114 LSP follow-up (BT-3275): a `'rename-class'`-kind entry's
+%% `oldFile` round-trips as `"oldFile"`; a non-binary `oldFile` is dropped
+%% but the rest of the entry survives (degrades to the ordinary-patch
+%% shape rather than losing the whole entry).
+flush_completed_normalises_file_kinds_old_file_test() ->
+    FileKinds = [
+        #{
+            file => <<"src/accumulator.bt">>,
+            kind => 'rename-class',
+            oldFile => <<"src/counter.bt">>
+        },
+        #{file => <<"src/widget.bt">>, kind => 'rename-class'},
+        #{file => <<"src/gadget.bt">>, kind => 'rename-class', oldFile => not_a_binary}
+    ],
+    Event = #{
+        '$beamtalk_class' => 'FlushCompleted',
+        files => [<<"src/accumulator.bt">>, <<"src/widget.bt">>, <<"src/gadget.bt">>],
+        fileKinds => FileKinds
+    },
+    {Frames, _State} = beamtalk_ws_handler:websocket_info(
+        ann('FlushCompleted', Event), authed_state()
+    ),
+    Decoded = first_text(Frames),
+    Out = maps:get(<<"fileKinds">>, maps:get(<<"data">>, Decoded)),
+    ?assertEqual(
+        [
+            #{
+                <<"file">> => <<"src/accumulator.bt">>,
+                <<"kind">> => <<"rename-class">>,
+                <<"oldFile">> => <<"src/counter.bt">>
+            },
+            #{<<"file">> => <<"src/widget.bt">>, <<"kind">> => <<"rename-class">>},
+            #{<<"file">> => <<"src/gadget.bt">>, <<"kind">> => <<"rename-class">>}
+        ],
+        Out
+    ).
+
 %% ADR 0105 Phase 1 (BT-2779): the reload_check/completed push frame —
 %% `beamtalk_repl_loader:publish_recheck_outcome/5`'s `'ReloadCheckCompleted'`
 %% announcement, re-encoded as JSON.
