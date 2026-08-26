@@ -268,15 +268,23 @@ async function handleDocumentMoved(params: DocumentMovedParams): Promise<void> {
     { oldUri, newUri: newUri.toString() }
   );
 
-  // Close every matching tab first, then reopen the new path once per plan
-  // (one per closed tab). `preserveFocus: true` on the close keeps focus
-  // from jumping around mid-retarget; the explicit `showTextDocument` calls
-  // below focus the reopened tabs instead. `preview: false` keeps each
-  // reopened tab pinned rather than replacing whichever preview tab is
-  // already showing in that view column.
-  await vscode.window.tabGroups.close(matchingTabs, true);
-
-  for (const plan of plans) {
+  // Close each matching tab individually (rather than one batched
+  // `tabGroups.close(matchingTabs, ...)` call) so a `false` result can be
+  // attributed to the specific tab it belongs to — closing as a single
+  // array only reports one boolean for the whole batch, which loses which
+  // tab it refers to. `preserveFocus: true` keeps focus from jumping around
+  // mid-retarget; the explicit `showTextDocument` calls below focus the
+  // reopened tabs instead. A tab's close can come back `false` when the
+  // user is prompted to save a dirty file at `oldUri` and cancels — in that
+  // case the tab is left open as-is rather than also opening `newUri`
+  // alongside it, which would otherwise leave a stale dirty tab and a fresh
+  // tab side by side in the same view column.
+  for (const [index, tab] of matchingTabs.entries()) {
+    const closed = await vscode.window.tabGroups.close(tab, true);
+    if (!closed) {
+      continue;
+    }
+    const plan = plans[index];
     await vscode.window.showTextDocument(newUri, {
       viewColumn: plan.viewColumn,
       selection: plan.selection
