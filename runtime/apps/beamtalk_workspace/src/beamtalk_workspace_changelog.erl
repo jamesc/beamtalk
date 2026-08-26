@@ -1060,7 +1060,14 @@ entry_to_value(#entry{} = E, Survivors) ->
         active => Active,
         shadowed => Shadowed,
         clean => Clean,
-        diff => diff_value(Diff)
+        diff => diff_value(Diff),
+        %% ADR 0114 (BT-3269/BT-3284): `undefined` for every kind except
+        %% `'rename-class'` (`oldClass`) / `'rename-method'` (`oldSelector`)
+        %% — `selector_symbol/1` is a generic binary()|undefined -> atom()|nil
+        %% converter, reused here rather than duplicated for the class-name
+        %% case (it never inspects *which* field it was called for).
+        oldClass => selector_symbol(E#entry.old_class),
+        oldSelector => selector_symbol(E#entry.old_selector)
     }.
 
 %% nil for "no diff" (clean / not computable), so Beamtalk reads it as the nil

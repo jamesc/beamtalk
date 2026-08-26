@@ -566,6 +566,12 @@ classify_kind('class-def') -> entry;
 %% decides whether an in-scope Tier 2 entry is applied or reported skipped.
 classify_kind('remove-method') -> entry;
 classify_kind('remove-class') -> entry;
+%% ADR 0114 (BT-3269/BT-3271/BT-3273): `'rename-class'`/`'rename-method'`
+%% compose exactly like `'remove-class'`/`'remove-method'` — both are Tier 2
+%% (see `entry_tier/1`) and still need `confirmDestructive: true` to apply,
+%% but `flushKinds:` itself only narrows scope, same as every other kind.
+classify_kind('rename-class') -> entry;
+classify_kind('rename-method') -> entry;
 classify_kind(human) -> author;
 classify_kind(agent) -> author;
 classify_kind(_) -> unknown.
@@ -579,8 +585,8 @@ unknown_kind_error(Unknowns) ->
             Joined,
             <<
                 ". Allowed: #instance, #class, #'new-class', #'class-def', "
-                "#'remove-method', #'remove-class' (entry kinds); #human, #agent "
-                "(author kinds)"
+                "#'remove-method', #'remove-class', #'rename-class', "
+                "#'rename-method' (entry kinds); #human, #agent (author kinds)"
             >>
         ])
     ).
@@ -669,18 +675,23 @@ filter_entries(Entries, any) ->
 filter_entries(Entries, {class, ClassBin}) ->
     [E || E <- Entries, beamtalk_workspace_changelog:entry_class(E) =:= ClassBin];
 filter_entries(Entries, {selector, Sel}) when
-    Sel =:= 'new-class'; Sel =:= 'remove-method'; Sel =:= 'remove-class'
+    Sel =:= 'new-class';
+    Sel =:= 'remove-method';
+    Sel =:= 'remove-class';
+    Sel =:= 'rename-class';
+    Sel =:= 'rename-method'
 ->
-    %% `'new-class'`/`'remove-class'` entries carry selector: null; a
-    %% `'remove-method'` entry carries the real removed selector (e.g. #foo),
-    %% not null. Either way, filtering on the bare marker atom is meant to
-    %% mean "all removals/additions of this kind", not a literal selector
-    %% match — matching on entry_selector/1 would return nothing for the
+    %% `'new-class'`/`'remove-class'`/`'rename-class'` entries carry
+    %% selector: null; a `'remove-method'`/`'rename-method'` entry carries
+    %% the real removed/new selector (e.g. #foo), not null. Either way,
+    %% filtering on the bare marker atom is meant to mean "all removals/
+    %% additions/renames of this kind", not a literal selector match —
+    %% matching on entry_selector/1 would return nothing for the
     %% null-selector kinds and would only ever match a method coincidentally
-    %% named e.g. #'remove-method' for the other, so kind-matching is what
+    %% named e.g. #'remove-method' for the others, so kind-matching is what
     %% this filter form is actually for. Unlike `instance`/`class` (also
     %% valid kind() values, but ambiguous with real getter selectors of the
-    %% same name), none of these three collides with a plausible method
+    %% same name), none of these five collides with a plausible method
     %% selector, so redirecting them to kind-matching is unambiguous.
     [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= Sel];
 filter_entries(Entries, {selector, Sel}) ->

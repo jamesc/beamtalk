@@ -81,9 +81,10 @@ TestCase subclass: ChangeLogTest
         #active => true
       }
 
-  // A rename-class entry (ADR 0114, BT-3269): the class was renamed to
-  // Accumulator (no selector — a class-identity change, mirroring newClassEntry's
-  // shape).
+  // A rename-class entry (ADR 0114, BT-3269): Counter renamed to
+  // Accumulator. No selector (a class identity change, not a method-level
+  // edit, mirroring newClassEntry's shape); oldClass carries the pre-rename
+  // name.
   renameClassEntry =>
     ChangeEntry
       new: #{
@@ -91,6 +92,7 @@ TestCase subclass: ChangeLogTest
         #className => #Accumulator,
         #selector => nil,
         #kind => #'rename-class',
+        #oldClass => #Counter,
         #intent => #durable,
         #flushable => true,
         #authorKind => #human,
@@ -99,8 +101,9 @@ TestCase subclass: ChangeLogTest
         #active => true
       }
 
-  // A rename-method entry (ADR 0114, BT-3269): Counter>>increment was renamed
-  // to Counter>>incrementBy — `selector` holds the new name.
+  // A rename-method entry (ADR 0114, BT-3269): Counter>>increment was
+  // renamed to Counter>>incrementBy — `selector` holds the new name and
+  // `oldSelector` the pre-rename one.
   renameMethodEntry =>
     ChangeEntry
       new: #{
@@ -109,6 +112,7 @@ TestCase subclass: ChangeLogTest
         #selector => #incrementBy,
         #kind => #'rename-method',
         #side => #instance,
+        #oldSelector => #increment,
         #intent => #durable,
         #flushable => true,
         #authorKind => #human,
@@ -333,6 +337,9 @@ TestCase subclass: ChangeLogTest
 
   testMethodEntryIsNotRenameClass => self deny: self activeEntry isRenameClass
 
+  testRenameClassEntryOldClass =>
+    self assert: self renameClassEntry oldClass equals: #Counter
+
   testRenameMethodEntryIsRenameMethod =>
     self assert: self renameMethodEntry isRenameMethod
 
@@ -340,6 +347,9 @@ TestCase subclass: ChangeLogTest
 
   testRenameMethodEntryKind =>
     self assert: self renameMethodEntry kind equals: #'rename-method'
+
+  testRenameMethodEntryOldSelector =>
+    self assert: self renameMethodEntry oldSelector equals: #increment
 
   // --- printString ---
   testEntryPrintStringForMethodPatch =>
@@ -349,10 +359,10 @@ TestCase subclass: ChangeLogTest
     self assert: self newClassEntry printString equals: "DoubleCounter (new-class)"
 
   testEntryPrintStringForRenameClass =>
-    self assert: self renameClassEntry printString equals: "Accumulator (rename-class)"
+    self assert: self renameClassEntry printString equals: "Counter -> Accumulator (rename-class)"
 
   testEntryPrintStringForRenameMethod =>
-    self assert: self renameMethodEntry printString equals: "Counter>>incrementBy (rename-method)"
+    self assert: self renameMethodEntry printString equals: "Counter>>increment -> incrementBy (rename-method)"
 
   testEmptyLogPrintString =>
     self assert: self emptyLog printString equals: "ChangeLog with 0 entries"
@@ -388,6 +398,12 @@ TestCase subclass: ChangeLogTest
 
   testChangeEntryIncludesSelectorIsRemoveClass =>
     self assert: (ChangeEntry includesSelector: #isRemoveClass)
+
+  testChangeEntryIncludesSelectorIsRenameClass =>
+    self assert: (ChangeEntry includesSelector: #isRenameClass)
+
+  testChangeEntryIncludesSelectorIsRenameMethod =>
+    self assert: (ChangeEntry includesSelector: #isRenameMethod)
 
   // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---
   testWorkspaceIncludesSelectorAutoflush =>
