@@ -102,6 +102,7 @@ flush_test_() ->
         fun rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes/1,
         fun rename_class_mixed_with_ordinary_patch_is_conflict/1,
         fun rename_class_two_renames_colliding_on_new_path_is_conflict/1,
+        fun rename_class_new_path_collides_with_other_rename_old_path_is_conflict/1,
         fun rename_class_resumes_after_simulated_partial_phase_b/1,
         fun flush_two_rejects_non_boolean_confirm/1,
         fun flush_kinds_two_rejects_non_boolean_confirm/1,
@@ -2290,6 +2291,54 @@ rename_class_two_renames_colliding_on_new_path_is_conflict(#{proj_dir := ProjDir
         ?_assertEqual(true, filelib:is_regular(OldPath2)),
         ?_assertEqual(false, filelib:is_regular(SharedNewPath)),
         ?_assertEqual(false, filelib:is_regular(SharedNewPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2))
+    ].
+
+%% BT-3526 review round 2 Blocker: the write-vs-write guard above does not
+%% catch the more dangerous shape — entry A's `new_path` equal to entry B's
+%% `old_path`. Phase B's `move` commit unlinks `old_path` only AFTER its own
+%% `new_path.tmp` rename succeeds, so committing A (writes `bar.bt`) then B
+%% (unlinks its own `old_path`, `bar.bt`) would silently destroy the content
+%% A just wrote there — both entries would still report as cleanly flushed.
+%% This must be refused up front, exactly like the write-vs-write case.
+rename_class_new_path_collides_with_other_rename_old_path_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    SharedPath = filename:join([ProjDir, "src", "bar.bt"]),
+    NewPath2 = filename:join([ProjDir, "src", "baz.bt"]),
+    OldSource1 = <<"Object subclass: Foo\nend\n">>,
+    OldSource2 = <<"Object subclass: Bar\nend\n">>,
+    ok = file:write_file(OldPath1, OldSource1),
+    ok = file:write_file(SharedPath, OldSource2),
+    {DeclStart1, DeclEnd1, _} = locate(OldSource1, <<"Foo">>),
+    %% Entry A: Foo (foo.bt) -> X, writing its new content to SharedPath.
+    DeclSite1 = rename_site(list_to_binary(OldPath1), DeclStart1, DeclEnd1, <<"X">>, <<"Foo">>),
+    {DeclStart2, DeclEnd2, _} = locate(OldSource2, <<"Bar">>),
+    %% Entry B: Bar (SharedPath) -> Y, moving AWAY from the exact file A is
+    %% about to write into.
+    DeclSite2 = rename_site(list_to_binary(SharedPath), DeclStart2, DeclEnd2, <<"Y">>, <<"Bar">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"X">>, <<"Foo">>, list_to_binary(OldPath1), list_to_binary(SharedPath), [DeclSite1]
+        )
+    ),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Y">>, <<"Bar">>, list_to_binary(SharedPath), list_to_binary(NewPath2), [DeclSite2]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"mixed_rename_and_rename_edit">>, maps:get(reason, hd(Conflicts))),
+        %% Whole batch aborted — neither original file touched, and Bar's
+        %% real content (at SharedPath) was never clobbered or moved.
+        ?_assertEqual(true, filelib:is_regular(OldPath1)),
+        ?_assertEqual({ok, OldSource2}, file:read_file(SharedPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath2)),
+        ?_assertEqual(false, filelib:is_regular(SharedPath ++ ".tmp")),
         ?_assertNot(entry_flushed(Seq1)),
         ?_assertNot(entry_flushed(Seq2))
     ].

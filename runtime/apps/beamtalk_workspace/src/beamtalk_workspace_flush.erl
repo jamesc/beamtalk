@@ -1147,16 +1147,30 @@ rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) ->
 
 -doc """
 Suggestion from BT-3526 review: `rename_entry_ordinary_collision/3` only
-guards a rename-class entry's write-target files against *ordinary* pending
-entries — two rename-class entries whose own `rename_entry_all_files_to_write/1`
-sets happen to intersect (e.g. a future `new_path`-supplying producer, or two
-unrelated classes whose `derive_new_path/3` styles coincide — see the
-moduledoc's "Atomicity (class rename)" section) went unguarded, risking one
-rename's `.tmp` silently clobbering the other's. Unreachable today
-(`classRenameTo/2`'s own `ensure_rename_collision_free/2` refuses a second
-rename targeting a class name already live, which is what would be needed to
-co-pend two renames colliding on the SAME `new_path`) but defended
-proactively rather than left as a latent gap for the next producer.
+guards a rename-class entry's touched files against *ordinary* pending
+entries — two rename-class entries whose own files intersect (e.g. a future
+`new_path`-supplying producer, or two unrelated classes whose
+`derive_new_path/3` styles coincide — see the moduledoc's "Atomicity (class
+rename)" section) went unguarded, risking one rename's `.tmp` silently
+clobbering the other's. Unreachable today (`classRenameTo/2`'s own
+`ensure_rename_collision_free/2` refuses a second rename targeting a class
+name already live, which is what would be needed to co-pend two renames
+colliding on the SAME `new_path`) but defended proactively rather than left
+as a latent gap for the next producer.
+
+Compares each entry's FULL touched-file set (`rename_entry_all_files/1` —
+`old_path` included, not just write-targets) against the other's, on BOTH
+sides — a first fix here compared write-targets to write-targets only and
+missed the more dangerous shape review round 2 found: entry A's `new_path`
+equal to entry B's `old_path`. Since Phase B's `move` commit unlinks
+`old_path` only AFTER its own `new_path.tmp` rename succeeds, whichever of
+A/B commits second would delete the file the OTHER just wrote there —
+silently destroying a renamed class's content while both entries report as
+cleanly flushed. Using the full set on both sides catches this (and the
+symmetric case, B's `new_path` equal to A's `old_path`) in one check, the
+same way `rename_entry_ordinary_collision/3` already uses the full set for
+the rename side of its own (asymmetric, since an ordinary patch has no
+separate "old"/"new" path) guard.
 
 Checked pairwise, each unordered pair exactly once (`Rest` only ever holds
 entries *after* `Entry` in list order) — mirrors `rename_entry_ordinary_
@@ -1167,7 +1181,7 @@ rename instead of an ordinary group.
 rename_entry_rename_collisions([]) ->
     [];
 rename_entry_rename_collisions([Entry | Rest]) ->
-    Files = sets:from_list(rename_entry_all_files_to_write(Entry), [{version, 2}]),
+    Files = sets:from_list(rename_entry_all_files(Entry), [{version, 2}]),
     case rename_entry_rename_collision_with(Entry, Files, Rest) of
         {true, Conflict} -> [Conflict | rename_entry_rename_collisions(Rest)];
         false -> rename_entry_rename_collisions(Rest)
@@ -1178,7 +1192,7 @@ rename_entry_rename_collisions([Entry | Rest]) ->
 rename_entry_rename_collision_with(_Entry, _Files, []) ->
     false;
 rename_entry_rename_collision_with(Entry, Files, [Other | Rest]) ->
-    OtherFiles = sets:from_list(rename_entry_all_files_to_write(Other), [{version, 2}]),
+    OtherFiles = sets:from_list(rename_entry_all_files(Other), [{version, 2}]),
     case sets:to_list(sets:intersection(Files, OtherFiles)) of
         [] ->
             rename_entry_rename_collision_with(Entry, Files, Rest);
@@ -2061,8 +2075,11 @@ which is precisely what embeds the correct (new) `beamtalk_source` module
 attribute, closing the staleness gap at its root. It deliberately does NOT
 emit a `'class-def'` ChangeLog entry (see its own doc) so this never creates
 a fresh pending entry for a subsequent flush to trip over, and it does not
-touch the ChangeLog at all — this call sits entirely after `complete_flush/5`
-would run, so nothing here can race `mark_flushed/1`.
+touch the ChangeLog at all — this call runs inside `phase_b_loop/6`'s
+per-item recursion, right after each successful `commit/1` (so BEFORE
+`complete_flush/5`, which only runs once every `#prepared{}` has been
+processed), but since it never touches the ChangeLog either way, nothing
+here can race `mark_flushed/1` regardless of that ordering.
 """.
 -spec maybe_reload_renamed_class_source(#prepared{}) -> ok.
 maybe_reload_renamed_class_source(#prepared{op = Op, file = NewPath, entries = [Entry | _]}) when
