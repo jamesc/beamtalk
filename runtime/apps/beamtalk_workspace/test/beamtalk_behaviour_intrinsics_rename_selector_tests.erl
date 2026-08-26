@@ -261,10 +261,8 @@ setup_happy_with_changelog() ->
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    %% Mirrors `beamtalk_behaviour_intrinsics_rename_to_tests:setup_with_
-    %% changelog/0`'s identical entropy reasoning (`os:getpid/0` + a unique
-    %% integer, not the unique integer alone) — see that function's own doc.
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-selector-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rename-selector-changelog-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),
@@ -773,7 +771,8 @@ start_changelog(Fixture, Prefix) ->
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary(Prefix ++ "-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), Prefix ++ "-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),

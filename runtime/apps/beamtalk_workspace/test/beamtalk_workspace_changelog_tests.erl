@@ -1548,8 +1548,14 @@ rename_method_input() ->
 %% Create an isolated workspace: a unique id + a temp HOME so the changelog
 %% resolves its changes/ dir under our temp tree. Returns the prior HOME so it
 %% can be restored.
+%%
+%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: our
+%% own `load_from_disk` would otherwise restore a prior run's leftover
+%% `changes.jsonl` entries into this run's ETS table. This is the helper
+%% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
+%% `setup_with_changelog/0` (PR #3523) mirrors.
 fresh_workspace() ->
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-" ++ Unique),
     Tmp = filename:join(temp_dir(), "bt-changelog-" ++ Unique),
     ok = filelib:ensure_path(Tmp),

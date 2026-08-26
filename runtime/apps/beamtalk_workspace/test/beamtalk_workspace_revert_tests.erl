@@ -166,8 +166,12 @@ suite_teardown(_) ->
 %% Per-case: an isolated workspace (unique id + temp HOME/project) plus the
 %% changelog and meta gen_servers, with `project_path` pointing at the temp tree
 %% so files written there classify as in-project (flushable + revertable).
+%%
+%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: the
+%% changelog's own `load_from_disk` would otherwise restore a prior run's
+%% leftover `changes.jsonl` entries into this run's ETS table.
 case_setup() ->
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("revert-e2e-" ++ Unique),
     Tmp = filename:join(temp_dir(), "bt-revert-e2e-" ++ Unique),
     ok = filelib:ensure_path(Tmp),

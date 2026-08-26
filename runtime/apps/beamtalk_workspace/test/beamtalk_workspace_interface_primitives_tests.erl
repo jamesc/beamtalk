@@ -1285,8 +1285,12 @@ revert_via_object_keyed_map(_Ctx) ->
 
 %% Boot an isolated workspace: a temp HOME plus the changelog and meta
 %% gen_servers so the delegation paths run for real. Returns a context map.
+%%
+%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: the
+%% changelog's own `load_from_disk` would otherwise restore a prior run's
+%% leftover `changes.jsonl` entries into this run's ETS table.
 setup_changelog_ws() ->
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-wip-" ++ Unique),
     Tmp = filename:join(ws_temp_dir(), "bt-wip-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
