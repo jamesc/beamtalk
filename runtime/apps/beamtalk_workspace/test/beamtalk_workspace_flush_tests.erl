@@ -118,7 +118,11 @@ flush_test_() ->
         fun flush_kinds_two_rejects_non_boolean_confirm/1,
         %% BT-3212 (ADR 0113 LSP follow-up): per-file operation kind on the
         %% `FlushCompleted` wire payload
-        fun flush_announces_file_kinds_for_mixed_entries/1
+        fun flush_announces_file_kinds_for_mixed_entries/1,
+        %% BT-3275 (ADR 0114 LSP follow-up): `oldFile` on a `'rename-class'`
+        %% move, and per-site `'rename-method'` kinds, on the same payload
+        fun flush_announces_old_file_for_rename_class_move/1,
+        fun flush_announces_rename_method_kind_for_confirmed_sites/1
     ]}.
 
 unit_test_() ->
@@ -3453,6 +3457,148 @@ flush_announces_file_kinds_for_mixed_entries(#{proj_dir := ProjDir}) ->
             ?_assertEqual('new-class', KindOf(NewClassFile)),
             ?_assertEqual(instance, KindOf(PatchFile)),
             ?_assertEqual('remove-class', KindOf(RemoveFile))
+        ]
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% ADR 0114 LSP follow-up (BT-3275): a real `'rename-class'` flush's
+%% `fileKinds` entries distinguish the moved declaration file (kind
+%% `'rename-class'` PLUS `oldFile`, the file `file_kind_map/1` builds from the
+%% one `op = move` `#prepared{}` record) from the ordinary same-batch
+%% reference-rewrite file (kind `'rename-class'`, no `oldFile` — its own
+%% `#prepared{}` record has `op = write`) — the only signal on the wire that
+%% lets the LSP tell "this file needs a `RenameFile`" apart from "this file
+%% needs an ordinary patch" when both share the same entry kind.
+flush_announces_old_file_for_rename_class_move(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    RefPath = filename:join([ProjDir, "src", "widget.bt"]),
+    OldSource = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    RefSource = <<"Object subclass: Widget\n  makeCounter => Counter new\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    ok = file:write_file(RefPath, RefSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {RefStart, RefEnd, _} = locate(RefSource, <<"Counter new">>),
+    RefSite = rename_site(
+        list_to_binary(RefPath), RefStart, RefEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
+    ),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, RefSite]
+        )
+    ),
+    try
+        {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+        Event =
+            receive
+                {flush_evt, E} -> E
+            after 1000 -> ?assert(false)
+            end,
+        FileKinds = maps:get(fileKinds, Event),
+        EntryFor = fun(FilePath) ->
+            [M] = [M || M <- FileKinds, maps:get(file, M) =:= list_to_binary(FilePath)],
+            M
+        end,
+        MovedEntry = EntryFor(NewPath),
+        RefEntry = EntryFor(RefPath),
+        [
+            ?_assertEqual(1, maps:get(flushed, Summary)),
+            ?_assertEqual('rename-class', maps:get(kind, MovedEntry)),
+            ?_assertEqual(list_to_binary(OldPath), maps:get(oldFile, MovedEntry)),
+            ?_assertEqual('rename-class', maps:get(kind, RefEntry)),
+            ?_assertNot(maps:is_key(oldFile, RefEntry))
+        ]
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% ADR 0114 LSP follow-up (BT-3275): a real `'rename-method'` flush's
+%% `fileKinds` carries a `'rename-method'` entry for the definition site and
+%% every CONFIRMED sender site — never for a `candidate_sites` entry, which
+%% is never staged/written at all and so can never appear in `Files`/
+%% `fileKinds` in the first place.
+flush_announces_rename_method_kind_for_confirmed_sites(#{proj_dir := ProjDir}) ->
+    DefFile = filename:join([ProjDir, "src", "counter.bt"]),
+    SubFile = filename:join([ProjDir, "src", "sub_counter.bt"]),
+    CandidatePath = filename:join([ProjDir, "src", "widget.bt"]),
+    DefSource = <<
+        "Object subclass: Counter\n"
+        "  increment => self.value := self.value + 1\n"
+        "  bump => self increment\n"
+        "end\n"
+    >>,
+    SubSource = <<
+        "Counter subclass: SubCounter\n"
+        "  bumpTwice => super increment\n"
+        "end\n"
+    >>,
+    CandidateSource = <<"Object subclass: Widget\n  bump => aCounter increment\nend\n">>,
+    ok = file:write_file(DefFile, DefSource),
+    ok = file:write_file(SubFile, SubSource),
+    ok = file:write_file(CandidatePath, CandidateSource),
+    {DefStart, DefEnd, _} = locate(DefSource, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(DefFile), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {SuperStart, SuperEnd, _} = locate(SubSource, <<"super increment">>),
+    SuperSite = rename_site(
+        list_to_binary(SubFile),
+        SuperStart,
+        SuperEnd,
+        <<"super incrementBy">>,
+        <<"super increment">>
+    ),
+    {CandStart, CandEnd, _} = locate(CandidateSource, <<"increment">>),
+    CandidateSite = candidate_site(list_to_binary(CandidatePath), CandStart, CandEnd),
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
+    ),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>,
+            <<"incrementBy">>,
+            <<"increment">>,
+            instance,
+            [DefSite, SuperSite],
+            [CandidateSite]
+        )
+    ),
+    try
+        {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+        Event =
+            receive
+                {flush_evt, E} -> E
+            after 1000 -> ?assert(false)
+            end,
+        FileKinds = maps:get(fileKinds, Event),
+        KindsByFile = [{maps:get(file, M), maps:get(kind, M)} || M <- FileKinds],
+        [
+            ?_assertEqual(1, maps:get(flushed, Summary)),
+            ?_assertEqual(
+                {'rename-method', 'rename-method'},
+                {
+                    proplists:get_value(list_to_binary(DefFile), KindsByFile),
+                    proplists:get_value(list_to_binary(SubFile), KindsByFile)
+                }
+            ),
+            ?_assertEqual(
+                undefined, proplists:get_value(list_to_binary(CandidatePath), KindsByFile)
+            )
         ]
     after
         beamtalk_announcements:unsubscribe(SubRef)

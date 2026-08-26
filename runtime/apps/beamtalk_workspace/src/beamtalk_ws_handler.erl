@@ -247,19 +247,23 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% ADR 0082 Phase 3 (BT-2289); ADR 0113 LSP follow-up (BT-3212): Flush-
-%% completion push — broadcast after a `Workspace flush` writes one or more
-%% `.bt` source files. LSP clients use this to emit `workspace/applyEdit` so
-%% open editor buffers refresh against the new on-disk state. `files` is the
-%% list of absolute paths touched (written or removed); `fileKinds` is the
-%% BT-3212 per-file companion — one `{file, kind}` object per touched file,
-%% `kind` being `beamtalk_workspace_changelog:entry_kind/1`'s own wire value
-%% (`"new-class"`, `"remove-class"`, `"instance"`, `"class"`,
-%% `"remove-method"`) — so a consumer can classify `CreateFile` vs.
-%% `DeleteFile` vs. an ordinary patch before touching the filesystem, rather
-%% than inferring it from post-flush existence. Absent/empty on a producer
-%% that predates BT-3212 (defensive default `[]`), so an older runtime still
-%% degrades to the pre-BT-3212 existence-check fallback client-side.
+%% ADR 0082 Phase 3 (BT-2289); ADR 0113 LSP follow-up (BT-3212); ADR 0114 LSP
+%% follow-up (BT-3275): Flush-completion push — broadcast after a `Workspace
+%% flush` writes one or more `.bt` source files. LSP clients use this to emit
+%% `workspace/applyEdit` so open editor buffers refresh against the new
+%% on-disk state. `files` is the list of absolute paths touched (written or
+%% removed); `fileKinds` is the BT-3212 per-file companion — one
+%% `{file, kind}` object per touched file (plus an optional `oldFile`,
+%% BT-3275), `kind` being `beamtalk_workspace_changelog:entry_kind/1`'s own
+%% wire value (`"new-class"`, `"remove-class"`, `"instance"`, `"class"`,
+%% `"remove-method"`, `"rename-class"`, `"rename-method"`) — so a consumer
+%% can classify `CreateFile` vs. `DeleteFile` vs. `RenameFile` (the
+%% `"rename-class"` file that also carries `oldFile`) vs. a per-site
+%% `TextDocumentEdit` (`"rename-method"`) vs. an ordinary patch before
+%% touching the filesystem, rather than inferring it from post-flush
+%% existence. Absent/empty on a producer that predates BT-3212 (defensive
+%% default `[]`), so an older runtime still degrades to the pre-BT-3212
+%% existence-check fallback client-side.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'FlushCompleted', _Handler, Event},
     State = #ws_state{authenticated = true}
@@ -951,6 +955,15 @@ defensiveness. Defaults to `[]` for a producer that predates BT-3212 (the
 `Event` map simply has no `fileKinds` key), so an older runtime still degrades
 gracefully to an empty list here (the LSP's own existence-check fallback then
 takes over).
+
+ADR 0114 LSP follow-up (BT-3275): an entry may also carry `oldFile` — present
+only for the `'rename-class'`-kind file that is the actual moved declaration
+(`beamtalk_workspace_flush:file_kind_map/1`'s `op = move` case) — forwarded
+as `"oldFile"` when present so the LSP can distinguish that file (needs a
+`RenameFile`) from an ordinary same-batch `'rename-class'` reference rewrite
+(no `oldFile`, needs an ordinary patch). Non-binary `oldFile` is treated the
+same as absent rather than dropping the whole entry — the `file`/`kind` pair
+is still valid and useful degraded to the ordinary-patch shape.
 """.
 -spec normalise_file_kinds_for_push([term()]) -> [map()].
 normalise_file_kinds_for_push(FileKinds) when is_list(FileKinds) ->
@@ -959,10 +972,16 @@ normalise_file_kinds_for_push(_Other) ->
     [].
 
 -spec normalise_file_kind_entry(term()) -> {true, map()} | false.
-normalise_file_kind_entry(#{file := File, kind := Kind}) when
+normalise_file_kind_entry(#{file := File, kind := Kind} = Entry) when
     is_binary(File), is_atom(Kind)
 ->
-    {true, #{<<"file">> => File, <<"kind">> => atom_to_binary(Kind, utf8)}};
+    Base = #{<<"file">> => File, <<"kind">> => atom_to_binary(Kind, utf8)},
+    Out =
+        case maps:get(oldFile, Entry, undefined) of
+            OldFile when is_binary(OldFile) -> Base#{<<"oldFile">> => OldFile};
+            _ -> Base
+        end,
+    {true, Out};
 normalise_file_kind_entry(Other) ->
     ?LOG_WARNING(
         "flush_completed push: dropping malformed fileKinds entry",

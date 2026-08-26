@@ -1,0 +1,47 @@
+[
+  {
+    "wire": "new-class",
+    "rust_variant": "NewClass",
+    "why": "Workspace newClass:at: (ADR 0113, BT-3212) - CreateFile resource op"
+  },
+  {
+    "wire": "remove-class",
+    "rust_variant": "RemoveClass",
+    "why": "removeFromSystem (ADR 0113, BT-3209) - DeleteFile resource op"
+  },
+  {
+    "wire": "rename-class",
+    "rust_variant": "RenameClass",
+    "why": "renameTo:/moveClass:to: (ADR 0114, BT-3271/BT-3275) - RenameFile resource op for the moved file, ordinary patch for other same-batch reference rewrites"
+  },
+  {
+    "wire": "rename-method",
+    "rust_variant": "RenameMethod",
+    "why": "renameSelector:to: (ADR 0114, BT-3273/BT-3275) - TextDocumentEdit per confirmed site"
+  },
+  {
+    "wire": "instance",
+    "rust_variant": "Patch",
+    "why": "ordinary instance-side method patch (ADR 0082 Phase 3) - unchanged whole-document TextEdit"
+  },
+  {
+    "wire": "class",
+    "rust_variant": "Patch",
+    "why": "ordinary class-side method patch (ADR 0082 Phase 3) - unchanged whole-document TextEdit"
+  },
+  {
+    "wire": "class-def",
+    "rust_variant": "Patch",
+    "why": "whole-class redefinition via the cockpit :def tab (ADR 0082, BT-3248) - ordinary patch, not a new file"
+  },
+  {
+    "wire": "remove-method",
+    "rust_variant": "Patch",
+    "why": "method excision (ADR 0112, BT-3187) - the owning file still exists, so an ordinary patch"
+  },
+  {
+    "wire": "unknown",
+    "rust_variant": "Patch",
+    "why": "kind() is an open enum (ADR 0082) - an unrecognised value degrades to an ordinary patch, never a hard error"
+  }
+]
