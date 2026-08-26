@@ -40,6 +40,33 @@ definition, exercising the "two sites merge into one recompile" invariant),
 and one `super increment` send (`sub_counter.bt` — a different class in a
 different file). That is one definition site plus three reference sites
 across two files.
+
+## `meck` (BT-3280)
+
+The `partial_install_failure` and `stale_snapshot` cases below are the first
+use of `meck` anywhere in this codebase's test suite. Both need to inject a
+fault or a race at one specific, otherwise-untriggerable point inside
+`rewrite_sites/2`'s install pass — `partial_install_failure` needs
+`install_reload_result/2` (load + hot-reload) to fail on a binary that just
+compiled successfully (which essentially never happens naturally — see that
+function's own doc), and `stale_snapshot` needs a second writer's edit to
+land in the exact gap between one class-group's validation and that same
+group's own install turn, which a real concurrent process can never be
+reliably scheduled into inside a deterministic test. `meck:new(?MODULE,
+[passthrough])` against `beamtalk_repl_loader` itself, mocking only
+`install_reload_result/2` (`beamtalk_repl_loader.erl`'s `install_rewrite_group/7`
+calls it as `?MODULE:install_reload_result/2` specifically so this can
+intercept it — a local call would bypass meck's module-replacement
+entirely), was chosen deliberately over the alternatives: mocking a shared
+system module like `code` or `file` would risk destabilizing every other
+test in the same `rebar3 eunit` run (those modules are used everywhere,
+including by EUnit itself), and a hand-rolled test double for
+`beamtalk_repl_loader` would mean these tests no longer exercise the real
+`compile_reload_source/4` → `install_reload_result/2` call chain this
+module's other tests specifically exist to cover (see this moduledoc's own
+opening paragraph). Scoping the mock to this one module's one function, with
+`meck:passthrough/1` for every other call, keeps that real-chain coverage
+for everything except the single point under test.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -635,4 +662,249 @@ validate_sites_validation_failure(#{counter_path := CounterPath, sub_counter_pat
                 "Counter new increment", beamtalk_repl_state:new(undefined, 0)
             )
         )
+    ].
+
+%%====================================================================
+%% Shared site-builder for "rename increment -> incrementBy across all 4
+%% sites" (BT-3280) — the exact rename `rewrite_sites_success_test_` above
+%% also builds inline; extracted here rather than copied a further time
+%% (CLAUDE.md's no-duplicate-implementations rule) since both new test cases
+%% below need it.
+%%====================================================================
+
+rename_increment_sites(#{counter_path := CounterPath, sub_counter_path := SubCounterPath}) ->
+    CounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [DefSpan, RefSpan1, RefSpan2] = word_spans(CounterSource, <<"increment">>),
+    [SubRefSpan] = word_spans(SubCounterSource, <<"increment">>),
+    DefinitionSite = #{
+        class => <<"Counter">>,
+        source_file => list_to_binary(CounterPath),
+        span => DefSpan,
+        new_text => <<"incrementBy">>
+    },
+    ReferenceSites = [
+        #{
+            class => <<"Counter">>,
+            source_file => list_to_binary(CounterPath),
+            span => RefSpan1,
+            new_text => <<"incrementBy">>
+        },
+        #{
+            class => <<"Counter">>,
+            source_file => list_to_binary(CounterPath),
+            span => RefSpan2,
+            new_text => <<"incrementBy">>
+        },
+        #{
+            class => <<"SubCounter">>,
+            source_file => list_to_binary(SubCounterPath),
+            span => SubRefSpan,
+            new_text => <<"incrementBy">>
+        }
+    ],
+    {DefinitionSite, ReferenceSites}.
+
+teardown_with_meck(Fixture) ->
+    meck:unload(beamtalk_repl_loader),
+    teardown(Fixture).
+
+%%====================================================================
+%% partial_install_failure path (BT-3280): validation passes for EVERY
+%% group, but the later install_reload_result/2 call for one specific group
+%% fails — see this moduledoc's "meck" section for why meck is used here at
+%% all, and why it is scoped to this one module and function.
+%%====================================================================
+
+rewrite_sites_partial_install_failure_test_() ->
+    {setup, fun setup_with_install_fault/0, fun teardown_with_meck/1,
+        fun rewrite_sites_partial_install_failure/1}.
+
+setup_with_install_fault() ->
+    Fixture = setup(),
+    meck:new(beamtalk_repl_loader, [passthrough]),
+    %% Fail only SubCounter's own group install — Counter's group (processed
+    %% first; see group_sites_by_class/1's first-seen-class-order doc) still
+    %% installs for real via meck:passthrough/1, so this batch genuinely
+    %% partially applies rather than failing on its very first group.
+    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+        case filename:basename(LoadPath) of
+            "sub_counter.bt" -> {error, {injected_fault, load_binary_anomaly}};
+            _ -> meck:passthrough([Compiled, LoadPath])
+        end
+    end),
+    Fixture.
+
+rewrite_sites_partial_install_failure(Fixture) ->
+    {DefinitionSite, ReferenceSites} = rename_increment_sites(Fixture),
+    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    NewCounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSourceAfter = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [
+        ?_assertMatch(
+            {error, {partial_install_failure, <<"SubCounter">>, _, [<<"Counter">>]}}, Result
+        ),
+        %% Counter's group installed successfully BEFORE SubCounter's own
+        %% install call failed — its tracked source (and live module) already
+        %% reflect the rename. This is the documented, bounded partial-
+        %% application case, not equivalent to a clean validation-phase abort.
+        ?_assertEqual(3, length(word_spans(NewCounterSource, <<"incrementBy">>))),
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Counter new incrementBy", beamtalk_repl_state:new(undefined, 0)
+            )
+        ),
+        %% SubCounter's own group never installed — its tracked source is
+        %% byte-for-byte untouched (no "incrementBy" landed in it)...
+        ?_assertEqual(0, length(word_spans(SubCounterSourceAfter, <<"incrementBy">>))),
+        %% ...and its live `bump` method (still `super increment`) now fails,
+        %% since Counter no longer understands the old selector — exactly the
+        %% half-applied state `partial_install_failure`'s own doc describes,
+        %% not a silently-swallowed error.
+        ?_assertMatch(
+            {error, _, _, _, _},
+            beamtalk_repl_eval:do_eval("SubCounter new bump", beamtalk_repl_state:new(undefined, 0))
+        )
+    ].
+
+%%====================================================================
+%% Stale-snapshot detection (BT-3280): a concurrent writer's edit to a
+%% class's tracked source lands in the window between `build_class_group/2`'s
+%% own snapshot of that class (taken up front, before ANY group in this
+%% batch validates) and that SAME class's own turn to install, later in this
+%% same install loop. Reuses the `partial_install_failure` test's meck seam
+%% purely as a hook point to inject the concurrent write at the right moment
+%% (right after Counter's own group installs, immediately before
+%% SubCounter's own install turn) — Counter's own install call still passes
+%% through for real, nothing about it is faulted.
+%%====================================================================
+
+rewrite_sites_stale_snapshot_test_() ->
+    {setup, fun setup_with_concurrent_write/0, fun teardown_with_meck/1,
+        fun rewrite_sites_stale_snapshot/1}.
+
+%% The "concurrent session's" own edit to SubCounter — deliberately NOT
+%% derived from this test's own rename (a genuinely independent change, the
+%% same way an unrelated session's edit would be).
+concurrent_sub_counter_source() ->
+    <<
+        "Counter subclass: SubCounter\n"
+        "  bump -> Integer => super increment\n"
+        "  // edited by a concurrent session between this batch's own\n"
+        "  // validation and SubCounter's own install turn (BT-3280)"
+    >>.
+
+setup_with_concurrent_write() ->
+    Fixture = setup(),
+    meck:new(beamtalk_repl_loader, [passthrough]),
+    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+        Result = meck:passthrough([Compiled, LoadPath]),
+        case filename:basename(LoadPath) of
+            "counter.bt" ->
+                %% Simulate a second session's independent, successful edit to
+                %% SubCounter's tracked source landing right after Counter's
+                %% own group installs but before SubCounter's own group gets
+                %% its turn — exactly the race rewrite_sites/2's doc (point 4)
+                %% describes. Not a fault injection: this write itself
+                %% succeeds; it is `install_rewrite_groups/3`'s own
+                %% `class_source_unchanged/1` check against SubCounter's now-
+                %% stale snapshot that must catch it.
+                beamtalk_workspace_meta:set_class_source(
+                    <<"SubCounter">>, binary_to_list(concurrent_sub_counter_source())
+                );
+            _ ->
+                ok
+        end,
+        Result
+    end),
+    Fixture.
+
+rewrite_sites_stale_snapshot(Fixture) ->
+    {DefinitionSite, ReferenceSites} = rename_increment_sites(Fixture),
+    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    NewCounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    SubCounterSourceAfter = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"SubCounter">>)
+    ),
+    [
+        %% A distinct error from `partial_install_failure` — a caller (and
+        %% its ChangeLog bookkeeping) must be able to tell "cleanly rejected,
+        %% safely retryable" apart from "a documented bounded partial
+        %% application happened".
+        ?_assertMatch({error, {stale_snapshot, <<"SubCounter">>}}, Result),
+        %% Counter's own group is unaffected by the race on SubCounter and
+        %% still installed for real.
+        ?_assertEqual(3, length(word_spans(NewCounterSource, <<"incrementBy">>))),
+        %% SubCounter's tracked source is EXACTLY the concurrent session's own
+        %% edit — this batch's own precomputed (now-stale) new_source for
+        %% SubCounter was never written over it. This is the "no silent
+        %% overwrite / no lost update" guarantee BT-3280 exists to add: a
+        %% pre-fix implementation would have clobbered this with
+        %% "...bump -> Integer => super incrementBy" instead, silently
+        %% discarding the concurrent session's own edit.
+        ?_assertEqual(concurrent_sub_counter_source(), SubCounterSourceAfter)
+    ].
+
+%%====================================================================
+%% Stale-snapshot detection, class-removed variant (BT-3280): the OTHER way
+%% a class's tracked source can stop matching its snapshot — not edited but
+%% REMOVED entirely (e.g. a concurrent `removeFromSystem`), which
+%% `beamtalk_workspace_meta:get_class_source/1` reports as `undefined`
+%% rather than a changed binary. `class_source_unchanged/1` has a dedicated
+%% clause for this (`undefined -> false`) that the edited-source variant
+%% above never exercises, since that test's concurrent write always leaves
+%% SOME source behind — this is the only test in this suite that reaches it.
+%%====================================================================
+
+rewrite_sites_stale_snapshot_removed_test_() ->
+    {setup, fun setup_with_concurrent_removal/0, fun teardown_with_meck/1,
+        fun rewrite_sites_stale_snapshot_removed/1}.
+
+setup_with_concurrent_removal() ->
+    Fixture = setup(),
+    meck:new(beamtalk_repl_loader, [passthrough]),
+    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+        Result = meck:passthrough([Compiled, LoadPath]),
+        case filename:basename(LoadPath) of
+            "counter.bt" ->
+                %% Simulate a concurrent `removeFromSystem` on SubCounter
+                %% landing in the same gap the edited-source variant's own
+                %% setup describes — this time removing its tracked source
+                %% outright rather than replacing it.
+                beamtalk_workspace_meta:remove_class_source(<<"SubCounter">>);
+            _ ->
+                ok
+        end,
+        Result
+    end),
+    Fixture.
+
+rewrite_sites_stale_snapshot_removed(Fixture) ->
+    {DefinitionSite, ReferenceSites} = rename_increment_sites(Fixture),
+    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    NewCounterSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"Counter">>)
+    ),
+    [
+        %% Same distinct, cleanly-detected error as the edited-source variant
+        %% — a removed class is exactly as unsafe to install over as a
+        %% changed one, not a crash or a silent no-op.
+        ?_assertMatch({error, {stale_snapshot, <<"SubCounter">>}}, Result),
+        %% Counter's own group is unaffected and still installed for real.
+        ?_assertEqual(3, length(word_spans(NewCounterSource, <<"incrementBy">>))),
+        %% SubCounter has no tracked source at all — confirming the batch's
+        %% own stale `new_source` was never written back into existence
+        %% under it.
+        ?_assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"SubCounter">>))
     ].
