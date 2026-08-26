@@ -2983,10 +2983,17 @@ sites_or_undefined(Sites) when is_list(Sites) -> Sites.
 ) -> {ok, [revert_site()]} | {error, term()}.
 resolve_revert_sites([], _ClassMap, Acc) ->
     {ok, lists:reverse(Acc)};
-resolve_revert_sites([{_Index, undefined} | Rest], ClassMap, Acc) ->
+resolve_revert_sites([{0, undefined} | Rest], ClassMap, Acc) ->
     %% `sites[0] = null`: the dynamic-class "no declaration site" case — never
     %% legitimately anywhere else in the list (ADR 0114 § ChangeLog schema).
     resolve_revert_sites(Rest, ClassMap, Acc);
+resolve_revert_sites([{_Index, undefined} | _Rest], _ClassMap, _Acc) ->
+    %% An `undefined` site past index 0 would violate the invariant the
+    %% clause above relies on — refuse loudly (this module's own convention
+    %% elsewhere: `verify_current_spans/1`, `check_no_external_drift/3`, ...)
+    %% rather than silently under-reverting one site. Unreachable under every
+    %% current ChangeLog producer; a defensive backstop, not a live path.
+    {error, revert_site_unexpectedly_undefined};
 resolve_revert_sites([{Index, Site} | Rest], ClassMap, Acc) ->
     case resolve_revert_site(Site, ClassMap, Index =:= 0) of
         {ok, Resolved} -> resolve_revert_sites(Rest, ClassMap, [Resolved | Acc]);
