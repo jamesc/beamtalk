@@ -2426,7 +2426,7 @@ discover_rename_selector_sites(
                 end,
             case
                 confirmed_owners_already_defining(
-                    ConfirmedSelfSuper, NewSelector, IsClassSide
+                    ConfirmedSelfSuper, HierarchySet, ClassName, NewSelector, IsClassSide
                 )
             of
                 [] ->
@@ -2442,33 +2442,45 @@ discover_rename_selector_sites(
             end
     end.
 
-%% Review finding on PR #3529: a confirmed self/super site is about to be
-%% rewritten to send `NewSelector` instead of `OldSelector` — but if the
-%% OWNER of that site already independently defines `NewSelector` on the
-%% SAME side, post-rewrite dispatch resolves to THAT pre-existing method
-%% (ADR 0032 chain-walk dispatch stops at the first class defining the
-%% selector, starting from the receiver's own class) rather than to the
-%% just-renamed definition — a silent behavior change with no error. This
-%% is the exact class of bug the override-freedom check above already
-%% prevents for `OldSelector`; the identical reasoning applies to
-%% `NewSelector`, just not spelled out by the ADR text.
+%% Review finding on PR #3529 (round 2): a confirmed self/super site is
+%% about to be rewritten to send `NewSelector` instead of `OldSelector` —
+%% but `self`/`super` dispatch is LATE-BOUND to the runtime receiver's
+%% actual class, which can be ANY class in `HierarchySet`, not just the
+%% confirmed site's own textual owner (this is the identical late-binding
+%% fact `selector_override_free/4`'s own doc already relies on for
+%% `OldSelector`). A subclass that merely INHERITS a confirmed self-send
+%% without declaring one of its own — and independently already defines
+%% `NewSelector` — would slip through an owner-scoped check entirely: round
+%% 1's fix (checking only `ConfirmedSelfSuper`'s owners) missed exactly
+%% this case. Fixed by scanning the SAME `HierarchySet` `selector_override_
+%% free/4` scans, not just the sites' owners — mirroring that function
+%% arm-for-arm, applied to `NewSelector` instead of `OldSelector`.
 %%
-%% `beamtalk_xref:implementors_of/1` — the SAME query `selector_override_
-%% free/4` already uses for `OldSelector` — answers this directly: does any
-%% CONFIRMED site's owner already implement `NewSelector` on this side?
-%% `ClassName` itself is not re-checked here (already refused earlier by
-%% `ensure_rename_selector_collision_free/2`, step 2 of `rename_selector/3`
-%% — this only needs to cover the confirmed REFERENCE sites' owners, a
-%% strict subset of what step 2 doesn't already see).
--spec confirmed_owners_already_defining([map()], atom(), boolean()) -> [atom()].
-confirmed_owners_already_defining(ConfirmedSelfSuper, NewSelector, IsClassSide) ->
-    ConfirmedOwners = sets:from_list([Owner || #{owner := Owner} <- ConfirmedSelfSuper]),
+%% Gated on `ConfirmedSelfSuper =/= []`: when override-freedom already
+%% failed for `OldSelector` (`ConfirmedSelfSuper = []`), no reference site
+%% will be rewritten at all — only the definition, which `ensure_rename_
+%% selector_collision_free/2` (step 2 of `rename_selector/3`) already
+%% guards against `ClassName` itself — so scanning the whole hierarchy in
+%% that branch would only produce spurious refusals for renames that touch
+%% nothing outside the definition.
+%%
+%% `ClassName` itself is excluded (`Cls =/= ClassName`) for the same reason
+%% `selector_override_free/4` excludes it from its own override scan:
+%% already covered by step 2's check, not this one's job to repeat.
+-spec confirmed_owners_already_defining([map()], sets:set(atom()), atom(), atom(), boolean()) ->
+    [atom()].
+confirmed_owners_already_defining([], _HierarchySet, _ClassName, _NewSelector, _IsClassSide) ->
+    [];
+confirmed_owners_already_defining(
+    _ConfirmedSelfSuper, HierarchySet, ClassName, NewSelector, IsClassSide
+) ->
     Implementors = beamtalk_xref:implementors_of(NewSelector),
     lists:usort([
         Cls
      || {Cls, CS} <- Implementors,
         CS =:= IsClassSide,
-        sets:is_element(Cls, ConfirmedOwners)
+        Cls =/= ClassName,
+        sets:is_element(Cls, HierarchySet)
     ]).
 
 -spec is_self_or_super_site(map()) -> boolean().

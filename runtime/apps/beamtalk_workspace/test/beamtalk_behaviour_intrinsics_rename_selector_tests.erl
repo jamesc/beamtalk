@@ -447,6 +447,73 @@ rename_selector_target_collision(_Fixture) ->
     end.
 
 %%====================================================================
+%% Target-selector collision one level further down the inheritance chain
+%% (review finding on PR #3529, round 2): the colliding subclass does NOT
+%% itself send the renamed selector at all — it merely INHERITS the base
+%% class's confirmed self-send unchanged. Since `self` dispatch is
+%% late-bound to the runtime receiver's actual class (not the confirmed
+%% site's own textual owner), this must still be refused: an owner-scoped
+%% check (round 1's fix) would miss it entirely.
+%%====================================================================
+
+inherited_target_collision_base_source() ->
+    <<
+        "Value subclass: Bt3279InheritedTCollisionBase\n"
+        "  bump -> String => \"bumped\"\n"
+        "  increment -> String => self bump"
+    >>.
+
+inherited_target_collision_sub_source() ->
+    <<
+        "Bt3279InheritedTCollisionBase subclass: Bt3279InheritedTCollisionSub\n"
+        %% No override of `increment` or `bump`, and no self/super send of
+        %% `bump` of its own — `increment` is inherited unchanged.
+        "  boost -> String => \"pre-existing, unrelated\""
+    >>.
+
+rename_selector_inherited_target_collision_test_() ->
+    {setup, fun setup_inherited_target_collision/0, fun teardown_inherited_target_collision/1,
+        fun rename_selector_inherited_target_collision/1}.
+
+setup_inherited_target_collision() ->
+    start_fixture("bt3279-itcollision", [
+        {"bt3279_itcollision_base.bt", inherited_target_collision_base_source()},
+        {"bt3279_itcollision_sub.bt", inherited_target_collision_sub_source()}
+    ]).
+
+teardown_inherited_target_collision(_Fixture) ->
+    stop_classes(['Bt3279InheritedTCollisionBase', 'Bt3279InheritedTCollisionSub']),
+    stop_meta().
+
+rename_selector_inherited_target_collision(_Fixture) ->
+    try
+        beamtalk_behaviour_intrinsics:classRenameSelector(
+            class_object('Bt3279InheritedTCollisionBase'), bump, boost
+        ),
+        [?_assert(false)]
+    catch
+        error:#{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = Kind, message = Message}
+        } ->
+            [
+                ?_assertEqual(selector_already_exists, Kind),
+                ?_assert(
+                    binary:match(Message, <<"Bt3279InheritedTCollisionSub">>) =/= nomatch
+                ),
+                %% Nothing was mutated: the refusal happens before any rewrite.
+                ?_assertEqual(
+                    inherited_target_collision_base_source(),
+                    tracked_source(<<"Bt3279InheritedTCollisionBase">>)
+                ),
+                ?_assertEqual(
+                    inherited_target_collision_sub_source(),
+                    tracked_source(<<"Bt3279InheritedTCollisionSub">>)
+                )
+            ]
+    end.
+
+%%====================================================================
 %% `renameSelector:to:ifAbsent:` runs the block when OldSelector is absent.
 %%====================================================================
 
