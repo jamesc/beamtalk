@@ -515,6 +515,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:save_error, nil)
       |> assign(:flush_result, nil)
       |> assign(:flush_error, nil)
+      # BT-2588: one-shot flag `compile_clean/3` arms on a successful save and
+      # `resync_active_tab/2` consumes — see that function's docs.
+      |> assign(:save_echo_pending, false)
       # System Browser (BT-2491, epic BT-2482 Phase 2): the left-column
       # class → protocol → method navigator, driven by the BT-2488 browse ops
       # (ADR 0096) through the read-only facade. `browser_view` toggles the class
@@ -4595,7 +4598,29 @@ defmodule BtAttachWeb.WorkspaceLive do
   # active tab's fields so its breadcrumb/badges/doc block re-render from the
   # refreshed entry. A dirty active tab is untouched above, so this never disturbs
   # an edit.
+  #
+  # BT-2588: also decides whether to keep or clear the save/flush banners, via
+  # TWO signals combined:
+  #
+  #   * `:save_echo_pending` — a one-shot flag `compile_clean/3` arms on a
+  #     successful save, consumed here on EVERY call (so a stale `true` from an
+  #     earlier save can never leak into a later, unrelated refresh). Unset ⇒
+  #     this push is definitely not our own save's echo — clear unconditionally.
+  #   * for a `:method` tab, whether the re-read body actually changed. Even
+  #     when the flag IS set, BT-2600's coalescing can fold a genuinely
+  #     external change into the SAME debounced push as our own save's echo
+  #     (two `ClassLoaded` events landing within the same ~60ms window collapse
+  #     to one `:do_source_refresh`) — the body comparison catches that case.
+  #     Skipped for `:def`: `refresh_source_tab/2` never re-reads a `:def`
+  #     tab's editable definition body (only its doc/modifiers), so the
+  #     comparison would be vacuously "unchanged" on every push and could never
+  #     legitimately clear a `:def` tab's banner — the flag alone decides
+  #     there, same narrow coalescing blind spot as any other single-signal
+  #     check, self-healing on the next tab switch or save.
   defp resync_active_tab(socket, tabs) do
+    save_echo? = socket.assigns[:save_echo_pending]
+    socket = assign(socket, :save_echo_pending, false)
+
     case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
       %{dirty: false} = active ->
         # BT-2655: if the re-read changed the active tab's *body* (a git revert, a
@@ -4603,19 +4628,13 @@ defmodule BtAttachWeb.WorkspaceLive do
         # host is re-keyed and remounts with the new source. A no-op re-read (same
         # body) leaves the rev — and thus the live editor instance — untouched, so a
         # routine refresh of an unchanged tab never disturbs the editor.
-        #
-        # BT-2588: the same "did the body actually change" test also decides
-        # whether to keep the save/flush banners. Unchanged body ⇒ this push is
-        # the echo of the local save that just set `save_result` (the class
-        # reload it triggers) — keep the banner (`sync_active_fields/2`).
-        # Changed body ⇒ a genuine out-of-band change (a git revert, another
-        # session's flush, an MCP edit) landed underneath a stale banner from an
-        # earlier, unrelated action — clear it (`sync_active/2`), same as an
-        # explicit tab switch would.
-        body_unchanged? = active.source == socket.assigns[:edit_source]
         socket = maybe_bump_editor_rev(socket, active.source)
 
-        if body_unchanged? do
+        keep_banner? =
+          save_echo? and
+            (active.kind != :method or active.source == socket.assigns[:edit_source])
+
+        if keep_banner? do
           sync_active_fields(socket, active)
         else
           sync_active(socket, active)
@@ -6730,7 +6749,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp compile_clean(socket, "", _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
-    update_active_tab_by_id(socket, tab_id, fn tab ->
+    socket
+    |> update_active_tab_by_id(tab_id, fn tab ->
       %{
         tab
         | source: source,
@@ -6739,6 +6759,15 @@ defmodule BtAttachWeb.WorkspaceLive do
           disk_differs: compiled_disk_differs(tab, source)
       }
     end)
+    # BT-2588: this tab was just cleanly compiled — the class-reload notification
+    # this save itself triggers will arrive back as a coalesced `:do_source_refresh`
+    # push shortly after (BT-2600). Arm the flag `resync_active_tab/2` consumes to
+    # recognise THAT SPECIFIC push as its own echo (keep the banner) rather than a
+    # later, genuinely external change (clear it) — see the flag's definition for
+    # why comparing the tab's re-read body isn't a reliable enough signal on its
+    # own (it's blind for `:def` tabs, whose editable body a push refresh never
+    # re-reads at all).
+    |> assign(:save_echo_pending, true)
   end
 
   # Whether a just-compiled `:method` body diverges from its on-disk counterpart.

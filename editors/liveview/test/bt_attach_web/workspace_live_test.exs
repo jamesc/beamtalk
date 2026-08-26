@@ -441,15 +441,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert refreshed_html =~ "Saved value on #{class}"
   end
 
-  # BT-2588 (adversarial review follow-up): `resync_active_tab/2` now keeps the
-  # save banner across a push refresh whenever the tab's body didn't change —
-  # but a refresh that DOES change the body (a git revert, another session's
-  # flush, an MCP edit, or here: a direct eval recompile bypassing this
-  # LiveView's own `compile_clean/3`) must still clear a stale banner from an
-  # earlier, now-superseded save, exactly as an explicit tab switch would.
-  # Without the `body_unchanged?` guard in `resync_active_tab/2`, the naive fix
-  # for the race above would leave a WRONG banner sitting over changed content,
-  # not just a lingering one.
+  # BT-2588 (adversarial review follow-up): `resync_active_tab/2` keeps the save
+  # banner only when `:save_echo_pending` is set AND (for a `:method` tab) the
+  # re-read body still matches what was saved — this test constructs the case
+  # where BOTH the local save's own echo AND a real external change coalesce
+  # into the SAME push refresh (a direct eval recompile here, entirely
+  # bypassing this LiveView's own `compile_clean/3`), which the flag alone
+  # cannot distinguish. Without the body check, the flag-only fix would leave a
+  # WRONG banner sitting over changed content, not just a lingering one.
   test "a genuine out-of-band change clears a stale banner instead of leaving it stuck (BT-2588)",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
@@ -494,6 +493,43 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     refute refreshed_html =~ "Saved value on #{class}"
     assert refreshed_html =~ "self.value + 999"
+  end
+
+  # BT-2588 (review-bot follow-up): `refresh_source_tab/2`'s `:def` clause never
+  # re-reads a class-definition tab's editable body (only doc/modifiers — see
+  # its docs), so comparing bodies is meaningless for `:def` tabs: it is always
+  # "unchanged", trivially passing the echo case AND vacuously "passing" a
+  # stale-banner-never-clears bug the same way. The real test is a SECOND,
+  # later push after the echo's own `:save_echo_pending` has been consumed —
+  # only `resync_active_tab/2`'s flag check (not a body comparison, which is
+  # blind here) correctly clears the now-stale banner then.
+  test "a class-definition tab's banner survives its own echo but clears on the next unrelated push (BT-2588)",
+       %{conn: conn} do
+    {view, _html, class} = open_fresh_def_tab(conn)
+
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "tab" => "def:#{class}",
+        "class" => class,
+        "selector" => "▸ class definition",
+        "source" => "Actor subclass: #{class}\n  state: value = 0\n\n  value => self.value + 1"
+      })
+
+    assert save_html =~ "Compiled #{class}"
+
+    # First push: the save's own echo — the banner must survive it.
+    send(view.pid, :do_source_refresh)
+    echo_html = render(view)
+    assert echo_html =~ "Compiled #{class}"
+
+    # Second push: nothing else changed, but this is no longer the echo (the
+    # flag was already consumed above) — an unrelated later reload elsewhere
+    # in the image must not leave this tab's now-stale banner up forever.
+    send(view.pid, :do_source_refresh)
+    later_html = render(view)
+    refute later_html =~ "Compiled #{class}"
   end
 
   test "method editor: an invalid edit renders a structured error (BT-2409)", %{conn: conn} do
