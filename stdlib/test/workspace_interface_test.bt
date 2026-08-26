@@ -32,6 +32,15 @@ TestCase subclass: WorkspaceInterfaceTest
   testIncludesSelectorNewClassAt =>
     self assert: (WorkspaceInterface includesSelector: #newClass:at:)
 
+  // ADR 0114 Phase 2 (BT-3272): pure file-move facade method. Like
+  // `newClass:at:` above, the live success/refusal paths need a project
+  // tree + real class objects and are covered in
+  // beamtalk_repl_loader_move_class_tests (EUnit) — the `Workspace` singleton
+  // is not available in this BUnit context (see this file's own header
+  // comment), so BUnit only verifies the selector is present on the facade.
+  testIncludesSelectorMoveClassTo =>
+    self assert: (WorkspaceInterface includesSelector: #moveClass:to:)
+
   // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic
   // rename + external-edit detection are covered in the
   // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the
