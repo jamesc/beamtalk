@@ -362,8 +362,7 @@ TestCase subclass: ChangeLogTest
     self assert: self renameClassEntry printString equals: "Counter -> Accumulator (rename-class)"
 
   testEntryPrintStringForRenameMethod =>
-    self assert: self renameMethodEntry printString
-      equals: "Counter>>increment -> incrementBy (rename-method)"
+    self assert: self renameMethodEntry printString equals: "Counter>>increment -> incrementBy (rename-method)"
 
   testEmptyLogPrintString =>
     self assert: self emptyLog printString equals: "ChangeLog with 0 entries"
