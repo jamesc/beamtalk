@@ -2791,12 +2791,66 @@ classes' sources rather than one file. Ordinary method-patch revert
 revert_rename_sites(Entry) ->
     case build_revert_sites(Entry) of
         {ok, {DefinitionSite, ReferenceSites}} ->
-            case do_revert_rewrite(DefinitionSite, ReferenceSites) of
-                {ok, _RewriteResult} -> finish_rename_revert(Entry);
-                {error, _} = Err -> Err
+            revert_rename_sites(Entry, DefinitionSite, ReferenceSites);
+        {error, _} = Err ->
+            Err
+    end.
+
+%% `DefinitionSite =:= undefined` with a NON-empty `ReferenceSites` is the
+%% dynamic-class `'rename-class'` signature (ADR 0114's `sites[0] = null`
+%% shape, filtered out by `resolve_revert_sites/2` before this point — see
+%% this section's own doc). That is the one shape where identity restore
+%% (`finish_rename_revert/1`) and the reference-site splice are separate
+%% mutations with no shared rollback, mirroring the forward path's identical
+%% split (`beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s
+%% dynamic-class clause). Splicing first and moving identity second — safe
+%% for an ordinary class, whose definition-site splice performs the identity
+%% move as a side effect of the SAME `rewrite_sites/2` transaction — would
+%% leave reference sites pointing at a name nothing answers to if the
+%% identity move then failed, with no way to retry (the sites are already
+%% spliced, so `verify_current_spans/1`'s drift check refuses a second
+%% attempt on the next call). Fixed the same way `do_rename_and_rewrite/7`
+%% was: validate the splice FIRST (non-mutating), move identity second,
+%% splice the reference sites (now expected to succeed) last. Every other
+%% shape — an ordinary-class `'rename-class'` (`DefinitionSite` defined) or
+%% any `'rename-method'` (identity never changes) — keeps the original
+%% splice-then-finish order.
+-spec revert_rename_sites(
+    beamtalk_workspace_changelog:entry(), rewrite_site() | undefined, [rewrite_site()]
+) -> {ok, binary()} | {error, term()}.
+revert_rename_sites(Entry, undefined, [_ | _] = ReferenceSites) ->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'rename-class' -> revert_dynamic_class_rename_sites(Entry, ReferenceSites);
+        'rename-method' -> revert_rename_sites_splice_first(Entry, undefined, ReferenceSites)
+    end;
+revert_rename_sites(Entry, DefinitionSite, ReferenceSites) ->
+    revert_rename_sites_splice_first(Entry, DefinitionSite, ReferenceSites).
+
+-spec revert_dynamic_class_rename_sites(beamtalk_workspace_changelog:entry(), [rewrite_site()]) ->
+    {ok, binary()} | {error, term()}.
+revert_dynamic_class_rename_sites(Entry, ReferenceSites) ->
+    case validate_sites(undefined, ReferenceSites) of
+        ok ->
+            case finish_rename_revert(Entry) of
+                {ok, _RevertedClassNameBin} = Ok ->
+                    case do_revert_rewrite(undefined, ReferenceSites) of
+                        {ok, _RewriteResult} -> Ok;
+                        {error, _} = Err -> Err
+                    end;
+                {error, _} = Err ->
+                    Err
             end;
         {error, _} = Err ->
             Err
+    end.
+
+-spec revert_rename_sites_splice_first(
+    beamtalk_workspace_changelog:entry(), rewrite_site() | undefined, [rewrite_site()]
+) -> {ok, binary()} | {error, term()}.
+revert_rename_sites_splice_first(Entry, DefinitionSite, ReferenceSites) ->
+    case do_revert_rewrite(DefinitionSite, ReferenceSites) of
+        {ok, _RewriteResult} -> finish_rename_revert(Entry);
+        {error, _} = Err -> Err
     end.
 
 %% Trivial-success shortcut mirroring `rewrite_class_sites/4`'s own
