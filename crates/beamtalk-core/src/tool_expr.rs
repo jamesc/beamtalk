@@ -195,6 +195,37 @@ pub fn remove_class_expr(class: &str) -> String {
     )
 }
 
+/// Build the Beamtalk expression for the `rename_class` MCP tool (ADR 0114
+/// Phase 5, BT-3276) — wraps `Behaviour>>renameTo:` (ADR 0114 Phase 2,
+/// BT-3278).
+///
+/// Unlike [`remove_class_expr`], no follow-up `ChangeLog` lookup is chained
+/// on: `renameTo:` (return type `Behaviour`) already returns the renamed
+/// class itself, a useful response value on its own — `removeFromSystem`
+/// (the operation `remove_class_expr` wraps) returns `nil`, which is why
+/// that one needs the extra lookup and this one doesn't.
+///
+/// `class` and `new_name` are interpolated unescaped — see the module docs'
+/// "Caller responsibility" note; the caller must validate both first.
+pub fn rename_class_expr(class: &str, new_name: &str) -> String {
+    format!("{class} renameTo: #{new_name}")
+}
+
+/// Build the Beamtalk expression for the `rename_method` MCP tool (ADR 0114
+/// Phase 5, BT-3276) — wraps `Behaviour>>renameSelector:to:` (ADR 0114 Phase
+/// 3, BT-3279). Instance-side only — sent to a bare class name, this always
+/// touches the instance-side method table; a class-side rename needs a
+/// direct `Counter class renameSelector: ... to: ...` eval, the same
+/// chokepoint limitation `remove_method_expr` has (`docs/development/
+/// surface-parity.md`'s `remove-method` row).
+///
+/// `class`, `selector`, and `new_selector` are interpolated unescaped — see
+/// the module docs' "Caller responsibility" note; the caller must validate
+/// all three first.
+pub fn rename_method_expr(class: &str, selector: &str, new_selector: &str) -> String {
+    format!("{class} renameSelector: #{selector} to: #{new_selector}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,6 +406,32 @@ mod tests {
             remove_class_expr("Counter"),
             "Counter removeFromSystem. \
              (Workspace changes select: [:e | e isRemoveClass and: [e className =:= #Counter]]) last",
+        );
+    }
+
+    // --- ADR 0114 Phase 5 (BT-3276): rename_class / rename_method ---
+
+    #[test]
+    fn rename_class_expr_compiles_rename_to_send() {
+        assert_eq!(
+            rename_class_expr("Counter", "Accumulator"),
+            "Counter renameTo: #Accumulator",
+        );
+    }
+
+    #[test]
+    fn rename_method_expr_compiles_rename_selector_to_send() {
+        assert_eq!(
+            rename_method_expr("Counter", "increment", "incrementBy"),
+            "Counter renameSelector: #increment to: #incrementBy",
+        );
+    }
+
+    #[test]
+    fn rename_method_expr_preserves_keyword_selectors() {
+        assert_eq!(
+            rename_method_expr("Dict", "at:put:", "atKey:put:"),
+            "Dict renameSelector: #at:put: to: #atKey:put:",
         );
     }
 }
