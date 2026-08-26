@@ -114,6 +114,16 @@ flush_test_() ->
         fun rename_method_mixed_with_ordinary_patch_is_conflict/1,
         fun rename_method_mixed_with_rename_class_is_conflict/1,
         fun rename_method_two_entries_merge_in_same_file/1,
+        %% BT-3284 (Gap 1): flushKinds:/flush: surface for rename-class/
+        %% rename-method — classify_kind/1 and filter_entries/2's
+        %% selector-marker clause must recognise both kinds, same as
+        %% remove-class/remove-method already do.
+        fun filter_by_rename_class_selector/1,
+        fun filter_by_rename_method_selector/1,
+        fun flush_kinds_rename_class_requires_confirm/1,
+        fun flush_kinds_rename_class_with_confirm_moves_file/1,
+        fun flush_kinds_rename_method_requires_confirm/1,
+        fun flush_kinds_rename_method_with_confirm_rewrites/1,
         fun flush_two_rejects_non_boolean_confirm/1,
         fun flush_kinds_two_rejects_non_boolean_confirm/1,
         %% BT-3212 (ADR 0113 LSP follow-up): per-file operation kind on the
@@ -1821,6 +1831,62 @@ filter_by_remove_method_selector(#{proj_dir := ProjDir}) ->
         ?_assert(entry_flushed(Seq))
     ].
 
+%% BT-3284 (Gap 1): `flush: #'rename-class' confirmDestructive: true` — the
+%% bare-symbol form — filters on kind, not selector, mirroring
+%% `filter_by_remove_class_selector/1`. A `'rename-class'` entry's selector is
+%% always null, so matching on `entry_selector/1` would silently match zero
+%% entries.
+filter_by_rename_class_selector(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush('rename-class', true),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(false, filelib:is_regular(OldPath)),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% BT-3284 (Gap 1): `flush: #'rename-method' confirmDestructive: true` filters
+%% on kind, not selector — unlike `'rename-class'`, a `'rename-method'` entry
+%% carries the real new selector (here `#incrementBy`, not
+%% `#'rename-method'`), guarding against re-introducing an `entry_selector/1`
+%% match that would only work by atom-name coincidence.
+filter_by_rename_method_selector(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Source = <<"Object subclass: Counter\n  increment => self.value := self.value + 1\nend\n">>,
+    ok = file:write_file(File, Source),
+    {DefStart, DefEnd, _} = locate(Source, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(File), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite], []
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush('rename-method', true),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(nomatch, binary:match(Final, <<"increment =>">>)),
+        ?_assert(entry_flushed(Seq))
+    ].
+
 %% `flushKinds: #{#'remove-class'}` (no confirm) leaves the destructive entry
 %% pending — `confirmDestructive` composes as an independent filter dimension,
 %% not implied by selecting the kind.
@@ -1851,6 +1917,116 @@ flush_kinds_remove_class_with_confirm_deletes_file(#{proj_dir := ProjDir}) ->
         ?_assertEqual(1, maps:get(flushed, Summary)),
         ?_assertEqual(1, maps:get(removedClasses, Summary)),
         ?_assertEqual(false, filelib:is_regular(File))
+    ].
+
+%% BT-3284 (Gap 1): `flushKinds: #{#'rename-class'}` (no confirm) leaves the
+%% destructive rename entry pending, exactly like `#'remove-class'` above —
+%% before this fix, `classify_kind('rename-class')` fell through to
+%% `unknown`, so the call raised `unknown_kind_error` instead of scoping.
+flush_kinds_rename_class_requires_confirm(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['rename-class']),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(maps:get(skipped, Summary))),
+        ?_assertEqual(true, filelib:is_regular(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath))
+    ].
+
+%% `flushKinds: #{#'rename-class'} confirmDestructive: true` applies it,
+%% scoped correctly to the rename-class entry — moving the file and
+%% rewriting its declaration.
+flush_kinds_rename_class_with_confirm_moves_file(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['rename-class'], true),
+    {ok, NewBody} = file:read_file(NewPath),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(skipped, Summary)),
+        ?_assertEqual(false, filelib:is_regular(OldPath)),
+        ?_assertEqual(<<"Object subclass: Accumulator\nend\n">>, NewBody),
+        ?_assert(entry_flushed(Seq))
+    ].
+
+%% `flushKinds: #{#'rename-method'}` (no confirm) leaves the destructive
+%% rename entry pending, mirroring `flush_kinds_rename_class_requires_confirm/1`.
+flush_kinds_rename_method_requires_confirm(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Source = <<"Object subclass: Counter\n  increment => self.value := self.value + 1\nend\n">>,
+    ok = file:write_file(File, Source),
+    {DefStart, DefEnd, _} = locate(Source, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(File), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite], []
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['rename-method']),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(maps:get(skipped, Summary))),
+        ?_assertEqual({ok, Source}, file:read_file(File))
+    ].
+
+%% `flushKinds: #{#'rename-method'} confirmDestructive: true` applies it,
+%% scoped correctly to the rename-method entry — rewriting the definition site.
+flush_kinds_rename_method_with_confirm_rewrites(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Source = <<"Object subclass: Counter\n  increment => self.value := self.value + 1\nend\n">>,
+    ok = file:write_file(File, Source),
+    {DefStart, DefEnd, _} = locate(Source, <<"increment">>),
+    DefSite = rename_site(
+        list_to_binary(File), DefStart, DefEnd, <<"incrementBy">>, <<"increment">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_method_input(
+            <<"Counter">>, <<"incrementBy">>, <<"increment">>, instance, [DefSite], []
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds(['rename-method'], true),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(skipped, Summary)),
+        ?_assertEqual(
+            <<"Object subclass: Counter\n  incrementBy => self.value := self.value + 1\nend\n">>,
+            Final
+        ),
+        ?_assert(entry_flushed(Seq))
     ].
 
 %% External-edit conflict table (ADR 0113): the target file was already

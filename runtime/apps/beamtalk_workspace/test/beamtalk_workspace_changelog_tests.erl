@@ -81,6 +81,7 @@ changelog_test_() ->
         fun rename_class_does_not_shadow_pending_new_class_entry/1,
         fun dirty_methods_uses_rename_class_placeholder/1,
         fun change_entries_handles_rename_class_without_crashing/1,
+        fun change_entries_handles_rename_method_without_crashing/1,
         fun target_key_single_element_for_ordinary_kind/1,
         fun target_key_distinct_per_site_for_rename_class/1,
         fun target_key_distinct_per_site_for_rename_method/1,
@@ -936,7 +937,25 @@ change_entries_handles_rename_class_without_crashing(_Ctx) ->
         ?_assertEqual('rename-class', maps:get(kind, Entry)),
         ?_assertEqual(nil, maps:get(selector, Entry)),
         ?_assertEqual(false, maps:get(clean, Entry)),
-        ?_assertEqual(nil, maps:get(diff, Entry))
+        ?_assertEqual(nil, maps:get(diff, Entry)),
+        %% BT-3284: `oldClass` surfaces the pre-rename name as a Symbol so
+        %% `ChangeEntry>>printString` can render "Counter -> Accumulator
+        %% (rename-class)"; `oldSelector` stays nil (this is not a rename-method).
+        ?_assertEqual('Counter', maps:get(oldClass, Entry)),
+        ?_assertEqual(nil, maps:get(oldSelector, Entry))
+    ].
+
+%% BT-3284: the `'rename-method'` mirror of the above — `oldSelector`
+%% surfaces the pre-rename selector as a Symbol; `oldClass` stays nil (this
+%% is not a rename-class).
+change_entries_handles_rename_method_without_crashing(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
+    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual('rename-method', maps:get(kind, Entry)),
+        ?_assertEqual(incrementBy, maps:get(selector, Entry)),
+        ?_assertEqual(increment, maps:get(oldSelector, Entry)),
+        ?_assertEqual(nil, maps:get(oldClass, Entry))
     ].
 
 %% target_key/1: every pre-0114 kind still returns a single-element list
