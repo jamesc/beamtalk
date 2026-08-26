@@ -105,6 +105,9 @@ flush_test_() ->
         fun rename_class_mixed_with_ordinary_patch_is_conflict/1,
         fun rename_class_two_renames_colliding_on_new_path_is_conflict/1,
         fun rename_class_new_path_collides_with_other_rename_old_path_is_conflict/1,
+        fun rename_class_same_class_chain_before_flush_is_distinct_conflict/1,
+        fun rename_class_three_hop_chain_before_flush_all_report_distinct_conflict/1,
+        fun rename_class_reused_freed_name_is_generic_conflict_not_chain/1,
         fun rename_class_resumes_after_simulated_partial_phase_b/1,
         %% ADR 0114 Phase 3 (BT-3273): rename-method multi-file destructive flush
         fun rename_method_flush_without_confirm_is_skipped_destructive/1,
@@ -2447,6 +2450,186 @@ rename_class_new_path_collides_with_other_rename_old_path_is_conflict(#{proj_dir
         ?_assertEqual({ok, OldSource2}, file:read_file(SharedPath)),
         ?_assertEqual(false, filelib:is_regular(NewPath2)),
         ?_assertEqual(false, filelib:is_regular(SharedPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2))
+    ].
+
+%% BT-3283: renaming the SAME class TWICE before any intervening flush
+%% (`Foo renameTo: #Bar` then, with no flush, `Bar renameTo: #Baz`) produces
+%% two `'rename-class'` entries that both compute `old_path = foo.bt` —
+%% `classRenameTo/2` reads `old_path` from the class's compiled
+%% `beamtalk_source` module attribute, which is only refreshed by a flush
+%% COMMIT (`maybe_reload_renamed_class_source/1`), so the second rename's
+%% entry is built before that attribute has ever changed. This genuinely
+%% shares a file with the first entry (both have `old_path = foo.bt`), so
+%% `rename_entry_rename_collisions/1` correctly refuses the whole batch —
+%% but must NOT reuse the generic `mixed_rename_and_rename_edit` wording,
+%% which implies two unrelated classes collided. It must report the
+%% distinct `same_class_rename_chain_needs_flush` reason instead, since
+%% `Baz`'s `old_class` (`Bar`) traces straight back to `Bar`'s own `class`
+%% (also `Bar`) — this IS the same underlying class, not a coincidence.
+%% Contrast with `rename_class_new_path_collides_with_other_rename_old_path_
+%% is_conflict/1` just above, which constructs a superficially similar
+%% file-collision shape but between two genuinely UNRELATED classes (Foo,
+%% Bar) and must keep reporting the generic reason.
+rename_class_same_class_chain_before_flush_is_distinct_conflict(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath1 = filename:join([ProjDir, "src", "bar.bt"]),
+    NewPath2 = filename:join([ProjDir, "src", "baz.bt"]),
+    OldSource = <<"Object subclass: Foo\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Foo">>),
+    %% Entry 1: Foo -> Bar.
+    DeclSite1 = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Bar">>, <<"Foo">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath), list_to_binary(NewPath1), [DeclSite1]
+        )
+    ),
+    %% Entry 2: Bar -> Baz, appended before any flush — its `old_path` is
+    %% STILL `OldPath` (`foo.bt`), matching the real staleness `classRenameTo/2`
+    %% would compute, not `NewPath1` (`bar.bt`, the file Bar would actually be
+    %% at once flushed).
+    DeclSite2 = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Baz">>, <<"Bar">>),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Baz">>, <<"Bar">>, list_to_binary(OldPath), list_to_binary(NewPath2), [DeclSite2]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    Detail = maps:get(detail, hd(Conflicts)),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(
+            <<"same_class_rename_chain_needs_flush">>, maps:get(reason, hd(Conflicts))
+        ),
+        %% Not the generic, unrelated-class-implying wording.
+        ?_assertEqual(nomatch, binary:match(Detail, <<"mixed_rename_and_rename_edit">>)),
+        ?_assert(binary:match(Detail, <<"same class">>) =/= nomatch),
+        %% Whole batch aborted cleanly — no partial writes, both entries
+        %% stay pending.
+        ?_assertEqual(true, filelib:is_regular(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath1)),
+        ?_assertEqual(false, filelib:is_regular(NewPath2)),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2))
+    ].
+
+%% BT-3283 review self-check: the SAME class renamed THREE times before any
+%% flush (`Foo renameTo: #Bar`, `Bar renameTo: #Baz`, `Baz renameTo: #Qux`)
+%% — every entry's stale `old_path` computation means all three entries
+%% share `old_path = foo.bt`, so the pairwise collision walk finds a
+%% collision for EVERY consecutive pair (Foo->Bar vs Bar->Baz, then
+%% Bar->Baz vs Baz->Qux — `rename_entry_rename_collision_with/3` stops at
+%% the first colliding partner it finds for a given entry, so entry 1 is
+%% never directly compared against entry 3). Every one of those pairs must
+%% still be recognised as a same-class chain, not just the first: multi-hop
+%% chains are not a special case `same_class_rename_chain/2` needs to know
+%% about — its one-directional, per-pair check is exactly why they fall out
+%% correctly for free.
+rename_class_three_hop_chain_before_flush_all_report_distinct_conflict(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath1 = filename:join([ProjDir, "src", "bar.bt"]),
+    NewPath2 = filename:join([ProjDir, "src", "baz.bt"]),
+    NewPath3 = filename:join([ProjDir, "src", "qux.bt"]),
+    OldSource = <<"Object subclass: Foo\nend\n">>,
+    ok = file:write_file(OldPath, OldSource),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Foo">>),
+    DeclSite1 = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Bar">>, <<"Foo">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath), list_to_binary(NewPath1), [DeclSite1]
+        )
+    ),
+    %% Entries 2 and 3 both still compute `old_path = foo.bt` too — the same
+    %% staleness as entry 2 in the two-hop test above, unresolved by either
+    %% intervening rename since neither flushed.
+    DeclSite2 = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Baz">>, <<"Bar">>),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Baz">>, <<"Bar">>, list_to_binary(OldPath), list_to_binary(NewPath2), [DeclSite2]
+        )
+    ),
+    DeclSite3 = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Qux">>, <<"Baz">>),
+    {ok, Seq3} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Qux">>, <<"Baz">>, list_to_binary(OldPath), list_to_binary(NewPath3), [DeclSite3]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    Reasons = [maps:get(reason, C) || C <- Conflicts],
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(2, length(Conflicts)),
+        ?_assertEqual(
+            [<<"same_class_rename_chain_needs_flush">>, <<"same_class_rename_chain_needs_flush">>],
+            Reasons
+        ),
+        ?_assertEqual(true, filelib:is_regular(OldPath)),
+        ?_assertEqual(false, filelib:is_regular(NewPath1)),
+        ?_assertEqual(false, filelib:is_regular(NewPath2)),
+        ?_assertEqual(false, filelib:is_regular(NewPath3)),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2)),
+        ?_assertNot(entry_flushed(Seq3))
+    ].
+
+%% BT-3283 review self-check: a class that RENAMES AWAY frees its old name,
+%% and a later, wholly UNRELATED class can legitimately reuse that freed
+%% name (`Foo renameTo: #Bar` frees `Foo`; some independent `X renameTo:
+%% #Foo` may then reclaim it — `ensure_rename_collision_free/2` allows this,
+%% since `Foo` is no longer registered). If the newly-reclaiming rename's
+%% `new_path` happens to collide with the FIRST rename's vacated `old_path`
+%% (exactly this shape: `Foo`'s old file gets reused as `X`'s new file),
+%% that is a genuine cross-class file collision — `X`'s incoming write vs.
+%% `Foo`'s outgoing move — and must keep reporting the generic
+%% `mixed_rename_and_rename_edit` reason, NOT `same_class_rename_chain_
+%% needs_flush`. `same_class_rename_chain/2` only compares `Other`'s
+%% `old_class` against `Entry`'s `class` (one direction) for exactly this
+%% reason: naively also checking the reverse (`Entry`'s `old_class` against
+%% `Other`'s `class`) would misfire on this shape, since `Entry`'s
+%% `old_class` (`Foo`) coincidentally equals `Other`'s `class` (`Foo`) even
+%% though `Entry` and `Other` rename two completely different classes.
+rename_class_reused_freed_name_is_generic_conflict_not_chain(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath1 = filename:join([ProjDir, "src", "bar.bt"]),
+    OldPath2 = filename:join([ProjDir, "src", "x.bt"]),
+    OldSource1 = <<"Object subclass: Foo\nend\n">>,
+    OldSource2 = <<"Object subclass: X\nend\n">>,
+    ok = file:write_file(OldPath1, OldSource1),
+    ok = file:write_file(OldPath2, OldSource2),
+    {DeclStart1, DeclEnd1, _} = locate(OldSource1, <<"Foo">>),
+    %% Entry 1: Foo -> Bar (vacates the name "Foo" and the file OldPath1).
+    DeclSite1 = rename_site(list_to_binary(OldPath1), DeclStart1, DeclEnd1, <<"Bar">>, <<"Foo">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath1), list_to_binary(NewPath1), [DeclSite1]
+        )
+    ),
+    {DeclStart2, DeclEnd2, _} = locate(OldSource2, <<"X">>),
+    %% Entry 2: X -> Foo, an UNRELATED class reclaiming the just-freed name
+    %% "Foo" — its `new_path` is deliberately set to OldPath1 (Foo's OWN
+    %% vacated file), the exact collision shape under test.
+    DeclSite2 = rename_site(list_to_binary(OldPath2), DeclStart2, DeclEnd2, <<"Foo">>, <<"X">>),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Foo">>, <<"X">>, list_to_binary(OldPath2), list_to_binary(OldPath1), [DeclSite2]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        %% The generic reason — NOT the same-class-chain one — since Foo and
+        %% X are genuinely different classes.
+        ?_assertEqual(<<"mixed_rename_and_rename_edit">>, maps:get(reason, hd(Conflicts))),
+        ?_assertEqual(true, filelib:is_regular(OldPath1)),
+        ?_assertEqual(true, filelib:is_regular(OldPath2)),
+        ?_assertEqual(false, filelib:is_regular(NewPath1)),
         ?_assertNot(entry_flushed(Seq1)),
         ?_assertNot(entry_flushed(Seq2))
     ].
