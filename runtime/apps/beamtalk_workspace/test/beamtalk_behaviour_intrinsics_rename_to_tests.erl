@@ -237,20 +237,18 @@ setup_with_changelog() ->
     %% can resolve `<home>/.beamtalk/workspaces/<id>/changes/` under — mirrors
     %% beamtalk_repl_loader_rewrite_sites_tests.erl's identical setup.
     %%
-    %% `erlang:unique_integer/1` alone is NOT enough entropy here (unlike its
-    %% usual per-VM-run uses elsewhere in this codebase): its counter resets
-    %% on every fresh `rebar3 eunit` invocation, and this call site is reached
-    %% after a deterministic, fixed number of prior `unique_integer` calls —
-    %% so two SEPARATE test runs can compute the IDENTICAL `WorkspaceId`/
+    %% `Unique` uses `beamtalk_test_unique:id/0` rather than a bare
+    %% `erlang:unique_integer/1` (BT-3281) — see its moduledoc for why: in
+    %% short, `erlang:unique_integer/1`'s counter resets every fresh `rebar3
+    %% eunit` invocation, so two SEPARATE test runs reaching this
+    %% deterministic call site can compute the IDENTICAL `WorkspaceId`/
     %% `ChangelogHome`. Observed directly (review follow-up, PR #3523): the
     %% real `~/.beamtalk/workspaces/<id>/changes/changes.jsonl` these resolve
     %% to persists across runs, so `beamtalk_workspace_changelog`'s own
     %% intentional `load_from_disk` restores a PRIOR run's leftover entries
     %% into this run's ETS table, and `[Entry] = entries()` intermittently
-    %% sees more than one. `os:getpid()` (the OS process id — genuinely
-    %% distinct per separate VM invocation, unlike the in-VM counter) closes
-    %% the gap.
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    %% sees more than one.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-to-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rename-to-changelog-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),
@@ -552,8 +550,9 @@ setup_dynamic_with_reference_and_changelog() ->
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    %% Same `os:getpid()` entropy fix `setup_with_changelog/0` documents.
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`,
+    %% same entropy fix `setup_with_changelog/0` documents.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-to-dyn-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rename-to-dyn-changelog-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),

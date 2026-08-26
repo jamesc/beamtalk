@@ -76,7 +76,8 @@ setup() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(temp_dir(), "bt-rewrite-sites-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     CounterPath = filename:join(ProjDir, "counter.bt"),
@@ -325,7 +326,9 @@ setup_with_changelog() ->
     %% `beamtalk_workspace_changelog_tests:fresh_workspace/0`'s isolation
     %% pattern (a unique id + a temp HOME) so `store_site_body/1` actually
     %% persists a ref file instead of degrading to `undefined` (run mode).
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    %%
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rewrite-sites-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rewrite-sites-changelog-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),

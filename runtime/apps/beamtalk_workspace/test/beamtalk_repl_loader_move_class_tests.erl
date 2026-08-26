@@ -90,15 +90,15 @@ teardown(_) ->
 
 %% Same "real ChangeLog needs a resolvable HOME" wrinkle
 %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own
-%% `setup_with_changelog/0` documents (`os:getpid()` closes the
-%% `erlang:unique_integer/1`-alone gap across separate `rebar3 eunit` runs).
+%% `setup_with_changelog/0` documents. Cross-invocation-unique (BT-3281) —
+%% see `beamtalk_test_unique:id/0`.
 setup_with_changelog() ->
     Fixture = setup(),
     case whereis(beamtalk_workspace_changelog) of
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-move-class-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-move-class-changelog-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),

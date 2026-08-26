@@ -235,7 +235,8 @@ reload_suite_teardown(_) ->
     ok.
 
 reload_case_setup() ->
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-flush-reload-" ++ Unique),
     Tmp = filename:join(temp_dir(), "bt-flush-reload-" ++ Unique),
     ProjDir = filename:join(Tmp, "proj"),
@@ -3490,17 +3491,11 @@ entry_flushed(Seq) ->
     beamtalk_workspace_changelog:entry_flushed(Entry).
 
 fresh_workspace() ->
-    %% `os:getpid()` mixed in alongside `erlang:unique_integer/1` (not that
-    %% counter alone): the counter resets on every fresh `rebar3 eunit` VM
-    %% invocation, so two separate test runs reaching this call site after
-    %% the same fixed number of prior `unique_integer` calls can compute an
-    %% IDENTICAL workspace id — and `beamtalk_workspace_changelog`'s own
-    %% `load_from_disk` would then restore a prior run's leftover ChangeLog
-    %% entries into this run's ETS table. Same bug, same fix as BT-3278's
-    %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl:setup_with_
-    %% changelog/0`. `os:getpid()` (the OS process id) is genuinely distinct
-    %% per separate VM invocation, unlike the in-VM counter.
-    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`:
+    %% `beamtalk_workspace_changelog`'s own `load_from_disk` would otherwise
+    %% restore a prior run's leftover ChangeLog entries into this run's ETS
+    %% table.
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-flush-" ++ Unique),
     Tmp = filename:join(temp_dir(), "bt-flush-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
