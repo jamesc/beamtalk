@@ -101,6 +101,7 @@ flush_test_() ->
         fun rename_class_external_edit_on_declaration_aborts_with_no_partial_writes/1,
         fun rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes/1,
         fun rename_class_mixed_with_ordinary_patch_is_conflict/1,
+        fun rename_class_two_renames_colliding_on_new_path_is_conflict/1,
         fun rename_class_resumes_after_simulated_partial_phase_b/1,
         fun flush_two_rejects_non_boolean_confirm/1,
         fun flush_kinds_two_rejects_non_boolean_confirm/1,
@@ -131,6 +132,222 @@ new_class_directory_target_test_() ->
 
 mark_flushed_failure_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun mark_flushed_failure_is_reported/1}.
+
+%% BT-3526 review Blocker regression coverage: a REAL compiled class (not a
+%% ChangeLog-entry fixture) is required here, unlike every other test in this
+%% module — the bug is specifically that a rename-class flush commit never
+%% recompiled the renamed class, leaving its compiled module's `beamtalk_source`
+%% attribute pointing at the pre-move path. Heavier suite-level setup mirrors
+%% `beamtalk_workspace_revert_tests.erl`'s own `suite_setup/0` /
+%% `case_setup/0` split (start the compiler + runtime once; an isolated
+%% workspace + temp HOME per case).
+rename_class_reload_test_() ->
+    {setup, fun reload_suite_setup/0, fun reload_suite_teardown/1,
+        {foreach, fun reload_case_setup/0, fun reload_case_teardown/1, [
+            fun rename_class_move_commit_refreshes_stale_source_attribute/1,
+            fun rename_class_sequential_rename_after_flush_succeeds/1
+        ]}}.
+
+reload_suite_setup() ->
+    {ok, _} = application:ensure_all_started(compiler),
+    ok = ensure_beamtalk_runtime_started(),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    %% Let the runtime register bootstrap classes before compiling user code
+    %% (mirrors beamtalk_workspace_revert_tests:suite_setup/0).
+    timer:sleep(300),
+    ok.
+
+%% Never tear down or restart a shared, already-live runtime here — this
+%% module runs alongside every other `beamtalk_workspace` EUnit module in one
+%% shared-VM `rebar3 eunit --app=beamtalk_workspace` invocation, and other
+%% test modules' own bootstrap (e.g. `beamtalk_test_boot:boot_real_stdlib/1`)
+%% may already have booted the runtime and be relying on that SAME instance
+%% staying up for the rest of the run; killing it here to force our own clean
+%% start would orphan that state for everything that runs after us (an
+%% earlier version of this fix did exactly that and cost 36 unrelated test
+%% failures elsewhere in the app suite — `Integer`/`Subprocess` no longer
+%% registered — found by running `rebar3 eunit --app=beamtalk_workspace`,
+%% not just this module in isolation).
+%%
+%% `'Object'` already resolving is the signal that some prior boot (this
+%% run's own, or another test module's) already did the work — reuse it
+%% as-is. Only when NOTHING is up yet do we attempt our own start, in which
+%% case this module's own lightweight `announce_flush_completed_emits_typed_
+%% event_test/0` may have already brought up `beamtalk_announcements`
+%% standalone/unsupervised (its own `ensure_started/0` contract, meant for a
+%% bare BUnit/REPL context with no full runtime) — blocking `beamtalk_
+%% runtime`'s supervisor from starting its OWN, properly-supervised child
+%% under the same registered name. Stopping it is safe ONLY in this branch:
+%% since `'Object'` is not yet registered, nothing else in this run can be
+%% relying on that standalone instance either.
+ensure_beamtalk_runtime_started() ->
+    case beamtalk_class_registry:whereis_class('Object') of
+        Pid when is_pid(Pid) ->
+            ok;
+        _NotYetBooted ->
+            case application:ensure_all_started(beamtalk_runtime) of
+                {ok, _} ->
+                    ok;
+                {error, _Reason} ->
+                    case whereis(beamtalk_announcements) of
+                        undefined ->
+                            error(beamtalk_runtime_start_failed);
+                        AnnouncementsPid ->
+                            stop(AnnouncementsPid),
+                            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+                            ok
+                    end
+            end
+    end.
+
+reload_suite_teardown(_) ->
+    _ = application:stop(beamtalk_compiler),
+    ok.
+
+reload_case_setup() ->
+    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    WorkspaceId = list_to_binary("test-ws-flush-reload-" ++ Unique),
+    Tmp = filename:join(temp_dir(), "bt-flush-reload-" ++ Unique),
+    ProjDir = filename:join(Tmp, "proj"),
+    ok = filelib:ensure_path(filename:join(ProjDir, "src")),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", Tmp),
+    {ok, ClogPid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WorkspaceId,
+        project_path => list_to_binary(ProjDir),
+        created_at => erlang:system_time(second),
+        last_activity => erlang:system_time(second)
+    }),
+    #{
+        clog_pid => ClogPid,
+        meta_pid => MetaPid,
+        workspace_id => WorkspaceId,
+        tmp_home => Tmp,
+        old_home => OldHome,
+        proj_dir => ProjDir
+    }.
+
+reload_case_teardown(#{
+    clog_pid := ClogPid, meta_pid := MetaPid, tmp_home := Tmp, old_home := OldHome
+}) ->
+    stop(MetaPid),
+    stop(ClogPid),
+    restore_home(OldHome),
+    del_tree(Tmp),
+    ok.
+
+%% Compile+load a real, in-project-backed class from `Path` (reusing the
+%% tested `beamtalk_repl_loader:reload_class_file/1` path directly, the same
+%% mechanism `Counter reload`/`:reload` and `beamtalk_workspace_revert_tests:
+%% define_project_class/3` use) so its compiled module carries a real
+%% `beamtalk_source` attribute pointing at `Path`.
+compile_project_class(Path, Source) ->
+    ok = file:write_file(Path, Source),
+    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
+    ok.
+
+%% THE root-cause regression test. Before the fix, `beamtalk_repl_loader:
+%% class_source_file/1` for the renamed class (`Bar`) still returns
+%% `OldPath` after a successful `flush_including_destructive/0` — the
+%% compiled module was never recompiled, so its embedded `beamtalk_source`
+%% attribute is stale even though the file has genuinely moved to `NewPath`
+%% on disk. After the fix (`maybe_reload_renamed_class_source/1`), it
+%% correctly reads `NewPath`.
+rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath = filename:join([ProjDir, "src", "bar.bt"]),
+    OldSource = <<"Object subclass: Foo\n  greet => 1\n">>,
+    ok = compile_project_class(OldPath, OldSource),
+    %% Precondition: the freshly-compiled class's attribute matches reality —
+    %% the bug only manifests once the file has moved out from under it.
+    PreSourceFile = beamtalk_repl_loader:class_source_file(<<"Foo">>),
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Foo">>),
+    DeclSite = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Bar">>, <<"Foo">>),
+    {ok, _Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath), list_to_binary(NewPath), [DeclSite]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    PostSourceFile = beamtalk_repl_loader:class_source_file(<<"Bar">>),
+    [
+        ?_assertEqual(list_to_binary(OldPath), PreSourceFile),
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        ?_assertEqual(false, filelib:is_regular(OldPath)),
+        ?_assertEqual(true, filelib:is_regular(NewPath)),
+        %% THE fix: the renamed class's own sourceFile attribute now reflects
+        %% where the file actually lives, not the pre-move path.
+        ?_assertEqual(list_to_binary(NewPath), PostSourceFile)
+    ].
+
+%% The full sequential-rename scenario (BT-3526 Blocker) at the flush level:
+%% `OldPath2` is read from the class's REAL, current `class_source_file/1`
+%% attribute — exactly what `beamtalk_behaviour_intrinsics:classRenameTo/2`'s
+%% `capture_class_removal_snapshot/1` reads in production — rather than a
+%% value hardcoded by the test. Before the fix that attribute is stale
+%% (`OldPath1`, already deleted by the first flush's move-commit) and this
+%% second flush would hit the unresolvable `source_missing` conflict the
+%% Blocker describes; after the fix it correctly reads `NewPath1` (still
+%% present) and the second flush completes cleanly. This is what makes the
+%% test a genuine regression test for the ROOT CAUSE rather than one that
+%% tests around it (see BT-3526's own note on this distinction) — it
+%% exercises the same read path the bug is about, even though it does not
+%% go through `classRenameTo/2` itself.
+rename_class_sequential_rename_after_flush_succeeds(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    NewPath1 = filename:join([ProjDir, "src", "bar.bt"]),
+    NewPath2 = filename:join([ProjDir, "src", "baz.bt"]),
+    OldSource = <<"Object subclass: Foo\n  greet => 1\n">>,
+    ok = compile_project_class(OldPath1, OldSource),
+    {Decl1Start, Decl1End, _} = locate(OldSource, <<"Foo">>),
+    DeclSite1 = rename_site(list_to_binary(OldPath1), Decl1Start, Decl1End, <<"Bar">>, <<"Foo">>),
+    {ok, _Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Bar">>, <<"Foo">>, list_to_binary(OldPath1), list_to_binary(NewPath1), [DeclSite1]
+        )
+    ),
+    {ok, Summary1} = beamtalk_workspace_flush:flush_including_destructive(),
+    %% The class's REAL current sourceFile — correct (NewPath1) after the
+    %% fix, stale (OldPath1, already deleted) without it. Coerced to `<<>>`
+    %% on a non-binary result (the class was never even reloaded, i.e. the
+    %% fix never ran) so this constructs a well-formed, if wrong, ChangeLog
+    %% entry rather than crashing on `binary_to_list(nil)` below — the
+    %% second flush then reports a clean `source_missing` conflict instead
+    %% of an opaque test-body exception, and either way `Summary2` fails the
+    %% "flushed with no conflicts" assertions below.
+    OldPath2 =
+        case beamtalk_repl_loader:class_source_file(<<"Bar">>) of
+            Bin when is_binary(Bin) -> Bin;
+            _NotReloaded -> <<>>
+        end,
+    {ok, BarBodyOnDisk} = file:read_file(NewPath1),
+    {Decl2Start, Decl2End, _} = locate(BarBodyOnDisk, <<"Bar">>),
+    DeclSite2 = rename_site(OldPath2, Decl2Start, Decl2End, <<"Baz">>, <<"Bar">>),
+    {ok, _Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(<<"Baz">>, <<"Bar">>, OldPath2, list_to_binary(NewPath2), [DeclSite2])
+    ),
+    {ok, Summary2} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary1)),
+        ?_assertEqual([], maps:get(conflicts, Summary1)),
+        %% The precise assertion this whole scenario is about: the second
+        %% rename's old_path (read from the live class, as production code
+        %% does) must be the CURRENT file (NewPath1), not the already-deleted
+        %% OldPath1.
+        ?_assertEqual(list_to_binary(NewPath1), OldPath2),
+        ?_assertEqual(1, maps:get(flushed, Summary2)),
+        ?_assertEqual([], maps:get(conflicts, Summary2)),
+        ?_assertEqual(false, filelib:is_regular(NewPath1)),
+        ?_assertEqual(true, filelib:is_regular(NewPath2)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Baz\n  greet => 1\n">>}, file:read_file(NewPath2)
+        )
+    ].
 
 setup() ->
     {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
@@ -2019,6 +2236,62 @@ rename_class_mixed_with_ordinary_patch_is_conflict(#{proj_dir := ProjDir}) ->
         ?_assertEqual({ok, RefSource}, file:read_file(RefPath)),
         ?_assertNot(entry_flushed(RenameSeq)),
         ?_assertNot(entry_flushed(PatchSeq))
+    ].
+
+%% BT-3526 review Suggestion: two INDEPENDENT rename-class entries (different
+%% classes, different `old_path`s) whose `new_path`s happen to coincide must
+%% conflict the same way a rename-vs-ordinary-patch collision does — a `.tmp`
+%% write from one would otherwise silently clobber the other's. Unreachable
+%% via the real `classRenameTo/2` primitive today (its own collision refusal
+%% prevents two co-pending renames targeting the same class name), but
+%% `resolve_new_path/1` explicitly records `new_path` when the entry itself
+%% supplies one, so a future producer that does could construct exactly this
+%% shape — constructed directly here the same way `resolve_new_path_prefers_
+%% recorded_value/0` does.
+rename_class_two_renames_colliding_on_new_path_is_conflict(#{proj_dir := ProjDir}) ->
+    OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
+    OldPath2 = filename:join([ProjDir, "src", "bar.bt"]),
+    SharedNewPath = filename:join([ProjDir, "src", "shared.bt"]),
+    OldSource1 = <<"Object subclass: Foo\nend\n">>,
+    OldSource2 = <<"Object subclass: Bar\nend\n">>,
+    ok = file:write_file(OldPath1, OldSource1),
+    ok = file:write_file(OldPath2, OldSource2),
+    {DeclStart1, DeclEnd1, _} = locate(OldSource1, <<"Foo">>),
+    DeclSite1 = rename_site(list_to_binary(OldPath1), DeclStart1, DeclEnd1, <<"X">>, <<"Foo">>),
+    {DeclStart2, DeclEnd2, _} = locate(OldSource2, <<"Bar">>),
+    DeclSite2 = rename_site(list_to_binary(OldPath2), DeclStart2, DeclEnd2, <<"Y">>, <<"Bar">>),
+    {ok, Seq1} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"X">>,
+            <<"Foo">>,
+            list_to_binary(OldPath1),
+            list_to_binary(SharedNewPath),
+            [DeclSite1]
+        )
+    ),
+    {ok, Seq2} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Y">>,
+            <<"Bar">>,
+            list_to_binary(OldPath2),
+            list_to_binary(SharedNewPath),
+            [DeclSite2]
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assert(length(Conflicts) >= 1),
+        ?_assertEqual(<<"mixed_rename_and_rename_edit">>, maps:get(reason, hd(Conflicts))),
+        %% Whole batch aborted — neither original file moved, and the shared
+        %% target was never written.
+        ?_assertEqual(true, filelib:is_regular(OldPath1)),
+        ?_assertEqual(true, filelib:is_regular(OldPath2)),
+        ?_assertEqual(false, filelib:is_regular(SharedNewPath)),
+        ?_assertEqual(false, filelib:is_regular(SharedNewPath ++ ".tmp")),
+        ?_assertNot(entry_flushed(Seq1)),
+        ?_assertNot(entry_flushed(Seq2))
     ].
 
 %% Crash-recovery / partial-Phase-B-then-retry (ADR 0114 § "Atomicity (class

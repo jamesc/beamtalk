@@ -1,0 +1,186 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3526 (review Blocker on PR #3526, class-rename multi-file flush, ADR
+// 0114 Phase 2): rename a class, flush, then rename the SAME class again and
+// flush again — entirely ordinary usage, not a race or external-tooling
+// scenario.
+//
+// The bug: `Behaviour>>renameTo:` (BT-3278) computes `old_path` for its
+// ChangeLog entry by reading the class's compiled BEAM module's embedded
+// `beamtalk_source` attribute (`sourceFile`) — a value baked in at the point
+// the class was last recompiled, NOT refreshed by a physical file move.
+// `Workspace flushIncludingDestructive` moves the file on disk (renaming
+// `<new_path>.tmp` into place and unlinking `old_path`) but, before this
+// fix, never recompiled the renamed class — so its `sourceFile` attribute
+// kept pointing at the now-deleted pre-move path. A SECOND `renameTo:` on
+// that same class would then compute a stale, already-gone `old_path`, and
+// the second flush could never resolve it (`reason => "source_missing"`)
+// even though the file's real, current content sat at the FIRST rename's
+// `new_path` the entire time.
+//
+// This is the real, reachable path a user would hit — unlike
+// `beamtalk_workspace_flush_tests.erl`'s EUnit-level coverage of the same
+// fix (which constructs ChangeLog entries directly and therefore cannot, by
+// itself, prove the real `beamtalk_source` attribute staleness this bug is
+// actually about), this script goes through the REAL `renameTo:` primitive
+// twice, with a real flush in between, against a real project file.
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE A REAL .bt FILE INSIDE THE PROJECT TREE AND LOAD IT
+// ===========================================================================
+
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_rename_class_sequential_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_fooPath := _projDir ++ "/Bt3526SeqRenameFoo.bt"
+// => _
+
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_fooSource := "Value subclass: Bt3526SeqRenameFoo" ++ _nl ++ "  greet -> String => ""hi from the sequential rename e2e"""
+// => _
+
+File writeAll: _fooPath contents: _fooSource
+// => Result ok: nil
+
+Workspace load: _fooPath
+// => _
+
+Bt3526SeqRenameFoo new greet
+// => hi from the sequential rename e2e
+
+// ===========================================================================
+// STEP 2 — FIRST renameTo:: Foo -> Bar. Before the file has moved, the
+// class's own sourceFile attribute still (correctly) points at _fooPath —
+// this is the moment described in the bug report as "correctly reflecting
+// reality AT THAT MOMENT".
+// ===========================================================================
+
+Bt3526SeqRenameFoo renameTo: #Bt3526SeqRenameBar
+// => _
+
+(Bt3526SeqRenameBar sourceFile) =:= _fooPath
+// => true
+
+// ===========================================================================
+// STEP 3 — FIRST FLUSH: commits the move (_fooPath -> _barPath on disk).
+// THE FIX under test: this must also refresh Bar's own compiled sourceFile
+// attribute to the NEW path, not leave it stale.
+// ===========================================================================
+
+_flush1 := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _flush1
+// => 1
+
+(Erlang maps get: #conflicts with: _flush1) isEmpty
+// => true
+
+_barPath := _projDir ++ "/Bt3526SeqRenameBar.bt"
+// => _
+
+File exists: _fooPath
+// => false
+
+File exists: _barPath
+// => true
+
+// THE FIX (BT-3526): Bar's own sourceFile attribute now correctly reflects
+// the moved file, not the stale pre-move path.
+(Bt3526SeqRenameBar sourceFile) =:= _barPath
+// => true
+
+// ===========================================================================
+// STEP 4 — SECOND renameTo:: Bar -> Baz. Without the fix, classRenameTo:
+// would compute old_path from Bar's (stale) sourceFile attribute (_fooPath,
+// already deleted in step 3) instead of the real current file (_barPath).
+// ===========================================================================
+
+Bt3526SeqRenameBar renameTo: #Bt3526SeqRenameBaz
+// => _
+
+Workspace changes notEmpty
+// => true
+
+// ===========================================================================
+// STEP 5 — SECOND FLUSH must complete cleanly — no stuck, unresolvable
+// entry, and no "Something external deleted both" conflict over a file
+// (_barPath) that plainly still existed the whole time.
+// ===========================================================================
+
+_flush2 := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _flush2
+// => 1
+
+_conflicts2 := Erlang maps get: #conflicts with: _flush2
+// => _
+
+_conflicts2 isEmpty
+// => true
+
+_bazPath := _projDir ++ "/Bt3526SeqRenameBaz.bt"
+// => _
+
+File exists: _barPath
+// => false
+
+File exists: _bazPath
+// => true
+
+_bazBody := (File readAll: _bazPath) unwrap
+// => _
+
+_expectedBazSource := "Value subclass: Bt3526SeqRenameBaz" ++ _nl ++ "  greet -> String => ""hi from the sequential rename e2e"""
+// => _
+
+_bazBody =:= _expectedBazSource
+// => true
+
+Workspace changes isEmpty
+// => true
+
+Object allSubclasses includes: Bt3526SeqRenameBaz
+// => true
+
+Bt3526SeqRenameBaz new greet
+// => hi from the sequential rename e2e
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Bt3526SeqRenameBaz removeFromSystem
+// => nil
+
+(Erlang file) delete: _bazPath
+// => _
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _

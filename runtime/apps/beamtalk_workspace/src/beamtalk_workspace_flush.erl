@@ -195,11 +195,43 @@ reports exactly which files committed, and the idempotent check above means
 re-flushing the same entry only re-writes the files that did not.
 
 **A `'rename-class'` entry sharing a target file with an ordinary pending
-patch (or another rename)** in the same flush batch surfaces as a
-`mixed_rename_and_ordinary_edit` conflict, aborting the whole batch — the
+patch, or with another rename-class entry's own target files** in the same
+flush batch surfaces as a `mixed_rename_and_ordinary_edit` (respectively
+`mixed_rename_and_rename_edit`) conflict, aborting the whole batch — the
 same defensive posture `remove-class`'s `mixed_remove_class_and_splice`
 guard already takes for the identical reason (reordering "write" and "move
-away" within one Phase A/B pass is undesigned).
+away" within one Phase A/B pass is undesigned). Today only the ordinary-vs-
+rename shape is reachable (`classRenameTo/2`'s own collision refusal
+prevents two co-pending entries from targeting the same class name), but
+`resolve_new_path/1` documents a future `new_path`-supplying producer that
+would not have that same guard, and `derive_new_path/3`'s two derivation
+styles could coincide for two unrelated class names — so
+`check_no_rename_file_collisions/2` guards the rename-vs-rename shape too
+(`rename_entry_rename_collisions/1`), rather than leaving it to the day a
+`.tmp` write silently clobbers another rename's in-flight one.
+
+**Post-commit source-attribute refresh (BT-3526 review fix).** A class's
+compiled BEAM module embeds its own source path as a `beamtalk_source`
+module attribute at compile time (`beamtalk_reflection:
+source_file_from_module/1`; `Behaviour>>sourceFile`) — this is exactly what
+`beamtalk_behaviour_intrinsics:classRenameTo/2`'s *next* invocation on this
+same class reads to compute its own `old_path`. Flush moves the file on
+disk but never recompiled the class, so that attribute went stale the
+moment the move committed: a second `renameTo:` on the same class, flushed
+afterwards, would compute `old_path` from the now-deleted pre-move path and
+could never resolve it (`reason => <<"source_missing">>`) even though the
+file's real, current content sits at `new_path` the entire time — an
+entirely ordinary "rename, flush, rename again" sequence, not a race. Once
+a `move`/`move_noop` commits successfully, `maybe_reload_renamed_class_
+source/1` best-effort reloads the class from `new_path`
+(`beamtalk_repl_loader:reload_class_file/2` — the same tested machinery
+`Counter reload`/`:reload` already uses) purely to refresh this bookkeeping
+attribute for a possible future rename; the class's in-memory identity and
+behaviour are already correct at this point (`classRenameTo/2`'s own job,
+BT-3278). A reload failure (no compiler available, a bare runtime, or any
+other error) is logged via `?LOG_WARNING` and never fails the
+already-successful flush — see that function's own doc for the full
+rationale.
 
 ## Conflict detection
 
@@ -1076,12 +1108,12 @@ check_no_rename_file_collisions([], _OrdinaryGroups) ->
     ok;
 check_no_rename_file_collisions(RenameEntries, OrdinaryGroups) ->
     OrdinaryFiles = sets:from_list([F || {F, _} <- OrdinaryGroups], [{version, 2}]),
-    case
-        lists:filtermap(
-            fun(Entry) -> rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) end,
-            RenameEntries
-        )
-    of
+    OrdinaryConflicts = lists:filtermap(
+        fun(Entry) -> rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) end,
+        RenameEntries
+    ),
+    RenameConflicts = rename_entry_rename_collisions(RenameEntries),
+    case OrdinaryConflicts ++ RenameConflicts of
         [] -> ok;
         Conflicts -> {conflict, Conflicts}
     end.
@@ -1108,6 +1140,67 @@ rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) ->
                             ") alongside a pending ordinary patch against the same file "
                             "in the same operation; flush or discard the other pending "
                             "entry first, then re-flush the rename"
+                        >>
+                    ])
+                )}
+    end.
+
+-doc """
+Suggestion from BT-3526 review: `rename_entry_ordinary_collision/3` only
+guards a rename-class entry's write-target files against *ordinary* pending
+entries — two rename-class entries whose own `rename_entry_all_files_to_write/1`
+sets happen to intersect (e.g. a future `new_path`-supplying producer, or two
+unrelated classes whose `derive_new_path/3` styles coincide — see the
+moduledoc's "Atomicity (class rename)" section) went unguarded, risking one
+rename's `.tmp` silently clobbering the other's. Unreachable today
+(`classRenameTo/2`'s own `ensure_rename_collision_free/2` refuses a second
+rename targeting a class name already live, which is what would be needed to
+co-pend two renames colliding on the SAME `new_path`) but defended
+proactively rather than left as a latent gap for the next producer.
+
+Checked pairwise, each unordered pair exactly once (`Rest` only ever holds
+entries *after* `Entry` in list order) — mirrors `rename_entry_ordinary_
+collision/3`'s one-conflict-per-entry granularity, just against a peer
+rename instead of an ordinary group.
+""".
+-spec rename_entry_rename_collisions([term()]) -> [map()].
+rename_entry_rename_collisions([]) ->
+    [];
+rename_entry_rename_collisions([Entry | Rest]) ->
+    Files = sets:from_list(rename_entry_all_files_to_write(Entry), [{version, 2}]),
+    case rename_entry_rename_collision_with(Entry, Files, Rest) of
+        {true, Conflict} -> [Conflict | rename_entry_rename_collisions(Rest)];
+        false -> rename_entry_rename_collisions(Rest)
+    end.
+
+-spec rename_entry_rename_collision_with(term(), sets:set(binary()), [term()]) ->
+    {true, map()} | false.
+rename_entry_rename_collision_with(_Entry, _Files, []) ->
+    false;
+rename_entry_rename_collision_with(Entry, Files, [Other | Rest]) ->
+    OtherFiles = sets:from_list(rename_entry_all_files_to_write(Other), [{version, 2}]),
+    case sets:to_list(sets:intersection(Files, OtherFiles)) of
+        [] ->
+            rename_entry_rename_collision_with(Entry, Files, Rest);
+        [Collided | _] ->
+            {true,
+                conflict_map(
+                    Collided,
+                    <<"mixed_rename_and_rename_edit">>,
+                    [Entry, Other],
+                    iolist_to_binary([
+                        <<"Cannot flush two rename-class entries (">>,
+                        beamtalk_workspace_changelog:entry_old_class(Entry),
+                        <<" -> ">>,
+                        beamtalk_workspace_changelog:entry_class(Entry),
+                        <<" and ">>,
+                        beamtalk_workspace_changelog:entry_old_class(Other),
+                        <<" -> ">>,
+                        beamtalk_workspace_changelog:entry_class(Other),
+                        <<
+                            ") whose target files collide in the same operation; "
+                            "flush or discard one of the pending entries first, "
+                            "then re-flush the other"
                         >>
                     ])
                 )}
@@ -1870,6 +1963,7 @@ phase_b_loop([], Shadowed, Committed, Failed, Skipped, RenameExpectedFiles) ->
 phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped, RenameExpectedFiles) ->
     case commit(P) of
         ok ->
+            maybe_reload_renamed_class_source(P),
             phase_b_loop(Rest, Shadowed, [P | Committed], Failed, Skipped, RenameExpectedFiles);
         {error, Reason} ->
             ?LOG_ERROR(
@@ -1928,6 +2022,105 @@ commit(#prepared{op = move, tmp = Tmp, file = NewPath, old_file = OldPath}) ->
     end;
 commit(#prepared{op = move_noop}) ->
     ok.
+
+-doc """
+Best-effort post-commit source-attribute refresh (BT-3526 review Blocker,
+ADR 0114 follow-up). See the moduledoc's "Post-commit source-attribute
+refresh" section for the full "why" — in short: `classRenameTo/2`'s NEXT
+invocation on this same class reads the class's compiled BEAM module's
+`beamtalk_source` attribute to compute ITS `old_path`, and that attribute is
+only ever refreshed by *recompiling* the class — which an ordinary flush
+commit (a plain `file:rename/2` + `file:delete/1`, no compile step) never
+does. Left unrefreshed, a second `renameTo:` + flush on the same class would
+compute a stale, now-deleted `old_path` and could never resolve it.
+
+Gated on `op =:= move orelse op =:= move_noop` (design point 3: only a
+committed rename-class move needs this — every other `op` either isn't a
+rename at all, or (a rename's OTHER-site splices, `prepare_rename_site_group/2`)
+targets a file that was never the renamed class's own declaration file) AND
+`entry_kind(Entry) =:= 'rename-class'` (defensive — today every `move`/
+`move_noop` `#prepared{}` is always produced by `prepare_rename_move/2` for
+exactly one `'rename-class'` entry, but this function's contract should not
+silently misfire if that ever changes).
+
+Deliberately best-effort (design point 1): the class's in-memory identity
+and behaviour are ALREADY correct at this point — `classRenameTo/2`
+(BT-3278) is what made the rename real; this reload only refreshes a
+bookkeeping attribute for a POSSIBLE FUTURE rename. A failure here (no
+compiler available, a bare runtime, a transient error) must never fail the
+already-successful flush that files are durably written under — surfaced
+via `?LOG_WARNING` instead (never silently swallowed, per design point 1's
+"clear signal in the logs" requirement) so it is diagnosable without
+threatening what already succeeded.
+
+`reload_class_file/2` (`beamtalk_repl_loader`, exported and already used by
+`Counter reload`/`:reload Counter`) is reused rather than any new machinery
+(the ADR 0114 review's own recommended direction): it reads `new_path` from
+disk, compiles it through the ordinary pipeline, and installs the result —
+which is precisely what embeds the correct (new) `beamtalk_source` module
+attribute, closing the staleness gap at its root. It deliberately does NOT
+emit a `'class-def'` ChangeLog entry (see its own doc) so this never creates
+a fresh pending entry for a subsequent flush to trip over, and it does not
+touch the ChangeLog at all — this call sits entirely after `complete_flush/5`
+would run, so nothing here can race `mark_flushed/1`.
+""".
+-spec maybe_reload_renamed_class_source(#prepared{}) -> ok.
+maybe_reload_renamed_class_source(#prepared{op = Op, file = NewPath, entries = [Entry | _]}) when
+    Op =:= move; Op =:= move_noop
+->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'rename-class' ->
+            reload_renamed_class_source(NewPath, beamtalk_workspace_changelog:entry_class(Entry));
+        _ ->
+            ok
+    end;
+maybe_reload_renamed_class_source(_Prepared) ->
+    ok.
+
+-spec reload_renamed_class_source(binary(), binary()) -> ok.
+reload_renamed_class_source(NewPath, NewClassBin) ->
+    ExpectedClassName =
+        case beamtalk_repl_server:safe_to_existing_atom(NewClassBin) of
+            {ok, Atom} -> Atom;
+            {error, _} -> undefined
+        end,
+    try beamtalk_repl_loader:reload_class_file(binary_to_list(NewPath), ExpectedClassName) of
+        {ok, _ClassNames} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Workspace flush: best-effort reload of a just-renamed class's source "
+                "attribute failed. The rename itself already succeeded (the class's "
+                "identity and file move are both correct); only the class's compiled "
+                "beamtalk_source bookkeeping attribute may still point at its pre-rename "
+                "path until the class is next reloaded/recompiled — a subsequent rename "
+                "of this same class may need its old_path corrected manually before it "
+                "can flush",
+                #{
+                    path => NewPath,
+                    class => NewClassBin,
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Workspace flush: best-effort reload of a just-renamed class's source "
+                "attribute crashed. The rename itself already succeeded; see "
+                "reload_class_file/2's own failure mode above for what this leaves stale",
+                #{
+                    path => NewPath,
+                    class => NewClassBin,
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
 
 %% Build a set of {Class, Selector} target keys from the entries whose file
 %% was renamed in Phase B. Used to gate which shadowed entries can be marked
