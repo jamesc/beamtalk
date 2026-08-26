@@ -1036,6 +1036,49 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     NewNameBin = atom_to_binary(NewName, utf8),
     {DefinitionSite, ReferenceSites} =
         discover_rename_sites(OldName, OldNameBin, NewNameBin, Classification),
+    do_rename_and_rewrite(
+        OldName, OldNameBin, NewName, NewNameBin, DefinitionSite, ReferenceSites, Classification
+    ).
+
+%% Ordering for a DYNAMIC class differs from an ordinary one (review
+%% feedback on PR #3523): a dynamic class's registry-identity move
+%% (`install_class_rename/3` -> `beamtalk_object_class:rename/2`) is a
+%% SEPARATE call from its reference-site rewrite — `rewrite_class_sites/4`
+%% only ever touches OTHER classes' files for a dynamic class, since it has
+%% no source of its own to fold into that transaction. Moving the identity
+%% FIRST means a lost race there (e.g. the TOCTOU window `rename/2`'s own
+%% doc describes) aborts the whole `renameTo:` call before any referencing
+%% file is ever rewritten, rather than committing those files' rewrite
+%% first and then discovering the class itself never actually got renamed
+%% — which would leave referencing code pointing at a name nothing answers
+%% to. For an ordinary (project) class, the definition site's own recompile
+%% (part of the SAME `rewrite_sites/2` transaction as the reference sites)
+%% is what installs the new pid — there is no separate identity-move step
+%% to reorder, so the original site-rewrite-then-retire-old-identity order
+%% stands.
+-spec do_rename_and_rewrite(
+    atom(), binary(), atom(), binary(), map() | undefined, [map()], map()
+) -> #beamtalk_object{}.
+do_rename_and_rewrite(
+    OldName,
+    OldNameBin,
+    NewName,
+    NewNameBin,
+    DefinitionSite,
+    ReferenceSites,
+    #{not_flushable_reason := <<"dynamic">>} = Classification
+) ->
+    NewPid = install_class_rename(OldName, NewName, Classification),
+    case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+        {ok, RewriteResult} ->
+            log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
+            beamtalk_class_registry:class_object_from_pid(NewPid);
+        {error, Reason} ->
+            beamtalk_error:raise(rename_rewrite_failed_error(OldName, Reason))
+    end;
+do_rename_and_rewrite(
+    OldName, OldNameBin, NewName, NewNameBin, DefinitionSite, ReferenceSites, Classification
+) ->
     case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
         {ok, RewriteResult} ->
             NewPid = install_class_rename(OldName, NewName, Classification),
@@ -1448,7 +1491,7 @@ install_class_rename(OldName, NewName, #{not_flushable_reason := <<"dynamic">>})
             Error0 = beamtalk_error:new(runtime_error, OldName),
             Msg = iolist_to_binary(
                 io_lib:format(
-                    "Renamed in the xref/ChangeLog sense, but the dynamic class's own registration could not move: ~p",
+                    "The dynamic class's own registration could not move, so no reference sites were rewritten: ~p",
                     [
                         Reason
                     ]

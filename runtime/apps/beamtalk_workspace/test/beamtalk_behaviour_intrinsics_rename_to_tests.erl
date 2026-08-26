@@ -283,3 +283,145 @@ rename_to_changelog(_Fixture) ->
         %% the two reference-site occurrences.
         ?_assertEqual(4, length(Sites))
     ].
+
+%%====================================================================
+%% Reordering fix (review round 3, PR #3523): for a DYNAMIC class that IS
+%% referenced by an in-project file, `classRenameTo/2` must commit the
+%% registry-identity move (`beamtalk_object_class:rename/2`) BEFORE the
+%% reference-site rewrite (`beamtalk_repl_eval:rewrite_sites/2`) — see
+%% `beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s own doc. The
+%% reverse order (the pre-fix behaviour) would commit the referencing
+%% file's rewrite first and only then discover whether the dynamic class's
+%% own registration actually moved, leaving a referencing file pointing at
+%% a name nothing answers to if that second step lost the TOCTOU race
+%% `beamtalk_object_class:rename/2`'s own doc describes.
+%%
+%% Forcing that race deterministically THROUGH `classRenameTo/2`'s full
+%% call chain isn't practical (unlike
+%% `object_class_rename_toctou_through_public_api_test_` in
+%% `beamtalk_behaviour_intrinsics_tests.erl`, which exercises it by calling
+%% `rename/2` directly): `classRenameTo/2`'s own collision pre-check uses
+%% the identical `whereis` primitive `rename/2` re-checks internally, so
+%% any state change made visible before the outer check would also trip
+%% that outer check first, before either rewrite step ever runs. Instead,
+%% this asserts the ORDERING itself, on the happy path, via plain OTP call
+%% tracing (no mocking library in this project's deps — same technique as
+%% `beamtalk_xref_tests.erl`'s `memoization_call_count_test_`).
+%%====================================================================
+
+dyn_user_source() ->
+    <<
+        "Value subclass: Bt3278DynUser\n"
+        "  makeThing -> Bt3278DynSource => Bt3278DynSource new"
+    >>.
+
+register_dynamic_class(ClassName) ->
+    State = #{
+        className => ClassName,
+        superclassRef => 'Object',
+        fieldSpecs => #{},
+        methodSpecs => #{}
+    },
+    {ok, Pid} = beamtalk_class_builder:register(State),
+    Tag = beamtalk_class_registry:class_object_tag(ClassName),
+    Module = beamtalk_object_class:module_name(Pid),
+    ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
+    {ClassObj, Pid}.
+
+setup_dynamic_with_reference() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    application:ensure_all_started(beamtalk_runtime),
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    ProjDir = filename:join(temp_dir(), "bt-rename-to-dyn-" ++ Unique),
+    ok = filelib:ensure_path(ProjDir),
+    UserPath = filename:join(ProjDir, "bt3278_dyn_user.bt"),
+    ok = file:write_file(UserPath, dyn_user_source()),
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"rename_to_dyn_test_ws">>,
+        project_path => list_to_binary(ProjDir),
+        created_at => erlang:system_time(second),
+        repl => false
+    }),
+    beamtalk_compiler_server:clear_classes(),
+    {ClassObj, _Pid} = register_dynamic_class('Bt3278DynSource'),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _UserClasses, _State1} = beamtalk_repl_loader:handle_load(UserPath, State0),
+    #{proj_dir => ProjDir, user_path => UserPath, class_obj => ClassObj}.
+
+teardown_dynamic_with_reference(_Fixture) ->
+    lists:foreach(
+        fun(ClassName) ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    ok;
+                Pid when is_pid(Pid) ->
+                    catch gen_server:stop(Pid, normal, 5000)
+            end
+        end,
+        ['Bt3278DynSource', 'Bt3278DynRenamed', 'Bt3278DynUser']
+    ),
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    ok.
+
+dynamic_class_rename_orders_identity_move_before_reference_rewrite_test_() ->
+    {setup, fun setup_dynamic_with_reference/0, fun teardown_dynamic_with_reference/1,
+        fun dynamic_class_rename_orders_identity_move_before_reference_rewrite/1}.
+
+dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj := ClassObj}) ->
+    Self = self(),
+    Worker = spawn(fun() ->
+        receive
+            go ->
+                Result = beamtalk_behaviour_intrinsics:classRenameTo(ClassObj, 'Bt3278DynRenamed'),
+                Self ! {bt3278_reorder_result, Result}
+        end
+    end),
+    1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
+    1 = erlang:trace_pattern({beamtalk_object_class, rename, 2}, true, [global]),
+    1 = erlang:trace_pattern({beamtalk_repl_eval, rewrite_sites, 2}, true, [global]),
+    Worker ! go,
+    Result =
+        receive
+            {bt3278_reorder_result, R} -> R
+        after 5000 ->
+            erlang:error(bt3278_reorder_worker_timeout)
+        end,
+    _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),
+    _ = erlang:trace_pattern({beamtalk_repl_eval, rewrite_sites, 2}, false, [global]),
+    %% The worker has already sent its result and is about to exit by the
+    %% time we get here — disabling a dead pid's trace flags raises
+    %% `badarg` and is a no-op anyway (flags die with the process).
+    (try
+        erlang:trace(Worker, false, [call])
+    catch
+        error:badarg -> ok
+    end),
+    CallOrder = bt3278_drain_call_order(),
+    [
+        ?_assertMatch(#beamtalk_object{class = 'Bt3278DynRenamed class'}, Result),
+        ?_assertEqual([rename, rewrite_sites], CallOrder)
+    ].
+
+bt3278_drain_call_order() ->
+    bt3278_drain_call_order([]).
+
+bt3278_drain_call_order(Acc) ->
+    receive
+        {trace, _Pid, call, {beamtalk_object_class, rename, _Args}} ->
+            bt3278_drain_call_order([rename | Acc]);
+        {trace, _Pid, call, {beamtalk_repl_eval, rewrite_sites, _Args}} ->
+            bt3278_drain_call_order([rewrite_sites | Acc])
+    after 200 ->
+        lists:reverse(Acc)
+    end.
