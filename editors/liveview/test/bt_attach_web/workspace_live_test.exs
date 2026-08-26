@@ -835,6 +835,96 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
+  test "Rename Class with an unrelated class selected in the tree leaves that selection untouched (ADR 0114, BT-3286)",
+       %{conn: conn} do
+    # Regression coverage for `reselect_renamed_class/3`: renaming a class from
+    # its open `:def` tab must only follow the rename into the System Browser
+    # tree's `selected_class` when the renamed class WAS the prior selection
+    # (or nothing was selected). This exercises the other branch — a
+    # DIFFERENT, unrelated class (B) is selected in the tree when class A is
+    # renamed from its own `:def` tab — which none of the tests above cover:
+    # they all rename the class that is also the active tab/tree selection.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class_a = "RenameUnrelatedA#{suffix}"
+    class_b = "RenameUnrelatedB#{suffix}"
+    new_name = "RenameUnrelatedA2#{suffix}"
+
+    class_a_src = """
+    Actor subclass: #{class_a}
+      greetA => "a"
+    """
+
+    class_b_src = """
+    Actor subclass: #{class_b}
+      greetB => "b"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_a_src})
+    view |> form("#eval-form") |> render_submit(%{expr: class_b_src})
+
+    # browse-classes is a mount snapshot — remount so the tree includes both.
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class_a and render(view) =~ class_b end)
+
+    # Select B in the tree first: `selected_class`, `browser_protocols`, and
+    # `browser_categories` all load for B — snapshot them to compare after the
+    # rename below.
+    view |> element(~s(div[phx-value-class="#{class_b}"])) |> render_click()
+    before = :sys.get_state(view.pid).socket.assigns
+    assert before.selected_class == class_b
+    browser_protocols_b = before.browser_protocols
+    browser_categories_b = before.browser_categories
+
+    # Select A and open its `:def` tab (temporarily moving the tree selection
+    # and the protocol/method panes onto A too).
+    view |> element(~s(div[phx-value-class="#{class_a}"])) |> render_click()
+
+    open_def_html =
+      view
+      |> element(~s(div[phx-click="browser_open_definition"][phx-value-class="#{class_a}"]))
+      |> render_click()
+
+    assert open_def_html =~ "def:#{class_a}"
+
+    # Re-select B in the tree: the tree highlight and protocol/method panes
+    # move back to B, but A's `:def` tab stays open and focused underneath —
+    # tab focus and tree selection are independent state (this is the exact
+    # setup `reselect_renamed_class/3`'s guard exists for).
+    view |> element(~s(div[phx-value-class="#{class_b}"])) |> render_click()
+
+    before_rename = :sys.get_state(view.pid).socket.assigns
+    assert before_rename.selected_class == class_b
+    assert before_rename.active_tab == "def:#{class_a}"
+
+    # Rename A -> A2 from its still-focused `:def` tab while B remains the
+    # tree's selected class.
+    view |> element(~s(button[phx-click="open_rename"])) |> render_click()
+
+    rename_html =
+      view
+      |> form("#rename-form")
+      |> render_submit(%{"new_name" => new_name})
+
+    assert rename_html =~ "Renamed #{class_a} to #{new_name}"
+    refute rename_html =~ "{:error"
+    refute rename_html =~ "beamtalk_error"
+
+    # The point under test: B's tree selection is left completely alone by the
+    # rename — `selected_class` is still B (never moved to A2), and
+    # `browser_protocols`/`browser_categories` are unchanged, still reflecting
+    # B rather than A2 (the pre-fix "ghost selection" mismatch this guards
+    # against: the tree highlighting one class while these panes show
+    # another).
+    after_rename = :sys.get_state(view.pid).socket.assigns
+    assert after_rename.selected_class == class_b
+    assert after_rename.browser_protocols == browser_protocols_b
+    assert after_rename.browser_categories == browser_categories_b
+
+    # The LiveView is still live and interactive after the rename.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
   test "the ChangeLog viewer flags a rename-class entry as destructive and its scoped 'apply rename' round-trips (ADR 0114, BT-3277)",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
