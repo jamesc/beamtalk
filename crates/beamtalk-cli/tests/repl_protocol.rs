@@ -1419,6 +1419,29 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                     "Usage: :flush-destructive [<Class>|#kind|#{ #file => \"path\" }]".to_string(),
                 ),
             }
+        } else if case.expression.starts_with(":rename-class ") {
+            // ADR 0114 Phase 5 (BT-3276): `:rename-class <Class> <NewName>` →
+            // `<Class> renameTo: #<NewName>`, via the same
+            // `rename_class_expr_for` the real REPL dispatch calls
+            // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror.
+            // The real dispatch also prompts for `y/N` terminal confirmation
+            // first; this harness talks to the protocol directly (no
+            // terminal), same as `:remove-class` above.
+            let arg = case.expression.strip_prefix(":rename-class ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::rename_class_expr_for(arg) {
+                Some(expr) => client.eval(&expr),
+                None => Err("Usage: :rename-class <Class> <NewName>".to_string()),
+            }
+        } else if case.expression.starts_with(":rename-method ") {
+            // ADR 0114 Phase 5 (BT-3276): `:rename-method <Class> <selector>
+            // <newSelector>` → `<Class> renameSelector: #<selector> to:
+            // #<newSelector>`, via the same `rename_method_expr_for` the
+            // real REPL dispatch calls.
+            let arg = case.expression.strip_prefix(":rename-method ").unwrap();
+            match beamtalk_cli::repl_meta_exprs::rename_method_expr_for(arg) {
+                Some(expr) => client.eval(&expr),
+                None => Err("Usage: :rename-method <Class> <selector> <newSelector>".to_string()),
+            }
         } else {
             client.eval(&case.expression)
         };

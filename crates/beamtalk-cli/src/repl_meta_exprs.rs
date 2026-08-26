@@ -132,6 +132,71 @@ pub fn flush_destructive_expr_for(selector: &str) -> Option<String> {
     ))
 }
 
+/// Construct the `<Class> renameTo: #<NewName>` expression a `:rename-class
+/// <Class> <NewName>` REPL line dispatches to (ADR 0114 Phase 5, BT-3276).
+///
+/// Splits on whitespace into exactly two tokens — the current class name and
+/// the new one. Unlike [`remove_method_expr_for`]'s selector, the first
+/// token is never symbol-decorated (a class name is a bare identifier); the
+/// second gets the same optional-leading-`#`-strip treatment for symmetry
+/// with how the resulting Symbol literal is written. Returns `None` when the
+/// argument doesn't split into exactly two non-empty tokens (after
+/// `#`-stripping the second), so the caller can print a usage hint instead
+/// of evaluating a malformed `renameTo:` send.
+///
+/// The real REPL dispatch (`commands/repl/mod.rs`) prompts for `y/N`
+/// confirmation before calling this — a destructive, memory-mutating
+/// operation per ADR 0114's Surface section (reusing ADR 0113's) — but that
+/// terminal-only confirmation step is orthogonal to expression construction,
+/// so it isn't modeled here, matching [`remove_class_expr_for`].
+pub fn rename_class_expr_for(arg: &str) -> Option<String> {
+    let mut parts = arg.split_whitespace();
+    let old_name = parts.next()?;
+    let new_name = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let new_name = new_name.strip_prefix('#').unwrap_or(new_name);
+    if new_name.is_empty() {
+        return None;
+    }
+    Some(format!("{old_name} renameTo: #{new_name}"))
+}
+
+/// Construct the `<Class> renameSelector: #<OldSelector> to: #<NewSelector>`
+/// expression a `:rename-method <Class> <OldSelector> <NewSelector>` REPL
+/// line dispatches to (ADR 0114 Phase 5, BT-3276). Instance-side only — sent
+/// to a bare class name, this always touches the instance-side method table;
+/// a class-side rename needs a direct `Counter class renameSelector: ... to:
+/// ...` eval, the same chokepoint limitation [`remove_method_expr_for`] has
+/// (`docs/development/surface-parity.md`'s `remove-method` row).
+///
+/// Splits on whitespace into exactly three tokens — the class, the current
+/// selector, and the new selector — stripping an optional leading `#` off
+/// each selector token (mirroring `remove_method_expr_for`), so
+/// `:rename-method Counter increment incrementBy` and `:rename-method
+/// Counter #increment #incrementBy` both work. Returns `None` when the
+/// argument doesn't split into exactly three tokens, or either selector
+/// strips down to empty (e.g. a bare `#`), so the caller can print a usage
+/// hint instead of evaluating a malformed `renameSelector:to:` send.
+pub fn rename_method_expr_for(arg: &str) -> Option<String> {
+    let mut parts = arg.split_whitespace();
+    let class = parts.next()?;
+    let old_selector = parts.next()?;
+    let new_selector = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let old_selector = old_selector.strip_prefix('#').unwrap_or(old_selector);
+    let new_selector = new_selector.strip_prefix('#').unwrap_or(new_selector);
+    if old_selector.is_empty() || new_selector.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{class} renameSelector: #{old_selector} to: #{new_selector}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +392,113 @@ mod tests {
             FLUSH_INCLUDING_DESTRUCTIVE_EXPR,
             "Workspace flushIncludingDestructive"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // rename_class_expr_for
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rename_class_translates_to_rename_to_send() {
+        assert_eq!(
+            rename_class_expr_for("Counter Accumulator"),
+            Some("Counter renameTo: #Accumulator".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_class_strips_leading_hash_on_new_name() {
+        assert_eq!(
+            rename_class_expr_for("Counter #Accumulator"),
+            Some("Counter renameTo: #Accumulator".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_class_trims_surrounding_whitespace() {
+        assert_eq!(
+            rename_class_expr_for("  Counter   Accumulator  "),
+            Some("Counter renameTo: #Accumulator".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_class_with_missing_new_name_reports_no_expression() {
+        assert_eq!(rename_class_expr_for("Counter"), None);
+        assert_eq!(rename_class_expr_for("Counter "), None);
+    }
+
+    #[test]
+    fn rename_class_with_empty_argument_reports_no_expression() {
+        assert_eq!(rename_class_expr_for(""), None);
+        assert_eq!(rename_class_expr_for("   "), None);
+    }
+
+    #[test]
+    fn rename_class_with_extra_token_reports_no_expression() {
+        assert_eq!(rename_class_expr_for("Counter Accumulator Extra"), None);
+    }
+
+    #[test]
+    fn rename_class_with_bare_hash_new_name_reports_no_expression() {
+        assert_eq!(rename_class_expr_for("Counter #"), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // rename_method_expr_for
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rename_method_translates_to_rename_selector_to_send() {
+        assert_eq!(
+            rename_method_expr_for("Counter increment incrementBy"),
+            Some("Counter renameSelector: #increment to: #incrementBy".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_method_preserves_keyword_selectors() {
+        assert_eq!(
+            rename_method_expr_for("Dict at:put: atKey:put:"),
+            Some("Dict renameSelector: #at:put: to: #atKey:put:".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_method_strips_leading_hash_on_both_selectors() {
+        assert_eq!(
+            rename_method_expr_for("Counter #increment #incrementBy"),
+            Some("Counter renameSelector: #increment to: #incrementBy".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_method_trims_surrounding_whitespace() {
+        assert_eq!(
+            rename_method_expr_for("  Counter   increment   incrementBy  "),
+            Some("Counter renameSelector: #increment to: #incrementBy".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_method_with_missing_tokens_reports_no_expression() {
+        assert_eq!(rename_method_expr_for("Counter"), None);
+        assert_eq!(rename_method_expr_for("Counter increment"), None);
+        assert_eq!(rename_method_expr_for(""), None);
+        assert_eq!(rename_method_expr_for("   "), None);
+    }
+
+    #[test]
+    fn rename_method_with_extra_token_reports_no_expression() {
+        assert_eq!(
+            rename_method_expr_for("Counter increment incrementBy Extra"),
+            None
+        );
+    }
+
+    #[test]
+    fn rename_method_with_bare_hash_selector_reports_no_expression() {
+        assert_eq!(rename_method_expr_for("Counter # incrementBy"), None);
+        assert_eq!(rename_method_expr_for("Counter increment #"), None);
     }
 }
