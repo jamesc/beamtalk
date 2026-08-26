@@ -43,6 +43,7 @@ pub mod hover_provider;
 pub mod implementors_provider;
 pub mod references_provider;
 pub mod references_to_query;
+pub mod selector_rename_query;
 pub mod senders_query;
 pub mod signature_help_provider;
 

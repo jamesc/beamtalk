@@ -45,7 +45,9 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     resolve_class_span/2,
     categorize_methods/2,
     class_state_field_defaults/2,
-    reindent_method_source/2
+    reindent_method_source/2,
+    find_selector_send_spans/3,
+    find_definition_selector_spans/5
 ]).
 
 -doc """
@@ -422,6 +424,67 @@ computable" — never blocks or undoes anything, since nothing here writes.
     | {error, atom(), binary()}.
 resolve_class_span(Source, ClassName) ->
     beamtalk_compiler_server:resolve_class_span(Source, ClassName).
+
+-doc """
+Resolve the exact byte span(s) of every self/super-directed send of
+`OldSelector' within `MethodSource' (ADR 0114, BT-3279).
+
+Backs `Behaviour>>renameSelector:to:''s reference-site rewrite
+(`beamtalk_behaviour_intrinsics:classRenameSelector/3'):
+`beamtalk_xref:senders_of/1' only carries a *line* number per sending
+method, and a whole-method span is too coarse to splice a single send's
+selector token(s) without corrupting the rest of the body. `MethodSource'
+is expected to be the OWNING method's own body text, already sliced via
+`resolve_method_span/4' — the caller translates the spans this returns back
+to absolute file offsets by adding that method's own span start.
+
+Returns `{ok, Occurrences}' — `Occurrences' a list of lists, one inner list
+per matched self/super send (a keyword selector contributes one
+`#{start := S, 'end' := E, new_text := NewText}' map per keyword part; a
+unary/binary selector contributes a single-element inner list). An empty
+outer list means no matching send was found, `MethodSource' didn't parse,
+or a match's keyword arity mismatched `NewSelector''s — never an error;
+this resolver has no failure mode beyond "found nothing" (see
+`crates/beamtalk-core/src/method_source_walker.rs`'s
+`find_selector_send_spans' doc for the full "why not regex" rationale).
+Transport failures return `{error, port_error | noproc | timeout, Message}'.
+""".
+-spec find_selector_send_spans(binary(), atom() | binary(), atom() | binary()) ->
+    {ok, [[#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]]}
+    | {error, atom(), binary()}.
+find_selector_send_spans(MethodSource, OldSelector, NewSelector) ->
+    beamtalk_compiler_server:find_selector_send_spans(MethodSource, OldSelector, NewSelector).
+
+-doc """
+Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
+selector-token span(s) within `Source' (ADR 0114, BT-3279).
+
+Backs `Behaviour>>renameSelector:to:''s definition-site rewrite: the
+`'rename-method'' ChangeLog schema's `sites[0]' must be a narrow
+selector-token splice, never the whole method body — replacing the whole
+body via `rewrite_sites/2' would corrupt the method's own parameter
+names/logic. For a keyword selector this is just the resolved definition's
+own `KeywordPart' spans (exact, from the parser); for unary/binary — which
+carry no dedicated selector span at all — this resolves it via a small
+modifier-skipping re-lex of the definition's own AST span
+(`crates/beamtalk-core/src/method_source_walker.rs`'s
+`find_definition_selector_spans' doc has the full mechanism).
+
+Returns `{ok, Spans}' on success (empty when `OldSelector'/`NewSelector'
+differ in keyword arity — never a panic). Resolution failures
+(`class_not_found' / `selector_not_found' / `ambiguous') and transport
+failures (`port_error' / `noproc' / `timeout') both return
+`{error, Reason, Message}', mirroring `resolve_method_span/4' exactly.
+""".
+-spec find_definition_selector_spans(
+    binary(), atom() | binary(), atom() | binary(), atom() | binary(), instance | class
+) ->
+    {ok, [#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]}
+    | {error, atom(), binary()}.
+find_definition_selector_spans(Source, ClassName, OldSelector, NewSelector, Side) ->
+    beamtalk_compiler_server:find_definition_selector_spans(
+        Source, ClassName, OldSelector, NewSelector, Side
+    ).
 
 -doc """
 Group a class's methods by its `// === Name ===' section dividers
