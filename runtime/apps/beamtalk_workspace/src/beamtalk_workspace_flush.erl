@@ -22,13 +22,15 @@ Every flushable entry classifies into one of two tiers (`entry_tier/1`):
     `'new-class'`, and `'remove-method'` (excising a recorded span leaves the
     file in place, mechanically identical to a patch). Applied by ordinary
     `flush/0` / `flush/1` / `flush_kinds/1` with no gate.
-  - **Tier 2** — destroys a file: `'remove-class'`; or moves one:
-    `'rename-class'` (ADR 0114, BT-3271). Only applied when the caller passes
-    `ConfirmDestructive = true` (`flush/2`, `flush_kinds/2`) or calls the
-    unscoped `flush_including_destructive/0`. Never silently reached — no
-    workspace setting or environment variable can imply it. A pending Tier 2
-    entry left out of the applied set is reported in the summary's `skipped`
-    field with `reason => <<"destructive">>`.
+  - **Tier 2** — destroys a file: `'remove-class'`; moves one: `'rename-class'`
+    (ADR 0114, BT-3271); or rewrites a method's confirmed call sites across
+    files in place, no file moved: `'rename-method'` (ADR 0114, BT-3273).
+    Only applied when the caller passes `ConfirmDestructive = true`
+    (`flush/2`, `flush_kinds/2`) or calls the unscoped
+    `flush_including_destructive/0`. Never silently reached — no workspace
+    setting or environment variable can imply it. A pending Tier 2 entry left
+    out of the applied set is reported in the summary's `skipped` field with
+    `reason => <<"destructive">>`.
 
 ## Selection
 
@@ -199,7 +201,8 @@ forever, defeating the "retry only what's left" guarantee.
 **Per-entry, not per-file, flushed marking.** A `'rename-class'` entry is
 only marked flushed once *every* file it touches (the move's own target
 plus every other rewritten site file) has committed in the SAME Phase B
-pass — `rename_class_fully_committed/3`. A Phase B failure partway through
+pass — `multi_site_entry_fully_committed/3` (BT-3273: shared with
+`'rename-method'`). A Phase B failure partway through
 leaves the entry pending in its entirety (even though some of its files are
 now correctly on disk); the per-file `files`/`conflicts` summary still
 reports exactly which files committed, and the idempotent check above means
@@ -243,6 +246,48 @@ BT-3278). A reload failure (no compiler available, a bare runtime, or any
 other error) is logged via `?LOG_WARNING` and never fails the
 already-successful flush — see that function's own doc for the full
 rationale.
+
+## Atomicity (method rename — ADR 0114, BT-3273)
+
+A `'rename-method'` entry is also genuinely multi-file (`sites[0]` is the
+definition, `sites[1..]` are every *confirmed* self/super sender site —
+`candidate_sites` are reported for human/agent review only and are never
+staged, written, or otherwise touched by flush) but, unlike class rename, it
+has no file-move component: renaming a selector never changes which file a
+method's class lives in, so every one of its sites — including the
+definition — is an ordinary in-place splice against the file it already sits
+in. This means method rename needs none of class rename's move-specific
+machinery (`old_path`/`new_path`, staged-rename crash recovery, the
+`already gone` disambiguation) — it reuses the exact same generic
+`{site(), OwnerEntry}` splice/grouping machinery class rename's own
+*other*-site references already go through (`group_units_by_file/1`,
+`prepare_rename_site_group/2`, `apply_site_units/2`), just seeded from
+*every* site instead of only the non-declaration ones.
+
+| Phase A (stage) | Phase B (commit) |
+|---|---|
+| For every confirmed site across every pending `'rename-method'` entry, group by `sourceFile` (sites from different entries landing in the same file merge into one splice, exactly like `group_by_file/1` already does for ordinary Tier-1 entries), read each file, splice every site's `span` against its recorded `source_ref`/`prev_source_ref`, write `<file>.tmp` | Rename each `<file>.tmp` → `<file>`, in sequence — same sequential-commit, partial-failure-is-recoverable-via-re-flush shape ordinary multi-file flush already documents above |
+
+A Phase A failure on any one file (a confirmed site's recorded span no
+longer resolves against current disk content) aborts the whole batch before
+any file is renamed, cleaning up every `.tmp` already written — mirrors the
+"any conflict aborts the whole flush" rule for ordinary multi-file flush and
+class rename alike. Like `'rename-class'`, a `'rename-method'` entry is only
+counted as fully flushed (and only then marked flushed in the ChangeLog)
+once *every* file among its confirmed sites has committed in the *same*
+Phase B pass (`multi_site_entry_fully_committed/3`) — a Phase B failure
+partway through leaves the whole entry pending even though some of its files
+already landed correctly; re-flushing retries only what didn't.
+
+A `'rename-method'` entry sharing a target file with a pending ordinary
+patch, or with a pending `'rename-class'` entry's own touched files, aborts
+the whole flush (`mixed_rename_method_and_pending_edit`) — the same
+defensive posture `'rename-class'`'s own collision guards take, for the
+identical reason (reordering two different splice mechanisms against one
+file within a single Phase A/B pass is undesigned). Two `'rename-method'`
+entries sharing a file are *not* a collision: their sites simply merge into
+one splice via `group_units_by_file/1`, the same way multiple ordinary
+patches against one file already merge via `group_by_file/1`.
 
 ## Conflict detection
 
@@ -324,7 +369,10 @@ set. A pending `'remove-class'` entry left out of the applied set because
     %% ADR 0114 Phase 2 (BT-3271): rename-class multi-file staging, exported
     %% for direct unit coverage independent of a full flush round-trip.
     resolve_new_path/1,
-    is_rename_class_entry/1
+    is_rename_class_entry/1,
+    %% ADR 0114 Phase 3 (BT-3273): rename-method multi-file staging, exported
+    %% for direct unit coverage independent of a full flush round-trip.
+    is_rename_method_entry/1
 ]).
 
 -type filter() ::
@@ -677,32 +725,65 @@ run_flush(Pending, ConfirmDestructive) ->
             false -> {Tier1, Tier2}
         end,
     Skipped = [skipped_entry(E) || E <- SkippedTier2],
-    %% ADR 0114 (BT-3271): a `'rename-class'` entry's top-level `sourceFile`
-    %% is always null (schema: ambiguous for a multi-file entry) so it can
-    %% never land in `group_by_file/1`'s grouping — pulled out up front and
-    %% staged through its own multi-file pipeline instead, then merged back
-    %% into one Phase A / Phase B pass with the ordinary entries.
-    {RenameEntries, OrdinaryEntries} = lists:partition(fun is_rename_class_entry/1, ToApply),
+    %% ADR 0114 (BT-3271/BT-3273): a `'rename-class'`/`'rename-method'`
+    %% entry's top-level `sourceFile` is always null (schema: ambiguous for a
+    %% multi-file entry) so neither can ever land in `group_by_file/1`'s
+    %% grouping — both are pulled out up front and staged through their own
+    %% multi-file pipelines instead, then merged back into one Phase A /
+    %% Phase B pass with the ordinary entries.
+    {RenameClassEntries, Rest1} = lists:partition(fun is_rename_class_entry/1, ToApply),
+    {RenameMethodEntries, OrdinaryEntries} = lists:partition(fun is_rename_method_entry/1, Rest1),
     OrdinaryGroups = group_by_file(OrdinaryEntries),
-    case check_no_rename_file_collisions(RenameEntries, OrdinaryGroups) of
+    case check_no_rename_file_collisions(RenameClassEntries, OrdinaryGroups) of
         {conflict, Conflicts0} ->
             {ok, conflict_summary(Conflicts0, Skipped)};
         ok ->
-            Combined = combine_phase_a(phase_a(OrdinaryGroups), phase_a_renames(RenameEntries)),
-            case Combined of
-                {ok, Prepared} ->
-                    RenameExpectedFiles = rename_expected_files_map(RenameEntries),
-                    phase_b(Prepared, Shadowed, Skipped, RenameExpectedFiles);
-                {error, _} = Err ->
-                    Err;
-                {conflict, Conflicts} ->
-                    {ok, conflict_summary(Conflicts, Skipped)}
+            %% BT-3273: a `'rename-method'` entry must not race a pending
+            %% ordinary patch OR a pending `'rename-class'` entry over the
+            %% same file — see the moduledoc's "Atomicity (method rename)"
+            %% section.
+            OtherFiles = sets:union(
+                sets:from_list([F || {F, _} <- OrdinaryGroups], [{version, 2}]),
+                sets:from_list(
+                    lists:flatmap(fun rename_entry_all_files/1, RenameClassEntries), [{version, 2}]
+                )
+            ),
+            case
+                check_no_rename_method_file_collisions(
+                    RenameMethodEntries, OtherFiles, OrdinaryGroups
+                )
+            of
+                {conflict, Conflicts1} ->
+                    {ok, conflict_summary(Conflicts1, Skipped)};
+                ok ->
+                    Combined = combine_phase_a(
+                        combine_phase_a(
+                            phase_a(OrdinaryGroups), phase_a_renames(RenameClassEntries)
+                        ),
+                        phase_a_rename_methods(RenameMethodEntries)
+                    ),
+                    case Combined of
+                        {ok, Prepared} ->
+                            RenameExpectedFiles = maps:merge(
+                                rename_expected_files_map(RenameClassEntries),
+                                rename_method_expected_files_map(RenameMethodEntries)
+                            ),
+                            phase_b(Prepared, Shadowed, Skipped, RenameExpectedFiles);
+                        {error, _} = Err ->
+                            Err;
+                        {conflict, Conflicts} ->
+                            {ok, conflict_summary(Conflicts, Skipped)}
+                    end
             end
     end.
 
 -spec is_rename_class_entry(term()) -> boolean().
 is_rename_class_entry(E) ->
     beamtalk_workspace_changelog:entry_kind(E) =:= 'rename-class'.
+
+-spec is_rename_method_entry(term()) -> boolean().
+is_rename_method_entry(E) ->
+    beamtalk_workspace_changelog:entry_kind(E) =:= 'rename-method'.
 
 %%% ----------------------------------------------------------------------------
 %%% Tiering (ADR 0113 Phase 2)
@@ -713,15 +794,17 @@ Classify a ChangeEntry into flush's destructive-confirmation tier.
 
 Tier 1 — edits a still-existing file (`instance`, `class`, `'new-class'`,
 `'remove-method'`) — applies under ordinary `flush/0` / `flush/1` /
-`flush_kinds/1` with no gate. Tier 2 — destroys a file (`'remove-class'`) or
-moves one (`'rename-class'`, ADR 0114 BT-3271) — only applies when the
-caller passes `ConfirmDestructive = true`.
+`flush_kinds/1` with no gate. Tier 2 — destroys a file (`'remove-class'`),
+moves one (`'rename-class'`, ADR 0114 BT-3271), or rewrites a method's
+confirmed call sites across files (`'rename-method'`, ADR 0114 BT-3273) —
+only applies when the caller passes `ConfirmDestructive = true`.
 """.
 -spec entry_tier(term()) -> tier1 | tier2.
 entry_tier(E) ->
     case beamtalk_workspace_changelog:entry_kind(E) of
         'remove-class' -> tier2;
         'rename-class' -> tier2;
+        'rename-method' -> tier2;
         _ -> tier1
     end.
 
@@ -1334,7 +1417,7 @@ derive_new_path(OldPath, OldClassBin, NewClassBin) ->
 -doc """
 Per-entry expected file set: every file that must appear in a Phase B
 commit for `Entry`'s `'rename-class'` to be considered fully flushed
-(`rename_class_fully_committed/3`). Keyed by `seq` since `#prepared{}`
+(`multi_site_entry_fully_committed/3`). Keyed by `seq` since `#prepared{}`
 records carry the raw `entry()`, not a convenient lookup key.
 """.
 -spec rename_expected_files_map([term()]) -> #{non_neg_integer() => sets:set(binary())}.
@@ -1834,17 +1917,20 @@ all_units_already_applied_loop(Body, [{Site, _Entry} | Rest], Shift) ->
             false
     end.
 
-%% A rename-class entry is only considered fully flushed once EVERY file it
-%% touches (`rename_entry_all_files_to_write/1`) has committed in the SAME
-%% Phase B pass — a non-rename-class entry has no multi-file fan-out (every
-%% other kind targets exactly one file) so it trivially satisfies this the
+%% A `'rename-class'`/`'rename-method'` entry is only considered fully
+%% flushed once EVERY file it touches (`rename_entry_all_files_to_write/1` /
+%% `rename_method_entry_all_files/1`, folded together into the single
+%% `RenameExpectedFiles` map `run_flush/2` builds, keyed by seq — globally
+%% unique across every entry regardless of kind, so the two kinds' entries
+%% never collide in one map) has committed in the SAME Phase B pass — every
+%% other kind targets exactly one file, so it trivially satisfies this the
 %% moment it appears in `Committed` at all.
--spec rename_class_fully_committed(
+-spec multi_site_entry_fully_committed(
     term(), #{non_neg_integer() => sets:set(binary())}, sets:set(binary())
 ) -> boolean().
-rename_class_fully_committed(Entry, RenameExpectedFiles, CommittedFilesSet) ->
+multi_site_entry_fully_committed(Entry, RenameExpectedFiles, CommittedFilesSet) ->
     case beamtalk_workspace_changelog:entry_kind(Entry) of
-        'rename-class' ->
+        Kind when Kind =:= 'rename-class'; Kind =:= 'rename-method' ->
             Seq = beamtalk_workspace_changelog:entry_seq(Entry),
             Expected = maps:get(Seq, RenameExpectedFiles, sets:new([{version, 2}])),
             sets:is_subset(Expected, CommittedFilesSet);
@@ -1885,6 +1971,166 @@ combine_phase_a({ok, P1}, {conflict, C2}) ->
 -spec cleanup_other_prepared({ok, [#prepared{}]} | term()) -> ok.
 cleanup_other_prepared({ok, P}) -> cleanup_tmps(P);
 cleanup_other_prepared(_) -> ok.
+
+%%% ----------------------------------------------------------------------------
+%%% Method rename (Tier 2) — multi-file staged splice (ADR 0114, BT-3273)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Cross-pipeline collision guard for `'rename-method'` (ADR 0114, BT-3273):
+abort the whole flush, before any Phase A I/O runs, if a `'rename-method'`
+entry's confirmed-site files overlap any file an ordinary pending patch or a
+pending `'rename-class'` entry is about to touch in the same batch (`OtherFiles`,
+built by the caller as the union of both). Mirrors `check_no_rename_file_
+collisions/2`'s identical defensive posture for the identical reason —
+reordering two different splice mechanisms against one file within a single
+Phase A/B pass is undesigned, so it is refused rather than silently raced.
+
+Two `'rename-method'` entries sharing a file are deliberately NOT a collision
+here (unlike class rename, which guards rename-vs-rename because a move can
+race another move's own unlink) — their confirmed sites simply merge into one
+splice via `group_units_by_file/1`, the same way multiple ordinary patches
+against one file already merge via `group_by_file/1`. There is no move/unlink
+step for a method rename to race.
+""".
+-spec check_no_rename_method_file_collisions([term()], sets:set(binary()), [{binary(), [term()]}]) ->
+    ok | {conflict, [map()]}.
+check_no_rename_method_file_collisions([], _OtherFiles, _OrdinaryGroups) ->
+    ok;
+check_no_rename_method_file_collisions(RenameMethodEntries, OtherFiles, OrdinaryGroups) ->
+    Conflicts = lists:filtermap(
+        fun(Entry) -> rename_method_entry_collision(Entry, OtherFiles, OrdinaryGroups) end,
+        RenameMethodEntries
+    ),
+    case Conflicts of
+        [] -> ok;
+        _ -> {conflict, Conflicts}
+    end.
+
+-spec rename_method_entry_collision(term(), sets:set(binary()), [{binary(), [term()]}]) ->
+    {true, map()} | false.
+rename_method_entry_collision(Entry, OtherFiles, OrdinaryGroups) ->
+    case [F || F <- rename_method_entry_all_files(Entry), sets:is_element(F, OtherFiles)] of
+        [] ->
+            false;
+        [Collided | _] ->
+            %% The colliding file may belong to a pending ordinary group (in
+            %% which case its entries are worth reporting alongside this
+            %% one) or to a `'rename-class'` entry's own touched files (no
+            %% convenient group to look up here — reporting just this
+            %% entry's own seq is still an accurate, actionable conflict).
+            OrdEntries =
+                case lists:keyfind(Collided, 1, OrdinaryGroups) of
+                    {Collided, Es} -> Es;
+                    false -> []
+                end,
+            {true,
+                conflict_map(
+                    Collided,
+                    <<"mixed_rename_method_and_pending_edit">>,
+                    [Entry | OrdEntries],
+                    iolist_to_binary([
+                        <<"Cannot flush a rename-method entry (">>,
+                        beamtalk_workspace_changelog:entry_class(Entry),
+                        <<" ">>,
+                        display_selector(beamtalk_workspace_changelog:entry_old_selector(Entry)),
+                        <<" -> ">>,
+                        display_selector(beamtalk_workspace_changelog:entry_selector(Entry)),
+                        <<
+                            ") alongside a pending ordinary patch or another pending "
+                            "rename against the same file in the same operation; flush "
+                            "or discard the other pending entry first, then re-flush "
+                            "this rename"
+                        >>
+                    ])
+                )}
+    end.
+
+-spec display_selector(binary() | undefined) -> binary().
+display_selector(undefined) -> <<"?">>;
+display_selector(Sel) when is_binary(Sel) -> Sel.
+
+%% Every file a `'rename-method'` entry's CONFIRMED sites touch — the
+%% definition (`sites[0]`) plus every confirmed self/super sender
+%% (`sites[1..]`). `candidate_sites` are never consulted here (ADR 0114: they
+%% are never staged, written, or otherwise touched by flush under any
+%% circumstance).
+-spec rename_method_entry_all_files(term()) -> [binary()].
+rename_method_entry_all_files(Entry) ->
+    lists:usort([
+        maps:get(source_file, S)
+     || S <- entry_confirmed_sites(Entry), S =/= undefined
+    ]).
+
+-spec entry_confirmed_sites(term()) -> [beamtalk_workspace_changelog:site()].
+entry_confirmed_sites(Entry) ->
+    case beamtalk_workspace_changelog:entry_sites(Entry) of
+        undefined -> [];
+        Sites -> Sites
+    end.
+
+-doc """
+Per-entry expected file set for a `'rename-method'` entry: every file that
+must appear in a Phase B commit for it to be considered fully flushed
+(`multi_site_entry_fully_committed/3`). Mirrors `rename_expected_files_map/1`
+for class rename; keyed by `seq` for the same reason (`#prepared{}` records
+carry the raw `entry()`, not a convenient lookup key).
+""".
+-spec rename_method_expected_files_map([term()]) -> #{non_neg_integer() => sets:set(binary())}.
+rename_method_expected_files_map(RenameMethodEntries) ->
+    lists:foldl(
+        fun(Entry, Acc) ->
+            Seq = beamtalk_workspace_changelog:entry_seq(Entry),
+            Files = sets:from_list(rename_method_entry_all_files(Entry), [{version, 2}]),
+            Acc#{Seq => Files}
+        end,
+        #{},
+        RenameMethodEntries
+    ).
+
+-doc """
+Phase A for every pending `'rename-method'` entry in this flush (ADR 0114,
+BT-3273): build the union of every entry's CONFIRMED `sites` (never
+`candidate_sites`) as `{Site, OwnerEntry}` units — sites from different
+entries that land in the same file merge, via `group_units_by_file/1`,
+exactly the way class rename's own OTHER-site references already merge
+across entries — then stage each file group with the same generic
+`prepare_rename_site_group/2` class rename's reference-site splices use.
+A `'rename-method'` entry has no file-move component (renaming a selector
+never changes which file a method's class lives in), so every one of its
+sites, including the definition site, is an ordinary in-place splice; abort-
+with-cleanup on the first conflict or hard error exactly like
+`phase_a_loop/3`/`phase_a_renames_loop/3` do for their own groups.
+""".
+-spec phase_a_rename_methods([term()]) ->
+    {ok, [#prepared{}]} | {error, #beamtalk_error{}} | {conflict, [map()]}.
+phase_a_rename_methods([]) ->
+    {ok, []};
+phase_a_rename_methods(RenameMethodEntries) ->
+    Units = lists:flatmap(
+        fun(Entry) ->
+            [{Site, Entry} || Site <- entry_confirmed_sites(Entry), Site =/= undefined]
+        end,
+        RenameMethodEntries
+    ),
+    Groups = group_units_by_file(Units),
+    phase_a_rename_methods_loop(Groups, [], []).
+
+phase_a_rename_methods_loop([], Prepared, []) ->
+    {ok, lists:reverse(Prepared)};
+phase_a_rename_methods_loop([], Prepared, Conflicts) ->
+    cleanup_tmps(Prepared),
+    {conflict, lists:reverse(Conflicts)};
+phase_a_rename_methods_loop([{File, Units} | Rest], Prepared, Conflicts) ->
+    case prepare_rename_site_group(File, Units) of
+        {ok, Rec} ->
+            phase_a_rename_methods_loop(Rest, [Rec | Prepared], Conflicts);
+        {conflict, C} ->
+            phase_a_rename_methods_loop(Rest, Prepared, [C | Conflicts]);
+        {error, _} = Err ->
+            cleanup_tmps(Prepared),
+            Err
+    end.
 
 %%% ----------------------------------------------------------------------------
 %%% Method splice
@@ -2096,15 +2342,17 @@ phase_b_loop([], Shadowed, Committed, Failed, Skipped, RenameExpectedFiles) ->
     Files = lists:reverse([P#prepared.file || P <- Committed]),
     CommittedFilesSet = sets:from_list(Files, [{version, 2}]),
     CommittedEntries = lists:flatten([P#prepared.entries || P <- Committed]),
-    %% ADR 0114 (BT-3271): a `'rename-class'` entry spans multiple files (the
-    %% move target plus every other rewritten site), so appearing in
-    %% `CommittedEntries` at all (from ONE of its files) is not enough —
-    %% every file it touches must have committed in THIS pass. A non-rename
-    %% entry trivially satisfies this (every other kind targets one file).
+    %% ADR 0114 (BT-3271/BT-3273): a `'rename-class'` entry spans multiple
+    %% files (the move target plus every other rewritten site) and a
+    %% `'rename-method'` entry does too (the definition plus every confirmed
+    %% sender site), so appearing in `CommittedEntries` at all (from ONE of
+    %% its files) is not enough — every file either kind touches must have
+    %% committed in THIS pass. A non-multi-site entry trivially satisfies
+    %% this (every other kind targets one file).
     FullyCommitted = [
         E
      || E <- CommittedEntries,
-        rename_class_fully_committed(E, RenameExpectedFiles, CommittedFilesSet)
+        multi_site_entry_fully_committed(E, RenameExpectedFiles, CommittedFilesSet)
     ],
     %% Only mark shadowed entries whose survivor (same class+selector) was
     %% actually committed in this Phase B. When Phase B aborts mid-loop, a
