@@ -1502,30 +1502,27 @@ this is ours.
 -spec check_rename_target_safe(binary(), binary(), term()) -> ok | {conflict, map()}.
 check_rename_target_safe(NewPath, NewFileBody, Entry) ->
     AbsNewPath = binary_to_list(NewPath),
-    case file:read_file_info(AbsNewPath) of
+    case file:read_file(AbsNewPath) of
+        {ok, NewFileBody} ->
+            ok;
         {error, enoent} ->
             ok;
-        _Exists ->
-            case file:read_file(AbsNewPath) of
-                {ok, NewFileBody} ->
-                    ok;
-                _NotAlreadyOurs ->
-                    {conflict,
-                        conflict_map(
-                            NewPath,
-                            <<"rename_target_exists">>,
-                            [Entry],
-                            iolist_to_binary([
-                                <<"Cannot rename to ">>,
-                                NewPath,
-                                <<
-                                    "; a file already exists at that path with "
-                                    "different content; move or remove it first, "
-                                    "then re-flush the rename"
-                                >>
-                            ])
-                        )}
-            end
+        _NotAlreadyOurs ->
+            {conflict,
+                conflict_map(
+                    NewPath,
+                    <<"rename_target_exists">>,
+                    [Entry],
+                    iolist_to_binary([
+                        <<"Cannot rename to ">>,
+                        NewPath,
+                        <<
+                            "; a file already exists at that path with "
+                            "different content; move or remove it first, "
+                            "then re-flush the rename"
+                        >>
+                    ])
+                )}
     end.
 
 %% See moduledoc's "Atomicity (class rename)" — `old_path` gone disambiguates
@@ -1749,26 +1746,93 @@ resolve_site_unit_2(Body, File, Start, End, PrevText, NewText, OwnerEntry) ->
             end
     end.
 
--spec already_applied_at(binary(), non_neg_integer(), binary()) -> boolean().
+%% `Start` is `integer()`, not `non_neg_integer()`, because `all_units_
+%% already_applied_loop/3` calls this with an original recorded offset PLUS
+%% an accumulated shift that is mathematically always non-negative for a
+%% real site list, but not something Dialyzer can prove structurally.
+-spec already_applied_at(binary(), integer(), binary()) -> boolean().
 already_applied_at(Body, Start, NewText) ->
     NewLen = byte_size(NewText),
-    Start + NewLen =< byte_size(Body) andalso
+    Start >= 0 andalso
+        Start + NewLen =< byte_size(Body) andalso
         binary:part(Body, Start, NewLen) =:= NewText.
 
+-doc """
+Verify every unit's expected new text already sits at its correct position
+in `Body` — the "old_path already gone" recovery check `resolve_missing_
+rename_source/4` uses to tell a genuinely completed move apart from an
+unresolvable conflict.
+
+**Cannot just check each unit's own RECORDED `span.start` against `Body`**
+(review round 5 on PR #3526): that offset is relative to the ORIGINAL,
+pre-splice source — valid input to `apply_site_units/2`'s own progressive,
+rightmost-first application (each not-yet-applied lower-offset unit's
+recorded start is still correct at the moment ITS splice runs, since only
+content strictly after it has shifted so far), but NOT valid as a direct
+lookup into the FINAL, fully-spliced `Body` this function is handed instead
+— there is no original body to progressively splice against here (`old_path`
+is gone, which is the whole reason this recovery path exists). Once `move_
+sites/1` has more than one unit in the same file (a declaration plus a
+same-file self-reference, `rename_class_self_reference_folds_into_move/1`'s
+own fixture shape) and the rename changes the class name's byte length (the
+overwhelmingly common case), every unit at a HIGHER original offset than an
+earlier one has shifted in the final body by that earlier unit's own
+length delta — checking its stale, unshifted offset misses genuinely
+correct content and reports a live, working rename as an unresolvable
+`rename_target_mismatch`, contradicting this PR's whole idempotent-retry
+guarantee (fails safe, not silently, but still wrong).
+
+Fixed by walking units in ascending original-offset order and threading a
+running `Shift` — the sum of `byte_size(NewText) - byte_size(PrevText)`
+for every unit already processed (all of which sit at LOWER original
+offsets, hence entirely before this one in the file) — added to each
+unit's own recorded `start` before checking. This mirrors, in reverse
+order, exactly how `apply_site_units/2`'s rightmost-first application
+would have shifted this unit's true position, without needing the
+original pre-splice body at all — every input it needs (`prev_source_ref`
+alongside the already-used `source_ref`) is already recorded on the
+site.
+""".
 -spec all_units_already_applied(binary(), [{beamtalk_workspace_changelog:site(), term()}]) ->
     boolean().
 all_units_already_applied(Body, Units) ->
-    lists:all(
-        fun({Site, _Entry}) ->
-            #{span := #{start := Start}} = Site,
-            NewRef = maps:get(source_ref, Site, undefined),
-            case beamtalk_workspace_changelog:read_site_body(NewRef) of
-                {ok, NewText} -> already_applied_at(Body, Start, NewText);
-                {error, _} -> false
-            end
+    Sorted = lists:sort(
+        fun(
+            {#{span := #{start := A, 'end' := AEnd}}, _},
+            {#{span := #{start := B, 'end' := BEnd}}, _}
+        ) ->
+            {A, AEnd} =< {B, BEnd}
         end,
         Units
-    ).
+    ),
+    all_units_already_applied_loop(Body, Sorted, 0).
+
+-spec all_units_already_applied_loop(
+    binary(), [{beamtalk_workspace_changelog:site(), term()}], integer()
+) -> boolean().
+all_units_already_applied_loop(_Body, [], _Shift) ->
+    true;
+all_units_already_applied_loop(Body, [{Site, _Entry} | Rest], Shift) ->
+    #{span := #{start := Start}} = Site,
+    NewRef = maps:get(source_ref, Site, undefined),
+    PrevRef = maps:get(prev_source_ref, Site, undefined),
+    case
+        {
+            beamtalk_workspace_changelog:read_site_body(NewRef),
+            beamtalk_workspace_changelog:read_site_body(PrevRef)
+        }
+    of
+        {{ok, NewText}, {ok, PrevText}} ->
+            case already_applied_at(Body, Start + Shift, NewText) of
+                true ->
+                    NextShift = Shift + (byte_size(NewText) - byte_size(PrevText)),
+                    all_units_already_applied_loop(Body, Rest, NextShift);
+                false ->
+                    false
+            end;
+        _ ->
+            false
+    end.
 
 %% A rename-class entry is only considered fully flushed once EVERY file it
 %% touches (`rename_entry_all_files_to_write/1`) has committed in the SAME

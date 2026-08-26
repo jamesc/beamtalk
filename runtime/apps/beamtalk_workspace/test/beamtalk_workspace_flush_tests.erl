@@ -99,6 +99,7 @@ flush_test_() ->
         fun rename_class_moves_file_rewrites_declaration_and_reference/1,
         fun rename_class_new_path_exists_as_unrelated_file_is_conflict/1,
         fun rename_class_self_reference_folds_into_move/1,
+        fun rename_class_self_reference_move_noop_after_old_path_gone/1,
         fun rename_class_external_edit_on_declaration_aborts_with_no_partial_writes/1,
         fun rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes/1,
         fun rename_class_mixed_with_ordinary_patch_is_conflict/1,
@@ -2124,6 +2125,60 @@ rename_class_self_reference_folds_into_move(#{proj_dir := ProjDir}) ->
         %% write.
         ?_assertEqual([list_to_binary(NewPath)], maps:get(files, Summary)),
         ?_assert(entry_flushed(Seq))
+    ].
+
+%% BT-3526 review round 5 Blocker: `all_units_already_applied/2` (the
+%% "old_path already gone" recovery check) must account for the cumulative
+%% byte-length shift a same-file self-reference site picks up from an
+%% EARLIER (lower-offset) site's own splice — checking each unit's raw
+%% recorded offset independently against the fully-spliced final body
+%% misreads a genuinely-completed rename as unresolvable once the class
+%% name changes length (the common case: "Counter" (7) -> "Accumulator"
+%% (11)). Mirrors `rename_class_resumes_after_simulated_partial_phase_b`'s
+%% own technique — construct the "already fully moved, crashed before
+%% mark_flushed" on-disk state directly, without going through
+%% `beamtalk_workspace_flush` at all — but for the self-reference-folded
+%% single-file move shape `rename_class_self_reference_folds_into_move/1`
+%% covers on the happy path, not the multi-file shape `rename_class_
+%% resumes_after_simulated_partial_phase_b/1` already covers.
+rename_class_self_reference_move_noop_after_old_path_gone(#{proj_dir := ProjDir}) ->
+    OldPath = filename:join([ProjDir, "src", "counter.bt"]),
+    NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
+    OldSource = <<"Object subclass: Counter\n  self2 => Counter new\nend\n">>,
+    {DeclStart, DeclEnd, _} = locate(OldSource, <<"Counter">>),
+    DeclSite = rename_site(
+        list_to_binary(OldPath), DeclStart, DeclEnd, <<"Accumulator">>, <<"Counter">>
+    ),
+    {SelfStart, SelfEnd, _} = locate(OldSource, <<"Counter new">>),
+    SelfSite = rename_site(
+        list_to_binary(OldPath), SelfStart, SelfEnd, <<"Accumulator new">>, <<"Counter new">>
+    ),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            list_to_binary(OldPath),
+            list_to_binary(NewPath),
+            [DeclSite, SelfSite]
+        )
+    ),
+    %% `old_path` is never created — this simulates a Phase B `move` commit
+    %% that already succeeded (renamed `<new_path>.tmp` into place, unlinked
+    %% `old_path`) and crashed before `mark_flushed` landed, exactly the
+    %% recovery state `resolve_missing_rename_source/4` must recognise as
+    %% `move_noop`, not a conflict.
+    ExpectedBody = <<"Object subclass: Accumulator\n  self2 => Accumulator new\nend\n">>,
+    ok = file:write_file(NewPath, ExpectedBody),
+    {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    {ok, NewBodyAfter} = file:read_file(NewPath),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        %% Already-correct content is left byte-identical, not corrupted by
+        %% a redundant re-splice against the wrong (unshifted) offset.
+        ?_assertEqual(ExpectedBody, NewBodyAfter),
+        ?_assert(entry_flushed(Seq)),
+        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp"))
     ].
 
 %% Forced Phase A staleness on the declaration span: a Phase A failure
