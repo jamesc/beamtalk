@@ -37,6 +37,7 @@ use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::notification::Notification as LspNotification;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOptions, CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams,
@@ -52,9 +53,9 @@ use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     ImplementationProviderCapability, InitializeParams, InitializeResult, InitializedParams,
     MarkupContent, MarkupKind, MessageType, OneOf, OptionalVersionedTextDocumentIdentifier,
-    ParameterInformation, ParameterLabel, Position, Range, ReferenceParams, RenameFile,
-    RenameFileOptions, ResourceOp, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind, TextDocumentEdit,
+    ParameterInformation, ParameterLabel, Position, Range, ReferenceParams, ResourceOp,
+    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, SymbolInformation, SymbolKind, TextDocumentEdit,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
     TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkDoneProgressOptions,
@@ -157,6 +158,56 @@ pub struct FetchContentParams {
 pub struct FetchContentResult {
     /// The source content of the requested file.
     pub content: String,
+}
+
+/// Params for the `beamtalk-lsp/documentMoved` custom notification (ADR 0114
+/// LSP follow-up, BT-3285) — see [`DocumentMoved`] for why it exists.
+/// `#[serde(rename_all = "camelCase")]` matches every other LSP payload
+/// (e.g. `lsp_types::RenameFile`'s `oldUri`/`newUri`), even though this type
+/// isn't itself part of the upstream `lsp_types` crate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentMovedParams {
+    /// The `file://` URI the class's declaration lived at before the
+    /// `renameTo:`/`moveClass:to:` flush moved it. Already gone from disk by
+    /// the time this notification is sent — see [`apply_rename_class_move`].
+    pub old_uri: Url,
+    /// The `file://` URI the class's declaration now lives at.
+    pub new_uri: Url,
+}
+
+/// A custom server-to-client LSP notification (ADR 0114 LSP follow-up,
+/// BT-3285): `beamtalk-lsp/documentMoved`, `{oldUri, newUri}`.
+///
+/// **Why this exists:** a `renameTo:`/`moveClass:to:` flush's
+/// `workspace/applyEdit` used to include a typed `RenameFile` resource
+/// operation (`old_uri -> new_uri`), so an open editor tab would follow the
+/// move. By the time that edit reaches the client, though, the runtime has
+/// already renamed the file on disk and unlinked `old_uri` — and VS Code's
+/// own `RenameOperation.perform()` treats "target already exists, source
+/// already gone" as "nothing to do" and silently skips the move step
+/// entirely (no error, but no editor-state retargeting either). See BT-3285
+/// for the investigation and docs/ADR/0114-class-and-method-rename.md's LSP
+/// section for the resulting design.
+///
+/// This notification is this project's first-party VS Code extension's
+/// replacement mechanism: it doesn't ask the client to perform a filesystem
+/// rename at all (there is nothing left to rename by the time it fires),
+/// just tells a listening client which editor URI to retarget. The
+/// extension (`editors/vscode/src/extension.ts`'s `handleDocumentMoved`,
+/// mirroring the existing `beamtalk-lsp/fetchContent` custom-request
+/// precedent used by `StdlibContentProvider`) closes any open tab at
+/// `old_uri` and reopens `new_uri` in its place. Any other LSP client
+/// ignores an unrecognised notification per the LSP spec, so it sees the
+/// documented degraded (no-crash, no-retarget) outcome — the same one the
+/// dropped `RenameFile` op silently produced in VS Code, just without the
+/// misleading implication that a real filesystem rename request was made.
+enum DocumentMoved {}
+
+impl LspNotification for DocumentMoved {
+    type Params = DocumentMovedParams;
+
+    const METHOD: &'static str = "beamtalk-lsp/documentMoved";
 }
 
 /// LSP backend wrapping `SimpleLanguageService`.
@@ -3439,17 +3490,12 @@ fn reload_finding_to_lsp_diagnostics(
 ///    `CreateFile` resource operation paired with a `TextDocumentEdit`
 ///    carrying the full content ([`create_file_edit`]) — also unconditional,
 ///    since a brand-new file was by definition never open before this flush.
-/// 5. **`RenameFile`** (BT-3275): reads the moved file's new content and
-///    emits a `RenameFile` resource operation paired with a
-///    `TextDocumentEdit` carrying it ([`rename_class_file_edit`]) — also
-///    unconditional, mirroring `CreateFile`/`DeleteFile`: a file move is
-///    project-wide state, not something only an open buffer cares about.
-///    **Known limitation (BT-3285):** the `old_uri` side of the resource op
-///    is always already gone from disk by this point, which in VS Code
-///    specifically means the rename step silently no-ops (no error, but no
-///    editor-state retargeting either) rather than actually making an open
-///    tab at the old path follow the move — see [`apply_rename_class_move`]'s
-///    doc for the mechanism.
+/// 5. **Rename-class move** (BT-3275; revised BT-3285): sends the custom
+///    `beamtalk-lsp/documentMoved` notification ([`DocumentMoved`]) carrying
+///    `{old_uri, new_uri}` — unconditional, mirroring `CreateFile`/
+///    `DeleteFile`: a file move is project-wide state, not something only an
+///    open buffer cares about. No `workspace/applyEdit` `RenameFile` op is
+///    sent any more; see [`DocumentMoved`]'s doc for why.
 /// 6. **Rename-method site** (BT-3275): checks the *live* open-paths handle
 ///    exactly like an ordinary patch (step 7) — every file this reaches was
 ///    an explicitly CONFIRMED site the caller already approved via
@@ -3500,8 +3546,7 @@ async fn flush_event_listener(
 
             match (kind, old_path.as_deref()) {
                 (Some(FlushFileKind::RenameClass), Some(old_raw)) => {
-                    apply_rename_class_move(&client, &workspace_roots, &abs_path, uri, old_raw)
-                        .await;
+                    apply_rename_class_move(&client, &workspace_roots, uri, old_raw).await;
                 }
                 (Some(FlushFileKind::RenameMethod), _) => {
                     apply_rename_method_site(&client, &abs_path, &raw_path, uri, &open_paths).await;
@@ -3565,58 +3610,76 @@ async fn apply_create_file(client: &Client, abs_path: &Path, uri: Url) {
     apply_flush_edit(client, &uri, edit, "CreateFile").await;
 }
 
-/// `FlushFileKind::RenameClass` with `oldFile` present (ADR 0114 LSP
-/// follow-up, BT-3275): the one file among a `'rename-class'` flush's
-/// touched files that IS the moved declaration. Resolves `old_raw` against
-/// the workspace roots via [`resolve_flushed_path`] — tolerating its
+/// Resolves a `'rename-class'` flush's `oldFile` companion (`old_raw`)
+/// against the workspace roots via [`resolve_flushed_path`] — tolerating its
 /// already-deleted state on disk (Phase B already unlinked it by the time
-/// this event fires), the same way that function already tolerates a
-/// `DeleteFile` target being gone. Unconditional, like `Create`/`Delete`: a
-/// file move is project-wide state, not something only an open buffer
-/// cares about. The file already exists at its new path on disk (Phase B
-/// already committed) so the read is expected to succeed.
+/// the flush event fires), the same way that function already tolerates a
+/// `DeleteFile` target being gone — into the `old_uri` [`apply_rename_class_move`]
+/// sends in its [`DocumentMoved`] notification.
 ///
-/// **Known limitation (BT-3285):** `old_uri` is *always* already gone from
-/// disk by the time this runs (see above), which is exactly the state VS
-/// Code's own `RenameOperation` treats as "already done" and silently skips
-/// (its `ignoreIfExists`-plus-target-exists short-circuit never calls
-/// `workingCopyFileService.move`) — so `workspace/applyEdit` does not fail,
-/// but VS Code also performs no editor-state retargeting in that skipped
-/// path. In practice an open tab at `old_uri` does **not** currently follow
-/// the rename in VS Code; it just stops erroring. The on-disk content is
-/// correct either way. See BT-3285 for the design work needed to actually
-/// close this gap (either re-timing this event ahead of Phase B's unlink,
-/// or a different signalling mechanism).
-async fn apply_rename_class_move(
-    client: &Client,
-    workspace_roots: &[PathBuf],
-    abs_path: &Path,
-    new_uri: Url,
-    old_raw: &str,
-) {
+/// Split out of `apply_rename_class_move` purely so this resolution step is
+/// unit-testable on its own: it needs no `Client`, whereas exercising
+/// `apply_rename_class_move` itself through a real `LspService`/socket pair
+/// would additionally require driving the service through a full LSP
+/// `initialize` handshake first — `Client::send_notification` (unlike
+/// `show_message`/`log_message`, which use its `_unchecked` sibling) only
+/// actually sends once `ServerState` has reached `Initialized`, and silently
+/// no-ops (never touching the socket) otherwise, so a socket-side test
+/// without that handshake would hang waiting for a message that never
+/// arrives.
+fn resolve_rename_class_old_uri(workspace_roots: &[PathBuf], old_raw: &str) -> Option<Url> {
     let Some((old_abs, _existed)) = resolve_flushed_path(old_raw, workspace_roots) else {
         tracing::debug!(
             old_raw,
             "flush_event_listener: could not resolve rename-class old path against workspace roots"
         );
-        return;
+        return None;
     };
     let Ok(old_uri) = Url::from_file_path(&old_abs) else {
         tracing::debug!(
             ?old_abs,
             "flush_event_listener: could not build file:// URI for rename-class old path"
         );
+        return None;
+    };
+    Some(old_uri)
+}
+
+/// `FlushFileKind::RenameClass` with `oldFile` present (ADR 0114 LSP
+/// follow-up, BT-3275; revised BT-3285): the one file among a
+/// `'rename-class'` flush's touched files that IS the moved declaration.
+/// Unconditional, like `Create`/`Delete`: a file move is project-wide state,
+/// not something only an open buffer cares about.
+///
+/// Sends the custom [`DocumentMoved`] notification rather than a
+/// `workspace/applyEdit` `RenameFile` op (BT-3275's original approach, which
+/// this replaces): `old_uri` is *always* already gone from disk by the time
+/// this runs, which is exactly the state VS Code's own `RenameOperation`
+/// treats as "already done" and silently skips — no error, but no
+/// editor-state retargeting either, so an open tab at `old_uri` never
+/// actually followed the rename in VS Code (BT-3285's investigation). No
+/// file content needs reading here any more, since the notification carries
+/// no content — the receiving client reopens `new_uri` itself and reads its
+/// already-correct on-disk bytes fresh.
+async fn apply_rename_class_move(
+    client: &Client,
+    workspace_roots: &[PathBuf],
+    new_uri: Url,
+    old_raw: &str,
+) {
+    let Some(old_uri) = resolve_rename_class_old_uri(workspace_roots, old_raw) else {
         return;
     };
-    let Ok(content) = tokio::fs::read_to_string(abs_path).await else {
-        tracing::warn!(
-            %new_uri,
-            "flush_event_listener: failed to read renamed file from disk"
-        );
-        return;
-    };
-    let edit = rename_class_file_edit(old_uri, new_uri.clone(), content);
-    apply_flush_edit(client, &new_uri, edit, "RenameFile").await;
+    client
+        .send_notification::<DocumentMoved>(DocumentMovedParams {
+            old_uri,
+            new_uri: new_uri.clone(),
+        })
+        .await;
+    tracing::debug!(
+        %new_uri,
+        "flush_event_listener: sent beamtalk-lsp/documentMoved notification"
+    );
 }
 
 /// `FlushFileKind::RenameMethod` (ADR 0114 LSP follow-up, BT-3275): the
@@ -3728,7 +3791,7 @@ fn classify_flush_action(kind: Option<FlushFileKind>, existed: bool) -> FlushAct
 /// Build a single `TextEdit` that replaces an entire document's content —
 /// the `changes`/`documentChanges` payload shape every flush-driven edit
 /// builder below sends (`change_file_edit`, `create_file_edit`,
-/// `rename_class_file_edit`, `rename_method_site_edit`): the flush already
+/// `rename_method_site_edit`): the flush already
 /// spliced the on-disk bytes server-side (no incremental diff is computed),
 /// so the client is always handed the whole new content rather than a
 /// localized range. `u32::MAX`/`u32::MAX` is the LSP convention for "end of
@@ -3819,53 +3882,6 @@ fn create_file_edit(uri: Url, content: String) -> WorkspaceEdit {
             })),
             DocumentChangeOperation::Edit(TextDocumentEdit {
                 text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
-                edits: vec![OneOf::Left(whole_document_text_edit(content))],
-            }),
-        ])),
-        ..Default::default()
-    }
-}
-
-/// Build the `workspace/applyEdit` payload for the file a `'rename-class'`
-/// flush moved (ADR 0114 LSP follow-up, BT-3275: `renameTo:`/
-/// `moveClass:to:`) — a typed `RenameFile` resource operation via
-/// `documentChanges`, paired with a `TextDocumentEdit` carrying the moved
-/// file's new content (its declaration line rewritten; the rest
-/// byte-identical, per ADR 0114's Phase A/B table), mirroring
-/// `create_file_edit`'s `CreateFile` + content pairing so the client applies
-/// the move and the content atomically as one workspace edit.
-///
-/// The physical rename already happened on disk (Phase B already committed
-/// by the time this event fires) — `ignoreIfExists: true` is defensive for
-/// the same reason `create_file_edit` sets it: the client's own `RenameFile`
-/// step must not fail just because the flush beat it to the move.
-///
-/// **Known limitation (BT-3285):** since the source is *always* already
-/// gone (not just occasionally raced), `ignoreIfExists: true` plus the
-/// target already existing is exactly the condition VS Code's own
-/// `RenameOperation` uses to skip the move step entirely rather than error
-/// — which avoids a hard failure but also means VS Code performs no
-/// editor-state retargeting for this op. The paired `TextDocumentEdit`
-/// below still carries the correct new content, but "an open tab under the
-/// old path follows the move" is not something this currently achieves in
-/// VS Code. See BT-3285.
-fn rename_class_file_edit(old_uri: Url, new_uri: Url, content: String) -> WorkspaceEdit {
-    WorkspaceEdit {
-        document_changes: Some(DocumentChanges::Operations(vec![
-            DocumentChangeOperation::Op(ResourceOp::Rename(RenameFile {
-                old_uri,
-                new_uri: new_uri.clone(),
-                options: Some(RenameFileOptions {
-                    overwrite: None,
-                    ignore_if_exists: Some(true),
-                }),
-                annotation_id: None,
-            })),
-            DocumentChangeOperation::Edit(TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier {
-                    uri: new_uri,
-                    version: None,
-                },
                 edits: vec![OneOf::Left(whole_document_text_edit(content))],
             }),
         ])),
@@ -7146,56 +7162,140 @@ mod tests {
         );
     }
 
-    // ADR 0114 LSP follow-up (BT-3275): the `RenameFile`/rename-method-site
-    // `WorkspaceEdit` builders, tested the same direct way the BT-3209/
+    // ADR 0114 LSP follow-up (BT-3275): the rename-method-site
+    // `WorkspaceEdit` builder, tested the same direct way the BT-3209/
     // BT-3212 builders above are.
 
+    // BT-3285: the rename-class move path no longer builds a `WorkspaceEdit`
+    // at all — it sends the custom `beamtalk-lsp/documentMoved` notification
+    // instead (see `DocumentMoved`'s doc for why the old `RenameFile` op was
+    // dropped). `Client::send_notification` only actually sends once
+    // `ServerState` has reached `Initialized`, which a bare `LspService::new`
+    // in a test never reaches on its own — a naive `apply_rename_class_move`
+    // test against an un-initialized service just hangs `socket.next()`
+    // forever instead of failing loudly, since `send_notification` silently
+    // no-ops (never touching the socket) rather than erroring when
+    // un-initialized. `resolve_rename_class_old_uri` — the one part of
+    // `apply_rename_class_move` with real path-resolution logic — is tested
+    // on its own regardless, matching this file's existing preference for
+    // testing the `Client`-free half directly (the `resolve_flushed_path`
+    // tests above take the same approach for the `WorkspaceEdit` builders'
+    // path resolution); `DocumentMovedParams`'s wire shape is tested via
+    // direct serialization. `apply_rename_class_move_sends_document_moved_notification`
+    // below additionally exercises the full send path end-to-end, by driving
+    // a real `initialize` JSON-RPC request through `LspService`'s
+    // `tower::Service` impl first (mirroring `tower-lsp`'s own
+    // `initializes_only_once` test) so `ServerState` genuinely reaches
+    // `Initialized` before `apply_rename_class_move` runs.
+
     #[test]
-    fn rename_class_file_edit_emits_typed_rename_resource_op_with_content() {
+    fn document_moved_params_serializes_camel_case_uri_fields() {
         let old_uri = Url::parse("file:///workspace/counter.bt").expect("uri");
         let new_uri = Url::parse("file:///workspace/accumulator.bt").expect("uri");
-        let edit = rename_class_file_edit(
-            old_uri.clone(),
-            new_uri.clone(),
-            "Object subclass: Accumulator\n".to_string(),
+        let value = serde_json::to_value(DocumentMovedParams {
+            old_uri: old_uri.clone(),
+            new_uri: new_uri.clone(),
+        })
+        .expect("serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "oldUri": old_uri.to_string(),
+                "newUri": new_uri.to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_rename_class_old_uri_builds_uri_for_already_deleted_old_path() {
+        // Mirrors `resolve_flushed_path_falls_back_for_deleted_absolute_file`
+        // above: by the time `apply_rename_class_move` runs, Phase B has
+        // already unlinked the old path from disk, so the old file is
+        // created and then deleted rather than left in place.
+        let temp = unique_temp_dir("beamtalk_lsp_rename_class_old_uri");
+        fs::create_dir_all(&temp).expect("create temp");
+        let old_path = temp.join("counter.bt");
+        fs::write(&old_path, "Object subclass: Counter\n").expect("write");
+        fs::remove_file(&old_path).expect("delete (simulates Phase B's unlink)");
+
+        let old_uri = resolve_rename_class_old_uri(&[], old_path.to_str().unwrap())
+            .expect("resolves even though the old file is already gone");
+        assert_eq!(old_uri, Url::from_file_path(&old_path).expect("uri"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_rename_class_old_uri_returns_none_when_path_cannot_be_resolved() {
+        // No real parent directory either — nothing to fall back to.
+        assert!(resolve_rename_class_old_uri(&[], "does/not/exist/counter.bt").is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_rename_class_move_sends_document_moved_notification() {
+        use futures_util::StreamExt;
+        use tower::{Service, ServiceExt};
+
+        // Mirrors `resolve_flushed_path_falls_back_for_deleted_absolute_file`
+        // above: by the time `apply_rename_class_move` runs, Phase B has
+        // already unlinked the old path from disk, so the old file is
+        // created and then deleted rather than left in place.
+        let temp = unique_temp_dir("beamtalk_lsp_rename_class_move_e2e");
+        fs::create_dir_all(&temp).expect("create temp");
+        let old_path = temp.join("counter.bt");
+        fs::write(&old_path, "Object subclass: Counter\n").expect("write");
+        fs::remove_file(&old_path).expect("delete (simulates Phase B's unlink)");
+
+        let (mut service, mut socket) = tower_lsp::LspService::new(Backend::new);
+
+        // Drive a real `initialize` JSON-RPC request through the service's
+        // `tower::Service` impl (the same mechanism `main.rs`/an actual LSP
+        // client use) so `ServerState` reaches `Initialized` — otherwise
+        // `Client::send_notification` below silently no-ops. Directly
+        // calling `Backend::initialize` would not do this: the state
+        // transition lives in `tower-lsp`'s own `InitializeLayer`, wrapping
+        // `LspService::call`, not in the `LanguageServer::initialize` method.
+        let init_request = tower_lsp::jsonrpc::Request::build("initialize")
+            .params(serde_json::json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        let init_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(init_request)
+            .await
+            .expect("initialize call succeeds");
+        assert!(
+            init_response.is_some_and(|r| r.is_ok()),
+            "initialize request must succeed for ServerState to reach Initialized"
         );
 
-        // No plain-text `changes` map — `RenameFile` + its content edit both
-        // live in `documentChanges` (the LSP spec forbids mixing the two).
-        assert!(edit.changes.is_none());
-        match edit.document_changes {
-            Some(DocumentChanges::Operations(ops)) => {
-                assert_eq!(ops.len(), 2);
-                match &ops[0] {
-                    DocumentChangeOperation::Op(ResourceOp::Rename(rename)) => {
-                        assert_eq!(rename.old_uri, old_uri);
-                        assert_eq!(rename.new_uri, new_uri);
-                        let options = rename.options.as_ref().expect("rename options");
-                        assert_eq!(options.ignore_if_exists, Some(true));
-                        assert_eq!(options.overwrite, None);
-                    }
-                    other => panic!("expected a Rename resource op, got {other:?}"),
-                }
-                match &ops[1] {
-                    DocumentChangeOperation::Edit(text_edit) => {
-                        assert_eq!(text_edit.text_document.uri, new_uri);
-                        assert_eq!(text_edit.edits.len(), 1);
-                        match &text_edit.edits[0] {
-                            OneOf::Left(edit) => {
-                                assert_eq!(edit.new_text, "Object subclass: Accumulator\n");
-                            }
-                            other @ OneOf::Right(_) => {
-                                panic!("expected a plain TextEdit, got {other:?}")
-                            }
-                        }
-                    }
-                    other @ DocumentChangeOperation::Op(_) => {
-                        panic!("expected a TextDocumentEdit, got {other:?}")
-                    }
-                }
-            }
-            other => panic!("expected Operations document_changes, got {other:?}"),
-        }
+        let client = service.inner().client.clone();
+        let new_path = temp.join("accumulator.bt");
+        let new_uri = Url::from_file_path(&new_path).expect("uri");
+
+        apply_rename_class_move(&client, &[], new_uri.clone(), old_path.to_str().unwrap()).await;
+
+        let notification = socket
+            .next()
+            .await
+            .expect("expected a beamtalk-lsp/documentMoved notification");
+        assert_eq!(notification.method(), "beamtalk-lsp/documentMoved");
+        let params = notification
+            .params()
+            .expect("notification carries params")
+            .clone();
+        let expected_old_uri = Url::from_file_path(&old_path).expect("uri");
+        assert_eq!(
+            params,
+            serde_json::json!({
+                "oldUri": expected_old_uri.to_string(),
+                "newUri": new_uri.to_string(),
+            })
+        );
+
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
