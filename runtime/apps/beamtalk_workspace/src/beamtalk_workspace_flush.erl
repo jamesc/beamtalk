@@ -1172,6 +1172,20 @@ same way `rename_entry_ordinary_collision/3` already uses the full set for
 the rename side of its own (asymmetric, since an ordinary patch has no
 separate "old"/"new" path) guard.
 
+Known, accepted limitation (BT-3283): since `old_path` is only ever refreshed
+by a recompile (`maybe_reload_renamed_class_source/1`, itself only triggered
+by a flush COMMIT), renaming the SAME class twice before ever flushing
+(`Foo renameTo: #Bar` then, with no flush in between, `Bar renameTo: #Baz`)
+produces two entries that both compute `old_path = foo.bt` — genuinely
+sharing a file, so this guard correctly (if confusingly) refuses the whole
+batch as a "collision" rather than the two-hop rename it actually is. Safe
+(clean abort, no data loss, both entries stay pending) but not the most
+permissive possible behaviour; supporting it would need chain detection
+(`entry2`'s `old_class` equal to `entry1`'s `class`) merged into an
+effective single-hop rename before staging — real design work, not a
+one-line fix, tracked separately rather than expanding this Blocker fix's
+own scope.
+
 Checked pairwise, each unordered pair exactly once (`Rest` only ever holds
 entries *after* `Entry` in list order) — mirrors `rename_entry_ordinary_
 collision/3`'s one-conflict-per-entry granularity, just against a peer
