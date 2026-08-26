@@ -32,6 +32,7 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% (future issues) to call with different site lists. See
     %% rewrite_sites/2's doc for the in-memory atomicity protocol.
     rewrite_sites/2,
+    validate_sites/2,
     emit_rewrite_change_entry/2,
     %% BT-3206: best-effort snapshot + ChangeLog append for a successful
     %% `removeFromSystem` (class removal) — see
@@ -1976,19 +1977,46 @@ freshly (re-)registered for a same-name class-group.
 rewrite_sites(undefined, []) ->
     {error, no_sites};
 rewrite_sites(DefinitionSite, ReferenceSites) when is_list(ReferenceSites) ->
-    AllSites =
-        case DefinitionSite of
-            undefined -> ReferenceSites;
-            _ -> [DefinitionSite | ReferenceSites]
-        end,
-    case group_sites_by_class(AllSites) of
-        {ok, Groups} ->
-            case validate_rewrite_groups(Groups) of
-                {ok, Validated} -> install_rewrite_groups(Validated, DefinitionSite);
-                {error, _} = Err -> Err
-            end;
-        {error, _} = Err ->
-            Err
+    case validate_and_group_sites(DefinitionSite, ReferenceSites) of
+        {ok, Validated} -> install_rewrite_groups(Validated, DefinitionSite);
+        {error, _} = Err -> Err
+    end.
+
+-doc """
+Run `rewrite_sites/2`'s own validation pass (grouping + the non-mutating
+compile-only check) WITHOUT installing anything — same pure prefix
+`rewrite_sites/2` itself runs before its install pass, exposed standalone
+for a caller that needs to know a rewrite WOULD succeed before committing
+some other, unrelated mutation first (ADR 0114, BT-3278 review follow-up:
+`beamtalk_behaviour_intrinsics:classRenameTo/2`'s dynamic-class path moves
+the class's registry identity via a completely separate call,
+`beamtalk_object_class:rename/2` — outside this module's own atomicity
+protocol entirely — so it validates the reference-site rewrite here FIRST,
+moves the identity second, and only then calls `rewrite_sites/2` itself to
+actually install; that ordering is what keeps a rejected rewrite from ever
+being preceded by a committed identity move).
+
+Returns `ok` on success (the caller then repeats the same arguments to
+`rewrite_sites/2` to actually install) or the same `{error, Reason}` shapes
+`rewrite_sites/2` itself returns for its own validation-phase failures —
+`no_sites`, `{class_source_unavailable, _}`, `{invalid_or_overlapping_span,
+_, _}`, or `{validation_failed, _}`. Never returns
+`{partial_install_failure, ...}` — that shape is specific to the install
+pass this function never runs.
+""".
+-spec validate_sites(rewrite_site() | undefined, [rewrite_site()]) ->
+    ok
+    | {error,
+        no_sites
+        | {class_source_unavailable, binary()}
+        | {invalid_or_overlapping_span, binary(), rewrite_span()}
+        | {validation_failed, [{binary(), term()}]}}.
+validate_sites(undefined, []) ->
+    {error, no_sites};
+validate_sites(DefinitionSite, ReferenceSites) when is_list(ReferenceSites) ->
+    case validate_and_group_sites(DefinitionSite, ReferenceSites) of
+        {ok, _Validated} -> ok;
+        {error, _} = Err -> Err
     end.
 
 %% One class's worth of a multi-site rewrite: every site targeting `class`,
@@ -2158,6 +2186,30 @@ validate_rewrite_groups(Groups) ->
     case [{G#rewrite_class_group.class, Reason} || {G, {error, Reason}} <- Results] of
         [] -> {ok, Results};
         Failures -> {error, {validation_failed, Failures}}
+    end.
+
+%% Shared prefix of `rewrite_sites/2` and `validate_sites/2`: group + validate
+%% only, never install. `rewrite_sites/2` feeds this call's `{ok, Validated}`
+%% straight into `install_rewrite_groups/2`; `validate_sites/2` just discards
+%% `Validated` and reports `ok`.
+-spec validate_and_group_sites(rewrite_site() | undefined, [rewrite_site()]) ->
+    {ok, [{#rewrite_class_group{}, term()}]}
+    | {error,
+        no_sites
+        | {class_source_unavailable, binary()}
+        | {invalid_or_overlapping_span, binary(), rewrite_span()}
+        | {validation_failed, [{binary(), term()}]}}.
+validate_and_group_sites(undefined, []) ->
+    {error, no_sites};
+validate_and_group_sites(DefinitionSite, ReferenceSites) ->
+    AllSites =
+        case DefinitionSite of
+            undefined -> ReferenceSites;
+            _ -> [DefinitionSite | ReferenceSites]
+        end,
+    case group_sites_by_class(AllSites) of
+        {ok, Groups} -> validate_rewrite_groups(Groups);
+        {error, _} = Err -> Err
     end.
 
 -spec compile_rewrite_group(#rewrite_class_group{}) ->

@@ -1012,10 +1012,17 @@ complete), while a dynamic (`ClassBuilder`) class is allowed with
    union of `referencesTo:`/`direct_subclasses/1` translated into
    `beamtalk_repl_loader:rewrite_site()` maps, plus the class's own
    declaration-header span as the definition site.
-5. Mutate: `rewrite_sites/2` (shared mechanism, BT-3270) installs every site
-   transactionally; then `install_class_rename/3` moves the registry
-   identity from `OldName` to `NewName` (see its own doc for the
-   dynamic-vs-compiled split).
+5. Mutate: for an ordinary (project) class, `rewrite_sites/2` (shared
+   mechanism, BT-3270) installs every site transactionally and that same
+   install is what publishes the new pid, so `install_class_rename/3` only
+   retires the old registry identity afterward. For a dynamic class, the
+   two mutations are unrelated calls into different subsystems with no
+   shared rollback, so `do_rename_and_rewrite/7` validates the rewrite
+   FIRST (`validate_class_sites/4`, non-mutating), moves the registry
+   identity from `OldName` to `NewName` second (`install_class_rename/3` —
+   see its own doc for the dynamic-vs-compiled split), and only then
+   performs the real rewrite — see `do_rename_and_rewrite/7`'s own doc for
+   why.
 6. Best-effort ChangeLog append (`log_class_rename/4`), mirroring
    `log_local_removal/3`'s placement — the rename is already live in memory
    by this point, so a logging failure must never surface to the caller.
@@ -1045,17 +1052,31 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
 %% (`install_class_rename/3` -> `beamtalk_object_class:rename/2`) is a
 %% SEPARATE call from its reference-site rewrite — `rewrite_class_sites/4`
 %% only ever touches OTHER classes' files for a dynamic class, since it has
-%% no source of its own to fold into that transaction. Moving the identity
-%% FIRST means a lost race there (e.g. the TOCTOU window `rename/2`'s own
-%% doc describes) aborts the whole `renameTo:` call before any referencing
-%% file is ever rewritten, rather than committing those files' rewrite
-%% first and then discovering the class itself never actually got renamed
-%% — which would leave referencing code pointing at a name nothing answers
-%% to. For an ordinary (project) class, the definition site's own recompile
-%% (part of the SAME `rewrite_sites/2` transaction as the reference sites)
-%% is what installs the new pid — there is no separate identity-move step
-%% to reorder, so the original site-rewrite-then-retire-old-identity order
-%% stands.
+%% no source of its own to fold into that transaction. Committing either
+%% mutation before confirming the OTHER would succeed risks the same class
+%% of half-applied state either way round: identity-move-first leaves
+%% referencing files un-rewritten if the rewrite then fails (a real,
+%% reachable case — `validation_failed`/`invalid_or_overlapping_span`/
+%% `workspace_unavailable`, not just the TOCTOU registration race the
+%% comment on `install_class_rename/3` describes); rewrite-first leaves
+%% referencing files pointing at a name the class never adopted if the
+%% identity move then fails. Neither mutation has a rollback, so the fix
+%% is to validate the rewrite FIRST via `validate_class_sites/4` (the same
+%% non-mutating compile-only check `rewrite_sites/2` itself runs before its
+%% own install pass, exposed standalone for exactly this cross-subsystem
+%% ordering need) — only once that passes does the identity move run,
+%% and only then the real (now expected-to-succeed) rewrite. A rewrite
+%% failure at that final step despite passing validation is the same
+%% already-accepted residual risk `rewrite_sites/2`'s own doc names for its
+%% `partial_install_failure` case (no cross-gen-server rollback), not a new
+%% gap this function introduces — surfaced via `rename_partial_failure_error/3`
+%% rather than `rename_rewrite_failed_error/2` since it is a genuinely
+%% different situation for the caller: the class HAS been renamed at that
+%% point. For an ordinary (project) class, the definition site's own
+%% recompile (part of the SAME `rewrite_sites/2` transaction as the
+%% reference sites) is what installs the new pid — there is no separate
+%% identity-move step to reorder, so the original
+%% site-rewrite-then-retire-old-identity order stands.
 -spec do_rename_and_rewrite(
     atom(), binary(), atom(), binary(), map() | undefined, [map()], map()
 ) -> #beamtalk_object{}.
@@ -1068,11 +1089,18 @@ do_rename_and_rewrite(
     ReferenceSites,
     #{not_flushable_reason := <<"dynamic">>} = Classification
 ) ->
-    NewPid = install_class_rename(OldName, NewName, Classification),
-    case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
-        {ok, RewriteResult} ->
-            log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
-            beamtalk_class_registry:class_object_from_pid(NewPid);
+    case validate_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+        ok ->
+            NewPid = install_class_rename(OldName, NewName, Classification),
+            case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+                {ok, RewriteResult} ->
+                    log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
+                    beamtalk_class_registry:class_object_from_pid(NewPid);
+                {error, Reason} ->
+                    beamtalk_error:raise(
+                        rename_partial_failure_error(OldName, NewName, Reason)
+                    )
+            end;
         {error, Reason} ->
             beamtalk_error:raise(rename_rewrite_failed_error(OldName, Reason))
     end;
@@ -1189,6 +1217,26 @@ rename_rewrite_failed_error(OldName, no_sites) ->
 rename_rewrite_failed_error(OldName, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
     Msg = iolist_to_binary(io_lib:format("Could not rename class: ~p", [Reason])),
+    beamtalk_error:with_message(Error0, Msg).
+
+%% A dynamic class's identity move committed AFTER `validate_class_sites/4`
+%% already passed, yet the real rewrite still failed (`do_rename_and_rewrite/7`'s
+%% own doc names this the same already-accepted residual risk
+%% `rewrite_sites/2`'s `partial_install_failure` case describes — no
+%% cross-gen-server rollback). Deliberately a distinct error from
+%% `rename_rewrite_failed_error/2`: that one always means "nothing changed",
+%% this one means the class IS renamed but some reference sites are not.
+-spec rename_partial_failure_error(atom(), atom(), term()) -> #beamtalk_error{}.
+rename_partial_failure_error(OldName, NewName, Reason) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "Renamed ~p to ~p, but rewriting its reference sites failed after "
+            "validation passed (partial state — the class's own identity has "
+            "already moved; investigate before retrying): ~p",
+            [OldName, NewName, Reason]
+        )
+    ),
     beamtalk_error:with_message(Error0, Msg).
 
 %%% ----------------------------------------------------------------------------
@@ -1452,6 +1500,24 @@ rewrite_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynami
 rewrite_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
     try
         erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites])
+    catch
+        error:undef -> {error, workspace_unavailable}
+    end.
+
+%% `rewrite_class_sites/4`'s own non-mutating validation half — same shape
+%% and same trivial-success shortcut for a freestanding dynamic class with
+%% nothing to rewrite, but reporting `ok`/`{error, _}` rather than
+%% `{ok, map()}`/`{error, _}` since there is no install result to return.
+%% Used by `do_rename_and_rewrite/7`'s dynamic-class branch to confirm the
+%% reference-site rewrite WOULD succeed before committing the separate,
+%% unrelated registry-identity move — see that function's own doc for why.
+-spec validate_class_sites(atom(), map() | undefined, [map()], map()) ->
+    ok | {error, term()}.
+validate_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
+    ok;
+validate_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
+    try
+        erlang:apply(beamtalk_repl_eval, validate_sites, [DefinitionSite, ReferenceSites])
     catch
         error:undef -> {error, workspace_unavailable}
     end.

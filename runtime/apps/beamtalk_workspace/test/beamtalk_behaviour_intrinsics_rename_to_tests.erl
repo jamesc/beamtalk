@@ -285,28 +285,39 @@ rename_to_changelog(_Fixture) ->
     ].
 
 %%====================================================================
-%% Reordering fix (review round 3, PR #3523): for a DYNAMIC class that IS
-%% referenced by an in-project file, `classRenameTo/2` must commit the
-%% registry-identity move (`beamtalk_object_class:rename/2`) BEFORE the
-%% reference-site rewrite (`beamtalk_repl_eval:rewrite_sites/2`) — see
-%% `beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s own doc. The
-%% reverse order (the pre-fix behaviour) would commit the referencing
-%% file's rewrite first and only then discover whether the dynamic class's
-%% own registration actually moved, leaving a referencing file pointing at
-%% a name nothing answers to if that second step lost the TOCTOU race
-%% `beamtalk_object_class:rename/2`'s own doc describes.
+%% Reordering fix (review rounds 3 and 4, PR #3523): for a DYNAMIC class
+%% that IS referenced by an in-project file, `classRenameTo/2` must
+%% validate the reference-site rewrite FIRST (`beamtalk_repl_eval:
+%% validate_sites/2`, non-mutating), commit the registry-identity move
+%% second (`beamtalk_object_class:rename/2`), and only then perform the
+%% real rewrite (`beamtalk_repl_eval:rewrite_sites/2`) — see
+%% `beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s own doc.
+%% Round 3's fix moved the identity move before the rewrite (closing the
+%% original gap: committing the rewrite first, then discovering the
+%% identity move lost the TOCTOU race `beamtalk_object_class:rename/2`'s
+%% own doc describes, would leave a referencing file pointing at a name
+%% nothing answers to) but traded it for the mirror-image gap — committing
+%% the identity move first, then discovering the rewrite itself fails
+%% (a stale span, a concurrent edit, workspace unavailable), leaves the
+%% class renamed with its reference sites never rewritten. Validating
+%% first closes both: only a rewrite already confirmed to validate can
+%% ever be preceded by a committed identity move.
 %%
-%% Forcing that race deterministically THROUGH `classRenameTo/2`'s full
-%% call chain isn't practical (unlike
+%% Forcing either failure deterministically THROUGH `classRenameTo/2`'s
+%% full call chain isn't practical (unlike
 %% `object_class_rename_toctou_through_public_api_test_` in
-%% `beamtalk_behaviour_intrinsics_tests.erl`, which exercises it by calling
-%% `rename/2` directly): `classRenameTo/2`'s own collision pre-check uses
-%% the identical `whereis` primitive `rename/2` re-checks internally, so
-%% any state change made visible before the outer check would also trip
-%% that outer check first, before either rewrite step ever runs. Instead,
-%% this asserts the ORDERING itself, on the happy path, via plain OTP call
-%% tracing (no mocking library in this project's deps — same technique as
-%% `beamtalk_xref_tests.erl`'s `memoization_call_count_test_`).
+%% `beamtalk_behaviour_intrinsics_tests.erl`, which exercises the TOCTOU
+%% race by calling `rename/2` directly): `classRenameTo/2`'s own collision
+%% pre-check uses the identical `whereis` primitive `rename/2` re-checks
+%% internally, so any state change made visible before the outer check
+%% would also trip that outer check first, before any of the three steps
+%% below ever run. Instead, this asserts the ORDERING itself, on the happy
+%% path, via plain OTP call tracing (no mocking library in this project's
+%% deps — same technique as `beamtalk_xref_tests.erl`'s
+%% `memoization_call_count_test_`); `validate_sites/2`'s own detection of a
+%% genuine validation failure (and that nothing is mutated when it fires)
+%% is unit-tested directly, with hand-constructed sites, in
+%% `beamtalk_repl_loader_rewrite_sites_tests.erl`.
 %%====================================================================
 
 dyn_user_source() ->
@@ -388,6 +399,7 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
         end
     end),
     1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
+    1 = erlang:trace_pattern({beamtalk_repl_eval, validate_sites, 2}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_object_class, rename, 2}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_repl_eval, rewrite_sites, 2}, true, [global]),
     Worker ! go,
@@ -397,6 +409,7 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
         after 5000 ->
             erlang:error(bt3278_reorder_worker_timeout)
         end,
+    _ = erlang:trace_pattern({beamtalk_repl_eval, validate_sites, 2}, false, [global]),
     _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),
     _ = erlang:trace_pattern({beamtalk_repl_eval, rewrite_sites, 2}, false, [global]),
     %% The worker has already sent its result and is about to exit by the
@@ -410,7 +423,11 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
     CallOrder = bt3278_drain_call_order(),
     [
         ?_assertMatch(#beamtalk_object{class = 'Bt3278DynRenamed class'}, Result),
-        ?_assertEqual([rename, rewrite_sites], CallOrder)
+        %% Validate (non-mutating) THEN the identity move THEN the real
+        %% rewrite — see do_rename_and_rewrite/7's own doc for why a dynamic
+        %% class needs a third, earlier step here that an ordinary class
+        %% doesn't.
+        ?_assertEqual([validate_sites, rename, rewrite_sites], CallOrder)
     ].
 
 bt3278_drain_call_order() ->
@@ -418,6 +435,8 @@ bt3278_drain_call_order() ->
 
 bt3278_drain_call_order(Acc) ->
     receive
+        {trace, _Pid, call, {beamtalk_repl_eval, validate_sites, _Args}} ->
+            bt3278_drain_call_order([validate_sites | Acc]);
         {trace, _Pid, call, {beamtalk_object_class, rename, _Args}} ->
             bt3278_drain_call_order([rename | Acc]);
         {trace, _Pid, call, {beamtalk_repl_eval, rewrite_sites, _Args}} ->
