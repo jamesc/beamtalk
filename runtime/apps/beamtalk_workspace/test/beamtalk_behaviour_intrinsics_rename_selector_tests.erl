@@ -244,6 +244,141 @@ rename_selector_success(_Fixture) ->
     ].
 
 %%====================================================================
+%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` undoes a pending
+%% `'rename-method'` entry — restores the original selector everywhere,
+%% including the SAME-CLASS multi-site case (`Bt3279HappyBase`'s own
+%% definition PLUS its own self-send inside `increment`, both rewritten
+%% within the ONE `Bt3279HappyBase` class-group — exactly the shape
+%% `beamtalk_repl_loader:current_spans_for_group/1`'s cumulative-offset math
+%% exists to get right, since `bump` (4 chars) -> `boost` (5 chars) shifts
+%% everything after the first site by +1), plus the subclass's own confirmed
+%% sender site.
+%%====================================================================
+
+setup_happy_with_changelog() ->
+    Fixture = setup_happy(),
+    case whereis(beamtalk_workspace_changelog) of
+        undefined -> ok;
+        LogPid -> gen_server:stop(LogPid)
+    end,
+    %% Mirrors `beamtalk_behaviour_intrinsics_rename_to_tests:setup_with_
+    %% changelog/0`'s identical entropy reasoning (`os:getpid/0` + a unique
+    %% integer, not the unique integer alone) — see that function's own doc.
+    Unique = os:getpid() ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
+    WorkspaceId = list_to_binary("bt-rename-selector-changelog-" ++ Unique),
+    ChangelogHome = filename:join(temp_dir(), "bt-rename-selector-changelog-home-" ++ Unique),
+    ok = filelib:ensure_path(ChangelogHome),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", ChangelogHome),
+    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    Fixture#{old_home => OldHome}.
+
+teardown_happy_with_changelog(#{old_home := OldHome} = Fixture) ->
+    case whereis(beamtalk_workspace_changelog) of
+        undefined -> ok;
+        LogPid -> gen_server:stop(LogPid)
+    end,
+    case OldHome of
+        false -> os:unsetenv("HOME");
+        _ -> os:putenv("HOME", OldHome)
+    end,
+    teardown_happy(Fixture).
+
+rename_selector_revert_test_() ->
+    {setup, fun setup_happy_with_changelog/0, fun teardown_happy_with_changelog/1,
+        fun rename_selector_revert/1}.
+
+rename_selector_revert(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+        class_object('Bt3279HappyBase'), bump, boost
+    ),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3279HappyBase">>, <<"boost">>, instance
+    ),
+    [
+        ?_assertMatch({ok, _}, RevertResult),
+        %% Both the definition AND the same-class self-send restored.
+        ?_assertEqual(happy_base_source(), tracked_source(<<"Bt3279HappyBase">>)),
+        %% The subclass's own confirmed sender site restored too.
+        ?_assertEqual(happy_sub_source(), tracked_source(<<"Bt3279HappySub">>)),
+        %% No active entry remains — revert retired the original one.
+        ?_assertEqual([], beamtalk_workspace_changelog:active_entries()),
+        %% Genuinely live: the subclass's self-send dispatches under the
+        %% original selector again.
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Bt3279HappySub new extra", beamtalk_repl_state:new(undefined, 0)
+            )
+        )
+    ].
+
+%% Post-flush revert is unsupported by design (ADR 0082/0113/0114:
+%% "best-effort, pre-flush semantics only") — same degrade `'rename-class'`/
+%% `'remove-class'`/`'remove-method'` revert already have.
+rename_selector_revert_after_flush_is_unsupported_test_() ->
+    {setup, fun setup_happy_with_changelog/0, fun teardown_happy_with_changelog/1,
+        fun rename_selector_revert_after_flush_is_unsupported/1}.
+
+rename_selector_revert_after_flush_is_unsupported(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+        class_object('Bt3279HappyBase'), bump, boost
+    ),
+    {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3279HappyBase">>, <<"boost">>, instance
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%% An unrelated edit landing on `Bt3279HappyBase` AFTER the rename but BEFORE
+%% the revert (e.g. a separate, independently-issued `compile:source:` patch)
+%% must be refused, not silently spliced over — `current_spans_for_group/1`'s
+%% cumulative-offset math assumes nothing else touched the class in between,
+%% and `verify_current_spans/1` is the check that catches a violation of that
+%% assumption rather than corrupting the file. The class's tracked source is
+%% asserted UNCHANGED afterward — a failed revert must leave the intervening
+%% edit intact, not partially applied.
+rename_selector_revert_after_intervening_edit_is_refused_test_() ->
+    {setup, fun setup_happy_with_changelog/0, fun teardown_happy_with_changelog/1,
+        fun rename_selector_revert_after_intervening_edit_is_refused/1}.
+
+rename_selector_revert_after_intervening_edit_is_refused(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+        class_object('Bt3279HappyBase'), bump, boost
+    ),
+    %% An out-of-band edit to the SAME class the rename touched, landing
+    %% while the rename entry sits pending — simulates another session/tool
+    %% patching the class independently, without going through revert at all.
+    ok = beamtalk_workspace_meta:set_class_source(
+        <<"Bt3279HappyBase">>,
+        binary_to_list(<<
+            "Value subclass: Bt3279HappyBase\n"
+            "  boost -> String => \"changed-by-someone-else\"\n"
+            "  increment -> String => self boost"
+        >>)
+    ),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3279HappyBase">>, <<"boost">>, instance
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult),
+        %% The intervening edit survives untouched — never partially spliced.
+        ?_assertEqual(
+            <<
+                "Value subclass: Bt3279HappyBase\n"
+                "  boost -> String => \"changed-by-someone-else\"\n"
+                "  increment -> String => self boost"
+            >>,
+            tracked_source(<<"Bt3279HappyBase">>)
+        ),
+        %% The original rename entry is still active/pending — a failed
+        %% revert never retires it.
+        ?_assertEqual(1, length(beamtalk_workspace_changelog:active_entries()))
+    ].
+
+%%====================================================================
 %% Cross-hierarchy false positive: an unrelated class (no inheritance
 %% relation) defining/sending the same selector name lands in
 %% `candidate_sites`, never `sites`.

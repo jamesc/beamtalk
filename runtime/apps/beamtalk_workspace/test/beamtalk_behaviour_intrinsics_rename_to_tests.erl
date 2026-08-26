@@ -285,6 +285,85 @@ rename_to_changelog(_Fixture) ->
     ].
 
 %%====================================================================
+%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` undoes a pending
+%% `'rename-class'` entry — restores the class's original name AND every
+%% rewritten site, including the SAME-CLASS multi-site case (`bt3278_widget_
+%% user.bt`'s two same-line occurrences, both rewritten within the ONE
+%% `Bt3278WidgetUser` class-group), which is exactly the shape `beamtalk_
+%% repl_loader:current_spans_for_group/1`'s cumulative-offset math exists to
+%% get right — reverting the SECOND occurrence correctly only if it accounts
+%% for the length delta the FIRST occurrence's own reverse-splice introduced.
+%%====================================================================
+
+rename_to_revert_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1, fun rename_to_revert/1}.
+
+rename_to_revert(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3278WidgetRenamed">>, <<"new-class">>
+    ),
+    [
+        ?_assertMatch({ok, _}, RevertResult),
+        %% The old name is live again; the new name is gone.
+        ?_assertMatch(P when is_pid(P), beamtalk_class_registry:whereis_class('Bt3278Widget')),
+        ?_assertEqual(undefined, beamtalk_class_registry:whereis_class('Bt3278WidgetRenamed')),
+        %% Every site restored to its exact pre-rename text.
+        ?_assertEqual(
+            widget_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278Widget">>)
+            )
+        ),
+        ?_assertEqual(
+            widget_sub_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278WidgetSub">>)
+            )
+        ),
+        ?_assertEqual(
+            widget_user_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3278WidgetUser">>)
+            )
+        ),
+        ?_assertEqual(
+            'Bt3278Widget',
+            gen_server:call(beamtalk_class_registry:whereis_class('Bt3278WidgetSub'), superclass)
+        ),
+        %% No active entry remains — revert retired the original one, mirroring
+        %% `'remove-class'` revert's own "undo emits no new entry" convention.
+        ?_assertEqual([], beamtalk_workspace_changelog:active_entries()),
+        %% Genuinely live: dispatch resolves through the reverted class again.
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Bt3278WidgetUser new makeWidget class name",
+                beamtalk_repl_state:new(undefined, 0)
+            )
+        )
+    ].
+
+%% Post-flush revert is unsupported by design (ADR 0082/0113/0114:
+%% "best-effort, pre-flush semantics only") — once `flushIncludingDestructive/0`
+%% has actually committed the rename to disk, the entry is flushed and drops
+%% out of the active view, same degrade `'remove-class'`/`'remove-method'`
+%% revert already have.
+rename_to_revert_after_flush_is_unsupported_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1,
+        fun rename_to_revert_after_flush_is_unsupported/1}.
+
+rename_to_revert_after_flush_is_unsupported(_Fixture) ->
+    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
+    RevertResult = beamtalk_workspace_interface_primitives:revert_method(
+        <<"Bt3278WidgetRenamed">>, <<"new-class">>
+    ),
+    [
+        ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
+    ].
+
+%%====================================================================
 %% Reordering fix (review rounds 3 and 4, PR #3523): for a DYNAMIC class
 %% that IS referenced by an in-project file, `classRenameTo/2` must
 %% validate the reference-site rewrite FIRST (`beamtalk_repl_eval:

@@ -83,6 +83,12 @@ module loading to beamtalk_repl_loader (BT-863).
 %% remove_method/3,4).
 -export([rewrite_sites/2, validate_sites/2, emit_rewrite_change_entry/2]).
 
+%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` for a pending
+%% `'rename-class'`/`'rename-method'` entry — thin forwarding wrapper over
+%% `beamtalk_repl_loader:revert_rename_sites/1`, called from `beamtalk_
+%% workspace_interface_primitives:revert_rename_entry/2`.
+-export([revert_rename_sites/1]).
+
 %% BT-3206 — best-effort snapshot + ChangeLog append for a successful
 %% `removeFromSystem` (class removal). Called via erlang:apply from
 %% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
@@ -1056,6 +1062,16 @@ Best-effort ChangeLog append for a completed `rewrite_sites/2` call (ADR
 -spec emit_rewrite_change_entry(map(), beamtalk_repl_loader:rewrite_result()) -> ok.
 emit_rewrite_change_entry(Spec, RewriteResult) ->
     beamtalk_repl_loader:emit_rewrite_change_entry(Spec, RewriteResult).
+
+-doc """
+Revert a pending `'rename-class'`/`'rename-method'` ChangeEntry (ADR 0114
+Phase 4, BT-3274). Thin forwarding wrapper — see `beamtalk_repl_loader:
+revert_rename_sites/1` for the full contract.
+""".
+-spec revert_rename_sites(beamtalk_workspace_changelog:entry()) ->
+    {ok, binary()} | {error, term()}.
+revert_rename_sites(Entry) ->
+    beamtalk_repl_loader:revert_rename_sites(Entry).
 
 -doc """
 Best-effort ChangeLog append for a completed extension-method `removeSelector:`
