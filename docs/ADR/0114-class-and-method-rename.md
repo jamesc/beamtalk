@@ -234,9 +234,18 @@ This ADR's central risk (auto-rewrite is only as safe as the index behind it) is
 **Adapted:** Beamtalk cannot get TypeScript's *soundness guarantee* because, like Python, it is dynamically dispatched — `perform:`, `Smalltalk at:`, and any string-built selector are invisible to xref exactly as `getattr` is invisible to `rope`. This ADR's posture is therefore Python's, not TypeScript's: best-effort against a real index, with an accepted, documented gap for dynamic access.
 **Rejected:** neither TypeScript's "refuse to compile until every reference is fixed" gate (Beamtalk has no project-wide compile step that could enforce it) nor Python tooling's common fallback of dry-run-only with no automatic rewrite at all (see *Alternatives Considered*).
 
-### LSP — `workspace/applyEdit` with `RenameFile`
+### LSP — `workspace/applyEdit` with `RenameFile`, revised to a custom `documentMoved` notification (BT-3285)
 
-ADR 0113 already adopted `DeleteFile`/`CreateFile`. This ADR adds `RenameFile` for class-file moves, plus a `TextDocumentEdit` per confirmed method-rename site — the same typed-resource-operation machinery, its last consumer.
+ADR 0113 already adopted `DeleteFile`/`CreateFile`. This ADR originally added `RenameFile` for class-file moves too, plus a `TextDocumentEdit` per confirmed method-rename site — the same typed-resource-operation machinery, its last consumer. The method-rename `TextDocumentEdit` shipped as designed and is unaffected by what follows; the class-file-move `RenameFile` op did not work as intended and was replaced (BT-3285).
+
+**Why `RenameFile` was replaced.** By the time a `renameTo:`/`moveClass:to:` flush's `workspace/applyEdit` reaches the client, `beamtalk_workspace_flush`'s Phase B has already renamed the file on disk and unlinked the old path (see that module's moduledoc, "Atomicity (class rename)" — `complete_flush/5` announces only after Phase B's `Committed` list is final; this ordering is a crash-recovery guarantee this ADR does not revisit). So the `RenameFile` op's `old_uri` never exists on disk by the time a client receives it. In VS Code specifically, this is not a hard failure: `ignoreIfExists: true` (needed regardless, since the flush may also race an editor-side save) combined with the target already existing makes VS Code's `RenameOperation.perform()` skip the move step entirely rather than error — but skipping it also means VS Code performs *no editor-state retargeting*, so an open tab at the old path silently never followed the rename. No crash, no data loss (the correct content is already on disk under the new path), but the UX goal that motivated choosing `RenameFile` in the first place did not actually happen.
+
+**The fix.** Reordering `beamtalk_workspace_flush`'s announcement to fire before Phase B's unlink was considered and rejected as too risky to the already-shipped crash-recovery ordering for a same-issue fix. Instead, the LSP server now sends a custom notification, `beamtalk-lsp/documentMoved` (server → client, `{oldUri, newUri}`), from the same call site the `RenameFile` op used to fire from — and no longer sends the `RenameFile` op at all, since (per the investigation above) it never achieved its purpose in VS Code and no other LSP client is known to depend on it.
+
+- **This project's own VS Code extension** (`editors/vscode/`) handles `beamtalk-lsp/documentMoved` directly — the same custom-request precedent as `beamtalk-lsp/fetchContent` (used by `StdlibContentProvider`), just server-initiated rather than client-initiated. On receipt, it closes any open tab at `oldUri` and reopens `newUri` in its place, restoring the view column and cursor/scroll position captured from any visible editor that was showing the old path (`handleDocumentMoved` in `extension.ts`; the retargeting decision itself is pure, `vscode`-independent logic in `documentMoved.ts`, unit-tested in `editors/vscode/src/__tests__/documentMoved.test.ts`). This is the one LSP client where "an open tab follows the rename" actually happens today.
+- **Any other LSP client** (an editor without Beamtalk-specific support for this notification) sees the documented degraded outcome: per the LSP spec, an unrecognised notification is simply ignored, so there is no error and no crash, but also no retargeting — an open tab at the old path stays open, pointed at a file that no longer exists, until the user closes or reopens it. This is the same no-crash/no-retarget outcome the dropped `RenameFile` op produced in VS Code, just without a filesystem-rename request that never actually accomplishes anything by the time the client sees it.
+
+No changes were made to `beamtalk_workspace_flush`'s commit/crash-recovery ordering — this approach doesn't require any.
 
 ## User Impact
 
@@ -262,7 +271,7 @@ ADR 0113 already adopted `DeleteFile`/`CreateFile`. This ADR adds `RenameFile` f
 
 ### Tooling developer (LSP/MCP/browser)
 
-- `RenameFile` completes the typed-resource-operation set ADR 0113 started.
+- The method-rename `TextDocumentEdit` completes the typed-resource-operation set ADR 0113 started. The class-rename `RenameFile` op that was meant to complete it the same way didn't work as intended (BT-3285) and was replaced by a custom `documentMoved` notification — see "LSP" above.
 - `remove_class`/`rename_class`/`rename_method` MCP tools and `:rename-class`/`:rename-method` REPL commands extend the existing tool surface with no new dispatch mechanism.
 
 ## Steelman Analysis
@@ -351,7 +360,7 @@ See Steelman above. Rejected for v1, not dismissed as unsound — `beamtalk_alia
 | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_flush.erl` | Extend ADR 0113's Tier-2 staging to genuinely multi-file per the *Flush* table above. |
 | `stdlib/src/Behaviour.bt` | `renameTo:`, `renameSelector:to:`, `renameSelector:to:ifAbsent:` — three new sealed methods, same pattern as `removeSelector:`/`removeSelector:ifAbsent:`. |
 | `stdlib/src/Workspace.bt` | `moveClass:to:`. |
-| `crates/beamtalk-lsp/src/server.rs` | Emits `RenameFile` (class rename) and per-site `TextDocumentEdit` (method rename) resource operations, completing ADR 0113's typed-operation work. |
+| `crates/beamtalk-lsp/src/server.rs` | Emits the custom `beamtalk-lsp/documentMoved` notification (class rename, BT-3285 — see "LSP" above) and per-site `TextDocumentEdit` (method rename, completing ADR 0113's typed-operation work) resource operations. |
 | `crates/beamtalk-mcp/src/server.rs` | New tools: `rename_class` (wraps `renameTo:`), `rename_method` (wraps `renameSelector:to:`). |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | New meta-commands `:rename-class`, `:rename-method`, matching ADR 0113's two-prompt shape. |
 | `runtime/apps/beamtalk_workspace/priv/static/workspace.js` | "Rename" browser action with the destructive-dirty-indicator affordance ADR 0113 established. |
