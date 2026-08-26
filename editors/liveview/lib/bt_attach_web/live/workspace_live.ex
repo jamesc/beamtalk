@@ -4297,6 +4297,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> assign_changes()
         |> open_definition(new_name)
         |> assign(
+          selected_class: new_name,
+          selected_protocol: nil,
           rename_open: false,
           rename_error: nil,
           save_result:
