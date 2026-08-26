@@ -243,9 +243,10 @@ sealed typed Object subclass: WorkspaceInterface
   ///
   /// Raises `no_source_file` for a dynamic (`ClassBuilder`) class — moving
   /// nothing is not a legitimate in-memory action. Raises a structured error
-  /// for a stdlib or dependency class (the same refusal `renameTo:` applies)
-  /// or a target path outside the project source tree. Returns `aClass`
-  /// unchanged on success.
+  /// for a stdlib or dependency class (the same refusal `renameTo:` applies),
+  /// a target path outside the project source tree, or a target equal to the
+  /// class's own current path (a same-path move has nothing to move). Returns
+  /// `aClass` unchanged on success.
   ///
   /// ## Examples
   /// ```beamtalk
