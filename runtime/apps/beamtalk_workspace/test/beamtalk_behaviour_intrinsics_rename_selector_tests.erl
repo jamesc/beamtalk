@@ -381,6 +381,72 @@ rename_selector_collision(_Fixture) ->
     end.
 
 %%====================================================================
+%% Target-selector collision in the confirmed-rewrite hierarchy (review
+%% finding on PR #3529): a subclass whose self-send is about to be
+%% auto-rewritten to `NewSelector` already independently defines its OWN,
+%% unrelated `NewSelector` method. Rewriting the confirmed site would
+%% silently redirect dispatch to that pre-existing method instead of the
+%% just-renamed definition — refused before any mutation, mirroring the
+%% override-freedom check's own reasoning for `OldSelector`.
+%%====================================================================
+
+target_collision_base_source() ->
+    <<
+        "Value subclass: Bt3279TargetCollisionBase\n"
+        "  bump -> String => \"bumped\"\n"
+        "  increment -> String => self bump"
+    >>.
+
+target_collision_sub_source() ->
+    <<
+        "Bt3279TargetCollisionBase subclass: Bt3279TargetCollisionSub\n"
+        "  extra -> String => self bump\n"
+        "  boost -> String => \"pre-existing, unrelated\""
+    >>.
+
+rename_selector_target_collision_test_() ->
+    {setup, fun setup_target_collision/0, fun teardown_target_collision/1,
+        fun rename_selector_target_collision/1}.
+
+setup_target_collision() ->
+    start_fixture("bt3279-tcollision", [
+        {"bt3279_tcollision_base.bt", target_collision_base_source()},
+        {"bt3279_tcollision_sub.bt", target_collision_sub_source()}
+    ]).
+
+teardown_target_collision(_Fixture) ->
+    stop_classes(['Bt3279TargetCollisionBase', 'Bt3279TargetCollisionSub']),
+    stop_meta().
+
+rename_selector_target_collision(_Fixture) ->
+    try
+        beamtalk_behaviour_intrinsics:classRenameSelector(
+            class_object('Bt3279TargetCollisionBase'), bump, boost
+        ),
+        [?_assert(false)]
+    catch
+        error:#{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = Kind, message = Message}
+        } ->
+            [
+                ?_assertEqual(selector_already_exists, Kind),
+                ?_assert(
+                    binary:match(Message, <<"Bt3279TargetCollisionSub">>) =/= nomatch
+                ),
+                %% Nothing was mutated: the refusal happens before any rewrite.
+                ?_assertEqual(
+                    target_collision_base_source(),
+                    tracked_source(<<"Bt3279TargetCollisionBase">>)
+                ),
+                ?_assertEqual(
+                    target_collision_sub_source(),
+                    tracked_source(<<"Bt3279TargetCollisionSub">>)
+                )
+            ]
+    end.
+
+%%====================================================================
 %% `renameSelector:to:ifAbsent:` runs the block when OldSelector is absent.
 %%====================================================================
 

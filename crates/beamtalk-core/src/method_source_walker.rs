@@ -440,34 +440,26 @@ fn split_keyword_parts(selector: &str) -> Vec<String> {
         .collect()
 }
 
-/// Byte offset of the first non-ASCII-whitespace byte at or after `pos`.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "source files over 4GB are not supported (Span uses u32)"
-)]
-fn skip_ws_forward(source: &str, pos: u32) -> u32 {
-    let bytes = source.as_bytes();
-    let mut i = (pos as usize).min(bytes.len());
-    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    i as u32
-}
-
-/// Byte offset of the first non-ASCII-whitespace byte at or before `pos`
-/// (searching backward), i.e. the end of whatever token precedes the
-/// whitespace run ending at `pos`.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "source files over 4GB are not supported (Span uses u32)"
-)]
-fn skip_ws_backward(source: &str, pos: u32) -> u32 {
-    let bytes = source.as_bytes();
-    let mut i = (pos as usize).min(bytes.len());
-    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-    i as u32
+/// The span of the first real (non-trivia) token starting at or after
+/// `pos`, translated back into `source`'s own absolute coordinates.
+///
+/// Re-lexes `source[pos..]` rather than scanning bytes for whitespace: a
+/// `BeamTalk` `//`/`/* */` comment is lexer TRIVIA attached to the token that
+/// follows it, not a token of its own (`Token::span()` excludes trivia by
+/// construction — see `token.rs`), so this is exact regardless of how much
+/// whitespace *or* how many comments sit between `pos` and the real next
+/// token. Mirrors `find_definition_selector_spans`'s own modifier-skipping
+/// re-lex, generalized to "take the first token" (index 0) instead of
+/// "skip N known modifier tokens".
+///
+/// Returns `None` only if `source[pos..]` has no token at all (e.g. `pos`
+/// is at/past EOF) — not expected for a well-formed send (there is always
+/// at least the selector token following the receiver), but never panics.
+fn first_token_span_after(source: &str, pos: u32) -> Option<Span> {
+    let tail = source.get(pos as usize..)?;
+    let tail_tokens = lex_with_eof(tail);
+    let tok_span = tail_tokens.first()?.span();
+    Some(Span::new(pos + tok_span.start(), pos + tok_span.end()))
 }
 
 /// Find every self/super-directed send of `old_selector` within
@@ -567,10 +559,6 @@ pub fn find_selector_send_spans(
 /// binary-pattern segment's size expression) are not walked — self/super
 /// sends there are vanishingly rare and, per this function's own doc,
 /// missing one is a completeness gap, not a corruption risk.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one match arm per Expression variant, mirroring collect_sends's exhaustive shape — splitting it up would obscure the parallel, not shorten it"
-)]
 fn collect_selector_send_spans(
     expr: &Expression,
     source: &str,
@@ -583,21 +571,15 @@ fn collect_selector_send_spans(
             receiver,
             selector,
             arguments,
-            span,
             ..
         } => {
             if !receiver_rooted_in_error(receiver)
                 && self_or_super_kind(receiver).is_some()
                 && selector.name() == old_selector
             {
-                if let Some(spans) = selector_send_spans_for_match(
-                    selector,
-                    *span,
-                    receiver,
-                    arguments,
-                    source,
-                    new_selector,
-                ) {
+                if let Some(spans) =
+                    selector_send_spans_for_match(selector, receiver, source, new_selector)
+                {
                     out.push(spans);
                 }
             }
@@ -691,9 +673,7 @@ fn collect_selector_send_spans(
 /// module's shape-specific rules — see [`find_selector_send_spans`]'s doc.
 fn selector_send_spans_for_match(
     selector: &MessageSelector,
-    send_span: Span,
     receiver: &Expression,
-    arguments: &[Expression],
     source: &str,
     new_selector: &str,
 ) -> Option<Vec<SelectorSendSpan>> {
@@ -716,24 +696,19 @@ fn selector_send_spans_for_match(
                     .collect(),
             )
         }
-        MessageSelector::Unary(_) => {
-            // No text follows the selector token in a bare unary send — the
-            // span runs from just after the receiver (skipping whitespace)
-            // through the send's own overall end.
-            let start = skip_ws_forward(source, receiver.span().end());
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+            // Neither shape carries its own selector span from the parser
+            // (unlike `Keyword`'s per-part spans) — re-lex from just after
+            // the receiver and take the first real token. This is exact
+            // even when a `//`/`/* */` comment sits between the receiver
+            // and the selector (review finding on PR #3529: a prior
+            // whitespace-only byte scan swallowed such a comment into the
+            // splice span, silently deleting it on rewrite) — see
+            // `first_token_span_after`'s own doc for why re-lexing rather
+            // than scanning bytes is exact here regardless of trivia.
+            let span = first_token_span_after(source, receiver.span().end())?;
             Some(vec![SelectorSendSpan {
-                span: Span::new(start, send_span.end()),
-                new_text: new_selector.to_string(),
-            }])
-        }
-        MessageSelector::Binary(_) => {
-            // The operator token sits between the receiver and the single
-            // argument; trim whitespace on both sides to land exactly on it.
-            let start = skip_ws_forward(source, receiver.span().end());
-            let arg0 = arguments.first()?;
-            let end = skip_ws_backward(source, arg0.span().start());
-            Some(vec![SelectorSendSpan {
-                span: Span::new(start, end),
+                span,
                 new_text: new_selector.to_string(),
             }])
         }
@@ -1386,6 +1361,44 @@ mod tests {
         let hit = &occurrences[0][0];
         assert_eq!(slice(src, hit.span), "bump");
         assert_eq!(hit.new_text, "increase");
+    }
+
+    #[test]
+    fn block_comment_between_receiver_and_unary_selector_is_not_swallowed() {
+        // Review finding on PR #3529: a whitespace-only byte scan for the
+        // unary/binary selector's start treated a `/* ... */` block comment
+        // (legal BeamTalk lexer trivia between any two tokens on the same
+        // line) as part of the splice span, so a rewrite would silently
+        // delete the comment along with the old selector text.
+        // `first_token_span_after` fixes this by re-lexing rather than
+        // scanning bytes. (A `//` line comment can't occur in this position
+        // in the first place — verified independently: a bare newline
+        // between receiver and selector already splits them into two
+        // separate statements before any comment is involved, since
+        // BeamTalk newlines are significant statement terminators — so
+        // there is no reachable "line comment mid-send" case to cover.)
+        let src = "increment => self /* why */ bump";
+        let occurrences = find_selector_send_spans(src, "bump", "increase");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let hit = &occurrences[0][0];
+        assert_eq!(
+            slice(src, hit.span),
+            "bump",
+            "span should be JUST the selector token"
+        );
+    }
+
+    #[test]
+    fn comment_between_receiver_and_binary_selector_is_not_swallowed() {
+        let src = "combine: n => self /* why */ + n";
+        let occurrences = find_selector_send_spans(src, "+", "plus");
+        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
+        let hit = &occurrences[0][0];
+        assert_eq!(
+            slice(src, hit.span),
+            "+",
+            "span should be JUST the operator token"
+        );
     }
 
     #[test]

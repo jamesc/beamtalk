@@ -2133,7 +2133,13 @@ rename_selector(Self, OldSelector, NewSelector) ->
             Classification = capture_class_removal_snapshot(ClassNameBin),
             case
                 discover_rename_selector_sites(
-                    ClassName, ClassNameBin, Side, OldSelector, OldSelectorBin, NewSelectorBin
+                    ClassName,
+                    ClassNameBin,
+                    Side,
+                    OldSelector,
+                    OldSelectorBin,
+                    NewSelector,
+                    NewSelectorBin
                 )
             of
                 {error, selector_shape_mismatch} ->
@@ -2145,6 +2151,12 @@ rename_selector(Self, OldSelector, NewSelector) ->
                 {error, dynamic_class_no_source} ->
                     beamtalk_error:raise(
                         rename_selector_dynamic_no_source_error(ClassName, OldSelectorBin)
+                    );
+                {error, {target_selector_collision, Collisions}} ->
+                    beamtalk_error:raise(
+                        rename_selector_target_collision_error(
+                            ClassName, NewSelectorBin, Collisions
+                        )
                     );
                 {ok, DefinitionSite, ReferenceSites, CandidateSites} ->
                     case
@@ -2211,6 +2223,35 @@ rename_selector_collision_error(ClassName, NewSelector) ->
             NewBin,
             <<" first, or choose a different target name">>
         ])
+    ).
+
+%% Review finding on PR #3529: refuses BEFORE any mutation when a confirmed
+%% rewrite site's OWNER already independently defines `NewSelectorBin` on
+%% the same side — see `confirmed_owners_already_defining/3`'s own doc for
+%% the exact silent-dispatch-redirection failure mode this prevents.
+-spec rename_selector_target_collision_error(atom(), binary(), [atom()]) -> #beamtalk_error{}.
+rename_selector_target_collision_error(ClassName, NewSelectorBin, Collisions) ->
+    CollisionBins = [atom_to_binary(Cls, utf8) || Cls <- Collisions],
+    CollisionList = iolist_to_binary(lists:join(<<", ">>, CollisionBins)),
+    Error0 = beamtalk_error:new(selector_already_exists, ClassName),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"Cannot rename to #">>,
+            NewSelectorBin,
+            <<" — "/utf8>>,
+            CollisionList,
+            <<" (in the confirmed-rewrite hierarchy) already defines #">>,
+            NewSelectorBin,
+            <<"; rewriting would silently redirect dispatch there">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Error1,
+        <<
+            "Choose a different target name, or removeSelector: it from "
+            "the colliding class(es) first"
+        >>
     ).
 
 -spec rename_selector_shape_mismatch_error(atom(), binary(), binary()) -> #beamtalk_error{}.
@@ -2346,12 +2387,13 @@ already documents: degrade to "no definition site" rather than blocking
 the whole rename.
 """.
 -spec discover_rename_selector_sites(
-    atom(), binary(), instance | class, atom(), binary(), binary()
+    atom(), binary(), instance | class, atom(), binary(), atom(), binary()
 ) ->
     {ok, map() | undefined, [map()], [map()]}
-    | {error, selector_shape_mismatch | dynamic_class_no_source}.
+    | {error,
+        selector_shape_mismatch | dynamic_class_no_source | {target_selector_collision, [atom()]}}.
 discover_rename_selector_sites(
-    ClassName, ClassNameBin, Side, OldSelector, OldSelectorBin, NewSelectorBin
+    ClassName, ClassNameBin, Side, OldSelector, OldSelectorBin, NewSelector, NewSelectorBin
 ) ->
     case definition_selector_sites(ClassNameBin, Side, OldSelectorBin, NewSelectorBin) of
         {error, _Reason} = Err ->
@@ -2382,14 +2424,52 @@ discover_rename_selector_sites(
                     true -> {InHierarchySelfSuper, OutOfHierarchySelfSuper};
                     false -> {[], SelfSuperSites}
                 end,
-            ReferenceSites =
-                ExtraDefinitionSites ++
-                    confirmed_reference_rewrite_sites(
-                        ConfirmedSelfSuper, OldSelectorBin, NewSelectorBin
-                    ),
-            CandidateSites = candidate_site_maps(OtherSites ++ CandidateSelfSuper),
-            {ok, DefinitionSite, ReferenceSites, CandidateSites}
+            case
+                confirmed_owners_already_defining(
+                    ConfirmedSelfSuper, NewSelector, IsClassSide
+                )
+            of
+                [] ->
+                    ReferenceSites =
+                        ExtraDefinitionSites ++
+                            confirmed_reference_rewrite_sites(
+                                ConfirmedSelfSuper, OldSelectorBin, NewSelectorBin
+                            ),
+                    CandidateSites = candidate_site_maps(OtherSites ++ CandidateSelfSuper),
+                    {ok, DefinitionSite, ReferenceSites, CandidateSites};
+                Collisions ->
+                    {error, {target_selector_collision, Collisions}}
+            end
     end.
+
+%% Review finding on PR #3529: a confirmed self/super site is about to be
+%% rewritten to send `NewSelector` instead of `OldSelector` — but if the
+%% OWNER of that site already independently defines `NewSelector` on the
+%% SAME side, post-rewrite dispatch resolves to THAT pre-existing method
+%% (ADR 0032 chain-walk dispatch stops at the first class defining the
+%% selector, starting from the receiver's own class) rather than to the
+%% just-renamed definition — a silent behavior change with no error. This
+%% is the exact class of bug the override-freedom check above already
+%% prevents for `OldSelector`; the identical reasoning applies to
+%% `NewSelector`, just not spelled out by the ADR text.
+%%
+%% `beamtalk_xref:implementors_of/1` — the SAME query `selector_override_
+%% free/4` already uses for `OldSelector` — answers this directly: does any
+%% CONFIRMED site's owner already implement `NewSelector` on this side?
+%% `ClassName` itself is not re-checked here (already refused earlier by
+%% `ensure_rename_selector_collision_free/2`, step 2 of `rename_selector/3`
+%% — this only needs to cover the confirmed REFERENCE sites' owners, a
+%% strict subset of what step 2 doesn't already see).
+-spec confirmed_owners_already_defining([map()], atom(), boolean()) -> [atom()].
+confirmed_owners_already_defining(ConfirmedSelfSuper, NewSelector, IsClassSide) ->
+    ConfirmedOwners = sets:from_list([Owner || #{owner := Owner} <- ConfirmedSelfSuper]),
+    Implementors = beamtalk_xref:implementors_of(NewSelector),
+    lists:usort([
+        Cls
+     || {Cls, CS} <- Implementors,
+        CS =:= IsClassSide,
+        sets:is_element(Cls, ConfirmedOwners)
+    ]).
 
 -spec is_self_or_super_site(map()) -> boolean().
 is_self_or_super_site(#{recv_kind := RecvKind}) ->
