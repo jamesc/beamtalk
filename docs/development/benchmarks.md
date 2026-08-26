@@ -605,6 +605,80 @@ accumulator — the realistic shape `sum`/`inject:into:` compile to).
   accumulators) is **not worth pursuing** — recorded here so the decision isn't
   re-litigated.
 
+### Number-on-the-left arithmetic coercion — try/catch vs bare BIF (BT-3265, ADR 0116)
+
+ADR 0116 adds double-dispatch coercion so `5 + aVector`-shaped expressions
+(numeric operand on the left, non-numeric operand on the right — a case the
+guard above has no answer for) dispatch to a reflected `plusFromNumber:`-style
+method instead of crashing with a raw `badarith`. The compile-time skip
+(`receiver_is_statically_numeric` applied to the right operand, same rule
+already applied to the left) means a `total + delta`-shaped call site — right
+operand statically numeric — never enters this mechanism at all: codegen
+emits the identical bare BIF it always has, with no `try` whatsoever. Only a
+right operand whose type is genuinely unknown at compile time (`5 + aVector`)
+gets wrapped in the `try`/`catch`/`is_number`/`send_number_coercion` shape
+(§ Dispatch mechanism of the ADR).
+
+This turns the ADR's own de-risking spike (a hand-written, standalone `.core`
+module measured ad hoc) into a permanent benchmark against the real codegen
+output (BT-3263), in `bench_number_coercion/0` and
+`bench_number_coercion_dispatch/0` (`runtime/perf/bench_collect_selfhost.escript`),
+mirroring `bench_guard/0`'s own methodology (same tight-loop shape, same
+`N`/`Reps`, same `min_us` best-of sampling).
+
+| Case | overhead | ratio |
+|------|---|---|
+| `bench_number_coercion` — `total + delta` shape (bare BIF, no `try`) vs `bench_guard`'s own `Bare` (N = 5M adds) | noise-level (~0.2%) | **~1.00×** — statistically the same code |
+| `bench_number_coercion` — `5 + aVector` shape, happy path (`try`/`catch`/`is_number`, never fails) vs bare (N = 5M adds) | ~8.7–8.8 ns/add | **~7.2×** (run-dependent — see below) |
+| `bench_number_coercion_dispatch` — `5 + "not a vector"`, dispatch actually fires (real `send_number_coercion/4`, DNU + hint) (N = 20 000) | — | **~12.1 µs/op** |
+
+#### Interpretation
+
+- **Zero-cost claim, confirmed empirically.** The `total + delta` row is not a
+  new code path — it's the same bare `erlang:'+'` loop `bench_guard/0`
+  already measures as `Bare`, run again here to give an explicit before/after
+  data point for this ADR rather than relying solely on "the codegen test
+  asserts no `try` is emitted." Both runs landed within ~0.2% of each other
+  (~7046–7083 µs/loop across two full runs) — noise, not a regression. This
+  is the structural guarantee (§ Dispatch mechanism's "Trigger condition,
+  refined") getting an empirical check: `total + delta` truly pays nothing.
+- **The `try`/`catch` happy-path cost is comparable to the already-accepted
+  `is_number` guard's, on the same sandbox, same run** — exactly the ADR's
+  own conclusion. `bench_guard`'s guard-vs-bare ratio measured in the same
+  run as the table above came out to **~6.75×**, next to this mechanism's
+  **~7.2×** — the same ballpark, not dramatically worse, consistent with the
+  ADR's Implementation § De-risking spike claim that the `try`/`catch`
+  wrapper contributes only a small fraction beyond what the `is_number` check
+  itself already costs.
+- **Run-dependent, confirmed again.** This doc's own `bench_guard` entry
+  above records **~2.7–3.0×** from an earlier measurement run; this session's
+  re-measurement of that *same, unmodified* benchmark came out to **~6.75×**
+  on this sandbox — matching the ADR's own de-risking-spike finding that its
+  sandbox reproduced `bench_guard/0` "well outside" the recorded range. The
+  **relative** comparison (this mechanism vs. the guard it sits next to, same
+  run, same hardware) is the trustworthy reading; neither ratio's absolute
+  value is portable off the machine it was measured on. Both figures above
+  came from two consecutive full script runs on the same sandbox and agreed
+  with each other to within ~1%, so the run-to-run variance is a
+  machine/scheduling effect, not measurement noise within a single run.
+- **The dispatch-triggering reference point (~12.1 µs/op) is orders of
+  magnitude slower than the happy-path `try`, as expected** — it exercises
+  the real `beamtalk_message_dispatch:send_number_coercion/4` (`RightClass`
+  lookup, DNU class/selector match, hint formatting via `io_lib:format`,
+  re-raise), not a stub, using the ADR's own REPL example (`5 + "not a
+  vector"`, § REPL example). This cost is paid **only** on the already-
+  failing path — never on the happy path the two rows above measure — the
+  same "catch cost is exclusive to the failure path" property the ADR's
+  § Dispatch mechanism argues for.
+- Applies **only to the residual call sites this ADR's compile-time skip
+  doesn't remove** — right operand type genuinely unknown at compile time.
+  All hot stdlib arithmetic and `total + delta`-shaped user code (the
+  overwhelming majority) is byte-for-byte unchanged and pays nothing,
+  asserted by codegen regression tests in
+  `crates/beamtalk-core/src/codegen/core_erlang/tests/expressions.rs`
+  (`test_number_coercion_bare_bif_unaffected_for_total_plus_delta` and
+  siblings).
+
 ## Array backing: map (current) vs alternatives — does Vector earn its place? (BT-2696)
 
 BT-2696 proposed a bit-partitioned-trie `Vector` on the premise that core lacked

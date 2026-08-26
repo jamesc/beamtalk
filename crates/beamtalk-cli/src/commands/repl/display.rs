@@ -305,4 +305,24 @@ mod tests {
         let rendered = strip_ansi(&format_value(&val));
         assert_eq!(rendered, "hello");
     }
+
+    // --- format_error ---
+
+    #[test]
+    fn format_error_prefixes_message_with_error_label() {
+        let rendered = strip_ansi(&format_error("connection refused"));
+        assert_eq!(rendered, "Error: connection refused");
+    }
+
+    #[test]
+    fn format_error_empty_message_keeps_prefix() {
+        let rendered = strip_ansi(&format_error(""));
+        assert_eq!(rendered, "Error: ");
+    }
+
+    #[test]
+    fn format_error_message_containing_colon() {
+        let rendered = strip_ansi(&format_error("undefined variable: x"));
+        assert_eq!(rendered, "Error: undefined variable: x");
+    }
 }

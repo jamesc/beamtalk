@@ -543,6 +543,63 @@ Binary operators follow standard math precedence (highest to lowest):
 - `-` - Subtraction: `10 - 3` → `7`
 - `++` - String concatenation: `"Hello" ++ " World"` → `"Hello World"`
 
+##### Number-on-the-left coercion (`plusFromNumber:` etc.)
+
+`+ - * /` are receiver-dispatched messages, so a value type can overload them as the receiver — `aVector + 5` works because `Vector` defines `+`. That says nothing about `5 + aVector`: a numeric literal (or other statically-numeric receiver) on the **left**, with a non-numeric value type on the right. For that shape, Beamtalk dispatches to a **reflected method** on the right operand instead of crashing, named by a `<verb>FromNumber:` convention:
+
+| Operator | Reflected method |
+|---|---|
+| `+` | `plusFromNumber:` |
+| `-` | `minusFromNumber:` |
+| `*` | `timesFromNumber:` |
+| `/` | `divFromNumber:` |
+
+A value type opts in per operator by declaring the method it wants to support, alongside its ordinary receiver-dispatch operators:
+
+```beamtalk
+Value subclass: Vector
+  field: components :: Array = #()
+
+  + other :: Number -> Vector => self collect: [:c | c + other]
+  - other :: Number -> Vector => self collect: [:c | c - other]
+
+  plusFromNumber:  n :: Number -> Vector => self collect: [:c | n + c]
+  timesFromNumber: n :: Number -> Vector => self collect: [:c | n * c]
+  minusFromNumber: n :: Number -> Vector => self collect: [:c | n - c]
+```
+
+```beamtalk
+aVector + 5   // => Vector(6, 7, 8)   receiver-dispatch `+`, unchanged
+5 + aVector   // => Vector(6, 7, 8)   dispatches to `aVector plusFromNumber: 5`
+```
+
+**Operand order matters — easy to get backwards for a non-commutative operator.** The reflected method's *receiver* (`self`) is the value that was on the **right** of the original expression; its *parameter* is the value that was on the **left**. `5 - aVector` sends `aVector minusFromNumber: 5`, computing `n - self` (`5` minus each component) — not `self - n`. `aVector - 5` (ordinary receiver-dispatch `-`, unchanged) computes the opposite: each component minus `5`. These are genuinely different computations, not the same subtraction read backwards:
+
+```beamtalk
+aVector := Vector withAll: #(1 2 3)
+aVector - 5   // => Vector(-4, -3, -2)   each component minus 5 (self - n)
+5 - aVector   // => Vector(4, 3, 2)      5 minus each component (n - self)
+```
+
+**When an operator doesn't apply, implement it anyway — to reject with intent.** Not every reflected operator makes sense for every type: `5 / aVector` ("a number divided by a vector") rarely has an obvious meaning the way `5 * aVector` (scale) does, and a point-like type (e.g. `Temperature`) may sensibly support `+` but not `*`. Omitting the method leaves `does_not_understand` to fire on a selector — `divFromNumber:` — that the caller never typed, which is harder to connect back to their own `5 / aVector` than an ordinary DNU is. Implementing the method anyway, with a body that rejects explicitly, is better:
+
+```beamtalk
+divFromNumber: n :: Number -> Vector =>
+  self error: "Cannot divide a number by a Vector — did you mean (aVector / n)?"
+```
+
+A type author who commits to number-on-the-left arithmetic at all typically implements all four reflected methods — some as real arithmetic, the rest as deliberate rejections — not a variable subset.
+
+**Missing hook: `does_not_understand`, with a hint.** A type that implements no reflected method at all still fails safely — `5 + aThing` raises an ordinary `does_not_understand` rather than crashing with a raw BEAM `badarith`. Because `plusFromNumber:` is a selector *synthesized* by this mechanism rather than one the caller ever typed, the error carries an added hint naming the original operator:
+
+```beamtalk
+5 + "not a vector"
+// => ERROR: String does not understand 'plusFromNumber:'
+// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic
+```
+
+This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `generality`/coercion tower, no `perform:`-based reflective retry — each reflected method is an ordinary, fully-typed method, so static typing (covariant-return refinement) and compile-time DNU checking work on it exactly as they do on `+`/`-`/`*`/`/` themselves. A type that never implements number-on-the-left arithmetic pays no cost for it: a statically-typed call site (`total + delta`, both operands' types known at compile time) compiles to the identical bare arithmetic instruction whether or not this mechanism exists. Comparison operators (`< > <= >=`) are **not** covered by this convention — `5 < aVector` is unaffected. See [ADR 0116](ADR/0116-number-on-the-left-arithmetic-coercion.md) for the full double-dispatch design, the rejected alternatives (a Smalltalk-style `generality` tower, `perform:`-based retry), and the zero-cost measurement for the statically-typed case.
+
 #### Comparison
 - `<` - Less than: `3 < 5` → `true`
 - `>` - Greater than: `5 > 3` → `true`
