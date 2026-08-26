@@ -153,4 +153,50 @@ defmodule BtAttachWeb.WorkspaceDerivedBadgeTest do
       assert Floki.find(frag, ".synthetic-note") == []
     end
   end
+
+  describe "BT-2588: method-editor-form KeyboardShortcuts hook wiring" do
+    # `id="method-editor-form"` is rendered by two `cond` branches (no-tab
+    # empty state vs. active-tab state). Both MUST carry `phx-hook`/`data-scope`
+    # from the very first render — LiveView's morphdom patch matches same-id
+    # elements as one node, so an attribute that's ADDED on a later transition
+    # between the branches never triggers the JS client's hook `mounted()`
+    # (only newly-ADDED nodes auto-mount). This locks that invariant in fast,
+    # non-Playwright coverage — the un-skipped Chromium e2e test
+    # (workspace_browser_test.exs) is the slower, higher-fidelity signal for
+    # the same regression.
+    test "the hook mounts with no chord bound before any tab is open", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
+
+      frag = Floki.parse_fragment!(render(view))
+      form = Floki.find(frag, "form#method-editor-form")
+      assert form != []
+      assert Floki.attribute(form, "phx-hook") == ["KeyboardShortcuts"]
+      assert Floki.attribute(form, "data-scope") == ["window"]
+      # No chord bound here (`method_editor_shortcuts_attrs(%{})`): there is no
+      # tab to save, so ⌘S must be a genuine no-op — not a request-submit of
+      # the hidden empty form, which would surface a spurious "Enter a class
+      # name to save a method." error (the bug the adversarial review pass
+      # caught: binding "mod+s" here too meant ⌘S ANYWHERE on the page, e.g.
+      # while typing in the Workspace eval pane, fired this).
+      assert Floki.attribute(form, "data-shortcuts") == ["{}"]
+    end
+
+    test "the hook binds mod+s to submit once a method tab is open", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
+
+      view
+      |> element(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
+      |> render_click()
+
+      html = view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+      frag = Floki.parse_fragment!(html)
+
+      form = Floki.find(frag, "form#method-editor-form")
+      assert Floki.attribute(form, "phx-hook") == ["KeyboardShortcuts"]
+      assert Floki.attribute(form, "data-scope") == ["window"]
+      assert Floki.attribute(form, "data-shortcuts") == [Jason.encode!(%{"mod+s" => "submit"})]
+    end
+  end
 end

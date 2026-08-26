@@ -441,6 +441,61 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert refreshed_html =~ "Saved value on #{class}"
   end
 
+  # BT-2588 (adversarial review follow-up): `resync_active_tab/2` now keeps the
+  # save banner across a push refresh whenever the tab's body didn't change —
+  # but a refresh that DOES change the body (a git revert, another session's
+  # flush, an MCP edit, or here: a direct eval recompile bypassing this
+  # LiveView's own `compile_clean/3`) must still clear a stale banner from an
+  # earlier, now-superseded save, exactly as an explicit tab switch would.
+  # Without the `body_unchanged?` guard in `resync_active_tab/2`, the naive fix
+  # for the race above would leave a WRONG banner sitting over changed content,
+  # not just a lingering one.
+  test "a genuine out-of-band change clears a stale banner instead of leaving it stuck (BT-2588)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "ExternalRaceCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 1
+
+      value => self.value
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+    view |> element(~s(div[phx-value-selector="value"])) |> render_click()
+
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "tab" => "method:#{class}:instance:value",
+        "class" => class,
+        "selector" => "value",
+        "source" => "value => self.value + 100"
+      })
+
+    assert save_html =~ "Saved value on #{class}"
+
+    # A genuine out-of-band change: recompile the SAME method via a plain eval
+    # `>>` install (mirrors the REPL / MCP / another session's write path),
+    # entirely bypassing this LiveView's own save/`compile_clean` bookkeeping.
+    view
+    |> form("#eval-form")
+    |> render_submit(%{expr: "#{class} >> value => self.value + 999"})
+
+    send(view.pid, :do_source_refresh)
+    refreshed_html = render(view)
+
+    refute refreshed_html =~ "Saved value on #{class}"
+    assert refreshed_html =~ "self.value + 999"
+  end
+
   test "method editor: an invalid edit renders a structured error (BT-2409)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])

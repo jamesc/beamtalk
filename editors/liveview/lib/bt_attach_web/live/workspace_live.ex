@@ -4594,9 +4594,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Keep the rendered active-tab editor in sync after a push refresh: re-sync the
   # active tab's fields so its breadcrumb/badges/doc block re-render from the
   # refreshed entry. A dirty active tab is untouched above, so this never disturbs
-  # an edit. BT-2588: uses `sync_active_fields/2` (not `sync_active/2`) — the
-  # push refresh that follows a *successful save* (the class reload it triggers)
-  # must not wipe the "Saved …" banner that save just set on this same tab.
+  # an edit.
   defp resync_active_tab(socket, tabs) do
     case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
       %{dirty: false} = active ->
@@ -4605,9 +4603,23 @@ defmodule BtAttachWeb.WorkspaceLive do
         # host is re-keyed and remounts with the new source. A no-op re-read (same
         # body) leaves the rev — and thus the live editor instance — untouched, so a
         # routine refresh of an unchanged tab never disturbs the editor.
-        socket
-        |> maybe_bump_editor_rev(active.source)
-        |> sync_active_fields(active)
+        #
+        # BT-2588: the same "did the body actually change" test also decides
+        # whether to keep the save/flush banners. Unchanged body ⇒ this push is
+        # the echo of the local save that just set `save_result` (the class
+        # reload it triggers) — keep the banner (`sync_active_fields/2`).
+        # Changed body ⇒ a genuine out-of-band change (a git revert, another
+        # session's flush, an MCP edit) landed underneath a stale banner from an
+        # earlier, unrelated action — clear it (`sync_active/2`), same as an
+        # explicit tab switch would.
+        body_unchanged? = active.source == socket.assigns[:edit_source]
+        socket = maybe_bump_editor_rev(socket, active.source)
+
+        if body_unchanged? do
+          sync_active_fields(socket, active)
+        else
+          sync_active(socket, active)
+        end
 
       _ ->
         socket
@@ -6237,18 +6249,27 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # BT-2588: the `id="method-editor-form"` hook wiring, shared verbatim across
   # both cond branches that can render that id (the active-tab editor form and
-  # the no-tab empty-state form). Splatted via `{method_editor_shortcuts_attrs()}`
-  # so the two renders cannot drift apart again — the original bug was exactly
-  # that drift: the empty-state form lacked `phx-hook`/`data-scope`, so opening
-  # a tab from that state added `phx-hook` to an ALREADY-mounted DOM node (same
-  # id ⇒ LiveView's morphdom patch treats it as an "updated" node, not an
-  # "added" one) and `KeyboardShortcuts#mounted()` — which attaches the window
-  # keydown listener — never ran. See the id="method-editor-form" call sites.
-  defp method_editor_shortcuts_attrs do
+  # the no-tab empty-state form) — and by `id="native-editor-form"`, which binds
+  # the identical chord. Splatted via `{method_editor_shortcuts_attrs()}` so
+  # these renders cannot drift apart again — the original bug was exactly that
+  # drift: the empty-state form lacked `phx-hook`/`data-scope`, so opening a tab
+  # from that state added `phx-hook` to an ALREADY-mounted DOM node (same id ⇒
+  # LiveView's morphdom patch treats it as an "updated" node, not an "added"
+  # one) and `KeyboardShortcuts#mounted()` — which attaches the window keydown
+  # listener — never ran.
+  #
+  # The empty-state form must still mount the hook (so a later transition to
+  # the active-tab form is an "updated" patch on an already-mounted hook, not
+  # another missed "added" one) but must NOT bind "mod+s" to "submit" there —
+  # otherwise ⌘S anywhere on the page while no tab is open (e.g. while typing
+  # in the Workspace eval pane) request-submits the hidden empty form and
+  # surfaces a spurious "Enter a class name to save a method." error. Callers
+  # pass `%{}` for that form; the active-tab forms use the default.
+  defp method_editor_shortcuts_attrs(shortcuts \\ %{"mod+s" => "submit"}) do
     %{
       "phx-hook" => "KeyboardShortcuts",
       "data-scope" => "window",
-      "data-shortcuts" => Jason.encode!(%{"mod+s" => "submit"})
+      "data-shortcuts" => Jason.encode!(shortcuts)
     }
   end
 
@@ -10701,9 +10722,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           id="native-editor-form"
                           phx-submit="native_save"
                           phx-change="edit_source"
-                          phx-hook="KeyboardShortcuts"
-                          data-scope="window"
-                          data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                          {method_editor_shortcuts_attrs()}
                         >
                           <div
                             id={"native-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
@@ -11186,10 +11205,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                      directly — keeps working without a focused tab; the handler
                      tolerates an absent `tab` and validates an empty class.
 
-                     BT-2588: this form must carry the SAME KeyboardShortcuts
-                     hook wiring as the active-tab form below (both share
-                     id="method-editor-form") — see `method_editor_shortcuts_attrs/0`
-                     for why a divergence here silently breaks ⌘S. --%>
+                     BT-2588: this form must carry the SAME `phx-hook`/`data-scope`
+                     as the active-tab form below (both share id="method-editor-form")
+                     — see `method_editor_shortcuts_attrs/0` for why a divergence
+                     here silently breaks ⌘S. It passes `%{}` (no chords bound): the
+                     hook must still mount here, but must not request-submit this
+                     empty/hidden form — no tab means nothing to save. --%>
                     <div class="panel-body">
                       <div class="empty">
                         Nothing open. Pick a method, or open a <span class="mono">▸ class definition</span>, from the System
@@ -11200,7 +11221,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         id="method-editor-form"
                         phx-submit="save_method"
                         phx-change="edit_source"
-                        {method_editor_shortcuts_attrs()}
+                        {method_editor_shortcuts_attrs(%{})}
                         hidden
                       >
                         <input type="hidden" name="tab" value="" />
