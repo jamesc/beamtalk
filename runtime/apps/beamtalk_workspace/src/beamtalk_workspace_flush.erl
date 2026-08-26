@@ -224,6 +224,25 @@ styles could coincide for two unrelated class names — so
 (`rename_entry_rename_collisions/1`), rather than leaving it to the day a
 `.tmp` write silently clobbers another rename's in-flight one.
 
+**Renaming the SAME class twice before ever flushing (BT-3283).**
+`classRenameTo/2` computes a rename entry's `old_path` from the class's
+*compiled* `beamtalk_source` attribute, which is only refreshed by a flush
+COMMIT (the post-commit refresh above) — so `Foo renameTo: #Bar` followed,
+with no intervening flush, by `Bar renameTo: #Baz` produces two entries that
+both compute `old_path = foo.bt`, genuinely sharing a file and tripping the
+rename-vs-rename guard just described. This is a same-class rename CHAIN,
+not two unrelated classes colliding, and chain-collapsing it into a single
+effective rename was deliberately rejected (too much atomicity risk for a
+UX nicety — see the Decision on BT-3283) in favour of keeping the existing
+abort-cleanly behaviour but reporting it accurately:
+`rename_entry_rename_collisions/1` detects this specific shape (one entry's
+`old_class` traces back to the other's `class`) and reports
+`same_class_rename_chain_needs_flush` instead of the generic
+`mixed_rename_and_rename_edit`, so the message says a flush is needed
+between renames of the same class rather than implying an unrelated-class
+collision. This is a documented, intentional limitation, not a bug: flush
+between renames of the same class.
+
 **Post-commit source-attribute refresh (BT-3526 review fix).** A class's
 compiled BEAM module embeds its own source path as a `beamtalk_source`
 module attribute at compile time (`beamtalk_reflection:
@@ -1282,14 +1301,18 @@ by a recompile (`maybe_reload_renamed_class_source/1`, itself only triggered
 by a flush COMMIT), renaming the SAME class twice before ever flushing
 (`Foo renameTo: #Bar` then, with no flush in between, `Bar renameTo: #Baz`)
 produces two entries that both compute `old_path = foo.bt` — genuinely
-sharing a file, so this guard correctly (if confusingly) refuses the whole
-batch as a "collision" rather than the two-hop rename it actually is. Safe
-(clean abort, no data loss, both entries stay pending) but not the most
-permissive possible behaviour; supporting it would need chain detection
-(`entry2`'s `old_class` equal to `entry1`'s `class`) merged into an
-effective single-hop rename before staging — real design work, not a
-one-line fix, tracked separately rather than expanding this Blocker fix's
-own scope.
+sharing a file, so this guard correctly refuses the whole batch as a
+collision rather than the two-hop rename it actually is. Safe (clean abort,
+no data loss, both entries stay pending); collapsing the chain into an
+effective single-hop rename was deliberately rejected as too much
+atomicity risk for a UX nicety (Decision, BT-3283). What this function DOES
+do for that shape is report it accurately: `same_class_rename_chain/2`
+recognises when a colliding pair is entirely attributable to one entry's
+`old_class` tracing back to the other's `class` (a genuine rename chain,
+not two unrelated classes) and `rename_pair_conflict/3` emits a distinct
+`same_class_rename_chain_needs_flush` reason/message for it instead of the
+generic `mixed_rename_and_rename_edit`, which would otherwise wrongly imply
+an unrelated-class collision.
 
 Checked pairwise, each unordered pair exactly once (`Rest` only ever holds
 entries *after* `Entry` in list order) — mirrors `rename_entry_ordinary_
@@ -1316,28 +1339,104 @@ rename_entry_rename_collision_with(Entry, Files, [Other | Rest]) ->
         [] ->
             rename_entry_rename_collision_with(Entry, Files, Rest);
         [Collided | _] ->
-            {true,
-                conflict_map(
-                    Collided,
-                    <<"mixed_rename_and_rename_edit">>,
-                    [Entry, Other],
-                    iolist_to_binary([
-                        <<"Cannot flush two rename-class entries (">>,
-                        beamtalk_workspace_changelog:entry_old_class(Entry),
-                        <<" -> ">>,
-                        beamtalk_workspace_changelog:entry_class(Entry),
-                        <<" and ">>,
-                        beamtalk_workspace_changelog:entry_old_class(Other),
-                        <<" -> ">>,
-                        beamtalk_workspace_changelog:entry_class(Other),
-                        <<
-                            ") whose target files collide in the same operation; "
-                            "flush or discard one of the pending entries first, "
-                            "then re-flush the other"
-                        >>
-                    ])
-                )}
+            {true, rename_pair_conflict(Collided, Entry, Other)}
     end.
+
+-doc """
+Builds the conflict map for one colliding rename-vs-rename pair (BT-3283).
+Distinguishes two shapes that both surface as a file collision here:
+
+* A genuine same-class rename CHAIN — `Other` picks up where `Entry` left
+  off (pair order from `rename_entry_rename_collisions/1` is chronological,
+  `Entry` always before `Other` — see `same_class_rename_chain/2`'s own doc
+  for why only that one direction is safe to check), detected via
+  `same_class_rename_chain/2`. Reported as `same_class_rename_chain_needs_
+  flush` with a message naming the actual two/three-class chain and asking
+  for a flush between renames — NOT the generic wording below, which would
+  wrongly imply two unrelated classes collided.
+* A genuine cross-class collision (e.g. `derive_new_path/3` coincidence, or
+  BT-3526's own `new_path`-equals-other's-`old_path` shape) — reported as
+  `mixed_rename_and_rename_edit`, unchanged from before this fix.
+""".
+-spec rename_pair_conflict(binary(), term(), term()) -> map().
+rename_pair_conflict(Collided, Entry, Other) ->
+    case same_class_rename_chain(Entry, Other) of
+        true ->
+            conflict_map(
+                Collided,
+                <<"same_class_rename_chain_needs_flush">>,
+                [Entry, Other],
+                iolist_to_binary([
+                    <<"Cannot flush two renames of the same class (">>,
+                    beamtalk_workspace_changelog:entry_old_class(Entry),
+                    <<" -> ">>,
+                    beamtalk_workspace_changelog:entry_class(Entry),
+                    <<" and ">>,
+                    beamtalk_workspace_changelog:entry_old_class(Other),
+                    <<" -> ">>,
+                    beamtalk_workspace_changelog:entry_class(Other),
+                    <<
+                        ") in the same operation; the class was renamed more "
+                        "than once before flushing, so flush between renames "
+                        "of the same class, then perform the next rename"
+                    >>
+                ])
+            );
+        false ->
+            conflict_map(
+                Collided,
+                <<"mixed_rename_and_rename_edit">>,
+                [Entry, Other],
+                iolist_to_binary([
+                    <<"Cannot flush two rename-class entries (">>,
+                    beamtalk_workspace_changelog:entry_old_class(Entry),
+                    <<" -> ">>,
+                    beamtalk_workspace_changelog:entry_class(Entry),
+                    <<" and ">>,
+                    beamtalk_workspace_changelog:entry_old_class(Other),
+                    <<" -> ">>,
+                    beamtalk_workspace_changelog:entry_class(Other),
+                    <<
+                        ") whose target files collide in the same operation; "
+                        "flush or discard one of the pending entries first, "
+                        "then re-flush the other"
+                    >>
+                ])
+            )
+    end.
+
+-doc """
+True when `Entry` and `Other`'s file collision is entirely attributable to
+them being the SAME underlying class renamed twice before any intervening
+flush (BT-3283) — `Other`'s `old_class` traces back to `Entry`'s `class` —
+rather than two genuinely unrelated classes.
+
+Checked in ONE direction only, deliberately: pair order out of
+`rename_entry_rename_collisions/1` is chronological (`Entry` always before
+`Other` in append/seq order), and class names are unique in the live
+registry, so `Other`'s `old_class` can only equal `Entry`'s `class` by
+actually being the same class instance `Entry` just renamed — there is no
+independent class that could coincidentally share that name at that
+moment. The REVERSE direction (`Entry`'s `old_class` equal to `Other`'s
+`class`) is NOT safe to also check, despite looking symmetric: `Entry`'s
+rename vacates its old name, and a later, wholly UNRELATED class can
+legitimately be renamed to reuse that now-free name (e.g. `Foo renameTo:
+#Bar` frees `Foo`, then some unrelated `X renameTo: #Foo` legitimately
+reclaims it) — if `X`'s derived `new_path` happens to collide with
+`Entry`'s vacated `old_path`, that IS a genuine cross-class collision
+(`X`'s incoming file vs. `Entry`'s outgoing one) needing the generic
+`mixed_rename_and_rename_edit` reason, not this one. Checking the reverse
+direction would misreport that real collision as a same-class chain.
+
+`entry_old_class/1` is `binary() | undefined` (a rename entry always sets
+it in practice, but the type allows `undefined`); guarding against
+`undefined` avoids matching two entries that coincidentally both lack it.
+""".
+-spec same_class_rename_chain(term(), term()) -> boolean().
+same_class_rename_chain(Entry, Other) ->
+    EntryClass = beamtalk_workspace_changelog:entry_class(Entry),
+    OtherOldClass = beamtalk_workspace_changelog:entry_old_class(Other),
+    OtherOldClass =/= undefined andalso EntryClass =:= OtherOldClass.
 
 %% Every file `Entry`'s rename touches in any way — read (`old_path`),
 %% written (`new_path` and every other site's file). Used only for the
