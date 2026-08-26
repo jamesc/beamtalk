@@ -4296,9 +4296,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> assign_browser_classes()
         |> assign_changes()
         |> open_definition(new_name)
+        |> reselect_renamed_class(old_name, new_name)
         |> assign(
-          selected_class: new_name,
-          selected_protocol: nil,
           rename_open: false,
           rename_error: nil,
           save_result:
@@ -4321,6 +4320,27 @@ defmodule BtAttachWeb.WorkspaceLive do
           rename_new_name: new_name,
           rename_error: facade_error(reason)
         )
+    end
+  end
+
+  # Only follow the rename into `selected_class` when the System Browser
+  # tree's own current selection WAS the renamed class (or nothing was
+  # selected) — unlike `dispatch_new_class/5`'s unconditional select-the-
+  # new-class (there's no prior selection to conflict with when creating a
+  # class), a rename can be triggered from an open `:def` tab while the
+  # tree has a DIFFERENT, unrelated class selected. Reassigning
+  # unconditionally would move the tree highlight to the renamed class
+  # while leaving `browser_protocols`/`browser_categories` showing the
+  # untouched previously-selected class — the same "ghost selection"
+  # mismatch `selected_class_visible?/1` (BT-2597) exists to avoid for the
+  # browser-source-filter case. Leaving an unrelated selection alone is
+  # simpler and correct here; there's no stale-name problem to fix in that
+  # case, since the unrelated class's own identity didn't change.
+  defp reselect_renamed_class(socket, old_name, new_name) do
+    if socket.assigns.selected_class in [old_name, nil] do
+      assign(socket, selected_class: new_name, selected_protocol: nil)
+    else
+      socket
     end
   end
 
