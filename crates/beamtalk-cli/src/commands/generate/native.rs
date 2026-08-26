@@ -7,7 +7,7 @@
 //! `self delegate` methods, and writes a skeleton `.erl` file with matching
 //! `handle_call/3` clauses.
 
-use beamtalk_core::ast::{ClassDefinition, MessageSelector, MethodDefinition, TypeAnnotation};
+use beamtalk_core::ast::{ClassDefinition, MessageSelector, MethodDefinition};
 use camino::Utf8PathBuf;
 use miette::{Context, Result};
 use std::fmt::Write as _;
@@ -260,7 +260,7 @@ fn write_handle_call_clause(out: &mut String, method: &MethodDefinition) {
 
     // Add return type comment for this clause
     if let Some(ref ret_type) = method.return_type {
-        let type_str = format_type_annotation(ret_type);
+        let type_str = beamtalk_core::unparse::unparse_type_annotation_display(ret_type);
         writeln!(out, "%% {selector_name} -> {type_str}").unwrap();
     }
 
@@ -329,40 +329,6 @@ fn capitalize_erlang_var(name: &str) -> String {
             let upper: String = first.to_uppercase().collect();
             format!("{upper}{}", chars.as_str())
         }
-    }
-}
-
-/// Format a type annotation as a human-readable string (for comments).
-fn format_type_annotation(ty: &TypeAnnotation) -> String {
-    match ty {
-        TypeAnnotation::Simple(id) => id.name.to_string(),
-        TypeAnnotation::Singleton { name, .. } => format!("#{name}"),
-        TypeAnnotation::Union { types, .. } => {
-            let parts: Vec<String> = types.iter().map(format_type_annotation).collect();
-            parts.join(" | ")
-        }
-        TypeAnnotation::Generic {
-            base, parameters, ..
-        } => {
-            let params: Vec<String> = parameters.iter().map(format_type_annotation).collect();
-            format!("{}({})", base.name, params.join(", "))
-        }
-        TypeAnnotation::Difference { base, excluded, .. } => {
-            format!(
-                "{} \\ {}",
-                format_type_annotation(base),
-                format_type_annotation(excluded)
-            )
-        }
-        TypeAnnotation::Intersection { left, right, .. } => {
-            format!(
-                "{} & {}",
-                format_type_annotation(left),
-                format_type_annotation(right)
-            )
-        }
-        // For other variants, just produce a placeholder
-        _ => "Object".to_string(),
     }
 }
 
