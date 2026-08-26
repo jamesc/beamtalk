@@ -34,6 +34,10 @@ Extracted from beamtalk_repl_eval (BT-863).
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
+    %% ADR 0114 Phase 2 (BT-3272): `Workspace moveClass:to:` — a pure file
+    %% move, reusing rewrite_sites/2 + emit_rewrite_change_entry/2 above with
+    %% a single byte-identical definition site. See move_class/2's own doc.
+    move_class/2,
     %% BT-3206: best-effort snapshot + ChangeLog append for a successful
     %% `removeFromSystem` (class removal) — see
     %% capture_class_removal_snapshot/1's doc for why the snapshot is a
@@ -2435,6 +2439,248 @@ store_rewrite_site_ref(Body) ->
             ),
             undefined
     end.
+
+%%% ----------------------------------------------------------------------------
+%%% Class move (ADR 0114 Phase 2, BT-3272)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Move `ClassName`'s `.bt` file to `NewPathBin`, leaving its name and every
+reference to it untouched (ADR 0114 Phase 2, BT-3272; backs `Workspace
+moveClass:to:`).
+
+Unlike `beamtalk_behaviour_intrinsics:classRenameTo/2` (BT-3278), nothing
+about the class's identity changes here — no collision check, no cross-file
+reference discovery, no registry re-registration — so `moveClass:to:` has no
+sites beyond the single file being moved (ADR 0114 § "`Workspace
+moveClass:to:`"). The mechanism is still the shared one (BT-3270): resolve
+the class's own declaration span (`beamtalk_compiler:resolve_class_span/2`,
+the same "header + state, never a method" resolver `add_class_def_flushability/2`
+above already uses) and rewrite it to ITSELF — a byte-identical splice — via
+`rewrite_sites/2`, purely so a `'rename-class'` ChangeLog entry with
+`old_class == class`, `old_path` = the class's current `source_file`, and
+`new_path = NewPathBin` gets recorded. `Workspace flush` (BT-3271) already
+knows how to replay that entry as a pure file move (the declaration site,
+plus any same-file self-reference, folded into one splice against `old_path`,
+written to `new_path`, then `old_path` unlinked).
+
+Reusing `rewrite_sites/2` rather than a bespoke "just log it" shortcut keeps
+this on the one tested atomicity mechanism every other rename-shaped entry
+already goes through — in particular, it still forces a real compile of the
+class's current tracked source before anything is logged, catching a source
+that has drifted into an unparseable state rather than silently recording a
+move for a class that cannot actually be reinstalled later. Because the
+registered name never changes, `rewrite_sites/2`'s own hot-reload reuses the
+SAME pid (`beamtalk_behaviour_intrinsics:install_class_rename/3`'s doc: "a
+NEW pid — hot-reload only reuses the SAME pid when the registered name is
+unchanged, which a rename by definition is not" — a move by definition IS
+unchanged) — the caller's own class-object reference stays valid, so this
+returns `ok` rather than a reinstalled object; the FFI boundary
+(`beamtalk_workspace_interface_primitives:moveClass/2`) returns the caller's
+own `aClass` argument unchanged.
+
+## Refusal (ADR 0114 § "`Workspace moveClass:to:`")
+
+Classification reuses `capture_class_removal_snapshot/1` — the exact
+stdlib/dependency/dynamic split `classRenameTo/2` already applies — with one
+deliberate divergence: a dynamic (`ClassBuilder`) class has no backing file
+to move at all, so it raises `no_source_file` here rather than
+`classRenameTo/2`'s permissive `flushable: false` ("dynamic") treatment of
+the identical classification — moving *nothing* is not a legitimate
+in-memory action the way patching a dynamic class's body is. Stdlib and
+dependency classes are refused for the same reason `classRenameTo/2` refuses
+them: the classification this primitive shares with it only ever covers
+in-project source, so neither primitive can vouch for a class living outside
+it.
+
+`NewPathBin` must resolve inside the active project tree
+(`classify_source_file/1` — the same check `newClass:at:`'s
+`validate_target_path/1` already applies): `Workspace flush` only ever
+writes into the project tree, so a target outside it could never actually be
+reached.
+
+Returns `ok` on success or `{error, #beamtalk_error{}}` on any refusal,
+resolution, or rewrite failure — the FFI boundary raises it.
+""".
+-spec move_class(atom(), binary()) -> ok | {error, #beamtalk_error{}}.
+move_class(ClassName, NewPathBin) when is_atom(ClassName), is_binary(NewPathBin) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    Classification = capture_class_removal_snapshot(ClassNameBin),
+    case move_class_ensure_movable(ClassName, Classification) of
+        {error, _} = Err ->
+            Err;
+        {ok, OldPathBin} ->
+            case move_class_validate_target(ClassName, OldPathBin, NewPathBin) of
+                {error, _} = Err ->
+                    Err;
+                ok ->
+                    Source = maps:get(prev_source, Classification, undefined),
+                    move_class_rewrite(ClassName, ClassNameBin, OldPathBin, NewPathBin, Source)
+            end
+    end.
+
+%% Dynamic (no backing file at all) -> `no_source_file`, stricter than
+%% `classRenameTo/2`'s permissive treatment of the same classification (see
+%% `move_class/2`'s own doc for why). Stdlib / dependency -> refuse,
+%% mirroring `classRenameTo/2`'s own refusal table exactly. An ordinary
+%% flushable project class -> proceed, carrying its current `source_file`
+%% forward as `old_path`.
+-spec move_class_ensure_movable(atom(), map()) -> {ok, binary()} | {error, #beamtalk_error{}}.
+move_class_ensure_movable(_ClassName, #{flushable := true, source_file := SourceFile}) ->
+    {ok, SourceFile};
+move_class_ensure_movable(ClassName, #{not_flushable_reason := <<"dynamic">>}) ->
+    {error, move_class_no_source_file_error(ClassName)};
+move_class_ensure_movable(ClassName, #{not_flushable_reason := <<"stdlib">>}) ->
+    {error, move_class_stdlib_refusal_error(ClassName)};
+move_class_ensure_movable(ClassName, #{not_flushable_reason := <<"dependency:", _/binary>> = Reason}) ->
+    {error, move_class_dependency_refusal_error(ClassName, Reason)};
+move_class_ensure_movable(ClassName, _Classification) ->
+    %% Defensive: `capture_class_removal_snapshot/1` never produces any other
+    %% shape (its only non-flushable reasons are "dynamic", "stdlib", or a
+    %% "dependency:" prefix — see `no_source_reason/1`/`classify_source_file/1`)
+    %% but fails the same way as the dynamic case rather than crashing on an
+    %% unmatched map, per "never panic on user input".
+    {error, move_class_no_source_file_error(ClassName)}.
+
+-spec move_class_validate_target(atom(), binary(), binary()) -> ok | {error, #beamtalk_error{}}.
+move_class_validate_target(ClassName, OldPathBin, NewPathBin) ->
+    %% A target equal to the class's current path is not a legitimate move: the
+    %% flush commit path for `op = move` (`beamtalk_workspace_flush:commit/1`)
+    %% renames the staged .tmp into NewPath and then deletes OldPath — when the
+    %% two are the same file, that delete removes the file it just wrote,
+    %% losing the class's source entirely. Refuse eagerly, mirroring
+    %% `newClass:at:`'s own eager `validate_target_path/1` check.
+    case
+        filename:absname(binary_to_list(NewPathBin)) =:=
+            filename:absname(binary_to_list(OldPathBin))
+    of
+        true ->
+            {error,
+                move_class_error(
+                    same_path,
+                    ClassName,
+                    <<"moveClass:to: target is the class's current path; nothing to move">>
+                )};
+        false ->
+            case classify_source_file(NewPathBin) of
+                {flushable, _AbsPath} ->
+                    ok;
+                {not_flushable, _Reason} ->
+                    {error,
+                        move_class_error(
+                            target_outside_project,
+                            ClassName,
+                            iolist_to_binary([
+                                <<"moveClass:to: target is outside the project source tree: ">>,
+                                NewPathBin,
+                                <<"; a class can only be moved to a path inside the current project">>
+                            ])
+                        )}
+            end
+    end.
+
+-spec move_class_rewrite(atom(), binary(), binary(), binary(), binary() | undefined) ->
+    ok | {error, #beamtalk_error{}}.
+move_class_rewrite(ClassName, _ClassNameBin, _OldPathBin, _NewPathBin, undefined) ->
+    {error,
+        move_class_error(
+            class_source_unavailable,
+            ClassName,
+            <<"moveClass:to: could not read this class's current tracked source">>
+        )};
+move_class_rewrite(ClassName, ClassNameBin, OldPathBin, NewPathBin, Source) ->
+    case beamtalk_compiler:resolve_class_span(Source, ClassNameBin) of
+        {ok, #{start := Start, 'end' := End} = Span, _PrevSource} ->
+            Text = binary:part(Source, Start, End - Start),
+            DefinitionSite = #{
+                class => ClassNameBin,
+                source_file => OldPathBin,
+                span => Span,
+                new_text => Text
+            },
+            case rewrite_sites(DefinitionSite, []) of
+                {ok, RewriteResult} ->
+                    emit_move_class_change_entry(
+                        ClassNameBin, OldPathBin, NewPathBin, RewriteResult
+                    ),
+                    ok;
+                {error, Reason} ->
+                    {error, move_class_rewrite_failed_error(ClassName, Reason)}
+            end;
+        {error, Reason, Message} ->
+            {error,
+                move_class_error(
+                    class_span_unresolved,
+                    ClassName,
+                    iolist_to_binary([
+                        <<"moveClass:to: could not locate this class's own declaration: ">>,
+                        io_lib:format("~p ~s", [Reason, Message])
+                    ])
+                )}
+    end.
+
+-spec emit_move_class_change_entry(binary(), binary(), binary(), rewrite_result()) -> ok.
+emit_move_class_change_entry(ClassNameBin, OldPathBin, NewPathBin, RewriteResult) ->
+    Spec = #{
+        kind => 'rename-class',
+        class => ClassNameBin,
+        old_class => ClassNameBin,
+        old_path => OldPathBin,
+        new_path => NewPathBin,
+        intent => durable,
+        author => new_class_author(),
+        author_kind => new_class_author_kind()
+    },
+    emit_rewrite_change_entry(Spec, RewriteResult).
+
+-spec move_class_error(atom(), atom(), binary()) -> #beamtalk_error{}.
+move_class_error(Kind, ClassName, Message) ->
+    Err0 = beamtalk_error:new(Kind, ClassName),
+    Err1 = beamtalk_error:with_selector(Err0, 'moveClass:to:'),
+    beamtalk_error:with_message(Err1, Message).
+
+-spec move_class_no_source_file_error(atom()) -> #beamtalk_error{}.
+move_class_no_source_file_error(ClassName) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    move_class_error(
+        no_source_file,
+        ClassName,
+        iolist_to_binary([
+            ClassNameBin,
+            <<" has no backing .bt file to move (it was created dynamically via ClassBuilder)">>
+        ])
+    ).
+
+-spec move_class_stdlib_refusal_error(atom()) -> #beamtalk_error{}.
+move_class_stdlib_refusal_error(ClassName) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    move_class_error(
+        runtime_error,
+        ClassName,
+        iolist_to_binary([<<"Cannot move stdlib class '">>, ClassNameBin, <<"'">>])
+    ).
+
+-spec move_class_dependency_refusal_error(atom(), binary()) -> #beamtalk_error{}.
+move_class_dependency_refusal_error(ClassName, Reason) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    move_class_error(
+        runtime_error,
+        ClassName,
+        iolist_to_binary([
+            <<"Cannot move dependency class '">>, ClassNameBin, <<"' (">>, Reason, <<")">>
+        ])
+    ).
+
+-spec move_class_rewrite_failed_error(atom(), term()) -> #beamtalk_error{}.
+move_class_rewrite_failed_error(ClassName, Reason) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    move_class_error(
+        runtime_error,
+        ClassName,
+        iolist_to_binary(
+            io_lib:format("Could not move class '~s': ~p", [ClassNameBin, Reason])
+        )
+    ).
 
 %% Load a recompiled method-patched class binary into BEAM.
 -spec load_recompiled_method(

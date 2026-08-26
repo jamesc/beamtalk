@@ -34,6 +34,7 @@ module loading to beamtalk_repl_loader (BT-863).
 
 %% ADR 0082 Phase 1 (BT-2285) — new-class creation backing `Workspace newClass:at:'.
 -export([new_class/2]).
+-export([move_class/2]).
 
 %% ADR 0113 (BT-3208) — `Workspace changes revert:` extension for a pending
 %% `'remove-class'` entry: recompiles and reinstalls the class from its
@@ -691,6 +692,15 @@ validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}
     {ok, [tuple()]} | {error, term()}.
 new_class(Source, TargetPath) ->
     beamtalk_repl_loader:new_class(Source, TargetPath).
+
+-doc """
+Move a class's `.bt` file to a new path without changing its name (ADR 0114
+Phase 2, BT-3272). Thin forwarding wrapper — see
+`beamtalk_repl_loader:move_class/2` for the full contract.
+""".
+-spec move_class(atom(), binary()) -> ok | {error, term()}.
+move_class(ClassName, NewPathBin) ->
+    beamtalk_repl_loader:move_class(ClassName, NewPathBin).
 
 -doc """
 Recompile and reinstall a class from a recorded prior source (ADR 0113,
