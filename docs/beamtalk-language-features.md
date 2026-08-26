@@ -3918,6 +3918,132 @@ removal is git's job. `removeSelector:`'s `#'remove-method'` entries are
 revertable the same way (they re-install the removed method's recorded prior
 body).
 
+#### Renaming a class or method — `renameTo:`, `renameSelector:to:`, and `moveClass:to:` (ADR 0114)
+
+`renameTo:` (class rename) and `renameSelector:to:` / `renameSelector:to:ifAbsent:`
+(method rename) give a class or method a new identity in place — unlike
+`removeFromSystem` + `newClass:at:`, which would lose instance identity,
+in-place undo, and any automatic reference fixing. Both compute their
+rewrite sites from the same xref infrastructure `SystemNavigation` exposes
+above (`referencesTo:`, `sendersOf:`, `implementorsOf:`) rather than a new
+query, follow `removeSelector:`'s established shape (sealed class-side
+methods, return the receiver for chaining, raise a structured
+`#beamtalk_error{}` — reusing `removeSelector:`'s `selector_not_found` kind —
+on an absent source, paired with an `ifAbsent:` escape hatch), and — like
+`removeFromSystem` — never touch disk on their own; the resulting entry
+needs its own confirmed destructive flush (below) to reach disk.
+
+```beamtalk
+sealed renameTo: aNewName :: Symbol -> Behaviour
+sealed renameSelector: aSelector :: Symbol to: aNewSelector :: Symbol -> Behaviour
+sealed renameSelector: aSelector :: Symbol to: aNewSelector :: Symbol
+    ifAbsent: absentBlock :: Block(T) -> Behaviour | T
+```
+
+**Receiver and side**, for `renameSelector:to:`, mirrors `removeSelector:`:
+`Counter renameSelector: #a to: #b` touches the instance-side table,
+`Counter class renameSelector: #a to: #b` touches the class-side table.
+
+```beamtalk
+Counter renameTo: #Accumulator
+Counter renameSelector: #increment to: #incrementBy
+Counter class renameSelector: #ofSize: to: #withCapacity:
+```
+
+A collision with an existing name is refused, loudly, the same way
+`removeFromSystem` refuses a name it can't act on:
+
+```beamtalk
+Counter renameTo: #Accumulator
+// => Error: cannot rename Counter to Accumulator — Accumulator already exists
+
+Counter renameSelector: #increment to: #decrement
+// => Error: Counter already defines #decrement locally — refusing to overwrite
+
+Counter renameSelector: #bogus to: #anything
+// => Error: selector_not_found
+
+Counter renameSelector: #bogus to: #anything ifAbsent: ["not found"]
+// => "not found"
+```
+
+**`renameTo:` rewrites every in-project reference it can find, immediately, in
+memory** — constructor/message sends, type annotations (including generic
+parameters like `List(Counter)`), superclass declarations, and extension
+declarations (via the union of `referencesTo:` and the class's direct
+subclasses). A class live-patched via `>>` since its last full compile is a
+real, accepted residual-risk gap here (`referencesTo:`'s reference-indexing
+channel is unconditionally empty for live patches), and a plain
+string/comment occurrence of a class's name is never rewritten — the same
+category of accepted risk `removeSelector:`'s dangling senders already carry,
+just concretely named.
+
+**`renameSelector:to:` auto-rewrites only structurally-safe `self`/`super`
+sends — not every textual sender `sendersOf:` finds.** `sendersOf: #sel`
+returns every send of that selector name anywhere in the project, regardless
+of which class's implementation the sender actually meant to call —
+auto-rewriting all of them would risk silently corrupting unrelated, working
+code that happens to share a selector name. `renameSelector:to:` therefore
+splits the results into two tiers, reported on the resulting ChangeEntry:
+
+- **Confirmed (`sites`, rewritten):** the definition itself, plus every
+  `self`/`super` send whose owner is the renamed class or a transitive
+  subclass — **only when no class in that subclass tree also implements the
+  same selector on the same side** (an override anywhere in the hierarchy
+  means a `self`/`super` send could be intercepted before reaching this
+  class's implementation, so none of that selector's `self`/`super` sites are
+  safe to auto-rewrite, not even ones on the class itself).
+- **Candidate (`candidate_sites`, reported for review, never auto-rewritten):**
+  every send through an arbitrary-expression receiver, every FFI call site,
+  every `self`/`super` send whose owner falls outside the renamed class's
+  hierarchy, and — when the selector is overridden anywhere in the subclass
+  tree — every `self`/`super` send for that selector regardless of owner.
+
+`candidate_sites` is exactly `removeSelector:`'s dangling-sender risk made
+visible rather than silent: nothing there is rewritten or written by flush,
+but a caller inspecting the returned `ChangeEntry` (`Workspace changes` —
+below) sees both counts and can patch the review list manually via
+`compile:source:`, the same way any other live patch is made.
+
+**`Workspace moveClass: aClass to: aNewPath`** relocates a class's `.bt` file
+without changing its name — the pure file-move counterpart to `renameTo:`,
+useful when only where a class lives on disk should change:
+
+```beamtalk
+Workspace moveClass: Counter to: "src/math/counter.bt"
+```
+
+**Refusal is decided per primitive**, by whether the in-memory effect alone
+is safe against a class the project doesn't own the *callers* of:
+
+| Primitive | Stdlib | Dynamic (`ClassBuilder`) | Dependency |
+|---|---|---|---|
+| `renameTo:` | Refuses | Allowed, not flushable | Refuses |
+| `renameSelector:to:` | Allowed, not flushable | Allowed, not flushable | Allowed, not flushable |
+
+`renameTo:` refuses a stdlib or dependency class outright — the xref index
+only covers in-project source, so its site-discovery can never be complete
+for a class whose callers might live outside the project.
+`renameSelector:to:` reuses `removeSelector:`'s narrower granularity
+argument: a single-selector rename's blast radius (one stray un-rewritten
+`self`/`super` sender) is smaller than a whole class silently losing
+referential integrity project-wide, so it installs in memory unconditionally
+and only gates the *disk* write.
+
+A successful rename logs a durable `kind: #'rename-class'` /
+`#'rename-method'` ChangeEntry — the same audit-trail-is-unconditional rule
+`removeFromSystem` follows — carrying the multi-file `sites` list flush will
+apply and (for `rename-method`) the `candidate_sites` review list above. Both
+kinds join `removeFromSystem` in Tier 2 (below): flushing rewrites every
+confirmed site across however many files it spans (a class rename also moves
+the `.bt` file itself), which is why it needs its own confirmation gesture.
+Unlike `removeFromSystem`, a pending rename entry is revertable —
+`Workspace changes revert: anEntry` splices every one of the entry's own
+recorded `sites` back to its own prior body, at its own recorded location,
+rather than re-running `renameTo:`/`renameSelector:to:` (which would
+re-compute site discovery against post-rename state and could disagree with
+what the original rename actually touched).
+
 #### Destructive flush — `flushIncludingDestructive` and `confirmDestructive` (ADR 0113)
 
 Every flushable ChangeEntry classifies into one of two tiers:
@@ -3925,7 +4051,7 @@ Every flushable ChangeEntry classifies into one of two tiers:
 | Tier | Entries | File survives? | Gate |
 |------|---------|-----------------|------|
 | 1 | patches, `newClass:at:`, `removeSelector:` (`#'remove-method'`) | Yes — excising a recorded span leaves the file in place, mechanically identical to a patch | None — `Workspace flush` applies it directly |
-| 2 | `removeFromSystem` (`#'remove-class'`) | No — the `.bt` file is deleted | Explicit `confirmDestructive` |
+| 2 | `removeFromSystem` (`#'remove-class'`), `renameTo:` / `Workspace moveClass:to:` (`#'rename-class'`), `renameSelector:to:` (`#'rename-method'`) | No — a class removal deletes the `.bt` file; a rename rewrites one or more files (a class rename also moves the file itself) | Explicit `confirmDestructive` |
 
 `Workspace flush` (no argument) applies only Tier 1. A pending Tier 2 entry is
 left pending and reported in the summary's `#skipped` field
@@ -3964,7 +4090,9 @@ staged (same-filesystem rename, then unlink) so a crash between the two steps
 leaves a recoverable file, never a partial or silent loss; a re-flush finishes
 the delete. See [ADR 0113](ADR/0113-destructive-workspace-operations.md) for
 the full design, including the external-edit conflict table and delete
-atomicity.
+atomicity — and [ADR 0114](ADR/0114-class-and-method-rename.md) for how
+`renameTo:`/`renameSelector:to:` extend this same tier and gate to genuinely
+multi-file staging.
 
 **Editor integration (LSP):** flush uses typed `workspace/applyEdit` resource
 operations for structural file changes: a `Workspace newClass:at:` flush emits

@@ -1071,6 +1071,29 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-170",
+      "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Counter renameTo: #Accumulator\nCounter renameSelector: #increment to: #incrementBy\nCounter class renameSelector: #ofSize: to: #withCapacity:",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-171",
+      "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "Counter renameTo: #Accumulator\n// => Error: cannot rename Counter to Accumulator — Accumulator already exists\n\nCounter renameSelector: #increment to: #decrement\n// => Error: Counter already defines #decrement locally — refusing to overwrite\n\nCounter renameSelector: #bogus to: #anything\n// => Error: selector_not_found\n\nCounter renameSelector: #bogus to: #anything ifAbsent: [\"not found\"]\n// => \"not found\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-174",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1080,7 +1103,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-171",
+      "id": "docs-beamtalk-language-features-block-175",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1103,7 +1126,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-172",
+      "id": "docs-beamtalk-language-features-block-176",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1121,80 +1144,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-174",
+      "id": "docs-beamtalk-language-features-block-178",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "// Session-local write — DEFERRED to end of eval, visible on the NEXT line:\nSession current bindings at: #y put: 99\n// => 99\ny\n// => 99\n\n// Workspace-global write — SYNCHRONOUS (routes through bind:as:),\n// visible immediately on the next line:\nWorkspace globals at: #answer put: 42\n// => 42\nanswer\n// => 42",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-176",
-      "title": "Cross-session access (read-only) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "find",
-        "first match",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "raise",
-        "search",
-        "set",
-        "throw",
-        "transform"
-      ],
-      "source": "// Pick a session that is NOT this one — session ordering is not guaranteed, so\n// `sessions first` could be the current session, where a write would succeed\n// (self-session) rather than raise. Tooling normally already knows the target id.\nmyId    := Session current id\notherId := (Workspace sessions collect: [:s | s id]) detect: [:each | each /= myId]\nother   := Session withId: otherId\n\nother bindings keys          // => cross-session READ, allowed\nother bindings at: #x put: 9 // => Error: Cannot mutate another session's bindings",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-177",
-      "title": "Tracing Lifecycle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Enable detailed trace capture\nTracing enable\n// => nil\n\n// Check if tracing is active\nTracing isEnabled\n// => true\n\n// Disable trace capture (aggregates continue)\nTracing disable\n// => nil\n\n// Clear all trace events and aggregate stats\nTracing clear\n// => nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-178",
-      "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "process"
-      ],
-      "source": "// All per-actor, per-method stats\nTracing stats\n// => #{...}  (Dictionary keyed by actor/selector)\n\n// Stats for a specific actor\nTracing statsFor: myCounter\n// => #{...}",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-179",
-      "title": "Trace Event Queries (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "process"
-      ],
-      "source": "// All captured events (newest first)\nTracing traces\n// => #(...)\n\n// Events for a specific actor\nTracing tracesFor: myCounter\n// => #(...)\n\n// Events for a specific actor + method\nTracing tracesFor: myCounter selector: #increment\n// => #(...)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1229,6 +1185,73 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-180",
+      "title": "Cross-session access (read-only) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "find",
+        "first match",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "raise",
+        "search",
+        "set",
+        "throw",
+        "transform"
+      ],
+      "source": "// Pick a session that is NOT this one — session ordering is not guaranteed, so\n// `sessions first` could be the current session, where a write would succeed\n// (self-session) rather than raise. Tooling normally already knows the target id.\nmyId    := Session current id\notherId := (Workspace sessions collect: [:s | s id]) detect: [:each | each /= myId]\nother   := Session withId: otherId\n\nother bindings keys          // => cross-session READ, allowed\nother bindings at: #x put: 9 // => Error: Cannot mutate another session's bindings",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-181",
+      "title": "Tracing Lifecycle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Enable detailed trace capture\nTracing enable\n// => nil\n\n// Check if tracing is active\nTracing isEnabled\n// => true\n\n// Disable trace capture (aggregates continue)\nTracing disable\n// => nil\n\n// Clear all trace events and aggregate stats\nTracing clear\n// => nil",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-182",
+      "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "// All per-actor, per-method stats\nTracing stats\n// => #{...}  (Dictionary keyed by actor/selector)\n\n// Stats for a specific actor\nTracing statsFor: myCounter\n// => #{...}",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-183",
+      "title": "Trace Event Queries (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "process"
+      ],
+      "source": "// All captured events (newest first)\nTracing traces\n// => #(...)\n\n// Events for a specific actor\nTracing tracesFor: myCounter\n// => #(...)\n\n// Events for a specific actor + method\nTracing tracesFor: myCounter selector: #increment\n// => #(...)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-184",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1243,7 +1266,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-181",
+      "id": "docs-beamtalk-language-features-block-185",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1258,7 +1281,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-182",
+      "id": "docs-beamtalk-language-features-block-186",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1268,7 +1291,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-183",
+      "id": "docs-beamtalk-language-features-block-187",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1288,7 +1311,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-184",
+      "id": "docs-beamtalk-language-features-block-188",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1317,7 +1340,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-185",
+      "id": "docs-beamtalk-language-features-block-189",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1348,7 +1371,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-187",
+      "id": "docs-beamtalk-language-features-block-19",
+      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-191",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1367,7 +1405,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-188",
+      "id": "docs-beamtalk-language-features-block-192",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1395,7 +1433,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-189",
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1416,22 +1454,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-19",
-      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1441,7 +1464,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-196",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1456,7 +1479,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1468,48 +1491,6 @@
         "set"
       ],
       "source": "node := (a subscribersOf: PriceChanged) first\nnode announcementClass   // => PriceChanged\nnode subscriber          // => a Pid\nnode handlerKind         // => #do      (one of #do | #send | #doOnce)\nnode once                // => false",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-196",
-      "title": "Protected stdlib class names (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Integer",
-        "Value",
-        "beamtalk-language-features",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "property",
-        "subclassing",
-        "value"
-      ],
-      "source": "// ❌ Compile-time warning: Class name `Integer` conflicts with a stdlib class.\n//    Loading will fail because stdlib class names are protected.\nValue subclass: Integer\n  field: x = 0",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-197",
-      "title": "Protected stdlib class names (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Integer",
-        "SafeInteger",
-        "beamtalk-language-features",
-        "branch",
-        "conditional",
-        "divSafe:",
-        "extends",
-        "if",
-        "inherit",
-        "inheritance",
-        "object",
-        "subclassing"
-      ],
-      "source": "// ✓ Subclass is fine\nInteger subclass: SafeInteger\n  divSafe: divisor =>\n    divisor == 0 ifTrue: [^0]\n    self / divisor",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1538,7 +1519,49 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-200",
+      "title": "Protected stdlib class names (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Integer",
+        "Value",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// ❌ Compile-time warning: Class name `Integer` conflicts with a stdlib class.\n//    Loading will fail because stdlib class names are protected.\nValue subclass: Integer\n  field: x = 0",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "Protected stdlib class names (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Integer",
+        "SafeInteger",
+        "beamtalk-language-features",
+        "branch",
+        "conditional",
+        "divSafe:",
+        "extends",
+        "if",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// ✓ Subclass is fine\nInteger subclass: SafeInteger\n  divSafe: divisor =>\n    divisor == 0 ifTrue: [^0]\n    self / divisor",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1559,7 +1582,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-203",
+      "id": "docs-beamtalk-language-features-block-207",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1577,42 +1600,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-208",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "for each",
-        "for-each",
-        "forEach",
-        "instantiate",
-        "iterate",
-        "iteration",
-        "loop"
-      ],
-      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
       "id": "docs-beamtalk-language-features-block-209",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
+      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1636,7 +1630,36 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-211",
+      "id": "docs-beamtalk-language-features-block-212",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-213",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1646,7 +1669,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1659,7 +1682,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1669,7 +1692,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-219",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1685,7 +1708,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-22",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-220",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1709,7 +1747,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1728,7 +1766,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-218",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1749,7 +1787,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-219",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1762,22 +1800,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-22",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-220",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1793,7 +1816,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-225",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1806,7 +1829,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1825,7 +1848,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1835,7 +1858,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1856,7 +1879,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1872,49 +1895,6 @@
         "throw"
       ],
       "source": "(File open: \"notes.txt\" mode: #read do: [:handle |\n  handle close.\n  handle read: 1        // => Result error: FileHandle 'read:' is closed\n]) unwrap",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-227",
-      "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "set",
-        "transform"
-      ],
-      "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-228",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-229",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1943,7 +1923,50 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-230",
+      "id": "docs-beamtalk-language-features-block-231",
+      "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "set",
+        "transform"
+      ],
+      "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-232",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-233",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1961,7 +1984,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-237",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1984,7 +2007,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-234",
+      "id": "docs-beamtalk-language-features-block-238",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1994,7 +2017,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-235",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2004,7 +2027,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-236",
+      "id": "docs-beamtalk-language-features-block-24",
+      "title": "Blocks (Closures) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block with no arguments\n[self doSomething]\n\n// Block with arguments\n[:x :y | x + y]\n\n// Block with local variables\n[:x | temp := x * 2. temp + 1]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-240",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2027,7 +2065,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-242",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2042,7 +2080,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-243",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2052,22 +2090,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-24",
-      "title": "Blocks (Closures) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block with no arguments\n[self doSomething]\n\n// Block with arguments\n[:x :y | x + y]\n\n// Block with local variables\n[:x | temp := x * 2. temp + 1]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-241",
+      "id": "docs-beamtalk-language-features-block-245",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2080,7 +2103,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-242",
+      "id": "docs-beamtalk-language-features-block-246",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2103,7 +2126,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-243",
+      "id": "docs-beamtalk-language-features-block-247",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2126,7 +2149,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-244",
+      "id": "docs-beamtalk-language-features-block-248",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2149,7 +2172,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-245",
+      "id": "docs-beamtalk-language-features-block-249",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2180,26 +2203,6 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-246",
-      "title": "Parallel Test Execution (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "TestCase",
-        "TracingTest",
-        "beamtalk-language-features",
-        "extends",
-        "inherit",
-        "inheritance",
-        "object",
-        "serial",
-        "setUp",
-        "subclassing",
-        "testEnable"
-      ],
-      "source": "TestCase subclass: TracingTest\n\n  class serial -> Boolean => true\n\n  setUp => Tracing clear. Tracing disable\n  testEnable => self assert: Tracing enable equals: nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
       "id": "docs-beamtalk-language-features-block-25",
       "title": "Blocks (Closures) (beamtalk-language-features)",
       "category": "language-reference",
@@ -2226,6 +2229,26 @@
         "validate:"
       ],
       "source": "Object subclass: Finder\n  firstPositive: items =>\n    items do: [:x | x > 0 ifTrue: [^x]]\n    nil   // returned only if no positive element found\n\nObject subclass: Validator\n  validate: x =>\n    x isNil ifTrue: [^\"missing\"]\n    x isEmpty ifTrue: [^\"empty\"]\n    \"ok\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-250",
+      "title": "Parallel Test Execution (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "TestCase",
+        "TracingTest",
+        "beamtalk-language-features",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "serial",
+        "setUp",
+        "subclassing",
+        "testEnable"
+      ],
+      "source": "TestCase subclass: TracingTest\n\n  class serial -> Boolean => true\n\n  setUp => Tracing clear. Tracing disable\n  testEnable => self assert: Tracing enable equals: nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -13975,6 +13998,8 @@
         "newClassEntry",
         "object",
         "orphanEntry",
+        "renameClassEntry",
+        "renameMethodEntry",
         "set",
         "shadowedEntry",
         "shadowedLog",
@@ -14012,8 +14037,12 @@
         "testEntryIsNotShadowedByDefault",
         "testEntryPrintStringForMethodPatch",
         "testEntryPrintStringForNewClass",
+        "testEntryPrintStringForRenameClass",
+        "testEntryPrintStringForRenameMethod",
         "testEntrySelector",
         "testMethodEntryIsNotNewClass",
+        "testMethodEntryIsNotRenameClass",
+        "testMethodEntryIsNotRenameMethod",
         "testMixedLogIsEmptyIsFalse",
         "testMixedLogNotEmpty",
         "testMixedLogPrintStringCountsActive",
@@ -14023,6 +14052,10 @@
         "testOrphanEntryIsNotActive",
         "testOrphanEntryIsOrphan",
         "testOrphanEntryIsPriorEpoch",
+        "testRenameClassEntryIsRenameClass",
+        "testRenameClassEntrySelectorIsNil",
+        "testRenameMethodEntryIsRenameMethod",
+        "testRenameMethodEntryKind",
         "testSelectActiveSubset",
         "testSelectByAuthorKind",
         "testSelectCanReachClean",
@@ -14042,7 +14075,7 @@
         "to_string",
         "where"
       ],
-      "source": "// BUnit tests for the ChangeLog / ChangeEntry collection protocol\n// (ADR 0082 Phase 1, BT-2284).\n//\n// The live `Workspace changes` path requires the workspace singleton + the\n// changelog gen_server, which are not available in the BUnit context\n// (workspace_mode: false). These tests therefore construct ChangeLog /\n// ChangeEntry value objects directly (via `new:`) to cover the collection\n// protocol and the active-vs-full (orphan / prior-epoch) filtering. The live\n// end-to-end path (`Workspace changes` returning a populated ChangeLog) is\n// covered by the gen_server's EUnit tests and the WorkspaceInterface facade\n// selector checks below.\n\nTestCase subclass: ChangeLogTest\n\n  // --- Fixtures: build ChangeEntry value objects directly ---\n\n  // An active, durable, human method patch (Counter>>increment).\n  activeEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 1,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A second active entry (Counter>>decrement, agent-authored).\n  activeAgentEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 2,\n        #className => #Counter,\n        #selector => #decrement,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // An orphan entry from a prior epoch (excluded from the default view).\n  orphanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Widget,\n        #selector => #render,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => true,\n        #priorEpoch => true,\n        #active => false\n      }\n\n  // A new-class entry (no selector).\n  newClassEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 3,\n        #className => #DoubleCounter,\n        #selector => nil,\n        #kind => #'new-class',\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A shadowed active entry: an older Counter>>increment superseded by a newer\n  // patch (or revert — a revert is itself a patch, ADR 0082 \"Undo\"). Active but\n  // excluded from the default pending view so the view collapses to one row per\n  // method (BT-2574).\n  shadowedEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #shadowed => true\n      }\n\n  // A ChangeLog holding two active entries plus one orphan.\n  mixedLog =>\n    ChangeLog new: #{\n      #entries => #(self orphanEntry, self activeEntry, self activeAgentEntry)\n    }\n\n  // A ChangeLog holding the latest Counter>>increment plus its shadowed\n  // predecessor (the patch-then-revert shape that motivated BT-2574).\n  shadowedLog =>\n    ChangeLog new: #{#entries => #(self shadowedEntry, self activeEntry)}\n\n  // A clean active entry: reverted back to its on-disk body, so there is no net\n  // change. Active but excluded from the pending view (\"disappear when clean\",\n  // BT-2575) — still reachable via select: for audit.\n  cleanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 4,\n        #className => #Counter,\n        #selector => #reset,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #clean => true\n      }\n\n  // An active entry carrying a net-vs-disk diff (BT-2575).\n  diffEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 5,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #diff => \"- self.v + 1\\n+ self.v + 2\\n\"\n      }\n\n  // A ChangeLog holding one dirty entry plus one clean (reverted-to-disk) entry.\n  cleanLog => ChangeLog new: #{#entries => #(self cleanEntry, self activeEntry)}\n\n  emptyLog => ChangeLog new\n\n  // --- Empty ChangeLog ---\n  testEmptyLogSizeIsZero => self assert: self emptyLog size equals: 0\n\n  testEmptyLogIsEmpty => self assert: self emptyLog isEmpty\n\n  testEmptyLogNotEmptyIsFalse => self deny: self emptyLog notEmpty\n\n  testEmptyLogDirtyMethodsThroughActiveEntries =>\n    // dirtyMethods delegates to FFI in the live path; here we verify the\n    // empty-log collection views directly.\n    self assert: self emptyLog activeEntries equals: #()\n\n  // --- size / isEmpty / notEmpty reflect the ACTIVE subset ---\n  testMixedLogSizeCountsOnlyActive =>\n    // 2 active + 1 orphan => size is 2 (active only).\n    self assert: self mixedLog size equals: 2\n\n  testMixedLogNotEmpty => self assert: self mixedLog notEmpty\n\n  testMixedLogIsEmptyIsFalse => self deny: self mixedLog isEmpty\n\n  testActiveEntriesExcludeOrphan =>\n    self assert: self mixedLog activeEntries size equals: 2\n\n  testAllEntriesIncludeOrphan =>\n    self assert: self mixedLog allEntries size equals: 3\n\n  // --- shadowed entries collapse the pending view to one row per method (BT-2574) ---\n  testShadowedExcludedFromActiveEntries =>\n    self assert: self shadowedLog activeEntries size equals: 1\n\n  testShadowedSurvivorIsLatest =>\n    self assert: self shadowedLog activeEntries first seq equals: 1\n\n  testShadowedLogSizeCountsOnlyLatest =>\n    self assert: self shadowedLog size equals: 1\n\n  testShadowedLogAllEntriesIncludeShadowed =>\n    self assert: self shadowedLog allEntries size equals: 2\n\n  testSelectCanReachShadowed =>\n    shadowed := self shadowedLog select: [:e | e isShadowed]\n    self assert: shadowed size equals: 1\n\n  // --- clean entries disappear from the pending view (BT-2575) ---\n  testCleanExcludedFromActiveEntries =>\n    self assert: self cleanLog activeEntries size equals: 1\n\n  testCleanLogSizeExcludesClean => self assert: self cleanLog size equals: 1\n\n  testCleanLogAllEntriesIncludeClean =>\n    self assert: self cleanLog allEntries size equals: 2\n\n  testSelectCanReachClean =>\n    cleans := self cleanLog select: [:e | e isClean]\n    self assert: cleans size equals: 1\n\n  testActiveSurvivorOfCleanLogIsDirty =>\n    self assert: self cleanLog activeEntries first isClean not\n\n  // --- do: iterates only ACTIVE entries ---\n  testDoVisitsOnlyActiveEntries =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self assert: visited size equals: 2\n\n  testDoSkipsOrphanClass =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self deny: (visited includes: #Widget)\n\n  // --- select: ranges over the FULL set, so it can reach orphans ---\n  testSelectCanReachOrphans =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans size equals: 1\n\n  testSelectOrphanIsExpectedClass =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans first className equals: #Widget\n\n  testSelectActiveSubset =>\n    actives := self mixedLog select: [:e | e isActive]\n    self assert: actives size equals: 2\n\n  testSelectByAuthorKind =>\n    agentChanges := self mixedLog select: [:e | e isAgent]\n    self assert: agentChanges size equals: 1\n\n  testSelectEmptyWhenNoMatch =>\n    none := self mixedLog select: [:e | e className =:= #Nonexistent]\n    self assert: none isEmpty\n\n  // --- ChangeEntry predicates ---\n  testEntryClassName => self assert: self activeEntry className equals: #Counter\n\n  testEntrySelector => self assert: self activeEntry selector equals: #increment\n\n  testEntryIsDurable => self assert: self activeEntry isDurable\n\n  testEntryIsNotEphemeral => self deny: self activeEntry isEphemeral\n\n  testEntryIsFlushable => self assert: self activeEntry isFlushable\n\n  testEntryIsHuman => self assert: self activeEntry isHuman\n\n  testEntryIsAgent => self assert: self activeAgentEntry isAgent\n\n  testEntryIsActive => self assert: self activeEntry isActive\n\n  testEntryIsNotShadowedByDefault => self deny: self activeEntry isShadowed\n\n  testShadowedEntryIsShadowed => self assert: self shadowedEntry isShadowed\n\n  testEntryIsNotCleanByDefault => self deny: self activeEntry isClean\n\n  testCleanEntryIsClean => self assert: self cleanEntry isClean\n\n  testEntryDiffNilByDefault => self assert: self activeEntry diff isNil\n\n  testEntryDiffAccessor =>\n    self assert: self diffEntry diff equals: \"- self.v + 1\\n+ self.v + 2\\n\"\n\n  testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan\n\n  testOrphanEntryIsPriorEpoch => self assert: self orphanEntry isPriorEpoch\n\n  testOrphanEntryIsNotActive => self deny: self orphanEntry isActive\n\n  testNewClassEntryIsNewClass => self assert: self newClassEntry isNewClass\n\n  testNewClassEntrySelectorIsNil =>\n    self assert: self newClassEntry selector isNil\n\n  testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass\n\n  // --- printString ---\n  testEntryPrintStringForMethodPatch =>\n    self assert: self activeEntry printString equals: \"Counter>>increment\"\n\n  testEntryPrintStringForNewClass =>\n    self assert: self newClassEntry printString equals: \"DoubleCounter (new-class)\"\n\n  testEmptyLogPrintString =>\n    self assert: self emptyLog printString equals: \"ChangeLog with 0 entries\"\n\n  testMixedLogPrintStringCountsActive =>\n    self assert: self mixedLog printString equals: \"ChangeLog with 2 entries\"\n\n  // --- WorkspaceInterface facade: `changes` selector exists ---\n  testWorkspaceIncludesSelectorChanges =>\n    self assert: (WorkspaceInterface includesSelector: #changes)\n\n  // --- ADR 0082 Phase 4 (BT-2290) ChangeLog operations exist ---\n  testChangeLogIncludesSelectorRevert =>\n    self assert: (ChangeLog includesSelector: #revert:)\n\n  testChangeLogIncludesSelectorClear =>\n    self assert: (ChangeLog includesSelector: #clear)\n\n  testChangeLogIncludesSelectorFlushKinds =>\n    self assert: (ChangeLog includesSelector: #flushKinds:)\n\n  // --- ADR 0113 Phase 2 (BT-3207) destructive-tier flush facade ---\n  // Live tiering (skipped:destructive, flushIncludingDestructive applying a\n  // pending remove-class entry, remove-method flushing under ordinary\n  // flush with no gate) requires a live workspace + project tree; that is\n  // covered end-to-end in the beamtalk_workspace_flush_tests EUnit suite and\n  // tests/repl-protocol/cases/workspace_flush_destructive.btscript. BUnit\n  // only verifies the new selectors are present on the facade\n  // (WorkspaceInterface's own flushIncludingDestructive / flush:confirmDestructive:\n  // selectors are checked in workspace_interface_test.bt).\n  testChangeLogIncludesSelectorFlushKindsConfirmDestructive =>\n    self assert: (ChangeLog includesSelector: #flushKinds:confirmDestructive:)\n\n  testChangeEntryIncludesSelectorIsRemoveClass =>\n    self assert: (ChangeEntry includesSelector: #isRemoveClass)\n\n  // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---\n  testWorkspaceIncludesSelectorAutoflush =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush)\n\n  testWorkspaceIncludesSelectorAutoflushSetter =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush:)",
+      "source": "// BUnit tests for the ChangeLog / ChangeEntry collection protocol\n// (ADR 0082 Phase 1, BT-2284).\n//\n// The live `Workspace changes` path requires the workspace singleton + the\n// changelog gen_server, which are not available in the BUnit context\n// (workspace_mode: false). These tests therefore construct ChangeLog /\n// ChangeEntry value objects directly (via `new:`) to cover the collection\n// protocol and the active-vs-full (orphan / prior-epoch) filtering. The live\n// end-to-end path (`Workspace changes` returning a populated ChangeLog) is\n// covered by the gen_server's EUnit tests and the WorkspaceInterface facade\n// selector checks below.\n\nTestCase subclass: ChangeLogTest\n\n  // --- Fixtures: build ChangeEntry value objects directly ---\n\n  // An active, durable, human method patch (Counter>>increment).\n  activeEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 1,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A second active entry (Counter>>decrement, agent-authored).\n  activeAgentEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 2,\n        #className => #Counter,\n        #selector => #decrement,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // An orphan entry from a prior epoch (excluded from the default view).\n  orphanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Widget,\n        #selector => #render,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => true,\n        #priorEpoch => true,\n        #active => false\n      }\n\n  // A new-class entry (no selector).\n  newClassEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 3,\n        #className => #DoubleCounter,\n        #selector => nil,\n        #kind => #'new-class',\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #agent,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A rename-class entry (ADR 0114, BT-3269): the class was renamed to\n  // Accumulator (no selector — a class-identity change, mirroring newClassEntry's\n  // shape).\n  renameClassEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 6,\n        #className => #Accumulator,\n        #selector => nil,\n        #kind => #'rename-class',\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A rename-method entry (ADR 0114, BT-3269): Counter>>increment was renamed\n  // to Counter>>incrementBy — `selector` holds the new name.\n  renameMethodEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 7,\n        #className => #Counter,\n        #selector => #incrementBy,\n        #kind => #'rename-method',\n        #side => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true\n      }\n\n  // A shadowed active entry: an older Counter>>increment superseded by a newer\n  // patch (or revert — a revert is itself a patch, ADR 0082 \"Undo\"). Active but\n  // excluded from the default pending view so the view collapses to one row per\n  // method (BT-2574).\n  shadowedEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 0,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #shadowed => true\n      }\n\n  // A ChangeLog holding two active entries plus one orphan.\n  mixedLog =>\n    ChangeLog new: #{\n      #entries => #(self orphanEntry, self activeEntry, self activeAgentEntry)\n    }\n\n  // A ChangeLog holding the latest Counter>>increment plus its shadowed\n  // predecessor (the patch-then-revert shape that motivated BT-2574).\n  shadowedLog =>\n    ChangeLog new: #{#entries => #(self shadowedEntry, self activeEntry)}\n\n  // A clean active entry: reverted back to its on-disk body, so there is no net\n  // change. Active but excluded from the pending view (\"disappear when clean\",\n  // BT-2575) — still reachable via select: for audit.\n  cleanEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 4,\n        #className => #Counter,\n        #selector => #reset,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #clean => true\n      }\n\n  // An active entry carrying a net-vs-disk diff (BT-2575).\n  diffEntry =>\n    ChangeEntry\n      new: #{\n        #seq => 5,\n        #className => #Counter,\n        #selector => #increment,\n        #kind => #instance,\n        #intent => #durable,\n        #flushable => true,\n        #authorKind => #human,\n        #orphan => false,\n        #priorEpoch => false,\n        #active => true,\n        #diff => \"- self.v + 1\\n+ self.v + 2\\n\"\n      }\n\n  // A ChangeLog holding one dirty entry plus one clean (reverted-to-disk) entry.\n  cleanLog => ChangeLog new: #{#entries => #(self cleanEntry, self activeEntry)}\n\n  emptyLog => ChangeLog new\n\n  // --- Empty ChangeLog ---\n  testEmptyLogSizeIsZero => self assert: self emptyLog size equals: 0\n\n  testEmptyLogIsEmpty => self assert: self emptyLog isEmpty\n\n  testEmptyLogNotEmptyIsFalse => self deny: self emptyLog notEmpty\n\n  testEmptyLogDirtyMethodsThroughActiveEntries =>\n    // dirtyMethods delegates to FFI in the live path; here we verify the\n    // empty-log collection views directly.\n    self assert: self emptyLog activeEntries equals: #()\n\n  // --- size / isEmpty / notEmpty reflect the ACTIVE subset ---\n  testMixedLogSizeCountsOnlyActive =>\n    // 2 active + 1 orphan => size is 2 (active only).\n    self assert: self mixedLog size equals: 2\n\n  testMixedLogNotEmpty => self assert: self mixedLog notEmpty\n\n  testMixedLogIsEmptyIsFalse => self deny: self mixedLog isEmpty\n\n  testActiveEntriesExcludeOrphan =>\n    self assert: self mixedLog activeEntries size equals: 2\n\n  testAllEntriesIncludeOrphan =>\n    self assert: self mixedLog allEntries size equals: 3\n\n  // --- shadowed entries collapse the pending view to one row per method (BT-2574) ---\n  testShadowedExcludedFromActiveEntries =>\n    self assert: self shadowedLog activeEntries size equals: 1\n\n  testShadowedSurvivorIsLatest =>\n    self assert: self shadowedLog activeEntries first seq equals: 1\n\n  testShadowedLogSizeCountsOnlyLatest =>\n    self assert: self shadowedLog size equals: 1\n\n  testShadowedLogAllEntriesIncludeShadowed =>\n    self assert: self shadowedLog allEntries size equals: 2\n\n  testSelectCanReachShadowed =>\n    shadowed := self shadowedLog select: [:e | e isShadowed]\n    self assert: shadowed size equals: 1\n\n  // --- clean entries disappear from the pending view (BT-2575) ---\n  testCleanExcludedFromActiveEntries =>\n    self assert: self cleanLog activeEntries size equals: 1\n\n  testCleanLogSizeExcludesClean => self assert: self cleanLog size equals: 1\n\n  testCleanLogAllEntriesIncludeClean =>\n    self assert: self cleanLog allEntries size equals: 2\n\n  testSelectCanReachClean =>\n    cleans := self cleanLog select: [:e | e isClean]\n    self assert: cleans size equals: 1\n\n  testActiveSurvivorOfCleanLogIsDirty =>\n    self assert: self cleanLog activeEntries first isClean not\n\n  // --- do: iterates only ACTIVE entries ---\n  testDoVisitsOnlyActiveEntries =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self assert: visited size equals: 2\n\n  testDoSkipsOrphanClass =>\n    visited := #()\n    self mixedLog do: [:e | visited := visited add: e className]\n    self deny: (visited includes: #Widget)\n\n  // --- select: ranges over the FULL set, so it can reach orphans ---\n  testSelectCanReachOrphans =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans size equals: 1\n\n  testSelectOrphanIsExpectedClass =>\n    orphans := self mixedLog select: [:e | e isOrphan]\n    self assert: orphans first className equals: #Widget\n\n  testSelectActiveSubset =>\n    actives := self mixedLog select: [:e | e isActive]\n    self assert: actives size equals: 2\n\n  testSelectByAuthorKind =>\n    agentChanges := self mixedLog select: [:e | e isAgent]\n    self assert: agentChanges size equals: 1\n\n  testSelectEmptyWhenNoMatch =>\n    none := self mixedLog select: [:e | e className =:= #Nonexistent]\n    self assert: none isEmpty\n\n  // --- ChangeEntry predicates ---\n  testEntryClassName => self assert: self activeEntry className equals: #Counter\n\n  testEntrySelector => self assert: self activeEntry selector equals: #increment\n\n  testEntryIsDurable => self assert: self activeEntry isDurable\n\n  testEntryIsNotEphemeral => self deny: self activeEntry isEphemeral\n\n  testEntryIsFlushable => self assert: self activeEntry isFlushable\n\n  testEntryIsHuman => self assert: self activeEntry isHuman\n\n  testEntryIsAgent => self assert: self activeAgentEntry isAgent\n\n  testEntryIsActive => self assert: self activeEntry isActive\n\n  testEntryIsNotShadowedByDefault => self deny: self activeEntry isShadowed\n\n  testShadowedEntryIsShadowed => self assert: self shadowedEntry isShadowed\n\n  testEntryIsNotCleanByDefault => self deny: self activeEntry isClean\n\n  testCleanEntryIsClean => self assert: self cleanEntry isClean\n\n  testEntryDiffNilByDefault => self assert: self activeEntry diff isNil\n\n  testEntryDiffAccessor =>\n    self assert: self diffEntry diff equals: \"- self.v + 1\\n+ self.v + 2\\n\"\n\n  testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan\n\n  testOrphanEntryIsPriorEpoch => self assert: self orphanEntry isPriorEpoch\n\n  testOrphanEntryIsNotActive => self deny: self orphanEntry isActive\n\n  testNewClassEntryIsNewClass => self assert: self newClassEntry isNewClass\n\n  testNewClassEntrySelectorIsNil =>\n    self assert: self newClassEntry selector isNil\n\n  testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass\n\n  // --- ADR 0114 (BT-3269/BT-3277): rename-class / rename-method kind ---\n  testRenameClassEntryIsRenameClass =>\n    self assert: self renameClassEntry isRenameClass\n\n  testRenameClassEntrySelectorIsNil =>\n    self assert: self renameClassEntry selector isNil\n\n  testMethodEntryIsNotRenameClass => self deny: self activeEntry isRenameClass\n\n  testRenameMethodEntryIsRenameMethod =>\n    self assert: self renameMethodEntry isRenameMethod\n\n  testMethodEntryIsNotRenameMethod => self deny: self activeEntry isRenameMethod\n\n  testRenameMethodEntryKind =>\n    self assert: self renameMethodEntry kind equals: #'rename-method'\n\n  // --- printString ---\n  testEntryPrintStringForMethodPatch =>\n    self assert: self activeEntry printString equals: \"Counter>>increment\"\n\n  testEntryPrintStringForNewClass =>\n    self assert: self newClassEntry printString equals: \"DoubleCounter (new-class)\"\n\n  testEntryPrintStringForRenameClass =>\n    self assert: self renameClassEntry printString equals: \"Accumulator (rename-class)\"\n\n  testEntryPrintStringForRenameMethod =>\n    self assert: self renameMethodEntry printString equals: \"Counter>>incrementBy (rename-method)\"\n\n  testEmptyLogPrintString =>\n    self assert: self emptyLog printString equals: \"ChangeLog with 0 entries\"\n\n  testMixedLogPrintStringCountsActive =>\n    self assert: self mixedLog printString equals: \"ChangeLog with 2 entries\"\n\n  // --- WorkspaceInterface facade: `changes` selector exists ---\n  testWorkspaceIncludesSelectorChanges =>\n    self assert: (WorkspaceInterface includesSelector: #changes)\n\n  // --- ADR 0082 Phase 4 (BT-2290) ChangeLog operations exist ---\n  testChangeLogIncludesSelectorRevert =>\n    self assert: (ChangeLog includesSelector: #revert:)\n\n  testChangeLogIncludesSelectorClear =>\n    self assert: (ChangeLog includesSelector: #clear)\n\n  testChangeLogIncludesSelectorFlushKinds =>\n    self assert: (ChangeLog includesSelector: #flushKinds:)\n\n  // --- ADR 0113 Phase 2 (BT-3207) destructive-tier flush facade ---\n  // Live tiering (skipped:destructive, flushIncludingDestructive applying a\n  // pending remove-class entry, remove-method flushing under ordinary\n  // flush with no gate) requires a live workspace + project tree; that is\n  // covered end-to-end in the beamtalk_workspace_flush_tests EUnit suite and\n  // tests/repl-protocol/cases/workspace_flush_destructive.btscript. BUnit\n  // only verifies the new selectors are present on the facade\n  // (WorkspaceInterface's own flushIncludingDestructive / flush:confirmDestructive:\n  // selectors are checked in workspace_interface_test.bt).\n  testChangeLogIncludesSelectorFlushKindsConfirmDestructive =>\n    self assert: (ChangeLog includesSelector: #flushKinds:confirmDestructive:)\n\n  testChangeEntryIncludesSelectorIsRemoveClass =>\n    self assert: (ChangeEntry includesSelector: #isRemoveClass)\n\n  // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---\n  testWorkspaceIncludesSelectorAutoflush =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush)\n\n  testWorkspaceIncludesSelectorAutoflushSetter =>\n    self assert: (WorkspaceInterface includesSelector: #autoflush:)",
       "explanation": "BUnit tests for the ChangeLog / ChangeEntry collection protocol (ADR 0082 Phase 1, BT-2284).  The live `Workspace changes` path requires the workspace singleton + the changelog gen_server, which are not available in the BUnit context (workspace_mode: false). These tests therefore construct ChangeLog / ChangeEntry value objects directly (via `new:`) to cover the collection protocol and the active-vs-full (orphan / prior-epoch) filtering. The live end-to-end path (`Workspace changes` returning a populated ChangeLog) is covered by the gen_server's EUnit tests and the WorkspaceInterface facade selector checks below."
     },
     {

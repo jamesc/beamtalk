@@ -1,0 +1,281 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3277 (ADR 0114 Phase 5, epic BT-3267 close-out): required e2e validation
+// combining the pieces the epic's earlier waves each exercised separately,
+// per CLAUDE.md's rule that EUnit/BUnit alone are insufficient for
+// user-facing features:
+//
+//   - `repl_rename_class_method.btscript` (BT-3276) exercises the
+//     `:rename-class`/`:rename-method` REPL meta-commands themselves, but
+//     against dynamically-defined classes with no on-disk source (never
+//     flushed, never reloaded).
+//   - `rename_class_flush_roundtrip.btscript` (BT-3271) and
+//     `rename_method_flush_roundtrip.btscript` (BT-3273) exercise the full
+//     flush + reload + dispatch-verification chain against real project
+//     files, but by calling the raw `renameTo:`/`renameSelector:to:`
+//     primitives directly, never through the REPL meta-commands, and never
+//     through the REPL's own `:flush-destructive` alias.
+//
+// Neither combination exists yet: nobody has proven that a rename actually
+// *started from the REPL surface a human/agent types* (`:rename-class`,
+// `:rename-method`, `:flush-destructive`) — not the underlying primitive —
+// produces a class that dispatches correctly after a real file is written,
+// removed from memory, and reloaded from disk. This test closes that gap.
+//
+// One class, two files (mirrors the flush-roundtrip tests' own fixture
+// shape):
+//
+//   Bt3277Widget.bt (the definition — a self-send proves renameSelector:to:'s
+//   confirmed-site rewrite survives a REPL-driven rename + flush + reload):
+//     Value subclass: Bt3277Widget
+//       greet -> String => "hi"
+//       shout -> String => self greet uppercase
+//
+//   Bt3277WidgetUser.bt (a cross-file reference — proves renameTo:'s
+//   confirmed-site rewrite survives the same round trip):
+//     Value subclass: Bt3277WidgetUser
+//       makeWidget -> Bt3277Widget => Bt3277Widget new
+//
+// Sequence: `:rename-method` (Bt3277Widget greet -> sayHi), `:flush-destructive`
+// (scoped), `:rename-class` (Bt3277Widget -> Bt3277Doohickey), `:flush-destructive`
+// (scoped) — then every class is removed from memory and reloaded fresh from
+// disk, and both the renamed selector and the renamed cross-file reference are
+// proven to dispatch correctly (and the old names are proven to be genuine
+// does_not_understand / class-not-found, not silently-dangling senders).
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE TWO REAL .bt FILES INSIDE THE PROJECT TREE AND LOAD THEM
+// ===========================================================================
+
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_rename_flush_reload_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_widgetPath := _projDir ++ "/Bt3277Widget.bt"
+// => _
+
+_userPath := _projDir ++ "/Bt3277WidgetUser.bt"
+// => _
+
+// A genuine LF byte built via the Erlang FFI (BT-3214: text literals in this
+// harness can't embed a raw newline, so every multi-line fixture source is
+// built by concatenating a real LF — see rename_class_flush_roundtrip.btscript's
+// identical note).
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_widgetSource := "Value subclass: Bt3277Widget" ++ _nl ++ "  greet -> String => ""hi""" ++ _nl ++ "  shout -> String => self greet uppercase"
+// => _
+
+_userSource := "Value subclass: Bt3277WidgetUser" ++ _nl ++ "  makeWidget -> Bt3277Widget => Bt3277Widget new"
+// => _
+
+File writeAll: _widgetPath contents: _widgetSource
+// => Result ok: nil
+
+File writeAll: _userPath contents: _userSource
+// => Result ok: nil
+
+Workspace load: _widgetPath
+// => _
+
+Workspace load: _userPath
+// => _
+
+Bt3277Widget new greet
+// => hi
+
+Bt3277Widget new shout
+// => HI
+
+Bt3277WidgetUser new makeWidget greet
+// => hi
+
+// ===========================================================================
+// STEP 2 — :rename-method RENAMES greet TO sayHi (REPL meta-command, not the
+// raw primitive) — the same self-send confirmed-site rewrite
+// rename_method_flush_roundtrip.btscript proves for the raw primitive, here
+// proven for the REPL alias.
+// ===========================================================================
+
+:rename-method Bt3277Widget greet sayHi
+// => _
+
+Bt3277Widget new sayHi
+// => hi
+
+// The self-send inside `shout` was auto-rewritten too (a confirmed
+// same-class self-send, ADR 0114's structurally-safe tier).
+Bt3277Widget new shout
+// => HI
+
+// The old selector no longer resolves in memory.
+[Bt3277Widget new greet] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// The in-memory rename does not touch disk — only flush does.
+_widgetBodyBeforeFlush := (File readAll: _widgetPath) unwrap
+// => _
+
+_widgetBodyBeforeFlush =:= _widgetSource
+// => true
+
+// ===========================================================================
+// STEP 3 — :flush-destructive #Bt3277Widget WRITES THE CONFIRMED SITES TO
+// DISK (REPL alias for `Workspace flush: #Bt3277Widget confirmDestructive:
+// true`).
+// ===========================================================================
+
+:flush-destructive #Bt3277Widget
+// => _
+
+_widgetBodyAfterMethodFlush := (File readAll: _widgetPath) unwrap
+// => _
+
+_expectedWidgetSourceAfterMethodFlush := "Value subclass: Bt3277Widget" ++ _nl ++ "  sayHi -> String => ""hi""" ++ _nl ++ "  shout -> String => self sayHi uppercase"
+// => _
+
+_widgetBodyAfterMethodFlush =:= _expectedWidgetSourceAfterMethodFlush
+// => true
+
+// ===========================================================================
+// STEP 4 — :rename-class RENAMES Bt3277Widget TO Bt3277Doohickey (REPL
+// meta-command) — the same cross-file confirmed-site rewrite
+// rename_class_flush_roundtrip.btscript proves for the raw primitive, here
+// proven for the REPL alias.
+// ===========================================================================
+
+:rename-class Bt3277Widget Bt3277Doohickey
+// => _
+
+Object allSubclasses includes: Bt3277Doohickey
+// => true
+
+Bt3277Doohickey new sayHi
+// => hi
+
+// The cross-file referencing class already resolves to the renamed class in
+// memory (`referencesTo:`'s confirmed site, rewritten immediately).
+Bt3277WidgetUser new makeWidget sayHi
+// => hi
+
+// The old class name no longer resolves.
+Bt3277Widget
+// => ERROR: Class 'Bt3277Widget' not found
+
+// ===========================================================================
+// STEP 5 — :flush-destructive #Bt3277Doohickey MOVES THE FILE AND REWRITES
+// THE CROSS-FILE REFERENCE.
+// ===========================================================================
+
+:flush-destructive #Bt3277Doohickey
+// => _
+
+Workspace changes isEmpty
+// => true
+
+_doohickeyPath := _projDir ++ "/Bt3277Doohickey.bt"
+// => _
+
+File exists: _widgetPath
+// => false
+
+_doohickeyBody := (File readAll: _doohickeyPath) unwrap
+// => _
+
+_expectedDoohickeySource := "Value subclass: Bt3277Doohickey" ++ _nl ++ "  sayHi -> String => ""hi""" ++ _nl ++ "  shout -> String => self sayHi uppercase"
+// => _
+
+_doohickeyBody =:= _expectedDoohickeySource
+// => true
+
+_userBodyAfterFlush := (File readAll: _userPath) unwrap
+// => _
+
+_expectedUserSourceAfterFlush := "Value subclass: Bt3277WidgetUser" ++ _nl ++ "  makeWidget -> Bt3277Doohickey => Bt3277Doohickey new"
+// => _
+
+_userBodyAfterFlush =:= _expectedUserSourceAfterFlush
+// => true
+
+// ===========================================================================
+// STEP 6 — NO DANGLING REFERENCES: REMOVE EVERYTHING FROM MEMORY AND RELOAD
+// BOTH (NOW-REWRITTEN) FILES FROM DISK — the end-to-end point of this test.
+// Every renamed site must dispatch correctly post-reload, and both old names
+// must be genuinely gone, not silently dangling.
+// ===========================================================================
+
+Bt3277WidgetUser removeFromSystem
+// => nil
+
+Bt3277Doohickey removeFromSystem
+// => nil
+
+Workspace changes clear
+// => _
+
+Workspace load: _doohickeyPath
+// => _
+
+Workspace load: _userPath
+// => _
+
+Bt3277Doohickey new sayHi
+// => hi
+
+Bt3277Doohickey new shout
+// => HI
+
+Bt3277WidgetUser new makeWidget sayHi
+// => hi
+
+// The renamed method's old selector is a genuine does_not_understand, not a
+// dangling sender, even after a full reload from the rewritten disk source.
+[Bt3277Doohickey new greet] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// The renamed class's old name resolves to nothing, even after reload — the
+// old `Bt3277Widget.bt` file is gone, so nothing could reload it back.
+Bt3277Widget
+// => ERROR: Class 'Bt3277Widget' not found
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Bt3277WidgetUser removeFromSystem
+// => nil
+
+Bt3277Doohickey removeFromSystem
+// => nil
+
+(Erlang file) delete: _doohickeyPath
+// => _
+
+(Erlang file) delete: _userPath
+// => _
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _
