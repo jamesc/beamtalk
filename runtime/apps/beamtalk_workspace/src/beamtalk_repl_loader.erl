@@ -88,7 +88,20 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% rather than re-derived, per the project's no-duplicate-implementations
     %% rule.
     class_source_file/1,
-    classify_source_file/1
+    classify_source_file/1,
+    %% BT-3280: exported (not merely -ifdef(TEST)) so `install_rewrite_group/7`
+    %% can call it as `?MODULE:install_reload_result/2` — a genuine external
+    %% call, needed so `beamtalk_repl_loader_rewrite_sites_tests.erl` can
+    %% `meck:new(?MODULE, [passthrough])` + `meck:expect/3` it to exercise
+    %% rewrite_sites/2's partial_install_failure path (an install-time
+    %% anomaly with no natural trigger against a binary that just compiled
+    %% successfully). A LOCAL call here would compile to a direct intra-module
+    %% jump that bypasses meck's module-replacement entirely, so this export +
+    %% qualification is required in every build, not only test builds — an
+    %% `-ifdef(TEST)`-only export would leave the production call site calling
+    %% an unexported function and crash with `undef`. See that test module's
+    %% own moduledoc for the full seam rationale.
+    install_reload_result/2
 ]).
 
 %% Exported for testing (only in test builds)
@@ -1332,6 +1345,13 @@ result and performs the mutating half: `load_class_binary/4` +
 value that failed `compile_reload_source/4` — callers gate on `{ok, ...}`
 first, which is exactly BT-3270's atomicity protocol: nothing calls this
 until every site in a batch has independently validated.
+
+Exported (BT-3280) purely so `install_rewrite_group/7`'s own
+`?MODULE:install_reload_result/2` call can be intercepted by `meck` in
+`beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
+coverage — not part of this module's intended public API otherwise; every
+other caller (`reload_class_file_impl/2`, `remove_method/3`,
+`install_rewrite_group/7`) is itself already inside this module.
 """.
 -spec install_reload_result(
     {ok, protocol_definition, map()} | {ok, compiled, binary(), [map()], atom()}, string()
@@ -1927,9 +1947,12 @@ function's answer, per the ADR's own steer:
    has been mutated: every class's `beamtalk_workspace_meta` source and
    loaded module are exactly as they were before this call. This is what
    gives the "no class left in a half-rewritten state" guarantee.
-3. **Only once every group has validated does the install pass run** —
-   `install_reload_result/2` (load + hot-reload) for each group in turn,
-   updating `beamtalk_workspace_meta`'s tracked source to match. Since every
+3. **Only once every group has validated does the install pass run** — for
+   each group in turn, `class_source_unchanged/1` re-checks that the class's
+   `beamtalk_workspace_meta` source is still byte-identical to what
+   `build_class_group/2` snapshotted into it BEFORE validation ran (BT-3280 —
+   see point 4 below), then `install_reload_result/2` (load + hot-reload)
+   updates `beamtalk_workspace_meta`'s tracked source to match. Since every
    group already compiled successfully, `install_reload_result/2` failing
    here is expected to be rare (see its own doc — `code:load_binary/3`
    failing on a binary that just came out of a successful compile is a
@@ -1943,6 +1966,34 @@ function's answer, per the ADR's own steer:
    so the caller (and its ChangeLog bookkeeping) can tell a documented,
    bounded partial application apart from "nothing happened" — it must NOT
    be treated as equivalent to a clean validation-phase abort.
+4. **Concurrent-writer detection at install time (BT-3280).** Steps 1-2 only
+   guarantee atomicity WITHIN this one call — nothing serializes a batch
+   against another eval-worker process concurrently mutating the same class
+   via `Counter compile: '...'`, a single-site patch, or another
+   `rewrite_sites/2` call entirely (each REPL/MCP/LSP session gets its own
+   worker off `beamtalk_repl_shell`, and this module has never had a
+   cross-session lock around `beamtalk_workspace_meta`'s read-then-later-
+   write sequence — same class of race the single-site `capture/4`/
+   `rollback/4` "two concurrent sessions... race" comment already
+   acknowledges elsewhere in this module, just widened here roughly
+   proportionally to batch size, since validating every OTHER group first
+   can leave an early group's snapshot stale by the time its own turn to
+   install comes up). Rather than a distributed lock (explicitly out of
+   scope — this is detect-and-reject, not a mutex), each group re-checks its
+   own class's CURRENT tracked source against its snapshot immediately
+   before that group's own install call. A mismatch (or the class no longer
+   having a tracked source at all) means some other write landed in the
+   validate-or-earlier-install window; `rewrite_sites/2` reports
+   `{error, {stale_snapshot, Class}}` for that group and stops the batch
+   there — installing this group's precomputed `new_source` anyway would
+   silently discard the concurrent edit (the lost-update bug this exists to
+   close). Groups already installed earlier in this same call stay
+   installed (same bounded-partial-application shape point 3 already
+   documents); nothing after the stale group installs. The caller can always
+   retry safely: re-run site discovery against current state and call
+   `rewrite_sites/2` again — a rejected install never corrupts anything, it
+   only refuses to overwrite what it can no longer prove is still the
+   snapshot it validated against.
 
 Known, accepted limitation this protocol does NOT close: `compile_file/4`
 itself has a side effect independent of installation — it registers each
@@ -1986,7 +2037,8 @@ freshly (re-)registered for a same-name class-group.
         | {class_source_unavailable, binary()}
         | {invalid_or_overlapping_span, binary(), rewrite_span()}
         | {validation_failed, [{binary(), term()}]}
-        | {partial_install_failure, binary(), term(), [binary()]}}.
+        | {partial_install_failure, binary(), term(), [binary()]}
+        | {stale_snapshot, binary()}}.
 rewrite_sites(undefined, []) ->
     {error, no_sites};
 rewrite_sites(DefinitionSite, ReferenceSites) when is_list(ReferenceSites) ->
@@ -2246,13 +2298,30 @@ compile_rewrite_group(#rewrite_class_group{
     NewSourceStr = unicode:characters_to_list(NewSourceBin),
     compile_reload_source(NewSourceStr, LoadPath, ModuleNameOverride, undefined).
 
+%% BT-3280: is `Group`'s class's CURRENT `beamtalk_workspace_meta` source
+%% still byte-identical to what `build_class_group/2` snapshotted into
+%% `original_source` before this batch's validation pass ran? `false` for a
+%% class whose source is no longer trackable at all (e.g. removed by a
+%% concurrent `removeFromSystem` in the same window) — that is exactly as
+%% unsafe to install over as a changed source, not a separate case. See
+%% `rewrite_sites/2`'s doc, point 4, for why this check exists and why it is
+%% re-run per group immediately before that group's own install rather than
+%% once up front.
+-spec class_source_unchanged(#rewrite_class_group{}) -> boolean().
+class_source_unchanged(#rewrite_class_group{class = Class, original_source = OriginalSource}) ->
+    case beamtalk_workspace_meta:get_class_source(Class) of
+        undefined -> false;
+        CurrentSource -> unicode:characters_to_binary(CurrentSource) =:= OriginalSource
+    end.
+
 %% Phase 2 of the atomicity protocol: install every already-validated group,
 %% in class-group order, updating `beamtalk_workspace_meta`'s tracked source
 %% to match each newly-installed class. See `rewrite_sites/2`'s doc for the
-%% pathological partial-install-failure case this handles defensively.
+%% pathological partial-install-failure case and the BT-3280 stale-snapshot
+%% case this handles defensively.
 -spec install_rewrite_groups([{#rewrite_class_group{}, term()}], rewrite_site() | undefined) ->
     {ok, rewrite_result()}
-    | {error, {partial_install_failure, binary(), term(), [binary()]}}.
+    | {error, {partial_install_failure, binary(), term(), [binary()]} | {stale_snapshot, binary()}}.
 install_rewrite_groups(ValidatedGroups, DefinitionSite) ->
     install_rewrite_groups(ValidatedGroups, DefinitionSite, []).
 
@@ -2260,13 +2329,53 @@ install_rewrite_groups(ValidatedGroups, DefinitionSite) ->
     [{#rewrite_class_group{}, term()}], rewrite_site() | undefined, [#rewrite_class_group{}]
 ) ->
     {ok, rewrite_result()}
-    | {error, {partial_install_failure, binary(), term(), [binary()]}}.
+    | {error, {partial_install_failure, binary(), term(), [binary()]} | {stale_snapshot, binary()}}.
 install_rewrite_groups([], DefinitionSite, InstalledRev) ->
     {ok, build_rewrite_result(DefinitionSite, lists:reverse(InstalledRev))};
 install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev) ->
+    #rewrite_class_group{class = Class} = Group,
+    case class_source_unchanged(Group) of
+        false ->
+            %% BT-3280: a concurrent writer landed on this class's tracked
+            %% source between this batch's own validation pass and this
+            %% group's own install turn. Fail cleanly and stop the batch here
+            %% — never install `NewSource` over it, which would silently
+            %% discard the other writer's edit (the lost-update bug this
+            %% check exists to close). Everything strictly before this group
+            %% in `InstalledRev` already installed and stays installed —
+            %% same bounded-partial-application shape `partial_install_failure`
+            %% below already has, just for a different, cleanly-detected cause.
+            {error, {stale_snapshot, Class}};
+        true ->
+            install_rewrite_group(Group, Compiled, Rest, DefinitionSite, InstalledRev)
+    end.
+
+%% The actual load+hot-reload+tracked-source-update for one already-validated,
+%% not-stale group — split out of `install_rewrite_groups/3` purely so that
+%% function's own `case class_source_unchanged(Group) of ... end` reads as a
+%% single guard clause rather than nesting this whole body a level deeper.
+%% `SourcePath`/`NewSource` are read straight off `Group` rather than taking
+%% them as separate params — they are already `Group`'s own fields, so
+%% passing them alongside `Group` would just be re-stating what `Group`
+%% already carries.
+-spec install_rewrite_group(
+    #rewrite_class_group{},
+    term(),
+    [{#rewrite_class_group{}, term()}],
+    rewrite_site() | undefined,
+    [#rewrite_class_group{}]
+) ->
+    {ok, rewrite_result()}
+    | {error, {partial_install_failure, binary(), term(), [binary()]} | {stale_snapshot, binary()}}.
+install_rewrite_group(Group, Compiled, Rest, DefinitionSite, InstalledRev) ->
     #rewrite_class_group{class = Class, source_path = SourcePath, new_source = NewSource} = Group,
     LoadPath = source_path_or_empty(SourcePath),
-    case install_reload_result(Compiled, LoadPath) of
+    %% BT-3280: qualified as `?MODULE:` (rather than a local call) purely so
+    %% `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
+    %% coverage can intercept it via `meck:new(?MODULE, [passthrough])` — see
+    %% that test module's own moduledoc for why. Behaviourally identical to a
+    %% local call in production (same module, same code version).
+    case ?MODULE:install_reload_result(Compiled, LoadPath) of
         {ok, ClassNames} ->
             NewSourceStr = unicode:characters_to_list(NewSource),
             lists:foreach(
