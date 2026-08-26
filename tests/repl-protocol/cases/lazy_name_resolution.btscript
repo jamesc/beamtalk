@@ -17,7 +17,7 @@
 // A workspace singleton resolves even though it is never injected into the
 // session binding map — it is resolved lazily from the singleton registry.
 Transcript
-// => _
+// => Actor(TranscriptStream, _)
 
 // Singleton receiver dispatch still works (binding-aware class send).
 Transcript show: "hi"
