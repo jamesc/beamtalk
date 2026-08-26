@@ -176,6 +176,29 @@ move_class_success(#{proj_dir := ProjDir, gadget_path := GadgetPath}) ->
     ].
 
 %%====================================================================
+%% Refusal: a target equal to the class's current path is not a legitimate
+%% move — the flush commit path for `op = move` renames the staged .tmp
+%% into NewPath then deletes OldPath, which (when NewPath == OldPath) would
+%% delete the file it just wrote. Refused eagerly, before any ChangeLog
+%% entry or disk write happens.
+%%====================================================================
+
+move_class_same_path_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1, fun move_class_same_path/1}.
+
+move_class_same_path(#{gadget_path := GadgetPath}) ->
+    GadgetPathBin = list_to_binary(GadgetPath),
+    Result = beamtalk_repl_loader:move_class('Bt3272Gadget', GadgetPathBin),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = same_path}}, Result),
+        %% Refused before any ChangeLog entry or disk write — the fixture's
+        %% file is untouched.
+        ?_assertEqual([], beamtalk_workspace_changelog:entries()),
+        ?_assertEqual(true, filelib:is_regular(GadgetPath)),
+        ?_assertEqual({ok, gadget_source()}, file:read_file(GadgetPath))
+    ].
+
+%%====================================================================
 %% Refusal: a dynamic (ClassBuilder) class has no backing file to move at
 %% all — `no_source_file`, deliberately stricter than `classRenameTo/2`'s
 %% permissive `flushable: false` treatment of the identical classification

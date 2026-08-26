@@ -2510,7 +2510,7 @@ move_class(ClassName, NewPathBin) when is_atom(ClassName), is_binary(NewPathBin)
         {error, _} = Err ->
             Err;
         {ok, OldPathBin} ->
-            case move_class_validate_target(ClassName, NewPathBin) of
+            case move_class_validate_target(ClassName, OldPathBin, NewPathBin) of
                 {error, _} = Err ->
                     Err;
                 ok ->
@@ -2542,22 +2542,41 @@ move_class_ensure_movable(ClassName, _Classification) ->
     %% unmatched map, per "never panic on user input".
     {error, move_class_no_source_file_error(ClassName)}.
 
--spec move_class_validate_target(atom(), binary()) -> ok | {error, #beamtalk_error{}}.
-move_class_validate_target(ClassName, NewPathBin) ->
-    case classify_source_file(NewPathBin) of
-        {flushable, _AbsPath} ->
-            ok;
-        {not_flushable, _Reason} ->
+-spec move_class_validate_target(atom(), binary(), binary()) -> ok | {error, #beamtalk_error{}}.
+move_class_validate_target(ClassName, OldPathBin, NewPathBin) ->
+    %% A target equal to the class's current path is not a legitimate move: the
+    %% flush commit path for `op = move` (`beamtalk_workspace_flush:commit/1`)
+    %% renames the staged .tmp into NewPath and then deletes OldPath — when the
+    %% two are the same file, that delete removes the file it just wrote,
+    %% losing the class's source entirely. Refuse eagerly, mirroring
+    %% `newClass:at:`'s own eager `validate_target_path/1` check.
+    case
+        filename:absname(binary_to_list(NewPathBin)) =:=
+            filename:absname(binary_to_list(OldPathBin))
+    of
+        true ->
             {error,
                 move_class_error(
-                    target_outside_project,
+                    same_path,
                     ClassName,
-                    iolist_to_binary([
-                        <<"moveClass:to: target is outside the project source tree: ">>,
-                        NewPathBin,
-                        <<"; a class can only be moved to a path inside the current project">>
-                    ])
-                )}
+                    <<"moveClass:to: target is the class's current path; nothing to move">>
+                )};
+        false ->
+            case classify_source_file(NewPathBin) of
+                {flushable, _AbsPath} ->
+                    ok;
+                {not_flushable, _Reason} ->
+                    {error,
+                        move_class_error(
+                            target_outside_project,
+                            ClassName,
+                            iolist_to_binary([
+                                <<"moveClass:to: target is outside the project source tree: ">>,
+                                NewPathBin,
+                                <<"; a class can only be moved to a path inside the current project">>
+                            ])
+                        )}
+            end
     end.
 
 -spec move_class_rewrite(atom(), binary(), binary(), binary(), binary() | undefined) ->
