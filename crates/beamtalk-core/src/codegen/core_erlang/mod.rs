@@ -1411,6 +1411,16 @@ pub(super) struct SavedClassMethodCtx {
     class_var_mutated: bool,
     class_slot_constructor_selector: Option<String>,
     builder_class_method_class: Option<String>,
+    // BT-3289: unlike `class_var_version` above, the instance-`State` version
+    // counter lives outside `ClassContext` (it's shared by every class, not
+    // per-class-context), so nothing captured it here even though
+    // `generate_class_method_fun_from_block` unconditionally resets it. A
+    // builder cascade nested inside an enclosing method's own field-assignment
+    // value (e.g. `self.x := Object classBuilder … addClassMethod:body: […]; register`)
+    // would silently clobber the enclosing method's in-progress `State`
+    // version, producing two bindings for the same version — caught by the
+    // ADR-0111 verifier as `NonLinearVersion`.
+    state_version: usize,
 }
 
 impl ClassContext {
@@ -2159,6 +2169,7 @@ impl CoreErlangGenerator {
             class_var_mutated: self.class_var_mutated(),
             class_slot_constructor_selector: self.class_slot_constructor_selector().cloned(),
             builder_class_method_class: self.builder_class_method_class(),
+            state_version: self.state_version(),
         };
         self.set_in_class_method(true);
         *self.class_var_names_mut() = class_var_names.iter().cloned().collect();
@@ -2203,6 +2214,12 @@ impl CoreErlangGenerator {
             // (REPL) builder cascades don't leak a class context.
             self.class_context = None;
         }
+        // BT-3289: `state_version` lives outside `ClassContext`, so it must be
+        // restored unconditionally here — independent of `had_context` — or a
+        // builder cascade nested inside an enclosing method's field-assignment
+        // value leaves that method's `State` version counter reset to 0
+        // instead of wherever it legitimately was.
+        self.set_state_version(saved.state_version);
     }
 
     /// BT-2709: Clears per-method parameter-type tracking. Call alongside
