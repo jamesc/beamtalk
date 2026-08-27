@@ -20,6 +20,18 @@ defmodule BtAttach.MixProject do
       version: @version,
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
+      test_coverage: [
+        ignore_modules: [
+          # Pure Phoenix boilerplate: `embed_templates` only, no logic to exercise.
+          BtAttachWeb.Layouts
+        ],
+        # :threshold only takes effect nested under :summary — Mix.Tasks.Test.Coverage
+        # reads it from the :summary opts, not the top-level test_coverage opts.
+        # Floor below the current ~60% baseline (BT-3288) so CI has headroom to
+        # fluctuate without going red; raise as coverage improves. Mirrors the
+        # Rust/Erlang coverage-job thresholds in .github/workflows/ci.yml.
+        summary: [threshold: 55]
+      ],
       # Warnings-as-errors for our own code only — deps compile with their
       # upstream settings and routinely warn under newer Elixir releases.
       elixirc_options: [warnings_as_errors: true],
