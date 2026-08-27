@@ -386,6 +386,152 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
            end)
   end
 
+  # BT-2588: a successful save triggers its own class-reload notification (the
+  # write-surface `:save` recompiles + flushes the class), which arrives back at
+  # the LiveView as a coalesced `:do_source_refresh` push (BT-2600, ~60ms debounce
+  # — see `refresh_debounce_ms/0`). `resync_active_tab/2` used to re-sync the
+  # still-focused (now clean) tab via the banner-clearing `sync_active/2`, wiping
+  # the "Saved …" banner within that same ~60ms window — invisible to a real user
+  # and too fast for even Playwright's polling to reliably catch (the bug behind
+  # the quarantined BT-2485 ⌘S e2e test). Sending `:do_source_refresh` directly
+  # reproduces that race deterministically, without depending on the debounce
+  # timing or a real browser.
+  test "a save's own coalesced class-reload refresh does not clear its just-shown banner (BT-2588)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RaceCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 1
+
+      value => self.value
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # Open `value` in an editor tab (mirrors "selecting a method opens it in the
+    # editor" above) — the race only reproduces with an OPEN, now-clean active
+    # tab: `resync_active_tab/2` only re-syncs (and, pre-fix, wiped the banner
+    # for) a tab it finds via `@active_tab`, and only when that tab is clean.
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+    view |> element(~s(div[phx-value-selector="value"])) |> render_click()
+
+    # The `tab` hidden field must ride the submit exactly as the real form does
+    # — `compile_clean/3` (which clears the tab's dirty flag, making it eligible
+    # for `resync_active_tab/2`'s `%{dirty: false}` guard) is a no-op without it.
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "tab" => "method:#{class}:instance:value",
+        "class" => class,
+        "selector" => "value",
+        "source" => "value => self.value + 100"
+      })
+
+    assert save_html =~ "Saved value on #{class}"
+
+    send(view.pid, :do_source_refresh)
+    refreshed_html = render(view)
+
+    assert refreshed_html =~ "Saved value on #{class}"
+  end
+
+  # BT-2588 (adversarial review follow-up): `resync_active_tab/2` keeps the save
+  # banner only when `:save_echo_pending` is set AND (for a `:method` tab) the
+  # re-read body still matches what was saved — this test constructs the case
+  # where BOTH the local save's own echo AND a real external change coalesce
+  # into the SAME push refresh (a direct eval recompile here, entirely
+  # bypassing this LiveView's own `compile_clean/3`), which the flag alone
+  # cannot distinguish. Without the body check, the flag-only fix would leave a
+  # WRONG banner sitting over changed content, not just a lingering one.
+  test "a genuine out-of-band change clears a stale banner instead of leaving it stuck (BT-2588)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "ExternalRaceCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 1
+
+      value => self.value
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+    view |> element(~s(div[phx-value-selector="value"])) |> render_click()
+
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "tab" => "method:#{class}:instance:value",
+        "class" => class,
+        "selector" => "value",
+        "source" => "value => self.value + 100"
+      })
+
+    assert save_html =~ "Saved value on #{class}"
+
+    # A genuine out-of-band change: recompile the SAME method via a plain eval
+    # `>>` install (mirrors the REPL / MCP / another session's write path),
+    # entirely bypassing this LiveView's own save/`compile_clean` bookkeeping.
+    view
+    |> form("#eval-form")
+    |> render_submit(%{expr: "#{class} >> value => self.value + 999"})
+
+    send(view.pid, :do_source_refresh)
+    refreshed_html = render(view)
+
+    refute refreshed_html =~ "Saved value on #{class}"
+    assert refreshed_html =~ "self.value + 999"
+  end
+
+  # BT-2588 (review-bot follow-up): `refresh_source_tab/2`'s `:def` clause never
+  # re-reads a class-definition tab's editable body (only doc/modifiers — see
+  # its docs), so comparing bodies is meaningless for `:def` tabs: it is always
+  # "unchanged", trivially passing the echo case AND vacuously "passing" a
+  # stale-banner-never-clears bug the same way. The real test is a SECOND,
+  # later push after the echo's own `:save_echo_pending` has been consumed —
+  # only `resync_active_tab/2`'s flag check (not a body comparison, which is
+  # blind here) correctly clears the now-stale banner then.
+  test "a class-definition tab's banner survives its own echo but clears on the next unrelated push (BT-2588)",
+       %{conn: conn} do
+    {view, _html, class} = open_fresh_def_tab(conn)
+
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "tab" => "def:#{class}",
+        "class" => class,
+        "selector" => "▸ class definition",
+        "source" => "Actor subclass: #{class}\n  state: value = 0\n\n  value => self.value + 1"
+      })
+
+    assert save_html =~ "Compiled #{class}"
+
+    # First push: the save's own echo — the banner must survive it.
+    send(view.pid, :do_source_refresh)
+    echo_html = render(view)
+    assert echo_html =~ "Compiled #{class}"
+
+    # Second push: nothing else changed, but this is no longer the echo (the
+    # flag was already consumed above) — an unrelated later reload elsewhere
+    # in the image must not leave this tab's now-stale banner up forever.
+    send(view.pid, :do_source_refresh)
+    later_html = render(view)
+    refute later_html =~ "Compiled #{class}"
+  end
+
   test "method editor: an invalid edit renders a structured error (BT-2409)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])

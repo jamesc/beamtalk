@@ -290,27 +290,26 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#inspector-panel .ivar-table", text: "item")
   end
 
-  # QUARANTINED (@tag :skip) — re-enable is blocked on BT-2588.
+  # BT-2588 found two compounding bugs, both fixed in `workspace_live.ex`:
   #
-  # PR #2653 rebuilt this test's setup for the post-#2637 cockpit (no starter
-  # tab): it opens `KsCounter >> ksBump` via omni search (avoiding the System
-  # Browser browse-classes snapshot race), edits the body, fires ⌘S, and asserts
-  # the "Saved …" banner. The setup is left intact so that removing `@tag :skip`
-  # re-enables a working test once BT-2588 lands.
-  #
-  # It stays skipped because CI diagnostic probes proved the ⌘S *keyboard* path
-  # does not reach the save in this environment, while the save itself is fine:
-  #   * Calling `#method-editor-form.requestSubmit()` directly produces the
-  #     banner (e2e green).
-  #   * BOTH a synthetic `window.dispatchEvent` keydown AND a trusted
-  #     `press(".cm-content", "ControlOrMeta+s")` fail to fire `save_method` (no
-  #     ok OR err banner) despite correct class/selector/source form fields.
-  # Since a plain `window.addEventListener("keydown")` fires for any dispatched
-  # event, even the direct window dispatch not saving means the form's
-  # `data-scope="window"` KeyboardShortcuts listener is not receiving the keydown
-  # — likely an app-side issue (possibly affecting real users), tracked in
-  # BT-2588. The sibling ⌘P test passes via an element-level press inside its form.
-  @tag :skip
+  # 1. `#method-editor-form` is rendered by two `cond` branches sharing the SAME
+  #    id — the empty "no tab" state (hidden, no hook) and the active-tab state
+  #    (hooked). LiveView's morphdom patch matches same-id elements as ONE node,
+  #    so opening a tab from the empty state was an "updated" patch, not an
+  #    "added" one; the JS client only auto-mounts `phx-hook` on added nodes, so
+  #    the hidden form's later-added `phx-hook` never mounted and the window
+  #    keydown listener never attached. Fixed by giving both renders the same
+  #    hook wiring via `method_editor_shortcuts_attrs/0`.
+  # 2. Even with the hook mounted, a successful save's own class-reload
+  #    notification raced its confirmation: `save_method` sets `save_result`,
+  #    then ~60ms later the coalesced `:do_source_refresh` push (BT-2600) —
+  #    triggered by the very save that just happened — re-synced the (now
+  #    clean) active tab via `sync_active/2`, which unconditionally clears
+  #    `save_result`/`save_error`. The "Saved …" banner was visible for under
+  #    60ms, invisible to a real user and to Playwright's polling alike. Fixed
+  #    by re-syncing the tab's fields only (`sync_active_fields/2`), leaving the
+  #    banner alone — the same "mid-save" carve-out `focus_tab_keep_banner/3`
+  #    already used for the new-method-tab-promotion path.
   test "the KeyboardShortcuts hook compiles a method on ⌘/Ctrl+S (BT-2485)", %{conn: conn} do
     conn
     |> visit("/")
@@ -332,9 +331,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # data-shortcuts "mod+s" → submit): the window-scoped KeyboardShortcuts hook
     # request-submits the form so class/selector/source ride the normal
     # save_method — no button click. `press_save/1` sends a trusted ⌘/Ctrl+S that
-    # bubbles to `window` after focusing the editor. (Currently a no-op in CI —
-    # the window listener isn't receiving the keydown; see BT-2588 — which is why
-    # this test is @tag :skip.)
+    # bubbles to `window` after focusing the editor.
     |> press_save()
     # The save is a server round-trip (WorkspaceLive compiles `KsCounter >>
     # ksBump` before assigning `save_result`); under parallel CI load that can

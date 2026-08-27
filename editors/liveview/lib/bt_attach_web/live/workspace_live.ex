@@ -515,6 +515,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:save_error, nil)
       |> assign(:flush_result, nil)
       |> assign(:flush_error, nil)
+      # BT-2588: one-shot flag `compile_clean/3` arms on a successful save and
+      # `resync_active_tab/2` consumes — see that function's docs.
+      |> assign(:save_echo_pending, false)
       # System Browser (BT-2491, epic BT-2482 Phase 2): the left-column
       # class → protocol → method navigator, driven by the BT-2488 browse ops
       # (ADR 0096) through the read-only facade. `browser_view` toggles the class
@@ -2537,6 +2540,12 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(source_refresh_pending: false)
       |> refresh_after_source_change()
       |> mark_source_loaded()
+      # BT-2588: this is the one place `:save_echo_pending` is cleared — see
+      # `resync_active_tab/2`'s docs for why it must NOT self-clear (a
+      # synchronous caller with more than one `resync_active_tab/2` call in its
+      # own pipeline, like `git_revert_event/2`, would otherwise spend the flag
+      # before the call that decides the rendered state ever sees it).
+      |> assign(:save_echo_pending, false)
 
     {:noreply, socket}
   end
@@ -5003,10 +5012,42 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp refresh_source_tab(_socket, tab), do: tab
 
-  # Keep the rendered active-tab editor in sync after a push refresh: re-`sync_active`
-  # the active tab so its breadcrumb/badges/doc block re-render from the refreshed
-  # entry. A dirty active tab is untouched above, so this never disturbs an edit.
+  # Keep the rendered active-tab editor in sync after a push refresh: re-sync the
+  # active tab's fields so its breadcrumb/badges/doc block re-render from the
+  # refreshed entry. A dirty active tab is untouched above, so this never disturbs
+  # an edit.
+  #
+  # BT-2588: also decides whether to keep or clear the save/flush banners, via
+  # TWO signals combined:
+  #
+  #   * `:save_echo_pending` — a one-shot flag `compile_clean/3` arms on a
+  #     successful save. This function only READS it (never clears it — see
+  #     why below); unset ⇒ this push is definitely not our own save's echo —
+  #     clear unconditionally.
+  #   * for a `:method` tab, whether the re-read body actually changed. Even
+  #     when the flag IS set, BT-2600's coalescing can fold a genuinely
+  #     external change into the SAME debounced push as our own save's echo
+  #     (two `ClassLoaded` events landing within the same ~60ms window collapse
+  #     to one `:do_source_refresh`) — the body comparison catches that case.
+  #     Skipped for `:def`: `refresh_source_tab/2` never re-reads a `:def`
+  #     tab's editable definition body (only its doc/modifiers), so the
+  #     comparison would be vacuously "unchanged" on every push and could never
+  #     legitimately clear a `:def` tab's banner — the flag alone decides
+  #     there, same narrow coalescing blind spot as any other single-signal
+  #     check, self-healing on the next tab switch or save.
+  #
+  # This function does NOT clear the flag (review-bot finding): `git_revert_event/2`
+  # calls `resync_active_tab/2` TWICE in one synchronous pipeline
+  # (`reload_reverted_def_buffers/2`, then `refresh_after_source_change/1`) — a
+  # read-then-clear here would let the first call spend the flag, leaving the
+  # second (which decides the actually-rendered state) always seeing it unset
+  # and wiping an unrelated tab's still-fresh banner on ANY git revert. The
+  # flag is a one-shot signal for the ASYNC push cycle specifically, so only
+  # its real owner, `handle_info(:do_source_refresh, ...)`, clears it — once,
+  # after every synchronous caller (this function included) has had its look.
   defp resync_active_tab(socket, tabs) do
+    save_echo? = socket.assigns[:save_echo_pending]
+
     case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
       %{dirty: false} = active ->
         # BT-2655: if the re-read changed the active tab's *body* (a git revert, a
@@ -5014,9 +5055,17 @@ defmodule BtAttachWeb.WorkspaceLive do
         # host is re-keyed and remounts with the new source. A no-op re-read (same
         # body) leaves the rev — and thus the live editor instance — untouched, so a
         # routine refresh of an unchanged tab never disturbs the editor.
-        socket
-        |> maybe_bump_editor_rev(active.source)
-        |> sync_active(active)
+        socket = maybe_bump_editor_rev(socket, active.source)
+
+        keep_banner? =
+          save_echo? and
+            (active.kind != :method or active.source == socket.assigns[:edit_source])
+
+        if keep_banner? do
+          sync_active_fields(socket, active)
+        else
+          sync_active(socket, active)
+        end
 
       _ ->
         socket
@@ -6644,6 +6693,32 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp synthetic_tab?(%{synthetic: true}), do: true
   defp synthetic_tab?(_), do: false
 
+  # BT-2588: the `id="method-editor-form"` hook wiring, shared verbatim across
+  # both cond branches that can render that id (the active-tab editor form and
+  # the no-tab empty-state form) — and by `id="native-editor-form"`, which binds
+  # the identical chord. Splatted via `{method_editor_shortcuts_attrs()}` so
+  # these renders cannot drift apart again — the original bug was exactly that
+  # drift: the empty-state form lacked `phx-hook`/`data-scope`, so opening a tab
+  # from that state added `phx-hook` to an ALREADY-mounted DOM node (same id ⇒
+  # LiveView's morphdom patch treats it as an "updated" node, not an "added"
+  # one) and `KeyboardShortcuts#mounted()` — which attaches the window keydown
+  # listener — never ran.
+  #
+  # The empty-state form must still mount the hook (so a later transition to
+  # the active-tab form is an "updated" patch on an already-mounted hook, not
+  # another missed "added" one) but must NOT bind "mod+s" to "submit" there —
+  # otherwise ⌘S anywhere on the page while no tab is open (e.g. while typing
+  # in the Workspace eval pane) request-submits the hidden empty form and
+  # surfaces a spurious "Enter a class name to save a method." error. Callers
+  # pass `%{}` for that form; the active-tab forms use the default.
+  defp method_editor_shortcuts_attrs(shortcuts \\ %{"mod+s" => "submit"}) do
+    %{
+      "phx-hook" => "KeyboardShortcuts",
+      "data-scope" => "window",
+      "data-shortcuts" => Jason.encode!(shortcuts)
+    }
+  end
+
   # Source origin badge helpers (BT-2552, BT-2643, BT-2641). Two orthogonal
   # fields drive the badge: `source_origin` is the classification ("stdlib" |
   # "dependency" | "project") and keys the css class + title; `package` is the
@@ -6813,8 +6888,24 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Push the active tab's fields into the form-backing assigns so the (single)
-  # save_method form always reflects the focused tab.
+  # save_method form always reflects the focused tab, then clear any stale
+  # save/flush banners — appropriate when the *user* is switching focus (a new
+  # tab's fields should start clean), but NOT when a push refresh re-syncs the
+  # tab that's still focused (see `sync_active_fields/2`, and
+  # `focus_tab_keep_banner/3` for the same "mid-save" carve-out).
   defp sync_active(socket, tab) do
+    socket
+    |> sync_active_fields(tab)
+    |> assign(save_result: nil, save_error: nil, flush_result: nil, flush_error: nil)
+  end
+
+  # Mirror `tab`'s class/selector/source into the form-backing assigns, without
+  # touching the save/flush banners. BT-2588: `resync_active_tab/2` (a push
+  # refresh) and `focus_tab_keep_banner/3` (post-save tab promotion) both need
+  # this — re-syncing the STILL-focused active tab after the user's OWN save
+  # must not wipe the "Saved …" banner that save just set, unlike an explicit
+  # tab switch (`sync_active/2`), which should start the new tab clean.
+  defp sync_active_fields(socket, tab) do
     assign(socket,
       edit_class: tab.class,
       edit_selector: tab.selector || "",
@@ -6823,11 +6914,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       # the old `{text, start, end}` no longer points at anything live. Without
       # this, a future consumer of `:edit_selection` could act on stale coords
       # from the tab the user just left.
-      edit_selection: nil,
-      save_result: nil,
-      save_error: nil,
-      flush_result: nil,
-      flush_error: nil
+      edit_selection: nil
     )
   end
 
@@ -7089,7 +7176,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp compile_clean(socket, "", _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
-    update_active_tab_by_id(socket, tab_id, fn tab ->
+    socket
+    |> update_active_tab_by_id(tab_id, fn tab ->
       %{
         tab
         | source: source,
@@ -7098,6 +7186,15 @@ defmodule BtAttachWeb.WorkspaceLive do
           disk_differs: compiled_disk_differs(tab, source)
       }
     end)
+    # BT-2588: this tab was just cleanly compiled — the class-reload notification
+    # this save itself triggers will arrive back as a coalesced `:do_source_refresh`
+    # push shortly after (BT-2600). Arm the flag `resync_active_tab/2` consumes to
+    # recognise THAT SPECIFIC push as its own echo (keep the banner) rather than a
+    # later, genuinely external change (clear it) — see the flag's definition for
+    # why comparing the tab's re-read body isn't a reliable enough signal on its
+    # own (it's blind for `:def` tabs, whose editable body a push refresh never
+    # re-reads at all).
+    |> assign(:save_echo_pending, true)
   end
 
   # Whether a just-compiled `:method` body diverges from its on-disk counterpart.
@@ -7169,19 +7266,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Focus `tab` and mirror it into the edit assigns *without* clearing the
-  # save/flush result banners. `sync_active/2` resets those (the "switching tabs
-  # starts clean" rule), which is wrong mid-save: promotion runs as part of a
-  # successful save and must keep the "Saved …" banner it just set.
+  # save/flush result banners (`sync_active_fields/2` — see BT-2588). `sync_active/2`
+  # resets those (the "switching tabs starts clean" rule), which is wrong
+  # mid-save: promotion runs as part of a successful save and must keep the
+  # "Saved …" banner it just set.
   defp focus_tab_keep_banner(socket, tabs, tab) do
     socket
     |> assign(:tabs, tabs)
     |> assign(:active_tab, tab.id)
-    |> assign(
-      edit_class: tab.class,
-      edit_selector: tab.selector,
-      edit_source: tab.source,
-      edit_selection: nil
-    )
+    |> sync_active_fields(tab)
   end
 
   defp update_active_tab(socket, fun),
@@ -11132,9 +11225,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           id="native-editor-form"
                           phx-submit="native_save"
                           phx-change="edit_source"
-                          phx-hook="KeyboardShortcuts"
-                          data-scope="window"
-                          data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                          {method_editor_shortcuts_attrs()}
                         >
                           <div
                             id={"native-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
@@ -11412,9 +11503,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                             id="method-editor-form"
                             phx-submit="save_method"
                             phx-change="edit_source"
-                            phx-hook="KeyboardShortcuts"
-                            data-scope="window"
-                            data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                            {method_editor_shortcuts_attrs()}
                           >
                             <%!-- the active tab id rides every compile so the handler
                            knows which tab to clean and whether it's a class
@@ -11739,7 +11828,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                      `save_method` form is still rendered (hidden, no editor) so
                      the BT-2409 e2e save flow — which posts class/selector/source
                      directly — keeps working without a focused tab; the handler
-                     tolerates an absent `tab` and validates an empty class. --%>
+                     tolerates an absent `tab` and validates an empty class.
+
+                     BT-2588: this form must carry the SAME `phx-hook`/`data-scope`
+                     as the active-tab form below (both share id="method-editor-form")
+                     — see `method_editor_shortcuts_attrs/0` for why a divergence
+                     here silently breaks ⌘S. It passes `%{}` (no chords bound): the
+                     hook must still mount here, but must not request-submit this
+                     empty/hidden form — no tab means nothing to save. --%>
                     <div class="panel-body">
                       <div class="empty">
                         Nothing open. Pick a method, or open a <span class="mono">▸ class definition</span>, from the System
@@ -11750,6 +11846,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         id="method-editor-form"
                         phx-submit="save_method"
                         phx-change="edit_source"
+                        {method_editor_shortcuts_attrs(%{})}
                         hidden
                       >
                         <input type="hidden" name="tab" value="" />
