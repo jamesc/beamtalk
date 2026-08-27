@@ -21,6 +21,8 @@ thiserror.workspace = true
 miette.workspace = true
 stacker.workspace = true
 dirs.workspace = true
+# why: shared leaf for ~/.beamtalk resolution (see docs/development/architecture-principles.md §6)
+beamtalk-home.workspace = true
 # why: BT-2859 — no longer optional: `ffi_type_specs`'s on-disk spec cache
 # (ADR 0075) unconditionally derives Serialize/Deserialize on its cache-entry
 # type. The `serde` *feature* below still independently gates the optional

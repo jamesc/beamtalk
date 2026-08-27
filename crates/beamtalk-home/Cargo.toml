@@ -1,0 +1,23 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-home"
+description = "Shared leaf: Beamtalk global config directory (~/.beamtalk) resolution"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["beam", "smalltalk", "directories"]
+categories = ["development-tools"]
+
+[dependencies]
+# why: the sole purpose of this crate is to resolve the home directory for
+# ~/.beamtalk; dirs is the cross-platform authority on home-dir location.
+dirs.workspace = true
+
+[lints]
+workspace = true
