@@ -134,7 +134,11 @@ jobs:
         run: |
           mix test --cover | tee coverage-output.txt
           total=$(grep -E '\|\s*Total\s*\|' coverage-output.txt | grep -oE '[0-9]+\.[0-9]+' | head -1)
-          echo "total=${total:-0}" >> "$GITHUB_OUTPUT"
+          if [ -z "$total" ]; then
+            echo "::error::Could not parse coverage total from 'mix test --cover' output — table format may have changed"
+            exit 1
+          fi
+          echo "total=${total}" >> "$GITHUB_OUTPUT"
 
       # Updates only elixir-coverage.json on the shared `badges` branch, via a
       # worktree so the main checkout (and its editors/liveview cwd) is never
