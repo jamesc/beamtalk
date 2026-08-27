@@ -3629,7 +3629,7 @@ current project's source tree. `Workspace flush` writes only entries where
 | `dirtyMethods` | `Dictionary` | `#{Class => Set(selectors)}` for the active set |
 | `revert: anEntry` | class | Re-install `prev_source` for that entry (itself a durable patch) |
 | `clear` | `ChangeLog` | Discard every pending entry without writing to disk (memory keeps the patches until restart) |
-| `flushKinds: kinds` | `FlushResult` | Flush only entries matching a Set of `#instance` / `#class` / `#'new-class'` / `#human` / `#agent` symbols (both dimensions AND together) |
+| `flushKinds: kinds` | `FlushResult` | Flush only entries matching a Set of `#instance` / `#class` / `#'new-class'` / `#'remove-method'` / `#'remove-class'` / `#'rename-class'` / `#'rename-method'` / `#'class-def'` / `#human` / `#agent` symbols (both dimensions AND together) |
 | `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch, orphan, shadowed, and clean entries |
 | `activeEntries` | `List(ChangeEntry)` | The default view: current-epoch, non-orphaned entries, collapsed to the latest entry per `(class, selector)` and filtered to those still differing from disk — one row per method that has a net change |
 
@@ -4153,11 +4153,16 @@ multi-file staging.
 
 **Editor integration (LSP):** flush uses typed `workspace/applyEdit` resource
 operations for structural file changes: a `Workspace newClass:at:` flush emits
-a `CreateFile` operation (BT-3212), and a Tier 2 destructive flush emits a
-`DeleteFile` operation (BT-3209), so the editor can distinguish file creation
-and deletion from ordinary content edits. Both fire regardless of whether the
-file was open in the editor. Ordinary method patches continue to use the
-generic `TextEdit` shape, gated on the file being open.
+a `CreateFile` operation (BT-3212), and a `remove-class` Tier 2 destructive
+flush emits a `DeleteFile` operation (BT-3209), so the editor can distinguish
+file creation and deletion from ordinary content edits. Both fire regardless of
+whether the file was open in the editor. A `rename-method` flush emits a
+`TextDocumentEdit` per confirmed site (BT-3275); a `rename-class` flush emits
+`TextDocumentEdit` for cross-file reference rewrites and a custom
+`beamtalk-lsp/documentMoved` notification (`{oldUri, newUri}`) for the moved
+declaration file — replacing the `RenameFile` op that silently no-ops in VS
+Code when the old path is already gone (BT-3285). Ordinary method patches
+continue to use the generic `TextEdit` shape, gated on the file being open.
 
 ### `SystemNavigation` — Cross-class code queries
 
