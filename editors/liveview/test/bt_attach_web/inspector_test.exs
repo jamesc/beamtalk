@@ -282,7 +282,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
       {:noreply, socket} = Inspector.handle_info({:object_changed, pid, %{}}, socket)
 
       assert socket.assigns.refresh_pending == true
-      refute_received :do_object_refresh
+      refute_receive :do_object_refresh, 200
     end
 
     test "a frozen pane ignores the push" do
@@ -293,7 +293,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
       {:noreply, socket} = Inspector.handle_info({:object_changed, pid, %{}}, socket)
 
       assert socket.assigns.refresh_pending == false
-      refute_received :do_object_refresh
+      refute_receive :do_object_refresh, 200
     end
 
     test "the deferred refresh re-reads the object and bumps flash_gen" do
