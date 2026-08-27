@@ -320,7 +320,6 @@ name = "beamtalk-workspace"
 version = "0.4.0"
 dependencies = [
  "beamtalk-home",
- "dirs",
  "miette",
  "sha2 0.11.0",
  "tracing",
