@@ -23,6 +23,9 @@
 //   - the no-match `[]`-shape on a well-formed spec
 
 TestCase subclass: SystemNavigationFfiSitesTest
+  field: nav = nil
+
+  setUp => self.nav := SystemNavigation default
 
   // --- selector existence ---
   testIncludesSelectorFfiSitesFor =>
@@ -57,54 +60,45 @@ TestCase subclass: SystemNavigationFfiSitesTest
   // `aSpec` is a String, so a literal String passes the typed `:: String`
   // parameter; the runtime shape-check is what we exercise.
   testWellFormedSpecDoesNotRaise =>
-    nav := SystemNavigation default
-    result := nav ffiSitesFor: "lists:noSuchFunctionXyzzyBunit"
+    result := self.nav ffiSitesFor: "lists:noSuchFunctionXyzzyBunit"
     self assert: result isEmpty
 
   // An arity-qualified well-formed spec is also accepted (returns []).
   testArityQualifiedSpecDoesNotRaise =>
-    nav := SystemNavigation default
-    result := nav ffiSitesFor: "lists:noSuchFunctionXyzzyBunit/1"
+    result := self.nav ffiSitesFor: "lists:noSuchFunctionXyzzyBunit/1"
     self assert: result isEmpty
 
   // --- malformed specs raise #user_error ---
   //
   // A spec with no `:` separator is malformed.
   testNoColonRaises =>
-    nav := SystemNavigation default
-    self should: [nav ffiSitesFor: "nocolon"] raise: #user_error
+    self should: [self.nav ffiSitesFor: "nocolon"] raise: #user_error
 
   // A spec with more than one `:` (extra colon) does not match module:function.
   testExtraColonRaises =>
-    nav := SystemNavigation default
-    self should: [nav ffiSitesFor: "a:b:c"] raise: #user_error
+    self should: [self.nav ffiSitesFor: "a:b:c"] raise: #user_error
 
   // An empty module name is malformed.
   testEmptyModuleRaises =>
-    nav := SystemNavigation default
-    self should: [nav ffiSitesFor: ":reverse"] raise: #user_error
+    self should: [self.nav ffiSitesFor: ":reverse"] raise: #user_error
 
   // An empty function name is malformed.
   testEmptyFunctionRaises =>
-    nav := SystemNavigation default
-    self should: [nav ffiSitesFor: "lists:"] raise: #user_error
+    self should: [self.nav ffiSitesFor: "lists:"] raise: #user_error
 
   // A non-numeric arity suffix is malformed.
   testNonNumericArityRaises =>
-    nav := SystemNavigation default
-    self should: [nav ffiSitesFor: "lists:reverse/x"] raise: #user_error
+    self should: [self.nav ffiSitesFor: "lists:reverse/x"] raise: #user_error
 
   // More than one `/` (two arity slashes) is malformed.
   testExtraSlashRaises =>
-    nav := SystemNavigation default
-    self should: [nav ffiSitesFor: "lists:reverse/1/2"] raise: #user_error
+    self should: [self.nav ffiSitesFor: "lists:reverse/1/2"] raise: #user_error
 
   // --- String argument required ---
   //
   // Passing a non-String raises. Dispatch dynamically via perform: so the typed
   // `:: String` parameter does not reject the bad argument at compile time.
   testNonStringSpecRaises =>
-    nav := SystemNavigation default
     self should: [
-      nav perform: #ffiSitesFor: withArguments: #(42)
+      self.nav perform: #ffiSitesFor: withArguments: #(42)
     ] raise: #user_error
