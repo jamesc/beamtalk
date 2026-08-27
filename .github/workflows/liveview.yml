@@ -85,5 +85,92 @@ jobs:
         run: mix assets.build
 
       # Workspace-attach tests are skipped automatically (no BT_WORKSPACE_COOKIE).
-      - name: Run tests
-        run: mix test
+      # --cover instruments via OTP's built-in :cover (same tool family as the
+      # Erlang runtime's rebar3 cover) and enforces the threshold set in
+      # mix.exs test_coverage (BT-3288) — a real CI gate, not just a report.
+      - name: Run tests with coverage
+        run: mix test --cover
+
+  coverage:
+    needs: liveview
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: editors/liveview
+    permissions:
+      contents: write
+    steps:
+      # persist-credentials kept: the step below pushes the coverage badge to the `badges` branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+
+      - name: Install Erlang/OTP + Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Mix deps and build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            editors/liveview/deps
+            editors/liveview/_build
+          key: ${{ runner.os }}-liveview-mix-${{ hashFiles('editors/liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-liveview-mix-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      # No asset build needed here: :playwright/:workspace tests (the only
+      # ones needing built JS/CSS) are excluded from a bare `mix test`.
+      - name: Run tests with coverage
+        id: coverage
+        run: |
+          mix test --cover | tee coverage-output.txt
+          total=$(grep -E '\|\s*Total\s*\|' coverage-output.txt | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          echo "total=${total:-0}" >> "$GITHUB_OUTPUT"
+
+      # Updates only elixir-coverage.json on the shared `badges` branch, via a
+      # worktree so the main checkout (and its editors/liveview cwd) is never
+      # disturbed. The `ci.yml` `coverage` job publishes rust/erlang-coverage.json
+      # to the same branch independently — must NOT recreate it as an orphan
+      # (that would delete those files), so this fetches + amends in place.
+      - name: Publish coverage badge
+        working-directory: .
+        run: |
+          badge_color() {
+            local cov=$1
+            awk -v c="$cov" 'BEGIN {
+              if (c >= 80) print "brightgreen"
+              else if (c >= 70) print "green"
+              else if (c >= 60) print "yellowgreen"
+              else if (c >= 50) print "yellow"
+              else print "red"
+            }'
+          }
+
+          COV="${{ steps.coverage.outputs.total }}"
+          MSG="unknown"
+          COLOR="lightgrey"
+
+          if echo "$COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
+            MSG="${COV}%"
+            COLOR=$(badge_color "$COV")
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin badges
+          git worktree add /tmp/badges-branch origin/badges
+          echo "{\"schemaVersion\":1,\"label\":\"Elixir coverage\",\"message\":\"${MSG}\",\"color\":\"${COLOR}\"}" > /tmp/badges-branch/elixir-coverage.json
+          cd /tmp/badges-branch
+          git add elixir-coverage.json
+          git diff --staged --quiet && exit 0
+          git commit -m "Update Elixir coverage badge [skip ci]"
+          git push origin HEAD:badges

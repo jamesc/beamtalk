@@ -1435,6 +1435,17 @@ coverage-runtime-open:
         echo "   Report: runtime/_build/test/cover/index.html"
     fi
 
+# Generate LiveView IDE (editors/liveview) coverage via Elixir's built-in
+# `mix test --cover` (OTP :cover — same tool family as coverage-runtime's
+# rebar3 cover). Threshold/ignore_modules are configured in mix.exs (BT-3288).
+# `mix deps.get` first mirrors fmt-check-elixir/fmt-elixir's fresh-checkout-safe pattern.
+[working-directory: 'editors/liveview']
+coverage-liveview:
+    @echo "📊 Generating LiveView IDE (Elixir) coverage..."
+    mix deps.get --quiet
+    mix test --cover
+    @echo "  📁 HTML report: editors/liveview/cover/index.html"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Clean Tasks
 # ═══════════════════════════════════════════════════════════════════════════

@@ -73,6 +73,22 @@ cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobe
 just coverage-all
 ```
 
+**Elixir coverage (LiveView IDE, `editors/liveview`):**
+```bash
+just coverage-liveview
+```
+Uses Elixir's built-in `mix test --cover` (OTP's `:cover` — the same tool
+family as `coverage-runtime`'s `rebar3 cover`, so no extra Hex dependency like
+`excoveralls` is needed). `test_coverage` in `editors/liveview/mix.exs`
+configures `ignore_modules` (currently just `BtAttachWeb.Layouts`, a pure
+`embed_templates` boilerplate module with no logic) and the pass/fail
+`summary: [threshold: ...]` floor — nested under `:summary`, since
+`Mix.Tasks.Test.Coverage` only reads `:threshold` from there, not from the
+top-level `test_coverage` options. The `liveview` CI job runs `mix test
+--cover` directly, so PRs get the threshold enforced as a real gate; a
+separate `coverage` job (push-to-`main` only) publishes the
+`elixir-coverage.json` badge.
+
 The Erlang coverage badge blends all four runtime apps —
 `beamtalk_runtime`, `beamtalk_workspace`, `beamtalk_stdlib`, and
 `beamtalk_compiler`. The `beamtalk_stdlib` figure reflects only the
@@ -124,6 +140,7 @@ beam-write-error arm, and root-only `permission_denied` / TOCTOU
 Coverage reports are saved to:
 - Rust HTML: `target/llvm-cov/html/index.html`
 - Erlang HTML: `runtime/_build/test/cover/index.html`
+- Elixir HTML: `editors/liveview/cover/index.html`
 - Rust Cobertura XML: `coverage.cobertura.xml`
 - Erlang Cobertura XML: one per app under `runtime/_build/test/covertool/` (`beamtalk_runtime`, `beamtalk_workspace`, `beamtalk_stdlib`, `beamtalk_compiler`)
 
