@@ -7619,3 +7619,47 @@ fn test_mixed_foldl_nested_in_letrec_is_compile_error() {
         ),
     }
 }
+
+#[test]
+fn test_class_builder_cascade_in_second_field_assignment_does_not_corrupt_state_version() {
+    // BT-3289: a `classBuilder … addClassMethod:body:`/`classMethods:` cascade
+    // lowers its block via `generate_class_method_fun_from_block`, which resets
+    // the instance-`State` version counter (`reset_state_version`) to give the
+    // class-method fun its own fresh count — but nothing saved/restored the
+    // ENCLOSING method's counter around that reset. When such a cascade sits in
+    // the value of a field-assignment that is not the method's first (i.e. an
+    // earlier statement already minted a `State` version), the reset rewinds
+    // the enclosing counter, and the enclosing assignment's own next-minted
+    // version collides with the earlier one — an ADR-0111 `NonLinearVersion`
+    // ThreadedIr-verify violation (`producers: 2, consumers: 1`), which used to
+    // hard-panic via `report_threaded_ir_verify_errors`'s `debug_assert!` (this
+    // crate's dev/test profile builds with debug_assertions on).
+    //
+    // This requires an Actor with real `state:` elsewhere in the SAME compiled
+    // module: instance field-assignment only threads through this
+    // version-counted `State`/`maps:put` convention when the module needs
+    // gen_server/actor semantics — otherwise fields thread through a separate
+    // `Self`-counted convention `generate_class_method_fun_from_block` never
+    // touches. Beamtalk's CLI enforces one class per `.bt` file and the REPL
+    // compiles one expression per turn, so this exact shape is unreachable
+    // through either surface — only a caller building a multi-class `Module`
+    // directly (as `generate_module` allows, and as fuzzing does) can hit it.
+    // That's exactly how the nightly `compile_pipeline` fuzz target found it: a
+    // `CrossOver` mutation spliced fragments of an Actor fixture and
+    // `class_builder_incremental_test.bt` into one fuzz input.
+    let src = "Actor subclass: SlwActor\n  state: value = 41\n\nTestCase subclass: FooTest\n  field: cls = nil\n  field: parentCls = nil\n\n  testX =>\n    self.parentCls := 1\n    self.cls := Object classBuilder name: #Child;\n      superclass: Object;\n      addClassMethod: #greeting body: [:self | \"child\"];\n      register\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "Reproducer must parse cleanly. Got diagnostics: {diags:?}"
+    );
+
+    let result = generate_module(&module, CodegenOptions::new("bt3289_state_version_repro"));
+
+    assert!(
+        result.is_ok(),
+        "generate_module must not fail/panic on a second field-assignment \
+         whose value contains a classBuilder addClassMethod:body: cascade. Got: {result:?}"
+    );
+}
