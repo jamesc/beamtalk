@@ -1940,6 +1940,173 @@ mod tests {
         Ok(())
     }
 
+    // --- ADR 0114 Phase 5 (BT-3276): rename_class/rename_method MCP tool
+    // round-trip ---
+    //
+    // These exercise the same `evaluate` seam and expression shapes the
+    // `rename_class`/`rename_method` MCP tools
+    // (`crates/beamtalk-mcp::server::{rename_class,rename_method}`, via
+    // `beamtalk_core::tool_expr::{rename_class_expr,rename_method_expr}`)
+    // build against a live workspace — the underlying `renameTo:`/
+    // `renameSelector:to:` mutation + xref-driven site discovery +
+    // ChangeLog-logging mechanics have full unit/e2e coverage in
+    // `stdlib/test/rename_to_test.bt`/`rename_selector_to_test.bt` (BT-3278/
+    // BT-3279) and `tests/repl-protocol/cases/rename_class_flush_roundtrip
+    // .btscript`/`rename_method_flush_roundtrip.btscript` (BT-3271/BT-3273);
+    // these tests pin that the MCP tools' constructed expressions round-trip
+    // correctly through the same `evaluate` path the tools use, and that the
+    // resulting ChangeLog entry has the expected `rename-class`/
+    // `rename-method` kind.
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_rename_class_success() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        let resp = client
+            .eval("Object subclass: McpRenameClassTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        // Mirrors `rename_class_expr("McpRenameClassTarget", "McpRenameClassRenamed")`.
+        let resp = client
+            .evaluate_with_options(
+                "McpRenameClassTarget renameTo: #McpRenameClassRenamed",
+                false,
+            )
+            .await?;
+        assert!(
+            !resp.is_error(),
+            "renameTo: should succeed: {:?}",
+            resp.error
+        );
+        assert_eq!(resp.value_string(), "McpRenameClassRenamed");
+
+        let resp = client
+            .eval("Object allSubclasses includes: McpRenameClassRenamed")
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "true");
+
+        // The old name no longer resolves.
+        let resp = client.eval("McpRenameClassTarget").await?;
+        assert!(resp.is_error(), "old name should no longer resolve");
+
+        // A durable `rename-class` ChangeLog entry was appended.
+        let resp = client
+            .eval(
+                "((Workspace changes select: [:e | e className =:= #McpRenameClassRenamed]) last) kind",
+            )
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "rename-class");
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_rename_class_refuses_stdlib_class() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        // Mirrors `rename_class_expr("Integer", "Whole")`.
+        let resp = client
+            .evaluate_with_options("Integer renameTo: #Whole", false)
+            .await?;
+        assert!(resp.is_error(), "renaming a stdlib class should error");
+        assert!(
+            resp.error_message().is_some(),
+            "should carry an error message"
+        );
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_rename_method_success() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        // `Value subclass:`, not `Object subclass:` — this test instantiates
+        // via `new` below, and `Object` subclasses are not instantiable.
+        let resp = client
+            .eval("Value subclass: McpRenameMethodTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        // Mirrors `rename_method_expr("McpRenameMethodTarget", "greet", "sayHi")`.
+        let resp = client
+            .evaluate_with_options(
+                "McpRenameMethodTarget renameSelector: #greet to: #sayHi",
+                false,
+            )
+            .await?;
+        assert!(
+            !resp.is_error(),
+            "renameSelector:to: should succeed: {:?}",
+            resp.error
+        );
+        assert_eq!(resp.value_string(), "McpRenameMethodTarget");
+
+        let resp = client.eval("McpRenameMethodTarget new sayHi").await?;
+        assert!(
+            !resp.is_error(),
+            "new sayHi should succeed: {:?}",
+            resp.error
+        );
+        assert_eq!(resp.value_string(), "hi");
+
+        // The old selector is gone.
+        let resp = client.eval("McpRenameMethodTarget new greet").await?;
+        assert!(resp.is_error(), "old selector should no longer resolve");
+
+        // A durable `rename-method` ChangeLog entry was appended.
+        let resp = client
+            .eval(
+                "((Workspace changes select: [:e | e className =:= #McpRenameMethodTarget]) last) kind",
+            )
+            .await?;
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "rename-method");
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_rename_method_refuses_absent_selector() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        let resp = client
+            .eval("Object subclass: McpRenameMethodAbsentTarget\n  greet => \"hi\"")
+            .await?;
+        assert!(!resp.is_error(), "class definition should succeed");
+
+        // Mirrors `rename_method_expr("McpRenameMethodAbsentTarget", "bogus", "stillBogus")`.
+        let resp = client
+            .evaluate_with_options(
+                "McpRenameMethodAbsentTarget renameSelector: #bogus to: #stillBogus",
+                false,
+            )
+            .await?;
+        assert!(resp.is_error(), "renaming an absent selector should error");
+        assert!(
+            resp.error_message().is_some(),
+            "should carry an error message"
+        );
+
+        client.close().await;
+        Ok(())
+    }
+
     #[tokio::test]
     #[ignore = "integration test"]
     async fn test_flush_confirm_destructive_expressions_round_trip()

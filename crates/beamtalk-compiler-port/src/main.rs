@@ -2738,6 +2738,149 @@ fn handle_reindent_method_source(request: &Map) -> Term {
     ]))
 }
 
+/// Handle a `find_selector_send_spans` request (ADR 0114, BT-3279).
+///
+/// Backs `Behaviour>>renameSelector:to:`'s reference-site rewrite: given one
+/// owning method's source text (a slice already resolved via
+/// `resolve_method_span`) and an `(old_selector, new_selector)` pair,
+/// resolve the exact byte span(s) of every self/super-directed send of
+/// `old_selector` within it — the splice targets a safe auto-rewrite needs.
+/// `beamtalk_xref:senders_of/1` only carries a *line* number per sending
+/// method, and a whole-method span is too coarse to splice a single send's
+/// selector token(s) without corrupting the rest of the body; see
+/// [`beamtalk_core::queries::selector_rename_query::find_selector_send_spans`]
+/// for the full "why not regex" rationale (a multi-keyword selector like
+/// `at:put:` can have arbitrary nested expressions between its keyword
+/// parts).
+///
+/// Request fields:
+/// - `method_source` (binary): the method source text to search
+/// - `old_selector` (binary): the selector being renamed
+/// - `new_selector` (binary): its replacement
+///
+/// Response: `#{status => ok, occurrences => [[#{start => S, end => E,
+/// new_text => <<...>>}, ...], ...]}` — one inner list per matched self/super
+/// send (a keyword selector contributes one map per keyword part, in
+/// keyword-part order; unary/binary contribute a single-element inner
+/// list). Returns an empty outer list when no matching sends are found, the
+/// source cannot be parsed, or `old_selector`/`new_selector` differ in
+/// keyword arity for a given occurrence (that occurrence is simply skipped,
+/// never a panic) — this resolver has no failure mode beyond "found
+/// nothing" (see that function's own doc), so there is no `status => error`
+/// shape here.
+fn handle_find_selector_send_spans(request: &Map) -> Term {
+    let Some(method_source) = map_get(request, "method_source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'method_source' field".to_string()]);
+    };
+    let Some(old_selector) = map_get(request, "old_selector").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'old_selector' field".to_string()]);
+    };
+    let Some(new_selector) = map_get(request, "new_selector").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'new_selector' field".to_string()]);
+    };
+
+    let occurrences = beamtalk_core::queries::selector_rename_query::find_selector_send_spans(
+        &method_source,
+        &old_selector,
+        &new_selector,
+    );
+
+    let occurrence_terms: Vec<Term> = occurrences
+        .iter()
+        .map(|spans| Term::from(List::from(selector_send_span_terms(spans))))
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (
+            atom("occurrences"),
+            Term::from(List::from(occurrence_terms)),
+        ),
+    ]))
+}
+
+/// Shared `#{start, end, new_text}` term builder for both selector-rename
+/// span commands (`find_selector_send_spans`, `find_definition_selector_spans`).
+fn selector_send_span_terms(
+    spans: &[beamtalk_core::queries::selector_rename_query::SelectorSendSpan],
+) -> Vec<Term> {
+    spans
+        .iter()
+        .map(|s| {
+            Term::from(Map::from([
+                (
+                    atom("start"),
+                    int_term(i32::try_from(s.span.start()).unwrap_or(i32::MAX)),
+                ),
+                (
+                    atom("end"),
+                    int_term(i32::try_from(s.span.end()).unwrap_or(i32::MAX)),
+                ),
+                (atom("new_text"), binary(&s.new_text)),
+            ]))
+        })
+        .collect()
+}
+
+/// Handle a `find_definition_selector_spans` request (ADR 0114, BT-3279).
+///
+/// Backs `Behaviour>>renameSelector:to:`'s DEFINITION-site rewrite: given a
+/// class's current full source, resolve `(old_selector, side)`'s own
+/// method-definition selector-token span(s) — a narrow splice target, never
+/// the whole method body. See
+/// [`beamtalk_core::queries::selector_rename_query::find_definition_selector_spans`]'s
+/// doc for why a whole-body replacement here would corrupt the method's own
+/// parameter names/logic on rewrite, and for how the unary/binary case
+/// (which carries no dedicated selector span from the parser) is resolved.
+///
+/// Request fields:
+/// - `source` (binary): the class's current full source text
+/// - `class_name` (binary): the target class name
+/// - `old_selector` (binary): the selector being renamed
+/// - `new_selector` (binary): its replacement
+/// - `side` (atom, optional): `instance` (default) or `class`
+///
+/// Response on success: `#{status => ok, spans => [#{start => S, end => E,
+/// new_text => <<...>>}, ...]}` (empty when `old_selector`/`new_selector`
+/// differ in keyword arity — never a panic). Failures (class not found,
+/// selector not found, ambiguous) come back as `#{status => error, reason
+/// => <atom>, ...}`, mirroring `resolve_method_span`'s own error shape
+/// exactly (same [`SpanResolveError`] variants, same `method_span_error_response`).
+fn handle_find_definition_selector_spans(request: &Map) -> Term {
+    use beamtalk_core::queries::selector_rename_query::find_definition_selector_spans;
+    use beamtalk_core::source_analysis::MethodSide;
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(class_name) = map_get(request, "class_name").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_name' field".to_string()]);
+    };
+    let Some(old_selector) = map_get(request, "old_selector").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'old_selector' field".to_string()]);
+    };
+    let Some(new_selector) = map_get(request, "new_selector").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'new_selector' field".to_string()]);
+    };
+    // `side` is optional; absent (or unrecognised) means the instance side —
+    // same convention as `handle_resolve_method_span`.
+    let side = match map_get(request, "side").and_then(term_to_atom).as_deref() {
+        Some("class") => MethodSide::Class,
+        _ => MethodSide::Instance,
+    };
+
+    match find_definition_selector_spans(&source, &class_name, &old_selector, &new_selector, side) {
+        Ok(spans) => Term::from(Map::from([
+            (atom("status"), atom("ok")),
+            (
+                atom("spans"),
+                Term::from(List::from(selector_send_span_terms(&spans))),
+            ),
+        ])),
+        Err(err) => method_span_error_response(&err),
+    }
+}
+
 /// Build a structured error response for a [`SpanResolveError`].
 ///
 /// The `reason` atom lets the Erlang hook branch without string-matching; the
@@ -3091,6 +3234,8 @@ fn handle_request(request_term: &Term) -> Term {
         "resolve_method_span" => handle_resolve_method_span(map),
         "reindent_method_source" => handle_reindent_method_source(map),
         "resolve_class_span" => handle_resolve_class_span(map),
+        "find_selector_send_spans" => handle_find_selector_send_spans(map),
+        "find_definition_selector_spans" => handle_find_definition_selector_spans(map),
         "categorize_methods" => handle_categorize_methods(map),
         "class_state_field_defaults" => handle_class_state_field_defaults(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
@@ -4494,6 +4639,156 @@ Object subclass: Counter
         };
         assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
         assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
+    }
+
+    // --- find_selector_send_spans tests (ADR 0114, BT-3279) ---
+
+    #[test]
+    fn find_selector_send_spans_finds_unary_self_send() {
+        let request = Map::from([
+            (atom("command"), atom("find_selector_send_spans")),
+            (atom("method_source"), binary("self basicNew")),
+            (atom("old_selector"), binary("basicNew")),
+            (atom("new_selector"), binary("newBasic")),
+        ]);
+        let response = handle_find_selector_send_spans(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(occurrences)) = map_get(m, "occurrences") else {
+            panic!("occurrences should be a list: {response:?}");
+        };
+        assert_eq!(occurrences.elements.len(), 1, "got {occurrences:?}");
+        let Term::List(ref spans) = occurrences.elements[0] else {
+            panic!("occurrence should be a list: {occurrences:?}");
+        };
+        assert_eq!(spans.elements.len(), 1);
+        let Term::Map(ref span) = spans.elements[0] else {
+            panic!("span should be a map: {spans:?}");
+        };
+        assert_eq!(
+            map_get(span, "new_text"),
+            Some(&binary("newBasic")),
+            "{span:?}"
+        );
+        let start = map_get(span, "start").and_then(term_to_usize).unwrap();
+        let end = map_get(span, "end").and_then(term_to_usize).unwrap();
+        assert_eq!(&"self basicNew"[start..end], "basicNew");
+    }
+
+    #[test]
+    fn find_selector_send_spans_no_match_is_empty_not_error() {
+        let request = Map::from([
+            (atom("command"), atom("find_selector_send_spans")),
+            (atom("method_source"), binary("anObject increment")),
+            (atom("old_selector"), binary("increment")),
+            (atom("new_selector"), binary("bump")),
+        ]);
+        let response = handle_find_selector_send_spans(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(occurrences)) = map_get(m, "occurrences") else {
+            panic!("occurrences should be a list: {response:?}");
+        };
+        assert!(occurrences.elements.is_empty(), "got {occurrences:?}");
+    }
+
+    #[test]
+    fn find_selector_send_spans_keyword_selector_produces_one_span_per_part() {
+        let request = Map::from([
+            (atom("command"), atom("find_selector_send_spans")),
+            (atom("method_source"), binary("self at: k put: v")),
+            (atom("old_selector"), binary("at:put:")),
+            (atom("new_selector"), binary("setAt:to:")),
+        ]);
+        let response = handle_find_selector_send_spans(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        let Some(Term::List(occurrences)) = map_get(m, "occurrences") else {
+            panic!("occurrences should be a list: {response:?}");
+        };
+        assert_eq!(occurrences.elements.len(), 1, "got {occurrences:?}");
+        let Term::List(ref spans) = occurrences.elements[0] else {
+            panic!("occurrence should be a list: {occurrences:?}");
+        };
+        assert_eq!(spans.elements.len(), 2, "got {spans:?}");
+    }
+
+    // --- find_definition_selector_spans tests (ADR 0114, BT-3279) ---
+
+    #[test]
+    fn find_definition_selector_spans_finds_unary_selector() {
+        let request = Map::from([
+            (atom("command"), atom("find_definition_selector_spans")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+            (atom("old_selector"), binary("increment")),
+            (atom("new_selector"), binary("bump")),
+        ]);
+        let response = handle_find_definition_selector_spans(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(spans)) = map_get(m, "spans") else {
+            panic!("spans should be a list: {response:?}");
+        };
+        assert_eq!(spans.elements.len(), 1, "got {spans:?}");
+        let Term::Map(ref span) = spans.elements[0] else {
+            panic!("span should be a map: {spans:?}");
+        };
+        let start = map_get(span, "start").and_then(term_to_usize).unwrap();
+        let end = map_get(span, "end").and_then(term_to_usize).unwrap();
+        assert_eq!(&SPAN_FIXTURE[start..end], "increment");
+        assert_eq!(map_get(span, "new_text"), Some(&binary("bump")));
+    }
+
+    #[test]
+    fn find_definition_selector_spans_class_side() {
+        let request = Map::from([
+            (atom("command"), atom("find_definition_selector_spans")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+            (atom("old_selector"), binary("new")),
+            (atom("new_selector"), binary("make")),
+            (atom("side"), atom("class")),
+        ]);
+        let response = handle_find_definition_selector_spans(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        let Some(Term::List(spans)) = map_get(m, "spans") else {
+            panic!("spans should be a list: {response:?}");
+        };
+        assert_eq!(spans.elements.len(), 1, "got {spans:?}");
+        let Term::Map(ref span) = spans.elements[0] else {
+            panic!("span should be a map: {spans:?}");
+        };
+        let start = map_get(span, "start").and_then(term_to_usize).unwrap();
+        let end = map_get(span, "end").and_then(term_to_usize).unwrap();
+        assert_eq!(&SPAN_FIXTURE[start..end], "new");
+    }
+
+    #[test]
+    fn find_definition_selector_spans_selector_not_found_is_structured_error() {
+        let request = Map::from([
+            (atom("command"), atom("find_definition_selector_spans")),
+            (atom("source"), binary(SPAN_FIXTURE)),
+            (atom("class_name"), binary("Counter")),
+            (atom("old_selector"), binary("nope")),
+            (atom("new_selector"), binary("stillNope")),
+        ]);
+        let response = handle_find_definition_selector_spans(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
+        assert_eq!(map_get(m, "reason"), Some(&atom("selector_not_found")));
     }
 
     // --- resolve_class_span tests (ADR 0082 extension, BT-3248) ---

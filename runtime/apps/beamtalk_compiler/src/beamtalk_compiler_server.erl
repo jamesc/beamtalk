@@ -49,7 +49,9 @@ to avoid temp files on disk (BT-48).
     resolve_class_span/2,
     categorize_methods/2,
     class_state_field_defaults/2,
-    reindent_method_source/2
+    reindent_method_source/2,
+    find_selector_send_spans/3,
+    find_definition_selector_spans/5
 ]).
 
 %% gen_server callbacks
@@ -565,6 +567,60 @@ resolve_class_span(Source, ClassName) ->
     end.
 
 -doc """
+Resolve the exact byte span(s) of every self/super-directed send of
+`OldSelector' within `MethodSource' (ADR 0114, BT-3279) — see
+`beamtalk_compiler_port:find_selector_send_spans/4' for the full wire shape
+and "why not regex" rationale. Backs `Behaviour>>renameSelector:to:''s
+reference-site rewrite. Returns `{ok, Occurrences}' (a list of lists — one
+inner list per matched self/super send; empty when nothing matches or a
+match's keyword arity mismatched); transport failures return
+`{error, port_error | noproc | timeout, Message}'.
+""".
+-spec find_selector_send_spans(binary(), atom() | binary(), atom() | binary()) ->
+    {ok, [[#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]]}
+    | {error, atom(), binary()}.
+find_selector_send_spans(MethodSource, OldSelector, NewSelector) ->
+    try
+        gen_server:call(
+            ?MODULE, {find_selector_send_spans, MethodSource, OldSelector, NewSelector}, 30000
+        )
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
+Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
+selector-token span(s) within `Source' (ADR 0114, BT-3279) — see
+`beamtalk_compiler_port:find_definition_selector_spans/6' for the full wire
+shape. Backs `Behaviour>>renameSelector:to:''s definition-site rewrite — a
+narrow selector-token splice, never the whole method body. Returns
+`{ok, Spans}' on success; resolution failures (class/selector not found,
+ambiguous) return `{error, Reason, Message}'; transport failures return
+`{error, port_error | noproc | timeout, Message}'.
+""".
+-spec find_definition_selector_spans(
+    binary(), atom() | binary(), atom() | binary(), atom() | binary(), instance | class
+) ->
+    {ok, [#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]}
+    | {error, atom(), binary()}.
+find_definition_selector_spans(Source, ClassName, OldSelector, NewSelector, Side) ->
+    try
+        gen_server:call(
+            ?MODULE,
+            {find_definition_selector_spans, Source, ClassName, OldSelector, NewSelector, Side},
+            30000
+        )
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Group a class's methods by its `// === Name ===' section dividers
 (BT-3239, extended by BT-3238 with `divider_span'/method `span' for the
 Cockpit's section-authoring write path) — see
@@ -969,6 +1025,20 @@ handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, Sta
 handle_call({resolve_class_span, Source, ClassName}, _From, State) ->
     Result = beamtalk_compiler_port:resolve_class_span(
         State#state.port, Source, ClassName
+    ),
+    {reply, Result, State};
+handle_call({find_selector_send_spans, MethodSource, OldSelector, NewSelector}, _From, State) ->
+    Result = beamtalk_compiler_port:find_selector_send_spans(
+        State#state.port, MethodSource, OldSelector, NewSelector
+    ),
+    {reply, Result, State};
+handle_call(
+    {find_definition_selector_spans, Source, ClassName, OldSelector, NewSelector, Side},
+    _From,
+    State
+) ->
+    Result = beamtalk_compiler_port:find_definition_selector_spans(
+        State#state.port, Source, ClassName, OldSelector, NewSelector, Side
     ),
     {reply, Result, State};
 handle_call({categorize_methods, Source, ClassName}, _From, State) ->

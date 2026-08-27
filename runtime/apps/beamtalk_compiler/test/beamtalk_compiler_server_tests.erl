@@ -431,6 +431,99 @@ compile_expression_trace_ambient_alias_backstop() ->
     ).
 
 %%% ---------------------------------------------------------------
+%%% Noproc degradation — call-path API functions return
+%%% {error, noproc, Msg} when the compiler server is not running.
+%%% Silent-fallback functions (get_classes/0, get_aliases/0) return
+%%% empty data structures matching their contract spec.
+%%% Covers lines that were previously unreachable in test because no
+%%% test ever called these functions without a live server process.
+%%% ---------------------------------------------------------------
+
+noproc_degradation_test_() ->
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"resolve_method_span/4 when down → {error, noproc, _}",
+            fun resolve_method_span_when_down/0},
+        {"resolve_class_span/2 when down → {error, noproc, _}", fun resolve_class_span_when_down/0},
+        {"find_selector_send_spans/3 when down → {error, noproc, _}",
+            fun find_selector_send_spans_when_down/0},
+        {"find_definition_selector_spans/5 when down → {error, noproc, _}",
+            fun find_definition_selector_spans_when_down/0},
+        {"categorize_methods/2 when down → {error, noproc, _}", fun categorize_methods_when_down/0},
+        {"class_state_field_defaults/2 when down → {error, noproc, _}",
+            fun class_state_field_defaults_when_down/0},
+        {"reindent_method_source/2 when down → {error, noproc, _}",
+            fun reindent_method_source_when_down/0},
+        {"get_classes/0 when down → #{} (silent fallback)", fun get_classes_when_down/0},
+        {"get_aliases/0 when down → [] (silent fallback)", fun get_aliases_when_down/0}
+    ]}.
+
+resolve_method_span_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:resolve_method_span(
+        <<"Object subclass: Tmp\n  foo => 1\n">>, <<"Tmp">>, <<"foo">>, instance
+    ),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+resolve_class_span_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:resolve_class_span(
+        <<"Object subclass: Tmp\n">>, <<"Tmp">>
+    ),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+find_selector_send_spans_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:find_selector_send_spans(
+        <<"self foo">>, <<"foo">>, <<"bar">>
+    ),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+find_definition_selector_spans_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:find_definition_selector_spans(
+        <<"Object subclass: Tmp\n  foo => 1\n">>, <<"Tmp">>, <<"foo">>, <<"bar">>, instance
+    ),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+categorize_methods_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:categorize_methods(
+        <<"Object subclass: Tmp\n  foo => 1\n">>, <<"Tmp">>
+    ),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+class_state_field_defaults_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:class_state_field_defaults(
+        <<"Object subclass: Tmp\n  state: x = 0\n  foo => self.x\n">>, <<"Tmp">>
+    ),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+reindent_method_source_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:reindent_method_source(<<"foo => 1">>, <<"  ">>),
+    application:start(beamtalk_compiler),
+    ?assertMatch({error, noproc, _}, Result).
+
+get_classes_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:get_classes(),
+    application:start(beamtalk_compiler),
+    ?assertEqual(#{}, Result).
+
+get_aliases_when_down() ->
+    application:stop(beamtalk_compiler),
+    Result = beamtalk_compiler_server:get_aliases(),
+    application:start(beamtalk_compiler),
+    ?assertEqual([], Result).
+
+%%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)
 %%% ---------------------------------------------------------------
 

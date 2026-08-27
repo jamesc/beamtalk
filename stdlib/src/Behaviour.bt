@@ -526,3 +526,95 @@ abstract Object subclass: Behaviour
   /// Integer removeFromSystem   // => Error: cannot remove stdlib class
   /// ```
   sealed removeFromSystem -> Nil => @primitive "classRemoveFromSystem"
+
+  // === Class rename (ADR 0114 Phase 2) ===
+
+  /// Rename this class to `aNewName`, rewriting every in-project reference
+  /// site and re-registering it under the new name.
+  ///
+  /// Site discovery is the union of `SystemNavigation default referencesTo:
+  /// self` (body/type-annotation/extension references) and
+  /// `direct_subclasses:` (superclass-declaration references) — the one
+  /// reference kind `referencesTo:` doesn't cover — reusing already-shipped
+  /// xref infrastructure rather than a new query (ADR 0087). This primitive
+  /// is in-memory only; flushing the rename to disk (file move, on-disk
+  /// reference rewrite) is a separate operation (`Workspace
+  /// flushIncludingDestructive`).
+  ///
+  /// A collision with an existing class name is refused loudly rather than
+  /// silently overwritten, the same way `removeFromSystem` refuses a name it
+  /// can't act on. Stdlib and dependency classes are also refused — the
+  /// xref index only covers in-project source, so site discovery for either
+  /// could never be complete. A dynamic (`ClassBuilder`) class is allowed:
+  /// it has no external file-based referents beyond what's already indexed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter renameTo: #Accumulator   // => Accumulator (Counter's old name is gone)
+  /// Counter renameTo: #Existing
+  /// // => error: cannot rename Counter to Existing — Existing already exists
+  /// //    hint: remove or rename the existing class first
+  /// Integer renameTo: #Whole   // => Error: cannot rename stdlib class
+  /// ```
+  sealed renameTo: aNewName :: Symbol -> Behaviour => @primitive "classRenameTo"
+
+  // === Method rename (ADR 0114 Phase 3) ===
+
+  /// Rename `aSelector` to `aNewSelector` on the receiver's side,
+  /// auto-rewriting only the self/super sends the cross-reference index can
+  /// prove are structurally safe, raising if `aSelector` is not defined
+  /// locally.
+  ///
+  /// Side follows `removeSelector:`'s own convention: sent to a class
+  /// object this touches the instance-side method table; sent to that
+  /// class's metaclass (`Counter class`) it touches the class-side table.
+  /// Local method table only — an extension method (ADR 0066) is not
+  /// resolved or renamed here.
+  ///
+  /// `sendersOf: aSelector` (ADR 0087) reports every textual send of that
+  /// selector project-wide, regardless of which class's implementation the
+  /// sender actually meant — auto-rewriting all of them could silently
+  /// corrupt unrelated code that happens to share a selector name. Only a
+  /// `self`/`super` send whose owner is this class or one of its
+  /// subclasses, AND ONLY when no override of `aSelector` exists anywhere
+  /// in that subclass tree, is auto-rewritten. Everything else — an
+  /// arbitrary-receiver send (the common external-caller case), an
+  /// unrelated class sharing the selector name, or every self/super site
+  /// when an override exists anywhere — is reported as a `candidate_sites`
+  /// entry on the resulting ChangeLog entry for human/agent review, never
+  /// rewritten automatically.
+  ///
+  /// A collision with an existing local selector is refused loudly rather
+  /// than silently overwritten, the same way `renameTo:` refuses an
+  /// existing class name.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter renameSelector: #increment to: #incrementBy
+  /// Counter class renameSelector: #ofSize: to: #withCapacity:
+  /// Counter renameSelector: #increment to: #decrement
+  /// // => error: Counter already defines #decrement locally — refusing to overwrite
+  /// //    hint: removeSelector: #decrement first, or choose a different target name
+  /// ```
+  sealed renameSelector: aSelector :: Symbol to: aNewSelector :: Symbol -> Behaviour =>
+    @primitive "classRenameSelector"
+
+  /// Rename `aSelector` to `aNewSelector` like `renameSelector:to:`, but
+  /// evaluate `absentBlock` instead of raising when `aSelector` is not
+  /// defined locally.
+  ///
+  /// Mirrors `removeSelector:ifAbsent:`'s shape: returns the receiver on
+  /// success, or `absentBlock`'s value on absence. The collision refusal
+  /// (`aNewSelector` already locally defined) always raises regardless of
+  /// this escape hatch — `absentBlock` only substitutes for "`aSelector`
+  /// not found".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter renameSelector: #bogus to: #stillBogus ifAbsent: ["not found"]
+  /// // => "not found"
+  /// Counter renameSelector: #increment to: #incrementBy ifAbsent: ["not found"]
+  /// // => Counter
+  /// ```
+  sealed renameSelector: aSelector :: Symbol to: aNewSelector :: Symbol ifAbsent: absentBlock :: Block(T) -> Behaviour | T =>
+    @primitive "classRenameSelectorIfAbsent"

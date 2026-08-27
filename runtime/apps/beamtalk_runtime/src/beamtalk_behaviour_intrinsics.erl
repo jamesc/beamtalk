@@ -46,6 +46,9 @@ that the Behaviour/Class libraries can rely on.
 | classReload/1               | Recompile from sourceFile + hot-swap (BT-845)             |
 | classConformsTo/2           | Check if class conforms to a protocol (ADR 0068 Phase 2c) |
 | classProtocols/1            | List protocols the class conforms to (ADR 0068 Phase 2c)  |
+| classRenameTo/2             | Rename the class + rewrite reference sites (ADR 0114 Phase 2, BT-3278) |
+| classRenameSelector/3       | Rename a selector + rewrite safe self/super sites (ADR 0114 Phase 3, BT-3279) |
+| classRenameSelectorIfAbsent/4 | Rename a selector, running a fallback block if absent (ADR 0114 Phase 3, BT-3279) |
 """.
 
 -include("beamtalk.hrl").
@@ -98,8 +101,23 @@ that the Behaviour/Class libraries can rely on.
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
     classProtocols/1,
+    %% ADR 0114 Phase 2 (BT-3278): class rename primitive
+    classRenameTo/2,
+    %% ADR 0114 Phase 3 (BT-3279): method rename primitives
+    classRenameSelector/3,
+    classRenameSelectorIfAbsent/4,
     %% ADR 0079 / BT-1988: exposed for cross-module hierarchy checks
-    walk_hierarchy/3
+    walk_hierarchy/3,
+    %% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:`'s
+    %% `'rename-class'` undo needs the SAME identity-move-then-retire
+    %% sequence `classRenameTo/2`'s own forward path uses (`beamtalk_
+    %% repl_loader:finish_rename_class_revert/1` calls this directly —
+    %% `beamtalk_workspace` already depends on `beamtalk_runtime` at compile
+    %% time, so no `erlang:apply/3` indirection is needed here, unlike the
+    %% reverse direction this module's other cross-app calls use) rather
+    %% than duplicating its whereis/stop/purge sequence (CLAUDE.md's
+    %% no-duplicate-implementations rule).
+    install_class_rename/3
 ]).
 
 %%% ============================================================================
@@ -975,6 +993,663 @@ log_class_removal(ClassNameBin, Snapshot) ->
     end,
     ok.
 
+%%% ============================================================================
+%%% Class Rename Primitive (ADR 0114 Phase 2, BT-3278)
+%%% ============================================================================
+
+-doc """
+Rename the receiver class to `NewName`, rewriting every in-project reference
+site found via `SystemNavigation referencesTo:` / `beamtalk_class_registry:
+direct_subclasses/1`, and re-registering it under `NewName` in memory.
+
+Backs `@primitive "classRenameTo"` (`Behaviour>>renameTo:`), modelled on
+`classRemoveSelector/2`'s shape immediately above: resolve the target,
+validate, mutate, best-effort log, return the receiver. Unlike
+`removeSelector:`'s "flushable, not refusal" rule, this primitive follows
+ADR 0114 § "Refusal vs flushability"'s per-operation table — a stdlib or
+dependency class is refused BEFORE any memory mutation (the xref index only
+covers in-project source, so site discovery for either could never be
+complete), while a dynamic (`ClassBuilder`) class is allowed with
+`flushable: false` (`"dynamic"`), same as a project class's disk half
+(BT-3271, out of scope here — this primitive is in-memory only).
+
+## Ordering
+
+1. Resolve `OldName` from the receiver's live class-object state (mirrors
+   `className/1` — never trust `Self`'s own possibly-stale `class` field).
+2. Collision refusal: `NewName` already a loaded class — raised before any
+   other check, cheapest and most fundamental ("nothing about this call can
+   proceed").
+3. Stdlib/dependency refusal, reusing `capture_class_removal_snapshot/1`'s
+   existing flushability classification (no new stdlib/dependency/dynamic
+   detection logic — see that function's own doc). Still read-only.
+4. Site discovery (`discover_rename_sites/3`) — read-only: computes the
+   union of `referencesTo:`/`direct_subclasses/1` translated into
+   `beamtalk_repl_loader:rewrite_site()` maps, plus the class's own
+   declaration-header span as the definition site.
+5. Mutate: for an ordinary (project) class, `rewrite_sites/2` (shared
+   mechanism, BT-3270) installs every site transactionally and that same
+   install is what publishes the new pid, so `install_class_rename/3` only
+   retires the old registry identity afterward. For a dynamic class, the
+   two mutations are unrelated calls into different subsystems with no
+   shared rollback, so `do_rename_and_rewrite/7` validates the rewrite
+   FIRST (`validate_class_sites/4`, non-mutating), moves the registry
+   identity from `OldName` to `NewName` second (`install_class_rename/3` —
+   see its own doc for the dynamic-vs-compiled split), and only then
+   performs the real rewrite — see `do_rename_and_rewrite/7`'s own doc for
+   why.
+6. Best-effort ChangeLog append (`log_class_rename/4`), mirroring
+   `log_local_removal/3`'s placement — the rename is already live in memory
+   by this point, so a logging failure must never surface to the caller.
+
+Raises a structured `#beamtalk_error{}` for the collision/stdlib/dependency
+refusals and for a `rewrite_sites/2` failure (validation or partial
+install); returns the receiver, re-pointed at the newly-installed class
+object, on success.
+""".
+-spec classRenameTo(#beamtalk_object{}, atom()) -> #beamtalk_object{}.
+classRenameTo(Self, NewName) when is_atom(NewName) ->
+    ClassPid = erlang:element(4, Self),
+    OldName = gen_server:call(ClassPid, class_name),
+    ok = ensure_rename_collision_free(OldName, NewName),
+    OldNameBin = atom_to_binary(OldName, utf8),
+    Classification = capture_class_removal_snapshot(OldNameBin),
+    ok = ensure_class_renamable(OldName, Classification),
+    NewNameBin = atom_to_binary(NewName, utf8),
+    {DefinitionSite, ReferenceSites} =
+        discover_rename_sites(OldName, OldNameBin, NewNameBin, Classification),
+    do_rename_and_rewrite(
+        OldName, OldNameBin, NewName, NewNameBin, DefinitionSite, ReferenceSites, Classification
+    ).
+
+%% Ordering for a DYNAMIC class differs from an ordinary one (review
+%% feedback on PR #3523): a dynamic class's registry-identity move
+%% (`install_class_rename/3` -> `beamtalk_object_class:rename/2`) is a
+%% SEPARATE call from its reference-site rewrite — `rewrite_class_sites/4`
+%% only ever touches OTHER classes' files for a dynamic class, since it has
+%% no source of its own to fold into that transaction. Committing either
+%% mutation before confirming the OTHER would succeed risks the same class
+%% of half-applied state either way round: identity-move-first leaves
+%% referencing files un-rewritten if the rewrite then fails (a real,
+%% reachable case — `validation_failed`/`invalid_or_overlapping_span`/
+%% `workspace_unavailable`, not just the TOCTOU registration race the
+%% comment on `install_class_rename/3` describes); rewrite-first leaves
+%% referencing files pointing at a name the class never adopted if the
+%% identity move then fails. Neither mutation has a rollback, so the fix
+%% is to validate the rewrite FIRST via `validate_class_sites/4` (the same
+%% non-mutating compile-only check `rewrite_sites/2` itself runs before its
+%% own install pass, exposed standalone for exactly this cross-subsystem
+%% ordering need) — only once that passes does the identity move run,
+%% and only then the real (now expected-to-succeed) rewrite. A rewrite
+%% failure at that final step despite passing validation is the same
+%% already-accepted residual risk `rewrite_sites/2`'s own doc names for its
+%% `partial_install_failure` case (no cross-gen-server rollback), not a new
+%% gap this function introduces — surfaced via `rename_partial_failure_error/3`
+%% rather than `rename_rewrite_failed_error/2` since it is a genuinely
+%% different situation for the caller: the class HAS been renamed at that
+%% point. For an ordinary (project) class, the definition site's own
+%% recompile (part of the SAME `rewrite_sites/2` transaction as the
+%% reference sites) is what installs the new pid — there is no separate
+%% identity-move step to reorder, so the original
+%% site-rewrite-then-retire-old-identity order stands.
+-spec do_rename_and_rewrite(
+    atom(), binary(), atom(), binary(), map() | undefined, [map()], map()
+) -> #beamtalk_object{}.
+do_rename_and_rewrite(
+    OldName,
+    OldNameBin,
+    NewName,
+    NewNameBin,
+    DefinitionSite,
+    ReferenceSites,
+    #{not_flushable_reason := <<"dynamic">>} = Classification
+) ->
+    case validate_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+        ok ->
+            NewPid = install_class_rename(OldName, NewName, Classification),
+            case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+                {ok, RewriteResult} ->
+                    log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
+                    beamtalk_class_registry:class_object_from_pid(NewPid);
+                {error, Reason} ->
+                    beamtalk_error:raise(
+                        rename_partial_failure_error(OldName, NewName, Reason)
+                    )
+            end;
+        {error, Reason} ->
+            beamtalk_error:raise(rename_rewrite_failed_error(OldName, Reason))
+    end;
+do_rename_and_rewrite(
+    OldName, OldNameBin, NewName, NewNameBin, DefinitionSite, ReferenceSites, Classification
+) ->
+    case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+        {ok, RewriteResult} ->
+            NewPid = install_class_rename(OldName, NewName, Classification),
+            log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
+            beamtalk_class_registry:class_object_from_pid(NewPid);
+        {error, Reason} ->
+            beamtalk_error:raise(rename_rewrite_failed_error(OldName, Reason))
+    end.
+
+%% Collision refusal (ADR 0114 § Decision): `renameTo: #Existing` when
+%% `Existing` already names a loaded class raises rather than silently
+%% overwriting — exact hint text from the ADR's own worked example.
+-spec ensure_rename_collision_free(atom(), atom()) -> ok.
+ensure_rename_collision_free(OldName, NewName) ->
+    case beamtalk_class_registry:whereis_class(NewName) of
+        undefined -> ok;
+        _Pid -> beamtalk_error:raise(rename_collision_error(OldName, NewName))
+    end.
+
+-spec rename_collision_error(atom(), atom()) -> #beamtalk_error{}.
+rename_collision_error(OldName, NewName) ->
+    OldBin = atom_to_binary(OldName, utf8),
+    NewBin = atom_to_binary(NewName, utf8),
+    Error0 = beamtalk_error:new(class_already_exists, OldName),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"cannot rename ">>,
+            OldBin,
+            <<" to ">>,
+            NewBin,
+            <<" — "/utf8>>,
+            NewBin,
+            <<" already exists">>
+        ])
+    ),
+    beamtalk_error:with_hint(Error1, <<"remove or rename the existing class first">>).
+
+%% Stdlib/dependency refusal (ADR 0114 § "Refusal vs flushability"): a
+%% dynamic class (`not_flushable_reason: "dynamic"`) and an ordinary project
+%% class (`flushable: true`) both proceed; only "stdlib" and "dependency:*"
+%% refuse, BEFORE any site discovery or mutation runs.
+-spec ensure_class_renamable(atom(), map()) -> ok.
+ensure_class_renamable(ClassName, #{not_flushable_reason := <<"stdlib">>}) ->
+    beamtalk_error:raise(stdlib_rename_refusal_error(ClassName));
+ensure_class_renamable(ClassName, #{not_flushable_reason := <<"dependency:", _/binary>> = Reason}) ->
+    beamtalk_error:raise(dependency_rename_refusal_error(ClassName, Reason));
+ensure_class_renamable(_ClassName, _Classification) ->
+    ok.
+
+-spec stdlib_rename_refusal_error(atom()) -> #beamtalk_error{}.
+stdlib_rename_refusal_error(ClassName) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"Cannot rename stdlib class '">>, atom_to_binary(ClassName, utf8), <<"'">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Error1,
+        <<
+            "Stdlib classes are protected and cannot be renamed; the xref "
+            "index only covers in-project source, so references outside the "
+            "project could never be found and rewritten."
+        >>
+    ).
+
+-spec dependency_rename_refusal_error(atom(), binary()) -> #beamtalk_error{}.
+dependency_rename_refusal_error(ClassName, Reason) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"Cannot rename dependency class '">>, atom_to_binary(ClassName, utf8), <<"'">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Error1,
+        iolist_to_binary([
+            <<"This class is defined outside the project (">>,
+            Reason,
+            <<
+                "); the xref index only covers in-project source, so its "
+                "references cannot be found and rewritten safely."
+            >>
+        ])
+    ).
+
+-spec rename_rewrite_failed_error(atom(), term()) -> #beamtalk_error{}.
+rename_rewrite_failed_error(OldName, workspace_unavailable) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    beamtalk_error:with_message(
+        Error0,
+        <<"Workspace not available; renameTo: requires a running workspace">>
+    );
+%% A non-dynamic classification with neither a definition nor any reference
+%% site — the divergent-classification edge case `rewrite_class_sites/4`'s
+%% own doc describes, falling through to a real `{error, no_sites}` from
+%% `rewrite_sites/2` instead of that function's dynamic-only trivial-success
+%% shortcut.
+rename_rewrite_failed_error(OldName, no_sites) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    beamtalk_error:with_message(
+        Error0,
+        <<"renameTo: found no declaration or reference site to rewrite">>
+    );
+rename_rewrite_failed_error(OldName, Reason) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    Msg = iolist_to_binary(io_lib:format("Could not rename class: ~p", [Reason])),
+    beamtalk_error:with_message(Error0, Msg).
+
+%% A dynamic class's identity move committed AFTER `validate_class_sites/4`
+%% already passed, yet the real rewrite still failed (`do_rename_and_rewrite/7`'s
+%% own doc names this the same already-accepted residual risk
+%% `rewrite_sites/2`'s `partial_install_failure` case describes — no
+%% cross-gen-server rollback). Deliberately a distinct error from
+%% `rename_rewrite_failed_error/2`: that one always means "nothing changed",
+%% this one means the class IS renamed but some reference sites are not.
+-spec rename_partial_failure_error(atom(), atom(), term()) -> #beamtalk_error{}.
+rename_partial_failure_error(OldName, NewName, Reason) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "Renamed ~p to ~p, but rewriting its reference sites failed after "
+            "validation passed (partial state — the class's own identity has "
+            "already moved; investigate before retrying): ~p",
+            [OldName, NewName, Reason]
+        )
+    ),
+    beamtalk_error:with_message(Error0, Msg).
+
+%%% ----------------------------------------------------------------------------
+%%% Site discovery (ADR 0114 § "renameTo: rewrites cross-file references")
+%%% ----------------------------------------------------------------------------
+
+%% Full site list: the union of `referencesTo:`/`direct_subclasses/1`
+%% translated into `rewrite_site()` maps, plus the class's own declaration
+%% header as the definition site. `referencesTo:`/`direct_subclasses/1` only
+%% say WHICH method/header mentions `OldName` (owner, side, selector) — they
+%% carry no byte span — so each hit here is independently re-resolved to an
+%% exact byte span via `beamtalk_compiler:resolve_method_span/4` /
+%% `resolve_class_span/2` (both already-shipped, ADR 0082) rather than
+%% reimplementing span resolution. A dynamic class (no `source_file` in
+%% `Classification`) has no declaration to rewrite, matching the ChangeLog
+%% schema's `sites[0] = null` case.
+-spec discover_rename_sites(atom(), binary(), binary(), map()) ->
+    {map() | undefined, [map()]}.
+discover_rename_sites(OldName, OldNameBin, NewNameBin, Classification) ->
+    DefinitionSite = definition_rewrite_site(OldNameBin, NewNameBin, Classification),
+    ReferenceSites =
+        reference_rewrite_sites(OldName, NewNameBin) ++
+            subclass_header_rewrite_sites(OldName, OldNameBin, NewNameBin),
+    {DefinitionSite, ReferenceSites}.
+
+-spec definition_rewrite_site(binary(), binary(), map()) ->
+    map() | undefined.
+definition_rewrite_site(OldNameBin, NewNameBin, #{source_file := SourceFile}) ->
+    case current_class_source(OldNameBin) of
+        undefined ->
+            undefined;
+        Source ->
+            Pattern = <<"subclass:\\s*(", OldNameBin/binary, ")\\b">>,
+            case header_token_span(Source, OldNameBin, Pattern) of
+                {ok, Span} ->
+                    #{
+                        class => OldNameBin,
+                        source_file => SourceFile,
+                        span => Span,
+                        new_text => NewNameBin
+                    };
+                not_found ->
+                    undefined
+            end
+    end;
+definition_rewrite_site(_OldNameBin, _NewNameBin, _Classification) ->
+    %% Dynamic class: no backing source (ChangeLog schema's sites[0] = null).
+    undefined.
+
+%% Every direct subclass's own declaration header names `OldName` as its
+%% superclass (`OldName subclass: Sub`) — the one reference kind
+%% `referencesTo:` doesn't cover (ADR 0114 § Decision).
+-spec subclass_header_rewrite_sites(atom(), binary(), binary()) ->
+    [map()].
+subclass_header_rewrite_sites(OldName, OldNameBin, NewNameBin) ->
+    Subs = beamtalk_class_registry:direct_subclasses(OldName),
+    lists:filtermap(
+        fun(Sub) -> subclass_header_rewrite_site(Sub, OldNameBin, NewNameBin) end,
+        Subs
+    ).
+
+-spec subclass_header_rewrite_site(atom(), binary(), binary()) ->
+    {true, map()} | false.
+subclass_header_rewrite_site(Sub, OldNameBin, NewNameBin) ->
+    SubBin = atom_to_binary(Sub, utf8),
+    case current_class_source(SubBin) of
+        undefined ->
+            false;
+        Source ->
+            Pattern = <<"(", OldNameBin/binary, ")\\s+subclass:">>,
+            case header_token_span(Source, SubBin, Pattern) of
+                {ok, Span} ->
+                    {true, #{
+                        class => SubBin,
+                        source_file => class_source_file_for(SubBin),
+                        span => Span,
+                        new_text => NewNameBin
+                    }};
+                not_found ->
+                    false
+            end
+    end.
+
+%% Resolve `ClassNameBin`'s declaration-header + state-declaration span
+%% (`beamtalk_compiler:resolve_class_span/2`, ADR 0082/BT-3248 — deliberately
+%% never a method body) and search `Pattern` WITHIN that slice only, not the
+%% whole file — a doc comment example mentioning the identical header text
+%% (common in stdlib doc comments) must never be mistaken for the real
+%% declaration. Returns the matched capture group's span translated back to
+%% absolute offsets into `Source`.
+-spec header_token_span(binary(), binary(), binary()) ->
+    {ok, map()} | not_found.
+header_token_span(Source, ClassNameBin, Pattern) ->
+    case class_header_span(Source, ClassNameBin) of
+        {ok, {HStart, HEnd}} ->
+            HeaderText = binary:part(Source, HStart, HEnd - HStart),
+            case re:run(HeaderText, Pattern, [{capture, [1], index}]) of
+                {match, [{Start, Len}]} ->
+                    {ok, #{start => HStart + Start, 'end' => HStart + Start + Len}};
+                nomatch ->
+                    not_found
+            end;
+        not_found ->
+            not_found
+    end.
+
+-spec class_header_span(binary(), binary()) ->
+    {ok, {non_neg_integer(), non_neg_integer()}} | not_found.
+class_header_span(Source, ClassNameBin) ->
+    try erlang:apply(beamtalk_compiler, resolve_class_span, [Source, ClassNameBin]) of
+        {ok, #{start := S, 'end' := E}, _PrevSource} -> {ok, {S, E}};
+        {error, _Reason, _Message} -> not_found
+    catch
+        error:undef -> not_found
+    end.
+
+%% Every `{owner, class_side, method}` triple `referencesTo:` reports for
+%% `OldName`, deduped across its possibly-multiple line-rows (ADR 0114
+%% site-discovery spike finding #2: two mentions on two different lines of
+%% the same method are two rows; this only needs the method once).
+-spec reference_rewrite_sites(atom(), binary()) -> [map()].
+reference_rewrite_sites(OldName, NewNameBin) ->
+    Sites = beamtalk_xref:references_to(OldName),
+    OldNameBin = atom_to_binary(OldName, utf8),
+    Triples = lists:usort([
+        {Owner, ClassSide, Method}
+     || #{owner := Owner, class_side := ClassSide, method := Method} <- Sites
+    ]),
+    lists:flatmap(
+        fun({Owner, ClassSide, Method}) ->
+            method_body_rewrite_sites(Owner, ClassSide, Method, OldNameBin, NewNameBin)
+        end,
+        Triples
+    ).
+
+%% Every whole-word occurrence of `OldNameBin` within `{Owner, ClassSide,
+%% Method}`'s own resolved byte span (`resolve_method_span/4`) becomes its
+%% own rewrite site — a method can mention the renamed class more than once
+%% (e.g. a param type AND a return type, spike finding #2's `Duration>>+`
+%% case), each needing its own splice.
+-spec method_body_rewrite_sites(atom(), boolean(), atom(), binary(), binary()) ->
+    [map()].
+method_body_rewrite_sites(Owner, IsClassSide, Method, OldNameBin, NewNameBin) ->
+    OwnerBin = atom_to_binary(Owner, utf8),
+    case current_class_source(OwnerBin) of
+        undefined ->
+            [];
+        Source ->
+            SelectorBin = atom_to_binary(Method, utf8),
+            %% `beamtalk_xref:site()`'s `class_side` field is a boolean (`true`
+            %% = class-side, `false` = instance-side) — translate to the
+            %% `instance | class` atom `resolve_method_span/4` expects.
+            Side =
+                case IsClassSide of
+                    true -> class;
+                    false -> instance
+                end,
+            case method_token_span(Source, OwnerBin, SelectorBin, Side) of
+                {ok, {MStart, MEnd}} ->
+                    MethodText = binary:part(Source, MStart, MEnd - MStart),
+                    SourceFile = class_source_file_for(OwnerBin),
+                    [
+                        #{
+                            class => OwnerBin,
+                            source_file => SourceFile,
+                            span => #{start => MStart + LStart, 'end' => MStart + LEnd},
+                            new_text => NewNameBin
+                        }
+                     || {LStart, LEnd} <- word_occurrence_spans(MethodText, OldNameBin)
+                    ];
+                not_found ->
+                    []
+            end
+    end.
+
+-spec method_token_span(binary(), binary(), binary(), instance | class) ->
+    {ok, {non_neg_integer(), non_neg_integer()}} | not_found.
+method_token_span(Source, OwnerBin, SelectorBin, ClassSide) ->
+    try
+        erlang:apply(beamtalk_compiler, resolve_method_span, [
+            Source, OwnerBin, SelectorBin, ClassSide
+        ])
+    of
+        {ok, #{start := S, 'end' := E}, _PrevSource} -> {ok, {S, E}};
+        {error, _Reason, _Message} -> not_found
+    catch
+        error:undef -> not_found
+    end.
+
+%% Every non-overlapping whole-word occurrence of `WordBin` in `Text`, as
+%% `{Start, End}` byte offsets relative to `Text`'s own start.
+-spec word_occurrence_spans(binary(), binary()) -> [{non_neg_integer(), non_neg_integer()}].
+word_occurrence_spans(Text, WordBin) ->
+    Pattern = <<"\\b", WordBin/binary, "\\b">>,
+    case re:run(Text, Pattern, [global, {capture, first, index}]) of
+        {match, Matches} -> [{S, S + L} || [{S, L}] <- Matches];
+        nomatch -> []
+    end.
+
+%% `ClassNameBin`'s CURRENT tracked source (`beamtalk_workspace_meta:
+%% get_class_source/1` — the in-memory-merged text `rewrite_sites/2` itself
+%% splices against, per that function's own doc; NOT necessarily identical
+%% to what's on disk). Routed via `erlang:apply/3` to avoid a compile-time
+%% dependency from `beamtalk_runtime` to `beamtalk_workspace`, the same
+%% indirection every other cross-app call in this module already uses.
+-spec current_class_source(binary()) -> binary() | undefined.
+current_class_source(ClassNameBin) ->
+    try erlang:apply(beamtalk_workspace_meta, get_class_source, [ClassNameBin]) of
+        Source when is_list(Source) -> unicode:characters_to_binary(Source);
+        undefined -> undefined
+    catch
+        error:undef -> undefined
+    end.
+
+%% `ClassNameBin`'s on-disk source file, for a `rewrite_site()`'s
+%% `source_file` ChangeLog-attribution field only (see that type's doc) —
+%% reuses `beamtalk_repl_loader:class_source_file/1` (already exported for
+%% exactly this kind of cross-module reuse, BT-3238) rather than re-deriving
+%% it. `undefined` for a class with no backing file.
+-spec class_source_file_for(binary()) -> binary() | undefined.
+class_source_file_for(ClassNameBin) ->
+    try erlang:apply(beamtalk_repl_loader, class_source_file, [ClassNameBin]) of
+        SourceFile when is_binary(SourceFile) -> SourceFile;
+        nil -> undefined
+    catch
+        error:undef -> undefined
+    end.
+
+%%% ----------------------------------------------------------------------------
+%%% Mutation + registry re-registration
+%%% ----------------------------------------------------------------------------
+
+%% Thin `erlang:apply/3` forwarding to the shared multi-site rewrite
+%% mechanism (BT-3270) — same indirection every other cross-app call in this
+%% module already uses. A dynamic class with neither a definition site nor
+%% any reference site (never mentioned anywhere in-project) has nothing to
+%% rewrite at all; `rewrite_sites/2` itself refuses that shape
+%% (`{error, no_sites}`) since it is normally a caller bug, but here it is
+%% the ordinary, legitimate "freestanding dynamic class" case, so it is
+%% special-cased to a trivial success rather than surfaced as an error.
+%%
+%% The trivial-success shortcut is gated on `Classification` actually being
+%% `"dynamic"`, NOT merely on the site shape (per review feedback on PR
+%% #3523): `current_class_source/1` (`beamtalk_workspace_meta:
+%% get_class_source/1`) is a separate source of truth from the BEAM-module
+%% check `capture_class_removal_snapshot/1` classifies from, and the two
+%% could in principle diverge for a project class (e.g. tracked source never
+%% set). Were the shortcut keyed on shape alone, that divergence would
+%% silently skip `rewrite_sites/2` for an ORDINARY class too, and
+%% `install_class_rename/3` would then stop and purge the old class with
+%% nothing ever installed under `NewName` — a `class_not_found`-flavoured
+%% crash after the old class is already gone. Falling through to the real
+%% `rewrite_sites/2` call for that shape on a non-dynamic classification
+%% instead surfaces a clean `{error, no_sites}` — translated by
+%% `rename_rewrite_failed_error/2` into a structured error — before any
+%% mutation happens.
+-spec rewrite_class_sites(atom(), map() | undefined, [map()], map()) ->
+    {ok, map()} | {error, term()}.
+rewrite_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
+    {ok, #{definition => undefined, sites => []}};
+rewrite_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
+    try
+        erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites])
+    catch
+        error:undef -> {error, workspace_unavailable}
+    end.
+
+%% `rewrite_class_sites/4`'s own non-mutating validation half — same shape
+%% and same trivial-success shortcut for a freestanding dynamic class with
+%% nothing to rewrite, but reporting `ok`/`{error, _}` rather than
+%% `{ok, map()}`/`{error, _}` since there is no install result to return.
+%% Used by `do_rename_and_rewrite/7`'s dynamic-class branch to confirm the
+%% reference-site rewrite WOULD succeed before committing the separate,
+%% unrelated registry-identity move — see that function's own doc for why.
+-spec validate_class_sites(atom(), map() | undefined, [map()], map()) ->
+    ok | {error, term()}.
+validate_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
+    ok;
+validate_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
+    try
+        erlang:apply(beamtalk_repl_eval, validate_sites, [DefinitionSite, ReferenceSites])
+    catch
+        error:undef -> {error, workspace_unavailable}
+    end.
+
+-doc """
+Move the class registry identity from `OldName` to `NewName` after a
+successful `rewrite_sites/2` install, returning the pid now serving
+`NewName`.
+
+Exported (ADR 0114 Phase 4, BT-3274) beyond `classRenameTo/2`'s own forward
+path: reverting a pending `'rename-class'` ChangeEntry re-splices the
+definition site's `prev_source_ref` back in, which makes `rewrite_sites/2`'s
+own install pipeline register a fresh pid under `old_class` exactly the same
+way the forward rename's splice originally registered `NewName` — so undo
+only needs the identical retire-the-stale-registration step below, called
+with the two names swapped (`beamtalk_repl_loader:finish_rename_class_
+revert/1`), not a second copy of it.
+
+Ordinary (project) class: the definition site's recompile already installed
+a fresh class-object process under `NewName` as an ordinary side effect of
+the standard `activate_module/4` -> `register_class/0` ->
+`beamtalk_class_builder:register/1` pipeline (a NEW pid — hot-reload only
+reuses the SAME pid when the registered name is unchanged, which a rename by
+definition is not). This branch therefore only needs to retire `OldName`:
+stop its now-orphaned class-object gen_server (`terminate/2` cleans up the
+ETS hierarchy entry, pg group, and loaded-class/backing-module indexes —
+NOT actors, per ADR 0114 Constraint 3: existing instances dispatch via
+`class_mod` bound at spawn, never by looking the class up by its registered
+name) and purge the four name-keyed derived registries
+(`beamtalk_class_lifecycle:purge_class_registries/1`, reused rather than
+`class_removed/2`'s full teardown — see that function's doc for why
+`purge_protocol/1`'s module-keyed purge must NOT run here: the SAME BEAM
+module atom still backs the renamed class, in-memory-only, no disk flush
+(BT-3271)).
+
+Dynamic (`ClassBuilder`) class: nothing above ever ran (no source, no
+`rewrite_sites/2` recompile) — `beamtalk_object_class:rename/2` moves the
+SAME live process to the new registered name in place.
+""".
+-spec install_class_rename(atom(), atom(), map()) -> pid().
+install_class_rename(OldName, NewName, #{not_flushable_reason := <<"dynamic">>}) ->
+    case beamtalk_object_class:rename(OldName, NewName) of
+        {ok, Pid} ->
+            Pid;
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(runtime_error, OldName),
+            Msg = iolist_to_binary(
+                io_lib:format(
+                    "The dynamic class's own registration could not move, so no reference sites were rewritten: ~p",
+                    [
+                        Reason
+                    ]
+                )
+            ),
+            beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
+    end;
+install_class_rename(OldName, NewName, _Classification) ->
+    %% Defensive backstop (review feedback on PR #3523): a successful
+    %% `rewrite_sites/2` call for an ordinary class is expected to have
+    %% already installed `NewName` via the normal compile/activate pipeline
+    %% (see this function's own doc) — checked here BEFORE touching
+    %% `OldName` so an unexpected miss raises cleanly with the old class
+    %% left intact, rather than retiring `OldName` first and crashing on a
+    %% `pid()`-typed caller (`class_object_from_pid/1`) handed `undefined`.
+    case beamtalk_class_registry:whereis_class(NewName) of
+        undefined ->
+            beamtalk_error:raise(rename_install_incomplete_error(OldName, NewName));
+        NewPid ->
+            case beamtalk_class_registry:whereis_class(OldName) of
+                undefined ->
+                    ok;
+                OldPid ->
+                    beamtalk_class_monitor:unwatch(OldName),
+                    gen_server:stop(OldPid)
+            end,
+            ok = beamtalk_class_lifecycle:purge_class_registries(OldName),
+            NewPid
+    end.
+
+-spec rename_install_incomplete_error(atom(), atom()) -> #beamtalk_error{}.
+rename_install_incomplete_error(OldName, NewName) ->
+    Error0 = beamtalk_error:new(runtime_error, OldName),
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "renameTo: reported success but '~p' was never installed under '~p'; "
+            "the old class was left untouched",
+            [OldName, NewName]
+        )
+    ),
+    beamtalk_error:with_message(Error0, Msg).
+
+%% Best-effort ChangeLog append after a successful `renameTo:` (ADR 0114 §
+%% ChangeLog schema, `kind: "rename-class"`) — mirrors `log_local_removal/3`'s
+%% placement and self-swallowing failure handling: the rename is already
+%% live in memory by this point, so a logging failure must never surface to
+%% the caller. `side`/`selector`/`old_selector` are absent (`null`) — a
+%% class rename has no method-level target, matching the schema.
+-spec log_class_rename(binary(), binary(), map(), map()) -> ok.
+log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult) ->
+    {Author, AuthorKind} = current_author_context(),
+    Spec = #{
+        kind => 'rename-class',
+        class => NewNameBin,
+        old_class => OldNameBin,
+        old_path => maps:get(source_file, Classification, undefined),
+        new_path => undefined,
+        intent => durable,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    try
+        erlang:apply(beamtalk_repl_eval, emit_rewrite_change_entry, [Spec, RewriteResult])
+    catch
+        error:undef -> ok
+    end,
+    ok.
+
 %% Structured `selector_not_found` error for the bare `removeSelector:` form
 %% (ADR 0112 § Error behaviour on absent selector) — deliberately distinct
 %% from `does_not_understand`: the message itself (`removeSelector:`) was
@@ -1333,6 +2008,765 @@ current_author_context() ->
                 end,
             {Author, human}
     end.
+
+%%% ============================================================================
+%%% Method Rename Primitives (ADR 0114 Phase 3, BT-3279)
+%%% ============================================================================
+
+-doc """
+Rename `OldSelector` to `NewSelector` on the receiver's side, auto-rewriting
+only the self/super sends the xref index can prove are structurally safe,
+raising if `OldSelector` is not defined locally.
+
+Backs `@primitive "classRenameSelector"` (`Behaviour>>renameSelector:to:`),
+modelled on `classRemoveSelector/2`'s shape immediately above and
+`classRenameTo/2`'s ordering: resolve the target, validate, discover sites,
+mutate, best-effort log, return the receiver. Side follows
+`classIncludesSelector/2`'s own convention (a `Self` tagged `class =
+'Metaclass'` is class-side; any other class object is instance-side).
+
+## Local-method-table scope only — extensions deliberately excluded
+
+Unlike `classRemoveSelector/2` (which checks the extension registry, ADR
+0066, FIRST since an extension shadows a same-named local method),
+`OldSelector`/`NewSelector` resolution here goes straight to
+`classIncludesSelector/2` — local method table only. ADR 0114's text never
+mentions extensions for rename, and an extension method has a different
+owner/attribution model entirely (BT-3185) that this primitive's
+site-discovery (keyed on `Self`'s own class only) has no way to reason
+about safely. A class whose `OldSelector` is only an extension (no local
+override) is therefore reported `absent` here — exactly like
+`removeSelector:` reports `absent` for a selector that resolves nowhere
+locally OR as an extension would, MINUS the extension half. A caller wanting
+to rename an extension method can still do so manually via `compile:source:`
++ `removeSelector:`.
+
+## Ordering
+
+1. Resolve `OldSelector` locally via `classIncludesSelector/2` — `absent` if
+   not found (raises `selector_not_found`, reusing ADR 0112's kind, or runs
+   `AbsentBlock` for the `...ifAbsent:` form).
+2. Collision refusal: `NewSelector` already locally defined on the same side
+   raises `selector_already_exists` — exact hint text from the ADR's own
+   worked example.
+3. Flushability classification (`capture_class_removal_snapshot/1`, reused
+   verbatim) — `renameSelector:to:` never refuses BASED ON THIS
+   CLASSIFICATION per the ADR's "Refusal vs flushability" table (stdlib/
+   dependency proceed with `flushable: false`); this classification exists
+   only to drive `rewrite_class_sites/4`'s existing dynamic-class
+   trivial-success gate below, not to block anything by itself. A genuinely
+   dynamic (ClassBuilder) class — no tracked `.bt` source at all — IS still
+   refused, but earlier, by site discovery itself (step 4): see
+   `definition_selector_sites/4`'s own doc for why this is a real,
+   documented divergence from the ADR's literal "Allowed" table entry
+   (there is no existing mechanism to rewrite a dynamic class's own method
+   table without source, mirroring `removeSelector:`'s identical existing
+   gap for the same shape).
+4. Site discovery (`discover_rename_selector_sites/6`) — read-only: the
+   definition's own selector-token span(s), confirmed self/super reference
+   sites (owner-in-hierarchy AND override-free), and candidate sites
+   (everything else `senders_of/1` finds for this selector) — see that
+   function's own doc for the full override-freedom mechanics (ADR 0114 §
+   "`renameSelector:to:` auto-rewrites only `self`/`super` sends").
+5. Mutate: `rewrite_class_sites/4` (the SAME shared multi-site rewrite
+   mechanism `classRenameTo/2` already uses, BT-3270) installs the
+   definition + confirmed reference sites transactionally. Unlike class
+   rename, there is no separate registry-identity move — a method rename
+   never changes what a class is registered under — so there is no
+   validate-then-install-identity-then-rewrite ordering concern here; a
+   single `rewrite_class_sites/4` call is both validation and installation.
+6. Best-effort ChangeLog append (`log_selector_rename/6`), mirroring
+   `log_class_rename/4`'s placement — the rename is already live in memory
+   by this point, so a logging failure must never surface to the caller.
+
+Raises a structured `#beamtalk_error{}` for the absent-selector (bare form
+only)/collision/shape-mismatch refusals and for a `rewrite_class_sites/4`
+failure; returns the receiver unchanged on success (unlike `classRenameTo/2`,
+a method rename never changes the class's own identity/pid).
+""".
+-spec classRenameSelector(#beamtalk_object{}, atom(), atom()) -> #beamtalk_object{}.
+classRenameSelector(Self, OldSelector, NewSelector) when
+    is_atom(OldSelector), is_atom(NewSelector)
+->
+    case rename_selector(Self, OldSelector, NewSelector) of
+        renamed -> Self;
+        absent -> beamtalk_error:raise(selector_not_found_error(Self, OldSelector))
+    end.
+
+-doc """
+Rename `OldSelector` to `NewSelector` like `classRenameSelector/3`, but
+evaluate `AbsentBlock` instead of raising when `OldSelector` resolves
+nowhere locally.
+
+Backs `@primitive "classRenameSelectorIfAbsent"`
+(`Behaviour>>renameSelector:to:ifAbsent:`). `AbsentBlock` runs in the
+sender's process, exactly like `classRemoveSelectorIfAbsent/3`'s own block
+argument (see that function's doc for the full "why the sender's process,
+not the receiver's" rationale — the same chain-walk-fallthrough call shape
+applies here unchanged).
+
+The collision refusal (`NewSelector` already locally defined) always
+raises regardless of this escape hatch — `AbsentBlock` only substitutes for
+"`OldSelector` not found", the same scoping `removeSelector:ifAbsent:`
+gives its own fallback block.
+
+Returns the receiver on success, or `AbsentBlock`'s value on absence.
+""".
+-spec classRenameSelectorIfAbsent(#beamtalk_object{}, atom(), atom(), fun(() -> term())) ->
+    #beamtalk_object{} | term().
+classRenameSelectorIfAbsent(Self, OldSelector, NewSelector, AbsentBlock) when
+    is_atom(OldSelector), is_atom(NewSelector)
+->
+    case rename_selector(Self, OldSelector, NewSelector) of
+        renamed -> Self;
+        absent -> AbsentBlock()
+    end.
+
+%% Shared resolution + rename for classRenameSelector/3 and
+%% classRenameSelectorIfAbsent/4. Local-method-table only (see this
+%% section's own moduledoc-style comment above for why extensions are out
+%% of scope). A collision or a shape-mismatch is a hard raise even from
+%% this shared helper — only "OldSelector not found" is reported as `absent`
+%% for the two public functions above to handle differently.
+-spec rename_selector(#beamtalk_object{}, atom(), atom()) -> renamed | absent.
+rename_selector(Self, OldSelector, NewSelector) ->
+    case classIncludesSelector(Self, OldSelector) of
+        false ->
+            absent;
+        true ->
+            ok = ensure_rename_selector_collision_free(Self, NewSelector),
+            {Side, ClassPid} = removal_target(Self),
+            ClassName = gen_server:call(ClassPid, class_name),
+            ClassNameBin = atom_to_binary(ClassName, utf8),
+            OldSelectorBin = atom_to_binary(OldSelector, utf8),
+            NewSelectorBin = atom_to_binary(NewSelector, utf8),
+            %% BT-3279: classification feeds `rewrite_class_sites/4`'s
+            %% existing dynamic-class trivial-success gate for the rare edge
+            %% case where a class WITH real tracked source still classifies
+            %% "dynamic" (see that function's own doc on why the two can
+            %% diverge) — `renameSelector:to:` never refuses based on
+            %% classification alone (ADR 0114 § "Refusal vs flushability").
+            %% The COMMON dynamic-class case (no tracked source at all) is
+            %% refused earlier, by `discover_rename_selector_sites/6` itself
+            %% — see `definition_selector_sites/4`'s own doc for why.
+            Classification = capture_class_removal_snapshot(ClassNameBin),
+            case
+                discover_rename_selector_sites(
+                    ClassName,
+                    ClassNameBin,
+                    Side,
+                    OldSelector,
+                    OldSelectorBin,
+                    NewSelector,
+                    NewSelectorBin
+                )
+            of
+                {error, selector_shape_mismatch} ->
+                    beamtalk_error:raise(
+                        rename_selector_shape_mismatch_error(
+                            ClassName, OldSelectorBin, NewSelectorBin
+                        )
+                    );
+                {error, dynamic_class_no_source} ->
+                    beamtalk_error:raise(
+                        rename_selector_dynamic_no_source_error(ClassName, OldSelectorBin)
+                    );
+                {error, {target_selector_collision, Collisions}} ->
+                    beamtalk_error:raise(
+                        rename_selector_target_collision_error(
+                            ClassName, NewSelectorBin, Collisions
+                        )
+                    );
+                {ok, DefinitionSite, ReferenceSites, CandidateSites} ->
+                    case
+                        rewrite_class_sites(
+                            ClassName, DefinitionSite, ReferenceSites, Classification
+                        )
+                    of
+                        {ok, RewriteResult} ->
+                            log_selector_rename(
+                                ClassNameBin,
+                                Side,
+                                OldSelectorBin,
+                                NewSelectorBin,
+                                CandidateSites,
+                                RewriteResult
+                            ),
+                            renamed;
+                        {error, Reason} ->
+                            beamtalk_error:raise(
+                                rename_selector_rewrite_failed_error(
+                                    ClassName, OldSelectorBin, Reason
+                                )
+                            )
+                    end
+            end
+    end.
+
+%% Collision refusal (ADR 0114 § Decision): `renameSelector: #a to: #b` when
+%% `#b` is already locally defined on the same side raises rather than
+%% silently overwriting — exact hint text from the ADR's own worked example.
+%% `selector_already_exists` is a NEW error kind (not a reuse of
+%% `class_already_exists`, which is a class-identity collision, a
+%% different concept) — mirrors `selector_not_found`'s own existing
+%% selector-level-vs-class-level kind split (ADR 0112).
+-spec ensure_rename_selector_collision_free(#beamtalk_object{}, atom()) -> ok.
+ensure_rename_selector_collision_free(Self, NewSelector) ->
+    case classIncludesSelector(Self, NewSelector) of
+        false ->
+            ok;
+        true ->
+            ClassPid = erlang:element(4, Self),
+            ClassName = gen_server:call(ClassPid, class_name),
+            beamtalk_error:raise(rename_selector_collision_error(ClassName, NewSelector))
+    end.
+
+-spec rename_selector_collision_error(atom(), atom()) -> #beamtalk_error{}.
+rename_selector_collision_error(ClassName, NewSelector) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    NewBin = atom_to_binary(NewSelector, utf8),
+    Error0 = beamtalk_error:new(selector_already_exists, ClassName, NewSelector),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            ClassBin,
+            <<" already defines #">>,
+            NewBin,
+            <<" locally — refusing to overwrite"/utf8>>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Error1,
+        iolist_to_binary([
+            <<"removeSelector: #">>,
+            NewBin,
+            <<" first, or choose a different target name">>
+        ])
+    ).
+
+%% Review finding on PR #3529: refuses BEFORE any mutation when a confirmed
+%% rewrite site's OWNER already independently defines `NewSelectorBin` on
+%% the same side — see `confirmed_owners_already_defining/3`'s own doc for
+%% the exact silent-dispatch-redirection failure mode this prevents.
+-spec rename_selector_target_collision_error(atom(), binary(), [atom()]) -> #beamtalk_error{}.
+rename_selector_target_collision_error(ClassName, NewSelectorBin, Collisions) ->
+    CollisionBins = [atom_to_binary(Cls, utf8) || Cls <- Collisions],
+    CollisionList = iolist_to_binary(lists:join(<<", ">>, CollisionBins)),
+    Error0 = beamtalk_error:new(selector_already_exists, ClassName),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"Cannot rename to #">>,
+            NewSelectorBin,
+            <<" — "/utf8>>,
+            CollisionList,
+            <<" (in the confirmed-rewrite hierarchy) already defines #">>,
+            NewSelectorBin,
+            <<"; rewriting would silently redirect dispatch there">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Error1,
+        <<
+            "Choose a different target name, or removeSelector: it from "
+            "the colliding class(es) first"
+        >>
+    ).
+
+-spec rename_selector_shape_mismatch_error(atom(), binary(), binary()) -> #beamtalk_error{}.
+rename_selector_shape_mismatch_error(ClassName, OldSelectorBin, NewSelectorBin) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Msg = iolist_to_binary([
+        <<"Cannot rename #">>,
+        OldSelectorBin,
+        <<" to #">>,
+        NewSelectorBin,
+        <<" — "/utf8>>,
+        <<
+            "the new selector must have the same shape and arity "
+            "(unary/binary/keyword, same number of keyword parts) as the "
+            "original"
+        >>
+    ]),
+    beamtalk_error:with_message(Error0, Msg).
+
+%% A dynamic (ClassBuilder) class has no tracked `.bt` source to splice a
+%% definition rewrite against — see `definition_selector_sites/4`'s own doc
+%% for why this is a hard refusal rather than a silent no-op, mirroring
+%% `beamtalk_repl_loader:remove_method/3`'s existing "class source not
+%% available" behavior for the identical shape.
+-spec rename_selector_dynamic_no_source_error(atom(), binary()) -> #beamtalk_error{}.
+rename_selector_dynamic_no_source_error(ClassName, OldSelectorBin) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Msg = iolist_to_binary([
+        <<"Class source not available for ">>,
+        atom_to_binary(ClassName, utf8),
+        <<" (cannot rename #">>,
+        OldSelectorBin,
+        <<")">>
+    ]),
+    beamtalk_error:with_message(Error0, Msg).
+
+-spec rename_selector_rewrite_failed_error(atom(), binary(), term()) -> #beamtalk_error{}.
+rename_selector_rewrite_failed_error(ClassName, _OldSelectorBin, workspace_unavailable) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    beamtalk_error:with_message(
+        Error0,
+        <<"Workspace not available; renameSelector:to: requires a running workspace">>
+    );
+%% Defensive backstop (mirrors `rename_rewrite_failed_error/2`'s own
+%% `no_sites` clause): reachable only if a class's own classification and
+%% its `beamtalk_workspace_meta` tracked-source state have diverged (see
+%% `rewrite_class_sites/4`'s own doc for the analogous class-rename case) —
+%% not expected in practice since `OldSelector` was just confirmed to
+%% resolve locally.
+rename_selector_rewrite_failed_error(ClassName, OldSelectorBin, no_sites) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Msg = iolist_to_binary([
+        <<"renameSelector: #">>,
+        OldSelectorBin,
+        <<" found no definition or reference site to rewrite">>
+    ]),
+    beamtalk_error:with_message(Error0, Msg);
+rename_selector_rewrite_failed_error(ClassName, _OldSelectorBin, Reason) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Msg = iolist_to_binary(io_lib:format("Could not rename selector: ~p", [Reason])),
+    beamtalk_error:with_message(Error0, Msg).
+
+%%% ----------------------------------------------------------------------------
+%%% Site discovery (ADR 0114 § "renameSelector:to: auto-rewrites only self/super sends")
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Full site list for a `(ClassName, Side, OldSelector)` rename: the
+definition's own selector-token span(s), every CONFIRMED self/super
+reference site, and every CANDIDATE site (reported, never rewritten) —
+see ADR 0114 § Decision for the full override-freedom rule this
+implements.
+
+## The override-freedom check — the crux of this ADR
+
+`recv_kind: self_recv`/`super_recv` plus `owner`-in-`ClassName`'s-subclass-
+tree narrowing is NECESSARY but not SUFFICIENT: an override anywhere in
+that subclass tree can intercept a same-hierarchy `self`/`super` send
+before it ever reaches `ClassName`'s own implementation (late-bound
+dispatch starts at the runtime receiver's actual class, not at
+`ClassName`). The only structurally sound closure: `beamtalk_xref:
+implementors_of/1` (already shipped, ADR 0087/BT-2300) filtered to this
+rename's own `Side`, intersected with `ClassName`'s subclass closure
+(`beamtalk_class_registry:all_subclasses/1` — the TRANSITIVE closure, unlike
+`classRenameTo/2`'s one-level-only `direct_subclasses/1` use for its
+superclass-header case, a different reference kind entirely), MINUS
+`ClassName` itself. A non-empty intersection means override-freedom FAILS
+for the WHOLE selector: every self/super site — including ones owned by
+`ClassName` itself — becomes a candidate, never just the sites downstream
+of the specific override (a single shared call-site text is executed
+polymorphically across every possible receiver class, so safety must hold
+for ALL of them, not just the common case).
+
+## Judgment call: keyword selectors and `sites[0]`
+
+The ChangeLog schema's `sites[0]` slot is a SINGLE `rewrite_site()`. A
+keyword selector's own definition needs one splice PER keyword part (each
+`KeywordPart` has its own independent span,
+`beamtalk_core::method_source_walker::find_definition_selector_spans`'s own
+doc). This function designates the FIRST keyword part's definition-token
+span as `DefinitionSite` (`sites[0]`) and folds every OTHER keyword part's
+definition-token span into the `ReferenceSites` list (`sites[1..]`) — the
+`rewrite_site()`/splice mechanism itself has no opinion on "why" a site is
+being rewritten, so this costs nothing mechanically; it only means a
+keyword-selector rename's ChangeLog `sites[1..]` mixes "other keyword
+parts of the same definition" with "confirmed reference sites", which the
+schema's own comment does not explicitly anticipate. Flagged here as a
+real interpretation call the ADR text does not spell out byte-for-byte.
+
+## Judgment call: candidate-site spans
+
+`senders_of/1`'s `other`/`erlang_ffi` rows (and any self/super row demoted
+to candidate) carry no byte span — only a `line`. Since `candidate_sites`
+are NEVER spliced by flush (BT-3271, `beamtalk_workspace_changelog.erl`'s
+own doc comment), the OWNING METHOD's own whole span
+(`resolve_method_span`, via `method_token_span/4`) is used as the
+candidate's `span` — a "somewhere in this method" pointer for human/agent
+review, not a precise token. This does not affect correctness since nothing
+ever splices against it.
+
+## Judgment call: definition resolution failure vs. a genuine shape mismatch
+
+`find_definition_selector_spans` returning `{ok, []}` when `OldSelector`
+was just confirmed to exist locally is a reliable, cheap signal that
+`NewSelector` has a different shape/arity than `OldSelector` (see that
+function's own "skip, don't panic" contract) — this is surfaced as a hard
+`selector_shape_mismatch` refusal rather than silently proceeding with a
+half-renamed definition. A genuine resolution FAILURE (`class_not_found` /
+`selector_not_found` / `ambiguous` against the tracked source — e.g. stale
+source after an unsynced live patch) is instead treated as the same
+accepted completeness gap `classRenameTo/2`'s own `definition_rewrite_site/3`
+already documents: degrade to "no definition site" rather than blocking
+the whole rename.
+""".
+-spec discover_rename_selector_sites(
+    atom(), binary(), instance | class, atom(), binary(), atom(), binary()
+) ->
+    {ok, map() | undefined, [map()], [map()]}
+    | {error,
+        selector_shape_mismatch | dynamic_class_no_source | {target_selector_collision, [atom()]}}.
+discover_rename_selector_sites(
+    ClassName, ClassNameBin, Side, OldSelector, OldSelectorBin, NewSelector, NewSelectorBin
+) ->
+    case definition_selector_sites(ClassNameBin, Side, OldSelectorBin, NewSelectorBin) of
+        {error, _Reason} = Err ->
+            Err;
+        {ok, DefinitionSites} ->
+            {DefinitionSite, ExtraDefinitionSites} =
+                case DefinitionSites of
+                    [] -> {undefined, []};
+                    [First | Rest] -> {First, Rest}
+                end,
+            IsClassSide = (Side =:= class),
+            RawSites = beamtalk_xref:senders_of(OldSelector),
+            {SelfSuperSites, OtherSites} = lists:partition(fun is_self_or_super_site/1, RawSites),
+            HierarchySet = sets:from_list([
+                ClassName | beamtalk_class_registry:all_subclasses(ClassName)
+            ]),
+            {InHierarchySelfSuper, OutOfHierarchySelfSuper} = lists:partition(
+                fun(#{owner := Owner, class_side := CS} = Site) ->
+                    CS =:= IsClassSide andalso sets:is_element(Owner, HierarchySet) andalso
+                        not is_unreachable_super_send(Site, ClassName)
+                end,
+                SelfSuperSites
+            ),
+            OverrideFree = selector_override_free(
+                OldSelector, IsClassSide, ClassName, HierarchySet
+            ),
+            {ConfirmedSelfSuper, CandidateSelfSuper} =
+                case OverrideFree of
+                    true -> {InHierarchySelfSuper, OutOfHierarchySelfSuper};
+                    false -> {[], SelfSuperSites}
+                end,
+            case
+                confirmed_owners_already_defining(
+                    ConfirmedSelfSuper, HierarchySet, ClassName, NewSelector, IsClassSide
+                )
+            of
+                [] ->
+                    ReferenceSites =
+                        ExtraDefinitionSites ++
+                            confirmed_reference_rewrite_sites(
+                                ConfirmedSelfSuper, OldSelectorBin, NewSelectorBin
+                            ),
+                    CandidateSites = candidate_site_maps(OtherSites ++ CandidateSelfSuper),
+                    {ok, DefinitionSite, ReferenceSites, CandidateSites};
+                Collisions ->
+                    {error, {target_selector_collision, Collisions}}
+            end
+    end.
+
+%% Review finding on PR #3529 (round 2): a confirmed self/super site is
+%% about to be rewritten to send `NewSelector` instead of `OldSelector` —
+%% but `self`/`super` dispatch is LATE-BOUND to the runtime receiver's
+%% actual class, which can be ANY class in `HierarchySet`, not just the
+%% confirmed site's own textual owner (this is the identical late-binding
+%% fact `selector_override_free/4`'s own doc already relies on for
+%% `OldSelector`). A subclass that merely INHERITS a confirmed self-send
+%% without declaring one of its own — and independently already defines
+%% `NewSelector` — would slip through an owner-scoped check entirely: round
+%% 1's fix (checking only `ConfirmedSelfSuper`'s owners) missed exactly
+%% this case. Fixed by scanning the SAME `HierarchySet` `selector_override_
+%% free/4` scans, not just the sites' owners — mirroring that function
+%% arm-for-arm, applied to `NewSelector` instead of `OldSelector`.
+%%
+%% Gated on `ConfirmedSelfSuper =/= []`: when override-freedom already
+%% failed for `OldSelector` (`ConfirmedSelfSuper = []`), no reference site
+%% will be rewritten at all — only the definition, which `ensure_rename_
+%% selector_collision_free/2` (step 2 of `rename_selector/3`) already
+%% guards against `ClassName` itself — so scanning the whole hierarchy in
+%% that branch would only produce spurious refusals for renames that touch
+%% nothing outside the definition.
+%%
+%% `ClassName` itself is excluded (`Cls =/= ClassName`) for the same reason
+%% `selector_override_free/4` excludes it from its own override scan:
+%% already covered by step 2's check, not this one's job to repeat.
+-spec confirmed_owners_already_defining([map()], sets:set(atom()), atom(), atom(), boolean()) ->
+    [atom()].
+confirmed_owners_already_defining([], _HierarchySet, _ClassName, _NewSelector, _IsClassSide) ->
+    [];
+confirmed_owners_already_defining(
+    _ConfirmedSelfSuper, HierarchySet, ClassName, NewSelector, IsClassSide
+) ->
+    Implementors = beamtalk_xref:implementors_of(NewSelector),
+    lists:usort([
+        Cls
+     || {Cls, CS} <- Implementors,
+        CS =:= IsClassSide,
+        Cls =/= ClassName,
+        sets:is_element(Cls, HierarchySet)
+    ]).
+
+-spec is_self_or_super_site(map()) -> boolean().
+is_self_or_super_site(#{recv_kind := RecvKind}) ->
+    RecvKind =:= self_recv orelse RecvKind =:= super_recv;
+is_self_or_super_site(_) ->
+    false.
+
+%% Review finding on PR #3529 (round 3): a `super OldSelector` send sited
+%% INSIDE the class being renamed itself can never dispatch to that
+%% class's own implementation — `beamtalk_dispatch:super/5`'s own doc says
+%% it "does NOT check the CurrentClass's method table", always starting
+%% the lookup at `CurrentClass`'s superclass instead (`CurrentClass` here
+%% being the class where the SENDING method is lexically defined, i.e.
+%% this site's `owner` — a compile-time-fixed reference point, unlike
+%% `self`'s late-bound receiver class). So when `Owner =:= ClassName`, a
+%% `super OldSelector` site is necessarily calling some ANCESTOR's
+%% same-named method (the classic override-then-call-`super` idiom) — not
+%% `ClassName`'s own, just-renamed one — and rewriting it would silently
+%% target a selector the ancestor never defined. Every OTHER owner in
+%% `HierarchySet` (any subclass at any depth) is unaffected: `super`
+%% there starts its walk at that subclass's OWN immediate superclass,
+%% which the override-freedom check already guarantees resolves up to
+%% `ClassName`'s implementation with nothing intervening.
+%%
+%% Excluding this shape entirely (regardless of override-freedom) folds it
+%% into `candidate_sites` — human/agent review, never auto-rewritten —
+%% exactly like every other structurally-unprovable site this ADR reports.
+-spec is_unreachable_super_send(map(), atom()) -> boolean().
+is_unreachable_super_send(#{owner := Owner, recv_kind := super_recv}, ClassName) ->
+    Owner =:= ClassName;
+is_unreachable_super_send(_Site, _ClassName) ->
+    false.
+
+%% The override-freedom check (ADR 0114 § Decision): sound iff no class in
+%% `HierarchySet`, other than `ClassName` itself, implements `OldSelector`
+%% on the same side.
+-spec selector_override_free(atom(), boolean(), atom(), sets:set(atom())) -> boolean().
+selector_override_free(OldSelector, IsClassSide, ClassName, HierarchySet) ->
+    Implementors = beamtalk_xref:implementors_of(OldSelector),
+    Overrides = [
+        Cls
+     || {Cls, CS} <- Implementors,
+        CS =:= IsClassSide,
+        Cls =/= ClassName,
+        sets:is_element(Cls, HierarchySet)
+    ],
+    Overrides =:= [].
+
+%% Definition-site rewrite target(s) for `(ClassNameBin, Side, OldSelectorBin)`
+%% — see `discover_rename_selector_sites/6`'s own doc for the keyword-selector
+%% multi-span / resolution-failure-vs-shape-mismatch judgment calls this
+%% implements.
+%%
+%% A dynamic (ClassBuilder) class has NO tracked source at all — unlike
+%% `classRenameTo/2`, which has a genuinely source-free path for a
+%% freestanding dynamic class (its identity move is a separate,
+%% non-source-based `beamtalk_object_class:rename/2` call), there is no
+%% equivalent "rename this selector in place" mechanism for a dynamic
+%% class's own method table today: `rewrite_sites/2` only knows how to
+%% splice `.bt` SOURCE TEXT and recompile, which a sourceless class has
+%% none of. This is surfaced as `{error, dynamic_class_no_source}` — a hard
+%% refusal, not a silent no-op-success — deliberately mirroring
+%% `beamtalk_repl_loader:remove_method/3`'s OWN existing behavior for this
+%% exact shape (`removeSelector:` on a dynamic class already fails today
+%% with "Class source not available ... (cannot remove method)"; nothing
+%% in this codebase currently mutates a dynamic class's method table
+%% by selector name). This is a real, documented divergence from ADR
+%% 0114's "Refusal vs flushability" table, which lists dynamic classes as
+%% simply "Allowed" for `renameSelector:to:` without engineering how a
+%% dynamic class's OWN definition gets mutated without source — building
+%% that mechanism (a `beamtalk_object_class`-level method-rename primitive,
+%% analogous to `rename/2` for class identity) is out of scope for this
+%% issue and flagged here rather than silently worked around.
+-spec definition_selector_sites(binary(), instance | class, binary(), binary()) ->
+    {ok, [map()]} | {error, selector_shape_mismatch | dynamic_class_no_source}.
+definition_selector_sites(ClassNameBin, Side, OldSelectorBin, NewSelectorBin) ->
+    case current_class_source(ClassNameBin) of
+        undefined ->
+            {error, dynamic_class_no_source};
+        Source ->
+            case
+                definition_selector_span_call(
+                    Source, ClassNameBin, OldSelectorBin, NewSelectorBin, Side
+                )
+            of
+                {ok, []} ->
+                    {error, selector_shape_mismatch};
+                {ok, Spans} ->
+                    SourceFile = class_source_file_for(ClassNameBin),
+                    {ok, [
+                        #{
+                            class => ClassNameBin,
+                            source_file => SourceFile,
+                            span => #{start => S, 'end' => E},
+                            new_text => NewText
+                        }
+                     || #{start := S, 'end' := E, new_text := NewText} <- Spans
+                    ]};
+                {error, _Reason} ->
+                    %% Resolver couldn't locate the definition against
+                    %% currently-tracked source (e.g. stale/unsynced live
+                    %% patch) — accepted completeness gap, same category
+                    %% `classRenameTo/2`'s `definition_rewrite_site/3`
+                    %% already documents; degrade rather than block.
+                    {ok, []}
+            end
+    end.
+
+-spec definition_selector_span_call(binary(), binary(), binary(), binary(), instance | class) ->
+    {ok, [map()]} | {error, term()}.
+definition_selector_span_call(Source, ClassNameBin, OldSelectorBin, NewSelectorBin, Side) ->
+    try
+        erlang:apply(beamtalk_compiler, find_definition_selector_spans, [
+            Source, ClassNameBin, OldSelectorBin, NewSelectorBin, Side
+        ])
+    catch
+        error:undef -> {error, workspace_unavailable}
+    end.
+
+%% Every CONFIRMED self/super site, resolved to exact `rewrite_site()` maps
+%% by (a) deduping to distinct `{Owner, ClassSide, Method}` sending-method
+%% triples (`senders_of/1` returns one row PER OCCURRENCE, so two sends of
+%% `OldSelector` in the same method are two rows that must collapse to one
+%% owning-method resolution), then (b) resolving that owning method's own
+%% span once and running `find_selector_send_spans` against its sliced text
+%% to recover EVERY occurrence within it in one AST walk — this is what
+%% makes per-occurrence `line` correlation unnecessary entirely.
+-spec confirmed_reference_rewrite_sites([map()], binary(), binary()) -> [map()].
+confirmed_reference_rewrite_sites(ConfirmedSelfSuperSites, OldSelectorBin, NewSelectorBin) ->
+    Triples = lists:usort([
+        {Owner, ClassSide, Method}
+     || #{owner := Owner, class_side := ClassSide, method := Method} <- ConfirmedSelfSuperSites
+    ]),
+    lists:flatmap(
+        fun({Owner, IsClassSide, Method}) ->
+            owner_method_rewrite_sites(Owner, IsClassSide, Method, OldSelectorBin, NewSelectorBin)
+        end,
+        Triples
+    ).
+
+-spec owner_method_rewrite_sites(atom(), boolean(), atom(), binary(), binary()) -> [map()].
+owner_method_rewrite_sites(Owner, IsClassSide, Method, OldSelectorBin, NewSelectorBin) ->
+    OwnerBin = atom_to_binary(Owner, utf8),
+    case current_class_source(OwnerBin) of
+        undefined ->
+            [];
+        Source ->
+            OwnerSide = class_side_atom(IsClassSide),
+            MethodBin = atom_to_binary(Method, utf8),
+            case method_token_span(Source, OwnerBin, MethodBin, OwnerSide) of
+                {ok, {MStart, MEnd}} ->
+                    MethodText = binary:part(Source, MStart, MEnd - MStart),
+                    SourceFile = class_source_file_for(OwnerBin),
+                    Occurrences = selector_send_spans_call(
+                        MethodText, OldSelectorBin, NewSelectorBin
+                    ),
+                    [
+                        #{
+                            class => OwnerBin,
+                            source_file => SourceFile,
+                            span => #{start => MStart + S, 'end' => MStart + E},
+                            new_text => NewText
+                        }
+                     || SpansForOneOccurrence <- Occurrences,
+                        #{start := S, 'end' := E, new_text := NewText} <- SpansForOneOccurrence
+                    ];
+                not_found ->
+                    []
+            end
+    end.
+
+-spec selector_send_spans_call(binary(), binary(), binary()) -> [[map()]].
+selector_send_spans_call(MethodText, OldSelectorBin, NewSelectorBin) ->
+    try
+        erlang:apply(beamtalk_compiler, find_selector_send_spans, [
+            MethodText, OldSelectorBin, NewSelectorBin
+        ])
+    of
+        {ok, Occurrences} -> Occurrences;
+        {error, _Reason, _Message} -> []
+    catch
+        error:undef -> []
+    end.
+
+%% Every CANDIDATE site (`other`/`erlang_ffi` sends, plus any self/super
+%% site demoted to candidate) reduced to a `candidate_site()`-shaped map —
+%% see `discover_rename_selector_sites/6`'s own doc for why the OWNING
+%% METHOD's whole span is used rather than a precise token span. Deduped to
+%% distinct `{Owner, ClassSide, Method}` triples first, same rationale as
+%% `confirmed_reference_rewrite_sites/3` (multiple occurrences in one
+%% method need only one candidate entry — nothing here is ever spliced
+%% per-occurrence anyway). A triple whose owner has no tracked source or no
+%% resolvable `source_file` is dropped: `candidate_site()`'s `source_file`
+%% field is non-optional, and there is nothing meaningful to point at.
+-spec candidate_site_maps([map()]) -> [map()].
+candidate_site_maps(Sites) ->
+    Triples = lists:usort([
+        {Owner, ClassSide, Method}
+     || #{owner := Owner, class_side := ClassSide, method := Method} <- Sites
+    ]),
+    lists:filtermap(fun candidate_site_map/1, Triples).
+
+-spec candidate_site_map({atom(), boolean(), atom()}) -> {true, map()} | false.
+candidate_site_map({Owner, IsClassSide, Method}) ->
+    OwnerBin = atom_to_binary(Owner, utf8),
+    case current_class_source(OwnerBin) of
+        undefined ->
+            false;
+        Source ->
+            OwnerSide = class_side_atom(IsClassSide),
+            MethodBin = atom_to_binary(Method, utf8),
+            case method_token_span(Source, OwnerBin, MethodBin, OwnerSide) of
+                {ok, {MStart, MEnd}} ->
+                    case class_source_file_for(OwnerBin) of
+                        undefined ->
+                            false;
+                        SourceFile ->
+                            {true, #{
+                                source_file => SourceFile,
+                                span => #{start => MStart, 'end' => MEnd}
+                            }}
+                    end;
+                not_found ->
+                    false
+            end
+    end.
+
+%% `beamtalk_xref:site()`'s `class_side` field is a boolean (`true` =
+%% class-side, `false` = instance-side) — translate to the `instance |
+%% class` atom `resolve_method_span/4`/`find_selector_send_spans`'s wire
+%% shape expects. Mirrors `method_body_rewrite_sites/5`'s own inline
+%% translation for the class-rename case.
+-spec class_side_atom(boolean()) -> instance | class.
+class_side_atom(true) -> class;
+class_side_atom(false) -> instance.
+
+%% Best-effort ChangeLog append after a successful `renameSelector:to:` (ADR
+%% 0114 § ChangeLog schema, `kind: "rename-method"`) — mirrors
+%% `log_class_rename/4`'s placement and self-swallowing failure handling:
+%% the rename is already live in memory by this point, so a logging failure
+%% must never surface to the caller. `candidate_sites` passes through
+%% verbatim, exactly like `log_class_rename/4`'s own `Spec` (there are none
+%% for `'rename-class'`, this is `'rename-method'`'s own tier).
+-spec log_selector_rename(binary(), instance | class, binary(), binary(), [map()], map()) -> ok.
+log_selector_rename(
+    ClassNameBin, Side, OldSelectorBin, NewSelectorBin, CandidateSites, RewriteResult
+) ->
+    {Author, AuthorKind} = current_author_context(),
+    Spec = #{
+        kind => 'rename-method',
+        class => ClassNameBin,
+        selector => NewSelectorBin,
+        old_selector => OldSelectorBin,
+        side => Side,
+        candidate_sites => CandidateSites,
+        intent => durable,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    try
+        erlang:apply(beamtalk_repl_eval, emit_rewrite_change_entry, [Spec, RewriteResult])
+    catch
+        error:undef -> ok
+    end,
+    ok.
 
 %%% ============================================================================
 %%% Protocol Query Primitives (ADR 0068 Phase 2c)

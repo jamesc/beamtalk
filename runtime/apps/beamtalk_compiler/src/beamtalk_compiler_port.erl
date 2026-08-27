@@ -32,6 +32,8 @@ verification that BEAM can invoke the Rust compiler via a port.
     categorize_methods/3,
     class_state_field_defaults/3,
     reindent_method_source/3,
+    find_selector_send_spans/4,
+    find_definition_selector_spans/6,
     close/1
 ]).
 
@@ -958,6 +960,218 @@ resolve_class_span(Port, Source, ClassName) when
     end;
 resolve_class_span(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<"resolve_class_span: source/class must be binary or atom">>}.
+
+-doc """
+Resolve the exact byte span(s) of every self/super-directed send of
+`OldSelector' within `MethodSource' (ADR 0114, BT-3279).
+
+Backs `Behaviour>>renameSelector:to:''s reference-site rewrite:
+`beamtalk_xref:senders_of/1' only carries a *line* number per sending
+method, and a whole-method span is too coarse to splice a single send's
+selector token(s) without corrupting the rest of the body — see
+`beamtalk_core::queries::selector_rename_query::find_selector_send_spans''s
+module doc for the full "why not regex" rationale (a multi-keyword
+selector like `at:put:' can have arbitrary nested expressions between its
+keyword parts). `MethodSource' is expected to be the OWNING method's own
+body text, already sliced via `resolve_method_span/5' — the caller
+translates the spans this returns back to absolute file offsets by adding
+that method's own span start.
+
+Returns `{ok, Occurrences}' where `Occurrences' is a list of lists — one
+inner list per matched self/super send (a keyword selector contributes one
+`#{start := S, 'end' := E, new_text := NewText}' map per keyword part, in
+keyword-part order; unary/binary contribute a single-element inner list).
+An empty outer list means no matching send was found, `MethodSource'
+didn't parse, or a match's keyword arity mismatched `NewSelector''s — this
+resolver has no other failure mode (see its own doc), so unlike
+`resolve_method_span/5' there is no `{error, Reason, Message}' shape for a
+malformed/absent match, only for transport failure (port down, timeout) or
+a bad argument.
+""".
+-spec find_selector_send_spans(port(), binary(), atom() | binary(), atom() | binary()) ->
+    {ok, [[#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]]}
+    | {error, atom(), binary()}.
+find_selector_send_spans(Port, MethodSource, OldSelector, NewSelector) when
+    is_binary(MethodSource),
+    (is_atom(OldSelector) orelse is_binary(OldSelector)),
+    (is_atom(NewSelector) orelse is_binary(NewSelector))
+->
+    Request = #{
+        command => find_selector_send_spans,
+        method_source => MethodSource,
+        old_selector => to_binary(OldSelector),
+        new_selector => to_binary(NewSelector)
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_selector_send_spans_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (selector send spans)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during selector-send-spans query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (selector send spans)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (selector send spans)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+find_selector_send_spans(_Port, _MethodSource, _OldSelector, _NewSelector) ->
+    {error, bad_argument, <<
+        "find_selector_send_spans: method_source must be binary, "
+        "old_selector/new_selector must be atom or binary"
+    >>}.
+
+-spec handle_selector_send_spans_response(map()) ->
+    {ok, [[#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]]}
+    | {error, atom(), binary()}.
+handle_selector_send_spans_response(#{status := ok, occurrences := Occurrences}) when
+    is_list(Occurrences)
+->
+    {ok, [decode_selector_send_spans(Spans) || Spans <- Occurrences]};
+handle_selector_send_spans_response(Other) ->
+    ?LOG_ERROR("Unexpected selector-send-spans response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
+
+-doc """
+Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
+selector-token span(s) within `Source' (ADR 0114, BT-3279) — the narrow
+rewrite counterpart to `find_selector_send_spans/4' for the definition site
+itself: a `'rename-method'' ChangeLog entry's `sites[0]' must be a narrow
+selector-token splice, never the whole method body, or a rewrite would
+corrupt the method's own parameter names/logic. See
+`beamtalk_core::queries::selector_rename_query::find_definition_selector_spans''s
+module doc for the full resolution strategy (exact `KeywordPart' spans for
+a keyword selector; a small modifier-skipping re-lex for unary/binary,
+which the parser gives no dedicated span at all).
+
+Returns `{ok, Spans}' — `Spans' a list of `#{start := S, 'end' := E,
+new_text := NewText}' maps, one per keyword part for a keyword selector, or
+a single-element list for unary/binary. An empty list means
+`OldSelector'/`NewSelector' differ in keyword arity (never a panic).
+Resolution failures (class not found, selector not found, ambiguous) come
+back as `{error, Reason, Message}' exactly like `resolve_method_span/5'.
+Transport failures (port down, timeout) return `{error, port_error,
+Message}'.
+""".
+-spec find_definition_selector_spans(
+    port(), binary(), atom() | binary(), atom() | binary(), atom() | binary(), instance | class
+) ->
+    {ok, [#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]}
+    | {error, atom(), binary()}.
+find_definition_selector_spans(Port, Source, ClassName, OldSelector, NewSelector, Side) when
+    is_binary(Source),
+    (is_atom(ClassName) orelse is_binary(ClassName)),
+    (is_atom(OldSelector) orelse is_binary(OldSelector)),
+    (is_atom(NewSelector) orelse is_binary(NewSelector)),
+    (Side =:= instance orelse Side =:= class)
+->
+    Request = #{
+        command => find_definition_selector_spans,
+        source => Source,
+        class_name => to_binary(ClassName),
+        old_selector => to_binary(OldSelector),
+        new_selector => to_binary(NewSelector),
+        side => Side
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_definition_selector_spans_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (definition selector spans)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during definition-selector-spans query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (definition selector spans)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (definition selector spans)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+find_definition_selector_spans(
+    _Port, _Source, _ClassName, _OldSelector, _NewSelector, _Side
+) ->
+    {error, bad_argument, <<
+        "find_definition_selector_spans: source must be binary, class_name/"
+        "old_selector/new_selector must be atom or binary, side instance or class"
+    >>}.
+
+-spec handle_definition_selector_spans_response(map()) ->
+    {ok, [#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]}
+    | {error, atom(), binary()}.
+handle_definition_selector_spans_response(#{status := ok, spans := Spans}) when is_list(Spans) ->
+    {ok, decode_selector_send_spans(Spans)};
+handle_definition_selector_spans_response(#{status := error, reason := Reason} = Resp) ->
+    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
+    {error, Reason, Message};
+handle_definition_selector_spans_response(Other) ->
+    ?LOG_ERROR("Unexpected definition-selector-spans response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
+
+%% Shared decoder for both selector-rename span commands' `#{start, 'end',
+%% new_text}' map lists — filters out any malformed element defensively
+%% rather than crashing (mirrors this module's other `[safe]'-decoded list
+%% responses).
+-spec decode_selector_send_spans([map()]) ->
+    [#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}].
+decode_selector_send_spans(Spans) when is_list(Spans) ->
+    [
+        #{start => Start, 'end' => End, new_text => NewText}
+     || #{start := Start, 'end' := End, new_text := NewText} <- Spans,
+        is_integer(Start),
+        is_integer(End),
+        is_binary(NewText)
+    ].
 
 -doc """
 Group a class's methods by its `// === Name ===' section dividers (BT-3239,

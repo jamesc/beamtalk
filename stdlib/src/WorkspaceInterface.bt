@@ -229,6 +229,33 @@ sealed typed Object subclass: WorkspaceInterface
   newClass: source :: String at: path :: String -> List(Behaviour) =>
     (Erlang beamtalk_workspace_interface_primitives) newClass: source at: path
 
+  /// Move a class's `.bt` file to a new path without changing its name
+  /// (ADR 0114 Phase 2).
+  ///
+  /// A pure filesystem-organization operation — unlike `Behaviour>>renameTo:`,
+  /// no cross-file reference needs rewriting, since every call site still
+  /// names the class as before; only where its `.bt` file lives on disk
+  /// changes. Records a durable `kind: #'rename-class'` ChangeLog entry
+  /// (`old_class == class`, signalling "same identity, different path") with
+  /// a single site — the class's own declaration. Does NOT write to disk —
+  /// that happens later on `Workspace flush`, which replays the entry as a
+  /// file move (ADR 0114 Phase 2 / BT-3271).
+  ///
+  /// Raises `no_source_file` for a dynamic (`ClassBuilder`) class — moving
+  /// nothing is not a legitimate in-memory action. Raises a structured error
+  /// for a stdlib or dependency class (the same refusal `renameTo:` applies),
+  /// a target path outside the project source tree, or a target equal to the
+  /// class's own current path (a same-path move has nothing to move). Returns
+  /// `aClass` unchanged on success.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace moveClass: Counter to: "src/models/counter.bt"
+  /// // => Counter
+  /// ```
+  moveClass: aClass :: Behaviour to: aNewPath :: String -> Behaviour =>
+    (Erlang beamtalk_workspace_interface_primitives) moveClass: aClass to: aNewPath
+
   // === Flushing changes to disk ===
 
   /// Flush every pending durable Tier 1 change to disk (ADR 0082 Phase 2;

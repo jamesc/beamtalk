@@ -44,7 +44,7 @@
 //! Splicing `source[span]` back into `source` at `span` is therefore an exact
 //! no-op: `source[..start] ++ source[span] ++ source[end..] == source`.
 
-use crate::ast::{ClassDefinition, MessageSelector, Module};
+use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, Module};
 use crate::source_analysis::{Diagnostic, Span, lex_with_eof, parse};
 
 /// Which side of a class a method lives on.
@@ -174,10 +174,77 @@ pub(crate) fn resolve_in_module(
     selector: &str,
     side: MethodSide,
 ) -> Result<Span, SpanResolveError> {
-    // Each match contributes the *AST span* of its definition (whose end is the
-    // last body token; the trailing newline and leading doc comment are added by
-    // `definition_span`).
-    let mut matches: Vec<Span> = Vec::new();
+    let (class_seen, matches) = find_matching_definitions(module, class, selector, side);
+
+    match matches.len() {
+        0 if !class_seen => Err(SpanResolveError::ClassNotFound {
+            class: class.to_string(),
+        }),
+        0 => Err(SpanResolveError::SelectorNotFound {
+            class: class.to_string(),
+            selector: selector.to_string(),
+            side,
+        }),
+        // Each match contributes the *AST span* of its definition (whose end is
+        // the last body token; the trailing newline and leading doc comment are
+        // added by `definition_span`).
+        1 => Ok(definition_span(source, matches[0].resolve_span)),
+        count => Err(SpanResolveError::Ambiguous {
+            class: class.to_string(),
+            selector: selector.to_string(),
+            side,
+            count,
+        }),
+    }
+}
+
+/// One method definition matched by [`find_matching_definitions`], paired
+/// with the span [`resolve_in_module`] should anchor [`definition_span`]
+/// from.
+///
+/// `resolve_span` is NOT always `method.span`: for a standalone
+/// `Class >> selector` extension (ADR 0066), `method.span` starts at the
+/// SELECTOR token (`increment` in `Counter >> increment => ...`), but the
+/// construct's class name and selector can sit on different source lines
+/// (nothing in the grammar requires them adjacent) — anchoring from
+/// `method.span` alone would then silently drop the class-name line (and
+/// any doc comment attached above it) from the resolved definition span.
+/// `resolve_span` is always the WIDER `StandaloneMethodDefinition::span`
+/// (anchored at the class-name token) for that case, matching this
+/// resolver's pre-BT-3279 behavior exactly; for an ordinary class-body
+/// method there is no such outer wrapper, so `resolve_span` just equals
+/// `method.span`.
+#[derive(Clone, Copy)]
+pub(crate) struct MatchedDefinition<'a> {
+    /// The matched method's own AST node — its `selector`/`is_sealed`/
+    /// `is_internal`/`is_class_method` fields, used by
+    /// [`crate::method_source_walker::find_definition_selector_spans`]
+    /// (BT-3279, ADR 0114) to resolve the DEFINITION's own bare
+    /// selector-token span, which is unaffected by the class-name-vs-
+    /// selector line question above (a selector-token walk never needs to
+    /// reach back to the class name).
+    pub method: &'a MethodDefinition,
+    /// The span [`resolve_in_module`] passes to [`definition_span`] — see
+    /// this struct's own doc for why it can differ from `method.span`.
+    pub resolve_span: Span,
+}
+
+/// Every method definition matching `(class, selector, side)` — both
+/// ordinary class-body methods and standalone `Class >> selector` extension
+/// definitions (ADR 0066) — plus whether `class` was seen in `module` at
+/// all. Shared by [`resolve_in_module`] (which needs each match's
+/// `resolve_span` to compute the doc-comment-inclusive [`definition_span`])
+/// and [`crate::method_source_walker::find_definition_selector_spans`]
+/// (BT-3279, ADR 0114), which needs the matched `method`'s own fields
+/// instead — so both resolvers agree, by construction, on exactly which
+/// method counts as "the" match rather than duplicating this traversal.
+pub(crate) fn find_matching_definitions<'a>(
+    module: &'a Module,
+    class: &str,
+    selector: &str,
+    side: MethodSide,
+) -> (bool, Vec<MatchedDefinition<'a>>) {
+    let mut matches: Vec<MatchedDefinition<'a>> = Vec::new();
     let mut class_seen = false;
 
     for class_def in &module.classes {
@@ -190,8 +257,10 @@ pub(crate) fn resolve_in_module(
 
     // Standalone `Class >> selector` extension definitions (ADR 0066). These
     // live at module level rather than inside a class body. They count as the
-    // same class for span-resolution purposes. Their span starts at the
-    // class-name token (not the selector), so use `standalone.span`.
+    // same class for span-resolution purposes. `resolve_span` uses the
+    // WHOLE standalone construct's own span (anchored at the class-name
+    // token), not `standalone.method.span` (anchored at the selector) — see
+    // `MatchedDefinition`'s own doc for why that distinction matters.
     for standalone in &module.method_definitions {
         if standalone.class_name.name.as_str() != class {
             continue;
@@ -203,36 +272,26 @@ pub(crate) fn resolve_in_module(
             MethodSide::Instance
         };
         if standalone_side == side && standalone.method.selector.matches(selector) {
-            matches.push(standalone.span);
+            matches.push(MatchedDefinition {
+                method: &standalone.method,
+                resolve_span: standalone.span,
+            });
         }
     }
 
-    match matches.len() {
-        0 if !class_seen => Err(SpanResolveError::ClassNotFound {
-            class: class.to_string(),
-        }),
-        0 => Err(SpanResolveError::SelectorNotFound {
-            class: class.to_string(),
-            selector: selector.to_string(),
-            side,
-        }),
-        1 => Ok(definition_span(source, matches[0])),
-        count => Err(SpanResolveError::Ambiguous {
-            class: class.to_string(),
-            selector: selector.to_string(),
-            side,
-            count,
-        }),
-    }
+    (class_seen, matches)
 }
 
-/// Collects the spans of instance/class method definitions in `class_def`
-/// matching the selector and side.
-fn collect_matches(
-    class_def: &ClassDefinition,
+/// Collects the instance/class method definitions in `class_def` matching
+/// the selector and side. `resolve_span` equals `method.span` here — an
+/// ordinary class-body method has no outer wrapper construct distinct from
+/// its own span (see `MatchedDefinition`'s doc for the standalone-extension
+/// case where that's NOT true).
+fn collect_matches<'a>(
+    class_def: &'a ClassDefinition,
     selector: &str,
     side: MethodSide,
-    out: &mut Vec<Span>,
+    out: &mut Vec<MatchedDefinition<'a>>,
 ) {
     let methods = match side {
         MethodSide::Instance => &class_def.methods,
@@ -240,7 +299,10 @@ fn collect_matches(
     };
     for method in methods {
         if method.selector.matches(selector) {
-            out.push(method.span);
+            out.push(MatchedDefinition {
+                method,
+                resolve_span: method.span,
+            });
         }
     }
 }
@@ -542,6 +604,24 @@ typed Object subclass: AtomicCounter
         let src = "Object subclass: C\n  foo => 1\n";
         let span = resolve(src, "C", "foo", MethodSide::Instance).expect("foo resolves");
         assert_eq!(&src[span.as_range()], "  foo => 1\n");
+    }
+
+    #[test]
+    fn standalone_extension_span_is_anchored_at_class_name_not_selector() {
+        // BT-3279 review: a standalone `Class >> selector` extension's class
+        // name and its `>> selector` can sit on different source lines —
+        // nothing in the grammar requires them adjacent. `find_matching_
+        // definitions`'s `resolve_span` must anchor `definition_span` from
+        // the WHOLE standalone construct's own span (class-name-rooted),
+        // not `MethodDefinition::span` alone (selector-rooted) — using the
+        // latter silently dropped the class-name line (and any doc comment
+        // above it) from the resolved span, corrupting `Workspace flush`'s
+        // splice target for this (admittedly rare) formatting.
+        let src = "Object subclass: Counter\n  x => 1\n\nCounter\n  >> increment => self\n";
+        let span =
+            resolve(src, "Counter", "increment", MethodSide::Instance).expect("increment resolves");
+        assert_eq!(&src[span.as_range()], "Counter\n  >> increment => self\n");
+        assert_eq!(splice(src, span, &src[span.as_range()]), src);
     }
 
     #[test]

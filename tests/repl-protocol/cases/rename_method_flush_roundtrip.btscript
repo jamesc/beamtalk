@@ -1,0 +1,312 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3273 (ADR 0114 Phase 3, method-rename multi-file flush): required e2e
+// validation for the full `renameSelector:to:` + `Workspace flush:
+// confirmDestructive:` chain against a real, file-backed class hierarchy —
+// matching this issue's own acceptance criteria wording verbatim: `Counter
+// renameSelector: #increment to: #incrementBy` followed by `flush: Counter
+// confirmDestructive: true` rewrites the definition and every confirmed
+// self/super sender, verifies no dangling `does_not_understand` for any
+// confirmed site, and leaves `candidate_sites` untouched on disk.
+//
+// `Behaviour>>renameSelector:to:` (BT-3279) only ever produces a
+// `flushable: true` `'rename-method'` ChangeLog entry for a class the xref
+// index actually covers — an ordinary in-project class, not a BUnit fixture
+// (BUnit's `beamtalk test` runner has no project configured at all — see
+// `stdlib/test/rename_selector_test.bt`'s own doc comment). This harness
+// DOES run with a real project path (`beamtalk_workspace_meta`'s
+// `project_path`), so it is the one place the full disk-flush half of
+// BT-3273's acceptance criteria can actually be exercised end to end,
+// mirroring `rename_class_flush_roundtrip.btscript`'s identical split for
+// the sibling `renameTo:`/`'rename-class'` mechanism.
+//
+// Three files (mirrors `beamtalk_behaviour_intrinsics_rename_selector_tests.erl`'s
+// own fixture-graph shape, EUnit-side coverage of site *discovery*):
+//
+//   Bt3273Counter.bt (the definition):
+//     Value subclass: Bt3273Counter
+//       increment -> String => "incremented"
+//       bump -> String => self increment
+//
+//   Bt3273SubCounter.bt (a confirmed same-hierarchy `super` sender):
+//     Bt3273Counter subclass: Bt3273SubCounter
+//       bumpTwice -> String => super increment
+//
+//   Bt3273Widget.bt (an unrelated class sending the same selector name via
+//   an arbitrary-expression receiver — `other_recv`, always a
+//   `candidate_sites` entry, never auto-rewritten):
+//     Value subclass: Bt3273Widget
+//       poke: aCounter -> String => aCounter increment
+//
+// After `Bt3273Counter renameSelector: #increment to: #incrementBy` and
+// `Workspace flush: Bt3273Counter confirmDestructive: true`:
+//   - `Bt3273Counter.bt`'s definition AND its own `self increment` send are
+//     both rewritten to `incrementBy` (same-file confirmed sites).
+//   - `Bt3273SubCounter.bt`'s cross-file `super increment` send is
+//     rewritten too (cross-file confirmed site).
+//   - `Bt3273Widget.bt` is byte-identical — its `other_recv` send is a
+//     `candidate_sites` entry, reported but never staged or written.
+//   - Reloading all three files from disk resolves cleanly: the new
+//     selector works everywhere it was rewritten, and the old selector is a
+//     genuine `does_not_understand` — no dangling sender anywhere a
+//     confirmed rewrite promised coverage.
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE THREE REAL .bt FILES INSIDE THE PROJECT TREE AND LOAD THEM
+// ===========================================================================
+
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_rename_method_flush_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_counterPath := _projDir ++ "/Bt3273Counter.bt"
+// => _
+
+_subPath := _projDir ++ "/Bt3273SubCounter.bt"
+// => _
+
+_widgetPath := _projDir ++ "/Bt3273Widget.bt"
+// => _
+
+// A genuine LF byte built via the Erlang FFI (BT-3214: see
+// `rename_class_flush_roundtrip.btscript`'s identical note).
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_counterSource := "Value subclass: Bt3273Counter" ++ _nl ++ "  increment -> String => ""incremented""" ++ _nl ++ "  bump -> String => self increment"
+// => _
+
+_subSource := "Bt3273Counter subclass: Bt3273SubCounter" ++ _nl ++ "  bumpTwice -> String => super increment"
+// => _
+
+_widgetSource := "Value subclass: Bt3273Widget" ++ _nl ++ "  poke: aCounter -> String => aCounter increment"
+// => _
+
+File writeAll: _counterPath contents: _counterSource
+// => Result ok: nil
+
+File writeAll: _subPath contents: _subSource
+// => Result ok: nil
+
+File writeAll: _widgetPath contents: _widgetSource
+// => Result ok: nil
+
+Workspace load: _counterPath
+// => _
+
+Workspace load: _subPath
+// => _
+
+Workspace load: _widgetPath
+// => _
+
+Bt3273Counter new increment
+// => incremented
+
+Bt3273Counter new bump
+// => incremented
+
+Bt3273SubCounter new bumpTwice
+// => incremented
+
+Bt3273Widget new poke: Bt3273Counter new
+// => incremented
+
+// ===========================================================================
+// STEP 2 — renameSelector:to: RE-REGISTERS THE CONFIRMED SITES IN MEMORY AND
+// LOGS A rename-method ENTRY (ADR 0114 Phase 3, BT-3279)
+// ===========================================================================
+
+Bt3273Counter renameSelector: #increment to: #incrementBy
+// => Bt3273Counter
+
+Bt3273Counter new incrementBy
+// => incremented
+
+Bt3273Counter new bump
+// => incremented
+
+Bt3273SubCounter new bumpTwice
+// => incremented
+
+_renameEntry := (Workspace changes select: [:e | e className =:= #Bt3273Counter]) first
+// => _
+
+_renameEntry kind
+// => rename-method
+
+_renameEntry isFlushable
+// => true
+
+// The in-memory rename does not touch disk — only flush does.
+_counterBodyBeforeFlush := (File readAll: _counterPath) unwrap
+// => _
+
+_counterBodyBeforeFlush =:= _counterSource
+// => true
+
+// ===========================================================================
+// STEP 3 — Workspace flush REPORTS IT skipped: destructive, FILES SURVIVE
+// (ADR 0113 Phase 2 tier reused verbatim by ADR 0114 Phase 3)
+// ===========================================================================
+
+_tier1Flush := Workspace flush
+// => _
+
+Erlang maps get: #flushed with: _tier1Flush
+// => 0
+
+_skipped := Erlang maps get: #skipped with: _tier1Flush
+// => _
+
+_skipped size
+// => 1
+
+(Erlang maps get: #reason with: _skipped first)
+// => destructive
+
+// ===========================================================================
+// STEP 4 — Workspace flush: aClass confirmDestructive: true REWRITES EVERY
+// CONFIRMED SITE ACROSS FILES; candidate_sites STAY UNTOUCHED (ADR 0114
+// Phase 3, BT-3273)
+// ===========================================================================
+
+_destructiveFlush := Workspace flush: Bt3273Counter confirmDestructive: true
+// => _
+
+Erlang maps get: #flushed with: _destructiveFlush
+// => 1
+
+(Erlang maps get: #skipped with: _destructiveFlush) isEmpty
+// => true
+
+(Erlang maps get: #conflicts with: _destructiveFlush) isEmpty
+// => true
+
+Workspace changes isEmpty
+// => true
+
+// The definition AND the same-file self-send are both rewritten.
+_counterBodyAfterFlush := (File readAll: _counterPath) unwrap
+// => _
+
+_expectedCounterSource := "Value subclass: Bt3273Counter" ++ _nl ++ "  incrementBy -> String => ""incremented""" ++ _nl ++ "  bump -> String => self incrementBy"
+// => _
+
+_counterBodyAfterFlush =:= _expectedCounterSource
+// => true
+
+// The cross-file confirmed `super` sender is rewritten too.
+_subBodyAfterFlush := (File readAll: _subPath) unwrap
+// => _
+
+_expectedSubSource := "Bt3273Counter subclass: Bt3273SubCounter" ++ _nl ++ "  bumpTwice -> String => super incrementBy"
+// => _
+
+_subBodyAfterFlush =:= _expectedSubSource
+// => true
+
+// The candidate site (an arbitrary-receiver send of the same selector name)
+// is completely untouched — `#increment` verbatim, never rewritten, never
+// staged, never even given a `.tmp`.
+_widgetBodyAfterFlush := (File readAll: _widgetPath) unwrap
+// => _
+
+_widgetBodyAfterFlush =:= _widgetSource
+// => true
+
+// ===========================================================================
+// STEP 5 — NO DANGLING does_not_understand: A FRESH RE-LOAD OF ALL THREE
+// (NOW-REWRITTEN) FILES RESOLVES CLEANLY FOR EVERY CONFIRMED SITE — the
+// end-to-end point of this test.
+// ===========================================================================
+
+Bt3273Widget removeFromSystem
+// => nil
+
+Bt3273SubCounter removeFromSystem
+// => nil
+
+Bt3273Counter removeFromSystem
+// => nil
+
+Workspace changes clear
+// => _
+
+Workspace load: _counterPath
+// => _
+
+Workspace load: _subPath
+// => _
+
+Workspace load: _widgetPath
+// => _
+
+Bt3273Counter new incrementBy
+// => incremented
+
+Bt3273Counter new bump
+// => incremented
+
+Bt3273SubCounter new bumpTwice
+// => incremented
+
+// The old selector no longer resolves on the renamed class — a genuine
+// does_not_understand, not a silently-dangling sender.
+[Bt3273Counter new increment] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// The candidate site's own (never-rewritten) send still resolves — it was
+// never broken because it was never touched: `aCounter increment` still
+// means the OLD selector, and the renamed class no longer answers it, so
+// this now-stale candidate call site itself would raise DNU too — exactly
+// the reviewed-follow-up burden ADR 0114 documents `candidate_sites` for.
+[Bt3273Widget new poke: Bt3273Counter new] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Bt3273Widget removeFromSystem
+// => nil
+
+Bt3273SubCounter removeFromSystem
+// => nil
+
+Bt3273Counter removeFromSystem
+// => nil
+
+(Erlang file) delete: _counterPath
+// => _
+
+(Erlang file) delete: _subPath
+// => _
+
+(Erlang file) delete: _widgetPath
+// => _
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _

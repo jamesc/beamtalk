@@ -309,10 +309,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "beamtalk-workspace"
+name = "beamtalk-home"
 version = "0.4.0"
 dependencies = [
  "dirs",
+]
+
+[[package]]
+name = "beamtalk-workspace"
+version = "0.4.0"
+dependencies = [
+ "beamtalk-home",
  "miette",
  "sha2 0.11.0",
  "tracing",

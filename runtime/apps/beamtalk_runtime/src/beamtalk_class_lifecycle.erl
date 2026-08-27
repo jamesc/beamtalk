@@ -35,6 +35,16 @@ invokes once its safety checks pass and the class process has been stopped;
 each purge below targets a disjoint table/process, so there is no ordering
 requirement between them.
 
+`purge_class_registries/1` factors out the four *name-keyed* purges (xref,
+extensions, compiler cache, workspace class source) as their own exported
+step, reused by `classRenameTo` (ADR 0114, BT-3278) to retire a class's OLD
+identity after a rename installs the new one. Rename deliberately does NOT
+call `class_removed/2` itself for this: `purge_protocol/1` is keyed by
+`Module`, not by class name, and an in-memory-only rename (no disk flush,
+BT-3271) keeps the SAME BEAM module atom serving the class under its NEW
+name — purging protocols for that still-live module would wrongly erase
+registrations the renamed class still needs.
+
 ## Dependency direction
 
 `beamtalk_runtime` (this module's app) sits *below* `beamtalk_compiler` and
@@ -58,7 +68,7 @@ dependency-direction concern, since they live in this app.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([class_removed/2]).
+-export([class_removed/2, purge_class_registries/1]).
 
 -doc """
 Purge every derived registry entry for a class removed via
@@ -73,9 +83,24 @@ non-REPL run), so class removal itself is never blocked by this cleanup.
 """.
 -spec class_removed(atom(), atom()) -> ok.
 class_removed(ClassName, Module) ->
+    purge_class_registries(ClassName),
+    purge_protocol(Module),
+    ok.
+
+-doc """
+Purge the four *name-keyed* derived registries for `ClassName` — xref,
+extensions, compiler cache, and workspace class source — WITHOUT touching
+`beamtalk_protocol_registry` (keyed by `Module`, not by class name; see this
+module's doc for why `classRenameTo` must not call `class_removed/2` itself).
+
+Used by `class_removed/2` for a full class removal, and directly by
+`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114, BT-3278) to retire
+a class's OLD name after installing it under a new one.
+""".
+-spec purge_class_registries(atom()) -> ok.
+purge_class_registries(ClassName) ->
     purge_xref(ClassName),
     purge_extensions(ClassName),
-    purge_protocol(Module),
     purge_compiler_cache(ClassName),
     purge_workspace_class_source(ClassName),
     ok.

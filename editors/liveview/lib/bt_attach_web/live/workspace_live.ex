@@ -610,6 +610,26 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:new_class_error, nil)
       |> assign(:new_class_name, "")
       |> assign(:new_class_super, "Object")
+      # Rename modal (ADR 0114 Phase 5, BT-3277): the editor's owner-only
+      # "Rename Class"/"Rename Method" affordance, closed by default. Opening
+      # it reads the active tab (a `:def` tab renames the class via
+      # `renameTo:`; a `:method` tab renames the selector via
+      # `renameSelector:to:`) and pre-fills the field with the current name,
+      # mirroring the New Class modal's shape above. `rename_kind` (`:class` |
+      # `:method` | `nil`) picks which primitive `rename_submit` drives;
+      # `rename_class`/`rename_side`/`rename_old_selector` are the target
+      # captured when the modal opened (not re-read from the active tab on
+      # submit, so the target can't drift under a mid-edit tab switch);
+      # `rename_new_name` is the in-flight field value and `rename_error`
+      # carries an in-modal validation/rename error, kept off the
+      # method-editor's shared `save_error` just like `new_class_error`.
+      |> assign(:rename_open, false)
+      |> assign(:rename_kind, nil)
+      |> assign(:rename_class, nil)
+      |> assign(:rename_side, nil)
+      |> assign(:rename_old_selector, nil)
+      |> assign(:rename_new_name, "")
+      |> assign(:rename_error, nil)
       # Navigation aids (BT-2495, epic BT-2482 Phase 3): the top-bar omni search
       # and the method-editor Senders/Implementors popovers. Both ride thin
       # `:read` facade ops over the navigation channel (ADR 0096), so they work
@@ -1556,6 +1576,46 @@ defmodule BtAttachWeb.WorkspaceLive do
   # the button is rendered only for `:owner`, mirroring `remove_method` above.
   def handle_event("remove_class", _params, socket), do: {:noreply, socket}
 
+  # Open the Rename modal for the active tab (ADR 0114 Phase 5, BT-3277): a
+  # `:def` tab renames its class (`renameTo:`), an existing `:method` tab
+  # renames its selector (`renameSelector:to:`). Mirrors `remove_class`/
+  # `remove_method` above in reading the target from the active tab rather
+  # than trusting client-supplied params, but — unlike those, which act
+  # immediately — this only opens the modal; the actual rename waits for
+  # `rename_submit` once the owner has typed the new name.
+  def handle_event("open_rename", _params, %{assigns: %{role: :owner}} = socket) do
+    {:noreply, open_rename(socket)}
+  end
+
+  # Non-owner (Observer) or a crafted event with no matching role: a no-op —
+  # the buttons opening this modal are rendered only for `:owner`.
+  def handle_event("open_rename", _params, socket), do: {:noreply, socket}
+
+  # Dismiss the Rename modal without renaming anything — mirrors
+  # `close_new_class` (Escape / click-away / the modal's own × button all
+  # route here).
+  def handle_event("close_rename", _params, socket) do
+    {:noreply, assign(socket, rename_open: false, rename_error: nil)}
+  end
+
+  # Submit the Rename modal's new name (ADR 0114 Phase 5, BT-3277). Dispatches
+  # to `renameTo:` or `renameSelector:to:` depending on which kind of rename
+  # was opened; a rejected submit re-renders the modal with the in-flight
+  # value and an inline error, mirroring `new_class`'s validation-failure
+  # shape.
+  def handle_event(
+        "rename_submit",
+        %{"new_name" => new_name},
+        %{assigns: %{role: :owner}} = socket
+      )
+      when is_binary(new_name) do
+    {:noreply, submit_rename(socket, new_name)}
+  end
+
+  # Non-owner (Observer) or a crafted event with a missing/non-binary name: a
+  # no-op — the form is rendered only for `:owner` while the modal is open.
+  def handle_event("rename_submit", _params, socket), do: {:noreply, socket}
+
   # ── tabbed method editor (BT-2494, epic BT-2482 Phase 2) ────────────────────
 
   # Switch the focused editor tab. Pure view state — no workspace round-trip; an
@@ -1581,20 +1641,22 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Keyboard chord (Esc in the browser, ⌘W in the desktop shell) closing the
   # focused editor tab — same path as clicking the tab's ✕, including the
   # silent discard of a dirty tab. No-op when nothing is open. While an
-  # Escape-dismissable surface is open (New Class modal, Senders/Implementors
-  # popover, Settings dropdown), Escape means "dismiss it", never "close the
-  # tab". The PRIMARY defence is client-side (`claimedByWindowKeydown` in
-  # `keyboard_shortcuts.js`): those surfaces mount a `phx-window-keydown`
-  # element only while open, and LiveView's window listener fires before the
-  # hook's, so the same keystroke's dismiss event can reach the server first
-  # and clear these assigns before this handler runs — the guard below is a
-  # best-effort backstop (and the testable contract) for any push that does
-  # arrive while a surface is still open.
+  # Escape-dismissable surface is open (New Class modal, Rename modal,
+  # Senders/Implementors popover, Settings dropdown), Escape means "dismiss
+  # it", never "close the tab". The PRIMARY defence is client-side
+  # (`claimedByWindowKeydown` in `keyboard_shortcuts.js`): those surfaces
+  # mount a `phx-window-keydown` element only while open, and LiveView's
+  # window listener fires before the hook's, so the same keystroke's dismiss
+  # event can reach the server first and clear these assigns before this
+  # handler runs — the guard below is a best-effort backstop (and the
+  # testable contract) for any push that does arrive while a surface is
+  # still open.
   def handle_event("tab_close_active", _params, socket) do
     %{assigns: assigns} = socket
 
     escape_claimed? =
-      assigns.new_class_open or assigns.show_settings or assigns.nav_popover != nil
+      assigns.new_class_open or assigns.rename_open or assigns.show_settings or
+        assigns.nav_popover != nil
 
     case assigns.active_tab do
       _ when escape_claimed? -> {:noreply, socket}
@@ -1777,20 +1839,26 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, flush_changes(socket)}
   end
 
-  # "Delete file" — the browser's second, independently-confirmed gesture for
-  # one pending `remove-class` ChangeLog row (ADR 0113 Phase 4, BT-3210,
-  # Surface table). Scoped to the one class the row names, mirroring the
-  # REPL's `:flush-destructive <Class>` and the MCP `flush` tool's scoped
-  # `confirm_destructive: true` form — never the unscoped
-  # `flushIncludingDestructive`, since a browser click always targets one
-  # named row, not "every destructive entry in the workspace".
+  # "Delete file" / "Apply rename" — the browser's second, independently-
+  # confirmed gesture for one pending `remove-class`/`rename-class`/
+  # `rename-method` ChangeLog row (ADR 0113 Phase 4 BT-3210, extended by ADR
+  # 0114 Phase 5 BT-3277's Surface table). Scoped to the one class the row
+  # names, mirroring the REPL's `:flush-destructive <Class>` and the MCP
+  # `flush` tool's scoped `confirm_destructive: true` form — never the
+  # unscoped `flushIncludingDestructive`, since a browser click always
+  # targets one named row, not "every destructive entry in the workspace".
+  # `kind` rides its own `phx-value-*` attribute (defaulting to
+  # `"remove-class"`, this button's original — and still most common — row)
+  # only to pick the right status message on success; it plays no role in
+  # which entry actually gets flushed (the `class` Symbol alone scopes that).
   def handle_event(
         "flush_destructive",
-        %{"class" => class},
+        %{"class" => class} = params,
         %{assigns: %{role: :owner}} = socket
       )
       when is_binary(class) and class != "" do
-    {:noreply, flush_destructive(socket, class)}
+    kind = Map.get(params, "kind", "remove-class")
+    {:noreply, flush_destructive(socket, class, kind)}
   end
 
   # Non-owner (Observer), or a crafted event with a missing/blank class: a
@@ -4080,6 +4148,317 @@ defmodule BtAttachWeb.WorkspaceLive do
     end)
   end
 
+  # Deliberately NOT a selector grammar (unary/keyword/binary, whitespace
+  # rules, the lexer's exact binary-operator character set) — duplicating
+  # that here would be exactly the un-enforced "keep in sync" copy
+  # `docs/development/architecture-principles.md`'s Duplication section
+  # warns against, since nothing would catch this regex drifting from
+  # `crates/beamtalk-core/src/source_analysis/lexer.rs`'s
+  # `is_binary_selector_char/1` if the language ever adds an operator
+  # character. Instead this only guards the one property that actually
+  # matters here: the value is embedded as `##{new_name}` inside a
+  # textually-interpolated `evaluate` expression, so it must contain no
+  # character that could end the symbol literal early or splice in a second
+  # expression (whitespace, `#`, quotes, backslash). Anything that passes
+  # this narrow check but isn't actually a well-formed selector fails the
+  # same way any other malformed `evaluate` expression does — a normal
+  # compiler error surfaced via `rename_method_eval/6`'s `{:error, ...}`
+  # branch — so the compiler stays the sole source of truth for "is this a
+  # valid selector", never re-implemented here.
+  @selector_injection_re ~r/^[^[:space:]#"'\\]+$/
+
+  # Open the Rename modal against the active tab (ADR 0114 Phase 5, BT-3277):
+  # a `:def` tab renames its class, an existing (already-saved) `:method` tab
+  # renames its selector — mirroring `remove_active_class`/`remove_active_method`'s
+  # identical tab-kind dispatch, including `remove_active_method`'s `new: true`
+  # guard (a brand-new, not-yet-compiled method has no selector to rename).
+  # The target is captured into `rename_class`/`rename_side`/`rename_old_selector`
+  # now, at open time, rather than re-read from the active tab on submit — so
+  # switching tabs while the modal is open can't retarget the rename mid-flight.
+  defp open_rename(socket) do
+    case active_tab(socket.assigns) do
+      %{kind: :def, class: class} when is_binary(class) and class != "" ->
+        assign(socket,
+          rename_open: true,
+          rename_kind: :class,
+          rename_class: class,
+          rename_side: nil,
+          rename_old_selector: nil,
+          rename_new_name: class,
+          rename_error: nil
+        )
+
+      %{kind: :method, new: true} ->
+        status_error(socket, "This method hasn't been saved yet — nothing to rename.")
+
+      %{kind: :method, class: class, side: side, selector: selector}
+      when is_binary(class) and class != "" and is_binary(selector) and selector != "" ->
+        assign(socket,
+          rename_open: true,
+          rename_kind: :method,
+          rename_class: class,
+          rename_side: side,
+          rename_old_selector: selector,
+          rename_new_name: selector,
+          rename_error: nil
+        )
+
+      _ ->
+        status_error(socket, "Open a class definition or an existing method to rename it.")
+    end
+  end
+
+  # Dispatch the Rename modal's submitted name to whichever primitive
+  # `rename_kind` selected. A rejected submit keeps the modal open with the
+  # in-flight value and an inline error (never the method editor's shared
+  # `save_error`), mirroring `new_class/3`'s validation-failure shape.
+  defp submit_rename(socket, new_name) do
+    new_name = String.trim(new_name)
+
+    case socket.assigns.rename_kind do
+      :class ->
+        rename_class(socket, socket.assigns.rename_class, new_name)
+
+      :method ->
+        rename_method(
+          socket,
+          socket.assigns.rename_class,
+          socket.assigns.rename_side,
+          socket.assigns.rename_old_selector,
+          new_name
+        )
+
+      _ ->
+        assign(socket, rename_open: false, rename_error: nil)
+    end
+  end
+
+  # `OldClass renameTo: #NewName` (ADR 0114 Phase 2, `Behaviour>>renameTo:`,
+  # BT-3278), submitted through the same generic `evaluate` op the REPL
+  # `:rename-class` meta-command and the MCP `rename_class` tool use — no
+  # dedicated workspace-side op (ADR 0114's "Surface" table, reusing ADR
+  # 0113's "every surface constructs one of the Beamtalk expressions above
+  # and submits via the existing `evaluate` op"). Memory-mutating only: this
+  # never flushes — the resulting `rename-class` entry needs its own
+  # confirmed "apply rename" click in the Changes pane to reach disk (ADR
+  # 0114's two-gesture flow, reusing ADR 0113's `confirmDestructive` tier).
+  #
+  # `new_name` is validated locally against the same bare-PascalCase-identifier
+  # shape the New Class modal enforces (`@new_class_name_re`) before it is
+  # textually interpolated into the `evaluate` expression — this field is
+  # owner-typed but still raw client input reaching a raw Beamtalk expression,
+  # exactly the injection concern `flush_destructive/2`'s class-name check
+  # guards against.
+  defp rename_class(socket, old_name, new_name) do
+    cond do
+      new_name == "" ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error: "Enter a new class name."
+        )
+
+      not Regex.match?(@new_class_name_re, new_name) ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error:
+            "Class name must be PascalCase — start with an uppercase letter, e.g. `Accumulator`."
+        )
+
+      class_name_taken?(socket, new_name) ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error: "A class named #{new_name} already exists."
+        )
+
+      true ->
+        expr = "#{old_name} renameTo: ##{new_name}"
+        pid = socket.assigns[:session_pid]
+
+        if not is_pid(pid) do
+          assign(socket,
+            rename_open: true,
+            rename_new_name: new_name,
+            rename_error: "not attached to workspace"
+          )
+        else
+          rename_class_eval(socket, old_name, new_name, expr, pid)
+        end
+    end
+  end
+
+  defp rename_class_eval(socket, old_name, new_name, expr, pid) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        # The class's identity changed, so every tab keyed on the old name
+        # (its own `:def` tab plus any open `:method` tabs) is stale — close
+        # them all, mirroring `remove_class_eval/4`'s tab-closing success
+        # path, then refresh the class tree (a new name to browse) and the
+        # Changes pane (the new `rename-class` entry). `open_definition/2`
+        # re-syncs the active-tab editor assigns (clearing `save_result`,
+        # same note as `dispatch_new_class/5` above), so the success status is
+        # assigned AFTER it opens the renamed class's definition tab.
+        socket
+        |> close_tabs_for_class(old_name)
+        |> assign_browser_classes()
+        |> assign_changes()
+        |> open_definition(new_name)
+        |> reselect_renamed_class(old_name, new_name)
+        |> assign(
+          rename_open: false,
+          rename_error: nil,
+          save_result:
+            "Renamed #{old_name} to #{new_name} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+
+      {:error, reason, _output, _warnings} ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error: Workspace.render_error(reason)
+        )
+
+      {:error, reason} ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error: facade_error(reason)
+        )
+    end
+  end
+
+  # Only follow the rename into `selected_class` when the System Browser
+  # tree's own current selection WAS the renamed class (or nothing was
+  # selected) — unlike `dispatch_new_class/5`'s unconditional select-the-
+  # new-class (there's no prior selection to conflict with when creating a
+  # class), a rename can be triggered from an open `:def` tab while the
+  # tree has a DIFFERENT, unrelated class selected. Reassigning
+  # unconditionally would move the tree highlight to the renamed class
+  # while leaving `browser_protocols`/`browser_categories` showing the
+  # untouched previously-selected class — the same "ghost selection"
+  # mismatch `selected_class_visible?/1` (BT-2597) exists to avoid for the
+  # browser-source-filter case. Leaving an unrelated selection alone is
+  # simpler and correct here; there's no stale-name problem to fix in that
+  # case, since the unrelated class's own identity didn't change.
+  defp reselect_renamed_class(socket, old_name, new_name) do
+    if socket.assigns.selected_class in [old_name, nil] do
+      assign(socket, selected_class: new_name, selected_protocol: nil)
+    else
+      socket
+    end
+  end
+
+  # `Class renameSelector: #old to: #new` (or `Class class renameSelector: #old
+  # to: #new` for a class-side tab) — `Behaviour>>renameSelector:to:` (ADR
+  # 0114 Phase 3, BT-3279), submitted through the same generic `evaluate` op
+  # the REPL `:rename-method` meta-command and the MCP `rename_method` tool
+  # use. Memory-mutating only, same two-gesture flow as `rename_class/3`
+  # above: reaching disk needs the Changes pane's "apply rename" click.
+  #
+  # `new_name` is only checked against `@selector_injection_re` (no
+  # whitespace/`#`/quotes/backslash) before interpolation — see that
+  # attribute's own comment for why this stops short of validating full
+  # selector syntax. A value that passes this check but isn't actually a
+  # well-formed selector, or collides with an already-defined local
+  # selector, is refused server-side by `renameSelector:to:` itself
+  # (mirroring `removeSelector:`'s existing error surface) and surfaces
+  # through `rename_method_eval/6`'s ordinary error branch.
+  defp rename_method(socket, class, side, old_selector, new_name) do
+    cond do
+      new_name == "" ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error: "Enter a new selector."
+        )
+
+      not Regex.match?(@selector_injection_re, new_name) ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_name,
+          rename_error: "Selector cannot contain spaces, #, quotes, or backslashes."
+        )
+
+      true ->
+        receiver = if side == "class", do: "#{class} class", else: class
+        expr = "#{receiver} renameSelector: ##{old_selector} to: ##{new_name}"
+        pid = socket.assigns[:session_pid]
+
+        if not is_pid(pid) do
+          assign(socket,
+            rename_open: true,
+            rename_new_name: new_name,
+            rename_error: "not attached to workspace"
+          )
+        else
+          rename_method_eval(socket, class, receiver, old_selector, new_name, expr, pid)
+        end
+    end
+  end
+
+  defp rename_method_eval(socket, class, receiver, old_selector, new_selector, expr, pid) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        # The selector changed, so the active method tab (keyed on the old
+        # selector) is stale — close it, mirroring `remove_method_eval/6`'s
+        # tab-closing success path.
+        socket
+        |> close_active_tab_if(
+          &match?(%{kind: :method, class: ^class, selector: ^old_selector}, &1)
+        )
+        |> assign(
+          rename_open: false,
+          rename_error: nil,
+          save_result:
+            "Renamed #{receiver} #{old_selector} to #{new_selector} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+        |> assign_changes()
+
+      {:error, reason, _output, _warnings} ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_selector,
+          rename_error: Workspace.render_error(reason)
+        )
+
+      {:error, reason} ->
+        assign(socket,
+          rename_open: true,
+          rename_new_name: new_selector,
+          rename_error: facade_error(reason)
+        )
+    end
+  end
+
+  # Close every open tab (def or method) belonging to `class` — used after a
+  # successful class rename, since every one of them is keyed on the
+  # now-stale old name. Iterates `close_tab/2` (rather than a bulk filter)
+  # so each close runs its normal active-tab-reassignment bookkeeping.
+  defp close_tabs_for_class(socket, class) do
+    socket.assigns.tabs
+    |> Enum.filter(&(&1.kind in [:def, :method] and Map.get(&1, :class) == class))
+    |> Enum.reduce(socket, fn tab, acc -> close_tab(acc, tab.id) end)
+  end
+
+  # Close the active tab only when `pred` matches it — used after a
+  # successful method rename so a rename triggered from a *different* tab
+  # (not reachable today, since `open_rename/1` only ever targets the active
+  # tab, but kept explicit rather than assumed) never closes the wrong one.
+  defp close_active_tab_if(socket, pred) do
+    case active_tab(socket.assigns) do
+      %{} = tab -> if pred.(tab), do: close_tab(socket, tab.id), else: socket
+      _ -> socket
+    end
+  end
+
   defp dispatch_new_class(socket, name, superclass, source, path) do
     case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
       {:ok, created_path} ->
@@ -4206,6 +4585,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # flush-time consequences; the row's own `.destructive-badge` (see the
   # template) is the primary visual cue, this is the textual one.
   defp change_kind_label(%{kind: "remove-class"}), do: "remove class"
+  # ADR 0114 Phase 5 (BT-3277): the sibling Tier-2 kinds to "remove class"
+  # above — a `renameTo:`/`renameSelector:to:` entry, which also needs its
+  # own confirmed flush to reach disk (same `.destructive-row`/`.destructive-
+  # badge` marker as remove-class, extended in the template below).
+  defp change_kind_label(%{kind: "rename-class"}), do: "rename class"
+  defp change_kind_label(%{kind: "rename-method"} = c), do: "rename (#{c[:side] || "?"})"
   defp change_kind_label(%{kind: kind}), do: kind
 
   # Revert one pending method patch (BT-2293). On success the prior body is
@@ -4271,21 +4656,26 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # "Delete file" (ADR 0113 Phase 4, BT-3210) — the scoped Tier-2 flush for
-  # one `remove-class` row, submitted as `Workspace flush: #Class
+  # "Delete file" / "Apply rename" (ADR 0113 Phase 4 BT-3210, extended by ADR
+  # 0114 Phase 5 BT-3277) — the scoped Tier-2 flush for one `remove-class`/
+  # `rename-class`/`rename-method` row, submitted as `Workspace flush: #Class
   # confirmDestructive: true` through the generic `evaluate` op (no
   # dedicated workspace-side op, matching `remove_class`/`remove_method`
   # above and mirroring the REPL's `:flush-destructive #Class` / MCP
-  # `flush`'s scoped `confirm_destructive: true` form).
+  # `flush`'s scoped `confirm_destructive: true` form). All three kinds join
+  # the same Tier 2 (ADR 0114 "Flush" reuses ADR 0113's tier verbatim), so
+  # one handler drives all three rows; only the confirmation prompt and the
+  # resulting status message differ by `kind` (`rename_flush_verb/1`).
   #
-  # Scoped by *Symbol* (`#Class`), not the bare class name: this button only
-  # ever appears on an already-`remove-class`'d row, so `removeFromSystem`
-  # has already unbound the class name by the time this fires — a bare
-  # identifier would fail to *evaluate* (unresolved class) before the
+  # Scoped by *Symbol* (`#Class`), not the bare class name: a `remove-class`
+  # row's class name is already unbound by the time this fires (`removeFromSystem`
+  # ran first) — a bare identifier would fail to *evaluate* before the
   # `flush:` send ever runs. `beamtalk_workspace_flush`'s filter
   # normalisation matches a Symbol against the ChangeLog entry's recorded
-  # `class` field by name, needing no live class to resolve — exactly what
-  # scoping a destructive flush to an already-removed class needs.
+  # `class` field by name, needing no live class to resolve, so the same
+  # Symbol form works uniformly for a `rename-class`/`rename-method` row too
+  # (both still-bound, but simpler to share one code path than special-case
+  # which kind can take a bare identifier).
   #
   # `class` rides a `phx-value-*` attribute, so — unlike `remove_class`'s
   # `class` (read from server-tracked active-tab state) — it is
@@ -4294,7 +4684,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `validate_new_class_name`/`validate_superclass` already enforce for the
   # New Class modal's class-name fields (`@new_class_name_re`), so a crafted
   # event cannot inject arbitrary source into the `evaluate` call.
-  defp flush_destructive(socket, class) do
+  defp flush_destructive(socket, class, kind) do
     if Regex.match?(@new_class_name_re, class) do
       expr = "Workspace flush: ##{class} confirmDestructive: true"
       pid = socket.assigns[:session_pid]
@@ -4302,21 +4692,43 @@ defmodule BtAttachWeb.WorkspaceLive do
       if not is_pid(pid) do
         status_error(socket, "not attached to workspace")
       else
-        flush_destructive_eval(socket, class, expr, pid)
+        flush_destructive_eval(socket, class, kind, expr, pid)
       end
     else
       status_error(socket, "Invalid class name.")
     end
   end
 
-  defp flush_destructive_eval(socket, class, expr, pid) do
+  # The past-tense status line for a completed Tier-2 flush, by `kind` — an
+  # unrecognised future kind falls back to a generic phrase rather than
+  # crashing, matching `change_kind_label/1`'s own fallback.
+  defp rename_flush_message("rename-class", class), do: "Flushed the pending rename to #{class}"
+
+  defp rename_flush_message("rename-method", class),
+    do: "Flushed the pending method rename on #{class}"
+
+  defp rename_flush_message(_kind, class), do: "Flushed the pending removal for #{class}"
+
+  # The `data-confirm` prompt for the "apply rename" button (ADR 0114 Phase
+  # 5, BT-3277) — mirrors "delete file"'s prompt above, worded per kind since
+  # a class rename also moves the `.bt` file while a method rename only
+  # rewrites spans within existing files.
+  defp rename_flush_confirm_message(%{kind: "rename-class", class: class}) do
+    "Rename to #{class} on disk? This moves and edits one or more files and cannot be undone from here (use \"revert\" first if you change your mind)."
+  end
+
+  defp rename_flush_confirm_message(%{kind: "rename-method"} = c) do
+    "Rename #{c.selector} on #{c.class}#{if c[:side] == "class", do: " class", else: ""} on disk? This edits one or more files and cannot be undone from here (use \"revert\" first if you change your mind)."
+  end
+
+  defp flush_destructive_eval(socket, class, kind, expr, pid) do
     case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
       {:ok, _term, _output, _warnings} ->
         socket
         |> assign(
           save_result: nil,
           save_error: nil,
-          flush_result: "Flushed the pending removal for #{class}",
+          flush_result: rename_flush_message(kind, class),
           flush_error: nil
         )
         |> assign_changes()
@@ -10054,20 +10466,27 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <% expanded =
                               MapSet.member?(@expanded_changes, {c.class, c.selector, c[:side]}) %>
                             <%!-- Destructive-tier row marker (ADR 0113 Phase 4,
-                                 BT-3210): a `remove-class` entry deletes a `.bt`
-                                 file on flush and is deliberately excluded from
-                                 the ordinary "Save All to Disk" write (BT-3207's
-                                 Tier 1/Tier 2 split) — this class drives a purely
-                                 presentational CSS marker (`.destructive-row`, a
-                                 tinted left border + a "destructive" `::after`
-                                 badge on the Kind cell) so the row never reads as
-                                 just another dirty patch. Kept off the `<td>`
-                                 cells themselves (as an attribute or extra child
-                                 node) so the exact-match `<td>#{kind}</td>`
-                                 regex `workspace_changes_side_test.exs` (BT-3195)
+                                 BT-3210, joined by ADR 0114 Phase 5 BT-3277's
+                                 rename-class/rename-method): a `remove-class`
+                                 entry deletes a `.bt` file on flush, and a
+                                 `rename-class`/`rename-method` entry rewrites
+                                 one or more files — all three are deliberately
+                                 excluded from the ordinary "Save All to Disk"
+                                 write (BT-3207's Tier 1/Tier 2 split) — this
+                                 class drives a purely presentational CSS marker
+                                 (`.destructive-row`, a tinted left border + a
+                                 "destructive" `::after` badge on the Kind cell)
+                                 so the row never reads as just another dirty
+                                 patch. Kept off the `<td>` cells themselves (as
+                                 an attribute or extra child node) so the
+                                 exact-match `<td>#{kind}</td>` regex
+                                 `workspace_changes_side_test.exs` (BT-3195)
                                  already asserts on every other row's Kind cell
                                  stays untouched. --%>
-                            <tr class={if c.kind == "remove-class", do: "destructive-row"}>
+                            <tr class={
+                              if c.kind in ["remove-class", "rename-class", "rename-method"],
+                                do: "destructive-row"
+                            }>
                               <%!-- Leading disclosure caret (BT-2636): toggles
                                    this row's structured net-vs-disk diff. Only
                                    rendered when the entry carries a diff (the same
@@ -10102,42 +10521,62 @@ defmodule BtAttachWeb.WorkspaceLive do
                               <td>{if c.flushable, do: "yes", else: "no"}</td>
                               <td>{c.author_kind}</td>
                               <%!-- Revert one pending change (ADR 0082 Phase 5,
-                                   completeness BT-2663/BT-2664/BT-2665). Owner-only
-                                   (`revert` is an :execute op). Instance-side and
-                                   class-side method patches are revertable (a modify
-                                   re-installs the prior body; an add removes the
-                                   method), a new-class entry is revertable (it
-                                   removes the just-created class), and a
-                                   `remove-method` entry is revertable (it restores the
-                                   removed method — BT-3194, reusing `revert_method/3`'s
-                                   side-aware selection from BT-3187). Gate the button on
-                                   a positive kind assertion so an unanticipated future
-                                   kind hides the affordance rather than offering one
-                                   that errors. New-class rows carry no selector, so
-                                   send the `new-class` placeholder the workspace maps
-                                   back to the class's new-class entry.
+                                   completeness BT-2663/BT-2664/BT-2665; ADR 0114
+                                   Phase 5 BT-3274 for rename-class/rename-method).
+                                   Owner-only (`revert` is an :execute op).
+                                   Instance-side and class-side method patches are
+                                   revertable (a modify re-installs the prior body;
+                                   an add removes the method), a new-class entry is
+                                   revertable (it removes the just-created class), a
+                                   `remove-method` entry is revertable (it restores
+                                   the removed method — BT-3194, reusing
+                                   `revert_method/3`'s side-aware selection from
+                                   BT-3187), and a `rename-class`/`rename-method`
+                                   entry is revertable (it splices every rewritten
+                                   site back to its own prior body — BT-3274). Gate
+                                   the button on a positive kind assertion so an
+                                   unanticipated future kind hides the affordance
+                                   rather than offering one that errors. New-class
+                                   AND rename-class rows both carry no selector (a
+                                   whole-class-identity entry, not a method-level
+                                   one), so both send the `new-class` placeholder
+                                   the workspace maps back to whichever of the
+                                   two — by highest seq — the row shows
+                                   (`find_revert_target/3`'s `match_selector/1`).
 
                                    `phx-value-entry-side` (ADR 0112, BT-3187) carries
                                    this *row's* side (`"instance"`/`"class"`, or `""`
-                                   for a sideless new-class row) into the revert call,
-                                   so a same-selector instance-side and class-side
-                                   entry — otherwise indistinguishable by (class,
-                                   selector) alone — resolve to the one this row
-                                   actually shows, not whichever has the higher seq.
-                                   Named `entry-side` (not `side`) so it doesn't
-                                   collide with the browser's `phx-value-side`
-                                   instance/class toggle (BT-2491) — a plain
-                                   `button[phx-value-side=...]` selector would
-                                   otherwise match both controls. --%>
+                                   for a sideless new-class/rename-class row) into
+                                   the revert call, so a same-selector instance-side
+                                   and class-side entry — otherwise indistinguishable
+                                   by (class, selector) alone — resolve to the one
+                                   this row actually shows, not whichever has the
+                                   higher seq. Named `entry-side` (not `side`) so it
+                                   doesn't collide with the browser's
+                                   `phx-value-side` instance/class toggle
+                                   (BT-2491) — a plain `button[phx-value-side=...]`
+                                   selector would otherwise match both controls. --%>
                               <td :if={@role == :owner}>
                                 <button
-                                  :if={c.kind in ["instance", "class", "new-class", "remove-method"]}
+                                  :if={
+                                    c.kind in [
+                                      "instance",
+                                      "class",
+                                      "new-class",
+                                      "remove-method",
+                                      "rename-class",
+                                      "rename-method"
+                                    ]
+                                  }
                                   class="btn-link"
                                   type="button"
                                   phx-click="revert"
                                   phx-value-class={c.class}
                                   phx-value-selector={
-                                    if(c.kind == "new-class", do: "new-class", else: c.selector)
+                                    if(c.kind in ["new-class", "rename-class"],
+                                      do: "new-class",
+                                      else: c.selector
+                                    )
                                   }
                                   phx-value-entry-side={c[:side] || ""}
                                   phx-disable-with="Reverting…"
@@ -10153,24 +10592,44 @@ defmodule BtAttachWeb.WorkspaceLive do
                                      deletes its `.bt` file, so it gets its
                                      own `data-confirm` dialog rather than
                                      silently riding along with "Save All to
-                                     Disk" (which stays Tier-1-only, BT-3207).
-                                     Not revertable (`remove-class` is
-                                     deliberately absent from the `revert`
-                                     button's kind list above — BT-3208 owns
-                                     that follow-up), so this is the row's
-                                     only action. --%>
+                                     Disk" (which stays Tier-1-only, BT-3207). --%>
                                 <button
                                   :if={c.kind == "remove-class"}
                                   class="btn-link danger"
                                   type="button"
                                   phx-click="flush_destructive"
                                   phx-value-class={c.class}
+                                  phx-value-kind={c.kind}
                                   phx-disable-with="Deleting…"
                                   data-confirm={
                                     "Permanently delete #{c.class}'s source file from disk? This cannot be undone."
                                   }
                                 >
                                   delete file
+                                </button>
+                                <%!-- Apply rename (ADR 0114 Phase 5, BT-3277):
+                                     the same second, independently-confirmed
+                                     gesture as "delete file" above, for a
+                                     `rename-class`/`rename-method` row —
+                                     "Rename Class"/"Rename Method" (the editor
+                                     action) only renamed in memory; this click
+                                     is what actually rewrites the confirmed
+                                     sites on disk (a class-rename also moves
+                                     the `.bt` file itself). Revertable (unlike
+                                     `remove-class`), so this sits alongside —
+                                     not instead of — the "revert" button
+                                     above. --%>
+                                <button
+                                  :if={c.kind in ["rename-class", "rename-method"]}
+                                  class="btn-link danger"
+                                  type="button"
+                                  phx-click="flush_destructive"
+                                  phx-value-class={c.class}
+                                  phx-value-kind={c.kind}
+                                  phx-disable-with="Renaming…"
+                                  data-confirm={rename_flush_confirm_message(c)}
+                                >
+                                  apply rename
                                 </button>
                               </td>
                             </tr>
@@ -11166,6 +11625,25 @@ defmodule BtAttachWeb.WorkspaceLive do
                               >
                                 Remove Method
                               </button>
+                              <%!-- Rename Method (ADR 0114 Phase 5, BT-3277): same
+                             existing-method-only guard as Remove Method above —
+                             opens the Rename modal (`open_rename`) rather than
+                             renaming immediately, since (unlike Remove) this
+                             action needs a new selector typed first. Not
+                             `data-confirm`-gated itself; the modal's own
+                             submit is the confirming gesture (mirroring the
+                             New Class modal, not a `data-confirm` dialog). --%>
+                              <button
+                                :if={
+                                  active_tab(assigns).kind == :method and
+                                    not active_tab(assigns)[:new]
+                                }
+                                class="btn btn-sm"
+                                type="button"
+                                phx-click="open_rename"
+                              >
+                                Rename Method
+                              </button>
                               <%!-- Remove Class (ADR 0113 Phase 4, BT-3210): only on a
                              class-definition tab — a `:def` tab always names an
                              already-existing class (there is no "new, unsaved
@@ -11193,6 +11671,19 @@ defmodule BtAttachWeb.WorkspaceLive do
                               >
                                 Remove Class
                               </button>
+                              <%!-- Rename Class (ADR 0114 Phase 5, BT-3277): same
+                             `:def`-tab-only guard as Remove Class above —
+                             opens the Rename modal rather than renaming
+                             immediately, for the same "needs a new name
+                             typed first" reason Rename Method does. --%>
+                              <button
+                                :if={active_tab(assigns).kind == :def}
+                                class="btn btn-sm"
+                                type="button"
+                                phx-click="open_rename"
+                              >
+                                Rename Class
+                              </button>
                               <button class="btn btn-sm primary" type="submit">
                                 Compile <span class="k">⌘S</span>
                               </button>
@@ -11201,6 +11692,96 @@ defmodule BtAttachWeb.WorkspaceLive do
                               </button>
                             </div>
                           </form>
+                          <%!-- RENAME modal (ADR 0114 Phase 5, BT-3277): opened by
+                         "Rename Class"/"Rename Method" above. One shared modal for
+                         both kinds (`@rename_kind`), mirroring the New Class
+                         modal's shape (single field, Cancel/submit actions,
+                         Escape/click-away dismiss) — the memory-mutating rename
+                         itself fires on submit; reaching disk is the Changes
+                         pane's separate "apply rename" gesture (the
+                         destructive-dirty-indicator affordance ADR 0113
+                         established for delete, reused here per ADR 0114's
+                         Surface table). --%>
+                          <div
+                            :if={@role == :owner and @rename_open}
+                            id="rename-modal"
+                            class="modal-scrim"
+                            phx-window-keydown="close_rename"
+                            phx-key="escape"
+                          >
+                            <div
+                              class="modal-dialog"
+                              role="dialog"
+                              aria-modal="true"
+                              aria-label={
+                                if @rename_kind == :class, do: "Rename class", else: "Rename method"
+                              }
+                              phx-click-away="close_rename"
+                            >
+                              <div class="modal-head">
+                                <h2 class="modal-title">
+                                  {if @rename_kind == :class,
+                                    do: "Rename Class",
+                                    else: "Rename Method"}
+                                </h2>
+                                <button
+                                  type="button"
+                                  class="panel-close"
+                                  phx-click="close_rename"
+                                  aria-label="Close Rename dialog"
+                                  title="Close"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                              <form
+                                id="rename-form"
+                                phx-submit="rename_submit"
+                                class="new-class-modal-form"
+                              >
+                                <label class="new-class-field-label" for="rename-new-name">
+                                  {if @rename_kind == :class,
+                                    do: "New name for #{@rename_class}",
+                                    else: "New selector for #{@rename_class} #{@rename_old_selector}"}
+                                </label>
+                                <input
+                                  type="text"
+                                  id="rename-new-name"
+                                  name="new_name"
+                                  class="field"
+                                  value={@rename_new_name}
+                                  autocomplete="off"
+                                  spellcheck="false"
+                                  placeholder={
+                                    if @rename_kind == :class, do: "Accumulator", else: "incrementBy"
+                                  }
+                                  aria-describedby={if @rename_error, do: "rename-error"}
+                                  aria-invalid={to_string(@rename_error != nil)}
+                                  phx-mounted={Phoenix.LiveView.JS.focus()}
+                                />
+                                <p
+                                  :if={@rename_error}
+                                  id="rename-error"
+                                  class="new-class-error"
+                                  role="alert"
+                                >
+                                  {@rename_error}
+                                </p>
+                                <div class="modal-actions">
+                                  <button type="button" class="btn ghost" phx-click="close_rename">
+                                    Cancel
+                                  </button>
+                                  <button
+                                    class="btn primary"
+                                    type="submit"
+                                    phx-disable-with="Renaming…"
+                                  >
+                                    Rename
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          </div>
                           <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
                          affordance now lives in the System Browser head (class-
                          oriented, collapsed by default), not here under the method

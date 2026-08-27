@@ -1,0 +1,148 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3283 (follow-up from PR #3526 review round 3, non-blocking Suggestion):
+// renaming the SAME class TWICE before ANY intervening flush is ordinary
+// usage (`Foo renameTo: #Bar`, then — without flushing — `Bar renameTo:
+// #Baz`), reachable via the real `renameTo:` primitive because the in-memory
+// class registration renames immediately even though the file on disk does
+// not move until flush. `classRenameTo:`'s own `old_path` computation reads
+// the class's compiled `beamtalk_source` module attribute, which is only
+// refreshed by a flush COMMIT (`maybe_reload_renamed_class_source/1`) — so
+// both pending entries compute the SAME stale `old_path`, and
+// `rename_entry_rename_collisions/1` refuses the whole batch as a file
+// collision. That refusal is correct (no data loss) but, before this fix,
+// used the generic `mixed_rename_and_rename_edit` reason, which wrongly
+// implies two unrelated classes collided. This script exercises the real,
+// reachable path end-to-end and asserts the distinct
+// `same_class_rename_chain_needs_flush` reason instead.
+//
+// Contrast with `rename_class_flush_sequential_rename.btscript`, which
+// covers the SAME two-hop rename but WITH a flush between the two
+// `renameTo:` calls — the ordinary, unblocked path this one is not.
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE A REAL .bt FILE INSIDE THE PROJECT TREE AND LOAD IT
+// ===========================================================================
+
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_rename_class_chained_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_fooPath := _projDir ++ "/Bt3283ChainFoo.bt"
+// => _
+
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_fooSource := "Value subclass: Bt3283ChainFoo" ++ _nl ++ "  greet -> String => ""hi from the chained rename e2e"""
+// => _
+
+File writeAll: _fooPath contents: _fooSource
+// => Result ok: nil
+
+Workspace load: _fooPath
+// => _
+
+Bt3283ChainFoo new greet
+// => hi from the chained rename e2e
+
+// ===========================================================================
+// STEP 2 — FIRST renameTo:: Foo -> Bar. In-memory rename only — no flush yet.
+// ===========================================================================
+
+Bt3283ChainFoo renameTo: #Bt3283ChainBar
+// => _
+
+(Bt3283ChainBar sourceFile) =:= _fooPath
+// => true
+
+// ===========================================================================
+// STEP 3 — SECOND renameTo:: Bar -> Baz, WITH NO FLUSH IN BETWEEN. Bar's own
+// compiled sourceFile attribute is still stale (still _fooPath, per step 2),
+// so this second entry's old_path also resolves to _fooPath — the exact
+// root cause this issue is about.
+// ===========================================================================
+
+Bt3283ChainBar renameTo: #Bt3283ChainBaz
+// => _
+
+Workspace changes notEmpty
+// => true
+
+// ===========================================================================
+// STEP 4 — A SINGLE FLUSH COVERING BOTH PENDING ENTRIES ABORTS CLEANLY WITH
+// THE DISTINCT, SAME-CLASS-CHAIN REASON — NOT THE GENERIC COLLISION REASON.
+// ===========================================================================
+
+_flushResult := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _flushResult
+// => 0
+
+_conflicts := Erlang maps get: #conflicts with: _flushResult
+// => _
+
+_conflicts isEmpty
+// => false
+
+_conflictFirst := _conflicts first
+// => _
+
+Erlang maps get: #reason with: _conflictFirst
+// => same_class_rename_chain_needs_flush
+
+// No partial writes: the original file is untouched, and neither renamed
+// path was ever created.
+File exists: _fooPath
+// => true
+
+File exists: (_projDir ++ "/Bt3283ChainBar.bt")
+// => false
+
+File exists: (_projDir ++ "/Bt3283ChainBaz.bt")
+// => false
+
+// Both pending entries survive, unflushed, for the caller to resolve by
+// flushing between the two renames instead — the documented, supported way
+// to get this same two-hop rename to actually land on disk (see
+// `rename_class_flush_sequential_rename.btscript`).
+Workspace changes isEmpty
+// => false
+
+// ===========================================================================
+// CLEANUP — the live class is registered under its final in-memory name
+// (Baz) even though nothing ever reached disk; the original file is still
+// exactly where it started.
+// ===========================================================================
+
+Bt3283ChainBaz removeFromSystem
+// => nil
+
+(Erlang file) delete: _fooPath
+// => _
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _
