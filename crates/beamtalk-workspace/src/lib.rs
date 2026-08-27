@@ -83,8 +83,7 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn beamtalk_root_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk"))
+    beamtalk_home::beamtalk_root_dir().ok_or_else(|| miette!("Could not determine home directory"))
 }
 
 /// Resolve the address epmd should bind/contact: `ERL_EPMD_ADDRESS` if the
