@@ -1,0 +1,173 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3271 (ADR 0114 Phase 2, class-rename multi-file flush): required e2e
+// validation for the OTHER half of the acceptance criteria —
+// `rename_class_flush_roundtrip.btscript` covers the happy path; this
+// covers "a forced Phase A staleness (edit a target span externally between
+// rename and flush) aborts cleanly with no partial writes."
+//
+// Same two-file fixture shape as the companion roundtrip test (a class and
+// one in-project referrer), but the class's own declaration line is edited
+// externally — by a tool other than this workspace, e.g. another editor or
+// `git checkout` — after `renameTo:` has already computed and recorded the
+// rewrite, and before `Workspace flushIncludingDestructive` runs. Phase A's
+// external-edit check must catch this BEFORE any file is touched: neither
+// the (would-be) moved file nor the referencing file's rewrite reaches
+// disk, the original file survives with the externally-edited content
+// intact (flush never overwrites what it didn't validate), and the pending
+// entry stays in `Workspace changes` for the caller to resolve.
+
+// ===========================================================================
+// CLEAN START
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — WRITE TWO REAL .bt FILES INSIDE THE PROJECT TREE AND LOAD THEM
+// ===========================================================================
+
+_meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
+// => _
+
+_projectPath := Erlang maps get: #project_path with: _meta
+// => _
+
+_projDir := _projectPath ++ "/bt_e2e_rename_class_staleness_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang filelib) ensure_dir: (_projDir ++ "/.keep")
+// => Result ok: nil
+
+_demoPath := _projDir ++ "/Bt3271StaleRenameDemo.bt"
+// => _
+
+_userPath := _projDir ++ "/Bt3271StaleRenameDemoUser.bt"
+// => _
+
+_nl := (Erlang unicode) characters_to_binary: #(10)
+// => _
+
+_demoSource := "Value subclass: Bt3271StaleRenameDemo" ++ _nl ++ "  greet -> String => ""hi from the staleness e2e"""
+// => _
+
+_userSource := "Value subclass: Bt3271StaleRenameDemoUser" ++ _nl ++ "  makeDemo -> Bt3271StaleRenameDemo => Bt3271StaleRenameDemo new"
+// => _
+
+File writeAll: _demoPath contents: _demoSource
+// => Result ok: nil
+
+File writeAll: _userPath contents: _userSource
+// => Result ok: nil
+
+Workspace load: _demoPath
+// => _
+
+Workspace load: _userPath
+// => _
+
+// ===========================================================================
+// STEP 2 — renameTo: RECORDS THE REWRITE (IN MEMORY ONLY — NO DISK WRITE YET)
+// ===========================================================================
+
+Bt3271StaleRenameDemo renameTo: #Bt3271StaleRenameDemoRenamed
+// => _
+
+Workspace changes notEmpty
+// => true
+
+// ===========================================================================
+// STEP 3 — FORCED PHASE A STALENESS: SOMETHING ELSE EDITS THE DECLARATION
+// SPAN EXTERNALLY BEFORE THE FLUSH RUNS
+// ===========================================================================
+
+_externalEdit := "Value subclass: SomeoneElseChangedThisFile" ++ _nl ++ "  totallyDifferent => 999"
+// => _
+
+File writeAll: _demoPath contents: _externalEdit
+// => Result ok: nil
+
+// ===========================================================================
+// STEP 4 — Workspace flushIncludingDestructive ABORTS CLEANLY, NO PARTIAL
+// WRITES
+// ===========================================================================
+
+_flushResult := Workspace flushIncludingDestructive
+// => _
+
+Erlang maps get: #flushed with: _flushResult
+// => 0
+
+_conflicts := Erlang maps get: #conflicts with: _flushResult
+// => _
+
+_conflicts isEmpty
+// => false
+
+_conflictFirst := _conflicts first
+// => _
+
+Erlang maps get: #reason with: _conflictFirst
+// => external_edit
+
+// Neither file was touched: the original (now externally-edited) file keeps
+// exactly the bytes the external edit wrote, and the referencing file is
+// completely untouched — no partial rewrite, no `.tmp` left behind at
+// either path.
+(File readAll: _demoPath) unwrap =:= _externalEdit
+// => true
+
+(File readAll: _userPath) unwrap =:= _userSource
+// => true
+
+_renamedPath := _projDir ++ "/Bt3271StaleRenameDemoRenamed.bt"
+// => _
+
+File exists: _renamedPath
+// => false
+
+File exists: (_demoPath ++ ".tmp")
+// => false
+
+File exists: (_renamedPath ++ ".tmp")
+// => false
+
+File exists: (_userPath ++ ".tmp")
+// => false
+
+// The pending entry stays exactly that — pending, for the caller to resolve.
+Workspace changes isEmpty
+// => false
+
+_renameEntry := (Workspace changes select: [:e | e className =:= #Bt3271StaleRenameDemoRenamed]) first
+// => _
+
+_renameEntry isActive
+// => true
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Bt3271StaleRenameDemoRenamed removeFromSystem
+// => nil
+
+Bt3271StaleRenameDemoUser removeFromSystem
+// => nil
+
+(Erlang file) delete: _demoPath
+// => _
+
+(Erlang file) delete: _userPath
+// => _
+
+(Erlang file) del_dir: _projDir
+// => Result ok: nil
+
+Workspace changes clear
+// => _

@@ -169,6 +169,20 @@ pub(crate) const FLUSH_DESTRUCTIVE: ReplCommandSpec = ReplCommandSpec {
     takes_class_expr_arg: true,
 };
 
+pub(crate) const RENAME_CLASS: ReplCommandSpec = ReplCommandSpec {
+    name: ":rename-class",
+    aliases: &[],
+    help: "Rename a class in the running system (prompts for confirmation): `:rename-class <Class> <NewName>`",
+    takes_class_expr_arg: true,
+};
+
+pub(crate) const RENAME_METHOD: ReplCommandSpec = ReplCommandSpec {
+    name: ":rename-method",
+    aliases: &[],
+    help: "Rename a method on a class (prompts for confirmation): `:rename-method <Class> <selector> <newSelector>`",
+    takes_class_expr_arg: true,
+};
+
 /// The full REPL meta-command vocabulary. This is the single source both
 /// `helper.rs` (tab-completion) and `mod.rs` (dispatch, via
 /// `classify_command`) consult — see the module doc for why `:actors`,
@@ -190,6 +204,8 @@ pub(crate) const REPL_COMMAND_TABLE: &[&ReplCommandSpec] = &[
     &REMOVE_METHOD,
     &REMOVE_CLASS,
     &FLUSH_DESTRUCTIVE,
+    &RENAME_CLASS,
+    &RENAME_METHOD,
 ];
 
 /// All command word forms (canonical name + aliases) flattened, for
@@ -285,6 +301,8 @@ mod tests {
             ":remove-method ",
             ":remove-class ",
             ":flush-destructive ",
+            ":rename-class ",
+            ":rename-method ",
         ] {
             assert!(
                 prefixes.iter().any(|p| p == expected),

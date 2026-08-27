@@ -19,7 +19,8 @@ name = "beamtalk_workspace"
 path = "src/lib.rs"
 
 [dependencies]
-dirs.workspace = true
+# why: shared leaf for ~/.beamtalk resolution (see docs/development/architecture-principles.md §6)
+beamtalk-home.workspace = true
 miette.workspace = true
 sha2.workspace = true
 tracing.workspace = true

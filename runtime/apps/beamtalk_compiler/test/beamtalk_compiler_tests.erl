@@ -451,6 +451,21 @@ assert_command_recognized(<<"class_state_field_defaults">>) ->
         {ok, _},
         beamtalk_compiler:class_state_field_defaults(span_fixture(), <<"SpanCounter">>)
     );
+assert_command_recognized(<<"find_selector_send_spans">>) ->
+    %% `self basicNew` (SpanCounter's `class new` body, span_fixture/0) is a
+    %% real unary self-send — a non-empty result proves dispatch reached the
+    %% actual resolver, not just an empty-because-unrecognized fallback.
+    ?assertMatch(
+        {ok, [[_ | _] | _]},
+        beamtalk_compiler:find_selector_send_spans(<<"self basicNew">>, basicNew, newBasic)
+    );
+assert_command_recognized(<<"find_definition_selector_spans">>) ->
+    ?assertMatch(
+        {ok, [_ | _]},
+        beamtalk_compiler:find_definition_selector_spans(
+            span_fixture(), <<"SpanCounter">>, increment, bump, instance
+        )
+    );
 assert_command_recognized(Command) ->
     %% A corpus entry with no dispatch clause is a test-authoring gap, not a
     %% vocabulary mismatch — fail loudly rather than silently skipping it.

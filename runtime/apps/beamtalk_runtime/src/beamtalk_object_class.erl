@@ -57,7 +57,10 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_class_methods/1,
     local_class_methods_map/1,
     local_instance_methods/1,
-    dispatch_caller_pid/0
+    dispatch_caller_pid/0,
+    %% ADR 0114 (BT-3278): in-place identity move for a dynamic
+    %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
+    rename/2
 ]).
 
 %% gen_server callbacks
@@ -184,6 +187,66 @@ start_link(ClassName, ClassInfo) ->
 start_link(ClassInfo) ->
     ClassName = maps:get(name, ClassInfo),
     start_link(ClassName, ClassInfo).
+
+-doc """
+Move a DYNAMIC (ClassBuilder, no backing source) class's live registration
+from `OldName` to `NewName` in place — same pid, same state, just re-keyed.
+
+Backs `classRenameTo`'s dynamic-class row (ADR 0114 § "Refusal vs
+flushability": "Allowed, `flushable: false` (`\"dynamic\"`)") — a dynamic
+class has no source for the shared `beamtalk_repl_loader:rewrite_sites/2`
+mechanism to recompile, so nothing ever creates a fresh `NewName`-registered
+process the way an ordinary compiled class's rename does (see
+`beamtalk_behaviour_intrinsics:classRenameTo/2`'s doc). This is the one case
+where the SAME class-object process answers under a new name, rather than
+being retired in favour of a freshly-installed one.
+
+Reuses `sync_identity/6` and `seed_runtime_class_methods/2` — the exact
+functions `init/1` already calls to publish a class's identity — so the
+`beamtalk_class_metadata` row and runtime class-method funs move to
+`NewName` via the same path a brand-new registration would use, not a
+hand-rolled duplicate. `beamtalk_class_registry`'s pid/loaded-class indexes
+are updated the same way `init/1`/`terminate/2` already do for a genuinely
+new/removed process.
+
+Known, accepted gap (scoped like ADR 0114's other documented gaps): the
+native-backing-module reverse index (`record_backing_module_entry/3`) and
+`beamtalk_compiler_server`'s ambient class cache are not migrated here —
+both need `Meta`, which is only ever computed in `init/1` and not retained
+in `#class_state{}` afterward. A stale entry surviving under `OldName` for a
+renamed dynamic class with a native backing is an accepted gap, not a
+silent correctness claim.
+
+Fails with `{error, {already_registered, NewName}}` if `NewName` is already
+a live registered class — `classRenameTo/2` already checks this before
+calling; this is a defensive double-check, not the primary guard.
+""".
+-spec rename(class_name(), class_name()) -> {ok, pid()} | {error, term()}.
+rename(OldName, NewName) ->
+    case beamtalk_class_registry:whereis_class(OldName) of
+        undefined ->
+            {error, {class_not_found, OldName}};
+        Pid ->
+            NewRegName = beamtalk_class_registry:registry_name(NewName),
+            case erlang:whereis(NewRegName) of
+                undefined ->
+                    %% The handler can still lose a registration race that
+                    %% opens between this `whereis/1` check and its own
+                    %% `erlang:register/2` (review feedback on PR #3523) — it
+                    %% replies `{error, {already_registered, NewName}}`
+                    %% cleanly rather than crashing when that happens, so
+                    %% this call must actually handle that reply instead of
+                    %% pattern-matching only the `ok` case (a `badmatch` here
+                    %% would just move the crash from the class gen_server to
+                    %% THIS caller, defeating the handler's own fix).
+                    case gen_server:call(Pid, {rename_class, NewName}) of
+                        ok -> {ok, Pid};
+                        {error, _} = Err -> Err
+                    end;
+                _ ->
+                    {error, {already_registered, NewName}}
+            end
+    end.
 
 -doc "Update an existing class process with new metadata after redefinition.".
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
@@ -899,6 +962,57 @@ handle_call(class_name, _From, #class_state{name = Name} = State) ->
     {reply, Name, State};
 handle_call(module_name, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
+%% ADR 0114 (BT-3278): see rename/2's doc — the dynamic-class in-place
+%% identity move `classRenameTo` calls when there is no source to recompile.
+handle_call(
+    {rename_class, NewName},
+    _From,
+    #class_state{
+        name = OldName,
+        module = Module,
+        superclass = Superclass,
+        is_abstract = IsAbstract,
+        class_methods = ClassMethods
+    } = State
+) ->
+    OldRegName = beamtalk_class_registry:registry_name(OldName),
+    NewRegName = beamtalk_class_registry:registry_name(NewName),
+    true = erlang:unregister(OldRegName),
+    %% TOCTOU guard (review feedback on PR #3523): `rename/2`'s own
+    %% `erlang:whereis/1` check happens before this call is even sent, so a
+    %% concurrent registration of `NewRegName` in between would otherwise
+    %% crash this gen_server on the plain `true = erlang:register(...)` this
+    %% replaced — after `OldRegName` is already gone, leaving the class
+    %% unreachable under either name. Caught and rolled back here instead,
+    %% so the caller gets the same clean `{error, {already_registered, _}}`
+    %% `rename/2`'s pre-check is meant to produce.
+    case catch erlang:register(NewRegName, self()) of
+        true ->
+            put(beamtalk_class_name, NewName),
+            sync_identity(
+                NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
+            ),
+            seed_runtime_class_methods(NewName, ClassMethods),
+            beamtalk_class_registry:record_class_pid(self(), NewName),
+            beamtalk_class_registry:record_loaded_class(NewName, self()),
+            beamtalk_class_metadata:delete(OldName),
+            _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
+            beamtalk_class_monitor:unwatch(OldName),
+            beamtalk_class_monitor:watch(NewName, self()),
+            {reply, ok, State#class_state{name = NewName}};
+        {'EXIT', _Reason} ->
+            %% Residual gap, not closed here (review feedback on PR #3523):
+            %% this rollback assumes `OldRegName` is still free. Another
+            %% process registering under `OldRegName` in the narrow window
+            %% since `erlang:unregister/1` above would crash this same
+            %% gen_server the same way the guard above was written to
+            %% avoid — one level deeper. Accepted as out of scope: closing
+            %% it fully would need the same guard nested again with no
+            %% further fallback once nesting runs out, for a race
+            %% narrower than the one this function already targets.
+            true = erlang:register(OldRegName, self()),
+            {reply, {error, {already_registered, NewName}}, State}
+    end;
 handle_call(
     {method, Selector},
     _From,

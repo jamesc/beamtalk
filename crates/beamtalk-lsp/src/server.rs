@@ -37,6 +37,7 @@ use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::notification::Notification as LspNotification;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOptions, CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams,
@@ -157,6 +158,56 @@ pub struct FetchContentParams {
 pub struct FetchContentResult {
     /// The source content of the requested file.
     pub content: String,
+}
+
+/// Params for the `beamtalk-lsp/documentMoved` custom notification (ADR 0114
+/// LSP follow-up, BT-3285) — see [`DocumentMoved`] for why it exists.
+/// `#[serde(rename_all = "camelCase")]` matches every other LSP payload
+/// (e.g. `lsp_types::RenameFile`'s `oldUri`/`newUri`), even though this type
+/// isn't itself part of the upstream `lsp_types` crate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentMovedParams {
+    /// The `file://` URI the class's declaration lived at before the
+    /// `renameTo:`/`moveClass:to:` flush moved it. Already gone from disk by
+    /// the time this notification is sent — see [`apply_rename_class_move`].
+    pub old_uri: Url,
+    /// The `file://` URI the class's declaration now lives at.
+    pub new_uri: Url,
+}
+
+/// A custom server-to-client LSP notification (ADR 0114 LSP follow-up,
+/// BT-3285): `beamtalk-lsp/documentMoved`, `{oldUri, newUri}`.
+///
+/// **Why this exists:** a `renameTo:`/`moveClass:to:` flush's
+/// `workspace/applyEdit` used to include a typed `RenameFile` resource
+/// operation (`old_uri -> new_uri`), so an open editor tab would follow the
+/// move. By the time that edit reaches the client, though, the runtime has
+/// already renamed the file on disk and unlinked `old_uri` — and VS Code's
+/// own `RenameOperation.perform()` treats "target already exists, source
+/// already gone" as "nothing to do" and silently skips the move step
+/// entirely (no error, but no editor-state retargeting either). See BT-3285
+/// for the investigation and docs/ADR/0114-class-and-method-rename.md's LSP
+/// section for the resulting design.
+///
+/// This notification is this project's first-party VS Code extension's
+/// replacement mechanism: it doesn't ask the client to perform a filesystem
+/// rename at all (there is nothing left to rename by the time it fires),
+/// just tells a listening client which editor URI to retarget. The
+/// extension (`editors/vscode/src/extension.ts`'s `handleDocumentMoved`,
+/// mirroring the existing `beamtalk-lsp/fetchContent` custom-request
+/// precedent used by `StdlibContentProvider`) closes any open tab at
+/// `old_uri` and reopens `new_uri` in its place. Any other LSP client
+/// ignores an unrecognised notification per the LSP spec, so it sees the
+/// documented degraded (no-crash, no-retarget) outcome — the same one the
+/// dropped `RenameFile` op silently produced in VS Code, just without the
+/// misleading implication that a real filesystem rename request was made.
+enum DocumentMoved {}
+
+impl LspNotification for DocumentMoved {
+    type Params = DocumentMovedParams;
+
+    const METHOD: &'static str = "beamtalk-lsp/documentMoved";
 }
 
 /// LSP backend wrapping `SimpleLanguageService`.
@@ -3402,24 +3453,33 @@ fn reload_finding_to_lsp_diagnostics(
 }
 
 /// ADR 0082 Phase 3 (BT-2289); ADR 0113 Phase 4a (BT-3209) and LSP follow-up
-/// (BT-3212): consume `FlushEvent`s from the runtime listener and emit
-/// `workspace/applyEdit` per flushed file.
+/// (BT-3212); ADR 0114 LSP follow-up (BT-3275): consume `FlushEvent`s from
+/// the runtime listener and emit `workspace/applyEdit` per flushed file.
 ///
 /// For each file in the event, the listener:
 /// 1. Resolves the runtime-reported path against the LSP workspace roots to
 ///    an absolute filesystem path ([`resolve_flushed_path`]), which also
 ///    reports whether the leaf still exists on disk — the fallback signal
 ///    used only when the wire carried no per-file `kind` (see below).
-/// 2. Decides the `workspace/applyEdit` shape via [`classify_flush_action`]:
-///    the wire's per-file `kind` (BT-3212) drives the decision directly when
-///    present — `new-class` -> `CreateFile`, `remove-class` -> `DeleteFile`,
-///    anything else -> an ordinary patch — with no filesystem probing
-///    needed. A producer that predates BT-3212 sends no `kind` for a path;
-///    that case still falls back to BT-3209's original existence heuristic
-///    (gone -> `DeleteFile`, still there -> patch), so `CreateFile` is only
-///    ever reachable via an explicit wire `kind` — the existence check alone
-///    can never tell "freshly created" from "patched in place" (both leave
-///    the leaf present).
+/// 2. Dispatches on the wire's per-file `kind` (BT-3212) directly when
+///    present, before any filesystem probing:
+///    - `rename-class` **with** an `oldFile` companion (BT-3275) — the one
+///      file among a `'rename-class'` flush's touched files that IS the
+///      moved declaration — routes to [`apply_rename_class_move`], never
+///      through [`classify_flush_action`].
+///    - `rename-class` **without** `oldFile` (an ordinary same-batch
+///      reference rewrite in a file that did not itself move) and
+///      `rename-method` (BT-3275, a definition or confirmed-sender site)
+///      each route to their own branch below, likewise bypassing
+///      [`classify_flush_action`].
+///    - Everything else goes through [`classify_flush_action`]: `new-class`
+///      -> `CreateFile`, `remove-class` -> `DeleteFile`, anything else ->
+///      an ordinary patch. A producer that predates BT-3212 sends no `kind`
+///      for a path; that case still falls back to BT-3209's original
+///      existence heuristic (gone -> `DeleteFile`, still there -> patch), so
+///      `CreateFile` is only ever reachable via an explicit wire `kind` —
+///      the existence check alone can never tell "freshly created" from
+///      "patched in place" (both leave the leaf present).
 /// 3. **`DeleteFile`**: emits a [`DocumentChangeOperation::Op`] `DeleteFile`
 ///    resource operation ([`delete_file_edit`]) — unconditionally, not gated
 ///    on the open-paths check below, since a deletion is project-wide state
@@ -3430,7 +3490,23 @@ fn reload_finding_to_lsp_diagnostics(
 ///    `CreateFile` resource operation paired with a `TextDocumentEdit`
 ///    carrying the full content ([`create_file_edit`]) — also unconditional,
 ///    since a brand-new file was by definition never open before this flush.
-/// 5. **Patch** (an ordinary content edit, unchanged since ADR 0082 Phase 3):
+/// 5. **Rename-class move** (BT-3275; revised BT-3285): sends the custom
+///    `beamtalk-lsp/documentMoved` notification ([`DocumentMoved`]) carrying
+///    `{old_uri, new_uri}` — unconditional, mirroring `CreateFile`/
+///    `DeleteFile`: a file move is project-wide state, not something only an
+///    open buffer cares about. No `workspace/applyEdit` `RenameFile` op is
+///    sent any more; see [`DocumentMoved`]'s doc for why.
+/// 6. **Rename-method site** (BT-3275): checks the *live* open-paths handle
+///    exactly like an ordinary patch (step 7) — every file this reaches was
+///    an explicitly CONFIRMED site the caller already approved via
+///    `confirmDestructive` (never a `candidate_sites` entry, which is never
+///    staged/written and so never reaches this listener at all), but
+///    "was this open" still gates whether refreshing the *editor buffer* is
+///    worth doing — the on-disk bytes are already correct either way. Emits
+///    a `TextDocumentEdit` via `documentChanges` ([`rename_method_site_edit`])
+///    rather than the plain-`changes`-map shape ordinary patches use,
+///    matching the ADR's "`TextDocumentEdit` per confirmed site" wording.
+/// 7. **Patch** (an ordinary content edit, unchanged since ADR 0082 Phase 3):
 ///    checks the *live* open-paths handle to see whether the path is
 ///    currently open in the editor. Files that aren't open are skipped —
 ///    `VSCode` reads them fresh on next `did_open`. The check happens per
@@ -3449,6 +3525,7 @@ async fn flush_event_listener(
         for FlushedFile {
             path: raw_path,
             kind,
+            old_path,
         } in event.files
         {
             let resolved = resolve_flushed_path(&raw_path, &workspace_roots);
@@ -3467,12 +3544,20 @@ async fn flush_event_listener(
                 continue;
             };
 
-            match classify_flush_action(kind, existed) {
-                FlushAction::Delete => apply_delete_file(&client, uri).await,
-                FlushAction::Create => apply_create_file(&client, &abs_path, uri).await,
-                FlushAction::Patch => {
-                    apply_patch_file(&client, &abs_path, &raw_path, uri, &open_paths).await;
+            match (kind, old_path.as_deref()) {
+                (Some(FlushFileKind::RenameClass), Some(old_raw)) => {
+                    apply_rename_class_move(&client, &workspace_roots, uri, old_raw).await;
                 }
+                (Some(FlushFileKind::RenameMethod), _) => {
+                    apply_rename_method_site(&client, &abs_path, &raw_path, uri, &open_paths).await;
+                }
+                _ => match classify_flush_action(kind, existed) {
+                    FlushAction::Delete => apply_delete_file(&client, uri).await,
+                    FlushAction::Create => apply_create_file(&client, &abs_path, uri).await,
+                    FlushAction::Patch => {
+                        apply_patch_file(&client, &abs_path, &raw_path, uri, &open_paths).await;
+                    }
+                },
             }
         }
     }
@@ -3525,6 +3610,115 @@ async fn apply_create_file(client: &Client, abs_path: &Path, uri: Url) {
     apply_flush_edit(client, &uri, edit, "CreateFile").await;
 }
 
+/// Resolves a `'rename-class'` flush's `oldFile` companion (`old_raw`)
+/// against the workspace roots via [`resolve_flushed_path`] — tolerating its
+/// already-deleted state on disk (Phase B already unlinked it by the time
+/// the flush event fires), the same way that function already tolerates a
+/// `DeleteFile` target being gone — into the `old_uri` [`apply_rename_class_move`]
+/// sends in its [`DocumentMoved`] notification.
+///
+/// Split out of `apply_rename_class_move` purely so this resolution step is
+/// unit-testable on its own: it needs no `Client`, whereas exercising
+/// `apply_rename_class_move` itself through a real `LspService`/socket pair
+/// would additionally require driving the service through a full LSP
+/// `initialize` handshake first — `Client::send_notification` (unlike
+/// `show_message`/`log_message`, which use its `_unchecked` sibling) only
+/// actually sends once `ServerState` has reached `Initialized`, and silently
+/// no-ops (never touching the socket) otherwise, so a socket-side test
+/// without that handshake would hang waiting for a message that never
+/// arrives.
+fn resolve_rename_class_old_uri(workspace_roots: &[PathBuf], old_raw: &str) -> Option<Url> {
+    let Some((old_abs, _existed)) = resolve_flushed_path(old_raw, workspace_roots) else {
+        tracing::debug!(
+            old_raw,
+            "flush_event_listener: could not resolve rename-class old path against workspace roots"
+        );
+        return None;
+    };
+    let Ok(old_uri) = Url::from_file_path(&old_abs) else {
+        tracing::debug!(
+            ?old_abs,
+            "flush_event_listener: could not build file:// URI for rename-class old path"
+        );
+        return None;
+    };
+    Some(old_uri)
+}
+
+/// `FlushFileKind::RenameClass` with `oldFile` present (ADR 0114 LSP
+/// follow-up, BT-3275; revised BT-3285): the one file among a
+/// `'rename-class'` flush's touched files that IS the moved declaration.
+/// Unconditional, like `Create`/`Delete`: a file move is project-wide state,
+/// not something only an open buffer cares about.
+///
+/// Sends the custom [`DocumentMoved`] notification rather than a
+/// `workspace/applyEdit` `RenameFile` op (BT-3275's original approach, which
+/// this replaces): `old_uri` is *always* already gone from disk by the time
+/// this runs, which is exactly the state VS Code's own `RenameOperation`
+/// treats as "already done" and silently skips — no error, but no
+/// editor-state retargeting either, so an open tab at `old_uri` never
+/// actually followed the rename in VS Code (BT-3285's investigation). No
+/// file content needs reading here any more, since the notification carries
+/// no content — the receiving client reopens `new_uri` itself and reads its
+/// already-correct on-disk bytes fresh.
+async fn apply_rename_class_move(
+    client: &Client,
+    workspace_roots: &[PathBuf],
+    new_uri: Url,
+    old_raw: &str,
+) {
+    let Some(old_uri) = resolve_rename_class_old_uri(workspace_roots, old_raw) else {
+        return;
+    };
+    client
+        .send_notification::<DocumentMoved>(DocumentMovedParams {
+            old_uri,
+            new_uri: new_uri.clone(),
+        })
+        .await;
+    tracing::debug!(
+        %new_uri,
+        "flush_event_listener: sent beamtalk-lsp/documentMoved notification"
+    );
+}
+
+/// `FlushFileKind::RenameMethod` (ADR 0114 LSP follow-up, BT-3275): the
+/// definition site or a confirmed sender site of a `'rename-method'` flush
+/// (never a `candidate_sites` entry — those are never staged/written, so
+/// they never reach this listener at all). Gated on the file being open,
+/// exactly like [`apply_patch_file`] — the on-disk bytes are already correct
+/// either way (Phase B already committed), so this check is purely about
+/// whether an open editor buffer is worth refreshing, same as an ordinary
+/// patch. Emits a `TextDocumentEdit` via `documentChanges`
+/// ([`rename_method_site_edit`]) rather than the plain-`changes`-map shape
+/// [`change_file_edit`] uses, matching the ADR's "`TextDocumentEdit` per
+/// confirmed site" wording.
+async fn apply_rename_method_site(
+    client: &Client,
+    abs_path: &Path,
+    raw_path: &str,
+    uri: Url,
+    open_paths: &OpenPathsHandle,
+) {
+    let Ok(utf8_path) = Utf8PathBuf::try_from(abs_path.to_path_buf()) else {
+        tracing::debug!(raw_path, "flush_event_listener: resolved path is not UTF-8");
+        return;
+    };
+    if !open_paths.contains(&utf8_path) {
+        tracing::debug!(%utf8_path, "flush_event_listener: skipping closed rename-method site");
+        return;
+    }
+    let Ok(content) = tokio::fs::read_to_string(abs_path).await else {
+        tracing::warn!(
+            %utf8_path,
+            "flush_event_listener: failed to read rename-method site from disk"
+        );
+        return;
+    };
+    let edit = rename_method_site_edit(uri.clone(), content);
+    apply_flush_edit(client, &uri, edit, "RenameMethodSite").await;
+}
+
 /// `FlushAction::Patch` (an ordinary content edit, unchanged since ADR 0082
 /// Phase 3): gated on the file being open — `VSCode` reads a closed file fresh
 /// on next `did_open`.
@@ -3575,12 +3769,47 @@ enum FlushAction {
 /// a pre-BT-3212 producer degrades to `Patch` (its exact previous
 /// behaviour), since post-flush existence alone cannot distinguish "freshly
 /// created" from "patched in place".
+///
+/// `RenameClass`/`RenameMethod` (ADR 0114 LSP follow-up, BT-3275) are
+/// dispatched to their own dedicated branches in `flush_event_listener`
+/// *before* this function is ever called for them — `RenameClass` only
+/// reaches here when the wire carried no `oldFile` (an ordinary same-batch
+/// reference rewrite, not the moved file itself), and `RenameMethod` never
+/// reaches here at all. Both bucket to `Patch` here defensively, matching
+/// what the pre-BT-3275 fallback would have done for an unrecognised kind.
 fn classify_flush_action(kind: Option<FlushFileKind>, existed: bool) -> FlushAction {
     match kind {
         Some(FlushFileKind::NewClass) => FlushAction::Create,
-        Some(FlushFileKind::Patch) => FlushAction::Patch,
+        Some(FlushFileKind::Patch | FlushFileKind::RenameClass | FlushFileKind::RenameMethod) => {
+            FlushAction::Patch
+        }
         None if existed => FlushAction::Patch,
         Some(FlushFileKind::RemoveClass) | None => FlushAction::Delete,
+    }
+}
+
+/// Build a single `TextEdit` that replaces an entire document's content —
+/// the `changes`/`documentChanges` payload shape every flush-driven edit
+/// builder below sends (`change_file_edit`, `create_file_edit`,
+/// `rename_method_site_edit`): the flush already
+/// spliced the on-disk bytes server-side (no incremental diff is computed),
+/// so the client is always handed the whole new content rather than a
+/// localized range. `u32::MAX`/`u32::MAX` is the LSP convention for "end of
+/// file" — any line longer than this is unrealistic for source code and
+/// clients clamp to actual EOF.
+fn whole_document_text_edit(content: String) -> TextEdit {
+    TextEdit {
+        range: Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: u32::MAX,
+                character: u32::MAX,
+            },
+        },
+        new_text: content,
     }
 }
 
@@ -3592,25 +3821,7 @@ fn change_file_edit(uri: Url, content: String) -> WorkspaceEdit {
     WorkspaceEdit {
         changes: Some({
             let mut changes = HashMap::new();
-            changes.insert(
-                uri,
-                vec![TextEdit {
-                    range: Range {
-                        start: Position {
-                            line: 0,
-                            character: 0,
-                        },
-                        // u32::MAX/u32::MAX is the LSP convention for "end
-                        // of file" — any line longer than this is unrealistic
-                        // for source code and clients clamp to actual EOF.
-                        end: Position {
-                            line: u32::MAX,
-                            character: u32::MAX,
-                        },
-                    },
-                    new_text: content,
-                }],
-            );
+            changes.insert(uri, vec![whole_document_text_edit(content)]);
             changes
         }),
         ..Default::default()
@@ -3671,19 +3882,28 @@ fn create_file_edit(uri: Url, content: String) -> WorkspaceEdit {
             })),
             DocumentChangeOperation::Edit(TextDocumentEdit {
                 text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
-                edits: vec![OneOf::Left(TextEdit {
-                    range: Range {
-                        start: Position {
-                            line: 0,
-                            character: 0,
-                        },
-                        end: Position {
-                            line: u32::MAX,
-                            character: u32::MAX,
-                        },
-                    },
-                    new_text: content,
-                })],
+                edits: vec![OneOf::Left(whole_document_text_edit(content))],
+            }),
+        ])),
+        ..Default::default()
+    }
+}
+
+/// Build the `workspace/applyEdit` payload for one confirmed site of a
+/// `'rename-method'` flush (ADR 0114 LSP follow-up, BT-3275:
+/// `renameSelector:to:`) — a single `TextDocumentEdit` via `documentChanges`
+/// carrying the file's new content (a whole-document replacement, same
+/// convention as [`change_file_edit`]/[`create_file_edit`]'s content edits).
+/// Deliberately the typed `documentChanges`/`TextDocumentEdit` shape rather
+/// than [`change_file_edit`]'s plain `changes` map — the ADR's LSP section
+/// calls for "a `TextDocumentEdit` per confirmed site", not a generic patch,
+/// even though both end up replacing the whole document the same way.
+fn rename_method_site_edit(uri: Url, content: String) -> WorkspaceEdit {
+    WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Operations(vec![
+            DocumentChangeOperation::Edit(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
+                edits: vec![OneOf::Left(whole_document_text_edit(content))],
             }),
         ])),
         ..Default::default()
@@ -6922,6 +7142,214 @@ mod tests {
         // created" from "patched in place".
         assert_eq!(classify_flush_action(None, true), FlushAction::Patch);
         assert_eq!(classify_flush_action(None, false), FlushAction::Delete);
+    }
+
+    #[test]
+    fn classify_flush_action_buckets_rename_kinds_to_patch_defensively() {
+        // ADR 0114 LSP follow-up (BT-3275): `flush_event_listener` never
+        // actually calls `classify_flush_action` for these — `RenameClass`
+        // with `oldFile` and `RenameMethod` are dispatched to their own
+        // branches first. This is only the defensive fallback for the
+        // in-practice-unreachable remaining case (`RenameClass` reaching
+        // here at all only happens when the wire carried no `oldFile`).
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::RenameClass), true),
+            FlushAction::Patch
+        );
+        assert_eq!(
+            classify_flush_action(Some(FlushFileKind::RenameMethod), true),
+            FlushAction::Patch
+        );
+    }
+
+    // ADR 0114 LSP follow-up (BT-3275): the rename-method-site
+    // `WorkspaceEdit` builder, tested the same direct way the BT-3209/
+    // BT-3212 builders above are.
+
+    // BT-3285: the rename-class move path no longer builds a `WorkspaceEdit`
+    // at all — it sends the custom `beamtalk-lsp/documentMoved` notification
+    // instead (see `DocumentMoved`'s doc for why the old `RenameFile` op was
+    // dropped). `Client::send_notification` only actually sends once
+    // `ServerState` has reached `Initialized`, which a bare `LspService::new`
+    // in a test never reaches on its own — a naive `apply_rename_class_move`
+    // test against an un-initialized service just hangs `socket.next()`
+    // forever instead of failing loudly, since `send_notification` silently
+    // no-ops (never touching the socket) rather than erroring when
+    // un-initialized. `resolve_rename_class_old_uri` — the one part of
+    // `apply_rename_class_move` with real path-resolution logic — is tested
+    // on its own regardless, matching this file's existing preference for
+    // testing the `Client`-free half directly (the `resolve_flushed_path`
+    // tests above take the same approach for the `WorkspaceEdit` builders'
+    // path resolution); `DocumentMovedParams`'s wire shape is tested via
+    // direct serialization. `apply_rename_class_move_sends_document_moved_notification`
+    // below additionally exercises the full send path end-to-end, by driving
+    // a real `initialize` JSON-RPC request through `LspService`'s
+    // `tower::Service` impl first (mirroring `tower-lsp`'s own
+    // `initializes_only_once` test) so `ServerState` genuinely reaches
+    // `Initialized` before `apply_rename_class_move` runs.
+
+    #[test]
+    fn document_moved_params_serializes_camel_case_uri_fields() {
+        let old_uri = Url::parse("file:///workspace/counter.bt").expect("uri");
+        let new_uri = Url::parse("file:///workspace/accumulator.bt").expect("uri");
+        let value = serde_json::to_value(DocumentMovedParams {
+            old_uri: old_uri.clone(),
+            new_uri: new_uri.clone(),
+        })
+        .expect("serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "oldUri": old_uri.to_string(),
+                "newUri": new_uri.to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_rename_class_old_uri_builds_uri_for_already_deleted_old_path() {
+        // Mirrors `resolve_flushed_path_falls_back_for_deleted_absolute_file`
+        // above: by the time `apply_rename_class_move` runs, Phase B has
+        // already unlinked the old path from disk, so the old file is
+        // created and then deleted rather than left in place.
+        let temp = unique_temp_dir("beamtalk_lsp_rename_class_old_uri");
+        fs::create_dir_all(&temp).expect("create temp");
+        let old_path = temp.join("counter.bt");
+        fs::write(&old_path, "Object subclass: Counter\n").expect("write");
+        fs::remove_file(&old_path).expect("delete (simulates Phase B's unlink)");
+
+        let old_uri = resolve_rename_class_old_uri(&[], old_path.to_str().unwrap())
+            .expect("resolves even though the old file is already gone");
+        assert_eq!(old_uri, Url::from_file_path(&old_path).expect("uri"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_rename_class_old_uri_returns_none_when_path_cannot_be_resolved() {
+        // No real parent directory either — nothing to fall back to.
+        assert!(resolve_rename_class_old_uri(&[], "does/not/exist/counter.bt").is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_rename_class_move_sends_document_moved_notification() {
+        use futures_util::StreamExt;
+        use tower::{Service, ServiceExt};
+
+        // Mirrors `resolve_flushed_path_falls_back_for_deleted_absolute_file`
+        // above: by the time `apply_rename_class_move` runs, Phase B has
+        // already unlinked the old path from disk, so the old file is
+        // created and then deleted rather than left in place.
+        let temp = unique_temp_dir("beamtalk_lsp_rename_class_move_e2e");
+        fs::create_dir_all(&temp).expect("create temp");
+        let old_path = temp.join("counter.bt");
+        fs::write(&old_path, "Object subclass: Counter\n").expect("write");
+        fs::remove_file(&old_path).expect("delete (simulates Phase B's unlink)");
+
+        let (mut service, mut socket) = tower_lsp::LspService::new(Backend::new);
+
+        // Drive a real `initialize` JSON-RPC request through the service's
+        // `tower::Service` impl (the same mechanism `main.rs`/an actual LSP
+        // client use) so `ServerState` reaches `Initialized` — otherwise
+        // `Client::send_notification` below silently no-ops. Directly
+        // calling `Backend::initialize` would not do this: the state
+        // transition lives in `tower-lsp`'s own `InitializeLayer`, wrapping
+        // `LspService::call`, not in the `LanguageServer::initialize` method.
+        let init_request = tower_lsp::jsonrpc::Request::build("initialize")
+            .params(serde_json::json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        let init_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(init_request)
+            .await
+            .expect("initialize call succeeds");
+        assert!(
+            init_response.is_some_and(|r| r.is_ok()),
+            "initialize request must succeed for ServerState to reach Initialized"
+        );
+
+        let client = service.inner().client.clone();
+        let new_path = temp.join("accumulator.bt");
+        let new_uri = Url::from_file_path(&new_path).expect("uri");
+
+        apply_rename_class_move(&client, &[], new_uri.clone(), old_path.to_str().unwrap()).await;
+
+        let notification = socket
+            .next()
+            .await
+            .expect("expected a beamtalk-lsp/documentMoved notification");
+        assert_eq!(notification.method(), "beamtalk-lsp/documentMoved");
+        let params = notification
+            .params()
+            .expect("notification carries params")
+            .clone();
+        let expected_old_uri = Url::from_file_path(&old_path).expect("uri");
+        assert_eq!(
+            params,
+            serde_json::json!({
+                "oldUri": expected_old_uri.to_string(),
+                "newUri": new_uri.to_string(),
+            })
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn rename_method_site_edit_emits_typed_text_document_edit() {
+        let uri = Url::parse("file:///workspace/counter.bt").expect("uri");
+        let edit = rename_method_site_edit(
+            uri.clone(),
+            "Object subclass: Counter\n  incrementBy => self.value := self.value + 1\nend\n"
+                .to_string(),
+        );
+
+        // No plain-text `changes` map — the ADR calls for a typed
+        // `TextDocumentEdit` per confirmed site, not `change_file_edit`'s
+        // generic patch shape.
+        assert!(edit.changes.is_none());
+        match edit.document_changes {
+            Some(DocumentChanges::Operations(ops)) => {
+                assert_eq!(ops.len(), 1);
+                match &ops[0] {
+                    DocumentChangeOperation::Edit(text_edit) => {
+                        assert_eq!(text_edit.text_document.uri, uri);
+                        assert_eq!(text_edit.edits.len(), 1);
+                        match &text_edit.edits[0] {
+                            OneOf::Left(edit) => {
+                                assert_eq!(
+                                    edit.new_text,
+                                    "Object subclass: Counter\n  incrementBy => self.value := self.value + 1\nend\n"
+                                );
+                                assert_eq!(
+                                    edit.range,
+                                    Range {
+                                        start: Position {
+                                            line: 0,
+                                            character: 0
+                                        },
+                                        end: Position {
+                                            line: u32::MAX,
+                                            character: u32::MAX
+                                        },
+                                    }
+                                );
+                            }
+                            other @ OneOf::Right(_) => {
+                                panic!("expected a plain TextEdit, got {other:?}")
+                            }
+                        }
+                    }
+                    other @ DocumentChangeOperation::Op(_) => {
+                        panic!("expected a TextDocumentEdit, got {other:?}")
+                    }
+                }
+            }
+            other => panic!("expected Operations document_changes, got {other:?}"),
+        }
     }
 
     #[test]

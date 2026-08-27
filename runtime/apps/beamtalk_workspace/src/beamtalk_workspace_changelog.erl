@@ -47,15 +47,20 @@ Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 | `epoch`                | integer                                                      | bumped each workspace start |
 | `class`                | string                                                       | e.g. `"Counter"` |
 | `selector`             | string \| null                                              | null for `new-class` |
-| `kind`                 | `"instance"`\|`"class"`\|`"new-class"`\|`"remove-method"`\|`"remove-class"` | open enum |
-| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`; legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`); always null for `"remove-class"` (BT-3206 — no method-level target) |
-| `source_ref`           | string \| null                                              | null for `"remove-method"`/`"remove-class"` (nothing replaces the deleted text) |
-| `prev_source_ref`      | string \| null                                              | null for `new-class`; the removed class's full prior source for `"remove-class"` (BT-3206) |
-| `sourceFile`           | string \| null                                              | null for stdlib/dynamic |
-| `span`                 | `{start,end}` \| null                                       | null for `new-class` and `"remove-class"` (BT-3206 — no byte range within a whole-file removal); the excised span for `"remove-method"` (BT-2192's future flush-excise step) |
+| `kind`                 | `"instance"`\|`"class"`\|`"new-class"`\|`"remove-method"`\|`"remove-class"`\|`"rename-class"`\|`"rename-method"` | open enum |
+| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`/`"rename-method"` (ADR 0114, BT-3269); legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`); always null for `"remove-class"`/`"rename-class"` (BT-3206/BT-3269 — no method-level target) |
+| `source_ref`           | string \| null                                              | null for `"remove-method"`/`"remove-class"`/`"rename-class"`/`"rename-method"` (nothing replaces the deleted text; a multi-site entry's per-site bodies live under `sites` instead) |
+| `prev_source_ref`      | string \| null                                              | null for `new-class`; the removed class's full prior source for `"remove-class"` (BT-3206); null for `"rename-class"`/`"rename-method"` (superseded by `sites`) |
+| `sourceFile`           | string \| null                                              | null for stdlib/dynamic; also null for `"rename-class"`/`"rename-method"` (ambiguous for a multi-file entry — see `sites`) |
+| `span`                 | `{start,end}` \| null                                       | null for `new-class` and `"remove-class"` (BT-3206 — no byte range within a whole-file removal); the excised span for `"remove-method"` (BT-2192's future flush-excise step); null for `"rename-class"`/`"rename-method"` (see `sites`) |
+| `old_class`            | string \| null                                              | ADR 0114 (BT-3269): `"rename-class"`-only — the pre-rename class name |
+| `old_selector`         | string \| null                                              | ADR 0114 (BT-3269): `"rename-method"`-only — the pre-rename selector (`selector` holds the new one) |
+| `old_path`/`new_path`  | string \| null                                              | ADR 0114 (BT-3269): `"rename-class"`-only — the file path before/after a rename that also moves the backing file; null for a dynamic class |
+| `sites`                | `[{sourceFile,span,source_ref,prev_source_ref}\|null,...] \| null` | ADR 0114 (BT-3269): `"rename-class"`/`"rename-method"`-only — `sites[0]` is the definition/declaration site (`null` only for a dynamic class with no backing file), `sites[1..]` are every other rewritten reference |
+| `candidate_sites`      | `[{sourceFile,span},...] \| null`                           | ADR 0114 (BT-3269): `"rename-method"`-only — reported, never auto-rewritten senders; no `source_ref`/`prev_source_ref` since nothing here is ever spliced |
 | `intent`               | `"durable"`\|`"ephemeral"`                                  | |
-| `flushable`            | boolean                                                      | true iff in-project source |
-| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"` |
+| `flushable`            | boolean                                                      | true iff in-project source; for `"rename-class"`/`"rename-method"`, true iff every entry in `sites` (never `candidate_sites`) resolves to a flushable file |
+| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null — `"extension"` is not reachable there either (ADR 0114 § ChangeLog schema) |
 | `author`               | string                                                       | session/tool id |
 | `author_kind`          | `"human"`\|`"agent"`                                        | audit metadata |
 
@@ -95,7 +100,10 @@ release nodes do not start a workspace, so this code is a no-op there.
     epoch/0,
     clear/0,
     find_revert_target/2,
-    find_revert_target/3
+    find_revert_target/3,
+    %% ADR 0114 (BT-3270): per-site body persistence for the shared
+    %% multi-site rewrite mechanism — see this function's doc.
+    store_site_body/1
 ]).
 
 %% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
@@ -118,6 +126,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_class/1,
     entry_selector/1,
     entry_kind/1,
+    known_entry_kinds/0,
     entry_side/1,
     entry_intent/1,
     entry_flushable/1,
@@ -131,7 +140,26 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_source_ref/1,
     entry_prev_source_ref/1,
     read_source_body/1,
-    read_prev_source_body/1
+    read_prev_source_body/1,
+    %% ADR 0114 (BT-3271): reads a `site()`'s own ref directly, for
+    %% `beamtalk_workspace_flush`'s multi-site rename-class splice — see this
+    %% function's own doc for why it cannot reuse `read_source_body/1`/
+    %% `read_prev_source_body/1` verbatim.
+    read_site_body/1,
+    %% ADR 0114 (BT-3269).
+    entry_old_class/1,
+    entry_old_selector/1,
+    entry_old_path/1,
+    entry_new_path/1,
+    entry_sites/1,
+    entry_candidate_sites/1
+]).
+
+%% ADR 0114 (BT-3269): shadow-detection and flushability helpers for the
+%% multi-site `'rename-class'`/`'rename-method'` kinds.
+-export([
+    target_key/1,
+    sites_flushable/1
 ]).
 
 %% gen_server callbacks
@@ -145,7 +173,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 ]).
 
 %% Exported for tests only.
--export([changes_dir/1, entry_to_json/1, entry_from_json/1, body_delta/2]).
+-export([changes_dir/1, entry_to_json/1, entry_from_json/1, body_delta/2, read_source_file/1]).
 
 -define(ETS_TABLE, beamtalk_changelog_entries).
 %% Bounded ring: keep at most this many entries on disk before rotating older
@@ -162,17 +190,56 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% 0112's method-removal kind (BT-3187). `'class-def'` is ADR 0082's
 %% extension for redefining an *existing* class's whole definition (BT-3248) —
 %% the cockpit `:def` tab's "Compile" action, as opposed to `'new-class'`
-%% (a brand-new class created via `newClass:at:`).
+%% (a brand-new class created via `newClass:at:`). `'rename-class'`/
+%% `'rename-method'` are ADR 0114's `renameTo:`/`renameSelector:to:` kinds
+%% (BT-3269) — the first two kinds whose rewrite spans a *set* of files
+%% (`sites`/`candidate_sites`) rather than one, see those fields' docs below.
 -type kind() ::
-    instance | class | 'new-class' | 'class-def' | 'remove-method' | 'remove-class' | unknown.
+    instance
+    | class
+    | 'new-class'
+    | 'class-def'
+    | 'remove-method'
+    | 'remove-class'
+    | 'rename-class'
+    | 'rename-method'
+    | unknown.
 %% ADR 0112: which method table a `'remove-method'` entry targets. Stored
 %% explicitly only for that kind — legacy `instance`/`class`-kind patch
 %% entries derive their side from `kind` itself (`entry_side/1`), so the field
 %% is additive, not a breaking schema change (ADR 0112 § ChangeLog interaction).
+%% ADR 0114 (BT-3269): `'rename-method'` stores `side` the same explicit way;
+%% `'rename-class'` always has `side = undefined` (null) — a class identity
+%% change has no method-table side.
 -type side() :: instance | class.
 -type intent() :: durable | ephemeral | unknown.
 -type author_kind() :: human | agent | unknown.
 -type span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
+
+%% ADR 0114 (BT-3269): one rewritten reference location in a `'rename-class'`/
+%% `'rename-method'` entry's `sites` list. `source_ref`/`prev_source_ref` name
+%% the recorded pre/post rewrite bodies exactly like the top-level fields do
+%% for a single-file kind (undefined for a site not yet populated with a
+%% recorded body — the site-discovery/rewrite mechanism itself is BT-3270,
+%% out of scope here). A bare `undefined` in place of a `site()` map (rather
+%% than a map with `source_file = undefined`) is the ADR's documented
+%% `sites[0] = null` case: a dynamic (ClassBuilder) class being renamed has no
+%% backing file for its own declaration site to point at.
+-type site() :: #{
+    source_file := binary() | undefined,
+    span := span() | undefined,
+    source_ref := binary() | undefined,
+    prev_source_ref := binary() | undefined
+}.
+
+%% ADR 0114 (BT-3269): one reported-but-never-rewritten sender in a
+%% `'rename-method'` entry's `candidate_sites` list. No `source_ref`/
+%% `prev_source_ref` — nothing here is ever spliced, so there is no prior/new
+%% body to record (ADR 0114 § ChangeLog schema).
+-type candidate_site() :: #{
+    source_file := binary(),
+    span := span()
+}.
 
 %% A ChangeEntry as stored in memory. Bodies are not kept in the record —
 %% only the `source_ref` / `prev_source_ref` filenames — so the ETS footprint
@@ -193,6 +260,31 @@ release nodes do not start a workspace, so this code is a no-op there.
     prev_source_ref :: binary() | undefined,
     source_file :: binary() | undefined,
     span :: span() | undefined,
+    %% ADR 0114 (BT-3269): `'rename-class'`-only — the pre-rename class name.
+    %% `undefined` for every other kind.
+    old_class :: binary() | undefined,
+    %% ADR 0114 (BT-3269): `'rename-method'`-only — the pre-rename selector
+    %% (`selector` itself holds the *new* selector, mirroring how `class`
+    %% holds the *new* name for `'rename-class'`). `undefined` for every
+    %% other kind.
+    old_selector :: binary() | undefined,
+    %% ADR 0114 (BT-3269): `'rename-class'`-only — the file path before/after
+    %% a rename that also moves the backing file (or a pure `Workspace
+    %% moveClass:to:` move). `undefined` for a dynamic class (no backing
+    %% file) and for every other kind.
+    old_path :: binary() | undefined,
+    new_path :: binary() | undefined,
+    %% ADR 0114 (BT-3269): `'rename-class'`/`'rename-method'`-only — the
+    %% multi-site shape neither field above can express: `sites[0]` is always
+    %% the definition/declaration site, `sites[1..]` are every other rewritten
+    %% reference. `undefined` (not `[]`) for every other kind, matching the
+    %% "undefined means not applicable" convention every other optional field
+    %% here already follows.
+    sites :: [site() | undefined] | undefined,
+    %% ADR 0114 (BT-3269): `'rename-method'`-only — the reported, never
+    %% auto-rewritten candidate sender list. `undefined` for every other kind
+    %% (including `'rename-class'`, which has no candidate tier).
+    candidate_sites :: [candidate_site()] | undefined,
     intent :: intent(),
     flushable :: boolean(),
     not_flushable_reason :: binary() | undefined,
@@ -200,9 +292,11 @@ release nodes do not start a workspace, so this code is a no-op there.
     author_kind :: author_kind(),
     %% True once a `Workspace flush` has written this entry's patch to disk
     %% (ADR 0082 Phase 2) — OR, for a `'remove-class'` entry specifically,
-    %% once `Workspace changes revert:` has undone it (ADR 0113, BT-3208):
-    %% no disk write happened, but the entry's effect is equally resolved and
-    %% must equally drop out of the active/pending view. Persisted so the
+    %% once `Workspace changes revert:` has undone it (ADR 0113, BT-3208), OR,
+    %% the same way, for a `'rename-class'`/`'rename-method'` entry once its
+    %% own `revert:` has undone it (ADR 0114, BT-3274): no disk write
+    %% happened, but the entry's effect is equally resolved and must equally
+    %% drop out of the active/pending view. Persisted so the
     %% entry stays excluded from the active view across workspace restarts:
     %% history is preserved in the log for audit, but the entry is no longer
     %% considered "dirty". Don't read this field alone as "this reached disk"
@@ -234,10 +328,27 @@ release nodes do not start a workspace, so this code is a no-op there.
     prev_source => binary() | undefined,
     source_file => binary() | undefined,
     span => span() | undefined,
-    not_flushable_reason => binary() | undefined
+    not_flushable_reason => binary() | undefined,
+    %% ADR 0114 (BT-3269): see the matching `#entry{}` fields' docs above.
+    old_class => binary() | undefined,
+    old_selector => binary() | undefined,
+    old_path => binary() | undefined,
+    new_path => binary() | undefined,
+    sites => [site() | undefined] | undefined,
+    candidate_sites => [candidate_site()] | undefined
 }.
 
--export_type([entry/0, append_input/0, kind/0, side/0, intent/0, author_kind/0, span/0]).
+-export_type([
+    entry/0,
+    append_input/0,
+    kind/0,
+    side/0,
+    intent/0,
+    author_kind/0,
+    span/0,
+    site/0,
+    candidate_site/0
+]).
 
 -record(state, {
     %% Absolute path to <workspace>/changes, or undefined in run mode
@@ -411,6 +522,12 @@ must be restored. Returns:
     recorded body itself is unreadable, e.g. pruned by ChangeLog rotation).
     Revert recompiles and reinstalls the whole class from `PrevBody`, not a
     single-method patch.
+  - `{revert_rename, Entry}` when the most recent active entry is a
+    `'rename-class'`/`'rename-method'` (ADR 0114, BT-3274): a multi-site
+    target, not a single prior body — the caller (`beamtalk_repl_loader:
+    revert_rename_sites/1`) rewrites every one of `Entry`'s own `sites` back
+    to its own recorded `prev_source_ref`, against that site's own recorded
+    location, rather than a single `PrevBody` this function could return.
   - `{error, no_entry}` when no active entry targets `(Class, Selector)`
     (nothing to revert: either never patched, or already reverted/flushed).
   - `{error, no_prev_source}` when the most recent entry is a *modify* whose
@@ -445,6 +562,7 @@ whichever has the higher `seq` — would be selected.
     {ok, binary(), entry()}
     | {remove, entry()}
     | {reinstall_class, binary(), entry()}
+    | {revert_rename, entry()}
     | {error, no_entry | no_prev_source}.
 find_revert_target(Class, Selector) ->
     find_revert_target(Class, Selector, undefined).
@@ -462,6 +580,7 @@ side-agnostic behavior (used by callers, such as `revert_method/2`'s
     {ok, binary(), entry()}
     | {remove, entry()}
     | {reinstall_class, binary(), entry()}
+    | {revert_rename, entry()}
     | {error, no_entry | no_prev_source}.
 find_revert_target(Class, Selector, Side) when is_binary(Class) ->
     SelectorBin = revert_selector_binary(Selector),
@@ -501,6 +620,15 @@ find_revert_target(Class, Selector, Side) when is_binary(Class) ->
                 {ok, Body} -> {reinstall_class, Body, Entry};
                 {error, _} -> recover_class_prev_from_disk(Entry)
             end;
+        [#entry{kind = Kind} = Entry | _] when
+            Kind =:= 'rename-class'; Kind =:= 'rename-method'
+        ->
+            %% ADR 0114 (BT-3274): a multi-site target — the caller rewrites
+            %% every one of `Entry`'s own `sites` back to its own recorded
+            %% `prev_source_ref`, so there is no single `PrevBody` for this
+            %% function to resolve the way the modify/reinstall-class arms
+            %% above do.
+            {revert_rename, Entry};
         [#entry{prev_source_ref = undefined} = Entry | _] ->
             %% No recorded prior body. Either the method existed on disk before
             %% the patch (a modify, whose unflushed disk body IS its pre-patch
@@ -748,6 +876,110 @@ shadow_key(#entry{selector = undefined} = E) ->
 shadow_key(E) ->
     {E#entry.class, E#entry.selector, entry_side(E)}.
 
+%%% ----------------------------------------------------------------------------
+%%% Per-site shadow-detection key (ADR 0114, BT-3269)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Per-site shadow-detection keys for `Entry` (ADR 0114, BT-3269).
+
+Every existing kind targets exactly one file, so `shadow_key/1`'s single
+tuple already identifies "what does this entry patch" unambiguously — that
+is exactly the "does a newer edit replace this entry for the same
+`(class, selector, side)` (or whole-class) target" dirty-view question
+`survivor_seqs/1` answers. A `'rename-class'`/`'rename-method'` entry's
+`sites` list breaks the one-entry-one-target assumption underneath that
+question: renaming `Counter` might rewrite a reference inside `widget.bt`,
+and an *unrelated*, independently issued rename of `Widget` might also
+rewrite a (different) reference inside that very same file. Whole-entry
+keying cannot express "does a newer edit's rewritten location overlap this
+older edit's rewritten location" — that question needs a key per rewritten
+location, not per entry.
+
+Returns one key per site for `'rename-class'`/`'rename-method'` — a `null`
+site (the dynamic-class case, ADR 0114 § ChangeLog schema) is skipped, since
+there is no location to key — and a single-element list wrapping
+`shadow_key/1`'s existing tuple for every other kind, so a caller folding
+over "every target this entry touches" needs no kind-specific branch.
+`candidate_sites` are never included: they are never rewritten (ADR 0114),
+so they have no shadow-detection role.
+
+Each site's key also carries the entry's own rename identity —
+`class`/`old_class` for `'rename-class'`; `class`/`selector`/`old_selector`/
+`side` for `'rename-method'` — alongside the site's own `sourceFile`/`span`,
+so two independent renames that happen to touch the same file are never
+conflated into a false shadow relationship purely because they share a
+file: only a genuinely repeated edit of the *same* rename at the *same*
+location collides.
+
+Exported for the future multi-site rewrite mechanism (BT-3270) and for
+tests. Not yet wired into `survivor_seqs/1`/the `ChangeEntry` `shadowed`
+flag — `'rename-class'`/`'rename-method'` flush and dirty-view integration
+is out of scope for BT-3269 (schema only).
+""".
+-spec target_key(entry()) -> [term()].
+target_key(#entry{kind = 'rename-class'} = E) ->
+    [
+        {'rename-class', E#entry.class, E#entry.old_class, site_location(S)}
+     || S <- sites_or_empty(E), S =/= undefined
+    ];
+target_key(#entry{kind = 'rename-method'} = E) ->
+    [
+        {'rename-method', E#entry.class, E#entry.selector, E#entry.old_selector, entry_side(E),
+            site_location(S)}
+     || S <- sites_or_empty(E), S =/= undefined
+    ];
+target_key(E) ->
+    [shadow_key(E)].
+
+-spec sites_or_empty(#entry{}) -> [site() | undefined].
+sites_or_empty(#entry{sites = undefined}) -> [];
+sites_or_empty(#entry{sites = Sites}) -> Sites.
+
+-spec site_location(site()) -> {binary() | undefined, span() | undefined}.
+site_location(#{source_file := SourceFile, span := Span}) ->
+    {SourceFile, Span}.
+
+-doc """
+Fold per-site flushability verdicts into the single `flushable`/
+`not_flushable_reason` pair a `'rename-class'`/`'rename-method'` ChangeEntry
+records (ADR 0114 § ChangeLog schema): `true` iff every entry in `sites` is
+flushable, `false` with the first non-flushable site's reason otherwise.
+`candidate_sites` are never consulted — flush never writes them, so a
+candidate site being e.g. a stdlib sender must never block an otherwise
+clean rename (ADR 0114 explicitly calls this out: "a single incidental
+stdlib candidate sender would leave the whole rename stuck forever").
+
+Callers classify each site themselves before folding — reusing
+`beamtalk_repl_loader:classify_source_file/1`/`no_source_reason/1` exactly
+as the single-file kinds already do (ADR 0112), rather than this module
+re-deriving that classification, which would duplicate it: this module has
+no class-registry access, and a bare `sourceFile` cannot distinguish
+"stdlib" from "dynamic" the way a class name can (`no_source_reason/1`
+needs `code:which/1` on the class's own module).
+
+Order matters only for which reason is reported when several sites
+disagree: the first non-flushable entry in `Classifications` wins, so
+callers should classify sites in the same order they appear in `sites`
+(definition/declaration site first) for a deterministic, sites[0]-first
+reason.
+""".
+-spec sites_flushable([flushable | {not_flushable, binary()}]) ->
+    {boolean(), binary() | undefined}.
+sites_flushable(Classifications) ->
+    case
+        lists:filtermap(
+            fun
+                (flushable) -> false;
+                ({not_flushable, Reason}) -> {true, Reason}
+            end,
+            Classifications
+        )
+    of
+        [] -> {true, undefined};
+        [Reason | _] -> {false, Reason}
+    end.
+
 -doc """
 Return the dirty methods derived from the *active* entries as a Beamtalk
 Dictionary `#{ClassSymbol => Set(selectorSymbol)}`.
@@ -779,9 +1011,12 @@ dirtyMethods() ->
 %% (redefinition of an *existing* class's whole definition, BT-3248) also
 %% carries no selector — it gets its own `#'class-def'` placeholder rather
 %% than reusing `#new-class`, so the dirty view does not misreport a
-%% redefinition as a brand-new class.
+%% redefinition as a brand-new class. `'rename-class'` (ADR 0114, BT-3269)
+%% gets the same treatment for the same reason — it must not be confused
+%% with either a brand-new class or a whole-definition redefinition.
 -spec dirty_selector(#entry{}) -> atom().
 dirty_selector(#entry{kind = 'class-def', selector = undefined}) -> 'class-def';
+dirty_selector(#entry{kind = 'rename-class', selector = undefined}) -> 'rename-class';
 dirty_selector(#entry{selector = undefined}) -> 'new-class';
 dirty_selector(#entry{selector = Sel}) -> binary_to_atom(Sel, utf8).
 
@@ -825,7 +1060,14 @@ entry_to_value(#entry{} = E, Survivors) ->
         active => Active,
         shadowed => Shadowed,
         clean => Clean,
-        diff => diff_value(Diff)
+        diff => diff_value(Diff),
+        %% ADR 0114 (BT-3269/BT-3284): `undefined` for every kind except
+        %% `'rename-class'` (`oldClass`) / `'rename-method'` (`oldSelector`)
+        %% — `selector_symbol/1` is a generic binary()|undefined -> atom()|nil
+        %% converter, reused here rather than duplicated for the class-name
+        %% case (it never inspects *which* field it was called for).
+        oldClass => selector_symbol(E#entry.old_class),
+        oldSelector => selector_symbol(E#entry.old_selector)
     }.
 
 %% nil for "no diff" (clean / not computable), so Beamtalk reads it as the nil
@@ -1024,6 +1266,35 @@ entry_selector(#entry{selector = V}) -> V.
 entry_kind(#entry{kind = V}) -> V.
 
 -doc """
+Every atom `kind()` admits, exactly matching that type's literal union above
+— the single runtime-introspectable source of truth for the wire-string
+conformance corpus (`runtime/apps/beamtalk_workspace/test/fixtures/
+flush_file_kind_wire_corpus.json`, BT-3275) that pins the Rust LSP consumer's
+`FlushFileKind::from_wire` (`crates/beamtalk-lsp/src/runtime.rs`) to this
+module's `kind()` domain: `beamtalk_workspace_changelog_tests` asserts this
+list's `atom_to_binary` image equals the corpus's wire-string set exactly (so
+adding, removing, or renaming a `kind()` alternative without updating this
+function — the two are directly adjacent, unlike the corpus in a different
+app's test tree — fails a fast, obvious Erlang test), and the Rust side
+asserts `from_wire` against the same corpus in
+`FlushFileKind::from_wire`'s own test module. Neither side hand-derives the
+other's expected values — both are pinned to the shared file.
+""".
+-spec known_entry_kinds() -> [kind()].
+known_entry_kinds() ->
+    [
+        instance,
+        class,
+        'new-class',
+        'class-def',
+        'remove-method',
+        'remove-class',
+        'rename-class',
+        'rename-method',
+        unknown
+    ].
+
+-doc """
 The side (`instance` | `class`) a method-shaped entry targets, or `undefined`
 for an entry with no side (`'new-class'`, `unknown`) (ADR 0112, BT-3187).
 
@@ -1077,6 +1348,39 @@ entry_source_ref(#entry{source_ref = V}) -> V.
 -spec entry_prev_source_ref(entry()) -> binary() | undefined.
 entry_prev_source_ref(#entry{prev_source_ref = V}) -> V.
 
+-doc "The pre-rename class name for a `'rename-class'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-spec entry_old_class(entry()) -> binary() | undefined.
+entry_old_class(#entry{old_class = V}) -> V.
+
+-doc "The pre-rename selector for a `'rename-method'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-spec entry_old_selector(entry()) -> binary() | undefined.
+entry_old_selector(#entry{old_selector = V}) -> V.
+
+-doc "The pre-rename file path for a `'rename-class'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-spec entry_old_path(entry()) -> binary() | undefined.
+entry_old_path(#entry{old_path = V}) -> V.
+
+-doc "The post-rename file path for a `'rename-class'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-spec entry_new_path(entry()) -> binary() | undefined.
+entry_new_path(#entry{new_path = V}) -> V.
+
+-doc """
+The multi-site rewrite list for a `'rename-class'`/`'rename-method'` entry
+(ADR 0114, BT-3269); `undefined` otherwise. `sites[0]` is always the
+definition/declaration site; a bare `undefined` element (rather than a
+`site()` map) is the dynamic-class "no declaration site" case.
+""".
+-spec entry_sites(entry()) -> [site() | undefined] | undefined.
+entry_sites(#entry{sites = V}) -> V.
+
+-doc """
+The reported-but-never-rewritten candidate sender list for a
+`'rename-method'` entry (ADR 0114, BT-3269); `undefined` otherwise
+(including for `'rename-class'`, which has no candidate tier).
+""".
+-spec entry_candidate_sites(entry()) -> [candidate_site()] | undefined.
+entry_candidate_sites(#entry{candidate_sites = V}) -> V.
+
 -doc """
 Read the patched method body (or full new-class source) recorded for `Entry`
 from `<workspace>/changes/sources/<source_ref>.bt`.
@@ -1117,6 +1421,83 @@ read_source_file(Ref) ->
         undefined ->
             {error, no_workspace}
     end.
+
+-doc """
+Read one rewrite site's own recorded body (its `source_ref` or
+`prev_source_ref`) from `<workspace>/changes/sources/<ref>.bt` (ADR 0114,
+BT-3271).
+
+Generalizes `read_source_body/1`/`read_prev_source_body/1` to a `site()`'s
+own per-site ref, rather than the OWNING ENTRY's top-level `source_ref`/
+`prev_source_ref` — which are always `undefined` for a `'rename-class'`/
+`'rename-method'` entry (the per-site bodies live under `sites` instead, see
+the ChangeEntry schema doc's `source_ref`/`sites` rows). `beamtalk_workspace_
+flush`'s multi-site rename-class splice needs to read a specific site's ref
+directly, so this takes the raw `binary() | undefined` ref rather than an
+`entry()` — reuses `read_source_file/1` verbatim (CLAUDE.md's no-duplicate-
+implementations rule) rather than re-deriving the `sources/` path lookup.
+
+Returns `{error, no_source}` for `undefined` — mirroring `read_source_body/1`'s
+handling of an absent top-level `source_ref` — rather than crashing on a
+missing filename: a site legitimately has an `undefined` `source_ref` or
+`prev_source_ref` (e.g. a site discovered but never itself given a body ref).
+""".
+-spec read_site_body(binary() | undefined) -> {ok, binary()} | {error, term()}.
+read_site_body(undefined) ->
+    {error, no_source};
+read_site_body(Ref) when is_binary(Ref) ->
+    read_source_file(Ref).
+
+-doc """
+Persist one rewrite site's body to the ChangeLog's `sources/` directory and
+return its ref filename, for building a `'rename-class'`/`'rename-method'`
+entry's `sites` list (ADR 0114, BT-3270).
+
+Generalizes the single-body persistence `do_append/2` already performs for a
+whole entry's `source`/`prev_source` (`write_optional_source/3`) to the
+N-body case a multi-site rewrite needs — one call per site per body (a site
+typically has both a `source` and a `prev_source` body). Callers write every
+site's bodies via this function BEFORE calling `append/1`: a `site()`'s
+`source_ref`/`prev_source_ref` fields are already-persisted refs by the time
+`append/1`'s `append_input()` map is built, unlike the top-level `source`/
+`prev_source` keys, which name raw bodies `do_append/2` persists itself
+against the entry's own `seq` — not yet assigned at the point a caller is
+still assembling a multi-site `sites` list.
+
+Returns `undefined` for `undefined` (nothing to write — mirrors
+`write_optional_source/3`'s no-op for an absent body) and in run mode (no
+workspace; nothing durable to persist a ref against, and every reader of a
+`site()`'s refs already tolerates an absent one). Returns `{error, Reason}`
+on a write failure — callers should log and drop to `undefined` rather than
+fail the whole rewrite, mirroring how a ChangeLog write failure elsewhere is
+already best-effort from its caller's point of view.
+""".
+-spec store_site_body(binary() | undefined) -> {ok, binary()} | undefined | {error, term()}.
+store_site_body(undefined) ->
+    undefined;
+store_site_body(Body) when is_binary(Body) ->
+    case gen_server:call(?MODULE, get_sources_dir) of
+        undefined ->
+            undefined;
+        {ok, SourcesDir} ->
+            Ref = site_body_ref_filename(),
+            Path = filename:join(SourcesDir, binary_to_list(Ref)),
+            case write_file_atomic(Path, Body) of
+                ok -> {ok, Ref};
+                {error, _} = Err -> Err
+            end
+    end.
+
+%% sources/site-<unique>.bt — a rewrite site's body ref filename. Unlike
+%% `source_ref_filename/2` (keyed by the owning entry's own `seq`, assigned
+%% only once `do_append/2` runs), a site's body must be written BEFORE the
+%% entry's `seq` is known (see `store_site_body/1`'s doc) — `erlang:unique_
+%% integer/1` gives a monotonic, collision-free name with no such ordering
+%% dependency.
+-spec site_body_ref_filename() -> binary().
+site_body_ref_filename() ->
+    Unique = erlang:unique_integer([positive, monotonic]),
+    iolist_to_binary([<<"site-">>, integer_to_binary(Unique), <<".bt">>]).
 
 %%% ----------------------------------------------------------------------------
 %%% gen_server callbacks
@@ -1216,6 +1597,12 @@ do_append(Input, State) ->
         prev_source_ref = PrevSourceRef,
         source_file = maps:get(source_file, Input, undefined),
         span = maps:get(span, Input, undefined),
+        old_class = maps:get(old_class, Input, undefined),
+        old_selector = maps:get(old_selector, Input, undefined),
+        old_path = maps:get(old_path, Input, undefined),
+        new_path = maps:get(new_path, Input, undefined),
+        sites = maps:get(sites, Input, undefined),
+        candidate_sites = maps:get(candidate_sites, Input, undefined),
         intent = maps:get(intent, Input),
         flushable = maps:get(flushable, Input),
         not_flushable_reason = maps:get(not_flushable_reason, Input, undefined),
@@ -1677,6 +2064,13 @@ entry_to_json(#entry{} = E) ->
         <<"prev_source_ref">> => null_or(E#entry.prev_source_ref),
         <<"sourceFile">> => null_or(E#entry.source_file),
         <<"span">> => span_to_json(E#entry.span),
+        %% ADR 0114 (BT-3269).
+        <<"old_class">> => null_or(E#entry.old_class),
+        <<"old_selector">> => null_or(E#entry.old_selector),
+        <<"old_path">> => null_or(E#entry.old_path),
+        <<"new_path">> => null_or(E#entry.new_path),
+        <<"sites">> => sites_to_json(E#entry.sites),
+        <<"candidate_sites">> => candidate_sites_to_json(E#entry.candidate_sites),
         <<"intent">> => atom_to_binary(E#entry.intent, utf8),
         <<"flushable">> => E#entry.flushable,
         <<"not_flushable_reason">> => null_or(E#entry.not_flushable_reason),
@@ -1706,6 +2100,16 @@ entry_from_json(Line) ->
         prev_source_ref = from_null(maps:get(<<"prev_source_ref">>, Map, null)),
         source_file = from_null(maps:get(<<"sourceFile">>, Map, null)),
         span = span_from_json(maps:get(<<"span">>, Map, null)),
+        %% ADR 0114 (BT-3269): absent in every metadata line written before
+        %% this ADR — `maps:get/3`'s `null` default decodes to `undefined`
+        %% via the same helpers used for every other pre-existing optional
+        %% field, so legacy lines round-trip unchanged.
+        old_class = from_null(maps:get(<<"old_class">>, Map, null)),
+        old_selector = from_null(maps:get(<<"old_selector">>, Map, null)),
+        old_path = from_null(maps:get(<<"old_path">>, Map, null)),
+        new_path = from_null(maps:get(<<"new_path">>, Map, null)),
+        sites = sites_from_json(maps:get(<<"sites">>, Map, null)),
+        candidate_sites = candidate_sites_from_json(maps:get(<<"candidate_sites">>, Map, null)),
         intent = decode_intent(maps:get(<<"intent">>, Map)),
         flushable = maps:get(<<"flushable">>, Map),
         not_flushable_reason = from_null(maps:get(<<"not_flushable_reason">>, Map, null)),
@@ -1737,6 +2141,10 @@ decode_kind(<<"remove-method">>) ->
     'remove-method';
 decode_kind(<<"remove-class">>) ->
     'remove-class';
+decode_kind(<<"rename-class">>) ->
+    'rename-class';
+decode_kind(<<"rename-method">>) ->
+    'rename-method';
 decode_kind(Other) ->
     log_unknown_enum(kind, Other),
     unknown.
@@ -1801,6 +2209,98 @@ span_to_json(#{start := Start, 'end' := End}) -> #{<<"start">> => Start, <<"end"
 -spec span_from_json(map() | null) -> span() | undefined.
 span_from_json(null) -> undefined;
 span_from_json(#{<<"start">> := Start, <<"end">> := End}) -> #{start => Start, 'end' => End}.
+
+%% ADR 0114 (BT-3269): `sites`/`candidate_sites` (de)serialisation. A whole
+%% `sites` list of `null` (rather than an empty array) matches every other
+%% optional field's "absent means not applicable" convention — only
+%% `'rename-class'`/`'rename-method'` entries ever populate it. An individual
+%% `null` *element* inside a present list is the dynamic-class "no
+%% declaration site" case (ADR 0114 § ChangeLog schema), distinct from the
+%% whole-field absence.
+-spec site_to_json(site() | undefined) -> map() | null.
+site_to_json(undefined) ->
+    null;
+site_to_json(#{
+    source_file := SourceFile, span := Span, source_ref := SourceRef, prev_source_ref := PrevRef
+}) ->
+    #{
+        <<"sourceFile">> => null_or(SourceFile),
+        <<"span">> => span_to_json(Span),
+        <<"source_ref">> => null_or(SourceRef),
+        <<"prev_source_ref">> => null_or(PrevRef)
+    }.
+
+-spec site_from_json(map() | null) -> site() | undefined.
+site_from_json(null) ->
+    undefined;
+site_from_json(Map) when is_map(Map) ->
+    #{
+        source_file => from_null(maps:get(<<"sourceFile">>, Map, null)),
+        span => span_from_json(maps:get(<<"span">>, Map, null)),
+        source_ref => from_null(maps:get(<<"source_ref">>, Map, null)),
+        prev_source_ref => from_null(maps:get(<<"prev_source_ref">>, Map, null))
+    }.
+
+-spec sites_to_json([site() | undefined] | undefined) -> [map() | null] | null.
+sites_to_json(undefined) -> null;
+sites_to_json(Sites) -> [site_to_json(S) || S <- Sites].
+
+-spec sites_from_json([map() | null] | null) -> [site() | undefined] | undefined.
+sites_from_json(null) -> undefined;
+sites_from_json(List) when is_list(List) -> [site_from_json(S) || S <- List].
+
+-spec candidate_site_to_json(candidate_site()) -> map().
+candidate_site_to_json(#{source_file := SourceFile, span := Span}) ->
+    #{<<"sourceFile">> => SourceFile, <<"span">> => span_to_json(Span)}.
+
+%% Unlike `site_from_json/1`, a `candidate_site()` has no optional-field case
+%% to default (every candidate site always names a real sourceFile/span) —
+%% so a missing/invalid key is genuinely malformed, not a legitimate
+%% "not applicable" shape. Returns `error` for that case instead of
+%% crashing: `candidate_sites_from_json/1` drops just the malformed element
+%% (logged) rather than letting it propagate up through `entry_from_json/1`
+%% and cost `parse_log/1`'s catch the *entire* ChangeLog line — including
+%% that entry's unrelated `sites`/rename data — over one bad element.
+%%
+%% Guards against two distinct malformed shapes, not just a missing key:
+%% an explicit `"span": null` (`span_from_json/1` returns `undefined`, which
+%% would otherwise silently violate `candidate_site()`'s non-optional
+%% `span := span()` contract) and a `span` object missing `start`/`end`
+%% (`span_from_json/1` has no fallback clause for that shape and raises
+%% `function_clause` — caught here rather than crashing the whole decode).
+-spec candidate_site_from_json(map()) -> {ok, candidate_site()} | error.
+candidate_site_from_json(#{<<"sourceFile">> := SourceFile, <<"span">> := Span} = Map) ->
+    try span_from_json(Span) of
+        undefined -> drop_malformed_candidate_site(Map);
+        DecodedSpan -> {ok, #{source_file => SourceFile, span => DecodedSpan}}
+    catch
+        _:_ -> drop_malformed_candidate_site(Map)
+    end;
+candidate_site_from_json(Malformed) ->
+    drop_malformed_candidate_site(Malformed).
+
+-spec drop_malformed_candidate_site(term()) -> error.
+drop_malformed_candidate_site(Malformed) ->
+    ?LOG_WARNING("Dropping malformed candidate_site: ~p", [Malformed]),
+    error.
+
+-spec candidate_sites_to_json([candidate_site()] | undefined) -> [map()] | null.
+candidate_sites_to_json(undefined) -> null;
+candidate_sites_to_json(Sites) -> [candidate_site_to_json(S) || S <- Sites].
+
+-spec candidate_sites_from_json([map()] | null) -> [candidate_site()] | undefined.
+candidate_sites_from_json(null) ->
+    undefined;
+candidate_sites_from_json(List) when is_list(List) ->
+    lists:filtermap(
+        fun(S) ->
+            case candidate_site_from_json(S) of
+                {ok, CandidateSite} -> {true, CandidateSite};
+                error -> false
+            end
+        end,
+        List
+    ).
 
 -spec null_or(binary() | undefined) -> binary() | null.
 null_or(undefined) -> null;

@@ -662,11 +662,16 @@ enum CommandAction<'a> {
     RemoveClassArg(&'a str),
     FlushDestructive,
     FlushDestructiveArg(&'a str),
+    RenameClassUsage,
+    RenameClassArg(&'a str),
+    RenameMethodUsage,
+    RenameMethodArg(&'a str),
 }
 
 /// Classify a line as a known REPL meta-command (or `None` if it isn't one),
 /// using `commands::REPL_COMMAND_TABLE` to resolve the command word (and its
 /// aliases) — see [`CommandAction`].
+#[allow(clippy::too_many_lines)] // one if-block per REPL_COMMAND_TABLE entry; irreducible
 fn classify_command(line: &str) -> Option<CommandAction<'_>> {
     let word = line.split(' ').next().unwrap_or(line);
     let bare = word == line;
@@ -757,6 +762,20 @@ fn classify_command(line: &str) -> Option<CommandAction<'_>> {
             CommandAction::FlushDestructive
         } else {
             CommandAction::FlushDestructiveArg(commands::FLUSH_DESTRUCTIVE.arg(line)?)
+        });
+    }
+    if commands::RENAME_CLASS.is_form(word) {
+        return Some(if bare {
+            CommandAction::RenameClassUsage
+        } else {
+            CommandAction::RenameClassArg(commands::RENAME_CLASS.arg(line)?)
+        });
+    }
+    if commands::RENAME_METHOD.is_form(word) {
+        return Some(if bare {
+            CommandAction::RenameMethodUsage
+        } else {
+            CommandAction::RenameMethodArg(commands::RENAME_METHOD.arg(line)?)
         });
     }
     None
@@ -863,6 +882,28 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         CommandAction::FlushDestructiveArg(selector) => {
             handle_flush_destructive_arg(selector, client);
         }
+        // ADR 0114 Phase 5 (BT-3276): REPL alias for `Behaviour>>renameTo:`
+        // — `:rename-class <Class> <NewName>` desugars to `<Class> renameTo:
+        // #<NewName>`, gated behind a `y/N` terminal confirmation, matching
+        // `:remove-class`'s two-prompt shape: this prompt confirms the
+        // in-memory rename; a later, separately-confirmed
+        // `:flush-destructive` reaches disk (`rename-class` joins
+        // `remove-class` in the same Tier 2 gate, ADR 0114 "Flush"). See
+        // `handle_rename_class`.
+        CommandAction::RenameClassUsage => {
+            eprintln!("Usage: :rename-class <Class> <NewName>");
+        }
+        CommandAction::RenameClassArg(arg) => handle_rename_class(arg, client),
+        // ADR 0114 Phase 5 (BT-3276): REPL alias for
+        // `Behaviour>>renameSelector:to:` — `:rename-method <Class>
+        // <selector> <newSelector>` desugars to `<Class> renameSelector:
+        // #<selector> to: #<newSelector>`, gated behind a `y/N` terminal
+        // confirmation, matching `:rename-class`'s shape. Instance-side
+        // only — see `beamtalk_cli::repl_meta_exprs::rename_method_expr_for`.
+        CommandAction::RenameMethodUsage => {
+            eprintln!("Usage: :rename-method <Class> <selector> <newSelector>");
+        }
+        CommandAction::RenameMethodArg(arg) => handle_rename_method(arg, client),
     }
 
     CommandResult::Handled
@@ -923,6 +964,66 @@ fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
         None => {
             eprintln!("Usage: :flush-destructive [<Class>|#kind|#{{ #file => \"path\" }}]");
         }
+    }
+}
+
+/// `:rename-class <Class> <NewName>` (ADR 0114 Phase 5, BT-3276): prompts
+/// `y/N` at the terminal (mirroring `:remove-class`'s confirmation gesture
+/// for the memory-mutating half of a destructive operation) before
+/// evaluating `<Class> renameTo: #<NewName>`. Auto-rewrites every in-project
+/// cross-file reference the xref index can find and re-registers the class
+/// under the new name immediately; the file on disk (the rename/move plus
+/// rewritten references) is untouched until a later, separately-confirmed
+/// `:flush-destructive`.
+fn handle_rename_class(arg: &str, client: &mut ReplClient) {
+    match beamtalk_cli::repl_meta_exprs::rename_class_expr_for(arg) {
+        Some(expr) => {
+            let mut tokens = arg.split_whitespace();
+            let old_name = tokens.next().unwrap_or(arg.trim());
+            let new_name = tokens.next().unwrap_or("");
+            if confirm_destructive_action(&format!(
+                "Rename class {old_name} to {new_name}? This rewrites in-project cross-file references and takes effect in memory immediately; the file on disk is untouched until a later `:flush-destructive` (or `Workspace flushIncludingDestructive`)."
+            )) {
+                eval_and_display(client, &expr);
+            } else {
+                println!("Aborted: {old_name} was not renamed.");
+            }
+        }
+        None => eprintln!("Usage: :rename-class <Class> <NewName>"),
+    }
+}
+
+/// `:rename-method <Class> <selector> <newSelector>` (ADR 0114 Phase 5,
+/// BT-3276): prompts `y/N` at the terminal before evaluating `<Class>
+/// renameSelector: #<selector> to: #<newSelector>`. Auto-rewrites only the
+/// self/super sends the cross-reference index can prove are structurally
+/// safe; everything else is reported as a candidate for manual review,
+/// never rewritten automatically. Instance-side only. The file on disk is
+/// untouched until a later, separately-confirmed `:flush-destructive`.
+fn handle_rename_method(arg: &str, client: &mut ReplClient) {
+    match beamtalk_cli::repl_meta_exprs::rename_method_expr_for(arg) {
+        Some(expr) => {
+            let mut tokens = arg.split_whitespace();
+            let class = tokens.next().unwrap_or(arg.trim());
+            // Strip an optional leading `#` from each raw token before
+            // display — `rename_method_expr_for` does the same stripping
+            // internally when building `expr`, so a selector typed as
+            // `#increment` must not double up into `##increment` here.
+            let old_selector = tokens
+                .next()
+                .map_or("", |s| s.strip_prefix('#').unwrap_or(s));
+            let new_selector = tokens
+                .next()
+                .map_or("", |s| s.strip_prefix('#').unwrap_or(s));
+            if confirm_destructive_action(&format!(
+                "Rename {class}>>#{old_selector} to #{new_selector}? This auto-rewrites only structurally-safe self/super sends and takes effect in memory immediately; the file on disk is untouched until a later `:flush-destructive` (or `Workspace flushIncludingDestructive`)."
+            )) {
+                eval_and_display(client, &expr);
+            } else {
+                println!("Aborted: {class}>>#{old_selector} was not renamed.");
+            }
+        }
+        None => eprintln!("Usage: :rename-method <Class> <selector> <newSelector>"),
     }
 }
 
@@ -2128,6 +2229,52 @@ mod tests {
         assert_eq!(
             classify_command(":flush-destructive Counter"),
             Some(CommandAction::FlushDestructiveArg("Counter"))
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0114 Phase 5 (BT-3276) — `:rename-class <Class> <NewName>` and
+    // `:rename-method <Class> <selector> <newSelector>` meta-command
+    // dispatch, matching `:remove-class`'s alias pattern. The
+    // expression-building logic (`rename_class_expr_for`,
+    // `rename_method_expr_for`) lives in `beamtalk_cli::repl_meta_exprs` —
+    // shared with, and tested by, `tests/repl_protocol.rs` — so only
+    // dispatch classification is tested here; the terminal `y/N`
+    // confirmation gate is interactive and not unit tested (matches
+    // `:remove-class`/`:flush-destructive`).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bare_rename_class_is_usage_error() {
+        assert_eq!(
+            classify_command(":rename-class"),
+            Some(CommandAction::RenameClassUsage)
+        );
+    }
+
+    #[test]
+    fn rename_class_with_args_classifies_as_rename_class_arg() {
+        assert_eq!(
+            classify_command(":rename-class Counter Accumulator"),
+            Some(CommandAction::RenameClassArg("Counter Accumulator"))
+        );
+    }
+
+    #[test]
+    fn bare_rename_method_is_usage_error() {
+        assert_eq!(
+            classify_command(":rename-method"),
+            Some(CommandAction::RenameMethodUsage)
+        );
+    }
+
+    #[test]
+    fn rename_method_with_args_classifies_as_rename_method_arg() {
+        assert_eq!(
+            classify_command(":rename-method Counter increment incrementBy"),
+            Some(CommandAction::RenameMethodArg(
+                "Counter increment incrementBy"
+            ))
         );
     }
 }

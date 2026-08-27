@@ -96,22 +96,31 @@ pub struct FlushedFile {
     pub path: String,
     /// The per-file operation kind from the wire's `fileKinds` companion
     /// list (`beamtalk_workspace_changelog:entry_kind/1`'s own enum value,
-    /// bucketed into the three shapes the LSP acts on), or `None` when the
+    /// bucketed into the shapes the LSP acts on), or `None` when the
     /// producer predates BT-3212 and sent no `fileKinds` entry for this
     /// path — the older, filesystem-existence-based classification in
     /// `resolve_flushed_path` remains the fallback for that case (BT-3209
     /// backward-compat tolerance).
     pub kind: Option<FlushFileKind>,
+    /// ADR 0114 LSP follow-up (BT-3275): the pre-rename path, present only
+    /// for the one `RenameClass`-kind file that IS the moved declaration
+    /// (`beamtalk_workspace_flush:file_kind_map/1`'s `op = move` case,
+    /// forwarded on the wire as `oldFile`). `None` for every other file,
+    /// including a `RenameClass`-kind file that is an ordinary same-batch
+    /// reference rewrite in a file that did not itself move — `old_path` is
+    /// the only signal that distinguishes the two, since both share the
+    /// same `kind`.
+    pub old_path: Option<String>,
 }
 
-/// The three flush operation shapes the LSP distinguishes on the wire
-/// (ADR 0113 LSP follow-up, BT-3212) — bucketed client-side from the
-/// runtime's own `entry_kind/1` enum value rather than a value this crate
-/// invents: `'new-class'` and `'remove-class'` map straight across, and
-/// every other `entry_kind/1` value (`instance`, `class`,
-/// `'remove-method'`, or an unrecognised future value) buckets to
-/// `Patch` — the ordinary `TextEdit`/`Change` shape, unchanged since ADR
-/// 0082 Phase 3.
+/// The flush operation shapes the LSP distinguishes on the wire (ADR 0113
+/// LSP follow-up, BT-3212; ADR 0114 LSP follow-up, BT-3275) — bucketed
+/// client-side from the runtime's own `entry_kind/1` enum value rather than
+/// a value this crate invents: `'new-class'`, `'remove-class'`,
+/// `'rename-class'`, and `'rename-method'` map straight across, and every
+/// other `entry_kind/1` value (`instance`, `class`, `'remove-method'`, or an
+/// unrecognised future value) buckets to `Patch` — the ordinary
+/// `TextEdit`/`Change` shape, unchanged since ADR 0082 Phase 3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlushFileKind {
     /// `Workspace newClass:at:` — the file did not exist before this flush.
@@ -121,6 +130,19 @@ pub enum FlushFileKind {
     /// already unlinked the file from disk. Emitted as a `DeleteFile`
     /// resource operation (BT-3209).
     RemoveClass,
+    /// `renameTo:`/`moveClass:to:` (Tier 2 destructive flush, ADR 0114,
+    /// BT-3271/BT-3275) — a file touched by a class rename. Paired with
+    /// `FlushedFile::old_path` (`Some`), emitted as a `RenameFile` resource
+    /// operation plus a `TextDocumentEdit` carrying the moved file's new
+    /// content; without it (`None`), an ordinary same-batch reference
+    /// rewrite in a file that did not itself move — an ordinary patch.
+    RenameClass,
+    /// `renameSelector:to:` (Tier 2 destructive flush, ADR 0114, BT-3273/
+    /// BT-3275) — the definition site or a confirmed sender site of a
+    /// method rename (never a `candidate_sites` entry, which is never
+    /// staged/written and so never appears on this wire at all). Emitted as
+    /// a `TextDocumentEdit`.
+    RenameMethod,
     /// Everything else: an ordinary method patch or `'remove-method'`
     /// excision against a file that existed both before and after.
     /// Emitted as a whole-document `TextEdit`.
@@ -129,11 +151,13 @@ pub enum FlushFileKind {
 
 impl FlushFileKind {
     /// Bucket a raw `entry_kind/1` wire value (e.g. `"new-class"`,
-    /// `"instance"`) into the three LSP-relevant shapes.
+    /// `"instance"`) into the LSP-relevant shapes.
     fn from_wire(kind: &str) -> Self {
         match kind {
             "new-class" => Self::NewClass,
             "remove-class" => Self::RemoveClass,
+            "rename-class" => Self::RenameClass,
+            "rename-method" => Self::RenameMethod,
             _ => Self::Patch,
         }
     }
@@ -735,25 +759,37 @@ fn handle_push_frame(
             // older producer, or a path this list simply omits) leaves that
             // file's `kind` as `None`, so `flush_event_listener` falls back
             // to the pre-BT-3212 existence check for it (BT-3209 backward
-            // compat).
-            let kinds_by_path: std::collections::HashMap<&str, FlushFileKind> = data
-                .and_then(|d| d.get("fileKinds"))
-                .and_then(|f| f.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|entry| {
-                            let path = entry.get("file")?.as_str()?;
-                            let kind = entry.get("kind")?.as_str()?;
-                            Some((path, FlushFileKind::from_wire(kind)))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            // compat). BT-3275: also carries the optional `oldFile`
+            // companion (present only for the moved `'rename-class'` file).
+            let kinds_by_path: std::collections::HashMap<&str, (FlushFileKind, Option<String>)> =
+                data.and_then(|d| d.get("fileKinds"))
+                    .and_then(|f| f.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|entry| {
+                                let path = entry.get("file")?.as_str()?;
+                                let kind = entry.get("kind")?.as_str()?;
+                                let old_path = entry
+                                    .get("oldFile")
+                                    .and_then(|v| v.as_str())
+                                    .map(String::from);
+                                Some((path, (FlushFileKind::from_wire(kind), old_path)))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
             let files = paths
                 .into_iter()
                 .map(|path| {
-                    let kind = kinds_by_path.get(path.as_str()).copied();
-                    FlushedFile { path, kind }
+                    let (kind, old_path) = match kinds_by_path.get(path.as_str()) {
+                        Some((kind, old_path)) => (Some(*kind), old_path.clone()),
+                        None => (None, None),
+                    };
+                    FlushedFile {
+                        path,
+                        kind,
+                        old_path,
+                    }
                 })
                 .collect();
             if let Err(e) = flush_tx.send(FlushEvent { files }) {
@@ -1017,6 +1053,121 @@ mod tests {
                 ("src/widget.bt", Some(FlushFileKind::RemoveClass)),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn push_frame_with_rename_class_old_file_is_forwarded() {
+        // BT-3275: `oldFile` distinguishes the moved declaration file
+        // (`RenameClass` + `old_path = Some`) from an ordinary same-batch
+        // reference-rewrite file that shares the same `kind` but never
+        // moved (`RenameClass` + `old_path = None`).
+        let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "workspace",
+                "event": "flush_completed",
+                "data": {
+                    "files": ["src/accumulator.bt", "src/widget.bt"],
+                    "fileKinds": [
+                        {"file": "src/accumulator.bt", "kind": "rename-class", "oldFile": "src/counter.bt"},
+                        {"file": "src/widget.bt", "kind": "rename-class"}
+                    ]
+                }
+            }),
+            &tx,
+            &class_tx,
+            &reload_tx,
+        );
+        let evt = rx.recv().await.expect("flush event");
+        let got: Vec<(&str, Option<FlushFileKind>, Option<&str>)> = evt
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.kind, f.old_path.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "src/accumulator.bt",
+                    Some(FlushFileKind::RenameClass),
+                    Some("src/counter.bt")
+                ),
+                ("src/widget.bt", Some(FlushFileKind::RenameClass), None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn push_frame_with_rename_method_kind_is_forwarded() {
+        let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "workspace",
+                "event": "flush_completed",
+                "data": {
+                    "files": ["src/counter.bt", "src/sub_counter.bt"],
+                    "fileKinds": [
+                        {"file": "src/counter.bt", "kind": "rename-method"},
+                        {"file": "src/sub_counter.bt", "kind": "rename-method"}
+                    ]
+                }
+            }),
+            &tx,
+            &class_tx,
+            &reload_tx,
+        );
+        let evt = rx.recv().await.expect("flush event");
+        assert!(
+            evt.files
+                .iter()
+                .all(|f| f.kind == Some(FlushFileKind::RenameMethod) && f.old_path.is_none())
+        );
+    }
+
+    /// BT-3275 conformance: `FlushFileKind::from_wire` must bucket every
+    /// atom `beamtalk_workspace_changelog:kind()` (Erlang) admits the same
+    /// way this corpus pins it. The corpus is the single source of truth
+    /// both language-side implementations are pinned to; the Erlang side
+    /// asserts the identical wire-string set against
+    /// `beamtalk_workspace_changelog:known_entry_kinds/0` — the
+    /// runtime-introspectable image of that type's literal union — in
+    /// `beamtalk_workspace_changelog_tests:
+    /// known_entry_kinds_matches_shared_wire_corpus/0`. Neither side
+    /// hand-derives the other's expected values; both read the same file
+    /// (`docs/development/architecture-principles.md` §6: a rule crossing
+    /// the Rust/Erlang boundary needs a shared conformance fixture, not a
+    /// comment).
+    #[test]
+    fn from_wire_matches_shared_wire_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/flush_file_kind_wire_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let wire = case["wire"].as_str().expect("case.wire is a string");
+            let expected = case["rust_variant"]
+                .as_str()
+                .expect("case.rust_variant is a string");
+            let why = case["why"].as_str().unwrap_or("");
+            assert_eq!(
+                format!("{:?}", FlushFileKind::from_wire(wire)),
+                expected,
+                "corpus mismatch for wire kind {wire:?} ({why})"
+            );
+        }
     }
 
     #[tokio::test]

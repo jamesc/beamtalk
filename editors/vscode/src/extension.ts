@@ -7,6 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { planDocumentRetarget, type DocumentMovedParams } from "./documentMoved";
 import { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
 import {
   LanguageClient,
@@ -214,6 +215,89 @@ class StdlibContentProvider implements vscode.TextDocumentContentProvider {
   }
 }
 
+/** Method name for the server's `beamtalk-lsp/documentMoved` notification (BT-3285). */
+const DOCUMENT_MOVED_NOTIFICATION = "beamtalk-lsp/documentMoved";
+
+/**
+ * Handles the server's `beamtalk-lsp/documentMoved` notification (BT-3285):
+ * sent for a `renameTo:`/`moveClass:to:` flush at the point the (now-removed)
+ * `workspace/applyEdit` `RenameFile` op used to fire — that op silently
+ * no-ops in VS Code once the runtime has already renamed the file on disk
+ * and unlinked the old path (see docs/ADR/0114-class-and-method-rename.md's
+ * LSP section). Closes every open tab at `params.oldUri` (there can be more
+ * than one — the same file open in a split view, or a background tab that
+ * isn't the active one in its group) and reopens `params.newUri` once per
+ * closed tab, in that tab's own view column, restoring the cursor/scroll
+ * position captured from a *visible* editor in that column where one was
+ * captured (`planDocumentRetarget`, `documentMoved.ts`) — BT-3285's
+ * "preserving view state ... where practical".
+ */
+async function handleDocumentMoved(params: DocumentMovedParams): Promise<void> {
+  const oldUri = vscode.Uri.parse(params.oldUri).toString();
+  const newUri = vscode.Uri.parse(params.newUri);
+
+  const matchingTabs: vscode.Tab[] = [];
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      if (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === oldUri) {
+        matchingTabs.push(tab);
+      }
+    }
+  }
+  if (matchingTabs.length === 0) {
+    return;
+  }
+
+  const plans = planDocumentRetarget(
+    matchingTabs.map((tab) => ({ uri: oldUri, viewColumn: tab.group.viewColumn })),
+    vscode.window.visibleTextEditors
+      .filter(
+        (editor): editor is vscode.TextEditor & { viewColumn: vscode.ViewColumn } =>
+          editor.document.uri.toString() === oldUri && editor.viewColumn !== undefined
+      )
+      .map((editor) => ({
+        uri: oldUri,
+        viewColumn: editor.viewColumn,
+        selection: {
+          startLine: editor.selection.start.line,
+          startCharacter: editor.selection.start.character,
+          endLine: editor.selection.end.line,
+          endCharacter: editor.selection.end.character,
+        },
+      })),
+    { oldUri, newUri: newUri.toString() }
+  );
+
+  // Close each matching tab individually (rather than one batched
+  // `tabGroups.close(matchingTabs, ...)` call) so a `false` result can be
+  // attributed to the specific tab it belongs to — closing as a single
+  // array only reports one boolean for the whole batch, which loses which
+  // tab it refers to. `preserveFocus: true` keeps focus from jumping around
+  // mid-retarget; the explicit `showTextDocument` calls below focus the
+  // reopened tabs instead. A tab's close can come back `false` when the
+  // user is prompted to save a dirty file at `oldUri` and cancels — in that
+  // case the tab is left open as-is rather than also opening `newUri`
+  // alongside it, which would otherwise leave a stale dirty tab and a fresh
+  // tab side by side in the same view column.
+  for (const [index, tab] of matchingTabs.entries()) {
+    const closed = await vscode.window.tabGroups.close(tab, true);
+    if (!closed) {
+      continue;
+    }
+    const plan = plans[index];
+    await vscode.window.showTextDocument(newUri, {
+      viewColumn: plan.viewColumn,
+      selection: plan.selection
+        ? new vscode.Range(
+            new vscode.Position(plan.selection.startLine, plan.selection.startCharacter),
+            new vscode.Position(plan.selection.endLine, plan.selection.endCharacter)
+          )
+        : undefined,
+      preview: false,
+    });
+  }
+}
+
 /** Provides preconfigured build and test tasks for Beamtalk projects. */
 class BeamtalkTaskProvider implements vscode.TaskProvider {
   provideTasks(): vscode.Task[] {
@@ -309,6 +393,15 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   try {
     await client.start();
     outputChannel.info("Language server started successfully");
+    // BT-3285: retarget an open tab across a `renameTo:`/`moveClass:to:`
+    // flush — see `handleDocumentMoved`'s doc for why this notification
+    // exists instead of relying on `workspace/applyEdit`'s `RenameFile` op.
+    client.onNotification(DOCUMENT_MOVED_NOTIFICATION, (params: DocumentMovedParams) => {
+      handleDocumentMoved(params).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        outputChannel?.warn(`Failed to handle documentMoved notification: ${message}`);
+      });
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     outputChannel.error(`Failed to start language server: ${message}`);

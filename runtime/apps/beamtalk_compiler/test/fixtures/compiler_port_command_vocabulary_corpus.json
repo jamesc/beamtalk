@@ -17,5 +17,7 @@
   "reindent_method_source",
   "resolve_class_span",
   "categorize_methods",
-  "class_state_field_defaults"
+  "class_state_field_defaults",
+  "find_selector_send_spans",
+  "find_definition_selector_spans"
 ]

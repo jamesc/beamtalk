@@ -15,7 +15,8 @@ use std::sync::Arc;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::tool_expr::{
     FlushFilter, flush_expr_with_confirm_destructive, precheck_method_expr, remove_class_expr,
-    remove_method_expr, remove_method_if_absent_expr, save_class_expr,
+    remove_method_expr, remove_method_if_absent_expr, rename_class_expr, rename_method_expr,
+    save_class_expr,
 };
 use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{
@@ -718,6 +719,37 @@ pub struct RemoveClassParams {
         description = "Name of the Beamtalk class to remove from the running system (e.g. \"Counter\")."
     )]
     pub class: String,
+}
+
+/// Parameters for the `rename_class` MCP tool (ADR 0114 Phase 5, BT-3276).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RenameClassParams {
+    /// Name of the Beamtalk class to rename.
+    #[schemars(description = "Name of the Beamtalk class to rename (e.g. \"Counter\").")]
+    pub class: String,
+    /// The new name for the class.
+    #[schemars(description = "The new name for the class (e.g. \"Accumulator\").")]
+    pub new_name: String,
+}
+
+/// Parameters for the `rename_method` MCP tool (ADR 0114 Phase 5, BT-3276).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RenameMethodParams {
+    /// Name of the Beamtalk class whose method should be renamed.
+    #[schemars(
+        description = "Name of the Beamtalk class whose method should be renamed (e.g. \"Counter\"). Instance-side only — a class-side rename needs a direct 'Counter class renameSelector: #old to: #new' via 'evaluate'."
+    )]
+    pub class: String,
+    /// Current method selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "Current method selector to rename (e.g. \"increment\", \"at:put:\"). Accepted with or without a leading '#'."
+    )]
+    pub selector: String,
+    /// New selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "The new selector (e.g. \"incrementBy\"). Accepted with or without a leading '#'."
+    )]
+    pub new_selector: String,
 }
 
 /// Parameters for the `flush` MCP tool (ADR 0082 Phase 3, BT-2288).
@@ -2205,6 +2237,119 @@ impl BeamtalkMcp {
                 "{entry} — removed from memory, not yet flushed to disk. Call 'flush' with confirm_destructive: true (or evaluate 'Workspace flushIncludingDestructive') to delete its source file."
             )
         };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Rename a class in the running Beamtalk system (ADR 0114 Phase 5,
+    /// BT-3276).
+    ///
+    /// Compiles to `aClass renameTo: #NewName` (wraps `Behaviour>>renameTo:`,
+    /// ADR 0114 Phase 2, BT-3278), reusing the existing `evaluate` pathway
+    /// per ADR 0082's surface-parity principle — no new workspace-side op.
+    /// Auto-rewrites every in-project cross-file reference the xref index
+    /// (`referencesTo:`/`direct_subclasses:`) can find and re-registers the
+    /// class under the new name immediately; refuses a stdlib/dependency
+    /// class or a collision with an already-loaded class name. Like
+    /// `remove_class`, memory-mutating only: this tool never implicitly
+    /// flushes — reaching disk (the file move + rewritten cross-file
+    /// references) requires a distinct, explicit `flush` call with
+    /// `confirm_destructive: true` (or `Workspace flushIncludingDestructive`)
+    /// — `rename-class` joins `remove-class` in the same Tier 2 gate (ADR
+    /// 0114 "Flush" reuses ADR 0113's tier verbatim, extended to genuinely
+    /// multi-file staging).
+    #[tool(
+        description = "Rename a class in the running Beamtalk system. Compiles to 'aClass renameTo: #NewName', which rewrites every in-project cross-file reference the cross-reference index can find (constructor/message sends, type annotations, superclass declarations, extension declarations) and re-registers the class under the new name immediately — but does NOT touch disk. Refuses a stdlib/dependency class (the xref index only covers in-project source) or a collision with an already-loaded class name, raising a structured error. Appends a durable 'rename-class' ChangeLog entry. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending rename shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the renamed class. (ADR 0114 Phase 5, BT-3276.)"
+    )]
+    async fn rename_class(
+        &self,
+        Parameters(params): Parameters<RenameClassParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("rename_class");
+        validate_class_name(&params.class)?;
+        validate_class_name(&params.new_name)?;
+        tracing::debug!(
+            tool = "rename_class",
+            class = %params.class,
+            new_name = %params.new_name,
+            "tool invoked"
+        );
+
+        let expr = rename_class_expr(&params.class, &params.new_name);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to rename class");
+
+        let text = format!(
+            "{} — renamed in memory, not yet flushed to disk. Call 'flush' with confirm_destructive: true (or evaluate 'Workspace flushIncludingDestructive') to move its source file and rewrite cross-file references.",
+            response.value_string()
+        );
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Rename a method on a class in the running Beamtalk system (ADR 0114
+    /// Phase 5, BT-3276).
+    ///
+    /// Compiles to `aClass renameSelector: #old to: #new` (wraps
+    /// `Behaviour>>renameSelector:to:`, ADR 0114 Phase 3, BT-3279), reusing
+    /// the existing `evaluate` pathway per ADR 0082's surface-parity
+    /// principle — no new workspace-side op. Instance-side only — sent to a
+    /// bare class name, this always touches the instance-side method table;
+    /// a class-side rename needs a direct `Counter class renameSelector:
+    /// ... to: ...` eval, the same chokepoint limitation `remove_method`
+    /// documents (`docs/development/surface-parity.md`'s `remove-method`
+    /// row). Auto-rewrites only the self/super sends the cross-reference
+    /// index can prove are structurally safe; everything else is recorded on
+    /// the resulting `ChangeLog` entry's `candidate_sites` for human/agent
+    /// review, never auto-rewritten. Memory-mutating only, joining
+    /// `rename-class`/`remove-class` in the same Tier 2 flush gate.
+    #[tool(
+        description = "Rename a method on a class in the running Beamtalk system. Compiles to 'aClass renameSelector: #old to: #new', which auto-rewrites only the self/super sends the cross-reference index can prove are structurally safe, and raises a selector_not_found error if the selector is not defined locally. Instance-side only (send 'Counter class renameSelector: #old to: #new' directly via 'evaluate' for a class-side rename). Refuses a collision with an already-defined local selector, raising a structured error. Appends a durable 'rename-method' ChangeLog entry recording confirmed 'sites' (auto-rewritten) separately from 'candidate_sites' (reported for review, never auto-rewritten) — does NOT touch disk. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending rename shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the class. (ADR 0114 Phase 5, BT-3276.)"
+    )]
+    async fn rename_method(
+        &self,
+        Parameters(params): Parameters<RenameMethodParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("rename_method");
+        validate_class_name(&params.class)?;
+        let selector = params
+            .selector
+            .strip_prefix('#')
+            .unwrap_or(&params.selector);
+        validate_selector(selector)?;
+        let new_selector = params
+            .new_selector
+            .strip_prefix('#')
+            .unwrap_or(&params.new_selector);
+        validate_selector(new_selector)?;
+        tracing::debug!(
+            tool = "rename_method",
+            class = %params.class,
+            selector = %selector,
+            new_selector = %new_selector,
+            "tool invoked"
+        );
+
+        let expr = rename_method_expr(&params.class, selector, new_selector);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to rename method");
+
+        let text = format!(
+            "{} — renamed in memory, not yet flushed to disk. Call 'flush' with confirm_destructive: true (or evaluate 'Workspace flushIncludingDestructive') to write confirmed sites to disk.",
+            response.value_string()
+        );
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))

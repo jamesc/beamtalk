@@ -839,6 +839,301 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
+  # ── Rename Class / Rename Method (ADR 0114 Phase 5, BT-3277) ────────────────
+
+  test "class-definition editor: Rename Class renames the class in the system (ADR 0114, BT-3277)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
+    suffix = System.unique_integer([:positive])
+    class = "RenameMe#{suffix}"
+    new_name = "RenamedTo#{suffix}"
+
+    # "New Class" opens + selects the created class's def tab (BT-2645) — the
+    # tab the "Rename Class" button acts on.
+    html =
+      view
+      |> form("#new-class-form")
+      |> render_submit(%{"name" => class, "superclass" => "Actor"})
+
+    assert html =~ "def:#{class}"
+    assert html =~ "Rename Class"
+
+    # Sanity: the class exists and is spawnable before renaming.
+    name = "rncls_#{suffix}"
+    spawn_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    refute spawn_html =~ "does_not_understand"
+    refute spawn_html =~ "beamtalk_error"
+
+    # Click "Rename Class" to open the Rename modal, then submit the new name.
+    open_html =
+      view
+      |> element(~s(button[phx-click="open_rename"]))
+      |> render_click()
+
+    assert open_html =~ "rename-new-name"
+
+    rename_html =
+      view
+      |> form("#rename-form")
+      |> render_submit(%{"new_name" => new_name})
+
+    assert rename_html =~ "Renamed #{class} to #{new_name}"
+    assert rename_html =~ "not yet flushed to disk"
+    refute rename_html =~ "{:error"
+    refute rename_html =~ "beamtalk_error"
+
+    # The renamed class's def tab reopens under the new name, mirroring "New
+    # Class"'s own open-and-select success path (`rename_class_eval/4`
+    # calls `open_definition/2` the same way `dispatch_new_class/5` does).
+    assert rename_html =~ "def:#{new_name}"
+    refute rename_html =~ "def:#{class}\""
+
+    # The class really answers under the new name now, and the old name no
+    # longer resolves — `renameTo:` re-registers the class, it doesn't alias
+    # the old identifier (ADR 0114).
+    name2 = "rncls2_#{suffix}"
+
+    new_spawn_html =
+      view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{new_name} spawn"})
+
+    refute new_spawn_html =~ "does_not_understand"
+    refute new_spawn_html =~ "beamtalk_error"
+
+    old_html = view |> form("#eval-form") |> render_submit(%{expr: "#{class}"})
+    assert old_html =~ "not found" or old_html =~ "does_not_understand"
+
+    # The LiveView is still live and interactive after the rename.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
+  test "method editor: Rename Method renames the selector (ADR 0114, BT-3277)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RenameMethodMe#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{class} >> triple => self.value * 3"})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # Open `triple` as an editable tab — the tab the "Rename Method" button
+    # acts on, mirroring the "Remove Method" test's setup above.
+    open_tab_html =
+      view
+      |> element(~s(div[phx-value-selector="triple"]))
+      |> render_click()
+
+    assert open_tab_html =~ ~s(phx-value-id="method:#{class}:instance:triple")
+    assert open_tab_html =~ "Rename Method"
+
+    # Sanity: the method works, under its original name, before renaming.
+    name = "rnmth_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    triple_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} triple"})
+    assert triple_html =~ "3"
+
+    # Click "Rename Method" to open the Rename modal, then submit the new
+    # selector.
+    open_modal_html =
+      view
+      |> element(~s(button[phx-click="open_rename"]))
+      |> render_click()
+
+    assert open_modal_html =~ "rename-new-name"
+
+    rename_html =
+      view
+      |> form("#rename-form")
+      |> render_submit(%{"new_name" => "tripled"})
+
+    assert rename_html =~ "Renamed #{class} triple to tripled"
+    assert rename_html =~ "not yet flushed to disk"
+    refute rename_html =~ "{:error"
+    refute rename_html =~ "beamtalk_error"
+
+    # The renamed method's tab closes, mirroring Remove Method's success path.
+    refute rename_html =~ ~s(phx-value-id="method:#{class}:instance:triple")
+
+    # A fresh instance understands the new selector and no longer the old one.
+    name2 = "rnmth2_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} increment"})
+
+    tripled_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} tripled"})
+    assert tripled_html =~ "3"
+
+    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} triple"})
+    assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand"
+
+    # The LiveView is still live and interactive after the rename.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
+  test "Rename Class with an unrelated class selected in the tree leaves that selection untouched (ADR 0114, BT-3286)",
+       %{conn: conn} do
+    # Regression coverage for `reselect_renamed_class/3`: renaming a class from
+    # its open `:def` tab must only follow the rename into the System Browser
+    # tree's `selected_class` when the renamed class WAS the prior selection
+    # (or nothing was selected). This exercises the other branch — a
+    # DIFFERENT, unrelated class (B) is selected in the tree when class A is
+    # renamed from its own `:def` tab — which none of the tests above cover:
+    # they all rename the class that is also the active tab/tree selection.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class_a = "RenameUnrelatedA#{suffix}"
+    class_b = "RenameUnrelatedB#{suffix}"
+    new_name = "RenameUnrelatedA2#{suffix}"
+
+    class_a_src = """
+    Actor subclass: #{class_a}
+      greetA => "a"
+    """
+
+    class_b_src = """
+    Actor subclass: #{class_b}
+      greetB => "b"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_a_src})
+    view |> form("#eval-form") |> render_submit(%{expr: class_b_src})
+
+    # browse-classes is a mount snapshot — remount so the tree includes both.
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class_a and render(view) =~ class_b end)
+
+    # Select B in the tree first: `selected_class`, `browser_protocols`, and
+    # `browser_categories` all load for B — snapshot them to compare after the
+    # rename below.
+    view |> element(~s(div[phx-value-class="#{class_b}"])) |> render_click()
+    before = :sys.get_state(view.pid).socket.assigns
+    assert before.selected_class == class_b
+    browser_protocols_b = before.browser_protocols
+    browser_categories_b = before.browser_categories
+
+    # Select A and open its `:def` tab (temporarily moving the tree selection
+    # and the protocol/method panes onto A too).
+    view |> element(~s(div[phx-value-class="#{class_a}"])) |> render_click()
+
+    open_def_html =
+      view
+      |> element(~s(div[phx-click="browser_open_definition"][phx-value-class="#{class_a}"]))
+      |> render_click()
+
+    assert open_def_html =~ "def:#{class_a}"
+
+    # Re-select B in the tree: the tree highlight and protocol/method panes
+    # move back to B, but A's `:def` tab stays open and focused underneath —
+    # tab focus and tree selection are independent state (this is the exact
+    # setup `reselect_renamed_class/3`'s guard exists for).
+    view |> element(~s(div[phx-value-class="#{class_b}"])) |> render_click()
+
+    before_rename = :sys.get_state(view.pid).socket.assigns
+    assert before_rename.selected_class == class_b
+    assert before_rename.active_tab == "def:#{class_a}"
+
+    # Rename A -> A2 from its still-focused `:def` tab while B remains the
+    # tree's selected class.
+    view |> element(~s(button[phx-click="open_rename"])) |> render_click()
+
+    rename_html =
+      view
+      |> form("#rename-form")
+      |> render_submit(%{"new_name" => new_name})
+
+    assert rename_html =~ "Renamed #{class_a} to #{new_name}"
+    refute rename_html =~ "{:error"
+    refute rename_html =~ "beamtalk_error"
+
+    # The point under test: B's tree selection is left completely alone by the
+    # rename — `selected_class` is still B (never moved to A2), and
+    # `browser_protocols`/`browser_categories` are unchanged, still reflecting
+    # B rather than A2 (the pre-fix "ghost selection" mismatch this guards
+    # against: the tree highlighting one class while these panes show
+    # another).
+    after_rename = :sys.get_state(view.pid).socket.assigns
+    assert after_rename.selected_class == class_b
+    assert after_rename.browser_protocols == browser_protocols_b
+    assert after_rename.browser_categories == browser_categories_b
+
+    # The LiveView is still live and interactive after the rename.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
+  test "the ChangeLog viewer flags a rename-class entry as destructive and its scoped 'apply rename' round-trips (ADR 0114, BT-3277)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RenameDestructiveBadge#{suffix}"
+    new_name = "RenameDestructiveBadgeNew#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      greet => "hi"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # `Class renameTo: #NewName` directly via eval — the same expression the
+    # "Rename Class" button and the REPL `:rename-class` meta-command
+    # dispatch — logs a `rename-class` ChangeLog entry (ADR 0114 Phase 2,
+    # BT-3278).
+    rename_html =
+      view |> form("#eval-form") |> render_submit(%{expr: "#{class} renameTo: ##{new_name}"})
+
+    refute rename_html =~ "beamtalk_error"
+    refute rename_html =~ "{:error"
+
+    changes_html = render_hook(view, "dock_tab", %{"tab" => "changes"})
+
+    # The row renders the `destructive-row` marker — reused verbatim from
+    # ADR 0113's remove-class row (BT-3210) — and a scoped "apply rename"
+    # action alongside "revert" (unlike remove-class, a rename IS revertable
+    # — BT-3274).
+    assert changes_html =~ ~s(class="destructive-row")
+    assert changes_html =~ "rename class"
+
+    assert has_element?(
+             view,
+             ~s(button[phx-click="flush_destructive"][phx-value-class="#{new_name}"][phx-value-kind="rename-class"])
+           )
+
+    assert has_element?(
+             view,
+             ~s(button[phx-click="revert"][phx-value-class="#{new_name}"])
+           )
+
+    # Click "apply rename": scoped `Workspace flush: ##{new_name}
+    # confirmDestructive: true`. This class was never backed by an on-disk
+    # file (eval-defined, no project tree in the test workspace), so its
+    # entry is `flushable: false` — a safe no-op to flush, not a real
+    # rewrite; it must not error.
+    flush_html =
+      view
+      |> element(
+        ~s(button[phx-click="flush_destructive"][phx-value-class="#{new_name}"][phx-value-kind="rename-class"])
+      )
+      |> render_click()
+
+    assert flush_html =~ "Flushed the pending rename to #{new_name}"
+    refute flush_html =~ "beamtalk_error"
+    refute flush_html =~ "{:error"
+
+    # The LiveView is still live and interactive afterward.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
   # ── ChangeLog revert for a removed method (ADR 0112, BT-3194) ───────────────
 
   test "the ChangeLog viewer's revert button appears and round-trips for a removed method (ADR 0112, BT-3194)",
