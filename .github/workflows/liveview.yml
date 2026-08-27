@@ -145,6 +145,11 @@ jobs:
       # disturbed. The `ci.yml` `coverage` job publishes rust/erlang-coverage.json
       # to the same branch independently — must NOT recreate it as an orphan
       # (that would delete those files), so this fetches + amends in place.
+      #
+      # Retry loop: this job and ci.yml's `coverage` job can both push to
+      # `badges` around the same time (e.g. a PR touching both paths), and a
+      # non-fast-forward push must not fail the run outright — refetch and
+      # reapply instead (PR #3549 review).
       - name: Publish coverage badge
         working-directory: .
         run: |
@@ -170,11 +175,26 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin badges
-          git worktree add /tmp/badges-branch origin/badges
-          echo "{\"schemaVersion\":1,\"label\":\"Elixir coverage\",\"message\":\"${MSG}\",\"color\":\"${COLOR}\"}" > /tmp/badges-branch/elixir-coverage.json
-          cd /tmp/badges-branch
-          git add elixir-coverage.json
-          git diff --staged --quiet && exit 0
-          git commit -m "Update Elixir coverage badge [skip ci]"
-          git push origin HEAD:badges
+          attempt=0
+          until [ "$attempt" -ge 5 ]; do
+            attempt=$((attempt + 1))
+            git worktree remove --force /tmp/badges-branch 2>/dev/null || true
+            rm -rf /tmp/badges-branch
+            git fetch origin badges
+            git worktree add /tmp/badges-branch origin/badges
+            echo "{\"schemaVersion\":1,\"label\":\"Elixir coverage\",\"message\":\"${MSG}\",\"color\":\"${COLOR}\"}" > /tmp/badges-branch/elixir-coverage.json
+            git -C /tmp/badges-branch add elixir-coverage.json
+            if git -C /tmp/badges-branch diff --staged --quiet; then
+              echo "No badge changes to publish"
+              exit 0
+            fi
+            git -C /tmp/badges-branch commit -m "Update Elixir coverage badge [skip ci]"
+            if git -C /tmp/badges-branch push origin HEAD:badges; then
+              echo "Badge published"
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}), retrying..."
+            sleep $((RANDOM % 5 + attempt))
+          done
+          echo "::error::Failed to push Elixir coverage badge after ${attempt} attempts (concurrent badge publisher?)"
+          exit 1

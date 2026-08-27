@@ -791,17 +791,37 @@ jobs:
           # the same branch independently — this must NOT recreate the branch
           # as an orphan (that previously deleted elixir-coverage.json on every
           # run of this job, since it only ever re-added the two files below).
+          #
+          # Retry loop: this job and liveview.yml's `coverage` job can both push
+          # to `badges` around the same time (e.g. a PR touching both paths), and
+          # a non-fast-forward push must not fail the run outright — refetch and
+          # reapply instead (PR #3549 review).
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin badges
-          git worktree add /tmp/badges-branch origin/badges
-          echo "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_MSG}\",\"color\":\"${RUST_COLOR}\"}" > /tmp/badges-branch/rust-coverage.json
-          echo "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_MSG}\",\"color\":\"${ERLANG_COLOR}\"}" > /tmp/badges-branch/erlang-coverage.json
-          cd /tmp/badges-branch
-          git add rust-coverage.json erlang-coverage.json
-          git diff --staged --quiet && exit 0
-          git commit -m "Update coverage badges [skip ci]"
-          git push origin HEAD:badges
+          attempt=0
+          until [ "$attempt" -ge 5 ]; do
+            attempt=$((attempt + 1))
+            git worktree remove --force /tmp/badges-branch 2>/dev/null || true
+            rm -rf /tmp/badges-branch
+            git fetch origin badges
+            git worktree add /tmp/badges-branch origin/badges
+            echo "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_MSG}\",\"color\":\"${RUST_COLOR}\"}" > /tmp/badges-branch/rust-coverage.json
+            echo "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_MSG}\",\"color\":\"${ERLANG_COLOR}\"}" > /tmp/badges-branch/erlang-coverage.json
+            git -C /tmp/badges-branch add rust-coverage.json erlang-coverage.json
+            if git -C /tmp/badges-branch diff --staged --quiet; then
+              echo "No badge changes to publish"
+              exit 0
+            fi
+            git -C /tmp/badges-branch commit -m "Update coverage badges [skip ci]"
+            if git -C /tmp/badges-branch push origin HEAD:badges; then
+              echo "Badge published"
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}), retrying..."
+            sleep $((RANDOM % 5 + attempt))
+          done
+          echo "::error::Failed to push coverage badges after ${attempt} attempts (concurrent badge publisher?)"
+          exit 1
 
       - name: Fail if coverage thresholds not met
         if: steps.rust_thresholds.outcome == 'failure' || steps.erlang_thresholds.outcome == 'failure'
