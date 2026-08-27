@@ -21,11 +21,6 @@ thiserror.workspace = true
 miette.workspace = true
 stacker.workspace = true
 dirs.workspace = true
-# why: BT-3227 — `beamtalk_root_dir()` is the shared leaf under every
-# `~/.beamtalk/` resolution (see `beamtalk-workspace`'s doc comment); this
-# crate's project-root discovery must not re-derive `dirs::home_dir()`
-# independently.
-beamtalk-workspace.workspace = true
 # why: BT-2859 — no longer optional: `ffi_type_specs`'s on-disk spec cache
 # (ADR 0075) unconditionally derives Serialize/Deserialize on its cache-entry
 # type. The `serde` *feature* below still independently gates the optional
