@@ -241,8 +241,18 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> set_source("10 + 5")
     # ⌘P / Ctrl+P is bound (data-shortcuts "mod+p" → "submit:print_it"): the hook
     # sets the hidden action field and request-submits the eval form — no button
-    # click. Linux/CI uses Ctrl as the mod key.
-    |> press("#workspace-editor-overlay .cm-content", "Control+p")
+    # click. `ControlOrMeta` is Ctrl on Linux/CI and Cmd on macOS (mirrors
+    # `press_save/1`'s ⌘S chord) — BT-3287: a hardcoded "Control+p" collides on
+    # macOS with CodeMirror 6's built-in mac-only Emacs-style keymap
+    # (`@codemirror/commands`), which binds bare Ctrl-P to "cursor up" and calls
+    # `preventDefault()` on the keydown before it ever reaches the
+    # `KeyboardShortcuts` hook's chord handling (which correctly backs off on an
+    # already-`defaultPrevented` event — see `keyboard_shortcuts.js`). Real
+    # macOS users hit this shortcut via ⌘P (metaKey), which that keymap does
+    # NOT bind, so they're unaffected; only the test's hardcoded bare Ctrl chord
+    # was macOS-local-flaky. `ControlOrMeta+p` exercises the actual per-platform
+    # user gesture instead of a CI-only stand-in, sidestepping the collision.
+    |> press("#workspace-editor-overlay .cm-content", "ControlOrMeta+p")
     |> assert_has(".eval-status .val", text: "15")
   end
 
