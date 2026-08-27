@@ -1173,10 +1173,25 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # selector. `phx-value-entry-side="instance"` proves BT-3187's per-row side
     # (ADR 0112) rides along on a `remove-method` row exactly like the
     # instance/class/new-class rows already covered above.
-    assert has_element?(
-             view,
-             ~s(button[phx-click="revert"][phx-value-class="#{class}"][phx-value-selector="greeting"][phx-value-entry-side="instance"])
-           )
+    #
+    # BT-3287: the raw eval form (`#eval-form`, used above) drives `removeSelector:`
+    # through the generic `handle_event("eval", ...)` -> `eval_success/5` path,
+    # which — unlike the "Remove Method" button's own `remove_method_eval/6`
+    # (which calls `assign_changes/1` synchronously right after its own
+    # `Facade.dispatch(:eval, ...)`) — never refreshes the Changes pane itself.
+    # The new ChangeLog entry only becomes visible once the class-lifecycle
+    # broadcast this same removal triggers arrives back as the coalesced
+    # `:do_source_refresh` push (BT-2600, ~60ms debounce + round-trip) and its
+    # `refresh_after_source_change/1` calls `assign_changes/1`. A bare
+    # `has_element?` right after `render_submit` races that async refresh —
+    # intermittently missing it under load — so poll for it exactly like every
+    # other async-dependent assertion in this file does.
+    assert eventually(fn ->
+             has_element?(
+               view,
+               ~s(button[phx-click="revert"][phx-value-class="#{class}"][phx-value-selector="greeting"][phx-value-entry-side="instance"])
+             )
+           end)
 
     # Click it: the button dispatches the owner-gated `:revert` op, which
     # reaches `revert_method/3` — reusing its existing side-aware selection
