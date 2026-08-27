@@ -668,4 +668,46 @@ defmodule BtAttachWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  # ── dismissable status notices (BT-2612) ────────────────────────────────────
+  #
+  # A single reusable notice component for every `io-block` status banner
+  # (err/ok/warn/plain), shared by `BtAttachWeb.WorkspaceLive` and its
+  # extracted panes (e.g. `BtAttachWeb.Live.Inspector`, BT-3291) — moved here
+  # (rather than kept as a private component on the LiveView) so an extracted
+  # pane module can render it too without a back-reference to the god module
+  # (CLAUDE.md's shared-leaf-module rule). Each notice carries a
+  # keyboard-accessible `×` dismiss control, wired by the *caller* via
+  # `dismiss_attrs` — a map of `phx-*` attributes (e.g. `%{"phx-click" =>
+  # "dismiss_notice", "phx-value-key" => "git_error"}`) so top-level scalar
+  # assigns route through the generic `dismiss_notice` event while
+  # nested/per-window notices route through their own targeted events.
+  # Variant maps to the `io-block` modifier class.
+  attr :variant, :atom, default: :plain, values: [:err, :ok, :warn, :plain]
+  attr :message, :string, required: true
+  # Map of phx-* attributes rendered onto the dismiss button. The caller
+  # decides which event/values clear the right backing assign.
+  attr :dismiss_attrs, :map, required: true
+
+  def notice(assigns) do
+    ~H"""
+    <div class={["io-block", notice_variant_class(@variant)]}>
+      <span class="io-block-msg">{@message}</span>
+      <button
+        type="button"
+        class="io-block-dismiss"
+        aria-label="Dismiss notification"
+        title="Dismiss"
+        {@dismiss_attrs}
+      >
+        ×
+      </button>
+    </div>
+    """
+  end
+
+  defp notice_variant_class(:err), do: "err"
+  defp notice_variant_class(:ok), do: "ok"
+  defp notice_variant_class(:warn), do: "warn"
+  defp notice_variant_class(:plain), do: nil
 end
