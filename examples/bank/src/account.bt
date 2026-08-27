@@ -7,12 +7,14 @@
 /// making them inherently serialised per-account. Overdraft protection raises
 /// a structured error via `self error:`
 ///
-/// Usage:
-///   acct := Account spawn
-///   acct deposit: 500
-///   acct balance          // => 500
-///   acct withdraw: 200    // => 300
-///   acct withdraw: 9999   // => ERROR: Insufficient funds
+/// ## Examples
+/// ```beamtalk
+/// acct := Account spawn
+/// acct deposit: 500
+/// acct balance          // => 500
+/// acct withdraw: 200    // => 300
+/// acct withdraw: 9999   // => ERROR: Insufficient funds
+/// ```
 Actor subclass: Account
   state: balance = 0
   state: owner = ""

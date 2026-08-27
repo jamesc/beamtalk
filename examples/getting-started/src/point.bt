@@ -14,10 +14,14 @@
 /// Try it in the REPL:
 ///   $ beamtalk repl
 ///   > :load src/point.bt
-///   > p := Point x: 3 y: 4
-///   > p distanceSquared          => 25
-///   > (p withX: 0) distanceSquared     => 16
-///   > (Point x: 3 y: 4) == (Point x: 3 y: 4)   => true
+///
+/// ## Examples
+/// ```beamtalk
+/// > p := Point x: 3 y: 4
+/// > p distanceSquared          => 25
+/// > (p withX: 0) distanceSquared     => 16
+/// > (Point x: 3 y: 4) == (Point x: 3 y: 4)   => true
+/// ```
 Value subclass: Point
   /// X coordinate (default 0)
   field: x = 0

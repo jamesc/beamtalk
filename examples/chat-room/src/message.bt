@@ -11,9 +11,13 @@
 ///
 /// Usage in REPL:
 ///   > :load examples/chat-room/message.bt
-///   > msg := Message text: "Hello!" sender: "Alice"
-///   > msg text
-///   > msg describe
+///
+/// ## Examples
+/// ```beamtalk
+/// > msg := Message text: "Hello!" sender: "Alice"
+/// > msg text
+/// > msg describe
+/// ```
 Value subclass: Message
   field: text = ""
   field: sender = "Anonymous"

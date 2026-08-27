@@ -8,15 +8,17 @@
 /// Sorter holds a pluggable comparison block (the strategy) and applies it to sort
 /// any list. Factory methods provide the most common orderings.
 ///
-/// Usage:
-///   asc := Sorter ascending.
-///   asc sort: #(3, 1, 2).                             // => #(1, 2, 3)
+/// ## Examples
+/// ```beamtalk
+/// asc := Sorter ascending.
+/// asc sort: #(3, 1, 2).                             // => #(1, 2, 3)
 ///
-///   desc := Sorter descending.
-///   desc sort: #(3, 1, 2).                            // => #(3, 2, 1)
+/// desc := Sorter descending.
+/// desc sort: #(3, 1, 2).                            // => #(3, 2, 1)
 ///
-///   byLen := Sorter withStrategy: [:a :b | a length < b length].
-///   byLen sort: #("banana", "fig", "apple").           // smallest first
+/// byLen := Sorter withStrategy: [:a :b | a length < b length].
+/// byLen sort: #("banana", "fig", "apple").           // smallest first
+/// ```
 Value subclass: Sorter
   field: strategy = nil
 

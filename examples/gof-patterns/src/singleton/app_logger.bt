@@ -9,12 +9,14 @@
 /// Because the reference is a PID there is exactly one instance per node,
 /// enforced by the BEAM scheduler — no synchronisation boilerplate needed.
 ///
-/// Usage:
-///   logger := AppLogger spawn.        // spawn once; share this reference
-///   logger log: "app started".
-///   logger log: "processing request".
-///   logger size       // => 2
-///   logger entries    // => #("app started", "processing request")
+/// ## Examples
+/// ```beamtalk
+/// logger := AppLogger spawn.        // spawn once; share this reference
+/// logger log: "app started".
+/// logger log: "processing request".
+/// logger size       // => 2
+/// logger entries    // => #("app started", "processing request")
+/// ```
 Actor subclass: AppLogger
   state: entries = #()
 
