@@ -258,6 +258,47 @@ defmodule BtAttach.WorkspaceTest do
         apply(Workspace, :browse_method_source, ["Counter", :instance, "increment"])
       end
     end
+
+    # BT-3238/BT-2578/BT-2648/BT-2903: the remaining browse-surface wrappers all
+    # route through the same `dispatch_browse/2` plumbing exercised above, so
+    # against an unreachable workspace a single call each is enough to prove the
+    # wrapper builds its request and reaches the shared dispatcher (the branch
+    # matrix itself is covered by the meck-based `workspace_rpc_test.exs`).
+    test "browse_categories against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_categories("Counter")
+    end
+
+    test "browse_native_source/1,2 against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_native_source("Counter")
+      assert {:error, {:unreachable, _}} = Workspace.browse_native_source("Counter", "increment")
+    end
+
+    test "browse_native_module_source against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_native_module_source("lists")
+    end
+
+    test "browse_native_modules against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_native_modules()
+    end
+
+    test "browse_type_aliases against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_type_aliases()
+    end
+
+    test "save_native_source against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} =
+               Workspace.save_native_source("mymod", "-module(mymod).")
+    end
+
+    test "save_section against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.save_section("Counter", "Accessing")
+
+      assert {:error, {:unreachable, _}} =
+               Workspace.save_section("Counter", "Accessing", old_name: "Old")
+
+      assert {:error, {:unreachable, _}} =
+               Workspace.save_section("Counter", "Accessing", before_selector: "increment")
+    end
   end
 
   describe "git-surface wrappers (cockpit VCS surface, ADR 0082 / BT-2586)" do
@@ -399,6 +440,55 @@ defmodule BtAttach.WorkspaceTest do
       assert_raise FunctionClauseError, fn ->
         apply(Workspace, :revert, [:Counter, "increment"])
       end
+    end
+  end
+
+  describe "subscription facade wrappers (BT-2399/BT-2598/BT-2779/BT-2489)" do
+    # No live workspace: every subscribe/unsubscribe wrapper is a thin
+    # `rpc(:beamtalk_repl_subscriptions, ..., [...])` pass-through with no case
+    # wrapping, so against an unreachable node it returns `{:badrpc, :nodedown}`
+    # verbatim rather than crashing.
+    test "transcript/bindings/classes/reload_check subscribe+unsubscribe hit an unreachable workspace" do
+      pid = self()
+
+      assert {:badrpc, _} = Workspace.subscribe_transcript(pid)
+      assert {:badrpc, _} = Workspace.unsubscribe_transcript(pid)
+      assert {:badrpc, _} = Workspace.subscribe_bindings(pid)
+      assert {:badrpc, _} = Workspace.unsubscribe_bindings(pid)
+      assert {:badrpc, _} = Workspace.subscribe_classes(pid)
+      assert {:badrpc, _} = Workspace.unsubscribe_classes(pid)
+      assert {:badrpc, _} = Workspace.subscribe_reload_check(pid)
+      assert {:badrpc, _} = Workspace.unsubscribe_reload_check(pid)
+    end
+
+    test "subscribe_object_changes/2 against an unreachable workspace for a pid-backed object" do
+      pid = self()
+
+      assert {:badrpc, _} =
+               Workspace.subscribe_object_changes(
+                 {:beamtalk_object, "Counter", Counter, pid},
+                 pid
+               )
+
+      assert {:badrpc, _} =
+               Workspace.unsubscribe_object_changes(
+                 {:beamtalk_object, "Counter", Counter, pid},
+                 pid
+               )
+    end
+
+    test "subscribe_object_changes/2 rejects a non-inspectable term" do
+      pid = self()
+      assert Workspace.subscribe_object_changes("not a handle", pid) == {:error, :not_inspectable}
+
+      assert Workspace.unsubscribe_object_changes("not a handle", pid) ==
+               {:error, :not_inspectable}
+    end
+  end
+
+  describe "list_bindings/1 against an unreachable workspace" do
+    test "returns an unreachable error rather than crashing" do
+      assert {:error, {:unreachable, _}} = Workspace.list_bindings(self())
     end
   end
 
