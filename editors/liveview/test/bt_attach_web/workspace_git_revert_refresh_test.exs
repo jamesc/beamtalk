@@ -274,6 +274,40 @@ defmodule BtAttachWeb.WorkspaceGitRevertRefreshTest do
 
       assert render(view) =~ "self.value := self.value + 1"
     end
+
+    # BT-2588 (review-bot Blocker): `git_revert_event/2` calls `resync_active_tab/2`
+    # TWICE in one synchronous pipeline (`reload_reverted_def_buffers/2`, then
+    # `refresh_after_source_change/1`). `resync_active_tab/2` reads (but must NOT
+    # clear) the one-shot `:save_echo_pending` flag `compile_clean/3` arms on a
+    # save — clearing it there let the FIRST of the two calls spend it, so the
+    # SECOND (whichever actually decides the rendered state) always saw it unset
+    # and wiped the just-shown "Saved …" banner via the banner-clearing
+    # `sync_active/2` — even for a revert of a file completely unrelated to the
+    # just-saved tab. Reproduces deterministically with no timing/sleep needed:
+    # the flag is set synchronously by the save and would be wrongly consumed
+    # synchronously by the very next `git_revert` event, well within the real
+    # `:do_source_refresh` debounce window.
+    test "reverting an unrelated file does not wipe a just-shown save banner", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      html = open_increment_tab(view)
+      refute html =~ "unflushed"
+
+      save_html =
+        render_hook(view, "save_method", %{
+          "tab" => "method:Counter:instance:increment",
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => "increment => self.value := self.value + 7"
+        })
+
+      assert save_html =~ "Saved increment on Counter"
+
+      # Revert a file with nothing to do with the tab that was just saved.
+      revert_html = render_hook(view, "git_revert", %{"path" => "src/subprocess.bt"})
+
+      assert revert_html =~ "Saved increment on Counter"
+    end
   end
 
   describe "AC5: class-change push refreshes open windows + browser" do

@@ -2472,6 +2472,12 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(source_refresh_pending: false)
       |> refresh_after_source_change()
       |> mark_source_loaded()
+      # BT-2588: this is the one place `:save_echo_pending` is cleared — see
+      # `resync_active_tab/2`'s docs for why it must NOT self-clear (a
+      # synchronous caller with more than one `resync_active_tab/2` call in its
+      # own pipeline, like `git_revert_event/2`, would otherwise spend the flag
+      # before the call that decides the rendered state ever sees it).
+      |> assign(:save_echo_pending, false)
 
     {:noreply, socket}
   end
@@ -4603,9 +4609,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # TWO signals combined:
   #
   #   * `:save_echo_pending` — a one-shot flag `compile_clean/3` arms on a
-  #     successful save, consumed here on EVERY call (so a stale `true` from an
-  #     earlier save can never leak into a later, unrelated refresh). Unset ⇒
-  #     this push is definitely not our own save's echo — clear unconditionally.
+  #     successful save. This function only READS it (never clears it — see
+  #     why below); unset ⇒ this push is definitely not our own save's echo —
+  #     clear unconditionally.
   #   * for a `:method` tab, whether the re-read body actually changed. Even
   #     when the flag IS set, BT-2600's coalescing can fold a genuinely
   #     external change into the SAME debounced push as our own save's echo
@@ -4617,9 +4623,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     legitimately clear a `:def` tab's banner — the flag alone decides
   #     there, same narrow coalescing blind spot as any other single-signal
   #     check, self-healing on the next tab switch or save.
+  #
+  # This function does NOT clear the flag (review-bot finding): `git_revert_event/2`
+  # calls `resync_active_tab/2` TWICE in one synchronous pipeline
+  # (`reload_reverted_def_buffers/2`, then `refresh_after_source_change/1`) — a
+  # read-then-clear here would let the first call spend the flag, leaving the
+  # second (which decides the actually-rendered state) always seeing it unset
+  # and wiping an unrelated tab's still-fresh banner on ANY git revert. The
+  # flag is a one-shot signal for the ASYNC push cycle specifically, so only
+  # its real owner, `handle_info(:do_source_refresh, ...)`, clears it — once,
+  # after every synchronous caller (this function included) has had its look.
   defp resync_active_tab(socket, tabs) do
     save_echo? = socket.assigns[:save_echo_pending]
-    socket = assign(socket, :save_echo_pending, false)
 
     case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
       %{dirty: false} = active ->
