@@ -114,9 +114,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::storage::read_proc_start_time;
     use super::storage::{
-        NodeInfo, WorkspaceMetadata, generate_cookie, generate_workspace_id, read_port_file,
-        read_workspace_cookie, save_node_info, save_workspace_cookie, save_workspace_metadata,
-        validate_workspace_name, workspace_dir, workspace_id_for, workspaces_base_dir,
+        NodeInfo, WorkspaceMetadata, generate_cookie, read_port_file, read_workspace_cookie,
+        save_node_info, save_workspace_cookie, save_workspace_metadata, validate_workspace_name,
+        workspace_dir, workspace_id_for, workspaces_base_dir,
     };
     use super::*;
     use serial_test::serial;
@@ -147,31 +147,6 @@ mod tests {
                 let _ = fs::remove_file(base.join(format!("{}.lock", self.id)));
             }
         }
-    }
-
-    #[test]
-    fn test_generate_workspace_id_deterministic() {
-        let path = std::env::current_dir().unwrap();
-        let id1 = generate_workspace_id(&path).unwrap();
-        let id2 = generate_workspace_id(&path).unwrap();
-        assert_eq!(id1, id2, "Workspace ID should be deterministic");
-    }
-
-    #[test]
-    fn test_generate_workspace_id_length() {
-        let path = std::env::current_dir().unwrap();
-        let id = generate_workspace_id(&path).unwrap();
-        assert_eq!(id.len(), 12, "Workspace ID should be 12 characters");
-    }
-
-    #[test]
-    fn test_generate_workspace_id_hex() {
-        let path = std::env::current_dir().unwrap();
-        let id = generate_workspace_id(&path).unwrap();
-        assert!(
-            id.chars().all(|c| c.is_ascii_hexdigit()),
-            "ID should be hex"
-        );
     }
 
     #[test]
@@ -223,22 +198,11 @@ mod tests {
     #[test]
     fn test_workspace_id_for_none_uses_hash() {
         let path = std::env::current_dir().unwrap();
-        let from_none = workspace_id_for(&path, None).unwrap();
-        let from_hash = generate_workspace_id(&path).unwrap();
-        assert_eq!(from_none, from_hash, "None should fall through to hash");
-    }
-
-    #[test]
-    fn test_different_paths_produce_different_workspace_ids() {
-        // Verifies worktree isolation: different project paths (as with git worktrees)
-        // produce different workspace IDs, ensuring separate workspaces per worktree.
-        let cwd = std::env::current_dir().unwrap();
-        let parent = cwd.parent().expect("cwd should have a parent");
-        let id1 = generate_workspace_id(&cwd).unwrap();
-        let id2 = generate_workspace_id(parent).unwrap();
-        assert_ne!(
-            id1, id2,
-            "Different paths must produce different workspace IDs"
+        let id = workspace_id_for(&path, None).unwrap();
+        assert_eq!(id.len(), 12, "ID via hash path should be 12 hex chars");
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "ID should be hex"
         );
     }
 
@@ -1679,40 +1643,6 @@ mod tests {
         assert!(
             err.contains("not running"),
             "Error should indicate workspace is not running, got: {err}"
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_generate_workspace_id_rejects_non_utf8_path() {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt;
-
-        // Include PID in name to avoid collisions in parallel test runs
-        let tmp = std::env::temp_dir();
-        let mut invalid_bytes = b"beamtalk-test-\xff\xfe-".to_vec();
-        invalid_bytes.extend_from_slice(std::process::id().to_string().as_bytes());
-        let invalid_name = OsStr::from_bytes(&invalid_bytes);
-        let non_utf8_path = tmp.join(invalid_name);
-
-        // Create the directory so canonicalize() can succeed.
-        // Skip test if the filesystem rejects non-UTF8 names.
-        if let Err(e) = fs::create_dir(&non_utf8_path) {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                eprintln!("skipping test: failed to create non-UTF8 dir {non_utf8_path:?}: {e}");
-                return;
-            }
-        }
-
-        let result = generate_workspace_id(&non_utf8_path);
-        // Clean up before asserting
-        let _ = fs::remove_dir(&non_utf8_path);
-
-        assert!(result.is_err(), "Non-UTF8 path should produce an error");
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("invalid UTF-8"),
-            "Error should mention invalid UTF-8, got: {err}"
         );
     }
 }
