@@ -35,7 +35,9 @@ defmodule BtAttachWeb.Live.Inspector do
   delivered straight to the LiveView pid. `WorkspaceLive` still owns
   `handle_event/3`/`handle_info/2` (a `Phoenix.LiveView` callback contract),
   but delegates every inspector/window event and push to the functions here
-  by name — see the `@inspector_events` guard clause in `WorkspaceLive`.
+  by name — see the `@inspector_events` guard clause in `WorkspaceLive`,
+  which reads its event list from `__inspector_events__/0` below (BT-3301)
+  rather than hand-maintaining a second copy.
 
   Every workspace read/write goes through `BtAttach.Facade.dispatch/3` (ADR
   0091 Decision 3) with the RBAC-relevant `BtAttachWeb.Live.RequestContext` —
@@ -55,11 +57,35 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp ctx(socket), do: RequestContext.build(socket)
 
+  # ── canonical event list (BT-3301) ───────────────────────────────────────
+  #
+  # The single source of truth for which event names `handle_event/3` below
+  # implements. Before BT-3301, `WorkspaceLive`'s `@inspector_events` was an
+  # independently hand-maintained copy of these same 16 names — nothing tied
+  # the two lists together, so a name added/renamed/removed on one side
+  # without the other failed silently at runtime (a `FunctionClauseError` on
+  # click, or dead code never reached), not at compile/test time. Now
+  # `WorkspaceLive` reads `__inspector_events__/0` directly instead of
+  # hand-copying the list, so there is only one list to keep in sync with the
+  # clauses below — `inspector_test.exs`'s "@inspector_events coverage" test
+  # scans this file's `handle_event/3` clause heads and asserts the two stay
+  # identical, plus that every name here resolves to a working, non-crashing
+  # clause.
+  @inspector_events ~w(
+    inspect drill crumb freeze_toggle poke close_inspector set_inspector_mode
+    window_close window_crumb window_drill window_focus window_freeze
+    window_moved window_poke window_reset_positions dismiss_window_error
+  )
+
+  @doc false
+  def __inspector_events__, do: @inspector_events
+
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
   # `WorkspaceLive.handle_event/3` forwards every event whose name is in
-  # `@inspector_events` here unchanged (same event name, params, socket), so
-  # each clause below is exactly the body the LiveView used to run directly.
+  # `__inspector_events__/0` here unchanged (same event name, params, socket),
+  # so each clause below is exactly the body the LiveView used to run
+  # directly.
 
   # Inspect a binding by name: look up its live term and drill into it via the
   # read-surface `inspect` op. Reference-following starts here. In `"float"`
