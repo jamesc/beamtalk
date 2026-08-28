@@ -732,7 +732,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
       source = File.read!(@inspector_source)
 
       clause_names =
-        ~r/def handle_event\("([a-z_]+)"/
+        ~r/def handle_event\("([a-z0-9_]+)"/
         |> Regex.scan(source)
         |> Enum.map(fn [_, name] -> name end)
         |> MapSet.new()
