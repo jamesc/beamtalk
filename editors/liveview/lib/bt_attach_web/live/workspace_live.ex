@@ -1665,17 +1665,6 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("dismiss_notice", _params, socket), do: {:noreply, socket}
 
-  # Dismiss the error inside the live native-source pane: `@native_view` is a map
-  # whose `:error` field carries the banner. Clear only that field so the rest of
-  # the pane (content/clauses/meta) is preserved; if the pane is closed
-  # (`native_view: nil`) this is a no-op.
-  def handle_event("dismiss_native_error", _params, socket) do
-    case socket.assigns[:native_view] do
-      %{} = nv -> {:noreply, assign(socket, native_view: Map.put(nv, :error, nil))}
-      _ -> {:noreply, socket}
-    end
-  end
-
   # Dismiss the error inside the Senders/Implementors popover without closing the
   # whole popover (which `nav_close` does). `@nav_popover` is a map; clear only
   # its `:error` field.
@@ -1685,39 +1674,6 @@ defmodule BtAttachWeb.WorkspaceLive do
       _ -> {:noreply, socket}
     end
   end
-
-  # Selection tracking (BT-2485, BT-2539): the method-editor CmEditor hook
-  # reports the editor's current selection (text + offsets). We hold it in
-  # `edit_selection` so a later pane can evaluate the selected expression rather
-  # than the whole buffer (the spike's "evaluates selection" vs "evaluates
-  # buffer" distinction). The payload is client-supplied, so accept only the
-  # well-formed shape and ignore anything else rather than crash the LiveView.
-  def handle_event("select_source", %{"text" => text, "tab_id" => tab_id} = params, socket)
-      when is_binary(text) do
-    # Stale/in-flight selection guard (BT-2549): a departing CmEditor can dispatch
-    # one final `select_source` via `pushEvent` just before its `destroyed()`
-    # callback runs; that event can land *after* `sync_active/2` cleared
-    # `:edit_selection` on the tab switch, re-populating it with coordinates from
-    # the closed tab. The editor instance stamps each push with the tab it edits
-    # (data-tab-id), so ignore any stamp that no longer matches the active tab.
-    if tab_id == socket.assigns.active_tab do
-      selection = %{
-        text: text,
-        start: clamp_offset(params["start"]),
-        end: clamp_offset(params["end"])
-      }
-
-      {:noreply, assign(socket, edit_selection: selection)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  # Malformed payload (missing text, non-binary, or missing the "tab_id" key):
-  # ignore rather than crash the LiveView (the payload is client-supplied). A
-  # present-but-mismatched stamp (incl. `tab_id: null`) is handled by the guarded
-  # clause above, which drops it when it doesn't match the active tab.
-  def handle_event("select_source", _params, socket), do: {:noreply, socket}
 
   # Cap on the Transcript pane depth: the client keeps the most recent N lines
   # (via `stream_insert(:transcript, …, limit: -N)`), bounding the DOM in step
@@ -3820,6 +3776,13 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # Builds the 4th tab kind (`:native`) sharing `BtAttachWeb.Live.MethodEditor`'s
+  # `:tabs` list/shape (see that module's "tabbed method editor data model"
+  # comment) — this constructor stays here because the standalone Native
+  # module browser (BT-2667/BT-2670) is still `WorkspaceLive`-owned (BT-3297
+  # lands the rest of it later in the BT-3290 epic). A field added/renamed on
+  # the MethodEditor side must be mirrored here too until that extraction
+  # lands.
   defp add_native_module_tab(socket, id, module) do
     view = load_native_module_view(socket, module)
     # BT-2670: a project-owned native (`view.editable == true`) opens as an

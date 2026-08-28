@@ -100,6 +100,7 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
       dirty: Keyword.get(opts, :dirty, false),
       disk_differs: Keyword.get(opts, :disk_differs, false),
       runtime_only: Keyword.get(opts, :runtime_only, false),
+      synthetic: Keyword.get(opts, :synthetic, false),
       disk_source: Keyword.get(opts, :disk_source, "#{selector} => self"),
       doc: nil,
       signature: nil,
@@ -130,6 +131,40 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
       signature: nil,
       is_protocol: false,
       native_module: nil,
+      class_modifiers: [],
+      class_native: false,
+      source_origin: nil,
+      package: nil,
+      new: false
+    }
+  end
+
+  # Mirrors `WorkspaceLive.add_native_module_tab/3`'s shape (BT-2667/BT-2670)
+  # — the 4th tab kind, still constructed on the `WorkspaceLive` side (BT-3297
+  # territory) but sharing this module's `:tabs` list, so `compile_clean/3`'s
+  # update-syntax writes need every key present.
+  defp native_tab(id, module, opts \\ []) do
+    editable = Keyword.get(opts, :editable, true)
+    content = Keyword.get(opts, :content, "-module(#{module}).")
+
+    %{
+      id: id,
+      kind: :native,
+      class: module,
+      side: nil,
+      selector: nil,
+      native_view: %{editable: editable, content: content, error: nil},
+      source: Keyword.get(opts, :source, content),
+      base: Keyword.get(opts, :base, content),
+      dirty: Keyword.get(opts, :dirty, false),
+      disk_differs: false,
+      runtime_only: false,
+      disk_source: nil,
+      doc: nil,
+      signature: nil,
+      is_protocol: false,
+      native_module: nil,
+      native_delegate: false,
       class_modifiers: [],
       class_native: false,
       source_origin: nil,
@@ -386,6 +421,94 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
 
       assert result.assigns.tabs == tabs
     end
+
+    test "a successful compile arms :save_echo_pending so the coalesced push refresh recognises its own echo" do
+      # `WorkspaceLive.handle_info(:do_source_refresh, ...)` reads this flag
+      # (via `MethodEditor.resync_active_tab/2`) to decide whether to keep or
+      # clear the save/flush banner on the next push — it is the cross-module
+      # half of `compile_clean/3`'s contract, otherwise only exercised by the
+      # `:workspace`-tagged full-stack test.
+      tabs = [method_tab("a", "Counter", "foo", base: "foo => 1", source: "foo => 2")]
+      socket = base_socket(%{tabs: tabs, active_tab: "a", save_echo_pending: false})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{"class" => "Counter", "selector" => "foo", "source" => "foo => 2", "tab" => "a"},
+          socket
+        )
+
+      assert socket.assigns.save_echo_pending == true
+    end
+  end
+
+  describe "open_method_tab/4 (System Browser / omni-search / senders-implementors call-through)" do
+    test "opens a fresh method tab seeded from the image-accurate source" do
+      socket = base_socket()
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+
+      assert socket.assigns.active_tab == "method:Counter:instance:increment"
+      assert [%{kind: :method, class: "Counter", selector: "increment"}] = socket.assigns.tabs
+    end
+
+    test "re-opening the same clean tab re-focuses rather than duplicating" do
+      socket = base_socket()
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "value")
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+
+      assert socket.assigns.active_tab == "method:Counter:instance:increment"
+      assert length(socket.assigns.tabs) == 2
+    end
+
+    test "re-opening a dirty tab just refocuses, never clobbering the in-progress edit" do
+      dirty_tab =
+        method_tab("method:Counter:instance:increment", "Counter", "increment",
+          source: "increment => self.value := self.value + 99",
+          dirty: true
+        )
+
+      socket = base_socket(%{tabs: [dirty_tab], active_tab: nil})
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+
+      [tab] = socket.assigns.tabs
+      assert tab.source == "increment => self.value := self.value + 99"
+      assert tab.dirty == true
+    end
+  end
+
+  describe "promote_new_method_tab/4 (via save_method on a new-method tab)" do
+    test "drops the scratch tab and refocuses the already-open canonical tab for the same selector" do
+      canonical =
+        method_tab("method:Counter:instance:bar", "Counter", "bar", source: "bar => 0")
+
+      scratch = method_tab("new:Counter:instance", "Counter", "", new: true, source: "")
+
+      socket = base_socket(%{tabs: [canonical, scratch], active_tab: "new:Counter:instance"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "",
+            "source" => "bar => 1",
+            "tab" => "new:Counter:instance"
+          },
+          socket
+        )
+
+      assert socket.assigns.save_error == nil
+      # The scratch tab is gone; the pre-existing canonical tab absorbed the
+      # save and is now focused — no duplicate "Class ▸ (new method)" tab.
+      assert [%{id: "method:Counter:instance:bar", source: "bar => 1", new: false}] =
+               socket.assigns.tabs
+
+      assert socket.assigns.active_tab == "method:Counter:instance:bar"
+    end
   end
 
   describe "clear_disk_differs/2" do
@@ -534,6 +657,39 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
 
       assert result.assigns.native_source == "all"
       assert result.assigns.native_source_chosen == false
+    end
+  end
+
+  describe "native_save" do
+    test "compiles, reloads, and writes back an editable native tab's source" do
+      tab = native_tab("native:mymod", "mymod")
+
+      socket = base_socket(%{tabs: [tab], active_tab: "native:mymod"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "native_save",
+          %{"source" => "-module(mymod).\n-export([f/0])."},
+          socket
+        )
+
+      assert socket.assigns.save_error == nil
+      assert socket.assigns.save_result == "Saved mymod.erl"
+
+      [tab] = socket.assigns.tabs
+      assert tab.dirty == false
+      assert tab.native_view.content == "-module(mymod).\n-export([f/0])."
+    end
+
+    test "a save against a non-native active tab is a graceful no-op" do
+      tabs = [method_tab("a", "Counter", "foo")]
+      socket = base_socket(%{tabs: tabs, active_tab: "a"})
+
+      {:noreply, result} =
+        MethodEditor.handle_event("native_save", %{"source" => "whatever"}, socket)
+
+      assert result.assigns.tabs == tabs
+      assert result.assigns.save_error == nil
     end
   end
 

@@ -730,6 +730,13 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # (which the save_method form binds) always mirror the active tab, so the
   # existing write-surface handler reads them unchanged.
   #
+  # A 4th kind, `:native` (standalone read/editable `.erl` module tabs,
+  # BT-2667/BT-2670), is constructed by `WorkspaceLive.add_native_module_tab/3`
+  # — that System Browser feature is still `WorkspaceLive`-owned (BT-3297
+  # lands the rest of it later in the BT-3290 epic) but shares this same tab
+  # list/shape, so a field added/renamed here must be mirrored there too
+  # (and vice versa) until that extraction lands.
+  #
   #   %{
   #     id: stable string id (method-key, "def:<Class>", or "new:<Class>"),
   #     kind: :method | :def,
@@ -1780,14 +1787,17 @@ defmodule BtAttachWeb.Live.MethodEditor do
   end
 
   # BT-2598: the live image changed (a class was (re)loaded or removed).
-  # Re-pull the source-dependent surfaces this module owns: all open clean
-  # editor tabs (method + definition). `WorkspaceLive`'s own
-  # `refresh_after_source_change/1` still refreshes the browser class list,
-  # ChangeLog, and git panel — this is the method-editor-owned slice of
-  # that same refresh, folded together here so callers get one coherent
-  # update. Public: `BtAttachWeb.Live.Dock`'s `git_revert_event/2` (BT-3295)
-  # and `WorkspaceLive`'s coalesced `:do_source_refresh` handler both call
-  # it directly.
+  # Re-pull every source-dependent surface so open windows reflect the new
+  # image without a manual refresh: the browser class list and the active
+  # ChangeLog (cross-called back on `WorkspaceLive`, which still owns the
+  # System Browser / Changes pane), all open clean editor tabs (method +
+  # definition, owned here), and the git panel when it is the active dock
+  # tab (also cross-called back, `BtAttachWeb.Live.Dock` owns it). Folded
+  # together here — rather than split across callers — so every caller gets
+  # one coherent update in the same order the pre-extraction function did.
+  # Public: `BtAttachWeb.Live.Dock`'s `git_revert_event/2` (BT-3295) and
+  # `WorkspaceLive`'s coalesced `:do_source_refresh` handler both call it
+  # directly.
   def refresh_after_source_change(socket) do
     socket
     |> WorkspaceLive.assign_browser_classes()
