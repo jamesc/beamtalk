@@ -1006,11 +1006,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `BtAttachWeb.Live.Inspector`, extracted out of this module so they're
   # directly unit-testable. See that module's `handle_event/3` for the full
   # per-event behaviour (each clause below is exactly what used to run here).
-  @inspector_events ~w(
-    inspect drill crumb freeze_toggle poke close_inspector set_inspector_mode
-    window_close window_crumb window_drill window_focus window_freeze
-    window_moved window_poke window_reset_positions dismiss_window_error
-  )
+  #
+  # Unlike `@dock_events`/`@method_editor_events` below, this is NOT a
+  # separately hand-maintained list of event names: BT-3291 left two
+  # independent copies of the same 16 strings (this attribute, and
+  # `Inspector.handle_event/3`'s own clause heads) with nothing tying them
+  # together, so a name added/renamed/removed on one side without the other
+  # failed silently at runtime instead of at compile/test time (BT-3301).
+  # Reading `Inspector.__inspector_events__/0` here — the module that owns
+  # the clauses — eliminates the second copy entirely.
+  @inspector_events Inspector.__inspector_events__()
 
   @impl true
   def handle_event(event, params, socket) when event in @inspector_events do
@@ -7788,4 +7793,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # module — mirrors `dock_events/0`'s rationale: a test asserts every name
   # here resolves to an implemented `MethodEditor.handle_event/3` clause.
   def method_editor_events, do: @method_editor_events
+
+  @doc false
+  # Unlike `dock_events/0`/`method_editor_events/0` above, `@inspector_events`
+  # is not an independent hand-maintained copy — it IS
+  # `Inspector.__inspector_events__/0` (BT-3301). This accessor exists only
+  # so a test can assert the two stay literally identical, guarding against a
+  # future edit that reintroduces a second hardcoded list here.
+  def inspector_events, do: @inspector_events
 end

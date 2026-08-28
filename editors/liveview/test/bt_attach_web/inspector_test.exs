@@ -19,6 +19,9 @@ defmodule BtAttachWeb.Live.InspectorTest do
 
   alias BtAttachWeb.Live.Inspector
   alias BtAttachWeb.StubWorkspaceClient
+  alias BtAttachWeb.WorkspaceLive
+
+  @inspector_source Path.expand("../../lib/bt_attach_web/live/inspector.ex", __DIR__)
 
   setup do
     Application.put_env(:bt_attach, :workspace_client, StubWorkspaceClient)
@@ -672,6 +675,69 @@ defmodule BtAttachWeb.Live.InspectorTest do
       html = render_component(&Inspector.inspector_windows/1, windows: [win], role: :owner)
       assert html =~ "insp-tidy"
       assert html =~ ~s(id="inspector-window-win-1")
+    end
+  end
+
+  describe "@inspector_events coverage (BT-3301)" do
+    test "WorkspaceLive's @inspector_events IS Inspector's canonical list, not a copy" do
+      assert WorkspaceLive.inspector_events() == Inspector.__inspector_events__()
+    end
+
+    test "every event WorkspaceLive delegates to Inspector resolves to an implemented clause" do
+      params_by_event = %{
+        "inspect" => %{"name" => "counter"},
+        "drill" => %{"index" => "0"},
+        "crumb" => %{"index" => "0"},
+        "freeze_toggle" => %{},
+        "poke" => %{"message" => "increment"},
+        "close_inspector" => %{},
+        "set_inspector_mode" => %{"mode" => "float"},
+        "window_close" => %{"id" => "win-1"},
+        "window_crumb" => %{"id" => "win-1", "index" => "0"},
+        "window_drill" => %{"id" => "win-1", "index" => "0"},
+        "window_focus" => %{"id" => "win-1"},
+        "window_freeze" => %{"id" => "win-1"},
+        "window_moved" => %{"id" => "win-1", "x" => 5, "y" => 5},
+        "window_poke" => %{"id" => "win-1", "message" => "increment"},
+        "window_reset_positions" => %{},
+        "dismiss_window_error" => %{"id" => "win-1"}
+      }
+
+      # A hardcoded event-name list here would itself be an unenforced "keep
+      # in sync" copy of `@inspector_events` — read it from `Inspector`
+      # instead (the module both `WorkspaceLive` and this test now derive
+      # from), so adding/renaming/removing a name fails here rather than only
+      # at runtime in the browser.
+      for event <- Inspector.__inspector_events__() do
+        params = Map.fetch!(params_by_event, event)
+
+        assert {:noreply, %Phoenix.LiveView.Socket{}} =
+                 Inspector.handle_event(event, params, base_socket()),
+               "Inspector.handle_event/3 has no clause for #{inspect(event)} (or it crashed)"
+      end
+    end
+
+    test "no handle_event/3 clause head names an event missing from the canonical list" do
+      # The test above only catches a name in the canonical list with no
+      # matching clause (a rename/removal that leaves the list stale). It
+      # can't catch the OTHER direction: a brand-new
+      # `Inspector.handle_event("some_new_event", ...)` clause added without
+      # adding "some_new_event" to `__inspector_events__/0` is unreachable
+      # dead code (`WorkspaceLive`'s `when event in @inspector_events` guard
+      # never lets it through) rather than a crash, so nothing above would
+      # fail. Elixir doesn't expose clause-head literals through module
+      # reflection, so this scans the module's own source text for
+      # `handle_event("...", ...)` clause heads instead and asserts the
+      # literal name set matches the canonical list exactly.
+      source = File.read!(@inspector_source)
+
+      clause_names =
+        ~r/def handle_event\("([a-z_]+)"/
+        |> Regex.scan(source)
+        |> Enum.map(fn [_, name] -> name end)
+        |> MapSet.new()
+
+      assert clause_names == MapSet.new(Inspector.__inspector_events__())
     end
   end
 end
