@@ -9,12 +9,14 @@
 /// shared and mutated across the system. Observers are any actors that respond
 /// to receive:.
 ///
-/// Usage:
-///   bus     := EventBus spawn.
-///   watcher := EventCollector spawn.
-///   bus subscribe: watcher.
-///   bus notify: "order.placed".
-///   watcher eventCount   // => 1
+/// ## Examples
+/// ```beamtalk
+/// bus     := EventBus spawn.
+/// watcher := EventCollector spawn.
+/// bus subscribe: watcher.
+/// bus notify: "order.placed".
+/// watcher eventCount   // => 1
+/// ```
 Actor subclass: EventBus
   state: subscribers = #()
 

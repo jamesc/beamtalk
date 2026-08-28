@@ -6,12 +6,14 @@
 /// Each execute: runs the command first, then saves the previous buffer state.
 /// undo restores the most recent saved state. No command needs to implement its own undo logic.
 ///
-/// Usage:
-///   h := CommandHistory on: (TextBuffer withText: "hello").
-///   h := h execute: (InsertCommand at: 6 insert: " world").
-///   h buffer text    // => "hello world"
-///   h := h undo.
-///   h buffer text    // => "hello"
+/// ## Examples
+/// ```beamtalk
+/// h := CommandHistory on: (TextBuffer withText: "hello").
+/// h := h execute: (InsertCommand at: 6 insert: " world").
+/// h buffer text    // => "hello world"
+/// h := h undo.
+/// h buffer text    // => "hello"
+/// ```
 Value subclass: CommandHistory
   field: buffer = nil
   field: history = #()  // stack of prior buffer snapshots

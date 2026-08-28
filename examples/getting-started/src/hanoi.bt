@@ -7,16 +7,20 @@
 /// Try it in the REPL:
 ///   $ beamtalk repl
 ///   > :load examples/hanoi.bt
-///   > h := Hanoi new
-///   > h solve: 3 from: "A" to: "C" via: "B"
-///   Move disk from A to C
-///   Move disk from A to B
-///   Move disk from C to B
-///   Move disk from A to C
-///   Move disk from B to A
-///   Move disk from B to C
-///   Move disk from A to C
-///   nil
+///
+/// ## Examples
+/// ```beamtalk
+/// > h := Hanoi new
+/// > h solve: 3 from: "A" to: "C" via: "B"
+/// Move disk from A to C
+/// Move disk from A to B
+/// Move disk from C to B
+/// Move disk from A to C
+/// Move disk from B to A
+/// Move disk from B to C
+/// Move disk from A to C
+/// nil
+/// ```
 Value subclass: Hanoi
 
   solve: n from: source to: target via: auxiliary =>

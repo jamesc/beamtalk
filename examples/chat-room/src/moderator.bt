@@ -13,12 +13,16 @@
 ///   > :load examples/chat-room/chat_room.bt
 ///   > :load examples/chat-room/chat_member.bt
 ///   > :load examples/chat-room/moderator.bt
-///   > room := ChatRoom spawn
-///   > mod := Moderator spawn
-///   > mod setName: "Admin"
-///   > mod setRoom: room
-///   > room join: mod
-///   > mod say: "Welcome!"
+///
+/// ## Examples
+/// ```beamtalk
+/// > room := ChatRoom spawn
+/// > mod := Moderator spawn
+/// > mod setName: "Admin"
+/// > mod setRoom: room
+/// > room join: mod
+/// > mod say: "Welcome!"
+/// ```
 ChatMember subclass: Moderator
   state: muted = Set new  // Set of muted member names
 
