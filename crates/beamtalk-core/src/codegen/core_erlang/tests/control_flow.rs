@@ -2630,9 +2630,7 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
     )
     .expect("Tier 2 block value call inside ifTrue: branch with field mutation must compile");
 
-    eprintln!(
-        "Generated code for Tier 2 local-var assignment inside conditional:\n{code}"
-    );
+    eprintln!("Generated code for Tier 2 local-var assignment inside conditional:\n{code}");
 
     // Tier 2 two-hop extraction: element(1, ...) for value, element(2, ...) for new state.
     assert!(
