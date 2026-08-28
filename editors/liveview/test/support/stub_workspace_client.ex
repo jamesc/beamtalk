@@ -98,6 +98,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # `save_section/3` result (`nil` = report success).
               categories: %{},
               section_save_result: nil,
+              # BT-3303: seeded `inspect_value/1` field maps and `pid_stats/1`
+              # snapshots for a `{:beamtalk_object, class, _module, pid}` handle,
+              # keyed by `to_string(class)` (mirroring the existing
+              # `EmptySup`/`DeadSup` supervisor-keyed pattern in `inspect_value/1`
+              # above). `%{}` = every class keeps the prior default `{:ok, %{}}` —
+              # every existing test that never seeds a class is unaffected. Lets a
+              # test give an inspected object real fields (so a window/docked-pane
+              # drill has something non-empty to follow) and real pid-stats chips,
+              # without inventing a second test double.
+              object_fields: %{},
+              pid_stats_by_class: %{},
               calls: []
   end
 
@@ -164,8 +175,16 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # `subscribe_classes/1`.
   def subscribe_reload_check(_pid), do: record({:subscribe_reload_check}) && :ok
   def unsubscribe_reload_check(_pid), do: :ok
-  def subscribe_object_changes(_term, _pid), do: :ok
-  def unsubscribe_object_changes(_term, _pid), do: :ok
+  # BT-3303: record the (un)subscribe so a test can prove the reference-counted
+  # unsubscribe logic (`Inspector.unwatch_window/2`, `pid_watched_elsewhere?/3`,
+  # `docked_pid_watched_by_window?/2`) actually did or didn't call through for a
+  # given `{term, pid}` pair — e.g. that closing one of two windows watching the
+  # same actor pid does NOT unsubscribe while the sibling still watches it.
+  def subscribe_object_changes(term, pid),
+    do: record({:subscribe_object_changes, term, pid}) && :ok
+
+  def unsubscribe_object_changes(term, pid),
+    do: record({:unsubscribe_object_changes, term, pid}) && :ok
 
   # ── Eval + session ops ───────────────────────────────────────────────────
 
@@ -224,7 +243,30 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     end
   end
 
+  # BT-3303: an actor object's inspection content — its instance fields — keyed
+  # by class so a test can seed a real (non-empty) fields map instead of the
+  # catch-all `{:ok, %{}}` below. Unseeded classes keep that empty-fields
+  # default, so no existing test (none of which seed a class) is affected.
+  def inspect_value({:beamtalk_object, class, _module, pid} = _term) when is_pid(pid) do
+    case Map.get(get(:object_fields) || %{}, to_string(class)) do
+      nil -> {:ok, %{}}
+      fields -> {:ok, fields}
+    end
+  end
+
   def inspect_value(_term), do: {:ok, %{}}
+
+  @doc """
+  Test helper (BT-3303): seed `inspect_value/1`'s fields-map response for a
+  `{:beamtalk_object, class, _module, pid}` handle whose class is `class` (a
+  string or atom, matched via `to_string/1`). `fields` is the binary/atom-keyed
+  live-term map the real `inspect` op returns — pass an object-valued entry to
+  drive a further drill from the seeded row. Unseeded classes keep the default
+  `{:ok, %{}}` (empty fields, nothing to drill).
+  """
+  def seed_inspect_value(class, fields) when is_map(fields) do
+    update(:object_fields, fn map -> Map.put(map || %{}, to_string(class), fields) end)
+  end
 
   # BT-2634: representative supervisor children (binary-keyed rows, mirroring
   # `beamtalk_process_navigation:child_handles/1`). The nested supervisor child
@@ -1255,7 +1297,29 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Supervision tree ─────────────────────────────────────────────────────
 
   def supervision_tree(_pid, _scope), do: {:ok, []}
+
+  # BT-3303: a live actor's pid-stats snapshot, keyed by class (mirroring
+  # `inspect_value/1` above) so a test can seed real chip values instead of the
+  # catch-all `{:ok, %{}}`. Unseeded classes keep that empty default.
+  def pid_stats({:beamtalk_object, class, _module, pid} = _term) when is_pid(pid) do
+    case Map.get(get(:pid_stats_by_class) || %{}, to_string(class)) do
+      nil -> {:ok, %{}}
+      stats -> {:ok, stats}
+    end
+  end
+
   def pid_stats(_term), do: {:ok, %{}}
+
+  @doc """
+  Test helper (BT-3303): seed `pid_stats/1`'s response for a
+  `{:beamtalk_object, class, _module, pid}` handle whose class is `class` (a
+  string or atom). `stats` is the binary-keyed snapshot map (`status`,
+  `queue_depth`, `memory_bytes`, `reductions`, …) the real `pid_stats` op
+  returns. Unseeded classes keep the default `{:ok, %{}}`.
+  """
+  def seed_pid_stats(class, stats) when is_map(stats) do
+    update(:pid_stats_by_class, fn map -> Map.put(map || %{}, to_string(class), stats) end)
+  end
 
   # ── Pure utilities (delegated to real Workspace) ─────────────────────────
 
