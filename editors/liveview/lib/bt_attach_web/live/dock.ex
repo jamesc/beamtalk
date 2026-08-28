@@ -49,13 +49,13 @@ defmodule BtAttachWeb.Live.Dock do
   every dock event/async tag to the functions here by name — see the
   `@dock_events` guard clause and the `:git_load` forward in `WorkspaceLive`.
 
-  Several dock branches reach into state other panes still own (the System
-  Browser's `open_class`/`symbol_rows`, the Tests pane's
-  `discover_test_classes`, the Method Editor's tab-refresh helpers) because
-  those panes have not been extracted yet (BT-3296/BT-3297 land later in the
-  BT-3290 epic) — this module calls the still-`WorkspaceLive`-owned public
-  functions for those rather than duplicating their logic, exactly the
-  temporary cross-call shape a sequential decomposition produces.
+  Several dock branches reach into state other panes own: the git-revert path
+  calls `BtAttachWeb.Live.MethodEditor`'s tab-refresh helpers (extracted
+  BT-3296) directly, and the System Browser's `open_class`/`symbol_rows` and
+  the Tests pane's `discover_test_classes` are still `WorkspaceLive`-owned
+  (BT-3297 lands later in the BT-3290 epic) — this module calls those public
+  functions rather than duplicating their logic, exactly the temporary
+  cross-call shape a sequential decomposition produces.
   """
 
   use BtAttachWeb, :html
@@ -74,6 +74,7 @@ defmodule BtAttachWeb.Live.Dock do
   alias BtAttach.Workspace
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.Inspector
+  alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
   alias BtAttachWeb.WorkspaceLive
 
@@ -1127,10 +1128,10 @@ defmodule BtAttachWeb.Live.Dock do
         # `unflushed` badge before the re-read (which would otherwise
         # preserve the already-set divergence, mirroring
         # `clear_disk_differs/2` after a flush).
-        |> assign(:tabs, WorkspaceLive.clear_disk_differs(socket.assigns.tabs, reloaded))
+        |> assign(:tabs, MethodEditor.clear_disk_differs(socket.assigns.tabs, reloaded))
         # BT-2655: re-read the reverted `:def` tabs' *editable* definition
         # buffer so the visible editor shows the reverted header without a
-        # close/reopen. `WorkspaceLive.refresh_after_source_change/1` below
+        # close/reopen. `MethodEditor.refresh_after_source_change/1` below
         # re-reads `:method` tab bodies on its own (and bumps `editor_rev` to
         # remount the editor), but it deliberately leaves a `:def` tab's
         # editable definition buffer untouched (a generic push must not
@@ -1141,8 +1142,8 @@ defmodule BtAttachWeb.Live.Dock do
         # and expected. Method tabs are intentionally left to the refresh
         # below to avoid a redundant second `browse_method_source`
         # round-trip per tab.
-        |> WorkspaceLive.reload_reverted_def_buffers(reloaded)
-        |> WorkspaceLive.refresh_after_source_change()
+        |> MethodEditor.reload_reverted_def_buffers(reloaded)
+        |> MethodEditor.refresh_after_source_change()
         |> assign_git()
         # A clean revert whose reload failed surfaces its note in the shared
         # status area (the same slot revert / new-class outcomes use), NOT
@@ -1186,7 +1187,7 @@ defmodule BtAttachWeb.Live.Dock do
     reloaded = MapSet.new(class_names)
 
     for tab <- tabs,
-        key = WorkspaceLive.tab_disk_key(tab),
+        key = MethodEditor.tab_disk_key(tab),
         key != nil,
         MapSet.member?(reloaded, elem(key, 0)),
         into: MapSet.new(),
@@ -1455,7 +1456,7 @@ defmodule BtAttachWeb.Live.Dock do
     if MapSet.size(flushed) == 0 do
       socket
     else
-      assign(socket, :tabs, WorkspaceLive.clear_disk_differs(socket.assigns.tabs, flushed))
+      assign(socket, :tabs, MethodEditor.clear_disk_differs(socket.assigns.tabs, flushed))
     end
   end
 end
