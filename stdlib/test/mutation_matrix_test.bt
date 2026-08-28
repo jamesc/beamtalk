@@ -15,6 +15,8 @@ TestCase subclass: MutationMatrixTest
 
   setUp => self.a := MutationMatrixActor spawn
 
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
   // ── P0: Known bug patterns (verify fixes) ──────────────────────────
 
   // P0-1: collect: + ifTrue: + mutation (BT-1477)
