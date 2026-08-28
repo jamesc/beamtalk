@@ -67,7 +67,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
 
   # A synthetic live-object term backed by the test process's own pid — safe
   # to "subscribe"/"inspect" against the stub client without a real node.
-  defp object_term(pid \\ self()), do: {:beamtalk_object, TestClass, TestClass, pid}
+  defp object_term(pid \\ self()), do: {:beamtalk_object, :TestClass, :TestClass, pid}
 
   describe "pure classifiers" do
     test "term_kind/1 maps object refs to \"ref\" and scalars to their chip" do
@@ -370,6 +370,235 @@ defmodule BtAttachWeb.Live.InspectorTest do
 
       assert socket.assigns.window_z == 12
       assert Enum.find(socket.assigns.windows, &(&1.id == "a")).z == 12
+    end
+  end
+
+  describe "window_drill into a non-empty field row (BT-3303)" do
+    test "follows an object-valued field into a further inspect, extending the window's crumbs" do
+      pid = self()
+      root = {:beamtalk_object, :Counter, :Counter, pid}
+      child = {:beamtalk_object, :Child, :Child, pid}
+      StubWorkspaceClient.seed_inspect_value("Counter", %{"count" => 1, "child" => child})
+      StubWorkspaceClient.seed_inspect_value("Child", %{"name" => "kid"})
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", root)
+      assert [win] = socket.assigns.windows
+      # `field_rows/1` sorts by name: "child" < "count".
+      assert Enum.map(win.rows, & &1.name) == ["child", "count"]
+      child_index = Enum.find_index(win.rows, &(&1.name == "child"))
+      assert Enum.at(win.rows, child_index).drillable
+
+      {:noreply, socket} =
+        Inspector.handle_event(
+          "window_drill",
+          %{"id" => win.id, "index" => to_string(child_index)},
+          socket
+        )
+
+      assert [win] = socket.assigns.windows
+      assert win.target.label == "child"
+      assert List.last(win.crumbs) == %{label: "child", term: child}
+      assert Enum.map(win.rows, & &1.name) == ["name"]
+    end
+
+    test "window_drill with a malformed index or unknown window id is a no-op" do
+      root = object_term()
+      StubWorkspaceClient.seed_inspect_value("TestClass", %{"count" => 1})
+      socket = Inspector.open_window_for_term(base_socket(), "counter", root)
+
+      {:noreply, result} =
+        Inspector.handle_event("window_drill", %{"id" => "nope", "index" => "0"}, socket)
+
+      assert result == socket
+
+      [win] = socket.assigns.windows
+
+      {:noreply, result2} =
+        Inspector.handle_event(
+          "window_drill",
+          %{"id" => win.id, "index" => "not-a-number"},
+          socket
+        )
+
+      assert result2 == socket
+    end
+  end
+
+  describe "reference-counted unsubscribe across windows (BT-3303)" do
+    test "closing one of two windows on the same pid keeps the subscription alive for the other, closing both releases it" do
+      pid = self()
+      term = object_term(pid)
+
+      socket =
+        base_socket()
+        |> Inspector.open_window_for_term("a", term)
+        |> Inspector.open_window_for_term("b", term)
+
+      assert [win_a, win_b] = socket.assigns.windows
+      assert win_a.watch == term
+      assert win_b.watch == term
+
+      StubWorkspaceClient.clear_calls()
+
+      {:noreply, socket} = Inspector.handle_event("window_close", %{"id" => win_a.id}, socket)
+
+      refute {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+      assert [remaining] = socket.assigns.windows
+      assert remaining.id == win_b.id
+      assert remaining.watch == term
+
+      {:noreply, socket} = Inspector.handle_event("window_close", %{"id" => win_b.id}, socket)
+
+      assert {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+      assert socket.assigns.windows == []
+    end
+
+    test "the docked pane watching the same pid also keeps a window's subscription alive" do
+      pid = self()
+      term = object_term(pid)
+      StubWorkspaceClient.put_bindings([{"counter", term}])
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", term)
+      {:noreply, socket} = Inspector.handle_event("inspect", %{"name" => "counter"}, socket)
+
+      assert socket.assigns.inspect_watch == term
+      [win] = socket.assigns.windows
+
+      StubWorkspaceClient.clear_calls()
+
+      {:noreply, socket} = Inspector.handle_event("window_close", %{"id" => win.id}, socket)
+
+      refute {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+      assert socket.assigns.windows == []
+
+      # Closing the docked pane too — now nothing watches `term` — actually
+      # releases it.
+      {:noreply, socket} = Inspector.handle_event("close_inspector", %{}, socket)
+
+      assert {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+      assert socket.assigns.inspect_watch == nil
+    end
+  end
+
+  describe "window_poke (BT-3303)" do
+    test "an owner's window poke sends eval, renders the real result, and refreshes the live window" do
+      pid = self()
+      term = object_term(pid)
+      StubWorkspaceClient.seed_inspect_value("TestClass", %{"count" => 1})
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", term)
+      [win] = socket.assigns.windows
+      assert win.watch == term
+      assert win.flash_gen == 0
+
+      {:noreply, socket} =
+        Inspector.handle_event(
+          "window_poke",
+          %{"id" => win.id, "message" => "Actor subclass: Gadget"},
+          socket
+        )
+
+      [win] = socket.assigns.windows
+      assert win.poke_error == nil
+      assert win.poke_result =~ "→ "
+      assert win.poke_result =~ "Gadget"
+      # A live (watched) window re-reads after a successful poke (send_window_poke),
+      # bumping its flash generation.
+      assert win.flash_gen == 1
+    end
+
+    test "window_poke with no addressable binding (a drilled window) reports it can't send" do
+      pid = self()
+      root = object_term(pid)
+      child = object_term(pid)
+      StubWorkspaceClient.seed_inspect_value("TestClass", %{"child" => child})
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", root)
+      [win] = socket.assigns.windows
+      child_index = Enum.find_index(win.rows, &(&1.name == "child"))
+
+      {:noreply, socket} =
+        Inspector.handle_event(
+          "window_drill",
+          %{"id" => win.id, "index" => to_string(child_index)},
+          socket
+        )
+
+      {:noreply, socket} =
+        Inspector.handle_event(
+          "window_poke",
+          %{"id" => win.id, "message" => "increment"},
+          socket
+        )
+
+      [win] = socket.assigns.windows
+      assert win.poke_result == nil
+      assert win.poke_error =~ "Can only send to a bound object"
+    end
+  end
+
+  describe "window_freeze (BT-3303)" do
+    test "freezing a live window drops its subscription and holds the snapshot; unfreezing re-arms and catches up" do
+      pid = self()
+      term = object_term(pid)
+      StubWorkspaceClient.seed_inspect_value("TestClass", %{"count" => 1})
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", term)
+      [win] = socket.assigns.windows
+      assert win.watch == term
+      assert win.frozen == false
+
+      StubWorkspaceClient.clear_calls()
+
+      {:noreply, socket} = Inspector.handle_event("window_freeze", %{"id" => win.id}, socket)
+
+      [win] = socket.assigns.windows
+      assert win.frozen == true
+      assert win.watch == nil
+      assert {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+
+      {:noreply, socket} = Inspector.handle_event("window_freeze", %{"id" => win.id}, socket)
+
+      [win] = socket.assigns.windows
+      assert win.frozen == false
+      assert win.watch == term
+      # Unfreezing re-reads to catch up, bumping the flash generation.
+      assert win.flash_gen == 1
+    end
+  end
+
+  describe "pid_stats parameterization (BT-3303)" do
+    test "a window's head chips read a seeded pid_stats snapshot for its class" do
+      pid = self()
+      term = {:beamtalk_object, :Instance, :Instance, pid}
+      StubWorkspaceClient.seed_pid_stats("Instance", %{"status" => "running", "queue_depth" => 3})
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", term)
+      [win] = socket.assigns.windows
+
+      assert Inspector.stat_status(win.stats) == "running"
+      assert Inspector.stat_mailbox(win.stats) == 3
+    end
+
+    test "an unseeded class keeps the default empty stats" do
+      term = object_term()
+      socket = Inspector.open_window_for_term(base_socket(), "counter", term)
+      [win] = socket.assigns.windows
+
+      assert Inspector.stat_status(win.stats) == nil
+    end
+  end
+
+  describe "dismiss_window_error" do
+    test "clears only the matching window's error" do
+      win_a = %{id: "a", error: "boom"}
+      win_b = %{id: "b", error: "also boom"}
+      socket = base_socket(%{windows: [win_a, win_b]})
+
+      {:noreply, socket} = Inspector.handle_event("dismiss_window_error", %{"id" => "a"}, socket)
+
+      assert Enum.find(socket.assigns.windows, &(&1.id == "a")).error == nil
+      assert Enum.find(socket.assigns.windows, &(&1.id == "b")).error == "also boom"
     end
   end
 
