@@ -1421,6 +1421,17 @@ pub(super) struct SavedClassMethodCtx {
     // version, producing two bindings for the same version — caught by the
     // ADR-0111 verifier as `NonLinearVersion`.
     state_version: usize,
+    // BT-3300: same unguarded-reset shape as `state_version` above, for the
+    // enclosing method's own parameter list/types. `generate_class_method_fun_from_block`
+    // unconditionally clears both (`current_method_params.clear()` /
+    // `clear_method_param_types()`) to give the class-method fun its own fresh
+    // set — but they too live outside `ClassContext`, so a builder cascade
+    // nested inside an enclosing method's body would wipe out the enclosing
+    // method's real parameters/types for any later statement that reads them
+    // (e.g. the `erlangApply`/`erlangModuleLookup` FFI intrinsics, or
+    // primitive-BIF codegen).
+    current_method_params: Vec<String>,
+    current_method_param_types: std::collections::HashMap<String, String>,
 }
 
 impl ClassContext {
@@ -2170,6 +2181,8 @@ impl CoreErlangGenerator {
             class_slot_constructor_selector: self.class_slot_constructor_selector().cloned(),
             builder_class_method_class: self.builder_class_method_class(),
             state_version: self.state_version(),
+            current_method_params: self.current_method_params.clone(),
+            current_method_param_types: self.current_method_param_types.clone(),
         };
         self.set_in_class_method(true);
         *self.class_var_names_mut() = class_var_names.iter().cloned().collect();
@@ -2220,6 +2233,10 @@ impl CoreErlangGenerator {
         // value leaves that method's `State` version counter reset to 0
         // instead of wherever it legitimately was.
         self.set_state_version(saved.state_version);
+        // BT-3300: same reasoning as `state_version` above — restore
+        // unconditionally, independent of `had_context`.
+        self.current_method_params = saved.current_method_params;
+        self.current_method_param_types = saved.current_method_param_types;
     }
 
     /// BT-2709: Clears per-method parameter-type tracking. Call alongside
