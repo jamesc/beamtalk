@@ -1186,22 +1186,12 @@ defmodule BtAttachWeb.Live.Dock do
     reloaded = MapSet.new(class_names)
 
     for tab <- tabs,
-        key = tab_disk_key(tab),
+        key = WorkspaceLive.tab_disk_key(tab),
         key != nil,
         MapSet.member?(reloaded, elem(key, 0)),
         into: MapSet.new(),
         do: key
   end
-
-  # The disk key a tab is cleared by: `{class, selector}` for a `:method`
-  # tab, `{class, :def}` for a `:def` tab (the `:def` sentinel can't collide
-  # with a real binary selector) — mirrors `WorkspaceLive`'s own
-  # (necessarily private, since it pattern-matches its `:tabs` shape)
-  # `tab_disk_key/1`. Any other shape yields `nil`, which is never a set
-  # member.
-  defp tab_disk_key(%{kind: :method, class: class, selector: selector}), do: {class, selector}
-  defp tab_disk_key(%{kind: :def, class: class}), do: {class, :def}
-  defp tab_disk_key(_tab), do: nil
 
   # Whether the file `path` git is about to revert has unflushed in-memory
   # ChangeLog edits (BT-2598 decision 2). The cockpit `changes` rows carry

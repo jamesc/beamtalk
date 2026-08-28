@@ -113,8 +113,11 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.error == nil
       # `eval_status/4` bumps the re-key sequence on every success.
       assert socket.assigns.eval_seq == 1
-      # do_it never pushes the inline-insert event (print_it's affordance).
-      assert socket.private.live_temp[:push_events] in [nil, []]
+      # do_it never pushes the inline-insert event (print_it's affordance) —
+      # assert the specific event is absent rather than the whole push list,
+      # so an unrelated future push doesn't make this pass vacuously.
+      pushed_events = socket.private.live_temp[:push_events] || []
+      refute Enum.any?(pushed_events, &match?(["ws_insert_result", _], &1))
     end
 
     test "print_it (default, no action field) inserts the result inline and flashes the status" do
@@ -399,6 +402,20 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.save_error == "Invalid class name."
     end
 
+    test "a class name shaped as an injection attempt is rejected — `valid_class_name?/1` is the only guard before it is interpolated into a raw `evaluate` expression" do
+      {:noreply, socket} =
+        Dock.handle_event(
+          "flush_destructive",
+          %{"class" => "Foo. Session current clear"},
+          base_socket()
+        )
+
+      assert socket.assigns.save_error == "Invalid class name."
+      # The flush_result stays nil: rejected before any eval dispatch, so
+      # nothing this class-shape check exists to prevent actually ran.
+      assert socket.assigns.flush_result == nil
+    end
+
     test "no session (attach failed) reports 'not attached'" do
       socket = base_socket(%{session_pid: nil})
 
@@ -495,6 +512,136 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.git_status == nil
       assert socket.assigns.git_log == []
       assert socket.assigns.git_error =~ "failed unexpectedly"
+    end
+  end
+
+  describe "repl_inspect" do
+    test "docked mode inspects the stashed REPL result term" do
+      socket = base_socket(%{repl_terms: %{"repl-entry-1" => 42}})
+
+      {:noreply, socket} =
+        Dock.handle_event("repl_inspect", %{"id" => "repl-entry-1"}, socket)
+
+      assert socket.assigns.inspect_target != nil
+      assert socket.assigns.inspect_crumbs == [%{label: "REPL result", term: 42}]
+    end
+
+    test "float mode opens a floating window instead of the docked pane" do
+      socket =
+        base_socket(%{repl_terms: %{"repl-entry-1" => 42}, inspector_mode: "float"})
+
+      {:noreply, socket} =
+        Dock.handle_event("repl_inspect", %{"id" => "repl-entry-1"}, socket)
+
+      assert socket.assigns.inspect_target == nil
+      assert [%{label: "REPL result"}] = socket.assigns.windows
+    end
+
+    test "an unknown / stale entry id is a no-op, not a crash" do
+      socket = base_socket(%{repl_terms: %{}})
+
+      assert {:noreply, ^socket} =
+               Dock.handle_event("repl_inspect", %{"id" => "repl-entry-99"}, socket)
+    end
+  end
+
+  describe "eval target — tracked selection vs whole buffer" do
+    test "a non-blank selection is evaluated instead of the submitted expr" do
+      socket = base_socket(%{ws_selection: %{text: "Object subclass: Foo", start: 0, end: 20}})
+
+      {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "ignored buffer text"}, socket)
+
+      # The stub only recognises a class-defining send, so the result
+      # reflects the SELECTION having been evaluated, not the literal expr.
+      assert socket.assigns.result =~ "Foo"
+    end
+
+    test "a blank/whitespace-only selection falls back to the submitted expr" do
+      socket = base_socket(%{ws_selection: %{text: "   ", start: 0, end: 3}})
+
+      {:noreply, socket} =
+        Dock.handle_event("eval", %{"expr" => "Object subclass: Bar"}, socket)
+
+      assert socket.assigns.result =~ "Bar"
+    end
+  end
+
+  describe "git panel mutations — success path (Owner)" do
+    test "git_stage dispatches to the workspace and refreshes the panel" do
+      {:noreply, socket} =
+        Dock.handle_event("git_stage", %{"path" => "src/Foo.bt"}, base_socket())
+
+      assert socket.assigns.git_error == nil
+      assert {:git_stage, "src/Foo.bt"} in StubWorkspaceClient.calls()
+    end
+
+    test "git_unstage dispatches to the workspace" do
+      {:noreply, socket} =
+        Dock.handle_event("git_unstage", %{"path" => "src/Foo.bt"}, base_socket())
+
+      assert socket.assigns.git_error == nil
+      assert {:git_unstage, "src/Foo.bt"} in StubWorkspaceClient.calls()
+    end
+
+    test "git_commit dispatches to the workspace with the message" do
+      {:noreply, socket} =
+        Dock.handle_event("git_commit", %{"message" => "fix bug"}, base_socket())
+
+      assert socket.assigns.git_error == nil
+      assert {:git_commit, "fix bug"} in StubWorkspaceClient.calls()
+    end
+  end
+
+  describe "flush clears the unflushed badge on only the tabs it actually wrote" do
+    test "a method whose entry stopped being pending is cleared; an unrelated dirty tab is not" do
+      tabs = [
+        %{kind: :method, class: "Foo", selector: "bar", disk_differs: true},
+        %{kind: :method, class: "Foo", selector: "untouched", disk_differs: true}
+      ]
+
+      socket = base_socket(%{changes: [%{class: "Foo", selector: "bar"}], tabs: tabs})
+
+      {:noreply, socket} = Dock.handle_event("flush", %{}, socket)
+
+      assert [
+               %{selector: "bar", disk_differs: false},
+               %{selector: "untouched", disk_differs: true}
+             ] = socket.assigns.tabs
+    end
+  end
+
+  describe "@dock_events coverage" do
+    test "every event WorkspaceLive delegates to Dock resolves to an implemented clause" do
+      params_by_event = %{
+        "dock_tab" => %{"tab" => "workspace"},
+        "eval" => %{"expr" => "1 + 1"},
+        "select_workspace" => %{"text" => "1"},
+        "repl_eval" => %{"expr" => "1 + 1"},
+        "repl_history_prev" => %{},
+        "repl_history_next" => %{},
+        "repl_inspect" => %{"id" => "repl-entry-1"},
+        "git_refresh" => %{},
+        "git_diff" => %{"path" => "src/Foo.bt"},
+        "git_stage" => %{"path" => "src/Foo.bt"},
+        "git_unstage" => %{"path" => "src/Foo.bt"},
+        "git_revert" => %{"path" => "src/Foo.bt"},
+        "git_commit" => %{"message" => "msg"},
+        "toggle_change_diff" => %{"class" => "Foo", "selector" => "bar"},
+        "revert" => %{"class" => "Foo", "selector" => "bar"},
+        "flush" => %{},
+        "flush_destructive" => %{"class" => "Foo"}
+      }
+
+      # A hardcoded event-name list would itself be an unenforced "keep in
+      # sync" copy of `@dock_events` — read it from `WorkspaceLive` instead,
+      # so adding/removing a name on one side without the other fails here.
+      for event <- BtAttachWeb.WorkspaceLive.dock_events() do
+        params = Map.fetch!(params_by_event, event)
+
+        assert {:noreply, %Phoenix.LiveView.Socket{}} =
+                 Dock.handle_event(event, params, base_socket()),
+               "Dock.handle_event/3 has no clause for #{inspect(event)} (or it crashed)"
+      end
     end
   end
 end

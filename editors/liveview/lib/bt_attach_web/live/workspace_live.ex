@@ -3389,9 +3389,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The disk key a tab is cleared by: `{class, selector}` for a `:method` tab,
   # `{class, :def}` for a `:def` tab (the `:def` sentinel can't collide with a real
   # binary selector). Any other shape yields `nil`, which is never a set member.
-  defp tab_disk_key(%{kind: :method, class: class, selector: selector}), do: {class, selector}
-  defp tab_disk_key(%{kind: :def, class: class}), do: {class, :def}
-  defp tab_disk_key(_tab), do: nil
+  # Public: `BtAttachWeb.Live.Dock`'s `reloaded_tab_keys/2` (BT-3295, the git
+  # revert path) calls it directly rather than keeping its own copy — a tab
+  # shape change (BT-3296) must not risk the two silently diverging.
+  def tab_disk_key(%{kind: :method, class: class, selector: selector}), do: {class, selector}
+  def tab_disk_key(%{kind: :def, class: class}), do: {class, :def}
+  def tab_disk_key(_tab), do: nil
 
   # Read the active ChangeLog ("Workspace changes", ADR 0082) and assign display
   # rows. A workspace that is unreachable or returns an unexpected shape renders an
@@ -9439,4 +9442,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     </div>
     """
   end
+
+  @doc false
+  # The single source of truth for `@dock_events` outside this module — a
+  # test asserts every name here resolves to an implemented
+  # `Dock.handle_event/3` clause (not a `FunctionClauseError`), so a name
+  # added/removed on one side without the other fails CI instead of only a
+  # crafted WebSocket event in production. Kept away from the `handle_event/3`
+  # clause group (rather than beside `@dock_events`'s own definition) since a
+  # `def` of a different name interposed between two `handle_event/3` clauses
+  # trips the compiler's "clauses should be grouped together" warning.
+  def dock_events, do: @dock_events
 end
