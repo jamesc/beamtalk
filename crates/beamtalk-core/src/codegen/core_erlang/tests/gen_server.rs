@@ -7663,3 +7663,54 @@ fn test_class_builder_cascade_in_second_field_assignment_does_not_corrupt_state_
          whose value contains a classBuilder addClassMethod:body: cascade. Got: {result:?}"
     );
 }
+
+#[test]
+fn test_nested_class_builder_cascade_does_not_corrupt_current_method_params() {
+    // BT-3300: the same unguarded-reset shape as BT-3289's `state_version` leak
+    // above, for `current_method_params`/`current_method_param_types` instead.
+    // `generate_class_method_fun_from_block` unconditionally clears both at its
+    // start to give the class-method fun its own fresh parameter list — but
+    // neither is captured in `SavedClassMethodCtx`, so a builder cascade nested
+    // INSIDE another builder class-method fun's own body clobbers the outer
+    // fun's parameter list for any later statement in that same body that
+    // reads `current_method_params` (e.g. the `erlangApply`/`erlangModuleLookup`
+    // FFI intrinsics, or primitive-BIF codegen).
+    //
+    // Here the outer `greeting:` class-method fun has one parameter (`a`). Its
+    // body first runs an inner `classBuilder … addClassMethod:body:` cascade
+    // (building an unrelated `Inner` class), then ends with `@intrinsic
+    // erlangApply`, which reads `current_method_params` to find the selector
+    // argument to forward. Before the fix, the inner cascade's clear() wiped
+    // out the outer fun's `a` parameter, so `erlangApply` fell back to a
+    // hardcoded `"Selector"` var name that was never bound in this scope —
+    // `beamtalk_erlang_proxy:dispatch(Selector, Arguments, Self)` — which
+    // would fail `erlc` with an unbound-variable error rather than a clean
+    // Rust-side panic (so, unlike BT-3289, this isn't caught by the ADR-0111
+    // ThreadedIr verifier). Same reachability caveat as BT-3289: unreachable
+    // through the CLI (one class per `.bt` file) or the REPL (one expression
+    // per turn) — only direct `generate_module` library use, as fuzzing does,
+    // can construct this AST shape.
+    let src = "Actor subclass: SlwActor\n  state: value = 41\n\nTestCase subclass: FooTest\n  field: cls = nil\n  field: parentCls = nil\n\n  testX =>\n    self.parentCls := 1\n    self.cls := Object classBuilder name: #Outer;\n      superclass: Object;\n      addClassMethod: #greeting: body: [:self :a |\n        Object classBuilder name: #Inner;\n          superclass: Object;\n          addClassMethod: #answer body: [:self2 | 42];\n          register\n        @intrinsic erlangApply\n      ];\n      register\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "Reproducer must parse cleanly. Got diagnostics: {diags:?}"
+    );
+
+    let result = generate_module(&module, CodegenOptions::new("bt3300_params_repro"));
+    let code = result.expect("generate_module must not fail on a nested classBuilder cascade");
+
+    let marker = "'beamtalk_erlang_proxy':'dispatch'(";
+    let call_pos = code
+        .find(marker)
+        .expect("expected an erlangApply-generated dispatch call in the output");
+    let after = &code[call_pos + marker.len()..];
+    assert!(
+        !after.starts_with("Selector,"),
+        "current_method_params leaked across the nested classBuilder cascade: the \
+         outer `greeting:` fun's own `a` parameter should have been threaded into \
+         the erlangApply call, not the hardcoded \"Selector\" fallback (which is \
+         unbound in this scope and would fail erlc). Generated code:\n{code}"
+    );
+}
