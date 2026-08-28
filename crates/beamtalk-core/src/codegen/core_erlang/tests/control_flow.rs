@@ -2598,3 +2598,65 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
          '__local__outer' in the cascade's final NewState. Got: {code}"
     );
 }
+
+#[test]
+fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_branch() {
+    // BT-912/ADR 0111 Addendum 5 C3: `lower_local_var_assignment_bind`'s Tier 2
+    // sub-branch — `result := aBlock value` where `aBlock` is a Tier 2 block
+    // parameter, inside an `ifTrue:` branch that also has field mutations.
+    //
+    // `scan_class_for_tier2_blocks` sees `self applyWith:ifTrue:` called from
+    // `runExample` with a literal block that has field writes, so `aBlock`
+    // (position 0) is registered as Tier 2. Inside the `ifTrue:` branch,
+    // `result := aBlock value` hits `is_tier2_value_call` → the Gensym two-hop
+    // extraction path (element(1,...) for value, element(2,...) for new state).
+    let src = concat!(
+        "Actor subclass: Applier\n",
+        "  state: count = 0\n\n",
+        "  applyWith: aBlock ifTrue: flag =>\n",
+        "    flag ifTrue: [\n",
+        "      result := aBlock value.\n",
+        "      self.count := self.count + result\n",
+        "    ].\n",
+        "    self.count\n\n",
+        "  runExample =>\n",
+        "    self applyWith: [self.count := self.count + 10] ifTrue: true\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("applier_tier2_in_cond").with_workspace_mode(true),
+    )
+    .expect("Tier 2 block value call inside ifTrue: branch with field mutation must compile");
+
+    eprintln!(
+        "Generated code for Tier 2 local-var assignment inside conditional:\n{code}"
+    );
+
+    // Tier 2 two-hop extraction: element(1, ...) for value, element(2, ...) for new state.
+    assert!(
+        code.contains("'erlang':'element'(1,"),
+        "Tier 2 path must extract the value from the {{Result, NewState}} tuple \
+         via erlang:element(1, ...). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "Tier 2 path must extract the new state from the {{Result, NewState}} tuple \
+         via erlang:element(2, ...). Got:\n{code}"
+    );
+
+    // Field mutation `self.count := self.count + result` inside the branch.
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "Field mutation inside the true branch must produce maps:put('count', ...). \
+         Got:\n{code}"
+    );
+
+    // The whole conditional must be inlined as a case expression.
+    assert!(
+        code.contains("case "),
+        "ifTrue: with field mutation must compile to an inline case expression. \
+         Got:\n{code}"
+    );
+}
