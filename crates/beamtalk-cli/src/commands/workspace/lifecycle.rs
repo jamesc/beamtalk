@@ -23,9 +23,9 @@ use super::node_state::is_node_running;
 use super::process::start_detached_node;
 use super::storage::{
     NodeInfo, WorkspaceMetadata, acquire_workspace_lock, cleanup_stale_node_info, generate_cookie,
-    generate_workspace_id, get_node_info, get_workspace_metadata, save_workspace_cookie,
-    save_workspace_metadata, validate_workspace_name, workspace_dir, workspace_exists,
-    workspace_id_for, workspaces_base_dir,
+    get_node_info, get_workspace_metadata, save_workspace_cookie, save_workspace_metadata,
+    validate_workspace_name, workspace_dir, workspace_exists, workspace_id_for,
+    workspaces_base_dir,
 };
 
 /// Inner logic for workspace creation, called under an already-held lock.
@@ -407,6 +407,6 @@ pub(crate) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<St
         let cwd = std::env::current_dir().into_diagnostic()?;
         let project_root = discovery::discover_project_root(&cwd);
         Ok(find_workspace_by_project_path(&project_root)?
-            .unwrap_or(generate_workspace_id(&project_root)?))
+            .unwrap_or(beamtalk_workspace::generate_workspace_id(&project_root)?))
     }
 }

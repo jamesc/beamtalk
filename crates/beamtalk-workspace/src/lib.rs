@@ -304,6 +304,36 @@ mod tests {
         assert!(result.is_err(), "Non-existent path should produce an error");
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_generate_workspace_id_rejects_non_utf8_path() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let tmp = std::env::temp_dir();
+        let mut invalid_bytes = b"beamtalk-workspace-test-\xff\xfe-".to_vec();
+        invalid_bytes.extend_from_slice(std::process::id().to_string().as_bytes());
+        let invalid_name = OsStr::from_bytes(&invalid_bytes);
+        let non_utf8_path = tmp.join(invalid_name);
+
+        if let Err(e) = std::fs::create_dir(&non_utf8_path) {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                eprintln!("skipping test: failed to create non-UTF8 dir {non_utf8_path:?}: {e}");
+                return;
+            }
+        }
+
+        let result = generate_workspace_id(&non_utf8_path);
+        let _ = std::fs::remove_dir(&non_utf8_path);
+
+        assert!(result.is_err(), "Non-UTF-8 path should produce an error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("invalid UTF-8"),
+            "Error should mention invalid UTF-8, got: {err}"
+        );
+    }
+
     #[test]
     fn test_workspace_dir_rejects_path_traversal() {
         assert!(workspace_dir("../etc").is_err());

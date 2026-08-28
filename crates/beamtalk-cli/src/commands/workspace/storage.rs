@@ -64,12 +64,6 @@ impl NodeInfo {
     }
 }
 
-/// Generate a workspace ID from a project path.
-/// Uses SHA256 hash of the absolute path.
-pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
-    beamtalk_workspace::generate_workspace_id(project_path)
-}
-
 /// Validate a user-provided workspace name.
 pub(super) fn validate_workspace_name(name: &str) -> Result<()> {
     if name.is_empty() {
@@ -99,7 +93,7 @@ pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Re
             validate_workspace_name(trimmed)?;
             Ok(trimmed.to_string())
         }
-        None => generate_workspace_id(project_path),
+        None => beamtalk_workspace::generate_workspace_id(project_path),
     }
 }
 
