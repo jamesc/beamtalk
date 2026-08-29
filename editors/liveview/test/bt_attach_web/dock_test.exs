@@ -1,6 +1,68 @@
 # Copyright 2026 James Casey
 # SPDX-License-Identifier: Apache-2.0
 
+defmodule BtAttachWeb.Live.DockFakeClient do
+  @moduledoc """
+  A per-test-configurable veneer over `BtAttachWeb.StubWorkspaceClient`
+  (BT-3308), used only by `BtAttachWeb.Live.DockTest`.
+
+  `BtAttachWeb.Live.Dock` has a handful of degrade-gracefully branches that
+  only fire on a workspace reply the shared stub deliberately never
+  produces — a genuine `eval` compile failure (distinct from the facade's
+  RBAC short-circuit), a `git_diff`/`git_revert_file` that fails for a real
+  reason (not just an Observer denial), and a `symbols` read that actually
+  resolves a class (the shared stub always reports an empty class index). The
+  stub is shared by the whole suite and shaped for the success path, so
+  rather than widen it with failure knobs no other test needs, this module
+  wraps it: every function delegates to the stub unless the test forced a
+  reply for that op via `Application.put_env(:bt_attach, :dock_fake, %{op =>
+  reply})`. Mirrors `BtAttachWeb.Live.InspectorFakeClient` (BT-3305), the
+  precedent this follows.
+  """
+
+  alias BtAttachWeb.StubWorkspaceClient
+
+  # The reply this test forced for `key`, or `:error` when it forced none (in
+  # which case the caller falls through to the real stub).
+  defp forced(key), do: Map.fetch(Application.get_env(:bt_attach, :dock_fake, %{}), key)
+
+  def eval(pid, code) do
+    case forced(:eval) do
+      {:ok, reply} -> reply
+      :error -> StubWorkspaceClient.eval(pid, code)
+    end
+  end
+
+  def git_diff(path) do
+    case forced(:git_diff) do
+      {:ok, reply} -> reply
+      :error -> StubWorkspaceClient.git_diff(path)
+    end
+  end
+
+  def git_revert_file(path) do
+    case forced(:git_revert_file) do
+      {:ok, reply} -> reply
+      :error -> StubWorkspaceClient.git_revert_file(path)
+    end
+  end
+
+  def symbol_index(scope) do
+    case forced(:symbol_index) do
+      {:ok, reply} -> reply
+      :error -> StubWorkspaceClient.symbol_index(scope)
+    end
+  end
+
+  # `repl_focus_class/3`'s found branch drives the System Browser's
+  # `open_class/2`, which immediately re-loads protocols + categories for the
+  # focused class — delegate straight through so a forced `symbol_index`
+  # reply doesn't also need a matching `browse_protocols`/`browse_categories`
+  # fixture.
+  defdelegate browse_protocols(class, side), to: StubWorkspaceClient
+  defdelegate browse_categories(class), to: StubWorkspaceClient
+end
+
 defmodule BtAttachWeb.Live.DockTest do
   @moduledoc """
   Direct unit tests for `BtAttachWeb.Live.Dock` (BT-3295), driving its
@@ -20,6 +82,7 @@ defmodule BtAttachWeb.Live.DockTest do
   use ExUnit.Case, async: false
 
   alias BtAttachWeb.Live.Dock
+  alias BtAttachWeb.Live.DockFakeClient
   alias BtAttachWeb.StubWorkspaceClient
 
   setup do
@@ -28,10 +91,28 @@ defmodule BtAttachWeb.Live.DockTest do
 
     on_exit(fn ->
       Application.delete_env(:bt_attach, :workspace_client)
+      Application.delete_env(:bt_attach, :dock_fake)
       StubWorkspaceClient.stop_state(2_000)
     end)
 
     :ok
+  end
+
+  # Swap the workspace client for `DockFakeClient` and force the replies in
+  # `overrides` (see that module's doc) — the degrade-gracefully branches the
+  # shared stub's success-shaped replies never reach.
+  defp force_workspace_replies(overrides) when is_map(overrides) do
+    Application.put_env(:bt_attach, :dock_fake, overrides)
+    Application.put_env(:bt_attach, :workspace_client, DockFakeClient)
+  end
+
+  # The most recently `stream_insert`-ed `:repl` entry (streams prepend, so
+  # the head of `inserts` is the latest) — lets a test assert the actual
+  # `request`/`response`/`kind` of an appended scrollback row instead of only
+  # the side-effecting assigns (`repl_seq`/`repl_terms`).
+  defp last_repl_entry(socket) do
+    {_id, _at, item, _limit} = hd(socket.assigns.streams.repl.inserts)
+    item
   end
 
   # A bare, disconnected socket carrying exactly the assigns Dock's functions
@@ -563,6 +644,301 @@ defmodule BtAttachWeb.Live.DockTest do
         Dock.handle_event("eval", %{"expr" => "Object subclass: Bar"}, socket)
 
       assert socket.assigns.result =~ "Bar"
+    end
+
+    test "a selection with no trailing offset anchors the inline result at the buffer end (ws_anchor/1 fallback)" do
+      socket = base_socket(%{ws_selection: %{text: "Object subclass: Baz", start: 0, end: nil}})
+
+      {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "ignored"}, socket)
+
+      assert [["ws_insert_result", %{anchor: nil}]] = socket.private.live_temp[:push_events]
+    end
+  end
+
+  describe "eval / flush_destructive — genuine workspace op failures (not RBAC)" do
+    test "a real eval compile failure renders render_error/1 and the captured output" do
+      force_workspace_replies(%{eval: {:error, :compile_failed, "line 1: syntax error", []}})
+
+      {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "bad code"}, base_socket())
+
+      assert socket.assigns.result == nil
+      assert socket.assigns.output == "line 1: syntax error"
+      assert socket.assigns.error =~ "compile_failed"
+    end
+
+    test "a real eval failure with no captured output leaves output blank (present/1's nil clause)" do
+      force_workspace_replies(%{eval: {:error, :boom, nil, []}})
+
+      {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "bad code"}, base_socket())
+
+      assert socket.assigns.output == nil
+      assert socket.assigns.error =~ "boom"
+    end
+
+    test "a destructive flush whose eval fails outright surfaces render_error/1" do
+      force_workspace_replies(%{eval: {:error, :compile_failed, "some output", []}})
+
+      {:noreply, socket} =
+        Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())
+
+      assert socket.assigns.flush_result == nil
+      assert socket.assigns.save_error =~ "compile_failed"
+    end
+
+    test "a destructive flush whose eval is refused (facade short-circuit shape) surfaces facade_error/1" do
+      force_workspace_replies(%{eval: {:error, :forbidden_op}})
+
+      {:noreply, socket} =
+        Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())
+
+      assert socket.assigns.flush_result == nil
+      assert socket.assigns.save_error == "Operation not permitted."
+    end
+  end
+
+  describe "flush_destructive — rename-method kind" do
+    test "a successful destructive flush of a rename-method row reports the method-rename message" do
+      {:noreply, socket} =
+        Dock.handle_event(
+          "flush_destructive",
+          %{"class" => "Foo", "kind" => "rename-method"},
+          base_socket()
+        )
+
+      assert socket.assigns.flush_result == "Flushed the pending method rename on Foo"
+    end
+  end
+
+  describe "git panel — malformed unstage/revert/commit fallbacks (not RBAC — plain params catch-alls)" do
+    test "a malformed git_unstage payload surfaces a validation error" do
+      {:noreply, socket} = Dock.handle_event("git_unstage", %{}, base_socket())
+
+      assert socket.assigns.git_error == "Invalid unstage request."
+    end
+
+    test "a malformed git_revert payload surfaces a validation error" do
+      {:noreply, socket} = Dock.handle_event("git_revert", %{}, base_socket())
+
+      assert socket.assigns.git_error == "Invalid revert request."
+    end
+
+    test "a malformed git_commit payload surfaces a validation error" do
+      {:noreply, socket} = Dock.handle_event("git_commit", %{}, base_socket())
+
+      assert socket.assigns.git_error == "Invalid commit request."
+    end
+  end
+
+  describe "git panel — genuine op failures, distinct from RBAC denial" do
+    test "git_diff surfaces a real workspace failure (git_diff's own {:error, reason} branch)" do
+      force_workspace_replies(%{git_diff: {:error, :git_unreachable}})
+
+      {:noreply, socket} = Dock.handle_event("git_diff", %{"path" => "src/Foo.bt"}, base_socket())
+
+      assert socket.assigns.git_error =~ "git_unreachable"
+    end
+
+    test "git_revert surfaces a real workspace failure, distinct from the pending-edit guard" do
+      force_workspace_replies(%{git_revert_file: {:error, :git_conflict}})
+
+      {:noreply, socket} =
+        Dock.handle_event("git_revert", %{"path" => "src/Foo.bt"}, base_socket())
+
+      assert socket.assigns.git_error =~ "git_conflict"
+    end
+
+    test "a pending-edit row recorded with a non-binary source_file never blocks a revert (paths_match?/2 fallback)" do
+      socket =
+        base_socket(%{
+          changes: [%{class: "Foo", selector: "bar"}],
+          browser_classes: [%{"name" => "Foo", "source_file" => nil}]
+        })
+
+      {:noreply, socket} = Dock.handle_event("git_revert", %{"path" => "src/Foo.bt"}, socket)
+
+      # `paths_match?(nil, "src/Foo.bt")` falls to its non-binary fallback
+      # clause (`false`), so the row never matches the reverted path and the
+      # unflushed-edits guard never blocks — the revert proceeds to its
+      # ordinary success path instead (a clean revert clears `git_error`).
+      assert socket.assigns.git_error == nil
+    end
+  end
+
+  describe "handle_async(:git_load, …) — status/log read failures" do
+    test "a status-read failure surfaces its own reason and is not overwritten by a subsequent log failure" do
+      {:noreply, socket} =
+        Dock.handle_async(
+          :git_load,
+          {:ok, {{:error, :status_down}, {:error, :log_down}}},
+          base_socket()
+        )
+
+      assert socket.assigns.git_status == nil
+      assert socket.assigns.git_log == []
+      # `log_failed/2`'s `do: socket` branch: the status error (surfaced
+      # first) is not clobbered by the log read's own failure.
+      assert socket.assigns.git_error =~ "status_down"
+      refute socket.assigns.git_error =~ "log_down"
+    end
+
+    test "an unrecognised log-read shape degrades to the unexpected_git_log fallback" do
+      status = %{branch: "main", upstream: nil, ahead: 0, behind: 0, files: []}
+
+      {:noreply, socket} =
+        Dock.handle_async(
+          :git_load,
+          {:ok, {{:ok, status}, :not_a_recognised_shape}},
+          base_socket()
+        )
+
+      assert socket.assigns.git_log == []
+      assert socket.assigns.git_error =~ "unexpected_git_log"
+    end
+  end
+
+  describe "revert / flush — RBAC-denied (genuinely role-gated, unlike the git-panel catch-alls)" do
+    test "an Observer's revert is refused by the facade" do
+      {:noreply, socket} =
+        Dock.handle_event(
+          "revert",
+          %{"class" => "Foo", "selector" => "bar"},
+          base_socket(%{role: :observer})
+        )
+
+      assert socket.assigns.save_error =~ "Not authorized"
+    end
+
+    test "an Observer's flush is refused by the facade" do
+      {:noreply, socket} = Dock.handle_event("flush", %{}, base_socket(%{role: :observer}))
+
+      assert socket.assigns.flush_result == nil
+      assert socket.assigns.flush_error =~ "Not authorized"
+    end
+  end
+
+  describe "toggle_change_diff — malformed payload fallback" do
+    test "a malformed toggle_change_diff payload is a no-op, not a crash" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} = Dock.handle_event("toggle_change_diff", %{}, socket)
+    end
+  end
+
+  describe "repl_eval — the attach-failure-window clause's own guards and fallback" do
+    test "no session + a blank expr is a no-op (never appends, even without :repl_history assigns wired up)" do
+      socket = base_socket(%{session_pid: nil})
+
+      assert {:noreply, ^socket} = Dock.handle_event("repl_eval", %{"expr" => "   "}, socket)
+    end
+
+    test "no session + a non-blank expr reports 'not attached' and still records history" do
+      socket = base_socket(%{session_pid: nil})
+
+      {:noreply, socket} = Dock.handle_event("repl_eval", %{"expr" => "1 + 1"}, socket)
+
+      assert socket.assigns.repl_seq == 1
+      assert socket.assigns.repl_history == ["1 + 1"]
+      assert last_repl_entry(socket).response == "not attached to workspace"
+    end
+
+    test "a repl_eval event with no expr param at all is a no-op" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} = Dock.handle_event("repl_eval", %{}, socket)
+    end
+
+    test "an RBAC-denied repl eval renders the facade's short-circuit error (facade_error branch)" do
+      {:noreply, socket} =
+        Dock.handle_event("repl_eval", %{"expr" => "1 + 1"}, base_socket(%{role: :observer}))
+
+      entry = last_repl_entry(socket)
+      assert entry.kind == :error
+      assert entry.response =~ "Not authorized"
+    end
+  end
+
+  describe "repl_eval — meta-command dispatch table" do
+    test "each point-style meta-command resolves to its own clause and appends an :info entry" do
+      for cmd <- [":bindings", ":dirty", ":flush", ":sync", ":clear", ":show-codegen", ":quit"] do
+        {:noreply, socket} = Dock.handle_event("repl_eval", %{"expr" => cmd}, base_socket())
+
+        entry = last_repl_entry(socket)
+        assert entry.kind == :info, "#{cmd} did not append an :info entry"
+        assert entry.request == cmd
+      end
+    end
+
+    test "an unrecognised meta-command falls to the :unknown clause" do
+      {:noreply, socket} = Dock.handle_event("repl_eval", %{"expr" => ":wat"}, base_socket())
+
+      entry = last_repl_entry(socket)
+      assert entry.kind == :info
+      assert entry.response =~ "Unknown command :wat"
+    end
+
+    test "a meta-command argument stripped down to nothing (all-# arg) parses to no class (meta_arg/1's \"\" clause)" do
+      {:noreply, socket} = Dock.handle_event("repl_eval", %{"expr" => ":help ###"}, base_socket())
+
+      # No argument survived stripping, so this is the same as bare `:help` —
+      # the general help text, not a class lookup.
+      entry = last_repl_entry(socket)
+      assert entry.response =~ "IDE REPL"
+    end
+
+    test "`:help <Class>` on an unknown class reports it wasn't found" do
+      {:noreply, socket} =
+        Dock.handle_event("repl_eval", %{"expr" => ":help Bogus"}, base_socket())
+
+      entry = last_repl_entry(socket)
+      assert entry.response =~ "No class named Bogus"
+    end
+
+    test "`:help <Class>` on a class the live symbol index resolves focuses the System Browser" do
+      force_workspace_replies(%{symbol_index: {:value, %{"classes" => [%{"name" => "Counter"}]}}})
+
+      socket = base_socket(%{browser_side: "instance"})
+      {:noreply, socket} = Dock.handle_event("repl_eval", %{"expr" => ":help Counter"}, socket)
+
+      assert socket.assigns.selected_class == "Counter"
+      entry = last_repl_entry(socket)
+      assert entry.response =~ "Opened Counter in the System Browser"
+    end
+
+    test "a successful eval of a `Beamtalk help: Class` send also focuses the System Browser" do
+      socket = base_socket(%{browser_side: "instance"})
+
+      {:noreply, socket} =
+        Dock.handle_event("repl_eval", %{"expr" => "Beamtalk help: #Counter"}, socket)
+
+      assert socket.assigns.selected_class == "Counter"
+    end
+  end
+
+  describe "dock_tab tests — re-opening keeps an already-loaded catalogue" do
+    test "re-opening the Tests tab with a catalogue already loaded does not clobber it (ensure_test_classes/1 else clause)" do
+      loaded = [%{"class" => "AlreadyLoaded", "selectors" => []}]
+      socket = base_socket(%{test_classes: loaded})
+
+      {:noreply, socket} = Dock.handle_event("dock_tab", %{"tab" => "tests"}, socket)
+
+      assert socket.assigns.dock_tab == "tests"
+      assert socket.assigns.test_classes == loaded
+    end
+  end
+
+  describe "Dock.repl_preview/1 (public, template-facing)" do
+    test "a short single-line response is shown verbatim" do
+      assert Dock.repl_preview("42") == "42"
+    end
+
+    test "a long single-line response is truncated with an ellipsis" do
+      long = String.duplicate("a", 100)
+
+      assert Dock.repl_preview(long) == String.slice(long, 0, 80) <> "…"
+    end
+
+    test "a short first line of a multi-line response gets its own ellipsis marker" do
+      assert Dock.repl_preview("first\nsecond") == "first …"
     end
   end
 
