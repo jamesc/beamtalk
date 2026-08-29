@@ -23,7 +23,7 @@
 /// - `"firstName"` → `"withFirstName:"`
 /// - `""` → `"with:"`
 #[must_use]
-pub(crate) fn with_star_selector(field_name: &str) -> String {
+pub fn with_star_selector(field_name: &str) -> String {
     let mut chars = field_name.chars();
     match chars.next() {
         None => "with:".to_string(),
@@ -40,9 +40,7 @@ pub(crate) fn with_star_selector(field_name: &str) -> String {
 /// An empty slot list yields the empty string; callers should treat a class
 /// with no slots as having no keyword constructor.
 #[must_use]
-pub(crate) fn keyword_constructor_selector<'a>(
-    slot_names: impl IntoIterator<Item = &'a str>,
-) -> String {
+pub fn keyword_constructor_selector<'a>(slot_names: impl IntoIterator<Item = &'a str>) -> String {
     let mut sel = String::new();
     for name in slot_names {
         sel.push_str(name);

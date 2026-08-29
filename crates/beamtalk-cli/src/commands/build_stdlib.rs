@@ -703,16 +703,7 @@ fn synthesize_value_auto_methods(
         }
 
         // Auto functional updater: `withFieldName:` → Self type
-        let with_sel = {
-            let mut chars = slot_name.chars();
-            match chars.next() {
-                None => "with:".to_string(),
-                Some(first) => {
-                    let cap: String = first.to_uppercase().collect();
-                    format!("with{}{}:", cap, chars.as_str())
-                }
-            }
-        };
+        let with_sel = beamtalk_core::synthetic_selectors::with_star_selector(slot_name);
         if !user_selectors.contains(&with_sel) {
             let param_type = slot.type_annotation.as_ref().map(DeclaredType::from);
             let setter_doc = format!(
@@ -733,11 +724,9 @@ fn synthesize_value_auto_methods(
     }
 
     // Auto keyword constructor on the class side: `field1:field2:...`
-    let kw_sel: String = class.state.iter().fold(String::new(), |mut acc, s| {
-        acc.push_str(s.name.name.as_str());
-        acc.push(':');
-        acc
-    });
+    let kw_sel: String = beamtalk_core::synthetic_selectors::keyword_constructor_selector(
+        class.state.iter().map(|s| s.name.name.as_str()),
+    );
     if !user_class_selectors.contains(&kw_sel) {
         let arity = class.state.len();
         let param_types = class
