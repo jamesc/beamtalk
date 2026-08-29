@@ -53,11 +53,14 @@ defmodule BtAttachWeb.Live.Dock do
   calls `BtAttachWeb.Live.MethodEditor`'s tab-refresh helpers (extracted
   BT-3296) directly, `BtAttachWeb.Live.SystemBrowser`'s `open_class/2`
   (extracted BT-3297) focuses the System Browser on a class from the REPL
-  `:help` meta-command, and the top-bar omni search's `symbol_rows/1` and the
-  Tests pane's `discover_test_classes/1` are still `WorkspaceLive`-owned —
-  this module calls those public functions rather than duplicating their
-  logic, exactly the temporary cross-call shape a sequential decomposition
-  produces.
+  `:help` meta-command, the Tests pane's `discover_test_classes/1` (extracted
+  BT-3298, `BtAttachWeb.Live.TestRunner`) backs the `dock_tab`/`:test` lazy
+  first-open, and `flush_destructive/3`'s class-name check reuses
+  `BtAttachWeb.Live.ClassModals.valid_class_name?/1` (also BT-3298) — this
+  module calls those public functions rather than duplicating their logic,
+  exactly the temporary cross-call shape a sequential decomposition
+  produces. The top-bar omni search's `symbol_rows/1` is still
+  `WorkspaceLive`-owned.
   """
 
   use BtAttachWeb, :html
@@ -74,11 +77,13 @@ defmodule BtAttachWeb.Live.Dock do
 
   alias BtAttach.Facade
   alias BtAttach.Workspace
+  alias BtAttachWeb.Live.ClassModals
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.Inspector
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
   alias BtAttachWeb.Live.SystemBrowser
+  alias BtAttachWeb.Live.TestRunner
   alias BtAttachWeb.WorkspaceLive
 
   defp ctx(socket), do: RequestContext.build(socket)
@@ -1069,16 +1074,16 @@ defmodule BtAttachWeb.Live.Dock do
   # load the test catalogue on first open — the Tests pane's own events
   # (`tests_refresh`/`run_tests`/`load_tests`/`run_test_class`/
   # `open_test_method`) are NOT part of this extraction (BT-3295's "Events to
-  # move" list) and stay on `WorkspaceLive`, so the actual discovery RPC
-  # (`WorkspaceLive.discover_test_classes/1`) stays there too — this is a
-  # thin call-through, not a reimplementation.
+  # move" list); they belong to `BtAttachWeb.Live.TestRunner` (extracted
+  # BT-3298), so the actual discovery RPC (`TestRunner.discover_test_classes/1`)
+  # lives there too — this is a thin call-through, not a reimplementation.
 
   # Load the test catalogue once (lazy first open of the Tests tab).
   # Re-opening the tab keeps the already-loaded list — use `tests_refresh` to
   # re-discover.
   defp ensure_test_classes(socket) do
     if is_nil(socket.assigns.test_classes),
-      do: WorkspaceLive.discover_test_classes(socket),
+      do: TestRunner.discover_test_classes(socket),
       else: socket
   end
 
@@ -1392,11 +1397,11 @@ defmodule BtAttachWeb.Live.Dock do
   # `class` rides a `phx-value-*` attribute, so — unlike `remove_class`'s
   # `class` (read from server-tracked active-tab state) — it is
   # client-controlled input reaching a raw, textually-interpolated Beamtalk
-  # expression: validated against `WorkspaceLive.valid_class_name?/1`, the
+  # expression: validated against `ClassModals.valid_class_name?/1`, the
   # same bare-PascalCase-identifier shape the New Class modal enforces, so a
   # crafted event cannot inject arbitrary source into the `evaluate` call.
   defp flush_destructive(socket, class, kind) do
-    if WorkspaceLive.valid_class_name?(class) do
+    if ClassModals.valid_class_name?(class) do
       expr = "Workspace flush: ##{class} confirmDestructive: true"
       pid = socket.assigns[:session_pid]
 
