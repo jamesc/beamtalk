@@ -1530,8 +1530,13 @@ derive_new_path(OldPath, OldClassBin, NewClassBin) ->
     % strings), breaking `sourceFile` equality checks on Windows.
     NewPath =
         case Dir of
-            "." -> NewStem ++ ".bt";
-            _ -> Dir ++ "/" ++ NewStem ++ ".bt"
+            "." ->
+                NewStem ++ ".bt";
+            _ ->
+                case lists:suffix("/", Dir) of
+                    true -> Dir ++ NewStem ++ ".bt";
+                    false -> Dir ++ "/" ++ NewStem ++ ".bt"
+                end
         end,
     list_to_binary(NewPath).
 
