@@ -16,43 +16,17 @@ defmodule BtAttachWeb.Live.DockFakeClient do
   rather than widen it with failure knobs no other test needs, this module
   wraps it: every function delegates to the stub unless the test forced a
   reply for that op via `Application.put_env(:bt_attach, :dock_fake, %{op =>
-  reply})`. Mirrors `BtAttachWeb.Live.InspectorFakeClient` (BT-3305), the
-  precedent this follows.
+  reply})`. Shares its `forced/1` + per-op wrapping mechanics with
+  `BtAttachWeb.Live.InspectorFakeClient` (BT-3305) via the
+  `BtAttachWeb.ForcedReplyClient` macro (BT-3316).
   """
 
-  alias BtAttachWeb.StubWorkspaceClient
+  use BtAttachWeb.ForcedReplyClient, key: :dock_fake
 
-  # The reply this test forced for `key`, or `:error` when it forced none (in
-  # which case the caller falls through to the real stub).
-  defp forced(key), do: Map.fetch(Application.get_env(:bt_attach, :dock_fake, %{}), key)
-
-  def eval(pid, code) do
-    case forced(:eval) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.eval(pid, code)
-    end
-  end
-
-  def git_diff(path) do
-    case forced(:git_diff) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.git_diff(path)
-    end
-  end
-
-  def git_revert_file(path) do
-    case forced(:git_revert_file) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.git_revert_file(path)
-    end
-  end
-
-  def symbol_index(scope) do
-    case forced(:symbol_index) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.symbol_index(scope)
-    end
-  end
+  forceable(eval(pid, code))
+  forceable(git_diff(path))
+  forceable(git_revert_file(path))
+  forceable(symbol_index(scope))
 
   # `repl_focus_class/3`'s found branch drives the System Browser's
   # `open_class/2`, which immediately re-loads protocols + categories for the

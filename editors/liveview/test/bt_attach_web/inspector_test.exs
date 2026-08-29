@@ -14,44 +14,18 @@ defmodule BtAttachWeb.Live.InspectorFakeClient do
   stub is shared by the whole suite and its per-class seeding helpers
   (`seed_inspect_value/2`, `seed_pid_stats/2`) are shaped for the success path,
   so rather than widen it with failure knobs no other test needs, this module
-  wraps it: every function delegates to the stub unless the test forced a reply
-  for that op via `Application.put_env(:bt_attach, :inspector_fake, %{op =>
-  reply})`.
+  wraps it — mechanics shared with `BtAttachWeb.Live.DockFakeClient` via the
+  `BtAttachWeb.ForcedReplyClient` macro (BT-3316) — every function delegates
+  to the stub unless the test forced a reply for that op via
+  `Application.put_env(:bt_attach, :inspector_fake, %{op => reply})`.
   """
 
-  alias BtAttachWeb.StubWorkspaceClient
+  use BtAttachWeb.ForcedReplyClient, key: :inspector_fake
 
-  # The reply this test forced for `key`, or `:error` when it forced none (in
-  # which case the caller falls through to the real stub).
-  defp forced(key), do: Map.fetch(Application.get_env(:bt_attach, :inspector_fake, %{}), key)
-
-  def inspect_value(term) do
-    case forced(:inspect_value) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.inspect_value(term)
-    end
-  end
-
-  def pid_stats(term) do
-    case forced(:pid_stats) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.pid_stats(term)
-    end
-  end
-
-  def eval(pid, code) do
-    case forced(:eval) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.eval(pid, code)
-    end
-  end
-
-  def subscribe_object_changes(term, pid) do
-    case forced(:subscribe_object_changes) do
-      {:ok, reply} -> reply
-      :error -> StubWorkspaceClient.subscribe_object_changes(term, pid)
-    end
-  end
+  forceable(inspect_value(term))
+  forceable(pid_stats(term))
+  forceable(eval(pid, code))
+  forceable(subscribe_object_changes(term, pid))
 
   defdelegate unsubscribe_object_changes(term, pid), to: StubWorkspaceClient
   defdelegate list_bindings(pid), to: StubWorkspaceClient
