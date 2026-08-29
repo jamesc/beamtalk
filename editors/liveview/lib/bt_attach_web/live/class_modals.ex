@@ -74,7 +74,6 @@ defmodule BtAttachWeb.Live.ClassModals do
   use BtAttachWeb, :html
 
   alias BtAttach.Facade
-  alias BtAttach.Workspace
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
@@ -313,11 +312,11 @@ defmodule BtAttachWeb.Live.ClassModals do
         )
         |> WorkspaceLive.assign_changes()
 
-      {:error, reason, _output, _warnings} ->
-        WorkspaceLive.status_error(socket, Workspace.render_error(reason))
+      {:error, _, _, _} = err ->
+        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-      {:error, reason} ->
-        WorkspaceLive.status_error(socket, FacadeError.render(reason))
+      {:error, _} = err ->
+        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
     end
   end
 
@@ -377,11 +376,11 @@ defmodule BtAttachWeb.Live.ClassModals do
         )
         |> WorkspaceLive.assign_changes()
 
-      {:error, reason, _output, _warnings} ->
-        WorkspaceLive.status_error(socket, Workspace.render_error(reason))
+      {:error, _, _, _} = err ->
+        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-      {:error, reason} ->
-        WorkspaceLive.status_error(socket, FacadeError.render(reason))
+      {:error, _} = err ->
+        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
     end
   end
 
@@ -561,18 +560,18 @@ defmodule BtAttachWeb.Live.ClassModals do
           flush_error: nil
         )
 
-      {:error, reason, _output, _warnings} ->
+      {:error, _, _, _} = err ->
         assign(socket,
           rename_open: true,
           rename_new_name: new_name,
-          rename_error: Workspace.render_error(reason)
+          rename_error: FacadeError.render_eval_error(err)
         )
 
-      {:error, reason} ->
+      {:error, _} = err ->
         assign(socket,
           rename_open: true,
           rename_new_name: new_name,
-          rename_error: FacadeError.render(reason)
+          rename_error: FacadeError.render_eval_error(err)
         )
     end
   end
@@ -667,18 +666,18 @@ defmodule BtAttachWeb.Live.ClassModals do
         )
         |> WorkspaceLive.assign_changes()
 
-      {:error, reason, _output, _warnings} ->
+      {:error, _, _, _} = err ->
         assign(socket,
           rename_open: true,
           rename_new_name: new_selector,
-          rename_error: Workspace.render_error(reason)
+          rename_error: FacadeError.render_eval_error(err)
         )
 
-      {:error, reason} ->
+      {:error, _} = err ->
         assign(socket,
           rename_open: true,
           rename_new_name: new_selector,
-          rename_error: FacadeError.render(reason)
+          rename_error: FacadeError.render_eval_error(err)
         )
     end
   end

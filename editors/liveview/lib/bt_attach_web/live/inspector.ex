@@ -1193,11 +1193,11 @@ defmodule BtAttachWeb.Live.Inspector do
             w
         end
 
-      {:error, reason, _output, _warnings} ->
-        %{w | poke_result: nil, poke_error: Workspace.render_error(reason)}
+      {:error, _, _, _} = err ->
+        %{w | poke_result: nil, poke_error: FacadeError.render_eval_error(err)}
 
-      {:error, reason} ->
-        %{w | poke_result: nil, poke_error: FacadeError.render(reason)}
+      {:error, _} = err ->
+        %{w | poke_result: nil, poke_error: FacadeError.render_eval_error(err)}
     end
   end
 
@@ -1415,11 +1415,11 @@ defmodule BtAttachWeb.Live.Inspector do
         # watched.
         |> refresh_poked_inspector()
 
-      {:error, reason, _output, _warnings} ->
-        assign(socket, poke_result: nil, poke_error: Workspace.render_error(reason))
+      {:error, _, _, _} = err ->
+        assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
 
-      {:error, reason} ->
-        assign(socket, poke_result: nil, poke_error: FacadeError.render(reason))
+      {:error, _} = err ->
+        assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
     end
   end
 
