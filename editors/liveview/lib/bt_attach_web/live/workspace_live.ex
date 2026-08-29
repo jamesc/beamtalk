@@ -244,12 +244,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   alias BtAttach.SessionRegistry
   alias BtAttach.Workspace
   alias BtAttachWeb.ClassTree
+  alias BtAttachWeb.Live.ClassModals
   alias BtAttachWeb.Live.Dock
-  alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.Inspector
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
   alias BtAttachWeb.Live.SystemBrowser
+  alias BtAttachWeb.Live.TestRunner
 
   # All RBAC-relevant workspace ops go through the curated facade (ADR 0091
   # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
@@ -444,8 +445,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:tests_running, false)
       # BT-2599: a transient flag for the off-socket `:test_discover` catalogue
       # discovery — true only while a partial-load re-discovery is in flight so
-      # `handle_async(:test_discover, …)` keeps the partial-load `tests_error`
-      # banner across a successful re-discovery (see `apply_test_classes/3`).
+      # `TestRunner.handle_async(:test_discover, …)` keeps the partial-load
+      # `tests_error` banner across a successful re-discovery (see
+      # `TestRunner`'s `apply_test_classes/3`).
       |> assign(:tests_discover_keep_error, false)
       # REPL tab (BT-2543): a classic TUI request→response scrollback with the
       # input pinned at the bottom. `:repl` is the scrollback stream (so long
@@ -804,59 +806,37 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp force_close(_token, _pid), do: :ok
 
-  # ── Test-runner pane (BT-2557) ───────────────────────────────────────────────
-  #
-  # The GUI equivalent of a Smalltalk Test Runner: a dock tab that lists the live
-  # image's `TestCase` subclasses, runs all or a selected class through the
-  # attached session (never a shelled-out `beamtalk test`), and shows per-case
-  # pass/fail with failure detail — with an affordance to open a failing method
-  # in the method editor. Discovery is a `:read` op (the Observer may browse the
-  # catalogue); running tests is `:execute` (Owner-only, it evaluates code), so
-  # the run controls are owner-gated in the template, mirroring the eval form.
+  # Test Runner pane events (BT-2557/BT-2597/BT-2599, epic BT-3290): test
+  # catalogue discovery, running all/one TestCase subclass, loading the
+  # project's test/ files, opening a failing test method, and the
+  # cross-pane `dismiss_notice` utility all delegate to
+  # `BtAttachWeb.Live.TestRunner`, extracted out of this module (BT-3298) so
+  # its `handle_event/3`/`handle_async/3` clauses are directly unit-testable.
+  # See that module's docs for the full per-event behaviour (each clause used
+  # to run here). Reads its event list from `__test_runner_events__/0` —
+  # mirroring the BT-3301 fix that keeps this list from becoming a second,
+  # hand-maintained copy of the event names.
+  @test_runner_events TestRunner.__test_runner_events__()
 
-  # Re-discover the test catalogue (the "refresh" affordance). The discovery is a
-  # `:read` reflection op, but it is still a blocking workspace RPC — so it runs
-  # off-socket via `discover_test_classes/1` (`:test_discover` `start_async`,
-  # BT-2599) rather than stalling the LiveView process against a slow node. We
-  # reset `test_classes` to the nil sentinel so the pane shows its "discovering"
-  # state (not the misleading "No TestCase subclasses" empty-state) until the
-  # `handle_async(:test_discover, …)` fold resolves.
   @impl true
-  def handle_event("tests_refresh", _params, socket) do
-    {:noreply, socket |> assign(:test_classes, nil) |> discover_test_classes()}
+  def handle_event(event, params, socket) when event in @test_runner_events do
+    TestRunner.handle_event(event, params, socket)
   end
 
-  # Run every loaded TestCase subclass (`test-all`).
-  def handle_event("run_tests", _params, socket) do
-    {:noreply, run_tests(socket, nil)}
-  end
+  # New Class / Rename modals + Remove Method / Remove Class (BT-2293/BT-2645,
+  # ADR 0112 Phase 4 BT-3189, ADR 0113 Phase 4 BT-3210, ADR 0114 Phase 5
+  # BT-3277) all delegate to `BtAttachWeb.Live.ClassModals`, extracted out of
+  # this module (BT-3298, epic BT-3290) so its `handle_event/3` clauses are
+  # directly unit-testable. See that module's docs for the full per-event
+  # behaviour (each clause used to run here). Reads its event list from
+  # `__class_modals_events__/0` — mirroring the BT-3301 fix that keeps this
+  # list from becoming a second, hand-maintained copy of the event names.
+  @class_modals_events ClassModals.__class_modals_events__()
 
-  # Load the project's test/ files into the live image, then re-discover the
-  # catalogue (`load_tests`, `:execute` — Owner-only). A freshly-opened project
-  # holds only src/ classes, so without this the catalogue is empty (BT-2557).
-  def handle_event("load_tests", _params, socket) do
-    {:noreply, load_tests(socket)}
+  @impl true
+  def handle_event(event, params, socket) when event in @class_modals_events do
+    ClassModals.handle_event(event, params, socket)
   end
-
-  # Run a single selected test class (`test`, `class` = the row's class).
-  def handle_event("run_test_class", %{"class" => class}, socket) when is_binary(class) do
-    {:noreply, run_tests(socket, class)}
-  end
-
-  # Open a (failing) test method in the method editor. Test selectors are
-  # instance-side, so the side is always "instance"; reuses the System Browser's
-  # method-tab opener (BT-2491) so the test runner and browser share one editor.
-  def handle_event("open_test_method", %{"class" => class, "selector" => selector}, socket)
-      when is_binary(class) and is_binary(selector) do
-    {:noreply, MethodEditor.open_method_tab(socket, class, "instance", selector)}
-  end
-
-  # Fallback clauses for the guarded test handlers: a crafted WebSocket message
-  # with a missing / non-binary `class`/`selector` must be ignored, not crash the
-  # socket on a FunctionClauseError before RBAC is reached (matching `save_method`,
-  # `revert`, `browser_select_class`, etc.).
-  def handle_event("run_test_class", _params, socket), do: {:noreply, socket}
-  def handle_event("open_test_method", _params, socket), do: {:noreply, socket}
 
   # Workspace dock events (BT-3295, epic BT-3290): the eval/Workspace tab,
   # REPL tab, Transcript tab (push-only, no events), and Changes/Git tabs all
@@ -958,89 +938,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # ── method editor (Wave 3, write-surface ADR 0082) ──────────────────────────
-
-  # Remove the active method tab's method from its class (ADR 0112 Phase 4,
-  # BT-3189). Wired the same way Save is: an owner-only editor action that
-  # drives a write-surface primitive and refreshes the Changes pane. Unlike
-  # `save_method`, there is no dedicated workspace-side op — this just builds
-  # `Class removeSelector: #selector` (or `Class class removeSelector:
-  # #selector` for a class-side tab) and submits it through the existing
-  # `evaluate` op, exactly like the REPL `:remove-method` meta-command, the
-  # MCP `remove_method` tool, and the LSP `beamtalk.removeMethod` command
-  # (ADR 0112's "Beamtalk-level surface to add" — no new dispatcher op).
-  def handle_event("remove_method", _params, %{assigns: %{role: :owner}} = socket) do
-    {:noreply, remove_active_method(socket)}
-  end
-
-  # Non-owner (Observer) or a crafted event with no matching role: a no-op —
-  # the button is rendered only for `:owner`, mirroring `new_method` above.
-  def handle_event("remove_method", _params, socket), do: {:noreply, socket}
-
-  # Remove the active class-definition tab's class from the running system
-  # (ADR 0113 Phase 4, BT-3210). Wired the same way "Remove Method" is above
-  # (ADR 0112 Phase 4, BT-3189): an owner-only editor action, `data-confirm`
-  # -gated in the template, that drives a write-surface primitive and
-  # refreshes the Changes pane. There is no dedicated workspace-side op —
-  # this just builds `Class removeFromSystem` and submits it through the
-  # existing `evaluate` op, exactly like the REPL `:remove-class` meta-
-  # command and the MCP `remove_class` tool (ADR 0113's "Surface" table).
   #
-  # This is the memory-mutating gesture only, matching `autoflush: true`'s
-  # existing "the memory step is not gated" behaviour for ordinary patches
-  # (ADR 0113 Surface, browser row) — the resulting `remove-class` entry
-  # does NOT get silently written to disk by autoflush; it renders in the
-  # Changes pane with a distinct destructive-dirty affordance requiring its
-  # own explicit "Delete file" click (`confirmDestructive: true`) to reach
-  # disk. Two gestures for two genuinely separate decisions, same shape as
-  # the REPL's two independently-confirmed `:remove-class` / `:flush-
-  # destructive` commands.
-  def handle_event("remove_class", _params, %{assigns: %{role: :owner}} = socket) do
-    {:noreply, remove_active_class(socket)}
-  end
-
-  # Non-owner (Observer) or a crafted event with no matching role: a no-op —
-  # the button is rendered only for `:owner`, mirroring `remove_method` above.
-  def handle_event("remove_class", _params, socket), do: {:noreply, socket}
-
-  # Open the Rename modal for the active tab (ADR 0114 Phase 5, BT-3277): a
-  # `:def` tab renames its class (`renameTo:`), an existing `:method` tab
-  # renames its selector (`renameSelector:to:`). Mirrors `remove_class`/
-  # `remove_method` above in reading the target from the active tab rather
-  # than trusting client-supplied params, but — unlike those, which act
-  # immediately — this only opens the modal; the actual rename waits for
-  # `rename_submit` once the owner has typed the new name.
-  def handle_event("open_rename", _params, %{assigns: %{role: :owner}} = socket) do
-    {:noreply, open_rename(socket)}
-  end
-
-  # Non-owner (Observer) or a crafted event with no matching role: a no-op —
-  # the buttons opening this modal are rendered only for `:owner`.
-  def handle_event("open_rename", _params, socket), do: {:noreply, socket}
-
-  # Dismiss the Rename modal without renaming anything — mirrors
-  # `close_new_class` (Escape / click-away / the modal's own × button all
-  # route here).
-  def handle_event("close_rename", _params, socket) do
-    {:noreply, assign(socket, rename_open: false, rename_error: nil)}
-  end
-
-  # Submit the Rename modal's new name (ADR 0114 Phase 5, BT-3277). Dispatches
-  # to `renameTo:` or `renameSelector:to:` depending on which kind of rename
-  # was opened; a rejected submit re-renders the modal with the in-flight
-  # value and an inline error, mirroring `new_class`'s validation-failure
-  # shape.
-  def handle_event(
-        "rename_submit",
-        %{"new_name" => new_name},
-        %{assigns: %{role: :owner}} = socket
-      )
-      when is_binary(new_name) do
-    {:noreply, submit_rename(socket, new_name)}
-  end
-
-  # Non-owner (Observer) or a crafted event with a missing/non-binary name: a
-  # no-op — the form is rendered only for `:owner` while the modal is open.
-  def handle_event("rename_submit", _params, socket), do: {:noreply, socket}
+  # `remove_method`/`remove_class`/`open_rename`/`close_rename`/`rename_submit`
+  # (ADR 0112 Phase 4 BT-3189, ADR 0113 Phase 4 BT-3210, ADR 0114 Phase 5
+  # BT-3277) all delegate to `BtAttachWeb.Live.ClassModals` (BT-3298, epic
+  # BT-3290) — see the `@class_modals_events` guard clause above.
 
   # ── tabbed method editor (BT-2494, epic BT-2482 Phase 2) ────────────────────
   #
@@ -1054,73 +956,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `browser_open_native_module`/`browser_jump_native` all delegate to
   # `BtAttachWeb.Live.SystemBrowser` (BT-3297, epic BT-3290) — see the
   # `@system_browser_events` guard clause above.
-
-  # Open a blank "new method" tab for the *selected* class (the System Browser's
-  # "new method" entry). A new-method tab is a `:method` tab with no selector yet —
-  # the only editor surface that still shows a selector input (the breadcrumb can't
-  # name a selector that doesn't exist), so the author types the selector + body.
-  # The starter tab used to fill this role on startup; it now opens on demand only.
-  def handle_event("new_method", %{"class" => class}, %{assigns: %{role: :owner}} = socket)
-      when is_binary(class) and class != "" do
-    # Author on whichever side the browser is showing (instance/class), so "new
-    # method" while viewing the class side opens a class-side tab.
-    {:noreply, MethodEditor.open_new_method(socket, class, socket.assigns.browser_side)}
-  end
-
-  # Non-owner (Observer) or malformed payload: a no-op. Authoring is owner-only —
-  # the entry is rendered only for `:owner`, and a crafted event from a read-only
-  # role must not even open a (non-savable) scratch tab in their strip.
-  def handle_event("new_method", _params, socket), do: {:noreply, socket}
-
-  # Toggle the System Browser's "New Class" modal open/closed (BT-2293, BT-2645).
-  # Closed by default; the ＋ button in the browser head flips it. Opening the
-  # modal resets the field values + clears any stale in-modal validation error
-  # from a prior attempt so the owner gets a clean slate (the superclass defaults
-  # back to `Object`).
-  def handle_event("toggle_new_class", _params, socket) do
-    opening? = !socket.assigns.new_class_open
-
-    socket =
-      if opening? do
-        assign(socket,
-          new_class_open: true,
-          new_class_error: nil,
-          new_class_name: "",
-          new_class_super: "Object"
-        )
-      else
-        assign(socket, new_class_open: false, new_class_error: nil)
-      end
-
-    {:noreply, socket}
-  end
-
-  # Close the New Class modal (Esc / close button / scrim click), discarding the
-  # in-flight fields without creating anything (BT-2645).
-  def handle_event("close_new_class", _params, socket) do
-    {:noreply, assign(socket, new_class_open: false, new_class_error: nil)}
-  end
-
-  # Create a brand-new class from the New Class modal's name + superclass fields
-  # (ADR 0082 Phase 5 `Workspace newClass:at:`, BT-2293, BT-2645). The owner types
-  # a plain PascalCase class name and picks a superclass (default `Object`); the
-  # `<Superclass> subclass: <Name>` definition is synthesized server-side — the
-  # user never types `subclass:`. The target `.bt` path is derived from the class
-  # name (`Greeter` → `src/Greeter.bt`); the user thinks in classes, not files. A
-  # successful create logs a durable `new-class` ChangeLog entry (written to disk
-  # later on flush), appears in the Changes pane, and opens + selects the new class.
-  def handle_event("new_class", %{"name" => name} = params, socket)
-      when is_binary(name) do
-    superclass = Map.get(params, "superclass", "Object")
-    superclass = if is_binary(superclass), do: superclass, else: "Object"
-    {:noreply, new_class(socket, name, superclass)}
-  end
-
-  # Malformed payload (missing key / non-binary value): surface an in-modal
-  # validation error rather than letting a crafted event crash the LiveView.
-  def handle_event("new_class", _params, socket) do
-    {:noreply, assign(socket, new_class_error: "Invalid new-class form payload.")}
-  end
+  #
+  # `new_method`/`toggle_new_class`/`close_new_class`/`new_class` (BT-2293,
+  # BT-2645) all delegate to `BtAttachWeb.Live.ClassModals` (BT-3298, epic
+  # BT-3290) — see the `@class_modals_events` guard clause above.
 
   # ── omni search (BT-2495, epic BT-2482 Phase 3) ─────────────────────────────
 
@@ -1179,21 +1018,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # all delegate to `BtAttachWeb.Live.SystemBrowser` (BT-3297, epic BT-3290) —
   # see the `@system_browser_events` guard clause above.
 
-  # ── dismissable status notices (BT-2612) ────────────────────────────────────
-  #
-  # Generic dismiss for top-level *scalar* status assigns. The key arrives from
-  # the client and is NEVER turned into an atom (`String.to_atom/1` on user input
-  # is a memory/atom-table attack vector) — instead it is mapped through a fixed
-  # whitelist to the assign we clear. Unknown keys are ignored (no-op), matching
-  # the existing "clear to nil" convention every backing handler uses.
-  def handle_event("dismiss_notice", %{"key" => key}, socket) do
-    case dismiss_key_to_assign(key) do
-      nil -> {:noreply, socket}
-      assign_key -> {:noreply, assign(socket, assign_key, nil)}
-    end
-  end
-
-  def handle_event("dismiss_notice", _params, socket), do: {:noreply, socket}
+  # `dismiss_notice` (the generic dismiss for every pane's inline `.notice`
+  # status banner, BT-2612) delegates to `BtAttachWeb.Live.TestRunner`
+  # (BT-3298, epic BT-3290) — see the `@test_runner_events` guard clause
+  # above.
 
   # `dismiss_nav_error` (dismiss the error inside the Senders/Implementors
   # popover without closing it) delegates to `BtAttachWeb.Live.SystemBrowser`
@@ -1416,76 +1244,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
-  # BT-2597: the off-socket test run/load (`run_tests/2` / `load_tests/1`)
-  # completed. The task tags its dispatch result `{:run, _}` or `{:load, _}` so
-  # the right result-application path runs; either way the op is no longer in
-  # flight, so the controls re-enable.
-  def handle_async(:test_op, {:ok, {:run, dispatch_result}}, socket) do
-    {:noreply, socket |> apply_test_result(dispatch_result) |> assign(tests_running: false)}
-  end
+  # Test Runner async loads (BT-2597/BT-2599, extracted BT-3298): the
+  # off-socket `:test_op` (run/load) and `:test_discover` (catalogue
+  # discovery) `start_async` results forward to
+  # `BtAttachWeb.Live.TestRunner.handle_async/3` unchanged, mirroring the
+  # `:git_load` delegation above.
+  @impl true
+  def handle_async(:test_op, result, socket),
+    do: TestRunner.handle_async(:test_op, result, socket)
 
-  def handle_async(:test_op, {:ok, {:load, dispatch_result}}, socket) do
-    {:noreply, socket |> apply_test_load(dispatch_result) |> assign(tests_running: false)}
-  end
-
-  # A newer run/load `cancel_async`-ed this one. Safe as a no-op only because
-  # every `cancel_async(:test_op, …)` is immediately followed by a paired
-  # `start_async(:test_op, …)` (in `run_tests/2` / `load_tests/1`) that has
-  # already set `tests_running: true` — so the replacement task owns the running
-  # state. A future standalone `cancel_async(:test_op, …)` (e.g. a Cancel button)
-  # would need to reset `tests_running` itself. Mirrors the `:git_load` no-op.
-  def handle_async(:test_op, {:exit, :cancelled}, socket), do: {:noreply, socket}
-
-  def handle_async(:test_op, {:exit, reason}, socket) do
-    Logger.error("test run/load crashed: #{inspect(reason)}", domain: [:beamtalk, :liveview])
-
-    # Clear any prior run's results so a stale pass/fail table can't sit beside
-    # the crash banner (a torn read) — matching the `:git_load` crash handler and
-    # the `apply_test_result/2` dispatch-error path.
-    {:noreply,
-     assign(socket,
-       tests_running: false,
-       test_results: nil,
-       tests_error: "The test run failed unexpectedly."
-     )}
-  end
-
-  # BT-2599: the off-socket test-catalogue discovery (`discover_test_classes/1` →
-  # `list_tests`, `:read`) completed. We fold the raw dispatch outcome onto the
-  # socket through the pure `apply_test_classes/3` helper — the same path the
-  # load-tests re-discovery uses — so the async and sync callers agree. The
-  # `keep_error?` flag (set by the partial-load re-discovery) rides a transient
-  # assign so a *successful* re-discovery doesn't clear a partial-load banner.
-  def handle_async(:test_discover, {:ok, result}, socket) do
-    keep_error? = socket.assigns[:tests_discover_keep_error] || false
-
-    {:noreply,
-     socket
-     |> apply_test_classes(result, keep_error?)
-     |> assign(:tests_discover_keep_error, false)}
-  end
-
-  # A newer discovery (rapid double-refresh / open-then-refresh) `cancel_async`-ed
-  # this one — a no-op, mirroring the `:git_load` / `:test_op` cancellation. The
-  # replacement task already reset `test_classes` to the nil sentinel, so the
-  # pane stays in its "discovering" state until that newer result lands.
-  def handle_async(:test_discover, {:exit, :cancelled}, socket), do: {:noreply, socket}
-
-  # The discovery task crashed/exited. Degrade to a `tests_error` rather than
-  # taking down the socket (matching the `:git_load` / `:test_op` crash handlers).
-  # Leave `test_classes` at the nil sentinel so the pane shows only the error —
-  # not the misleading "No TestCase subclasses" empty-state — and retries on the
-  # next open/refresh.
-  def handle_async(:test_discover, {:exit, reason}, socket) do
-    Logger.error("test discovery crashed: #{inspect(reason)}", domain: [:beamtalk, :liveview])
-
-    {:noreply,
-     assign(socket,
-       test_classes: nil,
-       tests_error: "Couldn't discover tests — the discovery failed unexpectedly.",
-       tests_discover_keep_error: false
-     )}
-  end
+  @impl true
+  def handle_async(:test_discover, result, socket),
+    do: TestRunner.handle_async(:test_discover, result, socket)
 
   @impl true
   def terminate(_reason, socket) do
@@ -1552,27 +1322,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     :ok
   end
 
-  # Whitelist mapping a client-supplied dismiss key → the scalar status assign to
-  # clear (BT-2612). This is the security boundary: only these exact strings
-  # resolve; everything else returns nil and is ignored by `dismiss_notice`.
-  # NEVER replace this with `String.to_atom/1` on the user-supplied key.
-  defp dismiss_key_to_assign("browser_error"), do: :browser_error
-  defp dismiss_key_to_assign("output"), do: :output
-  defp dismiss_key_to_assign("changes_error"), do: :changes_error
-  defp dismiss_key_to_assign("git_error"), do: :git_error
-  defp dismiss_key_to_assign("tests_error"), do: :tests_error
-  defp dismiss_key_to_assign("save_result"), do: :save_result
-  defp dismiss_key_to_assign("save_error"), do: :save_error
-  defp dismiss_key_to_assign("flush_result"), do: :flush_result
-  defp dismiss_key_to_assign("flush_error"), do: :flush_error
-  defp dismiss_key_to_assign("bindings_error"), do: :bindings_error
-  defp dismiss_key_to_assign("inspect_error"), do: :inspect_error
-  defp dismiss_key_to_assign(_unknown), do: nil
+  # The `dismiss_notice` key whitelist (BT-2612) moved to
+  # `BtAttachWeb.Live.TestRunner.dismiss_key_to_assign/1` (BT-3298) alongside
+  # the `handle_event("dismiss_notice", …)` clause it backs.
 
   # `facade_error/1` moved to `BtAttachWeb.Live.FacadeError` (BT-3291) so
   # extracted panes (e.g. `BtAttachWeb.Live.Inspector`) render the same
-  # facade-error copy instead of keeping their own.
-  defp facade_error(reason), do: FacadeError.render(reason)
+  # facade-error copy instead of keeping their own; `WorkspaceLive` itself has
+  # had no direct caller left since the New Class/Rename/Remove handlers
+  # moved to `BtAttachWeb.Live.ClassModals` (BT-3298).
 
   # Human label for a porcelain status atom (BT-2586). `beamtalk_git` classifies
   # each XY column into one of these; "—" marks the no-change column.
@@ -1722,628 +1480,10 @@ defmodule BtAttachWeb.WorkspaceLive do
     %{id: System.unique_integer([:positive]), text: to_string(text)}
   end
 
-  # Remove the active method tab's method from its class (ADR 0112 Phase 4,
-  # BT-3189). A new (unsaved) method tab has nothing to remove, and a crafted
-  # event against a non-method tab is a graceful no-op — surfaced as a local
-  # validation error rather than evaluating a malformed expression.
-  defp remove_active_method(socket) do
-    case MethodEditor.active_tab(socket.assigns) do
-      %{kind: :method, new: true} ->
-        status_error(socket, "This method hasn't been saved yet — nothing to remove.")
-
-      %{kind: :method, class: class, side: side, selector: selector} = tab
-      when is_binary(selector) and selector != "" ->
-        remove_method(socket, tab, class, side, selector)
-
-      _ ->
-        status_error(socket, "Open an existing method to remove it.")
-    end
-  end
-
-  # `Class removeSelector: #selector` (or `Class class removeSelector:
-  # #selector` for a class-side tab), submitted through the same generic
-  # `evaluate` op the REPL `:remove-method` meta-command, the MCP
-  # `remove_method` tool, and the LSP `beamtalk.removeMethod` command all use —
-  # no dedicated workspace-side op (ADR 0112's "Beamtalk-level surface to
-  # add"). On success the tab is closed (its method no longer exists) and the
-  # Changes pane refreshes, mirroring `save_method_body/5`'s success path; a
-  # raised `selector_not_found` (or any other structured error) renders inline
-  # via the shared status area.
-  defp remove_method(socket, tab, class, side, selector) do
-    receiver = if side == "class", do: "#{class} class", else: class
-    expr = "#{receiver} removeSelector: ##{selector}"
-    pid = socket.assigns[:session_pid]
-
-    if not is_pid(pid) do
-      status_error(socket, "not attached to workspace")
-    else
-      remove_method_eval(socket, tab, receiver, selector, expr, pid)
-    end
-  end
-
-  defp remove_method_eval(socket, tab, receiver, selector, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
-        # tab was the active one — via `clear_active/1` if it was the last
-        # open tab, or via `sync_active/2` when focus moves to the next
-        # remaining tab — so the success message must be assigned AFTER
-        # closing the tab, not before, or closing the active tab would
-        # silently swallow it.
-        socket
-        |> MethodEditor.close_tab(tab.id)
-        |> assign(
-          save_result: "Removed #{selector} from #{receiver}",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil
-        )
-        |> assign_changes()
-
-      {:error, reason, _output, _warnings} ->
-        status_error(socket, Workspace.render_error(reason))
-
-      {:error, reason} ->
-        status_error(socket, facade_error(reason))
-    end
-  end
-
-  # Remove the active class-definition tab's class from the system (ADR 0113
-  # Phase 4, BT-3210). A `:def` tab always names an already-existing class
-  # (unlike a `:method` tab, there is no "new, unsaved class" draft state —
-  # class creation is a separate System Browser form, see the "NEW CLASS"
-  # comment in the template below), so there is no `new: true` guard to
-  # mirror `remove_active_method/1`'s; a crafted event against a non-`:def`
-  # tab is still a graceful no-op, surfaced as a local validation error
-  # rather than evaluating a malformed expression.
-  defp remove_active_class(socket) do
-    case MethodEditor.active_tab(socket.assigns) do
-      %{kind: :def, class: class} = tab when is_binary(class) and class != "" ->
-        remove_class(socket, tab, class)
-
-      _ ->
-        status_error(socket, "Open a class definition to remove it.")
-    end
-  end
-
-  # `Class removeFromSystem`, submitted through the same generic `evaluate`
-  # op the REPL `:remove-class` meta-command and the MCP `remove_class` tool
-  # use — no dedicated workspace-side op (ADR 0113's "Surface" table: "every
-  # surface constructs one of the Beamtalk expressions above and submits via
-  # the existing `evaluate` op"). Memory-mutating only: this never flushes.
-  defp remove_class(socket, tab, class) do
-    expr = "#{class} removeFromSystem"
-    pid = socket.assigns[:session_pid]
-
-    if not is_pid(pid) do
-      status_error(socket, "not attached to workspace")
-    else
-      remove_class_eval(socket, tab, class, expr, pid)
-    end
-  end
-
-  defp remove_class_eval(socket, tab, class, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
-        # tab was the active one — mirrors `remove_method_eval/6`'s success
-        # path, so the confirmation message must be assigned AFTER closing
-        # the tab. The message names the still-open second step (ADR 0113's
-        # two-gesture flow) so the owner isn't surprised the file survives
-        # this click.
-        socket
-        |> MethodEditor.close_tab(tab.id)
-        |> assign(
-          save_result:
-            "Removed #{class} from memory — not yet flushed to disk. Delete its file from the Changes pane to finish.",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil
-        )
-        |> assign_changes()
-
-      {:error, reason, _output, _warnings} ->
-        status_error(socket, Workspace.render_error(reason))
-
-      {:error, reason} ->
-        status_error(socket, facade_error(reason))
-    end
-  end
-
-  # Create a new class from the New Class modal's name + superclass (BT-2293,
-  # BT-2645). The owner supplies a plain PascalCase class name and a superclass
-  # (default `Object`); validation (PascalCase, non-empty, non-duplicate) runs
-  # locally — a rejected name surfaces an in-modal error and never round-trips.
-  # A valid name synthesizes the `<Superclass> subclass: <Name>` definition,
-  # derives the target `.bt` path from the name (so the user never types a file
-  # path), threads source + path to the workspace newClass chokepoint, refreshes
-  # the Changes pane (ChangeLog coherence), and opens + selects the new class.
-  defp new_class(socket, name, superclass) do
-    name = String.trim(name)
-    superclass = trim_superclass(superclass)
-
-    with :ok <- validate_new_class_name(socket, name),
-         :ok <- validate_superclass(superclass) do
-      source = superclass <> " subclass: " <> name
-      {:ok, path} = derive_class_path(name)
-      dispatch_new_class(socket, name, superclass, source, path)
-    else
-      {:error, message} ->
-        # Keep the in-flight field values so the re-rendered modal shows what the
-        # owner typed, and route the error to the modal-local assign (never the
-        # method-editor's shared `save_error` — BT-2645).
-        assign(socket,
-          new_class_open: true,
-          new_class_name: name,
-          new_class_super: superclass,
-          new_class_error: message
-        )
-    end
-  end
-
-  # An empty / blank superclass falls back to the default `Object` — the modal's
-  # select defaults to it, but a crafted payload or cleared typeahead must not
-  # synthesize a headerless `subclass: Name`.
-  defp trim_superclass(superclass) do
-    case String.trim(superclass) do
-      "" -> "Object"
-      trimmed -> trimmed
-    end
-  end
-
-  # Validate the superclass field the same way as the class name (BT-2645): a bare
-  # PascalCase identifier. The empty case is already normalised to `Object` by
-  # `trim_superclass/1`. This rejects a crafted payload (e.g. embedded newlines /
-  # syntax) locally, matching the name field rather than relying on the server
-  # parser to reject the synthesized source.
-  defp validate_superclass(superclass) do
-    if Regex.match?(~r/^[A-Z][A-Za-z0-9_]*$/, superclass),
-      do: :ok,
-      else:
-        {:error, "Superclass must be a class name starting with a capital letter, e.g. `Object`."}
-  end
-
-  # Validate a new class name locally (BT-2645): non-empty, PascalCase
-  # (`^[A-Z][A-Za-z0-9_]*$`), and not a duplicate of an existing class in the
-  # browse list. Returns `:ok` or `{:error, message}` for an in-modal error.
-  @new_class_name_re ~r/^[A-Z][A-Za-z0-9_]*$/
-
-  # Whether `name` is a bare PascalCase class-name identifier
-  # (`^[A-Z][A-Za-z0-9_]*$`) — the shape the New Class modal enforces. Public:
-  # `BtAttachWeb.Live.Dock`'s `flush_destructive/3` (BT-3295) validates a
-  # client-controlled `class` value against this same rule before
-  # interpolating it into a raw `evaluate` expression, so a crafted event
-  # can't inject arbitrary source.
-  def valid_class_name?(name), do: Regex.match?(@new_class_name_re, name)
-
-  defp validate_new_class_name(socket, name) do
-    cond do
-      name == "" ->
-        {:error, "Enter a class name to create a class."}
-
-      not valid_class_name?(name) ->
-        {:error,
-         "Class name must be PascalCase — start with an uppercase letter, e.g. `Greeter`."}
-
-      class_name_taken?(socket, name) ->
-        {:error, "A class named #{name} already exists."}
-
-      true ->
-        :ok
-    end
-  end
-
-  # Is `name` already a class in the loaded browse list? Compared against the
-  # `"name"` field of every browse row (the same list the tree renders), so a
-  # duplicate is caught before any round-trip.
-  defp class_name_taken?(socket, name) do
-    Enum.any?(socket.assigns[:browser_classes] || [], fn row ->
-      Map.get(row, "name") == name
-    end)
-  end
-
-  # Deliberately NOT a selector grammar (unary/keyword/binary, whitespace
-  # rules, the lexer's exact binary-operator character set) — duplicating
-  # that here would be exactly the un-enforced "keep in sync" copy
-  # `docs/development/architecture-principles.md`'s Duplication section
-  # warns against, since nothing would catch this regex drifting from
-  # `crates/beamtalk-core/src/source_analysis/lexer.rs`'s
-  # `is_binary_selector_char/1` if the language ever adds an operator
-  # character. Instead this only guards the one property that actually
-  # matters here: the value is embedded as `##{new_name}` inside a
-  # textually-interpolated `evaluate` expression, so it must contain no
-  # character that could end the symbol literal early or splice in a second
-  # expression (whitespace, `#`, quotes, backslash). Anything that passes
-  # this narrow check but isn't actually a well-formed selector fails the
-  # same way any other malformed `evaluate` expression does — a normal
-  # compiler error surfaced via `rename_method_eval/6`'s `{:error, ...}`
-  # branch — so the compiler stays the sole source of truth for "is this a
-  # valid selector", never re-implemented here.
-  @selector_injection_re ~r/^[^[:space:]#"'\\]+$/
-
-  # Open the Rename modal against the active tab (ADR 0114 Phase 5, BT-3277):
-  # a `:def` tab renames its class, an existing (already-saved) `:method` tab
-  # renames its selector — mirroring `remove_active_class`/`remove_active_method`'s
-  # identical tab-kind dispatch, including `remove_active_method`'s `new: true`
-  # guard (a brand-new, not-yet-compiled method has no selector to rename).
-  # The target is captured into `rename_class`/`rename_side`/`rename_old_selector`
-  # now, at open time, rather than re-read from the active tab on submit — so
-  # switching tabs while the modal is open can't retarget the rename mid-flight.
-  defp open_rename(socket) do
-    case MethodEditor.active_tab(socket.assigns) do
-      %{kind: :def, class: class} when is_binary(class) and class != "" ->
-        assign(socket,
-          rename_open: true,
-          rename_kind: :class,
-          rename_class: class,
-          rename_side: nil,
-          rename_old_selector: nil,
-          rename_new_name: class,
-          rename_error: nil
-        )
-
-      %{kind: :method, new: true} ->
-        status_error(socket, "This method hasn't been saved yet — nothing to rename.")
-
-      %{kind: :method, class: class, side: side, selector: selector}
-      when is_binary(class) and class != "" and is_binary(selector) and selector != "" ->
-        assign(socket,
-          rename_open: true,
-          rename_kind: :method,
-          rename_class: class,
-          rename_side: side,
-          rename_old_selector: selector,
-          rename_new_name: selector,
-          rename_error: nil
-        )
-
-      _ ->
-        status_error(socket, "Open a class definition or an existing method to rename it.")
-    end
-  end
-
-  # Dispatch the Rename modal's submitted name to whichever primitive
-  # `rename_kind` selected. A rejected submit keeps the modal open with the
-  # in-flight value and an inline error (never the method editor's shared
-  # `save_error`), mirroring `new_class/3`'s validation-failure shape.
-  defp submit_rename(socket, new_name) do
-    new_name = String.trim(new_name)
-
-    case socket.assigns.rename_kind do
-      :class ->
-        rename_class(socket, socket.assigns.rename_class, new_name)
-
-      :method ->
-        rename_method(
-          socket,
-          socket.assigns.rename_class,
-          socket.assigns.rename_side,
-          socket.assigns.rename_old_selector,
-          new_name
-        )
-
-      _ ->
-        assign(socket, rename_open: false, rename_error: nil)
-    end
-  end
-
-  # `OldClass renameTo: #NewName` (ADR 0114 Phase 2, `Behaviour>>renameTo:`,
-  # BT-3278), submitted through the same generic `evaluate` op the REPL
-  # `:rename-class` meta-command and the MCP `rename_class` tool use — no
-  # dedicated workspace-side op (ADR 0114's "Surface" table, reusing ADR
-  # 0113's "every surface constructs one of the Beamtalk expressions above
-  # and submits via the existing `evaluate` op"). Memory-mutating only: this
-  # never flushes — the resulting `rename-class` entry needs its own
-  # confirmed "apply rename" click in the Changes pane to reach disk (ADR
-  # 0114's two-gesture flow, reusing ADR 0113's `confirmDestructive` tier).
-  #
-  # `new_name` is validated locally against the same bare-PascalCase-identifier
-  # shape the New Class modal enforces (`@new_class_name_re`) before it is
-  # textually interpolated into the `evaluate` expression — this field is
-  # owner-typed but still raw client input reaching a raw Beamtalk expression,
-  # exactly the injection concern `flush_destructive/2`'s class-name check
-  # guards against.
-  defp rename_class(socket, old_name, new_name) do
-    cond do
-      new_name == "" ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error: "Enter a new class name."
-        )
-
-      not Regex.match?(@new_class_name_re, new_name) ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error:
-            "Class name must be PascalCase — start with an uppercase letter, e.g. `Accumulator`."
-        )
-
-      class_name_taken?(socket, new_name) ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error: "A class named #{new_name} already exists."
-        )
-
-      true ->
-        expr = "#{old_name} renameTo: ##{new_name}"
-        pid = socket.assigns[:session_pid]
-
-        if not is_pid(pid) do
-          assign(socket,
-            rename_open: true,
-            rename_new_name: new_name,
-            rename_error: "not attached to workspace"
-          )
-        else
-          rename_class_eval(socket, old_name, new_name, expr, pid)
-        end
-    end
-  end
-
-  defp rename_class_eval(socket, old_name, new_name, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        # The class's identity changed, so every tab keyed on the old name
-        # (its own `:def` tab plus any open `:method` tabs) is stale — close
-        # them all, mirroring `remove_class_eval/4`'s tab-closing success
-        # path, then refresh the class tree (a new name to browse) and the
-        # Changes pane (the new `rename-class` entry). `open_definition/2`
-        # re-syncs the active-tab editor assigns (clearing `save_result`,
-        # same note as `dispatch_new_class/5` above), so the success status is
-        # assigned AFTER it opens the renamed class's definition tab.
-        socket
-        |> close_tabs_for_class(old_name)
-        |> SystemBrowser.assign_browser_classes()
-        |> assign_changes()
-        |> MethodEditor.open_definition(new_name)
-        |> reselect_renamed_class(old_name, new_name)
-        |> assign(
-          rename_open: false,
-          rename_error: nil,
-          save_result:
-            "Renamed #{old_name} to #{new_name} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil
-        )
-
-      {:error, reason, _output, _warnings} ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error: Workspace.render_error(reason)
-        )
-
-      {:error, reason} ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error: facade_error(reason)
-        )
-    end
-  end
-
-  # Only follow the rename into `selected_class` when the System Browser
-  # tree's own current selection WAS the renamed class (or nothing was
-  # selected) — unlike `dispatch_new_class/5`'s unconditional select-the-
-  # new-class (there's no prior selection to conflict with when creating a
-  # class), a rename can be triggered from an open `:def` tab while the
-  # tree has a DIFFERENT, unrelated class selected. Reassigning
-  # unconditionally would move the tree highlight to the renamed class
-  # while leaving `browser_protocols`/`browser_categories` showing the
-  # untouched previously-selected class — the same "ghost selection"
-  # mismatch `selected_class_visible?/1` (BT-2597) exists to avoid for the
-  # browser-source-filter case. Leaving an unrelated selection alone is
-  # simpler and correct here; there's no stale-name problem to fix in that
-  # case, since the unrelated class's own identity didn't change.
-  defp reselect_renamed_class(socket, old_name, new_name) do
-    if socket.assigns.selected_class in [old_name, nil] do
-      assign(socket, selected_class: new_name, selected_protocol: nil)
-    else
-      socket
-    end
-  end
-
-  # `Class renameSelector: #old to: #new` (or `Class class renameSelector: #old
-  # to: #new` for a class-side tab) — `Behaviour>>renameSelector:to:` (ADR
-  # 0114 Phase 3, BT-3279), submitted through the same generic `evaluate` op
-  # the REPL `:rename-method` meta-command and the MCP `rename_method` tool
-  # use. Memory-mutating only, same two-gesture flow as `rename_class/3`
-  # above: reaching disk needs the Changes pane's "apply rename" click.
-  #
-  # `new_name` is only checked against `@selector_injection_re` (no
-  # whitespace/`#`/quotes/backslash) before interpolation — see that
-  # attribute's own comment for why this stops short of validating full
-  # selector syntax. A value that passes this check but isn't actually a
-  # well-formed selector, or collides with an already-defined local
-  # selector, is refused server-side by `renameSelector:to:` itself
-  # (mirroring `removeSelector:`'s existing error surface) and surfaces
-  # through `rename_method_eval/6`'s ordinary error branch.
-  defp rename_method(socket, class, side, old_selector, new_name) do
-    cond do
-      new_name == "" ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error: "Enter a new selector."
-        )
-
-      not Regex.match?(@selector_injection_re, new_name) ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_name,
-          rename_error: "Selector cannot contain spaces, #, quotes, or backslashes."
-        )
-
-      true ->
-        receiver = if side == "class", do: "#{class} class", else: class
-        expr = "#{receiver} renameSelector: ##{old_selector} to: ##{new_name}"
-        pid = socket.assigns[:session_pid]
-
-        if not is_pid(pid) do
-          assign(socket,
-            rename_open: true,
-            rename_new_name: new_name,
-            rename_error: "not attached to workspace"
-          )
-        else
-          rename_method_eval(socket, class, receiver, old_selector, new_name, expr, pid)
-        end
-    end
-  end
-
-  defp rename_method_eval(socket, class, receiver, old_selector, new_selector, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        # The selector changed, so the active method tab (keyed on the old
-        # selector) is stale — close it, mirroring `remove_method_eval/6`'s
-        # tab-closing success path.
-        socket
-        |> close_active_tab_if(
-          &match?(%{kind: :method, class: ^class, selector: ^old_selector}, &1)
-        )
-        |> assign(
-          rename_open: false,
-          rename_error: nil,
-          save_result:
-            "Renamed #{receiver} #{old_selector} to #{new_selector} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil
-        )
-        |> assign_changes()
-
-      {:error, reason, _output, _warnings} ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_selector,
-          rename_error: Workspace.render_error(reason)
-        )
-
-      {:error, reason} ->
-        assign(socket,
-          rename_open: true,
-          rename_new_name: new_selector,
-          rename_error: facade_error(reason)
-        )
-    end
-  end
-
-  # Close every open tab (def or method) belonging to `class` — used after a
-  # successful class rename, since every one of them is keyed on the
-  # now-stale old name. Iterates `close_tab/2` (rather than a bulk filter)
-  # so each close runs its normal active-tab-reassignment bookkeeping.
-  defp close_tabs_for_class(socket, class) do
-    socket.assigns.tabs
-    |> Enum.filter(&(&1.kind in [:def, :method] and Map.get(&1, :class) == class))
-    |> Enum.reduce(socket, fn tab, acc -> MethodEditor.close_tab(acc, tab.id) end)
-  end
-
-  # Close the active tab only when `pred` matches it — used after a
-  # successful method rename so a rename triggered from a *different* tab
-  # (not reachable today, since `open_rename/1` only ever targets the active
-  # tab, but kept explicit rather than assumed) never closes the wrong one.
-  defp close_active_tab_if(socket, pred) do
-    case MethodEditor.active_tab(socket.assigns) do
-      %{} = tab -> if pred.(tab), do: MethodEditor.close_tab(socket, tab.id), else: socket
-      _ -> socket
-    end
-  end
-
-  defp dispatch_new_class(socket, name, superclass, source, path) do
-    case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
-      {:ok, created_path} ->
-        socket
-        |> SystemBrowser.assign_browser_classes()
-        |> assign_changes()
-        # Open + select the NEW class (`name`), not the superclass: the def tab
-        # focuses it and the tree highlights it (BT-2645). `open_definition`
-        # re-syncs the active-tab editor assigns (clearing `save_result`), so the
-        # success status is assigned *after* it — otherwise the "Created …" banner
-        # would be wiped by the very tab it opens.
-        |> MethodEditor.open_definition(name)
-        |> assign(
-          selected_class: name,
-          selected_protocol: nil,
-          save_result: "Created new class — #{created_path}",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil,
-          new_class_open: false,
-          new_class_error: nil
-        )
-        # BT-2586/BT-2590: a new class only writes its `.bt` file to disk when
-        # autoflush is on (it is otherwise a durable in-memory ChangeLog entry,
-        # written at the next flush — `maybe_autoflush(durable)` in
-        # beamtalk_repl_loader). So reflect it in the git panel only when autoflush
-        # is on, matching the save path; with autoflush off the working tree is
-        # unchanged and the shell-out is skipped.
-        |> maybe_refresh_git_after_save()
-
-      {:error, reason} ->
-        # Route a failed create to the in-modal error (keep fields + modal open),
-        # never the method-editor's `save_error` (BT-2645).
-        assign(socket,
-          new_class_open: true,
-          new_class_name: name,
-          new_class_super: superclass,
-          new_class_error: facade_error(reason)
-        )
-    end
-  end
-
-  # Derive the in-project `.bt` path for a new class from its name (BT-2293,
-  # BT-2646): `Greeter` → `src/greeter.bt`, `EventStore` → `src/event_store.bt`.
-  # The basename is snake_cased to match the project convention (every file in a
-  # package `src/` is snake_case). The runtime's `newClass:at:` validation
-  # snake_case-normalises both the declared class name and the path basename
-  # (`beamtalk_repl_loader:validate_new_class/3` via `to_snake_case/1`), so a
-  # snake_case file maps cleanly to the PascalCase class. The name is already
-  # PascalCase-validated by the caller, so this always succeeds; it returns
-  # `{:ok, path}` to keep the call-site explicit.
-  #
-  # The `src/` prefix is assumed — it's the canonical package source dir the
-  # runtime resolves (`resolve_package_module` tries `src/` then `test/`). A
-  # project with a different layout would get a `target_outside_project` error at
-  # creation time (not silently on flush). If per-project source dirs ever land,
-  # this is the spot to read the configured dir instead of hardcoding `src/`.
-  defp derive_class_path(name) do
-    {:ok, "src/" <> to_snake_case(name) <> ".bt"}
-  end
-
-  # Snake-case a PascalCase class name, mirroring the runtime's
-  # `beamtalk_repl_loader:to_snake_case/1` EXACTLY so the IDE-derived filename and
-  # the loader's basename normalisation agree (BT-2646). The rule: the first
-  # character is lowercased unconditionally; thereafter an uppercase letter gets a
-  # leading `_` ONLY when the previous character was a lowercase letter. This
-  # collapses acronyms (`HTTPServer` → `httpserver`) rather than splitting every
-  # capital — diverging from the runtime here would make the loader reject or
-  # mis-locate the created file. Digits and other characters pass through verbatim
-  # and do not count as "lowercase" for the boundary test.
-  defp to_snake_case(name) do
-    name
-    |> String.to_charlist()
-    |> snake_chars(false, [])
-  end
-
-  defp snake_chars([], _prev_was_lower?, acc), do: acc |> Enum.reverse() |> List.to_string()
-
-  defp snake_chars([c | rest], prev_was_lower?, acc) when c >= ?A and c <= ?Z do
-    lowered = c + 32
-
-    if prev_was_lower? do
-      snake_chars(rest, false, [lowered, ?_ | acc])
-    else
-      snake_chars(rest, false, [lowered | acc])
-    end
-  end
-
-  defp snake_chars([c | rest], _prev_was_lower?, acc) do
-    snake_chars(rest, c >= ?a and c <= ?z, [c | acc])
-  end
+  # Remove Method / Remove Class / Rename modal (ADR 0112 Phase 4 BT-3189, ADR
+  # 0113 Phase 4 BT-3210, ADR 0114 Phase 5 BT-3277) and the New Class modal
+  # (BT-2293, BT-2645) all moved to `BtAttachWeb.Live.ClassModals` (BT-3298)
+  # alongside the `handle_event/3` clauses they back.
 
   # Human-readable Kind/Side label for one Changes-pane row (BT-3195): before
   # this, the table had no column distinguishing an instance-side patch from a
@@ -2382,7 +1522,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (BT-2293). Keeps the validation/error branches from leaving a stale flush
   # banner visible — the success branches already clear all four inline.
   # Public: shared with `BtAttachWeb.Live.Dock`'s revert/git-revert paths
-  # (BT-3295).
+  # (BT-3295) and `BtAttachWeb.Live.ClassModals`'s remove/rename paths
+  # (BT-3298).
   def status_error(socket, message) do
     assign(socket,
       save_result: nil,
@@ -2409,7 +1550,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # lazily on next open), so the common edit loop never pays for an extra git
   # shell-out it can't see. Used by the flush path, which always changes disk.
   # Public: shared with `BtAttachWeb.Live.Dock`'s flush paths (BT-3295) — the
-  # git panel's own `assign_git/1` now lives there.
+  # git panel's own `assign_git/1` now lives there — and
+  # `BtAttachWeb.Live.ClassModals`'s new-class create path (BT-3298).
   def maybe_refresh_git(socket) do
     if socket.assigns.dock_tab == "git", do: Dock.assign_git(socket), else: socket
   end
@@ -2420,7 +1562,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # result and is pure waste. When autoflush is on the save wrote through to disk,
   # so the panel must reflect it (gated, as ever, on the Git tab being active).
   # Public: `BtAttachWeb.Live.MethodEditor`'s save-definition path (BT-3296)
-  # calls it directly.
+  # and `BtAttachWeb.Live.ClassModals`'s new-class create path (BT-3298)
+  # call it directly.
   def maybe_refresh_git_after_save(socket) do
     if socket.assigns.autoflush, do: maybe_refresh_git(socket), else: socket
   end
@@ -2463,7 +1606,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (`apply_changes/2`) so the mount-time async load (BT-2591) and the post-action
   # refresh callers share one fold. The sync helper keeps its old signature.
   # Public: shared with `BtAttachWeb.Live.Dock`'s eval/REPL/Changes/git paths
-  # (BT-3295).
+  # (BT-3295) and `BtAttachWeb.Live.ClassModals`'s remove/rename/new-class
+  # paths (BT-3298).
   def assign_changes(socket), do: apply_changes(socket, read_changes(socket))
 
   # The raw `:changes` dispatch result — runs off the LiveView process in the
@@ -2630,194 +1774,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       else: socket
   end
 
-  # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
-
-  # Discover the live image's TestCase subclasses + selectors (`list_tests`,
-  # `:read`). Although `:read` reflection is usually fast, it is still a blocking
-  # workspace RPC: against a slow/unresponsive node the ~5s timeout would stall
-  # the LiveView process (first Tests-tab open / every manual Refresh). So it
-  # runs off-socket in a `:test_discover` `start_async` task, mirroring the test
-  # run/load `:test_op` (BT-2597) and the git panel's `:git_load` (BT-2590). A
-  # rapid double-refresh / open-then-refresh `cancel_async`-es the prior probe so
-  # only the latest result wins; the result lands in
-  # `handle_async(:test_discover, …)`. The `test_classes` nil sentinel is
-  # preserved meanwhile so the pane shows its "discovering" state rather than the
-  # misleading "No TestCase subclasses" empty-state.
-  # `keep_error?` is set by the load-tests re-discovery path: a partial load has
-  # already populated `tests_error` with its compile-error summary, and a
-  # *successful* discovery must NOT clear it (it would swallow the partial-load
-  # banner). The flag rides a transient assign that `handle_async/3` consumes.
-  # Public: `BtAttachWeb.Live.Dock`'s `ensure_test_classes/1` (BT-3295, the
-  # `dock_tab`/`:test` meta-command lazy-load) calls it directly — the Tests
-  # pane's own events haven't been extracted out of this module yet.
-  def discover_test_classes(socket, keep_error? \\ false) do
-    ctx = ctx(socket)
-
-    socket
-    |> assign(:tests_discover_keep_error, keep_error?)
-    |> cancel_async(:test_discover, :cancelled)
-    |> start_async(:test_discover, fn ->
-      # Off the LiveView process — capture only `ctx`, never `socket`.
-      Facade.dispatch(:list_tests, %{}, ctx)
-    end)
-  end
-
-  # Apply a completed `list_tests` dispatch to the socket. Pure (no dispatch);
-  # shared by `handle_async(:test_discover, …)` so the async path and the
-  # load-tests re-discovery agree (mirrors `apply_test_result/2` and
-  # `apply_git_status/2`). A dispatch failure / RBAC denial renders a
-  # `tests_error` rather than crashing the pane, mirroring `apply_changes/2`.
-  #
-  # On success we normally clear `tests_error` (a stale failure heals), but when
-  # `keep_error?` is true (a partial load is showing its compile-error summary)
-  # we leave `tests_error` intact so the banner survives the re-discovery.
-  defp apply_test_classes(socket, {:ok, classes}, keep_error?) when is_list(classes) do
-    socket = assign(socket, :test_classes, classes)
-    if keep_error?, do: socket, else: assign(socket, :tests_error, nil)
-  end
-
-  defp apply_test_classes(socket, {:error, reason}, _keep_error?),
-    # Leave the catalogue as the nil sentinel (not []) so the pane shows only the
-    # error — not the misleading "No TestCase subclasses" empty-state — and so
-    # re-opening the tab retries discovery (a transient failure heals).
-    do: assign(socket, test_classes: nil, tests_error: facade_error(reason))
-
-  defp apply_test_classes(socket, _other, _keep_error?),
-    do: assign(socket, test_classes: nil, tests_error: facade_error(:unexpected_test_result))
-
-  # Run all tests (`class` = nil) or a single class (`run_tests`, `:execute`).
-  #
-  # BT-2597: the run compiles + evaluates user code on the workspace node, which
-  # can take seconds for a large suite — so it runs off-socket in a `:test_op`
-  # `start_async` task (mirroring the git panel's `:git_load`, BT-2590) rather
-  # than blocking the LiveView process. A rapid second action `cancel_async`-es
-  # the in-flight op so only the latest result wins. The result lands in
-  # `handle_async(:test_op, …)`; `tests_running` disables the controls meanwhile.
-  defp run_tests(socket, class) do
-    ctx = ctx(socket)
-
-    socket
-    |> assign(tests_running: true, tests_error: nil)
-    |> cancel_async(:test_op, :cancelled)
-    |> start_async(:test_op, fn ->
-      # Off the LiveView process — capture only `ctx`, never `socket`.
-      {:run, Facade.dispatch(:run_tests, %{class: class}, ctx)}
-    end)
-  end
-
-  # Load the project's test/ files (`load_tests`, `:execute`), then re-discover
-  # the catalogue so the newly-loaded TestCase subclasses appear immediately.
-  #
-  # BT-2597: like `run_tests/2`, the load compiles user code, so it runs in the
-  # off-socket `:test_op` task; the result lands in `handle_async(:test_op, …)`.
-  defp load_tests(socket) do
-    ctx = ctx(socket)
-
-    socket
-    |> assign(tests_running: true, tests_error: nil)
-    |> cancel_async(:test_op, :cancelled)
-    |> start_async(:test_op, fn ->
-      {:load, Facade.dispatch(:load_tests, %{}, ctx)}
-    end)
-  end
-
-  # Apply a completed `run_tests` dispatch to the socket. Pure (no dispatch);
-  # shared by `handle_async/3` so the async path and any future sync caller agree
-  # (mirrors `apply_git_status/2`). An error (incl. a non-Owner RBAC denial)
-  # surfaces as `tests_error` and clears any stale results.
-  defp apply_test_result(socket, {:ok, result}) when is_map(result),
-    do: assign(socket, test_results: result, tests_error: nil)
-
-  defp apply_test_result(socket, {:error, reason}),
-    do: assign(socket, test_results: nil, tests_error: facade_error(reason))
-
-  defp apply_test_result(socket, _other),
-    do: assign(socket, test_results: nil, tests_error: facade_error(:unexpected_test_result))
-
-  # Apply a completed `load_tests` dispatch: refresh the catalogue to show
-  # whatever loaded, surfacing partial compile errors as `tests_error`. The
-  # re-discovery is kicked off via the off-socket `:test_discover` task
-  # (`discover_test_classes/2`) so the fold never blocks the LiveView process.
-  #
-  # We reset `test_classes` to the nil sentinel so the catalogue shows its
-  # "discovering" state until the off-socket re-discovery resolves with the
-  # freshly-loaded classes, and pass `keep_error?: true` so the later
-  # `handle_async(:test_discover, …)` fold doesn't clear this partial-load
-  # banner on a successful re-discovery.
-  defp apply_test_load(socket, {:ok, %{"errors" => [_ | _] = errors}}),
-    do:
-      socket
-      |> assign(test_classes: nil, tests_error: load_tests_error(errors))
-      |> discover_test_classes(true)
-
-  # A clean load simply re-discovers the catalogue off-socket; the
-  # `handle_async(:test_discover, …)` fold clears any stale `tests_error` on
-  # success (via `apply_test_classes/3`) and sets it on failure.
-  defp apply_test_load(socket, {:ok, _result}),
-    do: socket |> assign(test_classes: nil) |> discover_test_classes()
-
-  defp apply_test_load(socket, {:error, reason}),
-    do: assign(socket, tests_error: facade_error(reason))
-
-  defp apply_test_load(socket, _other),
-    do: assign(socket, tests_error: facade_error(:unexpected_test_result))
-
-  # Summarise compile errors from a partial test load into one line. Each error
-  # is a `%{"path" => ..., "message" => ...}` map (the load-project error shape).
-  defp load_tests_error(errors) do
-    count = length(errors)
-    first = errors |> List.first() |> Map.get("message", "")
-    "#{count} test file(s) failed to load: #{first}"
-  end
-
-  # Render the aggregate run duration (seconds, from the runtime TestResult) in a
-  # human unit: sub-second runs in ms, longer runs in seconds. A non-number (an
-  # unexpected wire shape) renders nothing rather than crashing the summary.
-  defp format_test_duration(seconds) when is_number(seconds) and seconds < 1.0 do
-    "#{round(seconds * 1000)} ms"
-  end
-
-  defp format_test_duration(seconds) when is_number(seconds) do
-    "#{:erlang.float_to_binary(seconds * 1.0, decimals: 2)} s"
-  end
-
-  defp format_test_duration(_), do: ""
-
-  # Per-class pass/fail tally from the last run, keyed by class name, so the
-  # catalogue can show "2✓ 1✗" next to each class without re-running. Returns nil
-  # when there are no results yet or the class had no cases in the last run.
-  defp test_class_tally(nil, _class), do: nil
-
-  defp test_class_tally(test_results, class) when is_map(test_results) do
-    cases = for t <- test_results["tests"] || [], t["class"] == class, do: t["status"]
-
-    case cases do
-      [] ->
-        nil
-
-      _ ->
-        %{
-          passed: Enum.count(cases, &(&1 == "pass")),
-          failed: Enum.count(cases, &(&1 == "fail")),
-          skipped: Enum.count(cases, &(&1 == "skip"))
-        }
-    end
-  end
-
-  # Short status glyph for a per-case result row.
-  defp test_status_label("pass"), do: "✓ pass"
-  defp test_status_label("fail"), do: "✗ fail"
-  defp test_status_label("skip"), do: "○ skip"
-  # An unanticipated status from the runner still gets a visible "?" label rather
-  # than rendering the raw atom text unadorned.
-  defp test_status_label(other), do: "? " <> other
-
-  # CSS class suffix for a per-case status. Only the three known statuses carry a
-  # styled rule (`.st-pass` / `.st-fail` / `.st-skip`); an unknown status falls
-  # back to the neutral skip style so a row is never left unstyled with a raw
-  # `st-<atom>` class that has no matching rule.
-  defp test_status_class(status) when status in ~w(pass fail skip), do: "st-" <> status
-  defp test_status_class(_other), do: "st-skip"
+  # The Test-runner pane data source (BT-2557/BT-2597/BT-2599) — discovery,
+  # running, and the render-template status-glyph helpers — moved to
+  # `BtAttachWeb.Live.TestRunner` (BT-3298) alongside the `handle_event/3`/
+  # `handle_async/3` clauses they back.
 
   # ── navigation aids: omni search (BT-2495) ──────────────────────────────────
   #
@@ -5105,7 +4065,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           , {@test_results["skipped"]} skipped
                         </span>
                         <span :if={@test_results["duration"]} class="test-duration">
-                          · {format_test_duration(@test_results["duration"])}
+                          · {TestRunner.format_test_duration(@test_results["duration"])}
                         </span>
                       </span>
                     </div>
@@ -5133,10 +4093,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <tbody>
                         <tr
                           :for={t <- @test_results["tests"]}
-                          class={["test-row", test_status_class(t["status"])]}
+                          class={["test-row", TestRunner.test_status_class(t["status"])]}
                         >
-                          <td class={["test-status", test_status_class(t["status"])]}>
-                            {test_status_label(t["status"])}
+                          <td class={["test-status", TestRunner.test_status_class(t["status"])]}>
+                            {TestRunner.test_status_label(t["status"])}
                           </td>
                           <td class="k">{t["class"]}</td>
                           <td>
@@ -5184,7 +4144,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                               <td class="k">{tc["class"]}</td>
                               <td>{length(tc["selectors"])}</td>
                               <td class="test-tally">
-                                <%= case test_class_tally(@test_results, tc["class"]) do %>
+                                <%= case TestRunner.test_class_tally(@test_results, tc["class"]) do %>
                                   <% nil -> %>
                                     <span class="muted-note">—</span>
                                   <% tally -> %>
@@ -6391,4 +5351,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   # BT-3301 fix), never a second hand-maintained copy. This accessor exists
   # only so a test can assert the two stay literally identical.
   def system_browser_events, do: @system_browser_events
+
+  @doc false
+  # Mirrors `inspector_events/0`/`system_browser_events/0`: `@test_runner_events`
+  # IS `TestRunner.__test_runner_events__/0` (BT-3298, following the BT-3301
+  # fix), never a second hand-maintained copy. This accessor exists only so a
+  # test can assert the two stay literally identical.
+  def test_runner_events, do: @test_runner_events
+
+  @doc false
+  # Mirrors `test_runner_events/0`: `@class_modals_events` IS
+  # `ClassModals.__class_modals_events__/0` (BT-3298, following the BT-3301
+  # fix), never a second hand-maintained copy. This accessor exists only so a
+  # test can assert the two stay literally identical.
+  def class_modals_events, do: @class_modals_events
 end
