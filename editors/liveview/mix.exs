@@ -23,7 +23,13 @@ defmodule BtAttach.MixProject do
       test_coverage: [
         ignore_modules: [
           # Pure Phoenix boilerplate: `embed_templates` only, no logic to exercise.
-          BtAttachWeb.Layouts
+          BtAttachWeb.Layouts,
+          # Test-support fake of the backend workspace client (BT-2554); exists to
+          # simulate failure/crash branches, not production code (BT-3312).
+          BtAttachWeb.StubWorkspaceClient,
+          # ignore_modules matches by exact module name, not prefix — list its
+          # per-test Agent struct module separately.
+          BtAttachWeb.StubWorkspaceClient.State
         ],
         # :threshold only takes effect nested under :summary — Mix.Tasks.Test.Coverage
         # reads it from the :summary opts, not the top-level test_coverage opts.
