@@ -192,6 +192,8 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
         "browser_mode" => %{"mode" => "classes"},
         "browser_open_native_module" => %{"module" => "beamtalk_http_client"},
         "browser_jump_native" => %{"class" => "Subprocess", "selector" => "readLine"},
+        "browser_open_alias" => %{"name" => "RestartStrategy", "package" => "my_app"},
+        "dismiss_alias_error" => %{},
         "browser_view" => %{"view" => "hierarchy"},
         "browser_source" => %{"src" => "all"},
         "browser_side" => %{"side" => "instance"},

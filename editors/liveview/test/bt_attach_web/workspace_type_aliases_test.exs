@@ -122,4 +122,83 @@ defmodule BtAttachWeb.WorkspaceTypeAliasesTest do
       assert html =~ "#temporary | #transient | #permanent"
     end
   end
+
+  describe "alias source view (BT-3314)" do
+    test "clicking a project-origin alias row shows its real source content", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "browser_mode", %{"mode" => "aliases"})
+
+      html =
+        render_click(view, "browser_open_alias", %{
+          "name" => "RestartStrategy",
+          "package" => "my_app"
+        })
+
+      assert html =~ "type RestartStrategy = #temporary | #transient | #permanent"
+      assert html =~ "src/restart_strategy.bt"
+      # `editable` is always `false` for an alias — there is no save op.
+      assert html =~ "project · read-only"
+    end
+
+    test "clicking a dependency-origin alias row degrades to the empty state, not an error", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "browser_mode", %{"mode" => "aliases"})
+
+      html =
+        render_click(view, "browser_open_alias", %{"name" => "JsonValue", "package" => "json"})
+
+      assert html =~ "No source available for type alias"
+      assert html =~ "JsonValue"
+      refute html =~ "io-block err"
+    end
+
+    test "clicking a stdlib-origin alias row also degrades to the empty state", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "browser_mode", %{"mode" => "aliases"})
+
+      html =
+        render_click(view, "browser_open_alias", %{
+          "name" => "TimeoutMs",
+          "package" => "stdlib"
+        })
+
+      assert html =~ "No source available for type alias"
+    end
+
+    test "clicking the same alias row again collapses the source view", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "browser_mode", %{"mode" => "aliases"})
+
+      html =
+        render_click(view, "browser_open_alias", %{
+          "name" => "RestartStrategy",
+          "package" => "my_app"
+        })
+
+      assert html =~ "type RestartStrategy = #temporary | #transient | #permanent"
+
+      html =
+        render_click(view, "browser_open_alias", %{
+          "name" => "RestartStrategy",
+          "package" => "my_app"
+        })
+
+      refute html =~ "type RestartStrategy = #temporary | #transient | #permanent"
+    end
+
+    test "an observer can view alias source (the op is :read)", %{conn: conn} do
+      {:ok, view, _html} = live(observer_conn(conn), "/")
+      render_click(view, "browser_mode", %{"mode" => "aliases"})
+
+      html =
+        render_click(view, "browser_open_alias", %{
+          "name" => "RestartStrategy",
+          "package" => "my_app"
+        })
+
+      assert html =~ "type RestartStrategy = #temporary | #transient | #permanent"
+    end
+  end
 end

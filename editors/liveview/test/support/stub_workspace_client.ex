@@ -1018,6 +1018,50 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      ]}
   end
 
+  # BT-3314: the read-only source view for a declared type alias, keyed by
+  # `name` (+ `package`, unused by these fixtures since none of the three
+  # `browse_type_aliases/0` rows share a name). Mirrors that op's three
+  # origins: a project alias (real content), a dependency/stdlib alias (no
+  # live path cache — `content: :null`, the honest empty state).
+  def browse_alias_source("RestartStrategy", _package) do
+    {:value,
+     %{
+       "name" => "RestartStrategy",
+       "package" => "my_app",
+       "source_file" => "src/restart_strategy.bt",
+       "source_origin" => "project",
+       "editable" => false,
+       "content" => "type RestartStrategy = #temporary | #transient | #permanent\n"
+     }}
+  end
+
+  def browse_alias_source("JsonValue", _package) do
+    {:value,
+     %{
+       "name" => "JsonValue",
+       "package" => "json",
+       "source_file" => "src/json_value.bt",
+       "source_origin" => "dependency",
+       "editable" => false,
+       "content" => :null
+     }}
+  end
+
+  def browse_alias_source("TimeoutMs", _package) do
+    {:value,
+     %{
+       "name" => "TimeoutMs",
+       "package" => "stdlib",
+       "source_file" => "apps/beamtalk_stdlib/src/timeout.bt",
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" => :null
+     }}
+  end
+
+  def browse_alias_source(name, _package),
+    do: {:error, "type alias `#{name}` not found"}
+
   # BT-2648: the read-only native pane keyed by a standalone native module.
   # BT-2668: the real `browse_native_module_source` op returns the ABSOLUTE on-disk
   # path (e.g. `/home/.../_build/.../*.erl`), so the stub mirrors that — the

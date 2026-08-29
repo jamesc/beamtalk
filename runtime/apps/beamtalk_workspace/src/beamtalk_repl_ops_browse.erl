@@ -25,6 +25,7 @@ panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-native-source` | read-only native pane | `{value, NativeSource}` |
 | `browse-native-modules` | native-modules section | `{value, [NativeModuleRow]}` |
 | `browse-type-aliases` | type-aliases section | `{value, [AliasRow]}` |
+| `browse-alias-source` | read-only alias source view | `{value, AliasSource}` |
 
 ## Term contract (BT-2399)
 
@@ -92,7 +93,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 %% source_origin (classification) / package (name) split helpers. BT-2732: the
 %% `dispatch_<selector>` export → `self delegate` selector recovery. BT-2903:
 %% the seeding-boundary exclusion + row-shaping helpers behind
-%% `browse-type-aliases`.
+%% `browse-type-aliases`. BT-3314: the alias-source param validator.
 -export([
     handle_call_clause_lines/1,
     clause_selector/1,
@@ -103,7 +104,9 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     alias_visible/2,
     alias_row/3,
     package_type_aliases/1,
-    class_definition_text/7
+    class_definition_text/7,
+    validate_alias/1,
+    safe_relative_path/1
 ]).
 -endif.
 
@@ -174,7 +177,14 @@ handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
 handle_term(<<"browse-native-modules">>, _Params, _Msg, _SessionPid) ->
     {value, browse_native_modules()};
 handle_term(<<"browse-type-aliases">>, _Params, _Msg, _SessionPid) ->
-    {value, browse_type_aliases()}.
+    {value, browse_type_aliases()};
+handle_term(<<"browse-alias-source">>, Params, _Msg, _SessionPid) ->
+    case validate_alias(Params) of
+        {ok, {Name, Package}} ->
+            browse_alias_source(Name, Package);
+        {error, Reason} ->
+            arg_error(<<"browse-alias-source">>, Reason)
+    end.
 
 -doc "Advertise the browse ops in `describe`.".
 -spec describe_ops() -> map().
@@ -198,7 +208,11 @@ describe_ops() ->
         <<"browse-native-modules">> => #{<<"params">> => []},
         %% BT-2903 (ADR 0108 Phase 8): enumerate every loaded package's
         %% declared `type` aliases (no params).
-        <<"browse-type-aliases">> => #{<<"params">> => []}
+        <<"browse-type-aliases">> => #{<<"params">> => []},
+        %% BT-3314: read-only source view for a declared type alias. `package`
+        %% disambiguates a same-named alias declared by more than one package
+        %% (`browse-type-aliases` does not dedupe by name — see its doc).
+        <<"browse-alias-source">> => #{<<"params">> => [<<"name">>, <<"package">>]}
     }.
 
 %%% ====================================================================
@@ -1362,6 +1376,152 @@ alias_field_or_null(undefined) ->
     null;
 alias_field_or_null(V) ->
     alias_field_binary(V).
+
+%%% ====================================================================
+%%% Op 8 — browse-alias-source (BT-3314)
+%%% ====================================================================
+
+%% Read-only source view for a declared type alias, keyed by `name` +
+%% `package` (aliases are not deduped by name across packages —
+%% `browse_type_aliases/0`'s no-dedupe note — so both are needed to
+%% disambiguate a same-named alias declared by more than one package).
+%%
+%% Unlike a `native:` class or standalone native module, a `type Name = ...`
+%% declaration produces no BEAM module (aliases erase entirely), so there is
+%% no compiled-module attribute / `module_info(compile)` path to recover an
+%% absolute file location from at read time — `AliasMetadata.source_file`
+%% (`app_file.rs`) is a package-relative display path like
+%% `"src/restart_strategy.bt"`, not an absolute one. Project-owned aliases
+%% resolve against the workspace's own recorded project root
+%% (`beamtalk_workspace_meta:get_metadata/0`); stdlib/dependency aliases have
+%% no live path cache to resolve against (the stdlib source tree and a
+%% fetched dependency's checkout are Rust-CLI/build-time-only concepts) and
+%% degrade to the honest `content = null` empty state — the same pattern
+%% `browse-native-source` already uses for a `.beam`-only module. `editable`
+%% is always `false` — there is no `save-alias-source` op.
+-spec browse_alias_source(binary(), binary() | undefined) -> beamtalk_repl_ops:op_result().
+browse_alias_source(Name, Package) ->
+    case find_alias_row(Name, Package) of
+        undefined ->
+            arg_error(<<"browse-alias-source">>, alias_not_found_message(Name, Package));
+        Row ->
+            {value, alias_source_value(Row)}
+    end.
+
+%% When `Package` is known (the common case — the UI's click always carries
+%% it), scan only that package's own rows via `type_aliases_of_package/1`
+%% (app resolution + the seeding-boundary visibility filter + row-building,
+%% all reused as-is) rather than recomputing and sorting the full
+%% cross-package `browse_type_aliases/0` catalog just to find one row. With no
+%% `Package` (REPL/MCP callers that haven't resolved one), there is no
+%% cheaper option than the full scan — no cross-package name index exists.
+-spec find_alias_row(binary(), binary() | undefined) -> map() | undefined.
+find_alias_row(Name, undefined) ->
+    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end, browse_type_aliases());
+find_alias_row(Name, Package) ->
+    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end, type_aliases_of_package(Package)).
+
+-spec first_match(fun((map()) -> boolean()), [map()]) -> map() | undefined.
+first_match(Pred, Rows) ->
+    case lists:filter(Pred, Rows) of
+        [Row | _] -> Row;
+        [] -> undefined
+    end.
+
+-spec alias_not_found_message(binary(), binary() | undefined) -> binary().
+alias_not_found_message(Name, undefined) ->
+    iolist_to_binary([<<"type alias `">>, Name, <<"` not found">>]);
+alias_not_found_message(Name, Package) ->
+    iolist_to_binary([
+        <<"type alias `">>, Name, <<"` not found in package `">>, Package, <<"`">>
+    ]).
+
+-spec alias_source_value(map()) -> map().
+alias_source_value(#{
+    <<"name">> := Name,
+    <<"source_file">> := SourceFile,
+    <<"source_origin">> := Origin,
+    <<"package">> := Package
+}) ->
+    #{
+        <<"name">> => Name,
+        <<"package">> => Package,
+        <<"source_file">> => SourceFile,
+        <<"source_origin">> => Origin,
+        <<"editable">> => false,
+        <<"content">> => alias_disk_content(Origin, SourceFile)
+    }.
+
+%% Project-owned aliases resolve against the workspace's own recorded project
+%% root; stdlib/dependency aliases have no live path cache to resolve against
+%% (see `browse_alias_source/2` doc), so they degrade to `null` — never an
+%% error.
+%%
+%% Security: `SourceFile` comes from a compiled `.app` file's `type_aliases`
+%% entry (`type_aliases_of_package/1`'s own doc already flags this as
+%% "still just a text file on disk" — a hand-edited or toolchain-mismatched
+%% one is not a from-source-only threat model). `filename:join/2` does NOT
+%% sanitize traversal: an absolute `SourceFile` silently discards the root
+%% entirely (`filename:join("/proj", "/etc/passwd") =:= "/etc/passwd"`), and a
+%% `..`-laden relative one escapes it at the OS level. `safe_relative_path/1`
+%% rejects both *before* any join/read is attempted, so a malformed entry
+%% degrades to the same `null` empty state as a merely-missing file, never a
+%% host-filesystem read outside the project tree.
+-spec alias_disk_content(binary(), binary()) -> binary() | null.
+alias_disk_content(<<"project">>, SourceFile) when byte_size(SourceFile) > 0 ->
+    case safe_relative_path(SourceFile) of
+        false ->
+            null;
+        true ->
+            %% `safe_relative_path/1` already guarantees `SourceFile` has no
+            %% `..` component and is not itself absolute, so joining it onto
+            %% `ProjectPath` cannot resolve outside that root — no further
+            %% containment check is needed (and `beamtalk_repl_loader`'s
+            %% `is_path_inside/2` is exported test-only, not for cross-module
+            %% production use).
+            case beamtalk_workspace_meta:get_metadata() of
+                {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
+                    Path = filename:join(binary_to_list(ProjectPath), binary_to_list(SourceFile)),
+                    case file:read_file(Path) of
+                        {ok, Bin} -> Bin;
+                        {error, _} -> null
+                    end;
+                _ ->
+                    null
+            end
+    end;
+alias_disk_content(_Origin, _SourceFile) ->
+    null.
+
+%% True iff `SourceFile` is a relative path with no `..` component — i.e. it
+%% cannot escape whatever root it is later joined against. Rejects both an
+%% absolute path (which `filename:join/2` would let override the root
+%% entirely) and any `..` segment (which escapes the root at the OS level
+%% even though it survives a naive string-prefix containment check on the
+%% *unresolved* joined path).
+-spec safe_relative_path(binary()) -> boolean().
+safe_relative_path(SourceFile) ->
+    Str = binary_to_list(SourceFile),
+    filename:pathtype(Str) =:= relative andalso
+        not lists:member("..", filename:split(Str)).
+
+%% BT-3314: `name` is required; `package` is optional (disambiguates a
+%% same-named alias declared by more than one package). Aliases are not
+%% runtime atoms/modules, so — unlike `validate_class`/`validate_module` —
+%% no atom resolution is needed, just non-empty binary validation.
+-spec validate_alias(map()) -> {ok, {binary(), binary() | undefined}} | {error, binary()}.
+validate_alias(Params) ->
+    case maps:get(<<"name">>, Params, undefined) of
+        Name when is_binary(Name), byte_size(Name) > 0 ->
+            Package =
+                case maps:get(<<"package">>, Params, undefined) of
+                    P when is_binary(P), byte_size(P) > 0 -> P;
+                    _ -> undefined
+                end,
+            {ok, {Name, Package}};
+        _ ->
+            {error, <<"`name` (non-empty string) is required">>}
+    end.
 
 %% Best-effort `handle_call` clause line-map: each clause whose first message
 %% element is a concrete selector (a quoted atom like `'writeLine:'` or a bare

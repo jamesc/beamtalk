@@ -285,6 +285,13 @@ defmodule BtAttach.WorkspaceTest do
       assert {:error, {:unreachable, _}} = Workspace.browse_type_aliases()
     end
 
+    test "browse_alias_source/1,2 against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_alias_source("RestartStrategy")
+
+      assert {:error, {:unreachable, _}} =
+               Workspace.browse_alias_source("RestartStrategy", "my_app")
+    end
+
     test "save_native_source against an unreachable workspace returns an unreachable error" do
       assert {:error, {:unreachable, _}} =
                Workspace.save_native_source("mymod", "-module(mymod).")

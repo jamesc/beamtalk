@@ -574,6 +574,12 @@ defmodule BtAttachWeb.WorkspaceLive do
       # excluded server-side at the seeding boundary (`browse-type-aliases`),
       # so every row this holds is already visible-by-construction.
       |> assign(:browser_type_aliases, [])
+      # BT-3314: the read-only alias source pane, mirroring `:native_view`.
+      # `nil` = collapsed; otherwise a map carrying the fetched source for one
+      # alias (lazily loaded on a Type Aliases row's click-to-toggle). Same
+      # single-slot design as `:native_view` — opening a second alias's pane
+      # replaces this value.
+      |> assign(:alias_view, nil)
       # BT-2656/BT-2661: the Native browser's own source-origin filter, mirroring the
       # class tree's `browser_source`. Defaults to "project" once the rows arrive
       # (`apply_default_native_source/1`), falling back to "all" when there are no
@@ -2094,6 +2100,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # server-side (seeding-boundary exclusion), so there is no companion
   # client-side filter attr the way `native_source` is for Native.
   attr :browser_type_aliases, :list, default: []
+  # BT-3314: the read-only alias source pane, mirroring `native_view`. `nil` =
+  # every alias row collapsed; otherwise the fetched source for whichever
+  # alias was last clicked (single-slot, same as `native_view`).
+  attr :alias_view, :map, default: nil
 
   defp system_browser_classes(assigns) do
     # BT-2557: filter the rows once, up front, so both the hierarchy and category
@@ -2431,30 +2441,55 @@ defmodule BtAttachWeb.WorkspaceLive do
       </div>
       <%!-- BT-2903 (ADR 0108 Phase 8): the "Type Aliases" panel body — shown only
            in `:aliases` mode. A `type Name = ...` declaration produces no BEAM
-           module (aliases erase entirely), so unlike Native there is nothing to
-           open as a source tab — each row is a flat, read-only entry showing the
-           alias's expansion inline, with a package/origin badge (mirroring the
-           class tree/Native vocabulary) and an "internal" tag when set. --%>
+           module (aliases erase entirely), so each row shows the alias's
+           expansion inline, with a package/origin badge (mirroring the class
+           tree/Native vocabulary) and an "internal" tag when set. BT-3314:
+           clicking a row toggles a read-only source view inline underneath it
+           (mirroring `browser_open_native`'s inline toggle) — `content: nil`
+           degrades to the honest "source not available" empty state for
+           stdlib/dependency aliases (no live path cache for those origins). --%>
       <div :if={@browser_mode == :aliases} class="panel-body" id="type-aliases-browser">
         <%= cond do %>
           <% @browser_type_aliases == [] -> %>
             <p class="muted-note">No type aliases in the workspace.</p>
           <% true -> %>
             <div class="tree type-aliases-list">
-              <div :for={alias_row <- @browser_type_aliases} class="row" title={alias_row["name"]}>
-                <span class="twig">●</span>
-                <span class="cls mono">{alias_row["name"]}</span>
-                <span class="alias-expansion mono">= {alias_row["expansion"]}</span>
-                <span
-                  :if={alias_row["source_origin"] && alias_row["source_origin"] != "project"}
-                  class={"source-origin-tag #{SystemBrowser.source_origin_class(alias_row)}"}
-                  title={SystemBrowser.source_origin_title(alias_row)}
+              <div :for={alias_row <- @browser_type_aliases} class="alias-item">
+                <div
+                  class={[
+                    "row",
+                    SystemBrowser.alias_shown?(assigns, alias_row["name"], alias_row["package"]) &&
+                      "sel"
+                  ]}
+                  phx-click="browser_open_alias"
+                  phx-value-name={alias_row["name"]}
+                  phx-value-package={alias_row["package"]}
+                  title={alias_row["name"]}
                 >
-                  {SystemBrowser.source_origin_label(alias_row)}
-                </span>
-                <span :if={alias_row["internal"] == true} class="runtime-tag" title="internal alias">
-                  internal
-                </span>
+                  <span class="twig">●</span>
+                  <span class="cls mono">{alias_row["name"]}</span>
+                  <span class="alias-expansion mono">= {alias_row["expansion"]}</span>
+                  <span
+                    :if={alias_row["source_origin"] && alias_row["source_origin"] != "project"}
+                    class={"source-origin-tag #{SystemBrowser.source_origin_class(alias_row)}"}
+                    title={SystemBrowser.source_origin_title(alias_row)}
+                  >
+                    {SystemBrowser.source_origin_label(alias_row)}
+                  </span>
+                  <span :if={alias_row["internal"] == true} class="runtime-tag" title="internal alias">
+                    internal
+                  </span>
+                </div>
+                <div
+                  :if={SystemBrowser.alias_shown?(assigns, alias_row["name"], alias_row["package"])}
+                  class="native-body alias-body"
+                >
+                  <.native_source_body view={@alias_view} dismiss_event="dismiss_alias_error">
+                    <:unavailable>
+                      No source available for type alias <code class="mono">{alias_row["name"]}</code>.
+                    </:unavailable>
+                  </.native_source_body>
+                </div>
               </div>
             </div>
         <% end %>
@@ -2564,17 +2599,23 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp class_row_indent(_), do: nil
 
-  # BT-2578/BT-2648: the read-only native source-view body, shared by the
+  # BT-2578/BT-2648/BT-3314: the read-only source-view body, shared by the
   # class-definition tab's native pane (keyed by a `native:` class's backing
-  # module) and the standalone "Native modules" pane (keyed by a module). `view`
-  # is the fetched native_view map (`error`/`content`/`source_file`/
-  # `source_origin`/`editable`/`clauses`/`selected_clause`/`requested_selector`);
-  # `fallback_module` names the module in the "source not available" empty state;
-  # `dismiss_event` clears the in-pane error. `content == nil` degrades to the
-  # empty state, never an error.
+  # module), the standalone "Native modules" pane (keyed by a module), and the
+  # Type Aliases panel's inline alias pane (keyed by a `name`/`package` pair —
+  # BT-3314). `view` is the fetched native_view/alias_view map
+  # (`error`/`content`/`source_file`/`source_origin`/`editable`/`clauses`/
+  # `selected_clause`/`requested_selector` — an alias_view always carries
+  # `clauses: []` and `requested_selector: nil`, so those branches simply don't
+  # render); `dismiss_event` clears the in-pane error. `content == nil`
+  # degrades to the `:unavailable` slot, never an error — the caller supplies
+  # that empty-state message directly (it's the one thing that genuinely
+  # differs per caller: "the module shipped without source" vs. "no source
+  # available for this alias"), so the component itself stays agnostic to
+  # what kind of source it's showing rather than branching on a caller kind.
   attr :view, :map, required: true
-  attr :fallback_module, :string, default: nil
   attr :dismiss_event, :string, required: true
+  slot :unavailable, required: true
 
   defp native_source_body(assigns) do
     ~H"""
@@ -2617,10 +2658,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       </div>
       <pre class="native-pre"><code>{@view.content}</code></pre>
     <% else %>
-      <div :if={is_nil(@view.error)} class="muted-note">
-        Erlang source not available — the module <code class="mono">{@fallback_module}</code>
-        shipped without source.
-      </div>
+      <div :if={is_nil(@view.error)} class="muted-note">{render_slot(@unavailable)}</div>
     <% end %>
     """
   end
@@ -3267,6 +3305,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   native_source={@native_source}
                   native_module_shown={SystemBrowser.active_native_module(assigns)}
                   browser_type_aliases={@browser_type_aliases}
+                  alias_view={@alias_view}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
                      the method list ("more class, less method"). phx-update="ignore"
@@ -4417,9 +4456,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <div class="panel-body native-tab-body">
                         <.native_source_body
                           view={nt.native_view}
-                          fallback_module={nt.class}
                           dismiss_event="dismiss_native_module_error"
-                        />
+                        >
+                          <:unavailable>
+                            Erlang source not available — the module
+                            <code class="mono">{nt.class}</code>
+                            shipped without source.
+                          </:unavailable>
+                        </.native_source_body>
                       </div>
                     <% end %>
                   <% match?(%{}, MethodEditor.active_tab(assigns)) -> %>
@@ -4626,9 +4670,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                         >
                           <.native_source_body
                             view={@native_view}
-                            fallback_module={doc_tab.native_module}
                             dismiss_event="dismiss_native_error"
-                          />
+                          >
+                            <:unavailable>
+                              Erlang source not available — the module
+                              <code class="mono">{doc_tab.native_module}</code>
+                              shipped without source.
+                            </:unavailable>
+                          </.native_source_body>
                         </div>
                       </section>
                       <%= cond do %>

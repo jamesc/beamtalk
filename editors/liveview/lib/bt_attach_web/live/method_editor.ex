@@ -253,13 +253,11 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # Dismiss the error inside the live native-source pane: `@native_view` is a
   # map whose `:error` field carries the banner. Clear only that field so the
   # rest of the pane (content/clauses/meta) is preserved; if the pane is
-  # closed (`native_view: nil`) this is a no-op.
-  def handle_event("dismiss_native_error", _params, socket) do
-    case socket.assigns[:native_view] do
-      %{} = nv -> {:noreply, assign(socket, native_view: Map.put(nv, :error, nil))}
-      _ -> {:noreply, socket}
-    end
-  end
+  # closed (`native_view: nil`) this is a no-op. Shared with `SystemBrowser`'s
+  # `dismiss_alias_error` via `SystemBrowser.dismiss_pane_error/2` — same
+  # single-slot socket-assign pane shape, just a different assign key.
+  def handle_event("dismiss_native_error", _params, socket),
+    do: {:noreply, SystemBrowser.dismiss_pane_error(socket, :native_view)}
 
   # Selection tracking (BT-2485, BT-2539): the method-editor CmEditor hook
   # reports the editor's current selection (text + offsets). We hold it in
