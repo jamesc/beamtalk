@@ -81,9 +81,6 @@ defmodule BtAttachWeb.Live.ClassModals do
   alias BtAttachWeb.Live.SystemBrowser
   alias BtAttachWeb.WorkspaceLive
 
-  defp ctx(socket), do: RequestContext.build(socket)
-  defp facade_error(reason), do: FacadeError.render(reason)
-
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
   # `WorkspaceLive.handle_event/3` forwards every event whose name is in
@@ -298,7 +295,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp remove_method_eval(socket, tab, receiver, selector, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, RequestContext.build(socket)) do
       {:ok, _term, _output, _warnings} ->
         # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
         # tab was the active one — via `clear_active/1` if it was the last
@@ -320,7 +317,7 @@ defmodule BtAttachWeb.Live.ClassModals do
         WorkspaceLive.status_error(socket, Workspace.render_error(reason))
 
       {:error, reason} ->
-        WorkspaceLive.status_error(socket, facade_error(reason))
+        WorkspaceLive.status_error(socket, FacadeError.render(reason))
     end
   end
 
@@ -361,7 +358,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp remove_class_eval(socket, tab, class, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, RequestContext.build(socket)) do
       {:ok, _term, _output, _warnings} ->
         # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
         # tab was the active one — mirrors `remove_method_eval/6`'s success
@@ -384,7 +381,7 @@ defmodule BtAttachWeb.Live.ClassModals do
         WorkspaceLive.status_error(socket, Workspace.render_error(reason))
 
       {:error, reason} ->
-        WorkspaceLive.status_error(socket, facade_error(reason))
+        WorkspaceLive.status_error(socket, FacadeError.render(reason))
     end
   end
 
@@ -538,7 +535,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp rename_class_eval(socket, old_name, new_name, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, RequestContext.build(socket)) do
       {:ok, _term, _output, _warnings} ->
         # The class's identity changed, so every tab keyed on the old name
         # (its own `:def` tab plus any open `:method` tabs) is stale — close
@@ -575,7 +572,7 @@ defmodule BtAttachWeb.Live.ClassModals do
         assign(socket,
           rename_open: true,
           rename_new_name: new_name,
-          rename_error: facade_error(reason)
+          rename_error: FacadeError.render(reason)
         )
     end
   end
@@ -650,7 +647,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp rename_method_eval(socket, class, receiver, old_selector, new_selector, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, RequestContext.build(socket)) do
       {:ok, _term, _output, _warnings} ->
         # The selector changed, so the active method tab (keyed on the old
         # selector) is stale — close it, mirroring `remove_method_eval/6`'s
@@ -681,7 +678,7 @@ defmodule BtAttachWeb.Live.ClassModals do
         assign(socket,
           rename_open: true,
           rename_new_name: new_selector,
-          rename_error: facade_error(reason)
+          rename_error: FacadeError.render(reason)
         )
     end
   end
@@ -802,7 +799,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp dispatch_new_class(socket, name, superclass, source, path) do
-    case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
+    case Facade.dispatch(:new_class, %{source: source, path: path}, RequestContext.build(socket)) do
       {:ok, created_path} ->
         socket
         |> SystemBrowser.assign_browser_classes()
@@ -838,7 +835,7 @@ defmodule BtAttachWeb.Live.ClassModals do
           new_class_open: true,
           new_class_name: name,
           new_class_super: superclass,
-          new_class_error: facade_error(reason)
+          new_class_error: FacadeError.render(reason)
         )
     end
   end

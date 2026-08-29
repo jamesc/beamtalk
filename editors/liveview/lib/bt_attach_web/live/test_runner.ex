@@ -78,9 +78,6 @@ defmodule BtAttachWeb.Live.TestRunner do
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
 
-  defp ctx(socket), do: RequestContext.build(socket)
-  defp facade_error(reason), do: FacadeError.render(reason)
-
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
   # `WorkspaceLive.handle_event/3` forwards every event whose name is in
@@ -277,7 +274,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   # Public: `BtAttachWeb.Live.Dock`'s `ensure_test_classes/1` (BT-3295, the
   # `dock_tab`/`:test` meta-command lazy-load) calls it directly.
   def discover_test_classes(socket, keep_error? \\ false) do
-    ctx = ctx(socket)
+    ctx = RequestContext.build(socket)
 
     socket
     |> assign(:tests_discover_keep_error, keep_error?)
@@ -306,10 +303,11 @@ defmodule BtAttachWeb.Live.TestRunner do
     # Leave the catalogue as the nil sentinel (not []) so the pane shows only the
     # error — not the misleading "No TestCase subclasses" empty-state — and so
     # re-opening the tab retries discovery (a transient failure heals).
-    do: assign(socket, test_classes: nil, tests_error: facade_error(reason))
+    do: assign(socket, test_classes: nil, tests_error: FacadeError.render(reason))
 
   defp apply_test_classes(socket, _other, _keep_error?),
-    do: assign(socket, test_classes: nil, tests_error: facade_error(:unexpected_test_result))
+    do:
+      assign(socket, test_classes: nil, tests_error: FacadeError.render(:unexpected_test_result))
 
   # Run all tests (`class` = nil) or a single class (`run_tests`, `:execute`).
   #
@@ -320,7 +318,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   # the in-flight op so only the latest result wins. The result lands in
   # `handle_async(:test_op, …)`; `tests_running` disables the controls meanwhile.
   defp run_tests(socket, class) do
-    ctx = ctx(socket)
+    ctx = RequestContext.build(socket)
 
     socket
     |> assign(tests_running: true, tests_error: nil)
@@ -337,7 +335,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   # BT-2597: like `run_tests/2`, the load compiles user code, so it runs in the
   # off-socket `:test_op` task; the result lands in `handle_async(:test_op, …)`.
   defp load_tests(socket) do
-    ctx = ctx(socket)
+    ctx = RequestContext.build(socket)
 
     socket
     |> assign(tests_running: true, tests_error: nil)
@@ -355,10 +353,11 @@ defmodule BtAttachWeb.Live.TestRunner do
     do: assign(socket, test_results: result, tests_error: nil)
 
   defp apply_test_result(socket, {:error, reason}),
-    do: assign(socket, test_results: nil, tests_error: facade_error(reason))
+    do: assign(socket, test_results: nil, tests_error: FacadeError.render(reason))
 
   defp apply_test_result(socket, _other),
-    do: assign(socket, test_results: nil, tests_error: facade_error(:unexpected_test_result))
+    do:
+      assign(socket, test_results: nil, tests_error: FacadeError.render(:unexpected_test_result))
 
   # Apply a completed `load_tests` dispatch: refresh the catalogue to show
   # whatever loaded, surfacing partial compile errors as `tests_error`. The
@@ -383,10 +382,10 @@ defmodule BtAttachWeb.Live.TestRunner do
     do: socket |> assign(test_classes: nil) |> discover_test_classes()
 
   defp apply_test_load(socket, {:error, reason}),
-    do: assign(socket, tests_error: facade_error(reason))
+    do: assign(socket, tests_error: FacadeError.render(reason))
 
   defp apply_test_load(socket, _other),
-    do: assign(socket, tests_error: facade_error(:unexpected_test_result))
+    do: assign(socket, tests_error: FacadeError.render(:unexpected_test_result))
 
   # Summarise compile errors from a partial test load into one line. Each error
   # is a `%{"path" => ..., "message" => ...}` map (the load-project error shape).

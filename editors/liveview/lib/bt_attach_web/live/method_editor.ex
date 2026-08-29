@@ -85,9 +85,6 @@ defmodule BtAttachWeb.Live.MethodEditor do
   alias BtAttachWeb.Live.SystemBrowser
   alias BtAttachWeb.WorkspaceLive
 
-  defp ctx(socket), do: RequestContext.build(socket)
-  defp facade_error(reason), do: FacadeError.render(reason)
-
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
   # `WorkspaceLive.handle_event/3` forwards every event whose name is in
@@ -354,7 +351,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
         case Facade.dispatch(
                :save,
                %{class: class, selector: selector, source: source},
-               ctx(socket)
+               RequestContext.build(socket)
              ) do
           {:ok, saved_class} ->
             # The patch is live + logged; refresh the change-history pane so
@@ -376,7 +373,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
             # `reason` may be a facade RBAC denial (`:unauthorized`) for a
             # crafted event from a read-only role, or a workspace
             # #beamtalk_error{}.
-            assign(socket, save_result: nil, save_error: facade_error(reason))
+            assign(socket, save_result: nil, save_error: FacadeError.render(reason))
         end
     end
   end
@@ -404,7 +401,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   end
 
   defp save_definition_eval(socket, tab, source, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: source}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: source}, RequestContext.build(socket)) do
       {:ok, _term, _output, _warnings} ->
         socket
         |> assign(
@@ -426,7 +423,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
         assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
 
       {:error, reason} ->
-        assign(socket, save_result: nil, save_error: facade_error(reason))
+        assign(socket, save_result: nil, save_error: FacadeError.render(reason))
     end
   end
 
@@ -444,7 +441,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
         case Facade.dispatch(
                :save_native_source,
                %{module: module, source: source},
-               ctx(socket)
+               RequestContext.build(socket)
              ) do
           {:value, %{"ok" => true}} ->
             # Compiled, reloaded, and written to disk. Clear the dirty dot,
@@ -464,7 +461,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
             assign(socket, save_result: nil, save_error: native_compile_error(errors))
 
           {:error, reason} ->
-            assign(socket, save_result: nil, save_error: facade_error(reason))
+            assign(socket, save_result: nil, save_error: FacadeError.render(reason))
 
           _other ->
             assign(socket, save_result: nil, save_error: "Could not save native source.")
@@ -517,7 +514,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
     case Facade.dispatch(
            :browse_method_source,
            %{class: class, side: side, selector: selector},
-           ctx(socket)
+           RequestContext.build(socket)
          ) do
       {:value, result} when is_map(result) ->
         %{
@@ -661,7 +658,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # class' docs). `{"", nil, nil, nil, false}` if the browse fails — the tab
   # then opens empty rather than erroring.
   defp class_definition_info(socket, class) do
-    case Facade.dispatch(:browse_class_definition, %{class: class}, ctx(socket)) do
+    case Facade.dispatch(:browse_class_definition, %{class: class}, RequestContext.build(socket)) do
       {:value, %{} = result} ->
         definition =
           case Map.get(result, "definition") do
