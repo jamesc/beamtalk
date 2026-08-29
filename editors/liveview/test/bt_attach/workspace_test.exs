@@ -72,6 +72,15 @@ defmodule BtAttach.WorkspaceTest do
     test "map values are recursively formatted" do
       assert Workspace.format_value(%{"items" => [1, 2]}) == "{items: #(1, 2)}"
     end
+
+    test "a shape none of the typed clauses match falls back to inspect/1" do
+      # Every JSON-safe shape (binary/integer/bool/nil/float/list/map) has its
+      # own clause above; a bare atom or tuple can't arrive from a real
+      # term_to_json/1 encode, but the catch-all exists so a future/odd shape
+      # degrades to inspect/1 rather than raising a FunctionClauseError.
+      assert Workspace.format_value(:an_atom) == inspect(:an_atom)
+      assert Workspace.format_value({:a, :tuple}) == inspect({:a, :tuple})
+    end
   end
 
   describe "format_flush_summary/1 — write-surface flush rendering (BT-2409, ADR 0082)" do
@@ -218,6 +227,14 @@ defmodule BtAttach.WorkspaceTest do
       }
 
       assert [%{side: nil}] = Workspace.pending_rows([raw])
+    end
+
+    test "a new-class entry (nil selector) renders a class placeholder" do
+      # A brand-new class definition has no selector of its own — ChangeLog
+      # sends `selector: nil` for that entry, and the row shows "(class)"
+      # rather than the empty string `to_string(nil)` would otherwise produce.
+      [row] = Workspace.pending_rows([entry(0, nil, [])])
+      assert row.selector == "(class)"
     end
   end
 
@@ -523,6 +540,24 @@ defmodule BtAttach.WorkspaceTest do
       # deterministically when two fronts attach to the same workspace.
       refute Workspace.attach_sname("ws-42", "1") == Workspace.attach_sname("ws-42", "2")
     end
+
+    test "attach_sname/0 evaluates its real default args (BT_ATTACH_NODE_SUFFIX + this VM's os pid)" do
+      # Every test above passes both args explicitly, which never exercises the
+      # default-value expressions themselves (`System.get_env/1`, `System.pid/0`).
+      # This suite's env has no BT_ATTACH_NODE_SUFFIX set, so the 0-arity call
+      # takes the same unset-suffix branch as `attach_sname(nil, _)`.
+      refute System.get_env("BT_ATTACH_NODE_SUFFIX")
+      name = Workspace.attach_sname()
+      assert Atom.to_string(name) =~ ~r/^bt_attach_\d+@localhost$/
+    end
+
+    test "attach_sname/1 evaluates only the os_pid default (an explicit suffix, no os_pid arg)" do
+      # Elixir's compiler generates a distinct default-filling clause per
+      # arity, so the 0-arity call above and this 1-arity call independently
+      # exercise the `suffix` and `os_pid` default-value expressions.
+      name = Workspace.attach_sname("ws-42")
+      assert Atom.to_string(name) =~ ~r/^bt_attach_ws-42_\d+@localhost$/
+    end
   end
 
   describe "epmd_reachable?/2 — local epmd probe (ADR 0097 Implementation §1c)" do
@@ -543,6 +578,13 @@ defmodule BtAttach.WorkspaceTest do
       :ok = :gen_tcp.close(listener)
 
       assert Workspace.epmd_reachable?(~c"127.0.0.1", port) == false
+    end
+
+    test "epmd_reachable?/0 evaluates its real default args (localhost + the real epmd port)" do
+      # Every test above passes both args explicitly; this exercises the
+      # default-value expressions themselves. This sandbox has no epmd running
+      # on the real port, so the 0-arity form takes the same false branch.
+      refute Workspace.epmd_reachable?()
     end
   end
 
