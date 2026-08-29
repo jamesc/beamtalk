@@ -256,9 +256,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
   # transport/display/lifecycle helpers (connect, render_term, session start)
   # go through the injectable workspace client so the mount and session-start
-  # paths are testable without a live node (BT-2554). `ctx/1` carries the
-  # request identity the facade audits / RBAC gates on (BT-2421).
-  defp ctx(socket), do: RequestContext.build(socket)
+  # paths are testable without a live node (BT-2554). `RequestContext.build/1`
+  # carries the request identity the facade audits / RBAC gates on (BT-2421).
 
   defp ws_client, do: Application.get_env(:bt_attach, :workspace_client, Workspace)
 
@@ -390,8 +389,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (the old pid's subscriptions died with it), so the resumed tab gets its
   # Transcript and bindings flowing again with its accumulated state intact.
   defp bind_session(socket, session_id, pid) do
-    with :ok <- Facade.dispatch(:subscribe_transcript, %{pid: self()}, ctx(socket)),
-         :ok <- Facade.dispatch(:subscribe_bindings, %{pid: self()}, ctx(socket)) do
+    with :ok <-
+           Facade.dispatch(:subscribe_transcript, %{pid: self()}, RequestContext.build(socket)),
+         :ok <- Facade.dispatch(:subscribe_bindings, %{pid: self()}, RequestContext.build(socket)) do
       # BT-2598: subscribe to the class-lifecycle push stream so any source change
       # — a git revert's disk→image reload, another session's flush, an external
       # edit reloaded into the image — pushes a `ClassLoaded`/`ClassRemoved`
@@ -752,7 +752,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # does not fail the mount — the cockpit degrades to the clean-tab re-read on
   # re-activation rather than a live push, and re-subscribes on the next remount.
   defp subscribe_classes_best_effort(socket) do
-    case Facade.dispatch(:subscribe_classes, %{pid: self()}, ctx(socket)) do
+    case Facade.dispatch(:subscribe_classes, %{pid: self()}, RequestContext.build(socket)) do
       :ok ->
         :ok
 
@@ -771,7 +771,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # reload-findings panel to whatever `initial_reload_findings/1` read at
   # mount (stale until next remount) rather than failing the whole session.
   defp subscribe_reload_check_best_effort(socket) do
-    case Facade.dispatch(:subscribe_reload_check, %{pid: self()}, ctx(socket)) do
+    case Facade.dispatch(:subscribe_reload_check, %{pid: self()}, RequestContext.build(socket)) do
       :ok ->
         :ok
 
@@ -790,7 +790,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # an empty panel (consistent with `changes`/`browser_classes`'s
   # graceful-degradation default) rather than failing the mount.
   defp initial_reload_findings(socket) do
-    case Facade.dispatch(:reload_findings, %{}, ctx(socket)) do
+    case Facade.dispatch(:reload_findings, %{}, RequestContext.build(socket)) do
       {:ok, findings} when is_list(findings) -> findings
       _other -> []
     end
@@ -1618,7 +1618,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # The raw `:changes` dispatch result — runs off the LiveView process in the
   # mount-load task, so it captures only `ctx`, never `socket`.
-  defp read_changes(socket), do: Facade.dispatch(:changes, %{}, ctx(socket))
+  defp read_changes(socket), do: Facade.dispatch(:changes, %{}, RequestContext.build(socket))
 
   # Fold a completed `:changes` read into the socket. Pure (no dispatch); shared by
   # `handle_async(:mount_load, …)` and the sync refresh path.
@@ -1735,7 +1735,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The task captures only `ctx` + `pid` (never `socket`) and returns the four
   # raw `Facade.dispatch` outcomes in a map so the fold applies them atomically.
   defp start_mount_load(socket, pid) do
-    ctx = ctx(socket)
+    ctx = RequestContext.build(socket)
 
     start_async(socket, :mount_load, fn ->
       # Runs in a Task off the LiveView process — never touch `socket` here.
@@ -1817,7 +1817,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # calls it directly — the System Browser hasn't been extracted out of this
   # module yet (BT-3297).
   def symbol_rows(socket) do
-    case Facade.dispatch(:symbols, %{scope: "all"}, ctx(socket)) do
+    case Facade.dispatch(:symbols, %{scope: "all"}, RequestContext.build(socket)) do
       {:value, %{"classes" => classes}} when is_list(classes) ->
         Enum.flat_map(classes, &class_symbol_rows/1)
 
@@ -1896,7 +1896,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp assign_bindings(socket, pid), do: apply_bindings(socket, read_bindings(socket, pid))
 
   defp read_bindings(socket, pid),
-    do: Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket))
+    do: Facade.dispatch(:bindings, %{session_pid: pid}, RequestContext.build(socket))
 
   defp apply_bindings(socket, {:error, reason}),
     do: assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))

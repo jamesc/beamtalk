@@ -86,9 +86,6 @@ defmodule BtAttachWeb.Live.Dock do
   alias BtAttachWeb.Live.TestRunner
   alias BtAttachWeb.WorkspaceLive
 
-  defp ctx(socket), do: RequestContext.build(socket)
-  defp facade_error(reason), do: FacadeError.render(reason)
-
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
   # `WorkspaceLive.handle_event/3` forwards every event whose name is in
@@ -116,7 +113,7 @@ defmodule BtAttachWeb.Live.Dock do
     action = eval_action(params)
     target = eval_target(expr, socket)
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: target}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: target}, RequestContext.build(socket)) do
       {:ok, term, output, _warnings} ->
         # eval returns the live term; rendering is display-only and reuses the
         # workspace's own formatter for surface-consistency with the browser.
@@ -138,7 +135,7 @@ defmodule BtAttachWeb.Live.Dock do
       # message rather than crashing the LiveView on an unmatched case clause.
       {:error, reason} ->
         {:noreply,
-         assign(socket, result: nil, output: nil, error: facade_error(reason), expr: expr)}
+         assign(socket, result: nil, output: nil, error: FacadeError.render(reason), expr: expr)}
     end
   end
 
@@ -199,12 +196,12 @@ defmodule BtAttachWeb.Live.Dock do
     if socket.assigns.git_diff_path == path do
       {:noreply, assign(socket, git_diff_path: nil, git_diff: nil)}
     else
-      case Facade.dispatch(:git_diff, %{path: path}, ctx(socket)) do
+      case Facade.dispatch(:git_diff, %{path: path}, RequestContext.build(socket)) do
         {:ok, diff} when is_map(diff) ->
           {:noreply, assign(socket, git_diff_path: path, git_diff: diff, git_error: nil)}
 
         {:error, reason} ->
-          {:noreply, assign(socket, git_error: facade_error(reason))}
+          {:noreply, assign(socket, git_error: FacadeError.render(reason))}
       end
     end
   end
@@ -290,7 +287,11 @@ defmodule BtAttachWeb.Live.Dock do
 
       true ->
         socket =
-          case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+          case Facade.dispatch(
+                 :eval,
+                 %{session_pid: pid, code: expr},
+                 RequestContext.build(socket)
+               ) do
             {:ok, term, _output, _warnings} ->
               socket |> repl_append_ok(expr, term) |> repl_help_followup(expr)
 
@@ -301,7 +302,7 @@ defmodule BtAttachWeb.Live.Dock do
             # 2-tuple the eval contract never produces; render it as the
             # entry's response rather than crashing the LiveView.
             {:error, reason} ->
-              repl_append_error(socket, expr, facade_error(reason))
+              repl_append_error(socket, expr, FacadeError.render(reason))
           end
 
         {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
@@ -1113,9 +1114,9 @@ defmodule BtAttachWeb.Live.Dock do
   # the user is editing), so they keep the original behaviour: dispatch and
   # refresh the git panel only.
   defp git_mutate_event(socket, op, params) do
-    case Facade.dispatch(op, params, ctx(socket)) do
+    case Facade.dispatch(op, params, RequestContext.build(socket)) do
       {:ok, _} -> assign_git(socket)
-      {:error, reason} -> assign(socket, git_error: facade_error(reason))
+      {:error, reason} -> assign(socket, git_error: FacadeError.render(reason))
     end
   end
 
@@ -1126,7 +1127,7 @@ defmodule BtAttachWeb.Live.Dock do
   # sessions; reloading + refreshing here makes the acting session update
   # synchronously rather than waiting on its own push.
   defp git_revert_event(socket, %{path: path} = params) do
-    case Facade.dispatch(:git_revert_file, params, ctx(socket)) do
+    case Facade.dispatch(:git_revert_file, params, RequestContext.build(socket)) do
       {:ok, _} ->
         {reloaded, reload_note} = reload_reverted_path(socket, path)
 
@@ -1161,7 +1162,7 @@ defmodule BtAttachWeb.Live.Dock do
         |> maybe_status_error(reload_note)
 
       {:error, reason} ->
-        assign(socket, git_error: facade_error(reason))
+        assign(socket, git_error: FacadeError.render(reason))
     end
   end
 
@@ -1176,12 +1177,12 @@ defmodule BtAttachWeb.Live.Dock do
   # tree was still reverted, and the subsequent refresh re-reads what the
   # image can serve; the note is surfaced afterwards.
   defp reload_reverted_path(socket, path) do
-    case Facade.dispatch(:reload, %{path: path}, ctx(socket)) do
+    case Facade.dispatch(:reload, %{path: path}, RequestContext.build(socket)) do
       {:ok, class_names} when is_list(class_names) ->
         {reloaded_tab_keys(socket.assigns.tabs, class_names), nil}
 
       {:error, reason} ->
-        {MapSet.new(), "Reverted #{path}, but reload failed: #{facade_error(reason)}"}
+        {MapSet.new(), "Reverted #{path}, but reload failed: #{FacadeError.render(reason)}"}
     end
   end
 
@@ -1262,7 +1263,7 @@ defmodule BtAttachWeb.Live.Dock do
   # the loading state on each refresh. Public: `WorkspaceLive.maybe_refresh_git/1`
   # (used by the not-yet-extracted save/flush paths) calls it directly.
   def assign_git(socket) do
-    ctx = ctx(socket)
+    ctx = RequestContext.build(socket)
 
     socket
     |> assign(git_diff_path: nil, git_diff: nil, git_status: nil, git_log: [], git_error: nil)
@@ -1284,20 +1285,20 @@ defmodule BtAttachWeb.Live.Dock do
     do: assign(socket, git_status: status, git_error: nil)
 
   defp apply_git_status(socket, {:error, reason}),
-    do: assign(socket, git_status: nil, git_error: facade_error(reason))
+    do: assign(socket, git_status: nil, git_error: FacadeError.render(reason))
 
   defp apply_git_status(socket, _other),
-    do: assign(socket, git_status: nil, git_error: facade_error(:unexpected_git_status))
+    do: assign(socket, git_status: nil, git_error: FacadeError.render(:unexpected_git_status))
 
   # Apply a completed git log read.
   defp apply_git_log(socket, {:ok, commits}) when is_list(commits),
     do: assign(socket, git_log: commits)
 
   defp apply_git_log(socket, {:error, reason}),
-    do: log_failed(socket, facade_error(reason))
+    do: log_failed(socket, FacadeError.render(reason))
 
   defp apply_git_log(socket, _other),
-    do: log_failed(socket, facade_error(:unexpected_git_log))
+    do: log_failed(socket, FacadeError.render(:unexpected_git_log))
 
   # A git-log read failed. Clear the list, and surface the error only if the
   # status read hasn't already reported one — when both fail together the
@@ -1327,7 +1328,11 @@ defmodule BtAttachWeb.Live.Dock do
   # structured error the workspace returns. `side` (ADR 0112, BT-3187)
   # disambiguates a same-selector instance-side entry from a class-side one.
   defp revert_change(socket, class, selector, side) do
-    case Facade.dispatch(:revert, %{class: class, selector: selector, side: side}, ctx(socket)) do
+    case Facade.dispatch(
+           :revert,
+           %{class: class, selector: selector, side: side},
+           RequestContext.build(socket)
+         ) do
       {:ok, reverted_class} ->
         socket
         |> assign(
@@ -1339,7 +1344,7 @@ defmodule BtAttachWeb.Live.Dock do
         |> WorkspaceLive.assign_changes()
 
       {:error, reason} ->
-        WorkspaceLive.status_error(socket, facade_error(reason))
+        WorkspaceLive.status_error(socket, FacadeError.render(reason))
     end
   end
 
@@ -1357,7 +1362,7 @@ defmodule BtAttachWeb.Live.Dock do
   defp flush_changes(socket) do
     was_pending = WorkspaceLive.pending_method_keys(socket.assigns.changes)
 
-    case Facade.dispatch(:flush, %{}, ctx(socket)) do
+    case Facade.dispatch(:flush, %{}, RequestContext.build(socket)) do
       {:ok, summary} ->
         socket
         |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
@@ -1369,7 +1374,7 @@ defmodule BtAttachWeb.Live.Dock do
         |> WorkspaceLive.maybe_refresh_git()
 
       {:error, reason} ->
-        assign(socket, flush_result: nil, flush_error: facade_error(reason))
+        assign(socket, flush_result: nil, flush_error: FacadeError.render(reason))
     end
   end
 
@@ -1426,7 +1431,7 @@ defmodule BtAttachWeb.Live.Dock do
   defp rename_flush_message(_kind, class), do: "Flushed the pending removal for #{class}"
 
   defp flush_destructive_eval(socket, class, kind, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, RequestContext.build(socket)) do
       {:ok, _term, _output, _warnings} ->
         socket
         |> assign(
@@ -1445,7 +1450,7 @@ defmodule BtAttachWeb.Live.Dock do
         WorkspaceLive.status_error(socket, Workspace.render_error(reason))
 
       {:error, reason} ->
-        WorkspaceLive.status_error(socket, facade_error(reason))
+        WorkspaceLive.status_error(socket, FacadeError.render(reason))
     end
   end
 

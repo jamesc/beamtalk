@@ -95,9 +95,6 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
 
-  defp ctx(socket), do: RequestContext.build(socket)
-  defp facade_error(reason), do: FacadeError.render(reason)
-
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
   # `WorkspaceLive.handle_event/3` forwards every event whose name is in
@@ -133,7 +130,11 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   def handle_event("complete", %{"code" => code}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) and is_binary(code) do
     completions =
-      case Facade.dispatch(:complete, %{session_pid: pid, code: code}, ctx(socket)) do
+      case Facade.dispatch(
+             :complete,
+             %{session_pid: pid, code: code},
+             RequestContext.build(socket)
+           ) do
         {:ok, list} when is_list(list) -> list
         _ -> []
       end
@@ -156,7 +157,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   def handle_event("hover", %{"code" => code}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) and is_binary(code) do
     hover =
-      case Facade.dispatch(:hover, %{session_pid: pid, code: code}, ctx(socket)) do
+      case Facade.dispatch(:hover, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
         {:ok, docs} when is_binary(docs) -> docs
         _ -> ""
       end
@@ -195,7 +196,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       case Facade.dispatch(
              :diagnostics,
              %{code: code, mode: Map.get(params, "mode")},
-             ctx(socket)
+             RequestContext.build(socket)
            ) do
         {:ok, list} when is_list(list) -> list
         _ -> []
@@ -648,7 +649,8 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   def assign_browser_classes(socket),
     do: apply_browser_classes(socket, read_browser_classes(socket))
 
-  defp read_browser_classes(socket), do: Facade.dispatch(:browse_classes, %{}, ctx(socket))
+  defp read_browser_classes(socket),
+    do: Facade.dispatch(:browse_classes, %{}, RequestContext.build(socket))
 
   # Public: `WorkspaceLive.handle_async(:mount_load, …)` folds the off-socket
   # mount read through this directly (`&SystemBrowser.apply_browser_classes/2`).
@@ -659,7 +661,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   end
 
   def apply_browser_classes(socket, {:error, reason}),
-    do: assign(socket, browser_classes: [], browser_error: facade_error(reason))
+    do: assign(socket, browser_classes: [], browser_error: FacadeError.render(reason))
 
   # Defensive catch-all (BT-2591): this fold runs in `handle_async(:mount_load,
   # …)` AND on the sync `assign_browser_classes/1` refresh path. An unexpected
@@ -671,7 +673,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       domain: [:beamtalk, :liveview]
     )
 
-    assign(socket, browser_classes: [], browser_error: facade_error(:unexpected_response))
+    assign(socket, browser_classes: [], browser_error: FacadeError.render(:unexpected_response))
   end
 
   # BT-2661: apply the one-shot initial origin-filter default once the class rows
@@ -710,7 +712,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # calls it directly at mount.
   def assign_browser_native_modules(socket) do
     rows =
-      case Facade.dispatch(:browse_native_modules, %{}, ctx(socket)) do
+      case Facade.dispatch(:browse_native_modules, %{}, RequestContext.build(socket)) do
         {:value, rows} when is_list(rows) -> rows
         _ -> []
       end
@@ -731,7 +733,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # Public: `WorkspaceLive.bind_session/3` calls it directly at mount.
   def assign_browser_type_aliases(socket) do
     rows =
-      case Facade.dispatch(:browse_type_aliases, %{}, ctx(socket)) do
+      case Facade.dispatch(:browse_type_aliases, %{}, RequestContext.build(socket)) do
         {:value, rows} when is_list(rows) -> rows
         _ -> []
       end
@@ -760,7 +762,11 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # `name` and `selectors`; an unknown class / bad side comes back as a structured
   # error we surface without blanking the rest of the pane.
   defp load_protocols(socket, class, side) do
-    case Facade.dispatch(:browse_protocols, %{class: class, side: side}, ctx(socket)) do
+    case Facade.dispatch(
+           :browse_protocols,
+           %{class: class, side: side},
+           RequestContext.build(socket)
+         ) do
       {:value, %{"protocols" => protocols}} when is_list(protocols) ->
         assign(socket, browser_protocols: protocols, browser_error: nil)
 
@@ -768,7 +774,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
         assign(socket, browser_protocols: [], browser_error: nil)
 
       {:error, reason} ->
-        assign(socket, browser_protocols: [], browser_error: facade_error(reason))
+        assign(socket, browser_protocols: [], browser_error: FacadeError.render(reason))
     end
   end
 
@@ -795,7 +801,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # unconditionally on every call, including this one).
   defp refresh_categories(socket, class) do
     view =
-      case Facade.dispatch(:browse_categories, %{class: class}, ctx(socket)) do
+      case Facade.dispatch(:browse_categories, %{class: class}, RequestContext.build(socket)) do
         {:value, %{"has_dividers" => _, "categories" => _} = view} -> view
         _ -> default_categories()
       end
@@ -870,14 +876,14 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   defp submit_section(socket, class, new_name, opts) do
     params = Map.merge(%{class: class, new_name: new_name}, Map.new(opts))
 
-    case Facade.dispatch(:save_section, params, ctx(socket)) do
+    case Facade.dispatch(:save_section, params, RequestContext.build(socket)) do
       {:value, %{"ok" => true}} ->
         socket
         |> assign(editing_section: nil, section_form_error: nil)
         |> refresh_categories(class)
 
       {:error, reason} ->
-        assign(socket, section_form_error: facade_error(reason))
+        assign(socket, section_form_error: FacadeError.render(reason))
 
       _other ->
         assign(socket, section_form_error: "Could not save the section.")
@@ -932,7 +938,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
 
     params = if selector, do: %{class: class, selector: selector}, else: %{class: class}
 
-    case Facade.dispatch(:browse_native_source, params, ctx(socket)) do
+    case Facade.dispatch(:browse_native_source, params, RequestContext.build(socket)) do
       {:value, %{} = r} ->
         %{
           base
@@ -954,7 +960,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
         }
 
       {:error, reason} ->
-        %{base | error: facade_error(reason)}
+        %{base | error: FacadeError.render(reason)}
 
       _ ->
         %{base | error: "Could not load Erlang source."}
@@ -1007,7 +1013,11 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       error: nil
     }
 
-    case Facade.dispatch(:browse_alias_source, %{name: name, package: package}, ctx(socket)) do
+    case Facade.dispatch(
+           :browse_alias_source,
+           %{name: name, package: package},
+           RequestContext.build(socket)
+         ) do
       {:value, %{} = r} ->
         %{
           base
@@ -1017,7 +1027,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
         }
 
       {:error, reason} ->
-        %{base | error: facade_error(reason)}
+        %{base | error: FacadeError.render(reason)}
 
       _ ->
         %{base | error: "Could not load type alias source."}
@@ -1064,7 +1074,11 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       error: nil
     }
 
-    case Facade.dispatch(:browse_native_module_source, %{module: module}, ctx(socket)) do
+    case Facade.dispatch(
+           :browse_native_module_source,
+           %{module: module},
+           RequestContext.build(socket)
+         ) do
       {:value, %{} = r} ->
         %{
           base
@@ -1080,7 +1094,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
         }
 
       {:error, reason} ->
-        %{base | error: facade_error(reason)}
+        %{base | error: FacadeError.render(reason)}
 
       _ ->
         %{base | error: "Could not load Erlang source."}
@@ -1210,7 +1224,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # active-tab path delegates here). A nil/empty selector is a graceful no-op.
   defp run_nav_query_for(socket, kind, selector) do
     if is_binary(selector) and selector != "" do
-      case Facade.dispatch(kind, %{selector: selector}, ctx(socket)) do
+      case Facade.dispatch(kind, %{selector: selector}, RequestContext.build(socket)) do
         {:value, %{"sites" => sites}} when is_list(sites) ->
           assign(socket, nav_popover: %{kind: kind, selector: selector, sites: sites})
 
@@ -1219,7 +1233,12 @@ defmodule BtAttachWeb.Live.SystemBrowser do
 
         {:error, reason} ->
           assign(socket,
-            nav_popover: %{kind: kind, selector: selector, sites: [], error: facade_error(reason)}
+            nav_popover: %{
+              kind: kind,
+              selector: selector,
+              sites: [],
+              error: FacadeError.render(reason)
+            }
           )
 
         # Any other shape (version skew, an unexpected reply) degrades to an empty
@@ -1255,7 +1274,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       end
 
     if is_binary(protocol) and protocol != "" do
-      case Facade.dispatch(kind, %{protocol: protocol}, ctx(socket)) do
+      case Facade.dispatch(kind, %{protocol: protocol}, RequestContext.build(socket)) do
         {:value, %{"sites" => sites}} when is_list(sites) ->
           assign(socket, nav_popover: %{kind: kind, selector: protocol, sites: sites})
 
@@ -1264,7 +1283,12 @@ defmodule BtAttachWeb.Live.SystemBrowser do
 
         {:error, reason} ->
           assign(socket,
-            nav_popover: %{kind: kind, selector: protocol, sites: [], error: facade_error(reason)}
+            nav_popover: %{
+              kind: kind,
+              selector: protocol,
+              sites: [],
+              error: FacadeError.render(reason)
+            }
           )
 
         _other ->
@@ -1298,7 +1322,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     if is_binary(module) and module != "" do
       kind = :callers_of_native_module
 
-      case Facade.dispatch(kind, %{module: module}, ctx(socket)) do
+      case Facade.dispatch(kind, %{module: module}, RequestContext.build(socket)) do
         {:value, %{"sites" => sites}} when is_list(sites) ->
           assign(socket, nav_popover: %{kind: kind, selector: module, sites: sites})
 
@@ -1307,7 +1331,12 @@ defmodule BtAttachWeb.Live.SystemBrowser do
 
         {:error, reason} ->
           assign(socket,
-            nav_popover: %{kind: kind, selector: module, sites: [], error: facade_error(reason)}
+            nav_popover: %{
+              kind: kind,
+              selector: module,
+              sites: [],
+              error: FacadeError.render(reason)
+            }
           )
 
         _other ->
@@ -1410,7 +1439,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # is the graceful unresolved no-op. Mirrors `run_nav_query_for/3` but acts on
   # the result rather than always opening a popover.
   defp open_implementor(socket, selector) do
-    case Facade.dispatch(:implementors, %{selector: selector}, ctx(socket)) do
+    case Facade.dispatch(:implementors, %{selector: selector}, RequestContext.build(socket)) do
       {:value, %{"sites" => [site]}} when is_map(site) ->
         open_implementor_site(socket, site)
 

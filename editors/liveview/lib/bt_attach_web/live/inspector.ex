@@ -53,8 +53,6 @@ defmodule BtAttachWeb.Live.Inspector do
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.RequestContext
 
-  defp ctx(socket), do: RequestContext.build(socket)
-
   # ── canonical event list (BT-3301) ───────────────────────────────────────
   #
   # The single source of truth for which event names `handle_event/3` below
@@ -463,7 +461,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # are not inspectable, so we say so rather than guess.
   def inspect_term(socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
-      case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+      case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
         # BT-2634: a supervisor's content is its CHILDREN / supervision tree,
         # not actor instance vars. Each child row carries a live
         # `{:beamtalk_supervisor, …}` / `{:beamtalk_object, …}` handle, so the
@@ -539,7 +537,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # current binding list, then inspect that term. The term — not a string —
   # drives the op.
   defp inspect_binding(socket, pid, name) do
-    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, RequestContext.build(socket)) do
       pairs when is_list(pairs) ->
         case List.keyfind(pairs, name, 0) do
           # Inspecting a binding starts a fresh drill breadcrumb at this
@@ -590,7 +588,11 @@ defmodule BtAttachWeb.Live.Inspector do
         # unsubscribe).
         assign(socket, inspect_watch: nil)
       else
-        case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+        case Facade.dispatch(
+               :subscribe_object,
+               %{term: term, pid: self()},
+               RequestContext.build(socket)
+             ) do
           :ok -> assign(socket, inspect_watch: term)
           # A non-:ok (term not watchable, dist hiccup) leaves the pane
           # un-watched rather than claiming a live subscription that isn't
@@ -625,7 +627,11 @@ defmodule BtAttachWeb.Live.Inspector do
   defp unwatch(%{assigns: %{inspect_watch: term}} = socket)
        when not is_nil(term) do
     unless docked_pid_watched_by_window?(socket, term) do
-      Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}, ctx(socket))
+      Facade.dispatch(
+        :unsubscribe_object,
+        %{term: term, pid: self()},
+        RequestContext.build(socket)
+      )
     end
 
     assign(socket, inspect_watch: nil)
@@ -649,7 +655,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # still drives the field flash, so the pane stays useful even when stats
   # are momentarily unavailable.
   defp refresh_stats(socket, term) do
-    case Facade.dispatch(:pid_stats, %{term: term}, ctx(socket)) do
+    case Facade.dispatch(:pid_stats, %{term: term}, RequestContext.build(socket)) do
       {:ok, stats} when is_map(stats) -> assign(socket, inspect_stats: stats)
       _ -> assign(socket, inspect_stats: nil)
     end
@@ -666,7 +672,7 @@ defmodule BtAttachWeb.Live.Inspector do
        when is_pid(pid) do
     label = current_inspect_label(socket)
 
-    case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+    case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
       {:ok, fields} when is_map(fields) ->
         socket
         |> assign(
@@ -734,7 +740,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # window on it. A binding that no longer resolves opens a window showing
   # the error rather than silently doing nothing.
   defp open_window(socket, pid, name) do
-    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, RequestContext.build(socket)) do
       pairs when is_list(pairs) ->
         case List.keyfind(pairs, name, 0) do
           {^name, term} -> open_window_for_term(socket, to_string(name), term)
@@ -910,7 +916,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # windows on the same actor doesn't silence the other).
   defp inspect_window(socket, w, label, term, crumbs) do
     if Workspace.inspectable?(term) do
-      case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+      case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
         # BT-2634: a supervisor renders its children / supervision tree
         # (drillable child handles), not actor instance vars — the
         # float-window twin of the docked supervisor case. `track_window/3`
@@ -989,7 +995,11 @@ defmodule BtAttachWeb.Live.Inspector do
       if w.frozen do
         %{w | watch: nil}
       else
-        case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+        case Facade.dispatch(
+               :subscribe_object,
+               %{term: term, pid: self()},
+               RequestContext.build(socket)
+             ) do
           :ok -> %{w | watch: term}
           _ -> %{w | watch: nil}
         end
@@ -1013,7 +1023,11 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp unwatch_window(%{watch: term} = w, socket) do
     unless pid_watched_elsewhere?(socket, term, w.id) do
-      Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}, ctx(socket))
+      Facade.dispatch(
+        :unsubscribe_object,
+        %{term: term, pid: self()},
+        RequestContext.build(socket)
+      )
     end
 
     %{w | watch: nil}
@@ -1042,7 +1056,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # failure clears the chips rather than rendering stale numbers (same
   # contract as the docked `refresh_stats/2`).
   defp refresh_window_stats(w, socket, term) do
-    case Facade.dispatch(:pid_stats, %{term: term}, ctx(socket)) do
+    case Facade.dispatch(:pid_stats, %{term: term}, RequestContext.build(socket)) do
       {:ok, stats} when is_map(stats) -> %{w | stats: stats}
       _ -> %{w | stats: nil}
     end
@@ -1055,7 +1069,7 @@ defmodule BtAttachWeb.Live.Inspector do
   defp refresh_window(w, socket, {:beamtalk_object, _c, _m, pid} = term) when is_pid(pid) do
     label = window_label(w)
 
-    case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+    case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
       {:ok, fields} when is_map(fields) ->
         %{
           w
@@ -1110,7 +1124,11 @@ defmodule BtAttachWeb.Live.Inspector do
   end
 
   defp rearm_window_watch(w, socket, term) do
-    case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+    case Facade.dispatch(
+           :subscribe_object,
+           %{term: term, pid: self()},
+           RequestContext.build(socket)
+         ) do
       :ok -> %{w | watch: term}
       _ -> %{w | watch: nil}
     end
@@ -1157,7 +1175,7 @@ defmodule BtAttachWeb.Live.Inspector do
   defp send_window_poke(socket, w, pid, label, message) do
     code = "#{label} #{message}"
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
       {:ok, term, _output, _warnings} ->
         w = %{w | poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil}
 
@@ -1179,7 +1197,7 @@ defmodule BtAttachWeb.Live.Inspector do
         %{w | poke_result: nil, poke_error: Workspace.render_error(reason)}
 
       {:error, reason} ->
-        %{w | poke_result: nil, poke_error: facade_error(reason)}
+        %{w | poke_result: nil, poke_error: FacadeError.render(reason)}
     end
   end
 
@@ -1333,7 +1351,11 @@ defmodule BtAttachWeb.Live.Inspector do
   # rows (used by unfreeze, which re-reads separately). A non-:ok result
   # leaves the watch nil rather than claiming a live subscription.
   defp rearm_watch(socket, term) do
-    case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+    case Facade.dispatch(
+           :subscribe_object,
+           %{term: term, pid: self()},
+           RequestContext.build(socket)
+         ) do
       :ok -> assign(socket, inspect_watch: term)
       _ -> assign(socket, inspect_watch: nil)
     end
@@ -1381,7 +1403,7 @@ defmodule BtAttachWeb.Live.Inspector do
   defp send_poke(socket, pid, label, message) do
     code = "#{label} #{message}"
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx(socket)) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
       {:ok, term, _output, _warnings} ->
         socket
         |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
@@ -1397,7 +1419,7 @@ defmodule BtAttachWeb.Live.Inspector do
         assign(socket, poke_result: nil, poke_error: Workspace.render_error(reason))
 
       {:error, reason} ->
-        assign(socket, poke_result: nil, poke_error: facade_error(reason))
+        assign(socket, poke_result: nil, poke_error: FacadeError.render(reason))
     end
   end
 
@@ -1639,11 +1661,6 @@ defmodule BtAttachWeb.Live.Inspector do
     |> Enum.map_join(",", &Enum.join/1)
     |> String.reverse()
   end
-
-  # `BtAttachWeb.Live.FacadeError` (shared with `WorkspaceLive` and its other
-  # extracted panes) renders a facade short-circuit (RBAC denial /
-  # off-vocabulary op) as a clear, user-facing message.
-  defp facade_error(reason), do: FacadeError.render(reason)
 
   # True when `watch` is a pid-backed term watching `pid` — the shared
   # predicate every docked/window change-push router (`handle_info`) and
