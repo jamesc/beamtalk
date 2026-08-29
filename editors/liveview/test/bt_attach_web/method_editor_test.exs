@@ -18,11 +18,110 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
   payload path — previously reachable only through the `:workspace`-tagged
   full-stack `WorkspaceLiveTest`, which needs a live workspace node and is
   excluded from the default `mix test` lane.
+
+  BT-3310 pushed coverage of `method_editor.ex` from 88.89% to 99.15%. Three
+  lines are left deliberately uncovered — each checked against the source
+  rather than assumed, per the epic's standing lesson that "looks RBAC-guarded"
+  claims need verifying:
+
+    * The `defmodule` line itself — every module in this app shows the same
+      single always-"miss" line under `:cover` (see e.g.
+      `BtAttachWeb.Live.Dock`'s own coverage report); it is a module-load-time
+      instrumentation artifact, not a branch.
+    * `update_native_view_content/3`'s anonymous fn's fallback `tab -> tab`
+      clause: its one call site (`save_native_source/2`, on a successful
+      compile) only reaches it after already matching `%{kind: :native,
+      native_view: %{editable: true}} = tab`, so the fallback's precondition
+      can never actually fail there.
+    * `parse_method_signature_selector/1`'s `defp parse_method_signature_selector(_source), do: ""`
+      clause: its only caller (`save_method_body/5`) receives `source` from
+      `handle_event("save_method", %{"source" => source, ...})`, which already
+      guards `is_binary(source)` — a non-binary can never reach it.
   """
   use ExUnit.Case, async: false
 
+  alias BtAttach.SessionRegistry
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.StubWorkspaceClient
+
+  # ── one-off workspace-client overrides (BT-3310) ────────────────────────
+  #
+  # `BtAttachWeb.StubClientOverrides` fills in every callback the module below
+  # does not define with a delegate to `StubWorkspaceClient`, so each of these
+  # models exactly one degraded/unusual server response instead of restating
+  # the whole stub surface (CLAUDE.md no-duplicate-implementations) — the same
+  # pattern `WorkspaceLivePanesTest` uses.
+
+  # BT-2670: eval fails with the structured 4-tuple shape (`{:error, reason,
+  # output, warnings}`), distinct from the facade-level 2-tuple `{:error,
+  # reason}` an RBAC denial produces — `save_definition_eval/4` renders each
+  # through a different helper (`Workspace.render_error/1` vs `facade_error/1`).
+  defmodule Eval4TupleErrorClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def eval(_pid, _code), do: {:error, :compile_failed, "output", ["a warning"]}
+  end
+
+  # `save_native_source/2` answering a shape none of the three documented wire
+  # shapes (`{:value, %{"ok" => true}}`, `{:value, %{"errors" => [...]}}`,
+  # `{:error, reason}`) match — the defensive final catch-all.
+  defmodule OddNativeSaveClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def save_native_source(_module, _source), do: {:value, %{"unexpected" => true}}
+  end
+
+  # `browse_method_source/3` answering each of the three non-`{:value, map}`
+  # shapes `method_source_info/4` folds to the same empty-buffer fallback,
+  # keyed by selector so one client drives all three.
+  defmodule OddMethodSourceClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def browse_method_source(_class, _side, "nonmap-selector"), do: {:value, "not-a-map"}
+    def browse_method_source(_class, _side, "erroring-selector"), do: {:error, :unreachable}
+    def browse_method_source(_class, _side, "weird-selector"), do: :neither_value_nor_error
+  end
+
+  # `browse_method_source/3` that always fails — used to drive a re-fetch
+  # failure against an already-open clean tab (both the re-activation pull in
+  # `open_method_tab/4` and the push-refresh pull in `refresh_source_tab/2`).
+  defmodule FailingMethodSourceClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def browse_method_source(_class, _side, _selector), do: {:error, :unreachable}
+  end
+
+  # `browse_class_definition/1` answering a class-definition row that is
+  # simultaneously missing its `"definition"` text, carries a whitespace-only
+  # `"comment"`, and is native-flagged with no `"backing_module"` — three
+  # independent fallbacks (`class_definition_info/2`'s `_ -> ""`,
+  # `doc_text/1`'s `"" -> nil`, `native_backing_module/1`'s `_ -> nil`) that
+  # the shipped stub's canned rows never combine.
+  defmodule OddClassDefinitionClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def browse_class_definition(class) do
+      {:value,
+       %{
+         "class" => class,
+         "definition" => nil,
+         "comment" => "   ",
+         "native" => true,
+         "backing_module" => "",
+         "sealed" => false,
+         "typed" => false,
+         "abstract" => false,
+         "is_protocol" => false,
+         "origin" => "both",
+         "disk_differs" => false
+       }}
+    end
+  end
 
   setup do
     Application.put_env(:bt_attach, :workspace_client, StubWorkspaceClient)
@@ -773,6 +872,462 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
       result = MethodEditor.open_definition(socket)
 
       assert result.assigns.tabs == []
+    end
+  end
+
+  # ── malformed tab_select/tab_close/native_save fallback catch-alls ──────
+  #
+  # BT-3310: read against the source first (per the epic's stated lesson) —
+  # none of these three fallback clauses check `socket.assigns.role`; they are
+  # plain missing/malformed-params catch-alls, exactly like `save_method`'s
+  # and `edit_source`'s already-tested "missing keys" clauses above, not RBAC
+  # gates. Triggered by mismatched params, not a role.
+  describe "malformed tab_select/tab_close/native_save payloads (plain catch-alls, not RBAC)" do
+    test "tab_select with no \"id\" key is a no-op" do
+      tabs = [method_tab("a", "Counter", "foo")]
+      socket = base_socket(%{tabs: tabs, active_tab: "a"})
+
+      {:noreply, result} = MethodEditor.handle_event("tab_select", %{}, socket)
+
+      assert result.assigns.active_tab == "a"
+      assert result.assigns.tabs == tabs
+    end
+
+    test "tab_close with no \"id\" key is a no-op" do
+      tabs = [method_tab("a", "Counter", "foo")]
+      socket = base_socket(%{tabs: tabs, active_tab: "a"})
+
+      {:noreply, result} = MethodEditor.handle_event("tab_close", %{}, socket)
+
+      assert result.assigns.tabs == tabs
+    end
+
+    test "native_save with no \"source\" key is a graceful no-op" do
+      tab = native_tab("native:mymod", "mymod")
+      socket = base_socket(%{tabs: [tab], active_tab: "native:mymod"})
+
+      {:noreply, result} = MethodEditor.handle_event("native_save", %{}, socket)
+
+      assert result.assigns.tabs == [tab]
+      assert result.assigns.save_error == nil
+    end
+  end
+
+  # ── save_method / save_definition / save_native_source error branches ──
+  #
+  # BT-3310: `role: :observer` genuinely drives `BtAttach.Facade.dispatch/3`'s
+  # own RBAC gate (`BtAttach.Rbac.authorize/2` denies `:execute`-class ops —
+  # `:save`/`:eval`/`:save_native_source` — to the Observer role) — a real
+  # unauthorized-role denial, not a params catch-all. `MethodEditor` itself
+  # never inspects `socket.assigns.role`; it only renders whatever
+  # `Facade.dispatch/3` returns through `facade_error/1`, the same helper any
+  # other dispatch error (a down workspace, a malformed reply) renders through
+  # too — so this is a real reachable *error* branch, but not evidence the
+  # module does its own role check.
+  describe "save_method / save_definition / save_native_source error branches" do
+    test "save_method_body renders the facade error when :save is denied to a non-owner role" do
+      tabs = [method_tab("a", "Counter", "foo")]
+      socket = base_socket(%{tabs: tabs, active_tab: "a", role: :observer})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{"class" => "Counter", "selector" => "foo", "source" => "foo => 42", "tab" => "a"},
+          socket
+        )
+
+      assert socket.assigns.save_result == nil
+      assert socket.assigns.save_error =~ "Not authorized"
+    end
+
+    test "save_definition rejects a blank (whitespace-only) class-definition source" do
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{"class" => "Counter", "selector" => "", "source" => "   ", "tab" => "def:Counter"},
+          socket
+        )
+
+      assert socket.assigns.save_result == nil
+      assert socket.assigns.save_error == "Enter a class definition to compile."
+    end
+
+    test "save_definition reports 'not attached to workspace' when there is no session pid" do
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter", session_pid: nil})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "",
+            "source" => "Object subclass: Counter",
+            "tab" => "def:Counter"
+          },
+          socket
+        )
+
+      assert socket.assigns.save_result == nil
+      assert socket.assigns.save_error == "not attached to workspace"
+    end
+
+    test "save_definition_eval renders Workspace.render_error/1 on a structured 4-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval4TupleErrorClient)
+
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "",
+            "source" => "Object subclass: Counter",
+            "tab" => "def:Counter"
+          },
+          socket
+        )
+
+      assert socket.assigns.save_result == nil
+      assert socket.assigns.save_error == StubWorkspaceClient.render_error(:compile_failed)
+    end
+
+    test "save_definition_eval renders the facade error when :eval is denied to a non-owner role" do
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter", role: :observer})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "",
+            "source" => "Object subclass: Counter",
+            "tab" => "def:Counter"
+          },
+          socket
+        )
+
+      assert socket.assigns.save_result == nil
+      assert socket.assigns.save_error =~ "Not authorized"
+    end
+
+    test "save_native_source falls back to a generic message on an unrecognised result shape" do
+      Application.put_env(:bt_attach, :workspace_client, OddNativeSaveClient)
+
+      tab = native_tab("native:mymod", "mymod")
+      socket = base_socket(%{tabs: [tab], active_tab: "native:mymod"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event("native_save", %{"source" => "-module(mymod)."}, socket)
+
+      assert socket.assigns.save_result == nil
+      assert socket.assigns.save_error == "Could not save native source."
+    end
+
+    test "the empty-state hidden form's tab=\"\" sentinel is a no-op re-base" do
+      socket = base_socket()
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{"class" => "Counter", "selector" => "foo", "source" => "foo => 42", "tab" => ""},
+          socket
+        )
+
+      assert socket.assigns.save_error == nil
+      assert socket.assigns.tabs == []
+    end
+  end
+
+  describe "native_compile_error/1 (via native_save)" do
+    test "a compile error with no integer \"line\" key uses the bare message" do
+      StubWorkspaceClient.set_native_save(
+        {:value, %{"errors" => [%{"message" => "syntax error"}]}}
+      )
+
+      tab = native_tab("native:mymod", "mymod")
+      socket = base_socket(%{tabs: [tab], active_tab: "native:mymod"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event("native_save", %{"source" => "-module(mymod)."}, socket)
+
+      assert socket.assigns.save_error == "syntax error"
+    end
+  end
+
+  describe "method_source_info/4 non-{:value, map} fallbacks (all fold to the empty buffer)" do
+    test "a {:value, non_map} result opens an empty editable buffer" do
+      Application.put_env(:bt_attach, :workspace_client, OddMethodSourceClient)
+      socket = base_socket()
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "nonmap-selector")
+
+      [tab] = socket.assigns.tabs
+      assert tab.source == ""
+      assert tab.doc == nil
+    end
+
+    test "an {:error, reason} result opens an empty editable buffer" do
+      Application.put_env(:bt_attach, :workspace_client, OddMethodSourceClient)
+      socket = base_socket()
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "erroring-selector")
+
+      [tab] = socket.assigns.tabs
+      assert tab.source == ""
+    end
+
+    test "any other unrecognised result opens an empty editable buffer" do
+      Application.put_env(:bt_attach, :workspace_client, OddMethodSourceClient)
+      socket = base_socket()
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "weird-selector")
+
+      [tab] = socket.assigns.tabs
+      assert tab.source == ""
+      assert tab.runtime_only == false
+    end
+  end
+
+  describe "disk_body_snapshot/1 (via open_method_tab on a runtime-only method)" do
+    defmodule RuntimeOnlyMethodSourceClient do
+      @moduledoc false
+      use BtAttachWeb.StubClientOverrides
+
+      def browse_method_source(_class, _side, _selector) do
+        {:value,
+         %{
+           "source" => "runtime => body",
+           "doc" => nil,
+           "signature" => nil,
+           "source_status" => "indexed",
+           "origin" => "runtime",
+           "disk_differs" => false,
+           "native_delegate" => false
+         }}
+      end
+    end
+
+    test "a runtime-only method opens with no on-disk snapshot to diff future compiles against" do
+      Application.put_env(:bt_attach, :workspace_client, RuntimeOnlyMethodSourceClient)
+      socket = base_socket()
+
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+
+      [tab] = socket.assigns.tabs
+      assert tab.runtime_only == true
+      assert tab.disk_source == nil
+    end
+  end
+
+  describe "class_definition_info/2 fallbacks (missing definition / blank comment / blank backing module)" do
+    test "a definition row missing its text/comment/backing-module fields degrades gracefully" do
+      Application.put_env(:bt_attach, :workspace_client, OddClassDefinitionClient)
+      socket = base_socket()
+
+      socket = MethodEditor.open_definition(socket, "Weird")
+
+      [tab] = socket.assigns.tabs
+      # `_ -> ""` in class_definition_info/2: a non-binary "definition" opens
+      # an empty (rather than crashing) editable buffer.
+      assert tab.source == ""
+      # `doc_text/1`'s `"" -> nil`: a whitespace-only comment is treated as
+      # "no doc", not rendered as a blank doc block.
+      assert tab.doc == nil
+      # `native_backing_module/1`'s `_ -> nil`: "native" => true but a blank
+      # "backing_module" still yields no backing module (and no Native badge).
+      assert tab.native_module == nil
+      assert tab.class_native == false
+    end
+  end
+
+  describe "close_tab/2 on a background (non-active) tab" do
+    test "closing a tab that is not the active one leaves focus untouched" do
+      tabs = [
+        method_tab("a", "Counter", "foo"),
+        method_tab("b", "Counter", "bar")
+      ]
+
+      socket = base_socket(%{tabs: tabs, active_tab: "a"})
+
+      socket = MethodEditor.close_tab(socket, "b")
+
+      assert Enum.map(socket.assigns.tabs, & &1.id) == ["a"]
+      assert socket.assigns.active_tab == "a"
+    end
+  end
+
+  describe "open_definition/1 on a :native active tab" do
+    test "is a no-op: a native module has no Beamtalk class definition to open" do
+      tab = native_tab("native:mymod", "mymod")
+      socket = base_socket(%{tabs: [tab], active_tab: "native:mymod"})
+
+      result = MethodEditor.open_definition(socket)
+
+      assert result.assigns.tabs == [tab]
+      assert result.assigns.active_tab == "native:mymod"
+    end
+  end
+
+  describe "open_method_tab/4 re-activation when the re-fetch itself fails" do
+    test "keeps the existing buffer rather than blanking a tab the user is looking at" do
+      socket = base_socket()
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+      [original] = socket.assigns.tabs
+
+      Application.put_env(:bt_attach, :workspace_client, FailingMethodSourceClient)
+      socket = MethodEditor.open_method_tab(socket, "Counter", "instance", "increment")
+
+      assert socket.assigns.active_tab == "method:Counter:instance:increment"
+      [tab] = socket.assigns.tabs
+      assert tab.source == original.source
+    end
+  end
+
+  describe "open_new_method/3 re-focusing an already-open scratch tab" do
+    test "re-clicking \"new method\" on the same class/side refocuses rather than duplicating" do
+      socket = base_socket()
+      socket = MethodEditor.open_new_method(socket, "Counter", "instance")
+
+      {:noreply, socket} =
+        MethodEditor.handle_event("edit_source", %{"source" => "partial => "}, socket)
+
+      socket = MethodEditor.open_new_method(socket, "Counter", "instance")
+
+      assert length(socket.assigns.tabs) == 1
+      assert socket.assigns.active_tab == "new:Counter:instance"
+      [tab] = socket.assigns.tabs
+      assert tab.source == "partial => "
+    end
+  end
+
+  describe "parse_method_signature_selector/1 via a new-method tab's source (BT-2606)" do
+    defp save_new_method(socket, source) do
+      MethodEditor.handle_event(
+        "save_method",
+        %{
+          "class" => "Counter",
+          "selector" => "",
+          "source" => source,
+          "tab" => "new:Counter:instance"
+        },
+        socket
+      )
+    end
+
+    test "a leading whole-line comment followed by the real header is skipped recursively" do
+      tabs = [method_tab("new:Counter:instance", "Counter", "", new: true, source: "")]
+      socket = base_socket(%{tabs: tabs, active_tab: "new:Counter:instance"})
+
+      {:noreply, socket} = save_new_method(socket, "// a leading comment\nbar => 1")
+
+      assert socket.assigns.save_error == nil
+      [tab] = socket.assigns.tabs
+      assert tab.selector == "bar"
+    end
+
+    test "a comment-only source (no header line ever arrives) parses to no selector" do
+      tabs = [method_tab("new:Counter:instance", "Counter", "", new: true, source: "")]
+      socket = base_socket(%{tabs: tabs, active_tab: "new:Counter:instance"})
+
+      {:noreply, socket} = save_new_method(socket, "// just a comment, nothing else")
+
+      assert socket.assigns.save_error == "Could not parse a method signature from the source."
+    end
+
+    test "a bare modifier keyword immediately before a bodyless arrow parses to no selector" do
+      tabs = [method_tab("new:Counter:instance", "Counter", "", new: true, source: "")]
+      socket = base_socket(%{tabs: tabs, active_tab: "new:Counter:instance"})
+
+      # "class ->" is neither `class => …` (the modifier word as a unary
+      # selector) nor a real `-> Type =>`/`-> arg =>` header — it exercises
+      # `return_type_follows_arrow?/1`'s empty-remainder fallback (`_ ->
+      # false`) and `selector_from_header/1`'s no-`"=>"` fallback together.
+      {:noreply, socket} = save_new_method(socket, "class ->")
+
+      assert socket.assigns.save_error == "Could not parse a method signature from the source."
+    end
+
+    test "a header whose selector text is neither an identifier nor an operator parses to no selector" do
+      tabs = [method_tab("new:Counter:instance", "Counter", "", new: true, source: "")]
+      socket = base_socket(%{tabs: tabs, active_tab: "new:Counter:instance"})
+
+      {:noreply, socket} = save_new_method(socket, "1 => nil")
+
+      assert socket.assigns.save_error == "Could not parse a method signature from the source."
+    end
+  end
+
+  describe "header_origin_title/1 and tab_disk_key/1 fallbacks (direct, pure)" do
+    test "header_origin_title/1 falls back to \"Project\" for an unrecognised/absent origin" do
+      assert MethodEditor.header_origin_title(%{source_origin: nil, package: nil}) == "Project"
+
+      assert MethodEditor.header_origin_title(%{source_origin: "project", package: nil}) ==
+               "Project"
+    end
+
+    test "tab_disk_key/1 has no disk key for a tab kind other than :method/:def" do
+      assert MethodEditor.tab_disk_key(%{kind: :native, class: "mymod"}) == nil
+    end
+
+    test "modifier_badges/1 shows no class-modifier badges when the tab carries no modifier list" do
+      assert MethodEditor.modifier_badges(%{class_modifiers: nil}) == []
+    end
+  end
+
+  describe "reload_reverted_def_buffers/2 when the re-fetch fails" do
+    test "keeps the tab's existing buffer rather than blanking it" do
+      tab = def_tab("def:Counter", "Counter", source: "Object subclass: Counter // v1")
+      socket = base_socket(%{tabs: [tab], active_tab: "def:Counter"})
+
+      StubWorkspaceClient.fail_class_definition(true)
+      on_exit(fn -> StubWorkspaceClient.fail_class_definition(false) end)
+
+      socket = MethodEditor.reload_reverted_def_buffers(socket, MapSet.new([{"Counter", :def}]))
+
+      [result] = socket.assigns.tabs
+      assert result.source == "Object subclass: Counter // v1"
+    end
+  end
+
+  describe "refresh_after_source_change/1: empty-source fallback and non-source tab kinds" do
+    test "a clean method tab whose re-fetch now fails keeps its buffer; a :native tab passes through" do
+      method =
+        method_tab("a", "Counter", "foo", source: "foo => 1", base: "foo => 1", dirty: false)
+
+      native = native_tab("native:mymod", "mymod")
+
+      socket = base_socket(%{tabs: [method, native], active_tab: "a"})
+
+      Application.put_env(:bt_attach, :workspace_client, FailingMethodSourceClient)
+      socket = MethodEditor.refresh_after_source_change(socket)
+
+      [refreshed_method, refreshed_native] = socket.assigns.tabs
+      assert refreshed_method.source == "foo => 1"
+      assert refreshed_native == native
+    end
+  end
+
+  describe "restore_doc/3 on a genuine resume (BT-2570)" do
+    test "re-applies a stashed expand state read back from the session registry" do
+      token = "method-editor-test-doc-#{System.unique_integer([:positive])}"
+      pid = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(pid, :kill) end)
+
+      SessionRegistry.register(token, "sess-doc-test", pid)
+      :ok = SessionRegistry.stash_doc(token, true)
+
+      socket = base_socket(%{doc_expanded: false, connected: true})
+
+      result = MethodEditor.restore_doc(socket, token, :resumed)
+
+      assert result.assigns.doc_expanded == true
     end
   end
 
