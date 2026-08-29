@@ -474,30 +474,30 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
   # test of the relativiser directly (it runs on whatever path the runtime op
   # returns), independent of the rendered viewer above.
   describe "clean_native_path/1 (BT-2668)" do
-    alias BtAttachWeb.WorkspaceLive
+    alias BtAttachWeb.Live.SystemBrowser
 
     test "relativises an absolute build path to a recognisable source root" do
-      assert WorkspaceLive.clean_native_path(
+      assert SystemBrowser.clean_native_path(
                "/home/james/source/proj/_build/default/deps/http/native/x.erl"
              ) == "deps/http/native/x.erl"
 
-      assert WorkspaceLive.clean_native_path("/opt/app/apps/beamtalk_stdlib/src/y.erl") ==
+      assert SystemBrowser.clean_native_path("/opt/app/apps/beamtalk_stdlib/src/y.erl") ==
                "apps/beamtalk_stdlib/src/y.erl"
     end
 
     test "leaves an already-relative path untouched" do
-      assert WorkspaceLive.clean_native_path("deps/http/native/x.erl") ==
+      assert SystemBrowser.clean_native_path("deps/http/native/x.erl") ==
                "deps/http/native/x.erl"
     end
 
     test "falls back to the basename for an absolute path with no known source root" do
-      assert WorkspaceLive.clean_native_path("/home/james/scratch/foo.erl") == "foo.erl"
+      assert SystemBrowser.clean_native_path("/home/james/scratch/foo.erl") == "foo.erl"
     end
 
     test "returns nil for the absent-path sentinels (no path leak)" do
-      assert WorkspaceLive.clean_native_path(:null) == nil
-      assert WorkspaceLive.clean_native_path(nil) == nil
-      assert WorkspaceLive.clean_native_path("") == nil
+      assert SystemBrowser.clean_native_path(:null) == nil
+      assert SystemBrowser.clean_native_path(nil) == nil
+      assert SystemBrowser.clean_native_path("") == nil
     end
   end
 

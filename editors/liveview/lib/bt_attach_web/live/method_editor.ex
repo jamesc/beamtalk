@@ -44,18 +44,16 @@ defmodule BtAttachWeb.Live.MethodEditor do
   `open_method_tab/4`, `open_new_method/3`, `breadcrumb/1`,
   `modifier_badges/1`, `tab_disk_key/1`, `clear_disk_differs/2`,
   `reload_reverted_def_buffers/2`, `refresh_after_source_change/1`) — the
-  same data several *other*, not-yet-extracted or intentionally-elsewhere
-  features still reach into: the System Browser's method/definition
-  navigation (`browser_select_method`, `omni_open`, `nav_open`,
-  `open_test_method`, `open_implementor_site`, all BT-3297 territory),
-  Remove/Rename (`remove_method`, `remove_class`, the Rename modal), New
-  Class, and the standalone Native-module browser tab
-  (`browser_open_native_module`). Those stay in `WorkspaceLive` (none of
-  their *events* are in this extraction's scope) and cross-call the public
-  functions here by name — exactly the temporary cross-call shape a
-  sequential decomposition produces, mirrored from `Dock`'s own cross-calls
-  back into `WorkspaceLive` for the System Browser/Tests code not yet
-  extracted.
+  same data several *other* features reach into: `BtAttachWeb.Live.SystemBrowser`'s
+  method/definition navigation (`browser_select_method`, `nav_open`,
+  `open_implementor_site`, the standalone Native-module browser tab, all
+  extracted in BT-3297) and `WorkspaceLive`'s still-resident omni search
+  (`omni_open`), test runner (`open_test_method`), and Remove/Rename
+  (`remove_method`, `remove_class`, the Rename modal) / New Class code. Those
+  cross-call the public functions here by name — exactly the temporary
+  cross-call shape a sequential decomposition produces, mirrored from
+  `Dock`'s own cross-calls back into `WorkspaceLive` for the Tests-pane code
+  not yet extracted.
 
   Every workspace read/write goes through `BtAttach.Facade.dispatch/3` (ADR
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
@@ -84,6 +82,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   alias BtAttach.Workspace
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.RequestContext
+  alias BtAttachWeb.Live.SystemBrowser
   alias BtAttachWeb.WorkspaceLive
 
   defp ctx(socket), do: RequestContext.build(socket)
@@ -526,7 +525,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
         %{
           source: if(is_binary(result["source"]), do: result["source"], else: ""),
           disk_differs: result["disk_differs"] == true,
-          runtime_only: WorkspaceLive.runtime_only?(result),
+          runtime_only: SystemBrowser.runtime_only?(result),
           # BT-2714: a compiler-derived method (value accessors /
           # `with<Field>:` setters / actor `new`/`spawn`) has no editable
           # source — the backend returns `source: null` but resolves the
@@ -731,11 +730,10 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # existing write-surface handler reads them unchanged.
   #
   # A 4th kind, `:native` (standalone read/editable `.erl` module tabs,
-  # BT-2667/BT-2670), is constructed by `WorkspaceLive.add_native_module_tab/3`
-  # — that System Browser feature is still `WorkspaceLive`-owned (BT-3297
-  # lands the rest of it later in the BT-3290 epic) but shares this same tab
-  # list/shape, so a field added/renamed here must be mirrored there too
-  # (and vice versa) until that extraction lands.
+  # BT-2667/BT-2670), is constructed by
+  # `BtAttachWeb.Live.SystemBrowser`'s private `add_native_module_tab/3`
+  # (BT-3297) but shares this same tab list/shape, so a field added/renamed
+  # here must be mirrored there too (and vice versa).
   #
   #   %{
   #     id: stable string id (method-key, "def:<Class>", or "new:<Class>"),
@@ -784,10 +782,9 @@ defmodule BtAttachWeb.Live.MethodEditor do
     |> assign(:editor_rev, 0)
   end
 
-  # Public: `WorkspaceLive`'s still-resident System Browser / Native module
-  # navigation (`open_native_module_tab`, BT-3297) looks up a tab by id
-  # before deciding whether to (re)focus or create one, mirroring every
-  # find-or-create path in this module.
+  # Public: `BtAttachWeb.Live.SystemBrowser`'s private `open_native_module_tab`
+  # (BT-3297) looks up a tab by id before deciding whether to (re)focus or
+  # create one, mirroring every find-or-create path in this module.
   def find_tab(socket, id), do: Enum.find(socket.assigns.tabs, &(&1.id == id))
 
   # The focused tab, or `nil` when the strip is empty (startup, or after the
@@ -796,14 +793,14 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # breadcrumb / dirty-state; falls back to the first tab if a non-nil
   # active id somehow no longer maps. Public: called throughout
   # `WorkspaceLive`'s render template and by its still-resident
-  # Remove/Rename/System-Browser code.
+  # Remove/Rename code, and by `BtAttachWeb.Live.SystemBrowser`.
   def active_tab(%{tabs: tabs, active_tab: id}) do
     (id && Enum.find(tabs, &(&1.id == id))) || List.first(tabs)
   end
 
   # Focus a tab by id and mirror its class/selector/source into the
   # form-backing assigns. Clears any stale save/flush result so switching
-  # tabs starts clean. Public: `WorkspaceLive`'s still-resident
+  # tabs starts clean. Public: `BtAttachWeb.Live.SystemBrowser`'s private
   # `open_native_module_tab` (BT-3297) cross-calls it.
   def activate_tab(socket, id) do
     case find_tab(socket, id) do
@@ -818,8 +815,8 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # focus (a new tab's fields should start clean), but NOT when a push
   # refresh re-syncs the tab that's still focused (see `sync_active_fields/2`,
   # and `focus_tab_keep_banner/3` for the same "mid-save" carve-out). Public:
-  # `WorkspaceLive`'s still-resident `open_native_module_tab` (BT-3297)
-  # cross-calls it.
+  # `BtAttachWeb.Live.SystemBrowser`'s private `open_native_module_tab`
+  # (BT-3297) cross-calls it.
   def sync_active(socket, tab) do
     socket
     |> sync_active_fields(tab)
@@ -917,8 +914,8 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # Open (or re-focus) a class-definition tab for a named class — the
   # System Browser's "class definition" entry opens the *selected* class's
   # definition, which need not be the active tab's class. Public:
-  # `WorkspaceLive`'s still-resident System Browser / Rename / New Class /
-  # go-to-definition code cross-calls it.
+  # `BtAttachWeb.Live.SystemBrowser`'s go-to-definition/nav code and
+  # `WorkspaceLive`'s still-resident Rename / New Class code cross-call it.
   def open_definition(socket, class) do
     id = "def:" <> class
 
@@ -1024,8 +1021,9 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # `method:Class:side:selector` key the editor already uses, so opening
   # the same method twice de-dupes. The buffer is seeded with the method's
   # image-accurate source so editing starts from the live body. Public:
-  # `WorkspaceLive`'s still-resident System Browser / omni-search /
-  # senders-implementors / Tests-pane navigation cross-calls it.
+  # `BtAttachWeb.Live.SystemBrowser`'s browse/senders-implementors navigation
+  # and `WorkspaceLive`'s still-resident omni-search / Tests-pane navigation
+  # cross-call it.
   def open_method_tab(socket, class, side, selector) do
     id = "method:" <> class <> ":" <> side <> ":" <> selector
 
@@ -1661,7 +1659,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # BT-2642: editor-header package/origin badge for the active tab. The tab
   # carries `source_origin` ("stdlib" | "dependency" | "project" | nil) and
   # `package`, snapshotted at open from the class's browse row. The header
-  # badge reuses BT-2641's vocabulary (`WorkspaceLive.dependency_badge_label/1`,
+  # badge reuses BT-2641's vocabulary (`SystemBrowser.dependency_badge_label/1`,
   # shared with the System Browser tree) and extends it to project (which
   # the tree hides but the header shows): stdlib → "STDLIB", dependency →
   # "DEP · <pkg>" (or bare "DEP"), project → the bare project package name.
@@ -1671,7 +1669,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   def header_package_label(%{source_origin: "stdlib"}), do: "STDLIB"
 
   def header_package_label(%{source_origin: "dependency"} = tab),
-    do: WorkspaceLive.dependency_badge_label(stringify_origin(tab))
+    do: SystemBrowser.dependency_badge_label(stringify_origin(tab))
 
   def header_package_label(%{source_origin: "project", package: pkg})
       when is_binary(pkg) and pkg != "",
@@ -1680,9 +1678,9 @@ defmodule BtAttachWeb.Live.MethodEditor do
   def header_package_label(_tab), do: ""
 
   # The CSS modifier class keying the header badge color, per origin.
-  # Mirrors `WorkspaceLive`'s `source_origin_class/1` but reads the tab's
-  # atom-keyed `source_origin`. Public: `WorkspaceLive`'s render template
-  # calls it directly.
+  # Mirrors `BtAttachWeb.Live.SystemBrowser`'s `source_origin_class/1` but
+  # reads the tab's atom-keyed `source_origin`. Public: `WorkspaceLive`'s
+  # render template calls it directly.
   def header_origin_class(%{source_origin: "stdlib"}), do: "stdlib"
   def header_origin_class(%{source_origin: "dependency"}), do: "dependency"
   def header_origin_class(_tab), do: "project"
@@ -1694,7 +1692,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   def header_origin_title(%{source_origin: "stdlib"}), do: "Standard library"
 
   def header_origin_title(%{source_origin: "dependency"} = tab),
-    do: "Dependency: #{WorkspaceLive.package_name(stringify_origin(tab))}"
+    do: "Dependency: #{SystemBrowser.package_name(stringify_origin(tab))}"
 
   def header_origin_title(%{source_origin: "project", package: pkg})
       when is_binary(pkg) and pkg != "",
@@ -1703,8 +1701,8 @@ defmodule BtAttachWeb.Live.MethodEditor do
   def header_origin_title(_tab), do: "Project"
 
   # Bridge the tab's atom-keyed origin/package onto the string-keyed map the
-  # BT-2641 browse-row helpers (`WorkspaceLive.dependency_badge_label/1`,
-  # `WorkspaceLive.package_name/1`) expect, so the dependency badge text
+  # BT-2641 browse-row helpers (`SystemBrowser.dependency_badge_label/1`,
+  # `SystemBrowser.package_name/1`) expect, so the dependency badge text
   # stays in one place.
   defp stringify_origin(tab),
     do: %{"source_origin" => tab[:source_origin], "package" => tab[:package]}
@@ -1788,9 +1786,10 @@ defmodule BtAttachWeb.Live.MethodEditor do
 
   # BT-2598: the live image changed (a class was (re)loaded or removed).
   # Re-pull every source-dependent surface so open windows reflect the new
-  # image without a manual refresh: the browser class list and the active
-  # ChangeLog (cross-called back on `WorkspaceLive`, which still owns the
-  # System Browser / Changes pane), all open clean editor tabs (method +
+  # image without a manual refresh: the browser class list (cross-called back
+  # on `BtAttachWeb.Live.SystemBrowser`, BT-3297) and the active ChangeLog
+  # (cross-called back on `WorkspaceLive`, which still owns the Changes
+  # pane), all open clean editor tabs (method +
   # definition, owned here), and the git panel when it is the active dock
   # tab (also cross-called back, `BtAttachWeb.Live.Dock` owns it). Folded
   # together here — rather than split across callers — so every caller gets
@@ -1800,7 +1799,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # directly.
   def refresh_after_source_change(socket) do
     socket
-    |> WorkspaceLive.assign_browser_classes()
+    |> SystemBrowser.assign_browser_classes()
     |> WorkspaceLive.assign_changes()
     |> refresh_open_source_tabs()
     |> WorkspaceLive.maybe_refresh_git()

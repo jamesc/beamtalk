@@ -139,10 +139,10 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
     }
   end
 
-  # Mirrors `WorkspaceLive.add_native_module_tab/3`'s shape (BT-2667/BT-2670)
-  # — the 4th tab kind, still constructed on the `WorkspaceLive` side (BT-3297
-  # territory) but sharing this module's `:tabs` list, so `compile_clean/3`'s
-  # update-syntax writes need every key present.
+  # Mirrors `BtAttachWeb.Live.SystemBrowser`'s private `add_native_module_tab/3`
+  # shape (BT-2667/BT-2670, BT-3297) — the 4th tab kind, constructed on the
+  # `SystemBrowser` side but sharing this module's `:tabs` list, so
+  # `compile_clean/3`'s update-syntax writes need every key present.
   defp native_tab(id, module, opts \\ []) do
     editable = Keyword.get(opts, :editable, true)
     content = Keyword.get(opts, :content, "-module(#{module}).")
