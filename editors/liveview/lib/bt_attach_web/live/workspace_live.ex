@@ -457,49 +457,25 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:repl_terms, %{})
       |> assign(:repl_history, [])
       |> assign(:repl_history_pos, nil)
-      |> assign(:inspect_target, nil)
-      |> assign(:inspect_rows, [])
-      |> assign(:inspect_error, nil)
-      # Drill breadcrumb (BT-2486): the trail of references followed so far, each
-      # carrying the live term so a crumb click re-inspects that level. Reset when
-      # inspection starts from a binding, appended to when a field is drilled.
-      |> assign(:inspect_crumbs, [])
-      # Live Inspector tracking (BT-2492, epic BT-2482 Phase 3): the per-object
-      # change subscription + pid stats + freeze toggle + owner poke wired onto
-      # the docked Inspector (backend BT-2489, ADR 0095 §5).
-      #
-      #   * `:inspect_watch` — the live `{:beamtalk_object, …}` term currently
-      #     subscribed for `{:object_changed, …}` pushes (nil = nothing watched,
-      #     e.g. a scalar target or a frozen pane). Held so we can unsubscribe it
-      #     exactly when the target changes / the pane freezes / the LiveView dies.
-      #   * `:inspect_stats` — the last `pid_stats` snapshot (binary-keyed metrics)
-      #     driving the mailbox/reductions/status chips; nil when none read yet.
-      #   * `:inspect_frozen` — when true the pane holds a snapshot: we drop the
-      #     change subscription so pushes stop re-reading, and the freeze toggle
-      #     re-subscribes + refreshes on unfreeze.
-      #   * `:flash_gen` — a monotonic counter bumped on each *live refresh*; it
-      #     rides the ivar table as `data-flash-gen` so the FieldFlash JS hook
-      #     flashes only the value cells that *changed* this refresh (debounced
-      #     client-side, no flash storm). Server-side the `{:object_changed, …}`
-      #     push is itself coalesced via `:refresh_pending` so a burst of writes
-      #     collapses into one re-read.
-      #   * `:poke_result` / `:poke_error` — the owner-only "send a message" quick
-      #     action's outcome (an `eval` of `<binding> <message>` against the
-      #     inspected actor); rendered under the poke bar.
-      |> assign(:inspect_watch, nil)
-      |> assign(:inspect_stats, nil)
-      |> assign(:inspect_frozen, false)
-      |> assign(:flash_gen, 0)
-      |> assign(:refresh_pending, false)
+      # Docked Inspector + floating windows (BT-2486/BT-2492/BT-2493, epic
+      # BT-2482 Phase 3): drill breadcrumb, live per-object tracking (change
+      # subscription, pid stats, freeze, field-flash coalescing), owner poke,
+      # and the floating-window desk. `Inspector.init_assigns/0` is the single
+      # source of truth for this key list + its fresh-session defaults
+      # (BT-3302) — see that function's doc and `Inspector`'s `@moduledoc` for
+      # what each key drives; assigning the map here (rather than hand-copying
+      # its keys into a local `assign/3` pipe) is the tether back to
+      # `Inspector`'s own read/write sites, so a rename that misses one side
+      # fails a `mix test` run instead of only a live user's click.
+      |> assign(Inspector.init_assigns())
       # BT-2600: coalesce `ClassLoaded`/`ClassRemoved` refresh bursts. A project
       # sync / `Workspace load:` reloading N files fires N consecutive pushes;
       # rather than running `refresh_after_source_change` (N source re-reads ×
       # open tabs) per push, the first push schedules one deferred
       # `:do_source_refresh` and sets this flag, collapsing the burst into a
-      # single refresh — mirroring the `:refresh_pending` object-change coalescing.
+      # single refresh — mirroring the Inspector's own `:refresh_pending`
+      # object-change coalescing.
       |> assign(:source_refresh_pending, false)
-      |> assign(:poke_result, nil)
-      |> assign(:poke_error, nil)
       # Method editor (Wave 3): the write-surface edit/save/flush pane.
       |> assign(:edit_class, "")
       |> assign(:edit_selector, "")
@@ -658,20 +634,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       # Dock/Float toggle (spikes/cockpit-ux-spike/app.jsx). In `"float"` mode a
       # binding click / Inspect-it opens a *floating, draggable, stackable*
       # inspector window instead of driving the docked pane; `"docked"` (the
-      # default) keeps the single right-column Inspector.
-      #
-      #   * `:inspector_mode` — `"docked"` | `"float"`. Persisted in LV state so it
-      #     survives re-render; the top-bar toggle flips it.
-      #   * `:windows` — the open floating windows, each a self-contained inspector
-      #     (its own drill `crumbs`, `rows`, `target`, live `watch`/`stats`/`frozen`
-      #     + `flash_gen`, and `x`/`y`/`z` placement). The window list (id + drill
-      #     stack + content) lives server-side; only x/y/z are client-reported by
-      #     the WindowDrag hook on drop / focus, so there is no per-mousemove
-      #     round-trip and positions survive an unrelated re-render.
-      #   * `:next_window_id` — a monotonic counter minting unique window ids.
-      #   * `:window_z` — the running max z-index; a click bumps the focused window
-      #     to `window_z + 1` so z-order follows focus (the spike's stacking).
-      |> assign(:inspector_mode, "docked")
+      # default) keeps the single right-column Inspector. `:inspector_mode`,
+      # `:windows`, `:next_window_id` and `:window_z` are already set above by
+      # `Inspector.init_assigns()` (BT-3302) — see `Inspector`'s `@moduledoc`
+      # for what each drives.
       # Panel visibility toggles (BT-2559): dismissable side panels + collapsible
       # dock. Each panel can be hidden via a close button; toggle buttons in the
       # top bar re-show them. The dock can be collapsed/expanded.
@@ -689,9 +655,6 @@ defmodule BtAttachWeb.WorkspaceLive do
       # `restore_doc/3`, so an expanded block stays expanded across a socket drop,
       # redeploy, or laptop wake (BT-2570).
       |> assign(:doc_expanded, false)
-      |> assign(:windows, [])
-      |> assign(:next_window_id, 1)
-      |> assign(:window_z, 10)
       |> assign_browser_native_modules()
       |> assign_browser_type_aliases()
       # BT-2636: the set of expanded Changes-pane rows (keyed by the row's

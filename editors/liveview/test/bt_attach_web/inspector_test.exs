@@ -22,6 +22,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
   alias BtAttachWeb.WorkspaceLive
 
   @inspector_source Path.expand("../../lib/bt_attach_web/live/inspector.ex", __DIR__)
+  @workspace_live_source Path.expand("../../lib/bt_attach_web/live/workspace_live.ex", __DIR__)
 
   setup do
     Application.put_env(:bt_attach, :workspace_client, StubWorkspaceClient)
@@ -37,32 +38,28 @@ defmodule BtAttachWeb.Live.InspectorTest do
 
   # A bare socket carrying exactly the assigns Inspector's functions read —
   # the subset of `WorkspaceLive.bind_session/3`'s init relevant to the
-  # docked Inspector + floating windows. `role: :owner` by default (most
-  # tests aren't about RBAC); override per test.
+  # docked Inspector + floating windows, PLUS the handful of WorkspaceLive-
+  # context keys Inspector only ever reads (never initialises):
+  # `:current_user`/`:role`/`:session_id`/`:session_pid`/`:__changed__`.
+  # `role: :owner` by default (most tests aren't about RBAC); override per
+  # test.
+  #
+  # The Inspector-owned half comes straight from `Inspector.init_assigns/0`
+  # (BT-3302) rather than a hand-copied literal map — the same function
+  # `bind_session/3` itself calls — so this fixture and production init
+  # can never drift apart: a key this module's `handle_event`/`handle_info`
+  # clauses read but `init_assigns/0` no longer provides shows up here as a
+  # `KeyError` on the very next `mix test`, not only live in a browser.
   defp base_socket(overrides \\ %{}) do
     assigns =
-      %{
+      Inspector.init_assigns()
+      |> Map.merge(%{
         __changed__: %{},
         current_user: nil,
         role: :owner,
         session_id: "sess-1",
-        session_pid: self(),
-        inspector_mode: "docked",
-        inspect_target: nil,
-        inspect_rows: [],
-        inspect_crumbs: [],
-        inspect_error: nil,
-        inspect_watch: nil,
-        inspect_stats: nil,
-        inspect_frozen: false,
-        flash_gen: 0,
-        refresh_pending: false,
-        poke_result: nil,
-        poke_error: nil,
-        windows: [],
-        window_z: 10,
-        next_window_id: 1
-      }
+        session_pid: self()
+      })
       |> Map.merge(overrides)
 
     %Phoenix.LiveView.Socket{assigns: assigns}
@@ -738,6 +735,45 @@ defmodule BtAttachWeb.Live.InspectorTest do
         |> MapSet.new()
 
       assert clause_names == MapSet.new(Inspector.__inspector_events__())
+    end
+  end
+
+  describe "init_assigns/0 (BT-3302 socket-assign contract)" do
+    test "returns exactly the keys the docked Inspector + floating windows own" do
+      # Pins the canonical key SET (not just its use as a socket-assign
+      # source elsewhere in this file) so an accidental key removal/rename
+      # inside `Inspector.init_assigns/0` itself — with no other call site
+      # touched — still fails here, rather than silently starting to omit an
+      # assign `bind_session/3` used to initialise.
+      expected =
+        MapSet.new(~w(
+          inspect_target inspect_rows inspect_crumbs inspect_error
+          inspect_watch inspect_stats inspect_frozen flash_gen
+          refresh_pending poke_result poke_error windows window_z
+          next_window_id inspector_mode
+        )a)
+
+      assert MapSet.new(Map.keys(Inspector.init_assigns())) == expected
+    end
+
+    test "WorkspaceLive.bind_session/3 assigns come from Inspector.init_assigns/0, not a copy" do
+      # `bind_session/3` is private, so this asserts the tether the same way
+      # the `@inspector_events` coverage test above does for events: scan
+      # `workspace_live.ex`'s own source and confirm it calls
+      # `Inspector.init_assigns()` rather than hand-listing the keys via a
+      # local `assign/3` pipe (the pre-BT-3302 shape this guards against
+      # regressing to).
+      source = File.read!(@workspace_live_source)
+
+      assert source =~ "assign(Inspector.init_assigns())"
+
+      # And none of the canonical keys are hand-assigned as a literal
+      # `assign(:key, ...)` call elsewhere in the file — that would be
+      # exactly the second, unenforced copy BT-3302 removed.
+      for key <- Map.keys(Inspector.init_assigns()) do
+        refute source =~ "assign(:#{key},",
+               "workspace_live.ex still hand-assigns :#{key} instead of getting it from Inspector.init_assigns/0"
+      end
     end
   end
 end
