@@ -267,14 +267,9 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # Dismiss the error inside the live alias-source pane: `@alias_view` is a
   # map whose `:error` field carries the banner. Clear only that field so the
   # rest of the pane (content/meta) is preserved; if the pane is closed
-  # (`alias_view: nil`) this is a no-op. Mirrors `MethodEditor`'s
-  # `dismiss_native_error`.
-  def handle_event("dismiss_alias_error", _params, socket) do
-    case socket.assigns[:alias_view] do
-      %{} = av -> {:noreply, assign(socket, alias_view: Map.put(av, :error, nil))}
-      _ -> {:noreply, socket}
-    end
-  end
+  # (`alias_view: nil`) this is a no-op.
+  def handle_event("dismiss_alias_error", _params, socket),
+    do: {:noreply, dismiss_pane_error(socket, :alias_view)}
 
   # BT-2656: switch the left browser column between the class tree (`classes`) and
   # the separate Native browser (`native`) via the panel-head `Classes | Native`
@@ -1036,6 +1031,20 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     do: shown_name == name and shown_package == package
 
   def alias_shown?(_assigns, _name, _package), do: false
+
+  # Clear the `:error` field on a single-slot socket-assign pane view
+  # (`native_view`/`alias_view`) without disturbing the rest of it
+  # (content/meta/clauses); a no-op when the pane is closed (assign is `nil`)
+  # or absent. Shared so `MethodEditor`'s `dismiss_native_error` and this
+  # module's `dismiss_alias_error` can't drift on the clear-one-field
+  # contract — see CLAUDE.md's no-duplicate-implementations rule. Public:
+  # `MethodEditor` (which already aliases this module) calls it directly.
+  def dismiss_pane_error(socket, key) when is_atom(key) do
+    case socket.assigns[key] do
+      %{} = view -> assign(socket, key, Map.put(view, :error, nil))
+      _ -> socket
+    end
+  end
 
   # BT-2648: fetch a standalone native module's source for the read-only pane,
   # keyed by `module` (not class). Same normalisation as `load_native_view/3`

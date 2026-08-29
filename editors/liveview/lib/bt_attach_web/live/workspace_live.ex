@@ -2484,12 +2484,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                   :if={SystemBrowser.alias_shown?(assigns, alias_row["name"], alias_row["package"])}
                   class="native-body alias-body"
                 >
-                  <.native_source_body
-                    view={@alias_view}
-                    fallback_module={alias_row["name"]}
-                    dismiss_event="dismiss_alias_error"
-                    kind={:alias}
-                  />
+                  <.native_source_body view={@alias_view} dismiss_event="dismiss_alias_error">
+                    <:unavailable>
+                      No source available for type alias <code class="mono">{alias_row["name"]}</code>.
+                    </:unavailable>
+                  </.native_source_body>
                 </div>
               </div>
             </div>
@@ -2608,17 +2607,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (`error`/`content`/`source_file`/`source_origin`/`editable`/`clauses`/
   # `selected_clause`/`requested_selector` — an alias_view always carries
   # `clauses: []` and `requested_selector: nil`, so those branches simply don't
-  # render); `fallback_module` names the module/alias in the "source not
-  # available" empty state; `dismiss_event` clears the in-pane error.
-  # `content == nil` degrades to the empty state, never an error. `kind`
-  # (`:native` default, or `:alias`) only ever selects the empty-state wording
-  # — every other branch (meta line, clauses, content) is identical, since a
-  # `.beam`-only native module and a stdlib/dependency alias with no
-  # resolvable path degrade the exact same way.
+  # render); `dismiss_event` clears the in-pane error. `content == nil`
+  # degrades to the `:unavailable` slot, never an error — the caller supplies
+  # that empty-state message directly (it's the one thing that genuinely
+  # differs per caller: "the module shipped without source" vs. "no source
+  # available for this alias"), so the component itself stays agnostic to
+  # what kind of source it's showing rather than branching on a caller kind.
   attr :view, :map, required: true
-  attr :fallback_module, :string, default: nil
   attr :dismiss_event, :string, required: true
-  attr :kind, :atom, default: :native
+  slot :unavailable, required: true
 
   defp native_source_body(assigns) do
     ~H"""
@@ -2661,13 +2658,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       </div>
       <pre class="native-pre"><code>{@view.content}</code></pre>
     <% else %>
-      <div :if={is_nil(@view.error) and @kind == :native} class="muted-note">
-        Erlang source not available — the module <code class="mono">{@fallback_module}</code>
-        shipped without source.
-      </div>
-      <div :if={is_nil(@view.error) and @kind == :alias} class="muted-note">
-        No source available for type alias <code class="mono">{@fallback_module}</code>.
-      </div>
+      <div :if={is_nil(@view.error)} class="muted-note">{render_slot(@unavailable)}</div>
     <% end %>
     """
   end
@@ -4465,9 +4456,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <div class="panel-body native-tab-body">
                         <.native_source_body
                           view={nt.native_view}
-                          fallback_module={nt.class}
                           dismiss_event="dismiss_native_module_error"
-                        />
+                        >
+                          <:unavailable>
+                            Erlang source not available — the module
+                            <code class="mono">{nt.class}</code>
+                            shipped without source.
+                          </:unavailable>
+                        </.native_source_body>
                       </div>
                     <% end %>
                   <% match?(%{}, MethodEditor.active_tab(assigns)) -> %>
@@ -4674,9 +4670,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                         >
                           <.native_source_body
                             view={@native_view}
-                            fallback_module={doc_tab.native_module}
                             dismiss_event="dismiss_native_error"
-                          />
+                          >
+                            <:unavailable>
+                              Erlang source not available — the module
+                              <code class="mono">{doc_tab.native_module}</code>
+                              shipped without source.
+                            </:unavailable>
+                          </.native_source_body>
                         </div>
                       </section>
                       <%= cond do %>

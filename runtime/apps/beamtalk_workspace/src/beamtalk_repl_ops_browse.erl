@@ -105,7 +105,8 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     alias_row/3,
     package_type_aliases/1,
     class_definition_text/7,
-    validate_alias/1
+    validate_alias/1,
+    safe_relative_path/1
 ]).
 -endif.
 
@@ -1407,17 +1408,22 @@ browse_alias_source(Name, Package) ->
             {value, alias_source_value(Row)}
     end.
 
+%% When `Package` is known (the common case — the UI's click always carries
+%% it), scan only that package's own rows via `type_aliases_of_package/1`
+%% (app resolution + the seeding-boundary visibility filter + row-building,
+%% all reused as-is) rather than recomputing and sorting the full
+%% cross-package `browse_type_aliases/0` catalog just to find one row. With no
+%% `Package` (REPL/MCP callers that haven't resolved one), there is no
+%% cheaper option than the full scan — no cross-package name index exists.
 -spec find_alias_row(binary(), binary() | undefined) -> map() | undefined.
 find_alias_row(Name, undefined) ->
-    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end);
+    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end, browse_type_aliases());
 find_alias_row(Name, Package) ->
-    first_match(fun(R) ->
-        maps:get(<<"name">>, R) =:= Name andalso maps:get(<<"package">>, R) =:= Package
-    end).
+    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end, type_aliases_of_package(Package)).
 
--spec first_match(fun((map()) -> boolean())) -> map() | undefined.
-first_match(Pred) ->
-    case lists:filter(Pred, browse_type_aliases()) of
+-spec first_match(fun((map()) -> boolean()), [map()]) -> map() | undefined.
+first_match(Pred, Rows) ->
+    case lists:filter(Pred, Rows) of
         [Row | _] -> Row;
         [] -> undefined
     end.
@@ -1450,20 +1456,54 @@ alias_source_value(#{
 %% root; stdlib/dependency aliases have no live path cache to resolve against
 %% (see `browse_alias_source/2` doc), so they degrade to `null` — never an
 %% error.
+%%
+%% Security: `SourceFile` comes from a compiled `.app` file's `type_aliases`
+%% entry (`type_aliases_of_package/1`'s own doc already flags this as
+%% "still just a text file on disk" — a hand-edited or toolchain-mismatched
+%% one is not a from-source-only threat model). `filename:join/2` does NOT
+%% sanitize traversal: an absolute `SourceFile` silently discards the root
+%% entirely (`filename:join("/proj", "/etc/passwd") =:= "/etc/passwd"`), and a
+%% `..`-laden relative one escapes it at the OS level. `safe_relative_path/1`
+%% rejects both *before* any join/read is attempted, so a malformed entry
+%% degrades to the same `null` empty state as a merely-missing file, never a
+%% host-filesystem read outside the project tree.
 -spec alias_disk_content(binary(), binary()) -> binary() | null.
 alias_disk_content(<<"project">>, SourceFile) when byte_size(SourceFile) > 0 ->
-    case beamtalk_workspace_meta:get_metadata() of
-        {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
-            Path = filename:join(binary_to_list(ProjectPath), binary_to_list(SourceFile)),
-            case file:read_file(Path) of
-                {ok, Bin} -> Bin;
-                {error, _} -> null
-            end;
-        _ ->
-            null
+    case safe_relative_path(SourceFile) of
+        false ->
+            null;
+        true ->
+            %% `safe_relative_path/1` already guarantees `SourceFile` has no
+            %% `..` component and is not itself absolute, so joining it onto
+            %% `ProjectPath` cannot resolve outside that root — no further
+            %% containment check is needed (and `beamtalk_repl_loader`'s
+            %% `is_path_inside/2` is exported test-only, not for cross-module
+            %% production use).
+            case beamtalk_workspace_meta:get_metadata() of
+                {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
+                    Path = filename:join(binary_to_list(ProjectPath), binary_to_list(SourceFile)),
+                    case file:read_file(Path) of
+                        {ok, Bin} -> Bin;
+                        {error, _} -> null
+                    end;
+                _ ->
+                    null
+            end
     end;
 alias_disk_content(_Origin, _SourceFile) ->
     null.
+
+%% True iff `SourceFile` is a relative path with no `..` component — i.e. it
+%% cannot escape whatever root it is later joined against. Rejects both an
+%% absolute path (which `filename:join/2` would let override the root
+%% entirely) and any `..` segment (which escapes the root at the OS level
+%% even though it survives a naive string-prefix containment check on the
+%% *unresolved* joined path).
+-spec safe_relative_path(binary()) -> boolean().
+safe_relative_path(SourceFile) ->
+    Str = binary_to_list(SourceFile),
+    filename:pathtype(Str) =:= relative andalso
+        not lists:member("..", filename:split(Str)).
 
 %% BT-3314: `name` is required; `package` is optional (disambiguates a
 %% same-named alias declared by more than one package). Aliases are not

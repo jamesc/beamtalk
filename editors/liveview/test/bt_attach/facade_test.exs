@@ -57,6 +57,10 @@ defmodule BtAttach.FacadeTest do
     def browse_type_aliases,
       do: record({:browse_type_aliases}) && {:value, [%{"name" => "RestartStrategy"}]}
 
+    # BT-3314: the read-only alias source view.
+    def browse_alias_source(name, package),
+      do: record({:browse_alias_source, name, package}) && {:value, %{"name" => name}}
+
     # BT-2495: the navigation aids — senders/implementors (nav-query) + the
     # omni-search symbol index (nav-symbols).
     def senders_of(selector),
@@ -173,6 +177,7 @@ defmodule BtAttach.FacadeTest do
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition browse_native_source
                      browse_native_modules browse_native_module_source browse_type_aliases
+                     browse_alias_source
                      list_tests
                      senders implementors required_methods conforming_classes
                      callers_of_native_module symbols
@@ -317,6 +322,29 @@ defmodule BtAttach.FacadeTest do
                {:value, [%{"name" => "RestartStrategy"}]}
 
       assert {:browse_type_aliases} in RecordingClient.calls()
+    end
+
+    # BT-3314: the read-only alias source view.
+    test "browse_alias_source passes the name and package through" do
+      assert Facade.dispatch(:browse_alias_source, %{
+               name: "RestartStrategy",
+               package: "my_app"
+             }) ==
+               {:value, %{"name" => "RestartStrategy"}}
+
+      assert {:browse_alias_source, "RestartStrategy", "my_app"} in RecordingClient.calls()
+    end
+
+    test "browse_alias_source with no package param passes nil through" do
+      assert Facade.dispatch(:browse_alias_source, %{name: "RestartStrategy"}) ==
+               {:value, %{"name" => "RestartStrategy"}}
+
+      assert {:browse_alias_source, "RestartStrategy", nil} in RecordingClient.calls()
+    end
+
+    test "browse_alias_source with a non-binary name is invalid params" do
+      assert Facade.dispatch(:browse_alias_source, %{name: 123}) ==
+               {:error, :invalid_params}
     end
 
     test "the observer role may browse (read capability) but not eval" do

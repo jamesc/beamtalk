@@ -326,6 +326,39 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.browse_type_aliases() == {:value, []}
     end
 
+    test "browse_alias_source/1 dispatches browse-alias-source with no package param" do
+      mock_rpc(
+        decode_asserting(
+          fn decoded ->
+            assert %{"op" => "browse-alias-source", "name" => "RestartStrategy"} = decoded
+            refute Map.has_key?(decoded, "package")
+          end,
+          {:value, %{"name" => "RestartStrategy"}}
+        )
+      )
+
+      assert Workspace.browse_alias_source("RestartStrategy") ==
+               {:value, %{"name" => "RestartStrategy"}}
+    end
+
+    test "browse_alias_source/2 dispatches browse-alias-source with a package param" do
+      mock_rpc(
+        decode_asserting(
+          fn decoded ->
+            assert %{
+                     "op" => "browse-alias-source",
+                     "name" => "RestartStrategy",
+                     "package" => "my_app"
+                   } = decoded
+          end,
+          {:value, %{"name" => "RestartStrategy", "package" => "my_app"}}
+        )
+      )
+
+      assert Workspace.browse_alias_source("RestartStrategy", "my_app") ==
+               {:value, %{"name" => "RestartStrategy", "package" => "my_app"}}
+    end
+
     test "save_native_source dispatches save-native-source with module + source" do
       mock_rpc(
         decode_asserting(

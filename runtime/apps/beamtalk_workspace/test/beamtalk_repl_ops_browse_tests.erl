@@ -852,6 +852,76 @@ alias_source_project_reads_file_content_test() ->
         )
     end).
 
+%% Security: an absolute `source_file` must not let `filename:join/2` discard
+%% the project root entirely (`filename:join("/proj", "/etc/hosts") =:=
+%% "/etc/hosts"`). Points at a real, universally-present file (`/etc/hosts`)
+%% so this test would genuinely leak its content if the guard regressed,
+%% rather than merely testing an already-missing path.
+alias_source_project_rejects_absolute_source_file_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        with_types_only_fixture_app(
+            myapp,
+            [
+                #{
+                    name => 'Escaped',
+                    expansion => "Integer",
+                    doc => undefined,
+                    source_file => "/etc/hosts",
+                    internal => false
+                }
+            ],
+            fun() ->
+                {value, Source} = beamtalk_repl_ops_browse:handle_term(
+                    <<"browse-alias-source">>,
+                    #{<<"name">> => <<"Escaped">>, <<"package">> => <<"myapp">>},
+                    make_msg(),
+                    self()
+                ),
+                ?assertEqual(null, maps:get(<<"content">>, Source))
+            end
+        )
+    end).
+
+%% Security: a `..`-laden relative `source_file` escapes the project root at
+%% the OS level even though it would survive a naive string-prefix
+%% containment check on the unresolved joined path. Again points at
+%% `/etc/hosts` via traversal from the project dir so a regression would
+%% genuinely leak it.
+alias_source_project_rejects_dotdot_traversal_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        with_types_only_fixture_app(
+            myapp,
+            [
+                #{
+                    name => 'Escaped',
+                    expansion => "Integer",
+                    doc => undefined,
+                    source_file => "../../../../../../../../etc/hosts",
+                    internal => false
+                }
+            ],
+            fun() ->
+                {value, Source} = beamtalk_repl_ops_browse:handle_term(
+                    <<"browse-alias-source">>,
+                    #{<<"name">> => <<"Escaped">>, <<"package">> => <<"myapp">>},
+                    make_msg(),
+                    self()
+                ),
+                ?assertEqual(null, maps:get(<<"content">>, Source))
+            end
+        )
+    end).
+
+safe_relative_path_rejects_absolute_test() ->
+    ?assertNot(beamtalk_repl_ops_browse:safe_relative_path(<<"/etc/hosts">>)).
+
+safe_relative_path_rejects_dotdot_test() ->
+    ?assertNot(beamtalk_repl_ops_browse:safe_relative_path(<<"../../etc/hosts">>)),
+    ?assertNot(beamtalk_repl_ops_browse:safe_relative_path(<<"src/../../etc/hosts">>)).
+
+safe_relative_path_accepts_plain_relative_test() ->
+    ?assert(beamtalk_repl_ops_browse:safe_relative_path(<<"src/restart_strategy.bt">>)).
+
 validate_alias_missing_name_is_error_test() ->
     ?assertEqual(
         {error, <<"`name` (non-empty string) is required">>},
