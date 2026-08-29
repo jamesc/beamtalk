@@ -96,7 +96,6 @@ export const CmEditor = {
     const extensions = [
       history(),
       drawSelection(),
-      highlightActiveLine(),
       indentUnit.of("  "),
       EditorState.tabSize.of(2),
       // ⌘D/⌘P/⌘I are NOT bound here: they're the Workspace's Do-it/Print-it/
@@ -110,6 +109,11 @@ export const CmEditor = {
       EditorState.readOnly.of(readOnly),
       EditorView.updateListener.of((u) => this.onUpdate(u)),
     ]
+    // Active-line highlighting tracks the editing cursor, so it only makes sense
+    // where there is one. A read-only pane (docs viewer, native viewer,
+    // class-definition source) mounts with its cursor defaulted to line 1, which
+    // would otherwise paint that line with a permanent, meaningless highlight.
+    if (!readOnly) extensions.push(highlightActiveLine())
     if (placeholderText) extensions.push(placeholderExt(placeholderText))
     if (this.inlineResults) extensions.push(inlineResultsField)
     // Backend-driven autocomplete (BT-2544): candidates come from the live image
