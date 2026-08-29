@@ -547,4 +547,510 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
       assert socket.assigns.show_browser == false
     end
   end
+
+  # ── BT-3307: completion / diagnostics fallbacks ─────────────────────────────
+  #
+  # `complete`/`hover`/`diagnostics` are all `:read`-capability ops
+  # (`BtAttach.Facade`'s `@ops`), and BOTH roles (`:owner`/`:observer`) carry
+  # `:read` (`BtAttach.Rbac`'s `@grants`) — so there is no real role that ever
+  # denies them. `role: :no_grants` below is never a value
+  # `BtAttachWeb.Live.RequestContext.build/1` produces in production; it
+  # exists purely to push `BtAttach.Rbac.authorize/2`'s `Map.get(@grants,
+  # role, [])` down its `[]` default, deterministically tripping the
+  # dispatch-failure `case` branch each handler degrades through (an
+  # unreachable workspace would land here the same way) without needing a
+  # workspace-client stub override.
+  describe "completion / hover / diagnostics: dispatch-failure and malformed-params fallbacks" do
+    test "complete's case falls back to an empty list when the op is denied" do
+      socket = base_socket(%{role: :no_grants})
+
+      assert {:reply, %{"completions" => []}, ^socket} =
+               SystemBrowser.handle_event("complete", %{"code" => "Int"}, socket)
+    end
+
+    test "complete with no \"code\" param replies with an empty list (malformed-params fallback)" do
+      socket = base_socket()
+
+      assert {:reply, %{"completions" => []}, ^socket} =
+               SystemBrowser.handle_event("complete", %{}, socket)
+    end
+
+    test "hover's case falls back to an empty string when the op is denied" do
+      socket = base_socket(%{role: :no_grants})
+
+      assert {:reply, %{"hover" => ""}, ^socket} =
+               SystemBrowser.handle_event("hover", %{"code" => "Counter"}, socket)
+    end
+
+    test "diagnostics' case falls back to an empty list when the op is denied" do
+      socket = base_socket(%{role: :no_grants})
+
+      assert {:reply, %{"diagnostics" => []}, ^socket} =
+               SystemBrowser.handle_event("diagnostics", %{"code" => "3 + 4"}, socket)
+    end
+
+    test "diagnostics with no \"code\" param replies with an empty list (malformed-params fallback)" do
+      socket = base_socket()
+
+      assert {:reply, %{"diagnostics" => []}, ^socket} =
+               SystemBrowser.handle_event("diagnostics", %{}, socket)
+    end
+  end
+
+  # ── BT-3307: browser_* handle_event fallbacks ───────────────────────────────
+  #
+  # Correction from the sibling issue BT-3305 (its own uncovered fallbacks
+  # turned out NOT to be RBAC-guarded): read each clause head in
+  # `system_browser.ex` before assuming a role check. None of the eight
+  # below (`browser_open_definition`, `browser_open_native`, `browser_mode`,
+  # `browser_open_native_module`, `browser_jump_native`, `browser_view`,
+  # `browser_source`, `browser_select_class`) tests `socket.assigns.role` —
+  # each guard matches only the SHAPE of `params`, so any role reaches the
+  # real clause and only a malformed/missing/unrecognised param value falls
+  # through to the catch-all. Triggered here via mismatched params, not role,
+  # per that correction.
+  describe "browser_* handle_event fallbacks: malformed/missing params, NOT RBAC" do
+    test "browser_open_definition ignores a missing or blank class" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_open_definition", %{"class" => ""}, socket)
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_open_definition", %{}, socket)
+    end
+
+    test "browser_open_native ignores a missing or blank class" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_open_native", %{"class" => ""}, socket)
+    end
+
+    test "browser_open_alias ignores a missing or blank name" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_open_alias", %{"name" => ""}, socket)
+    end
+
+    test "browser_mode ignores an unrecognised mode value" do
+      socket = base_socket(%{browser_mode: :classes})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_mode", %{"mode" => "bogus"}, socket)
+    end
+
+    test "browser_open_native_module ignores a missing or blank module" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event(
+                 "browser_open_native_module",
+                 %{"module" => ""},
+                 socket
+               )
+    end
+
+    test "browser_jump_native ignores a payload missing the selector" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event(
+                 "browser_jump_native",
+                 %{"class" => "Subprocess"},
+                 socket
+               )
+    end
+
+    test "browser_view ignores an unrecognised view value" do
+      socket = base_socket(%{browser_view: "hierarchy"})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_view", %{"view" => "bogus"}, socket)
+    end
+
+    test "browser_source ignores an unrecognised src value" do
+      socket = base_socket(%{browser_source: "all"})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_source", %{"src" => "bogus"}, socket)
+    end
+
+    test "browser_select_class ignores a non-binary class" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_select_class", %{"class" => 123}, socket)
+    end
+
+    test "browser_select_protocol ignores a payload missing the protocol" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_select_protocol", %{}, socket)
+    end
+
+    test "browser_select_method ignores an incomplete payload" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event(
+                 "browser_select_method",
+                 %{"class" => "Counter"},
+                 socket
+               )
+    end
+
+    test "browser_group_mode ignores an unrecognised mode value" do
+      socket = base_socket(%{browser_group_mode: "protocol"})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_group_mode", %{"mode" => "bogus"}, socket)
+    end
+  end
+
+  describe "browser_side with no class selected (the nil branch)" do
+    test "flipping the side with no class selected just clears browser_protocols" do
+      socket =
+        base_socket(%{
+          selected_class: nil,
+          browser_side: "instance",
+          browser_protocols: [%{"name" => "stale"}]
+        })
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("browser_side", %{"side" => "class"}, socket)
+
+      assert socket.assigns.browser_side == "class"
+      assert socket.assigns.browser_protocols == []
+    end
+  end
+
+  # Unlike the plain catch-alls above, these three genuinely DO gate on
+  # `socket.assigns.role == :owner` in the clause head — the real RBAC case
+  # the sibling issue's correction says to verify rather than assume.
+  describe "section-form handle_event fallbacks: real RBAC (owner-only)" do
+    test "browser_edit_section is a no-op for a non-owner role" do
+      socket = base_socket(%{role: :observer})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event("browser_edit_section", %{"name" => ""}, socket)
+    end
+
+    test "browser_rename_section is a no-op for a non-owner role" do
+      socket = base_socket(%{role: :observer, selected_class: "Counter"})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event(
+                 "browser_rename_section",
+                 %{"old_name" => "Old", "new_name" => "New"},
+                 socket
+               )
+    end
+
+    test "browser_add_section is a no-op for a non-owner role" do
+      socket =
+        base_socket(%{role: :observer, selected_class: "Counter", browser_side: "instance"})
+
+      assert {:noreply, ^socket} =
+               SystemBrowser.handle_event(
+                 "browser_add_section",
+                 %{"new_name" => "New", "before_selector" => "increment"},
+                 socket
+               )
+    end
+  end
+
+  describe "nav_* handle_event fallbacks: malformed/missing params" do
+    test "nav_open_class with no class clears the popover" do
+      socket = base_socket(%{nav_popover: %{kind: :implementors, selector: "x", sites: []}})
+
+      {:noreply, socket} = SystemBrowser.handle_event("nav_open_class", %{}, socket)
+
+      assert socket.assigns.nav_popover == nil
+    end
+
+    test "nav_required_open with a blank selector clears the popover" do
+      socket =
+        base_socket(%{nav_popover: %{kind: :required_methods, selector: "x", sites: []}})
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("nav_required_open", %{"selector" => ""}, socket)
+
+      assert socket.assigns.nav_popover == nil
+    end
+
+    test "nav_open with an incomplete payload clears the popover" do
+      socket = base_socket(%{nav_popover: %{kind: :implementors, selector: "x", sites: []}})
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("nav_open", %{"class" => "Counter"}, socket)
+
+      assert socket.assigns.nav_popover == nil
+    end
+
+    test "goto_definition with no token is a pure no-op" do
+      socket = base_socket()
+
+      assert {:noreply, ^socket} = SystemBrowser.handle_event("goto_definition", %{}, socket)
+    end
+  end
+
+  describe "dismiss_nav_error clears only the popover's :error field" do
+    test "clears :error, leaves the rest of the popover intact" do
+      socket =
+        base_socket(%{
+          nav_popover: %{
+            kind: :implementors,
+            selector: "increment",
+            sites: [%{"class" => "Counter"}],
+            error: "boom"
+          }
+        })
+
+      {:noreply, socket} = SystemBrowser.handle_event("dismiss_nav_error", %{}, socket)
+
+      assert %{
+               kind: :implementors,
+               selector: "increment",
+               sites: [%{"class" => "Counter"}],
+               error: nil
+             } = socket.assigns.nav_popover
+    end
+  end
+
+  describe "apply_browser_classes/2: defensive catch-all for an unexpected dispatch shape" do
+    test "degrades to an empty tree with a structured error rather than crashing" do
+      socket = base_socket()
+
+      socket = SystemBrowser.apply_browser_classes(socket, :some_unexpected_shape)
+
+      assert socket.assigns.browser_classes == []
+      assert socket.assigns.browser_error == inspect(:unexpected_response)
+    end
+  end
+
+  describe "assign_browser_native_modules/1 and assign_browser_type_aliases/1: dispatch-failure fallback" do
+    test "assign_browser_native_modules degrades to an empty list when denied" do
+      socket = base_socket(%{role: :no_grants})
+
+      socket = SystemBrowser.assign_browser_native_modules(socket)
+
+      assert socket.assigns.browser_native_modules == []
+    end
+
+    test "assign_browser_type_aliases degrades to an empty list when denied" do
+      socket = base_socket(%{role: :no_grants})
+
+      socket = SystemBrowser.assign_browser_type_aliases(socket)
+
+      assert socket.assigns.browser_type_aliases == []
+    end
+  end
+
+  describe "load_protocols / refresh_categories: dispatch-failure fallback" do
+    test "browser_select_class surfaces a facade error and default categories when denied" do
+      socket = base_socket(%{role: :no_grants})
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("browser_select_class", %{"class" => "Counter"}, socket)
+
+      assert socket.assigns.selected_class == "Counter"
+      assert socket.assigns.browser_protocols == []
+
+      assert socket.assigns.browser_error ==
+               "Not authorized: your role may not perform this operation."
+
+      assert socket.assigns.browser_categories == SystemBrowser.default_categories()
+    end
+  end
+
+  describe "category_methods_for_side/2 and insertable_methods_for_side/2: edge shapes" do
+    test "category_methods_for_side/2 is empty for a non-list categories arg" do
+      assert SystemBrowser.category_methods_for_side(nil, "instance") == []
+      assert SystemBrowser.category_methods_for_side(%{}, "instance") == []
+    end
+
+    test "insertable_methods_for_side/2 is empty for a non-list categories arg" do
+      assert SystemBrowser.insertable_methods_for_side(nil, "instance") == []
+    end
+
+    test "insertable_methods_for_side/2 excludes a named category's only (first) method" do
+      categories = [
+        %{"name" => "Accessing", "methods" => [%{"selector" => "value", "side" => "instance"}]}
+      ]
+
+      assert SystemBrowser.insertable_methods_for_side(categories, "instance") == []
+    end
+  end
+
+  describe "submit_section/4: an unexpected (non-ok, non-error) save-section result" do
+    test "surfaces a generic form error" do
+      StubWorkspaceClient.set_section_save({:value, %{"ok" => false}})
+
+      socket = base_socket(%{selected_class: "Counter", browser_side: "instance"})
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event(
+          "browser_add_section",
+          %{"new_name" => "New", "before_selector" => "increment"},
+          socket
+        )
+
+      assert socket.assigns.section_form_error == "Could not save the section."
+    end
+  end
+
+  describe "load_native_view / load_alias_view / load_native_module_view: error branch" do
+    test "browser_open_native on a non-native class surfaces the workspace's structured error" do
+      socket = base_socket()
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("browser_open_native", %{"class" => "Counter"}, socket)
+
+      assert socket.assigns.native_view.error ==
+               inspect("class `Counter` is not native-backed")
+    end
+
+    test "browser_open_alias for an unknown alias name surfaces the workspace's structured error" do
+      socket = base_socket()
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("browser_open_alias", %{"name" => "Nonesuch"}, socket)
+
+      assert socket.assigns.alias_view.error == inspect("type alias `Nonesuch` not found")
+    end
+
+    test "browser_open_native_module for an unknown module surfaces the workspace's structured error" do
+      socket = base_socket()
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event(
+          "browser_open_native_module",
+          %{"module" => "no_such_module"},
+          socket
+        )
+
+      tab = List.last(socket.assigns.tabs)
+      assert tab.native_view.error == inspect("module `no_such_module` not found")
+    end
+  end
+
+  describe "run_nav_query/2 with no active tab (the nil branch)" do
+    test "senders with no open tabs is a graceful no-op" do
+      socket = base_socket(%{tabs: [], active_tab: nil})
+
+      {:noreply, socket} = SystemBrowser.handle_event("senders", %{}, socket)
+
+      assert socket.assigns.nav_popover == nil
+    end
+  end
+
+  describe "nav-query dispatch-failure (error) branch: implementors, protocol actions, native callers" do
+    test "implementors surfaces a facade error in the popover when denied" do
+      socket =
+        base_socket(%{
+          role: :no_grants,
+          tabs: [method_tab("method:Counter:instance:increment", "Counter", "increment")],
+          active_tab: "method:Counter:instance:increment"
+        })
+
+      {:noreply, socket} = SystemBrowser.handle_event("implementors", %{}, socket)
+
+      assert %{
+               kind: :implementors,
+               selector: "increment",
+               sites: [],
+               error: "Not authorized: your role may not perform this operation."
+             } = socket.assigns.nav_popover
+    end
+
+    test "required_methods surfaces a facade error in the popover when denied" do
+      socket =
+        base_socket(%{
+          role: :no_grants,
+          tabs: [def_tab("def:Printable", "Printable", is_protocol: true)],
+          active_tab: "def:Printable"
+        })
+
+      {:noreply, socket} = SystemBrowser.handle_event("required_methods", %{}, socket)
+
+      assert %{
+               kind: :required_methods,
+               selector: "Printable",
+               sites: [],
+               error: "Not authorized: your role may not perform this operation."
+             } = socket.assigns.nav_popover
+    end
+
+    test "native_callers surfaces a facade error in the popover when denied" do
+      socket =
+        base_socket(%{
+          role: :no_grants,
+          tabs: [native_tab("native:beamtalk_subprocess", "beamtalk_subprocess")],
+          active_tab: "native:beamtalk_subprocess"
+        })
+
+      {:noreply, socket} = SystemBrowser.handle_event("native_callers", %{}, socket)
+
+      assert %{
+               kind: :callers_of_native_module,
+               selector: "beamtalk_subprocess",
+               sites: [],
+               error: "Not authorized: your role may not perform this operation."
+             } = socket.assigns.nav_popover
+    end
+  end
+
+  describe "goto_definition: a malformed single-implementor site" do
+    test "a site with no binary class/method is the graceful unresolved no-op" do
+      StubWorkspaceClient.set_implementors("mysteryValue", [%{"class" => nil, "method" => nil}])
+
+      socket = base_socket(%{browser_classes: []})
+
+      {:noreply, socket} =
+        SystemBrowser.handle_event("goto_definition", %{"token" => "mysteryValue"}, socket)
+
+      assert Phoenix.Flash.get(socket.assigns.flash, :info) == "No definition found."
+      assert socket.assigns.nav_popover == nil
+    end
+  end
+
+  describe "method_row_title/1: signature/doc combinations" do
+    test "no signature, a doc present prefixes the selector with the doc's first line" do
+      assert SystemBrowser.method_row_title(%{
+               "selector" => "foo",
+               "doc" => "Some doc line.\nmore"
+             }) == "foo\nSome doc line."
+    end
+
+    test "a blank signature is treated as absent (presence/1's blank-string branch)" do
+      assert SystemBrowser.method_row_title(%{
+               "selector" => "bar",
+               "signature" => "   ",
+               "doc" => nil
+             }) == "bar"
+    end
+  end
+
+  describe "source_origin_class/1 and source_origin_title/1: project catch-all" do
+    test "source_origin_class/1 defaults to \"project\" for anything but stdlib/dependency" do
+      assert SystemBrowser.source_origin_class(%{"source_origin" => "stdlib"}) == "stdlib"
+      assert SystemBrowser.source_origin_class(%{"source_origin" => "dependency"}) == "dependency"
+      assert SystemBrowser.source_origin_class(%{}) == "project"
+    end
+
+    test "source_origin_title/1 defaults to \"Project\" for anything but stdlib/dependency" do
+      assert SystemBrowser.source_origin_title(%{"source_origin" => "stdlib"}) ==
+               "Standard library"
+
+      assert SystemBrowser.source_origin_title(%{
+               "source_origin" => "dependency",
+               "package" => "http"
+             }) == "Dependency: http"
+
+      assert SystemBrowser.source_origin_title(%{}) == "Project"
+    end
+  end
 end
