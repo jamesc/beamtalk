@@ -295,14 +295,15 @@ defmodule BtAttachWeb.Live.Dock do
             {:ok, term, _output, _warnings} ->
               socket |> repl_append_ok(expr, term) |> repl_help_followup(expr)
 
-            {:error, reason, _output, _warnings} ->
-              repl_append_error(socket, expr, Workspace.render_error(reason))
+            # The 2-tuple shape is a facade short-circuit (RBAC denial /
+            # off-vocabulary op) the eval contract never produces on its
+            # own; `render_eval_error/1` renders it as the entry's response
+            # rather than crashing the LiveView.
+            {:error, _, _, _} = err ->
+              repl_append_error(socket, expr, FacadeError.render_eval_error(err))
 
-            # Facade short-circuit (RBAC denial / off-vocabulary op) — a
-            # 2-tuple the eval contract never produces; render it as the
-            # entry's response rather than crashing the LiveView.
-            {:error, reason} ->
-              repl_append_error(socket, expr, FacadeError.render(reason))
+            {:error, _} = err ->
+              repl_append_error(socket, expr, FacadeError.render_eval_error(err))
           end
 
         {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
@@ -1446,11 +1447,11 @@ defmodule BtAttachWeb.Live.Dock do
         # "Save All to Disk" flush.
         |> WorkspaceLive.maybe_refresh_git()
 
-      {:error, reason, _output, _warnings} ->
-        WorkspaceLive.status_error(socket, Workspace.render_error(reason))
+      {:error, _, _, _} = err ->
+        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-      {:error, reason} ->
-        WorkspaceLive.status_error(socket, FacadeError.render(reason))
+      {:error, _} = err ->
+        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
     end
   end
 

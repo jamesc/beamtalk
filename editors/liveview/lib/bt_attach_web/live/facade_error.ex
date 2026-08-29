@@ -22,4 +22,17 @@ defmodule BtAttachWeb.Live.FacadeError do
 
   def render(:forbidden_op), do: "Operation not permitted."
   def render(reason), do: Workspace.render_error(reason)
+
+  @doc """
+  Renders the error branch of an `eval` (`Facade.dispatch(:eval, ...)`)
+  result, whichever of its two error shapes it took: a 4-tuple
+  (`{:error, reason, output, warnings}`) from the eval contract itself, or
+  a 2-tuple (`{:error, reason}`) from a facade short-circuit (RBAC denial /
+  off-vocabulary op) that never reaches eval. Collapses the same
+  two-clause dispatch that was duplicated at 9 call sites across the Live
+  panes (BT-3318) into one shared helper.
+  """
+  @spec render_eval_error({:error, term(), term(), term()} | {:error, term()}) :: String.t()
+  def render_eval_error({:error, reason, _output, _warnings}), do: Workspace.render_error(reason)
+  def render_eval_error({:error, reason}), do: render(reason)
 end

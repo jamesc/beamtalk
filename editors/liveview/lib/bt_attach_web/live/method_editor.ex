@@ -79,7 +79,6 @@ defmodule BtAttachWeb.Live.MethodEditor do
 
   alias BtAttach.Facade
   alias BtAttach.SessionRegistry
-  alias BtAttach.Workspace
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.RequestContext
   alias BtAttachWeb.Live.SystemBrowser
@@ -419,11 +418,11 @@ defmodule BtAttachWeb.Live.MethodEditor do
         # (no redundant refresh).
         |> WorkspaceLive.maybe_refresh_git_after_save()
 
-      {:error, reason, _output, _warnings} ->
-        assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
+      {:error, _, _, _} = err ->
+        assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
 
-      {:error, reason} ->
-        assign(socket, save_result: nil, save_error: FacadeError.render(reason))
+      {:error, _} = err ->
+        assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
     end
   end
 
