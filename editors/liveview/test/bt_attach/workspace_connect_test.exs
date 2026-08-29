@@ -62,8 +62,15 @@ defmodule BtAttach.WorkspaceConnectTest do
     end
 
     test "Node.connect returns false -> connect_failed/false (set_cookie's empty-token branch runs)" do
+      previous_cookie = System.get_env("BT_WORKSPACE_COOKIE")
       System.put_env("BT_WORKSPACE_COOKIE", "")
-      on_exit(fn -> System.delete_env("BT_WORKSPACE_COOKIE") end)
+
+      on_exit(fn ->
+        if previous_cookie,
+          do: System.put_env("BT_WORKSPACE_COOKIE", previous_cookie),
+          else: System.delete_env("BT_WORKSPACE_COOKIE")
+      end)
+
       :meck.expect(Node, :alive?, fn -> true end)
       :meck.expect(Node, :connect, fn _node -> false end)
 
@@ -72,8 +79,15 @@ defmodule BtAttach.WorkspaceConnectTest do
     end
 
     test "Node.connect returns :ignored -> connect_failed/:ignored (set_cookie sets the real cookie)" do
+      previous_cookie = System.get_env("BT_WORKSPACE_COOKIE")
       System.put_env("BT_WORKSPACE_COOKIE", "sometoken")
-      on_exit(fn -> System.delete_env("BT_WORKSPACE_COOKIE") end)
+
+      on_exit(fn ->
+        if previous_cookie,
+          do: System.put_env("BT_WORKSPACE_COOKIE", previous_cookie),
+          else: System.delete_env("BT_WORKSPACE_COOKIE")
+      end)
+
       :meck.expect(Node, :alive?, fn -> true end)
       :meck.expect(Node, :connect, fn _node -> :ignored end)
       :meck.expect(Node, :set_cookie, fn _node, :sometoken -> true end)
