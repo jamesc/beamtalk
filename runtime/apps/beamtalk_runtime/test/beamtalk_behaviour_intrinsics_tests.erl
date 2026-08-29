@@ -2832,3 +2832,169 @@ object_class_rename_toctou_through_public_api_test_() ->
             )
         ]
     end}.
+
+%%% ============================================================================
+%%% classRemoveSelector/2 and classRemoveSelectorIfAbsent/3 (ADR 0112, BT-3186)
+%%%
+%%% The happy-path (local-method removal) is exercised by the REPL-protocol
+%%% suite (`tests/repl-protocol/cases/remove_selector.btscript`) because it
+%%% needs a live workspace.  These EUnit tests cover the paths that do NOT need
+%%% a workspace: absent-selector errors, extension-method removal (instance and
+%%% class side), and the defensive `error:undef` catch for local removal.
+%%% ============================================================================
+
+%% Absent selector raises selector_not_found — deliberately not
+%% does_not_understand (ADR 0112 § Error behaviour on absent selector).
+class_remove_selector_absent_raises_selector_not_found_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                {ClassObj, Pid} = register_class('BTRmSelAbsent3186', #{}, #{}),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = selector_not_found}
+                        },
+                        beamtalk_behaviour_intrinsics:classRemoveSelector(
+                            ClassObj, 'noSuchMethod3186'
+                        )
+                    )
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% Instance-side extension removal: classRemoveSelector returns Self and the
+%% extension is gone.  Uses register/4 (no source) so extension_prev_source/2
+%% exercises its not_found branch (lines 833-835).
+class_remove_selector_extension_instance_side_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ClassName = 'BTRmSelExtInst3186',
+                {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
+                ok = beamtalk_extensions:register(
+                    ClassName, 'extensionMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+                ),
+                try
+                    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(
+                        ClassObj, 'extensionMethod3186'
+                    ),
+                    ?assertEqual(ClassObj, Result),
+                    ?assertNot(beamtalk_extensions:has(ClassName, 'extensionMethod3186'))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% classRemoveSelectorIfAbsent/3: absent selector evaluates the block and
+%% returns its value rather than raising.
+class_remove_selector_if_absent_block_called_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                {ClassObj, Pid} = register_class('BTRmSelIfAbsent3186', #{}, #{}),
+                try
+                    Result = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+                        ClassObj, 'noSuchMethod3186', fun() -> block_was_called end
+                    ),
+                    ?assertEqual(block_was_called, Result)
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% classRemoveSelectorIfAbsent/3: extension present — returns Self (block not
+%% called).
+class_remove_selector_if_absent_extension_hit_returns_self_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ClassName = 'BTRmSelIfAbsentExt3186',
+                {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
+                ok = beamtalk_extensions:register(
+                    ClassName, 'extMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+                ),
+                try
+                    Result = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+                        ClassObj, 'extMethod3186', fun() -> block_was_called end
+                    ),
+                    ?assertEqual(ClassObj, Result),
+                    ?assertNot(beamtalk_extensions:has(ClassName, 'extMethod3186'))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% Class-side extension removal via a Metaclass-tagged object — exercises the
+%% removal_target/1 Metaclass clause (line 864) and the class-side branch of
+%% extension_ets_class/2 (line 875).
+class_remove_selector_class_side_extension_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ClassName = 'BTRmSelClassSide3186',
+                {_ClassObj, Pid} = register_class_with_class_methods(
+                    ClassName, #{}, #{}, #{}
+                ),
+                %% Metaclass-tagged object is the class-side receiver.
+                Module = beamtalk_object_class:module_name(Pid),
+                MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = Module, pid = Pid},
+                %% Class-side ETS key is class_object_tag(ClassName).
+                ClassEtsKey = beamtalk_class_registry:class_object_tag(ClassName),
+                ok = beamtalk_extensions:register(
+                    ClassEtsKey, 'classExtMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+                ),
+                try
+                    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(
+                        MetaObj, 'classExtMethod3186'
+                    ),
+                    ?assertEqual(MetaObj, Result),
+                    ?assertNot(beamtalk_extensions:has(ClassEtsKey, 'classExtMethod3186'))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% Local-method removal without a workspace hits the error:undef catch in
+%% remove_local_method/3 (lines 907-908), producing a runtime_error.  This
+%% path is documented in the source as the expected behaviour when the workspace
+%% app is not running.
+class_remove_selector_local_method_no_workspace_raises_runtime_error_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {ClassObj, Pid} = register_class(
+                    'BTRmSelLocalNoWs3186', #{}, #{'localTestMethod3186' => MethodFun}
+                ),
+                try
+                    ?assertError(
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        beamtalk_behaviour_intrinsics:classRemoveSelector(
+                            ClassObj, 'localTestMethod3186'
+                        )
+                    )
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
