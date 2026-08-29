@@ -154,7 +154,11 @@ unit_test_() ->
         fun entry_tier_classifies_rename_method_as_tier2/0,
         fun resolve_new_path_prefers_recorded_value/0,
         fun resolve_new_path_derives_exact_style_from_old_path/0,
-        fun resolve_new_path_derives_snake_case_style_from_old_path/0
+        fun resolve_new_path_derives_snake_case_style_from_old_path/0,
+        %% BT-3526 Windows regression (filename:join/2 drive-letter case bug)
+        fun resolve_new_path_preserves_drive_letter_case/0,
+        fun resolve_new_path_derives_path_with_no_directory/0,
+        fun resolve_new_path_derives_path_at_filesystem_root/0
     ].
 
 new_class_directory_target_test_() ->
@@ -3424,6 +3428,78 @@ resolve_new_path_derives_snake_case_style_from_old_path() ->
         ?assertEqual(
             <<"/proj/src/accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
         )
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% BT-3526 Windows regression: a derived new path must preserve the exact
+%% drive-letter case of `old_path` (e.g. `C:` stays `C:`, never lower-cased
+%% to `c:`) — `filename:join/2` mangles this on win32, which is why
+%% `derive_new_path/3` deliberately no longer uses it. This assertion holds
+%% on any host, since the fix replaced `filename:join/2` with plain string
+%% concatenation that is not win32-mode-dependent.
+resolve_new_path_preserves_drive_letter_case() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        Input = rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            <<"C:/proj/src/Counter.bt">>,
+            undefined,
+            [rename_site(<<"C:/proj/src/Counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(Input),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(
+            <<"C:/proj/src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+        )
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% `old_path` with no directory component (`filename:dirname/1` returns
+%% `"."`) derives a bare filename, not a `"./"`-prefixed one.
+resolve_new_path_derives_path_with_no_directory() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        Input = rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            <<"Counter.bt">>,
+            undefined,
+            [rename_site(<<"Counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(Input),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(<<"Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry))
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+%% `old_path` at the filesystem root (`filename:dirname/1` returns the
+%% trailing-slash `"/"`) must not produce a doubled separator (`"//..."`).
+resolve_new_path_derives_path_at_filesystem_root() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        Input = rename_class_input(
+            <<"Accumulator">>,
+            <<"Counter">>,
+            <<"/Counter.bt">>,
+            undefined,
+            [rename_site(<<"/Counter.bt">>, 0, 7, <<"Accumulator">>, <<"Counter">>)]
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(Input),
+        [Entry] = beamtalk_workspace_changelog:flushable_pending(),
+        ?assertEqual(<<"/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry))
     after
         stop(Pid),
         restore_home(OldHome),
