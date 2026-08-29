@@ -1294,6 +1294,15 @@ defmodule BtAttachWeb.StubWorkspaceClient do
       else: {:ok, ""}
   end
 
+  # BT-2556/BT-3297: live parse-only diagnostics for the CodeMirror editors'
+  # lint source. The stub reports no diagnostics for any buffer (the "clean
+  # parse" default); a test driving the squiggle path itself lives in the
+  # `:playwright` browser suite (`workspace_browser_test.exs`), which exercises
+  # the real compiler — this stub only needs to answer the shape so
+  # `BtAttachWeb.Live.SystemBrowser`'s `diagnostics` event has something to
+  # dispatch to without a real workspace node.
+  def diagnostics(_code, _mode), do: {:ok, []}
+
   # ── Supervision tree ─────────────────────────────────────────────────────
 
   def supervision_tree(_pid, _scope), do: {:ok, []}

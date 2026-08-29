@@ -51,11 +51,13 @@ defmodule BtAttachWeb.Live.Dock do
 
   Several dock branches reach into state other panes own: the git-revert path
   calls `BtAttachWeb.Live.MethodEditor`'s tab-refresh helpers (extracted
-  BT-3296) directly, and the System Browser's `open_class`/`symbol_rows` and
-  the Tests pane's `discover_test_classes` are still `WorkspaceLive`-owned
-  (BT-3297 lands later in the BT-3290 epic) — this module calls those public
-  functions rather than duplicating their logic, exactly the temporary
-  cross-call shape a sequential decomposition produces.
+  BT-3296) directly, `BtAttachWeb.Live.SystemBrowser`'s `open_class/2`
+  (extracted BT-3297) focuses the System Browser on a class from the REPL
+  `:help` meta-command, and the top-bar omni search's `symbol_rows/1` and the
+  Tests pane's `discover_test_classes/1` are still `WorkspaceLive`-owned —
+  this module calls those public functions rather than duplicating their
+  logic, exactly the temporary cross-call shape a sequential decomposition
+  produces.
   """
 
   use BtAttachWeb, :html
@@ -76,6 +78,7 @@ defmodule BtAttachWeb.Live.Dock do
   alias BtAttachWeb.Live.Inspector
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
+  alias BtAttachWeb.Live.SystemBrowser
   alias BtAttachWeb.WorkspaceLive
 
   defp ctx(socket), do: RequestContext.build(socket)
@@ -970,7 +973,7 @@ defmodule BtAttachWeb.Live.Dock do
   defp repl_focus_class(socket, expr, class) do
     if class in browser_class_names(socket) do
       socket
-      |> WorkspaceLive.open_class(class)
+      |> SystemBrowser.open_class(class)
       |> repl_append_info(expr, "Opened #{class} in the System Browser ◂")
     else
       # "No class named X" is feedback about a meta-command, not a
@@ -1024,14 +1027,14 @@ defmodule BtAttachWeb.Live.Dock do
   # Non-help evals pass through untouched.
   #
   # Unlike `repl_focus_class/3`, this skips the `browser_class_names/1`
-  # validation and calls `WorkspaceLive.open_class/2` directly: the `eval`
+  # validation and calls `SystemBrowser.open_class/2` directly: the `eval`
   # already succeeded, which proves the class exists in the runtime, so a
   # symbol-index lookup would be redundant (and would falsely reject a class
   # defined moments earlier if the index is briefly stale). `load_protocols`
   # handles an empty result gracefully regardless.
   defp repl_help_followup(socket, expr) do
     case Regex.run(~r/^\s*Beamtalk\s+help:\s+#?([A-Z]\w*)/, expr) do
-      [_, class] -> WorkspaceLive.open_class(socket, class)
+      [_, class] -> SystemBrowser.open_class(socket, class)
       _ -> socket
     end
   end
