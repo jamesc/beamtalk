@@ -89,6 +89,13 @@ top-level `test_coverage` options. The `liveview` CI job runs `mix test
 separate `coverage` job (push-to-`main` only) publishes the
 `elixir-coverage.json` badge.
 
+The threshold started at 55 (floor below the ~60% baseline measured in
+BT-3288). After the WorkspaceLive decomposition and direct-test issues
+(BT-3290's children, BT-3291–BT-3298) landed, total coverage measured
+~82.7%; BT-3299 raised the floor to 78 — a few points of headroom below
+that new baseline, not the measured number itself — mirroring the original
+"floor below baseline" approach.
+
 The Erlang coverage badge blends all four runtime apps —
 `beamtalk_runtime`, `beamtalk_workspace`, `beamtalk_stdlib`, and
 `beamtalk_compiler`. The `beamtalk_stdlib` figure reflects only the

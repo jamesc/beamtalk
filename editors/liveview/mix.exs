@@ -27,10 +27,12 @@ defmodule BtAttach.MixProject do
         ],
         # :threshold only takes effect nested under :summary — Mix.Tasks.Test.Coverage
         # reads it from the :summary opts, not the top-level test_coverage opts.
-        # Floor below the current ~60% baseline (BT-3288) so CI has headroom to
-        # fluctuate without going red; raise as coverage improves. Mirrors the
-        # Rust/Erlang coverage-job thresholds in .github/workflows/ci.yml.
-        summary: [threshold: 55]
+        # Floor below the current ~82.7% baseline (BT-3299, after the
+        # WorkspaceLive decomposition landed — was ~60%/55 pre-BT-3290) so CI
+        # has headroom to fluctuate without going red; raise as coverage
+        # improves. Mirrors the Rust/Erlang coverage-job thresholds in
+        # .github/workflows/ci.yml.
+        summary: [threshold: 78]
       ],
       # Warnings-as-errors for our own code only — deps compile with their
       # upstream settings and routinely warn under newer Elixir releases.
