@@ -693,6 +693,186 @@ alias_row_undefined_doc_is_null_test() ->
     ?assertEqual(null, maps:get(<<"doc">>, Row)).
 
 %%====================================================================
+%% browse-alias-source — read-only alias source view (BT-3314)
+%%====================================================================
+
+describe_ops_has_alias_source_key_test() ->
+    Ops = beamtalk_repl_ops_browse:describe_ops(),
+    ?assert(maps:is_key(<<"browse-alias-source">>, Ops)),
+    #{<<"browse-alias-source">> := Info} = Ops,
+    ?assertEqual([<<"name">>, <<"package">>], maps:get(<<"params">>, Info)).
+
+%% An unknown alias name is a structured not-found error, mirroring
+%% `browse-native-source`'s unknown-class path.
+alias_source_unknown_name_is_error_test() ->
+    ensure_stdlib(),
+    Response = beamtalk_repl_ops_browse:handle(
+        <<"browse-alias-source">>, #{<<"name">> => <<"__NoSuchAlias__">>}, make_msg(), self()
+    ),
+    Decoded = assert_error_response(Response),
+    ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)).
+
+%% With a single alias of that name loaded, `package` can be omitted.
+alias_source_omitted_package_finds_unique_alias_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'SoloAlias',
+                expansion => "Integer",
+                doc => undefined,
+                source_file => "src/solo.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            {value, Source} = beamtalk_repl_ops_browse:handle_term(
+                <<"browse-alias-source">>, #{<<"name">> => <<"SoloAlias">>}, make_msg(), self()
+            ),
+            ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Source)),
+            ?assertEqual(false, maps:get(<<"editable">>, Source))
+        end
+    ).
+
+%% Two packages legally declaring the same alias name (`browse-type-aliases`'s
+%% no-dedupe note) are disambiguated by `package` — the wrong package for a
+%% real name is still not-found, not a silent wrong match.
+alias_source_disambiguates_same_name_by_package_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'Shared',
+                expansion => "Integer",
+                doc => undefined,
+                source_file => "src/shared.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            with_types_only_fixture_app(
+                bt_fake_alias_dup_pkg,
+                [
+                    #{
+                        name => 'Shared',
+                        expansion => "String",
+                        doc => undefined,
+                        source_file => "src/shared.bt",
+                        internal => false
+                    }
+                ],
+                fun() ->
+                    {value, StdlibSource} = beamtalk_repl_ops_browse:handle_term(
+                        <<"browse-alias-source">>,
+                        #{<<"name">> => <<"Shared">>, <<"package">> => <<"stdlib">>},
+                        make_msg(),
+                        self()
+                    ),
+                    ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, StdlibSource)),
+
+                    {value, DepSource} = beamtalk_repl_ops_browse:handle_term(
+                        <<"browse-alias-source">>,
+                        #{
+                            <<"name">> => <<"Shared">>,
+                            <<"package">> => <<"bt_fake_alias_dup_pkg">>
+                        },
+                        make_msg(),
+                        self()
+                    ),
+                    ?assertEqual(<<"dependency">>, maps:get(<<"source_origin">>, DepSource)),
+
+                    Response = beamtalk_repl_ops_browse:handle(
+                        <<"browse-alias-source">>,
+                        #{<<"name">> => <<"Shared">>, <<"package">> => <<"__no_such_pkg__">>},
+                        make_msg(),
+                        self()
+                    ),
+                    assert_error_response(Response)
+                end
+            )
+        end
+    ).
+
+%% Stdlib/dependency aliases have no live path cache to resolve their
+%% package-relative `source_file` against (BT-3314's documented limitation) —
+%% they degrade to the honest `content = null` empty state, never an error.
+alias_source_stdlib_degrades_to_null_content_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'RestartStrategy',
+                expansion => "#temporary | #transient | #permanent",
+                doc => undefined,
+                source_file => "src/restart_strategy.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            {value, Source} = beamtalk_repl_ops_browse:handle_term(
+                <<"browse-alias-source">>,
+                #{<<"name">> => <<"RestartStrategy">>, <<"package">> => <<"stdlib">>},
+                make_msg(),
+                self()
+            ),
+            ?assertEqual(null, maps:get(<<"content">>, Source)),
+            ?assertEqual(<<"src/restart_strategy.bt">>, maps:get(<<"source_file">>, Source))
+        end
+    ).
+
+%% A project-owned alias resolves its package-relative `source_file` against
+%% the workspace's own recorded project root and reads the real bytes on
+%% disk — the one origin where `browse-alias-source` can show real content.
+alias_source_project_reads_file_content_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        {ok, #{project_path := ProjectPath}} = beamtalk_workspace_meta:get_metadata(),
+        Dir = binary_to_list(ProjectPath),
+        ok = filelib:ensure_dir(filename:join([Dir, "src", "x"])),
+        Content = <<"type Greeting = #hello | #goodbye\n">>,
+        ok = file:write_file(filename:join([Dir, "src", "greeting.bt"]), Content),
+        with_types_only_fixture_app(
+            myapp,
+            [
+                #{
+                    name => 'Greeting',
+                    expansion => "#hello | #goodbye",
+                    doc => undefined,
+                    source_file => "src/greeting.bt",
+                    internal => false
+                }
+            ],
+            fun() ->
+                {value, Source} = beamtalk_repl_ops_browse:handle_term(
+                    <<"browse-alias-source">>,
+                    #{<<"name">> => <<"Greeting">>, <<"package">> => <<"myapp">>},
+                    make_msg(),
+                    self()
+                ),
+                ?assertEqual(<<"project">>, maps:get(<<"source_origin">>, Source)),
+                ?assertEqual(false, maps:get(<<"editable">>, Source)),
+                ?assertEqual(Content, maps:get(<<"content">>, Source))
+            end
+        )
+    end).
+
+validate_alias_missing_name_is_error_test() ->
+    ?assertEqual(
+        {error, <<"`name` (non-empty string) is required">>},
+        beamtalk_repl_ops_browse:validate_alias(#{})
+    ).
+
+validate_alias_blank_package_is_ignored_test() ->
+    ?assertEqual(
+        {ok, {<<"Foo">>, undefined}},
+        beamtalk_repl_ops_browse:validate_alias(#{<<"name">> => <<"Foo">>, <<"package">> => <<>>})
+    ).
+
+validate_alias_with_package_test() ->
+    ?assertEqual(
+        {ok, {<<"Foo">>, <<"bar">>}},
+        beamtalk_repl_ops_browse:validate_alias(#{
+            <<"name">> => <<"Foo">>, <<"package">> => <<"bar">>
+        })
+    ).
+
+%%====================================================================
 %% class_definition_text/7 — BT-3255 (ADR 0067 field:/state: + typed prefix),
 %% BT-3254 (sealed/abstract modifier round-trip)
 %%====================================================================

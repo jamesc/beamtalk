@@ -432,6 +432,33 @@ defmodule BtAttach.Workspace do
   def browse_type_aliases, do: dispatch_browse("browse-type-aliases", %{})
 
   @doc """
+  Return the read-only source of a declared type alias for the System
+  Browser's "Type Aliases" panel (BT-3314, `browse-alias-source`). Keyed by
+  `name` and (since aliases are not deduped across packages —
+  `browse_type_aliases/0`'s no-dedupe note) an optional `package` to
+  disambiguate a same-named alias declared by more than one package.
+
+  Unlike `browse_native_source/2`, a `type Name = ...` declaration produces
+  no BEAM module (aliases erase entirely at compile time), so there is no
+  compiled-module path to recover an absolute file location from at read
+  time. Project-owned aliases resolve against the workspace's own recorded
+  project root; stdlib/dependency aliases have no such live path cache (a
+  build-time-only concept) and degrade to `content: null` — the same honest
+  "source not available" empty state `browse_native_source/2` uses for a
+  `.beam`-only module. `editable` is always `false` (read-only, no save op
+  exists). An unknown alias name/package pair comes back as a structured
+  `#beamtalk_error{}`.
+  """
+  @spec browse_alias_source(String.t(), String.t() | nil) :: {:value, term()} | {:error, term()}
+  def browse_alias_source(name, package \\ nil)
+
+  def browse_alias_source(name, nil) when is_binary(name),
+    do: dispatch_browse("browse-alias-source", %{"name" => name})
+
+  def browse_alias_source(name, package) when is_binary(name) and is_binary(package),
+    do: dispatch_browse("browse-alias-source", %{"name" => name, "package" => package})
+
+  @doc """
   Save (edit → compile → reload → write-back) a project-owned native (`.erl`)
   module (BT-2670, `save-native-source`). `module` is the native module name,
   `source` the edited Erlang source. The workspace re-derives project ownership

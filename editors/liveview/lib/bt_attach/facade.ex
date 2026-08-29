@@ -106,6 +106,13 @@ defmodule BtAttach.Facade do
     # user code, `:read`, safe for the Observer role, same guarantee as
     # `browse_classes`/`browse_native_modules`.
     browse_type_aliases: :read,
+    # BT-3314: the read-only alias source view. Aliases erase at compile time
+    # (no BEAM module), so this is pure `.app`-env metadata + an on-disk `.bt`
+    # read for project-owned aliases only — stdlib/dependency degrade to the
+    # "source not available" empty state (no live path cache for those
+    # origins) — no user code, `:read`, safe for the Observer role, same
+    # guarantee as `browse_type_aliases`.
+    browse_alias_source: :read,
     # BT-3238: the divider-grouped ("// === Name ===") method view — a fresh,
     # server-side read of the class's on-disk source through the shared
     # `source_analysis::method_category` recognizer (the same one the LSP's
@@ -336,6 +343,15 @@ defmodule BtAttach.Facade do
   # `type` aliases (no params) — the System Browser's "Type Aliases" section
   # data source.
   defp invoke(:browse_type_aliases, _params, _ctx), do: client().browse_type_aliases()
+
+  # BT-3314: the read-only source view for a declared type alias, keyed by
+  # `name` (+ optional `package` to disambiguate a same-named alias from a
+  # different package — see `browse_type_aliases`'s no-dedupe note).
+  defp invoke(:browse_alias_source, %{name: name} = params, _ctx) do
+    if is_binary(name),
+      do: client().browse_alias_source(name, Map.get(params, :package)),
+      else: {:error, :invalid_params}
+  end
 
   # BT-2648: the read-only native pane keyed by a standalone native `module`
   # (no backing class) — the module surfaced by `browse_native_modules`.

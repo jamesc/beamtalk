@@ -206,7 +206,9 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"browse-native-source">>;
     Op =:= <<"browse-native-modules">>;
     %% BT-2903 (ADR 0108 Phase 8): type-alias enumeration.
-    Op =:= <<"browse-type-aliases">>
+    Op =:= <<"browse-type-aliases">>;
+    %% BT-3314: read-only type-alias source view.
+    Op =:= <<"browse-alias-source">>
 ->
     %% ADR 0095 (BT-2488): System Browser browse facade — read-only term-ops,
     %% each returning `{value, JsonValue}`.

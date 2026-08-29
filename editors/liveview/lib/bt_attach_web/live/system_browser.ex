@@ -33,6 +33,9 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     * **Class definitions + Native browser** — `"browser_open_definition"`,
       `"browser_open_native"`, `"browser_mode"`, `"browser_open_native_module"`,
       `"browser_jump_native"`.
+    * **Type Aliases panel** — `"browser_open_alias"` (BT-3314: toggle a
+      read-only source view inline under the clicked alias row, mirroring
+      `"browser_open_native"`'s inline toggle) and `"dismiss_alias_error"`.
     * **Panel visibility** — `"close_browser"`, `"toggle_browser"`.
     * **Source-navigation affordances** — `"complete"`/`"hover"`/
       `"diagnostics"` (the CodeMirror editors' backend-driven autocomplete,
@@ -56,8 +59,9 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   `:browser_protocols`, `:browser_error`, `:browser_categories`,
   `:browser_group_mode`, `:editing_section`, `:section_form_error`,
   `:native_view`, `:browser_mode`, `:browser_native_modules`,
-  `:browser_type_aliases`, `:native_source`, `:native_source_chosen`,
-  `:nav_popover`, `:browser_classes`) stays on the LiveView's own socket —
+  `:browser_type_aliases`, `:alias_view`, `:native_source`,
+  `:native_source_chosen`, `:nav_popover`, `:browser_classes`) stays on the
+  LiveView's own socket —
   initialised in `WorkspaceLive.bind_session/3` and mount, same as the
   Dock/Inspector/MethodEditor assigns. `WorkspaceLive` still owns
   `handle_event/3` (`Phoenix.LiveView` callback contracts) and `render/1`
@@ -105,6 +109,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     close_browser toggle_browser
     browser_open_definition browser_open_native browser_mode
     browser_open_native_module browser_jump_native
+    browser_open_alias dismiss_alias_error
     browser_view browser_source browser_side browser_select_class
     browser_select_protocol browser_select_method browser_group_mode
     browser_edit_section browser_cancel_section browser_rename_section
@@ -238,6 +243,38 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   end
 
   def handle_event("browser_open_native", _params, socket), do: {:noreply, socket}
+
+  # BT-3314: toggle the read-only source view inline under a clicked Type
+  # Aliases row, mirroring `browser_open_native`'s inline toggle (a type alias
+  # has no compiled module to back a first-class editor tab the way
+  # `browser_open_native_module` opens one — see `load_alias_view/2`'s doc).
+  # `package` disambiguates a same-named alias declared by more than one
+  # package (`browse_type_aliases/0`'s no-dedupe note); a re-click on the same
+  # row collapses it.
+  def handle_event("browser_open_alias", %{"name" => name} = params, socket)
+      when is_binary(name) and name != "" do
+    package = nonempty_string(Map.get(params, "package"))
+
+    if alias_shown?(socket.assigns, name, package) do
+      {:noreply, assign(socket, alias_view: nil)}
+    else
+      {:noreply, assign(socket, alias_view: load_alias_view(socket, name, package))}
+    end
+  end
+
+  def handle_event("browser_open_alias", _params, socket), do: {:noreply, socket}
+
+  # Dismiss the error inside the live alias-source pane: `@alias_view` is a
+  # map whose `:error` field carries the banner. Clear only that field so the
+  # rest of the pane (content/meta) is preserved; if the pane is closed
+  # (`alias_view: nil`) this is a no-op. Mirrors `MethodEditor`'s
+  # `dismiss_native_error`.
+  def handle_event("dismiss_alias_error", _params, socket) do
+    case socket.assigns[:alias_view] do
+      %{} = av -> {:noreply, assign(socket, alias_view: Map.put(av, :error, nil))}
+      _ -> {:noreply, socket}
+    end
+  end
 
   # BT-2656: switch the left browser column between the class tree (`classes`) and
   # the separate Native browser (`native`) via the panel-head `Classes | Native`
@@ -949,6 +986,56 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # native pane toggle).
   def native_shown?(%{native_view: %{class: shown}}, class), do: shown == class
   def native_shown?(_assigns, _class), do: false
+
+  # BT-3314: fetch a declared type alias's read-only source for the inline
+  # pane under its Type Aliases row, keyed by `name` (+ optional `package` to
+  # disambiguate a same-named alias from a different package —
+  # `browse_type_aliases/0`'s no-dedupe note). Unlike `load_native_view/3`,
+  # there is no compiled module to recover an absolute path from at read time
+  # — a `type Name = ...` declaration erases entirely — so project-owned
+  # aliases resolve against the workspace's own project root server-side,
+  # while stdlib/dependency aliases have no live path cache to resolve
+  # against and degrade to `content: nil`, never an error (see
+  # `beamtalk_repl_ops_browse:browse_alias_source/2`'s doc). `editable` is
+  # always `false` — there is no save op for alias source.
+  defp load_alias_view(socket, name, package) do
+    base = %{
+      name: name,
+      package: package,
+      source_file: nil,
+      source_origin: nil,
+      editable: false,
+      content: nil,
+      clauses: [],
+      requested_selector: nil,
+      selected_clause: nil,
+      error: nil
+    }
+
+    case Facade.dispatch(:browse_alias_source, %{name: name, package: package}, ctx(socket)) do
+      {:value, %{} = r} ->
+        %{
+          base
+          | source_file: clean_native_path(Map.get(r, "source_file")),
+            source_origin: Map.get(r, "source_origin"),
+            content: nonempty_string(Map.get(r, "content"))
+        }
+
+      {:error, reason} ->
+        %{base | error: facade_error(reason)}
+
+      _ ->
+        %{base | error: "Could not load type alias source."}
+    end
+  end
+
+  # True when the alias pane is currently showing `name`/`package`'s source.
+  # Public: `WorkspaceLive`'s render template calls it directly (the Type
+  # Aliases row toggle).
+  def alias_shown?(%{alias_view: %{name: shown_name, package: shown_package}}, name, package),
+    do: shown_name == name and shown_package == package
+
+  def alias_shown?(_assigns, _name, _package), do: false
 
   # BT-2648: fetch a standalone native module's source for the read-only pane,
   # keyed by `module` (not class). Same normalisation as `load_native_view/3`
