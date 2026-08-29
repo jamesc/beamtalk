@@ -5,10 +5,14 @@
 // mutated and scoped — covering do:, inject:into:, to:do:, and whileFalse:
 
 TestCase subclass: ActorLocalMutationsTest
+  field: a = nil
+
+  setUp => self withA: LocalMutationActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   testLocalMutationsInActorBlocks =>
-    a := LocalMutationActor spawn
-    self assert: (a sumWithDo: #(1, 2, 3, 4, 5)) equals: 15
+    self assert: (self.a sumWithDo: #(1, 2, 3, 4, 5)) equals: 15
     b := LocalMutationActor spawn
     self assert: (b sumWithInject: #(10, 20, 30)) equals: #{
       #count => 3,
@@ -42,29 +46,26 @@ TestCase subclass: ActorLocalMutationsTest
   testHybridParamsCountedLoop =>
     // BT-1326: counted loop with both local var AND field mutations uses hybrid mode.
     // Locals as direct fun params, actor State as explicit parameter.
-    a := LocalMutationActor spawn
-    r := a sumAndCountToN: 5
+    r := self.a sumAndCountToN: 5
     self assert: (r at: #sum) equals: 15
     self assert: (r at: #log) equals: 5
-    self assert: (a getLog) equals: 5
+    self assert: self.a getLog equals: 5
     b := LocalMutationActor spawn
     r2 := b sumAndCountTimesRepeat: 4
     self assert: (r2 at: #sum) equals: 4
     self assert: (r2 at: #log) equals: 4
-    self assert: (b getLog) equals: 4
+    self assert: b getLog equals: 4
 
   // BT-1342: whileTrue: with both local var AND field mutations uses full-extract mode.
   testFullExtractWhileTrue =>
-    a := LocalMutationActor spawn
-    r := a sumAndCountWhileTrue: 5
+    r := self.a sumAndCountWhileTrue: 5
     self assert: (r at: #sum) equals: 15
     self assert: (r at: #log) equals: 5
-    self assert: (a getLog) equals: 5
+    self assert: self.a getLog equals: 5
 
   // BT-1342: Multiple field mutations in a counted loop (both step and log mutated).
   testMultiFieldMutation =>
-    a := LocalMutationActor spawn
-    r := a multiFieldMutation: 4
+    r := self.a multiFieldMutation: 4
     // step = 1+2+3+4 = 10, log = 4
     self assert: (r at: #step) equals: 10
     self assert: (r at: #log) equals: 4
@@ -72,44 +73,37 @@ TestCase subclass: ActorLocalMutationsTest
   testHybridReadonlyFieldOptimization =>
     // BT-1326: Read-only field (self.step=1) is pre-extracted before the letrec.
     // Verifies the optimization produces correct results at runtime.
-    a := LocalMutationActor spawn
-    r := a sumWithStep: 5
+    r := self.a sumWithStep: 5
     // sum = 1+1+1+1+1 = 5 (step=1 each iteration), log = 5 iterations
     self assert: (r at: #sum) equals: 5
     self assert: (r at: #log) equals: 5
-    self assert: (a getLog) equals: 5
+    self assert: self.a getLog equals: 5
 
   testBlockLocalVarInDoBody =>
-    a := LocalMutationActor spawn
-    self assert: (a doubleAndSum: #(1, 2, 3)) equals: 12
+    self assert: (self.a doubleAndSum: #(1, 2, 3)) equals: 12
 
   // BT-1276: select:/reject: with local mutation should use tuple-acc and return correct results.
   testSelectWithLocalMutation =>
-    a := LocalMutationActor spawn
-    r := a selectPositiveWithCount: #(-1, 2, -3, 4, 5)
+    r := self.a selectPositiveWithCount: #(-1, 2, -3, 4, 5)
     self assert: (r at: #result) equals: #(2, 4, 5)
     self assert: (r at: #count) equals: 5
 
   testRejectWithLocalMutation =>
-    a := LocalMutationActor spawn
-    r := a rejectNegativeWithCount: #(-1, 2, -3, 4, 5)
+    r := self.a rejectNegativeWithCount: #(-1, 2, -3, 4, 5)
     self assert: (r at: #result) equals: #(2, 4, 5)
     self assert: (r at: #count) equals: 5
 
   // BT-1329: Nested list op inside counted loop — direct-params with expanded tuple.
   testNestedDoInsideCountedLoop =>
-    a := LocalMutationActor spawn
     // 3 items × 2 iterations = 6 total increments
-    self assert: (a countItemsInRangeWithDo: #(10, 20, 30) times: 2) equals: 6
+    self assert: (self.a countItemsInRangeWithDo: #(10, 20, 30) times: 2) equals: 6
 
   testNestedInjectInsideCountedLoop =>
-    a := LocalMutationActor spawn
     // inject accumulates: iteration 1: 0+1+2+3=6, iteration 2: 6+1+2+3=12
-    self assert: (a sumItemsNTimes: #(1, 2, 3) times: 2) equals: 12
+    self assert: (self.a sumItemsNTimes: #(1, 2, 3) times: 2) equals: 12
 
   testNestedCollectInsideCountedLoop =>
-    a := LocalMutationActor spawn
-    r := a collectAndCountNTimes: #(1, 2) times: 2
+    r := self.a collectAndCountNTimes: #(1, 2) times: 2
     // Last iteration (i=2): collect: [:x | x * 2] => #(2, 4)
     self assert: (r at: #result) equals: #(2, 4)
     // 2 items × 2 iterations = 4 count increments
