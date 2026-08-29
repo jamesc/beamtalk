@@ -1522,7 +1522,18 @@ derive_new_path(OldPath, OldClassBin, NewClassBin) ->
             true -> binary_to_list(NewClassBin);
             false -> beamtalk_repl_loader:to_snake_case(binary_to_list(NewClassBin))
         end,
-    list_to_binary(filename:join(Dir, NewStem ++ ".bt")).
+    % NOTE: deliberately not filename:join/2 — on win32 it lower-cases a
+    % leading drive letter (e.g. "C:" -> "c:") while filename:dirname/1
+    % above does not, so the two would disagree on the drive-letter case
+    % and desync from the un-normalized paths used elsewhere (the original
+    % `beamtalk_source` attribute, and ChangeLog `old_path`/`new_path`
+    % strings), breaking `sourceFile` equality checks on Windows.
+    NewPath =
+        case Dir of
+            "." -> NewStem ++ ".bt";
+            _ -> Dir ++ "/" ++ NewStem ++ ".bt"
+        end,
+    list_to_binary(NewPath).
 
 -doc """
 Per-entry expected file set: every file that must appear in a Phase B
