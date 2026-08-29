@@ -128,4 +128,41 @@ defmodule BtAttach.TomlTest do
       assert map["\"oidc\""]["issuer"] == "https://idp.example.com"
     end
   end
+
+  describe "further parse/1 error branches (BT-3311)" do
+    test "rejects a pair with an empty key" do
+      assert {:error, {:malformed, 2, _}} = Toml.parse("[oidc]\n= \"x\"\n")
+    end
+
+    test "rejects an array containing a non-string (bare) element" do
+      assert {:error, {:malformed, 2, _}} =
+               Toml.parse(~s([oidc.roles]\nowner = [invalid, "b"]\n))
+    end
+
+    test "an array element's escaped quote does not break comma-splitting" do
+      # Exercises `split_array_elements/5`'s backslash/quote-toggle clauses —
+      # distinct from `unquote_chars/2`'s own `\"` handling (already covered
+      # by the scalar-string escape test above), since arrays track quote
+      # state independently while splitting on top-level commas.
+      source = ~S([oidc.roles]
+      owner = ["a\"b", "c"]
+      )
+
+      assert {:ok, map} = Toml.parse(source)
+      assert map["oidc"]["roles"]["owner"] == ["a\"b", "c"]
+    end
+
+    test "honours \\n and \\t escapes in strings" do
+      source = ~S([oidc]
+      issuer = "line1\nline2\ttab"
+      )
+
+      assert {:ok, map} = Toml.parse(source)
+      assert map["oidc"]["issuer"] == "line1\nline2\ttab"
+    end
+
+    test "rejects extra characters after a closing quote" do
+      assert {:error, {:malformed, 2, _}} = Toml.parse("[oidc]\nissuer = \"abc\"junk\n")
+    end
+  end
 end

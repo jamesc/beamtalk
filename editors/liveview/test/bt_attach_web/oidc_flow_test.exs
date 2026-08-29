@@ -34,6 +34,20 @@ defmodule BtAttachWeb.OidcFlowTest do
     def callback(_config, _params, _session_params), do: {:error, :invalid_grant}
   end
 
+  # A provider whose `authorize_url/1` itself fails (IdP unreachable / a
+  # metadata-discovery error) — distinct from `FakeProvider`'s callback-time
+  # failures above (BT-3311, `OidcController.auth/2`'s `{:error, reason}`
+  # branch).
+  defmodule UnreachableProvider do
+    @behaviour BtAttach.Oidc
+
+    @impl true
+    def authorize_url(_config), do: {:error, :metadata_discovery_failed}
+
+    @impl true
+    def callback(_config, _params, _session_params), do: {:error, :invalid_grant}
+  end
+
   @oidc_config %{
     issuer: "https://idp.test",
     client_id: "beamtalk-ide",
@@ -59,6 +73,20 @@ defmodule BtAttachWeb.OidcFlowTest do
       conn = get(conn, ~p"/")
       assert html_response(conn, 200) =~ "Beamtalk Workspace"
     end
+
+    # BT-3311: a misconfigured front (OIDC disabled but these routes hit
+    # directly) responds via a redirect home rather than leaking a stack
+    # trace — `auth/2`'s and `callback/2`'s own `nil`/`is_nil(config)`
+    # branches, reachable independent of the router's `require_oidc` plug.
+    test "GET /oidc/auth redirects home rather than starting a flow", %{conn: conn} do
+      conn = get(conn, ~p"/oidc/auth")
+      assert redirected_to(conn) == ~p"/"
+    end
+
+    test "GET /oidc/callback redirects home rather than exchanging a code", %{conn: conn} do
+      conn = get(conn, ~p"/oidc/callback?code=good")
+      assert redirected_to(conn) == ~p"/"
+    end
   end
 
   describe "OIDC enabled" do
@@ -82,6 +110,15 @@ defmodule BtAttachWeb.OidcFlowTest do
       assert handshake.same_site == "Lax"
       assert handshake.path == "/oidc"
       assert handshake.http_only
+    end
+
+    test "GET /oidc/auth reports a 502 when the provider's authorize_url fails", %{conn: conn} do
+      # BT-3311: `UnreachableProvider` fails building the authorization URL
+      # itself (IdP unreachable / metadata discovery) — distinct from
+      # `FakeProvider`'s callback-time failures below.
+      Application.put_env(:bt_attach, :oidc_provider, UnreachableProvider)
+      conn = get(conn, ~p"/oidc/auth")
+      assert text_response(conn, 502) =~ "OIDC provider unavailable"
     end
 
     test "a valid callback mints a session and lands authenticated in the IDE", %{conn: conn} do

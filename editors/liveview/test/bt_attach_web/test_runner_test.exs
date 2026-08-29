@@ -196,6 +196,69 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
       socket = base_socket()
       assert {:noreply, ^socket} = TestRunner.handle_event("dismiss_notice", %{}, socket)
     end
+
+    # BT-3311: `dismiss_key_to_assign/1`'s whitelist covers scalar status
+    # assigns owned by several OTHER panes (not just this one's own
+    # `tests_error`) — the cross-pane utility the moduledoc describes.
+    test "dismisses the cross-pane \"browser_error\" key" do
+      socket = base_socket(%{browser_error: "boom"})
+
+      {:noreply, socket} =
+        TestRunner.handle_event("dismiss_notice", %{"key" => "browser_error"}, socket)
+
+      assert socket.assigns.browser_error == nil
+    end
+
+    test "dismisses the cross-pane \"output\" key" do
+      socket = base_socket(%{output: "boom"})
+      {:noreply, socket} = TestRunner.handle_event("dismiss_notice", %{"key" => "output"}, socket)
+      assert socket.assigns.output == nil
+    end
+
+    test "dismisses the cross-pane \"changes_error\" key" do
+      socket = base_socket(%{changes_error: "boom"})
+
+      {:noreply, socket} =
+        TestRunner.handle_event("dismiss_notice", %{"key" => "changes_error"}, socket)
+
+      assert socket.assigns.changes_error == nil
+    end
+
+    test "dismisses the cross-pane \"git_error\" key" do
+      socket = base_socket(%{git_error: "boom"})
+
+      {:noreply, socket} =
+        TestRunner.handle_event("dismiss_notice", %{"key" => "git_error"}, socket)
+
+      assert socket.assigns.git_error == nil
+    end
+
+    test "dismisses the cross-pane \"flush_error\" key" do
+      socket = base_socket(%{flush_error: "boom"})
+
+      {:noreply, socket} =
+        TestRunner.handle_event("dismiss_notice", %{"key" => "flush_error"}, socket)
+
+      assert socket.assigns.flush_error == nil
+    end
+
+    test "dismisses the cross-pane \"bindings_error\" key" do
+      socket = base_socket(%{bindings_error: "boom"})
+
+      {:noreply, socket} =
+        TestRunner.handle_event("dismiss_notice", %{"key" => "bindings_error"}, socket)
+
+      assert socket.assigns.bindings_error == nil
+    end
+
+    test "dismisses the cross-pane \"inspect_error\" key" do
+      socket = base_socket(%{inspect_error: "boom"})
+
+      {:noreply, socket} =
+        TestRunner.handle_event("dismiss_notice", %{"key" => "inspect_error"}, socket)
+
+      assert socket.assigns.inspect_error == nil
+    end
   end
 
   describe "handle_async(:test_discover, …) — test discovery failure handling (BT-2599)" do
@@ -396,9 +459,19 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
       assert TestRunner.test_class_tally(nil, "Counter") == nil
     end
 
+    test "test_class_tally/2 returns nil when the class had no cases in the last run" do
+      results = %{"tests" => [%{"class" => "Other", "status" => "pass"}]}
+
+      assert TestRunner.test_class_tally(results, "Counter") == nil
+    end
+
     test "test_status_label/1 and test_status_class/1 cover pass/fail/skip and an unknown status" do
       assert TestRunner.test_status_label("pass") == "✓ pass"
       assert TestRunner.test_status_class("pass") == "st-pass"
+      assert TestRunner.test_status_label("fail") == "✗ fail"
+      assert TestRunner.test_status_class("fail") == "st-fail"
+      assert TestRunner.test_status_label("skip") == "○ skip"
+      assert TestRunner.test_status_class("skip") == "st-skip"
       assert TestRunner.test_status_label("weird") == "? weird"
       assert TestRunner.test_status_class("weird") == "st-skip"
     end
