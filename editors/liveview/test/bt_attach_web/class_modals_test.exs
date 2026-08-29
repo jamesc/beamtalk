@@ -20,6 +20,44 @@ defmodule BtAttachWeb.Live.ClassModalsTest do
   alias BtAttachWeb.StubWorkspaceClient
   alias BtAttachWeb.WorkspaceLive
 
+  # ── one-off workspace-client overrides (BT-3311) ────────────────────────
+  #
+  # `BtAttachWeb.StubClientOverrides` fills in every callback the module below
+  # does not define with a delegate to `StubWorkspaceClient`, so each of these
+  # models exactly one degraded server response instead of restating the
+  # whole stub surface (CLAUDE.md no-duplicate-implementations) — the same
+  # pattern `MethodEditorTest`/`WorkspaceLivePanesTest` use.
+
+  # `eval` fails with the structured 4-tuple shape (`{:error, reason, output,
+  # warnings}`), distinct from a plain 2-tuple `{:error, reason}` —
+  # `remove_method_eval/6`/`remove_class_eval/4`/`rename_class_eval/4`/
+  # `rename_method_eval/6` render each through a different helper
+  # (`Workspace.render_error/1` vs `facade_error/1`).
+  defmodule Eval4TupleErrorClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def eval(_pid, _code), do: {:error, :compile_failed, "output", ["a warning"]}
+  end
+
+  # `eval` fails with a plain 2-tuple (a down workspace, a malformed reply) —
+  # distinct from the 4-tuple structured-error shape above.
+  defmodule Eval2TupleErrorClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def eval(_pid, _code), do: {:error, :unreachable}
+  end
+
+  # `new_class/2` fails — `dispatch_new_class/5`'s error branch, kept
+  # in-modal (never the method-editor's shared `save_error`).
+  defmodule NewClassErrorClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def new_class(_source, _path), do: {:error, :disk_full}
+  end
+
   setup do
     Application.put_env(:bt_attach, :workspace_client, StubWorkspaceClient)
     {:ok, _} = StubWorkspaceClient.start_state()
@@ -611,6 +649,244 @@ defmodule BtAttachWeb.Live.ClassModalsTest do
       refute ClassModals.valid_class_name?("greeter")
       refute ClassModals.valid_class_name?("")
       refute ClassModals.valid_class_name?("Foo. Session current clear")
+    end
+  end
+
+  # ── dispatch error branches (BT-3311) ───────────────────────────────────
+  #
+  # `remove_method`/`remove_class`/`open_rename`/`rename_submit` all gate on
+  # `socket.assigns.role` in their own `handle_event/3` clause head (unlike
+  # e.g. `MethodEditor`'s `save_method`), so a non-owner role never reaches
+  # `Facade.dispatch/3` here at all — an RBAC-denial trick can't reach these
+  # branches. Instead each one is driven by a genuine dispatch failure: no
+  # session pid, or a one-off workspace client answering a structured 4-tuple
+  # or plain 2-tuple eval error.
+  describe "Remove Method dispatch error branches" do
+    test "reports 'not attached to workspace' when there is no session pid" do
+      tabs = [method_tab("method:Counter:instance:increment", "Counter", "increment")]
+
+      socket =
+        base_socket(%{
+          tabs: tabs,
+          active_tab: "method:Counter:instance:increment",
+          session_pid: nil
+        })
+
+      {:noreply, socket} = ClassModals.handle_event("remove_method", %{}, socket)
+
+      assert socket.assigns.save_error == "not attached to workspace"
+    end
+
+    test "renders Workspace.render_error/1 on a structured 4-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval4TupleErrorClient)
+      tabs = [method_tab("method:Counter:instance:increment", "Counter", "increment")]
+      socket = base_socket(%{tabs: tabs, active_tab: "method:Counter:instance:increment"})
+
+      {:noreply, socket} = ClassModals.handle_event("remove_method", %{}, socket)
+
+      assert socket.assigns.save_error == StubWorkspaceClient.render_error(:compile_failed)
+    end
+
+    test "renders the facade error on a plain 2-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval2TupleErrorClient)
+      tabs = [method_tab("method:Counter:instance:increment", "Counter", "increment")]
+      socket = base_socket(%{tabs: tabs, active_tab: "method:Counter:instance:increment"})
+
+      {:noreply, socket} = ClassModals.handle_event("remove_method", %{}, socket)
+
+      assert socket.assigns.save_error == BtAttach.Workspace.render_error(:unreachable)
+    end
+  end
+
+  describe "Remove Class dispatch error branches" do
+    test "reports 'not attached to workspace' when there is no session pid" do
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter", session_pid: nil})
+
+      {:noreply, socket} = ClassModals.handle_event("remove_class", %{}, socket)
+
+      assert socket.assigns.save_error == "not attached to workspace"
+    end
+
+    test "renders Workspace.render_error/1 on a structured 4-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval4TupleErrorClient)
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter"})
+
+      {:noreply, socket} = ClassModals.handle_event("remove_class", %{}, socket)
+
+      assert socket.assigns.save_error == StubWorkspaceClient.render_error(:compile_failed)
+    end
+
+    test "renders the facade error on a plain 2-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval2TupleErrorClient)
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter"})
+
+      {:noreply, socket} = ClassModals.handle_event("remove_class", %{}, socket)
+
+      assert socket.assigns.save_error == BtAttach.Workspace.render_error(:unreachable)
+    end
+  end
+
+  describe "rename_submit with no rename kind in flight" do
+    test "is a graceful no-op that just closes the modal" do
+      # `rename_kind` defaults to `nil` in `base_socket/1` — a modal opened
+      # without a captured target (shouldn't happen via `open_rename/1`, but
+      # kept explicit rather than assumed, mirroring `close_active_tab_if/2`'s
+      # own defensive-but-real catch-all below).
+      socket = base_socket(%{rename_open: true, rename_error: "stale"})
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "Whatever"}, socket)
+
+      assert socket.assigns.rename_open == false
+      assert socket.assigns.rename_error == nil
+    end
+  end
+
+  describe "class rename: unrelated tree selection + dispatch errors" do
+    test "leaves an unrelated System Browser tree selection untouched" do
+      tabs = [def_tab("def:Counter", "Counter")]
+
+      socket =
+        base_socket(%{
+          tabs: tabs,
+          active_tab: "def:Counter",
+          rename_open: true,
+          rename_kind: :class,
+          rename_class: "Counter",
+          selected_class: "SomethingElse"
+        })
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "Accumulator"}, socket)
+
+      assert socket.assigns.rename_open == false
+      # The tree's selection was on an unrelated class, so the rename doesn't
+      # follow it (only a selection on the renamed class itself — or none —
+      # would move).
+      assert socket.assigns.selected_class == "SomethingElse"
+    end
+
+    test "renders Workspace.render_error/1 on a structured 4-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval4TupleErrorClient)
+
+      socket =
+        base_socket(%{rename_open: true, rename_kind: :class, rename_class: "Counter"})
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "Accumulator"}, socket)
+
+      assert socket.assigns.rename_open == true
+      assert socket.assigns.rename_error == StubWorkspaceClient.render_error(:compile_failed)
+    end
+
+    test "renders the facade error on a plain 2-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval2TupleErrorClient)
+
+      socket =
+        base_socket(%{rename_open: true, rename_kind: :class, rename_class: "Counter"})
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "Accumulator"}, socket)
+
+      assert socket.assigns.rename_open == true
+      assert socket.assigns.rename_error == BtAttach.Workspace.render_error(:unreachable)
+    end
+  end
+
+  describe "method rename: no session, no active tab, and dispatch errors" do
+    test "reports 'not attached to workspace' when there is no session pid" do
+      socket =
+        base_socket(%{
+          session_pid: nil,
+          rename_open: true,
+          rename_kind: :method,
+          rename_class: "Counter",
+          rename_side: "instance",
+          rename_old_selector: "increment"
+        })
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "incrementBy"}, socket)
+
+      assert socket.assigns.rename_open == true
+      assert socket.assigns.rename_error == "not attached to workspace"
+    end
+
+    test "renders Workspace.render_error/1 on a structured 4-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval4TupleErrorClient)
+
+      socket =
+        base_socket(%{
+          rename_open: true,
+          rename_kind: :method,
+          rename_class: "Counter",
+          rename_side: "instance",
+          rename_old_selector: "increment"
+        })
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "incrementBy"}, socket)
+
+      assert socket.assigns.rename_open == true
+      assert socket.assigns.rename_error == StubWorkspaceClient.render_error(:compile_failed)
+    end
+
+    test "renders the facade error on a plain 2-tuple eval error" do
+      Application.put_env(:bt_attach, :workspace_client, Eval2TupleErrorClient)
+
+      socket =
+        base_socket(%{
+          rename_open: true,
+          rename_kind: :method,
+          rename_class: "Counter",
+          rename_side: "instance",
+          rename_old_selector: "increment"
+        })
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "incrementBy"}, socket)
+
+      assert socket.assigns.rename_open == true
+      assert socket.assigns.rename_error == BtAttach.Workspace.render_error(:unreachable)
+    end
+
+    test "a successful rename with no active tab leaves the (empty) tab strip untouched" do
+      # `close_active_tab_if/2`'s own catch-all (BT-3311): `open_rename/1`
+      # always targets the active tab, so this path isn't reachable through
+      # the modal's own open flow — kept explicit rather than assumed, same
+      # as the comment on `close_active_tab_if/2` itself.
+      socket =
+        base_socket(%{
+          active_tab: nil,
+          rename_open: true,
+          rename_kind: :method,
+          rename_class: "Counter",
+          rename_side: "instance",
+          rename_old_selector: "increment"
+        })
+
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => "incrementBy"}, socket)
+
+      assert socket.assigns.rename_open == false
+      assert socket.assigns.tabs == []
+      assert socket.assigns.save_result =~ "Renamed Counter increment to incrementBy"
+    end
+  end
+
+  describe "New Class modal dispatch error (BT-3311)" do
+    test "a failed create keeps the modal open with an in-modal facade error" do
+      Application.put_env(:bt_attach, :workspace_client, NewClassErrorClient)
+
+      {:noreply, socket} =
+        ClassModals.handle_event("new_class", %{"name" => "Greeter"}, base_socket())
+
+      assert socket.assigns.new_class_open == true
+      assert socket.assigns.new_class_name == "Greeter"
+      assert socket.assigns.new_class_error == BtAttach.Workspace.render_error(:disk_full)
     end
   end
 end
