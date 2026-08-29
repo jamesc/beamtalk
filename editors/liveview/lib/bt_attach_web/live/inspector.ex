@@ -25,13 +25,11 @@ defmodule BtAttachWeb.Live.Inspector do
       overlay.
     * Reconnect persistence for the open window desk (BT-2527 #3).
 
-  State (`:inspect_target`, `:inspect_rows`, `:inspect_crumbs`,
-  `:inspect_watch`, `:inspect_stats`, `:inspect_frozen`, `:flash_gen`,
-  `:refresh_pending`, `:poke_result`, `:poke_error`, `:windows`, `:window_z`,
-  `:next_window_id`, `:inspector_mode`) stays on the LiveView's own socket —
-  it is threaded today as plain `WorkspaceLive` assigns (not a
-  `Phoenix.LiveComponent`'s isolated assigns), initialised in
-  `WorkspaceLive.bind_session/3` and read live by object-change pushes
+  State stays on the LiveView's own socket — it is threaded today as plain
+  `WorkspaceLive` assigns (not a `Phoenix.LiveComponent`'s isolated
+  assigns), initialised in `WorkspaceLive.bind_session/3` from this module's
+  `init_assigns/0` (BT-3302 — the canonical key list + defaults live there,
+  not hand-copied here as prose) and read live by object-change pushes
   delivered straight to the LiveView pid. `WorkspaceLive` still owns
   `handle_event/3`/`handle_info/2` (a `Phoenix.LiveView` callback contract),
   but delegates every inspector/window event and push to the functions here
@@ -79,6 +77,54 @@ defmodule BtAttachWeb.Live.Inspector do
 
   @doc false
   def __inspector_events__, do: @inspector_events
+
+  # ── canonical default-assigns map (BT-3302) ─────────────────────────────
+  #
+  # The single source of truth for which socket-assign keys the docked
+  # Inspector + floating windows own, and their fresh-session defaults.
+  # Before BT-3302, `WorkspaceLive.bind_session/3` initialised these 15 keys
+  # as one hand-written `assign/3` pipe with no tether back to the keys this
+  # module actually reads/writes (its own `@moduledoc` carried an
+  # independently hand-maintained — and, it turned out, already stale, since
+  # it omitted `:inspect_error` — prose copy of the same list). A rename here
+  # that missed a call site in this file (or vice versa) had no compile/test
+  # signal, only a `KeyError`/nil-pattern-match crash the first time a user
+  # drove the affected code path.
+  #
+  # `bind_session/3` now assigns this map directly instead of hand-copying
+  # the keys, and `InspectorTest`'s `base_socket/1` fixture is built from it
+  # too (merged with the WorkspaceLive-context keys Inspector only reads,
+  # never initialises: `:session_pid`, `:current_user`, `:role`,
+  # `:session_id`). With both the production init path and the test fixture
+  # deriving from this one map, a key this module's functions actually
+  # pattern-match/assign on but that goes missing here fails the very next
+  # `mix test` run (a `KeyError` reading a socket assign that no longer
+  # exists) rather than waiting for a user to hit it live.
+  @default_assigns %{
+    inspect_target: nil,
+    inspect_rows: [],
+    inspect_crumbs: [],
+    inspect_error: nil,
+    inspect_watch: nil,
+    inspect_stats: nil,
+    inspect_frozen: false,
+    flash_gen: 0,
+    refresh_pending: false,
+    poke_result: nil,
+    poke_error: nil,
+    windows: [],
+    window_z: 10,
+    next_window_id: 1,
+    inspector_mode: "docked"
+  }
+
+  @doc """
+  The default assigns for the docked Inspector + floating windows on a
+  freshly-bound `WorkspaceLive` socket (BT-3302). Called from
+  `WorkspaceLive.bind_session/3` via `assign/2` — see the module doc for why
+  this replaced a hand-written `assign/3` pipe there.
+  """
+  def init_assigns, do: @default_assigns
 
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
