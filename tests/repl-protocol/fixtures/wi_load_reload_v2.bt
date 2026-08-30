@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: v2 of a class re-loaded in place via `Workspace load:` (BT-3336).
+// See wi_load_reload_v1.bt.
+
+Value subclass: WiLoadReload
+
+  value => 2

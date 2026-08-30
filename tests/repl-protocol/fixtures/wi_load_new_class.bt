@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: a brand-new Actor class loaded via `Workspace load:` (BT-3336).
+// Used by workspace_load_error_paths.btscript's "new class" scenario — the
+// class's own gen_server process must start and register on load.
+
+Actor subclass: WiLoadNewActor
+  state: count = 0
+
+  bump => self.count := self.count + 1
+
+  getCount => self.count

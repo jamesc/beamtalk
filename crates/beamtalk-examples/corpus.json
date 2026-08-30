@@ -35243,6 +35243,113 @@
       ],
       "source": "// ValuePoint — a Point value object used in E2E tests (BT-926).\n// Exercises Value subclass: auto-generated getters, with*: setters,\n// keyword constructor, and value equality.\n\nValue subclass: ValuePoint\n  field: x = 0\n  field: y = 0\n\n  // User-defined method: Euclidean distance squared from origin\n  distanceSquared => (self.x * self.x) + (self.y * self.y)",
       "explanation": "ValuePoint — a Point value object used in E2E tests (BT-926). Exercises Value subclass: auto-generated getters, with*: setters, keyword constructor, and value equality."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-wi-load-broken-native-project-src-wiloadbrokennativeuser",
+      "title": "WiLoadBrokenNativeUser",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Object",
+        "WiLoadBrokenNativeUser",
+        "extends",
+        "go",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// E2E fixture: a class referencing a native `.erl` module that fails to\n// compile (BT-3336). Used by workspace_load_error_paths.btscript's \"unmet\n// dependency\" scenario — `maybe_recompile_native_deps/2` rejects the load\n// before the `.bt` file itself is even handed to the compiler.\n\nObject subclass: WiLoadBrokenNativeUser\n\n  class go => (Erlang wi_load_broken_native) go",
+      "explanation": "E2E fixture: a class referencing a native `.erl` module that fails to compile (BT-3336). Used by workspace_load_error_paths.btscript's \"unmet dependency\" scenario — `maybe_recompile_native_deps/2` rejects the load before the `.bt` file itself is even handed to the compiler."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-wi-load-new-class",
+      "title": "WiLoadNewActor",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Actor",
+        "WiLoadNewActor",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "bump",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getCount",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing",
+        "wi_load_new_class"
+      ],
+      "source": "// E2E fixture: a brand-new Actor class loaded via `Workspace load:` (BT-3336).\n// Used by workspace_load_error_paths.btscript's \"new class\" scenario — the\n// class's own gen_server process must start and register on load.\n\nActor subclass: WiLoadNewActor\n  state: count = 0\n\n  bump => self.count := self.count + 1\n\n  getCount => self.count",
+      "explanation": "E2E fixture: a brand-new Actor class loaded via `Workspace load:` (BT-3336). Used by workspace_load_error_paths.btscript's \"new class\" scenario — the class's own gen_server process must start and register on load."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-wi-load-reload-v1",
+      "title": "WiLoadReload",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Value",
+        "WiLoadReload",
+        "extends",
+        "inherit",
+        "inheritance",
+        "subclassing",
+        "value",
+        "wi_load_reload_v1"
+      ],
+      "source": "// E2E fixture: v1 of a class re-loaded in place via `Workspace load:` (BT-3336).\n// Used by workspace_load_error_paths.btscript's \"already registered\" scenario\n// together with wi_load_reload_v2.bt (same class name, different body).\n\nValue subclass: WiLoadReload\n\n  value => 1",
+      "explanation": "E2E fixture: v1 of a class re-loaded in place via `Workspace load:` (BT-3336). Used by workspace_load_error_paths.btscript's \"already registered\" scenario together with wi_load_reload_v2.bt (same class name, different body)."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-wi-load-reload-v2",
+      "title": "WiLoadReload",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Value",
+        "WiLoadReload",
+        "extends",
+        "inherit",
+        "inheritance",
+        "subclassing",
+        "value",
+        "wi_load_reload_v2"
+      ],
+      "source": "// E2E fixture: v2 of a class re-loaded in place via `Workspace load:` (BT-3336).\n// See wi_load_reload_v1.bt.\n\nValue subclass: WiLoadReload\n\n  value => 2",
+      "explanation": "E2E fixture: v2 of a class re-loaded in place via `Workspace load:` (BT-3336). See wi_load_reload_v1.bt."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-wi-load-undefined-class-reference",
+      "title": "WiLoadOrphan",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Value",
+        "WiLoadOrphan",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "subclassing",
+        "value",
+        "wi_load_undefined_class_reference"
+      ],
+      "source": "// E2E fixture: a class whose method body references an undefined class\n// (BT-3336). Used by workspace_load_error_paths.btscript's \"unmet\n// dependency / undefined class reference\" scenario.\n\nValue subclass: WiLoadOrphan\n\n  value => NoSuchClassWiLoadDependency new",
+      "explanation": "E2E fixture: a class whose method body references an undefined class (BT-3336). Used by workspace_load_error_paths.btscript's \"unmet dependency / undefined class reference\" scenario."
     }
   ]
 }

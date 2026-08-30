@@ -54,7 +54,11 @@ respectively.
     current_otp_release/0,
     finish_section_write/4,
     atomic_write_file/2,
-    atomic_write_file/3
+    atomic_write_file/3,
+    %% BT-3336: white-box coverage for the pure load-result-shape helpers
+    %% behind sync_project/2 and handle_term/4's `load-source` clause.
+    collect_load_warnings/1,
+    build_incremental_summary/4
 ]).
 -endif.
 

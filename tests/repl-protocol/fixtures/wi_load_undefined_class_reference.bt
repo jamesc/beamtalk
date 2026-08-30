@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: a class whose method body references an undefined class
+// (BT-3336). Used by workspace_load_error_paths.btscript's "unmet
+// dependency / undefined class reference" scenario.
+
+Value subclass: WiLoadOrphan
+
+  value => NoSuchClassWiLoadDependency new
