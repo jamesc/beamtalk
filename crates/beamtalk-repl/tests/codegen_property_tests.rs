@@ -1,39 +1,45 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Property-based tests for Beamtalk code generation.
+//! Property-based tests for REPL code generation.
 //!
-//! These tests verify that the code generator handles all parsed ASTs safely:
+//! These tests verify that `beamtalk-repl`'s codegen entry points handle
+//! all parsed ASTs safely:
 //!
-//! 1. **`generate_module` never panics** — codegen returns Ok or Err, never panics
-//! 2. **Generated output is valid UTF-8** — output is always a valid String
-//! 3. **Successful codegen produces non-empty output** — no silent empty results
+//! 1. **`generate_repl_expression` never panics** — REPL codegen is safe
+//!    on arbitrary and near-valid input.
+//! 2. **Successful REPL codegen produces non-empty output** — no silent
+//!    empty results.
 //!
-//! **DDD Context:** Code Generation
+//! **DDD Context:** REPL
 //!
-//! ADR 0011 Phase 2 (extended).
+//! BT-3344 (ADR 0117 Decision step 4): moved here from `beamtalk-core`'s
+//! `tests/codegen_property_tests.rs`, where these REPL-specific properties
+//! were the last remaining edge from `codegen`'s test tree into `repl`
+//! (test-only; see BT-3340, ADR 0117 Decision step 2, for the production-
+//! code split). The `generate_module`-only properties stayed behind in
+//! `beamtalk-core`, since they don't touch `beamtalk-repl` at all.
 //!
-//! BT-3344 (ADR 0117 Decision step 4): the REPL-specific properties that
-//! used to live here (`generate_repl_expression` never panics / produces
-//! non-empty output) moved to
-//! `beamtalk-repl/tests/codegen_property_tests.rs` — they exercised only
-//! `beamtalk-repl::codegen`'s public API, the last remaining edge from
-//! `codegen`'s test tree into `repl` (test-only; see BT-3340, ADR 0117
-//! Decision step 2, for the production-code split). What's left here needs
-//! no such cross-crate care: it exercises only `beamtalk-core`'s own
-//! `generate_module`, so this could be a plain unit test, but it stays a
-//! Cargo integration test for consistency with its sibling file above.
+//! Kept as a Cargo integration test (not a unit test embedded in
+//! `beamtalk-repl::src`), matching `beamtalk-repl/tests/repl_codegen_smoke.rs`
+//! — see that file's doc comment for why.
 
 use beamtalk_core::ast::Module;
-use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_repl::codegen::generate_repl_expression;
 use proptest::prelude::*;
 
 // ============================================================================
 // Generators
 // ============================================================================
 
-/// Near-valid Beamtalk fragments for codegen testing.
+/// Near-valid Beamtalk fragments for REPL codegen testing.
+///
+/// Deliberately duplicated from `beamtalk-core/tests/codegen_property_tests.rs`
+/// rather than shared: the two files are integration tests of different
+/// crates (`beamtalk-repl` vs `beamtalk-core`), so sharing this small,
+/// test-only fixture generator would require a new shared test-support
+/// crate — disproportionate for a handful of literal fragments.
 const FRAGMENTS: &[&str] = &[
     "42",
     "\"hello\"",
@@ -121,44 +127,38 @@ fn proptest_config() -> ProptestConfig {
 proptest! {
     #![proptest_config(proptest_config())]
 
-    /// Property 1: `generate_module` never panics on arbitrary parsed input.
+    /// Property 1: `generate_repl_expression` never panics.
     ///
-    /// The code generator may return Ok or Err, but it must never panic.
+    /// Each top-level expression in the parsed module is tried individually.
     #[test]
-    fn generate_module_never_panics(input in "\\PC{0,300}") {
+    fn generate_repl_expression_never_panics(input in "\\PC{0,300}") {
         let module = parse_source(&input);
-        let options = CodegenOptions::new("prop_test_module");
-        let _result = generate_module(&module, options);
+        for expr in &module.expressions {
+            let _result = generate_repl_expression(&expr.expression, "prop_test_repl");
+        }
     }
 
-    /// Property 1b: `generate_module` never panics on near-valid input.
+    /// Property 1b: `generate_repl_expression` never panics on near-valid input.
     #[test]
-    fn generate_module_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn generate_repl_expression_never_panics_near_valid(input in near_valid_beamtalk()) {
         let module = parse_source(&input);
-        let options = CodegenOptions::new("prop_test_module");
-        let _result = generate_module(&module, options);
+        for expr in &module.expressions {
+            let _result = generate_repl_expression(&expr.expression, "prop_test_repl");
+        }
     }
 
-    /// Property 2: Successful codegen always produces valid, non-empty output.
+    /// Property 2: REPL expression codegen output contains module structure.
     #[test]
-    fn successful_codegen_produces_output(input in near_valid_beamtalk()) {
+    fn repl_codegen_output_structure(input in near_valid_beamtalk()) {
         let module = parse_source(&input);
-        let options = CodegenOptions::new("prop_test_module");
-        if let Ok(output) = generate_module(&module, options) {
-            prop_assert!(
-                !output.is_empty(),
-                "generate_module returned Ok with empty output for input {:?}",
-                input,
-            );
-            // Output is already a String, so it's valid UTF-8 by construction.
-            // But verify it contains the expected module header.
-            let snippet_end = output.floor_char_boundary(200);
-            prop_assert!(
-                output.contains("module") || output.contains("'prop_test_module'"),
-                "Generated output doesn't look like Core Erlang for input {:?}: {}",
-                input,
-                &output[..snippet_end],
-            );
+        for expr in &module.expressions {
+            if let Ok(output) = generate_repl_expression(&expr.expression, "prop_test_repl") {
+                prop_assert!(
+                    !output.is_empty(),
+                    "generate_repl_expression returned Ok with empty output for input {:?}",
+                    input,
+                );
+            }
         }
     }
 }

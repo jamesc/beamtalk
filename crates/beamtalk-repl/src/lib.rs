@@ -19,9 +19,12 @@
 //!
 //! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::repl`
 //! into its own crate — `repl` depended only on `codegen`/`ast`/
-//! `source_analysis` in production (its one back-edge, `codegen`'s own test
-//! files calling `repl::codegen` to validate REPL-specific codegen paths, is
-//! test-only, so `beamtalk-core` keeps `beamtalk-repl` as a dev-dependency).
+//! `source_analysis` in production. Its one back-edge, `codegen`'s own test
+//! files calling `repl::codegen` to validate REPL-specific codegen paths,
+//! was test-only and has since been closed too: BT-3344 (ADR 0117 Decision
+//! step 4) moved those test cases into this crate's own `tests/`, so
+//! `beamtalk-core` no longer depends on `beamtalk-repl` at all, dev or
+//! otherwise.
 //! Reaching into [`CoreErlangGenerator`]'s previously crate-private state
 //! (scope stack, state-threading counters, REPL/workspace-mode flags) is
 //! exactly what a REPL-specific codegen boundary is expected to need, so

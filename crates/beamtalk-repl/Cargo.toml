@@ -26,6 +26,10 @@ beamtalk-cerl-doc.workspace = true
 
 [dev-dependencies]
 ecow.workspace = true
+# why: BT-3344 (ADR 0117 Decision step 4) — property tests for
+# `codegen::generate_repl_expression`, moved here from
+# `beamtalk-core/tests/codegen_property_tests.rs`.
+proptest.workspace = true
 
 [lints]
 workspace = true

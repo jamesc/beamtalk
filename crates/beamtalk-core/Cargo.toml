@@ -57,12 +57,6 @@ insta.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 tempfile = "3.14"
-# why: BT-3340 (ADR 0117 Decision step 2) — `repl` moved to its own crate;
-# `codegen`'s own test files still validate REPL-specific codegen paths via
-# `beamtalk_repl::codegen`. Cargo permits this cyclic dev-dependency (the
-# production edge is one-way, `beamtalk-repl` → `beamtalk-core`) since it's
-# excluded when `beamtalk-core` is built as a dependency.
-beamtalk-repl.workspace = true
 # why: already present transitively (see Cargo.lock); used in codegen tests to
 # assert on Core Erlang shape without hardcoding fresh-variable counter values.
 regex = "1"
