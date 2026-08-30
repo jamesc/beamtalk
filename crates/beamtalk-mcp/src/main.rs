@@ -600,4 +600,74 @@ mod tests {
         );
         drop(writer);
     }
+
+    // --- wait_for_tcp_ready ---
+
+    #[tokio::test]
+    async fn wait_for_tcp_ready_succeeds_once_a_listener_is_up() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        // Keep the listener alive for the duration of the wait.
+        let _keep_alive = listener;
+        wait_for_tcp_ready(port, std::time::Duration::from_secs(5))
+            .await
+            .expect("a listening port should be reported ready");
+    }
+
+    #[tokio::test]
+    async fn wait_for_tcp_ready_errors_on_timeout() {
+        // Bind then immediately drop to get a port nothing is listening on,
+        // rather than guessing at an unused one.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let err = wait_for_tcp_ready(port, std::time::Duration::from_millis(300))
+            .await
+            .expect_err("no listener on this port should time out, not succeed");
+        assert!(
+            err.to_string().contains("not accepting connections"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // --- resolve_port_and_cookie ---
+
+    /// With `--port`, the cookie comes only from the ambient `BEAMTALK_COOKIE`
+    /// env var — never mutated here, since `set_var` is process-global and
+    /// unsound under a multi-threaded test runner (same approach BT-3325 took
+    /// for beamtalk-lsp's equivalent env-dependent test). The test instead
+    /// reads whatever is ambiently set and asserts the branch that implies.
+    #[tokio::test]
+    async fn resolve_port_and_cookie_with_explicit_port_reflects_ambient_cookie() {
+        let args = Args {
+            verbose: 0,
+            port: Some(9999),
+            workspace_id: None,
+            start: false,
+        };
+        let result = resolve_port_and_cookie(&args).await;
+        match std::env::var("BEAMTALK_COOKIE") {
+            Ok(cookie) if !cookie.trim().is_empty() => {
+                let (port, got_cookie, workspace_id) =
+                    result.expect("ambient BEAMTALK_COOKIE is non-empty, so this should succeed");
+                assert_eq!(port, 9999);
+                assert_eq!(got_cookie, cookie);
+                // Explicit --port never enables workspace port re-discovery.
+                assert!(workspace_id.is_none());
+            }
+            _ => {
+                let err = result
+                    .expect_err("--port without a non-empty BEAMTALK_COOKIE must error, not hang");
+                assert!(
+                    err.to_string().contains("BEAMTALK_COOKIE"),
+                    "unexpected error: {err}"
+                );
+            }
+        }
+    }
 }
