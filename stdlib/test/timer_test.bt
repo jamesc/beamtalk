@@ -8,12 +8,12 @@ TestCase subclass: TimerTest
   testSleepReturnsNil =>
     // Timer sleep: returns nil
     result := Timer sleep: 1
-    self assert: result isNil
+    self assert: result equals: nil
 
   testSleepZeroReturnsNil =>
     // Timer sleep: 0 returns nil immediately
     result := Timer sleep: 0
-    self assert: result isNil
+    self assert: result equals: nil
 
   testAfterReturnsTimer =>
     // Timer after:do: returns a Timer instance
@@ -33,14 +33,14 @@ TestCase subclass: TimerTest
     self assert: t isActive
     t cancel
     // after cancel, process is immediately dead — block never ran
-    self assert: t isActive not
+    self deny: t isActive
 
   testAfterFiresAndBecomesInactive =>
     // after: block fires after delay; process exits, so isActive becomes false
     t := Timer after: 20 do: []
     self assert: t isActive
     Timer sleep: 100
-    self assert: t isActive not
+    self deny: t isActive
 
   testEveryStaysActiveAcrossMultipleIntervals =>
     // every: process stays alive across multiple intervals (repeating behaviour)
@@ -49,20 +49,20 @@ TestCase subclass: TimerTest
     Timer sleep: 100
     self assert: t isActive
     t cancel
-    self assert: t isActive not
+    self deny: t isActive
 
   testCancelReturnsTrueWhenActive =>
     // cancel returns true for an active timer
     t := Timer after: 10000 do: []
     result := t cancel
-    self assert: result
+    self assert: result equals: true
 
   testCancelReturnsFalseWhenInactive =>
     // cancel returns false for an already-cancelled timer
     t := Timer after: 10000 do: []
     t cancel
     result := t cancel
-    self assert: result not
+    self assert: result equals: false
 
   testIsActiveWhenPending =>
     // isActive returns true for a pending timer
@@ -74,13 +74,13 @@ TestCase subclass: TimerTest
     // isActive returns false after cancel
     t := Timer after: 10000 do: []
     t cancel
-    self assert: t isActive not
+    self deny: t isActive
 
   testIsActiveAfterFired =>
     // isActive returns false after a one-shot timer fires
     t := Timer after: 10 do: []
     Timer sleep: 100
-    self assert: t isActive not
+    self deny: t isActive
 
   testPrintString =>
     // printString returns a String
