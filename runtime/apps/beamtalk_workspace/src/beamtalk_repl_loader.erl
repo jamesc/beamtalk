@@ -2888,6 +2888,18 @@ ADR 0114's `sites[0] = null` case) has nothing to splice either way —
 `do_revert_rewrite/2` mirrors `rewrite_class_sites/4`'s own trivial-success
 shortcut for that shape, so only the identity move runs.
 
+BT-3335: a pure `Workspace moveClass:to:` (BT-3272) entry never changes a
+class's name at all — its `'rename-class'` entry records `old_class ==
+class` by construction — so there is no "CURRENT (post-rename) name" that
+differs from `old_class` for `install_class_rename/3` to retire. Calling it
+anyway (as an earlier version of this function did) resolves BOTH names to
+the SAME live pid — the one `do_revert_rewrite/2` just reinstalled under
+this unchanged name — and its ordinary-class clause would stop and purge
+that pid as if it were a stale leftover registration, destroying the class
+`revert_rename_sites/1` was asked to restore. `finish_rename_class_revert/1`
+special-cases `old_class =:= class` and returns `{ok, OldNameBin}` directly,
+skipping `install_class_rename/3` entirely for that shape.
+
 Returns `{ok, RevertedClassNameBin}` (the class's name AFTER revert —
 `old_class` for `'rename-class'`, the entry's own stable `class` for
 `'rename-method'`) on success, or `{error, Reason}` on any resolution/read/
@@ -3004,27 +3016,49 @@ finish_rename_revert(Entry) ->
 finish_rename_class_revert(Entry) ->
     CurrentNameBin = beamtalk_workspace_changelog:entry_class(Entry),
     OldNameBin = beamtalk_workspace_changelog:entry_old_class(Entry),
-    case
-        {
-            beamtalk_repl_server:safe_to_existing_atom(CurrentNameBin),
-            beamtalk_repl_server:safe_to_existing_atom(OldNameBin)
-        }
-    of
-        {{ok, CurrentName}, {ok, OldName}} ->
-            Classification = capture_class_removal_snapshot(CurrentNameBin),
-            try
-                _ = beamtalk_behaviour_intrinsics:install_class_rename(
-                    CurrentName, OldName, Classification
-                ),
-                {ok, OldNameBin}
-            catch
-                error:#{error := #beamtalk_error{} = Err} -> {error, Err};
-                Class:Reason -> {error, {rename_identity_restore_failed, Class, Reason}}
-            end;
-        _ ->
-            {error,
-                {rename_identity_restore_failed, unresolvable_class_atom,
-                    {CurrentNameBin, OldNameBin}}}
+    case CurrentNameBin =:= OldNameBin of
+        true ->
+            %% BT-3335: a pure `Workspace moveClass:to:` (BT-3272) entry — a
+            %% file-location-only move never changes a class's name, so its
+            %% `'rename-class'` entry records `old_class == class` by
+            %% construction (`move_class/2`'s own doc). `do_revert_rewrite/2`
+            %% — earlier in this same revert call chain
+            %% (`revert_rename_sites_splice_first/3` calls it before
+            %% `finish_rename_revert/1` reaches this function) — already
+            %% spliced the definition site back via `rewrite_sites/2`, which
+            %% reinstalls THIS SAME name and reuses the SAME pid (its own
+            %% "hot-reload only assigns a NEW pid when the registered name
+            %% changed" rule — a move-revert's name never does). There is no
+            %% stale post-rename registration left to retire, so skip
+            %% `install_class_rename/3` entirely: its ordinary-class clause
+            %% resolves `OldName`/`NewName` to the SAME live pid and would
+            %% otherwise mistake the class's own just-reinstalled process for
+            %% a leftover old-name registration, stopping and purging it out
+            %% from under the caller.
+            {ok, OldNameBin};
+        false ->
+            case
+                {
+                    beamtalk_repl_server:safe_to_existing_atom(CurrentNameBin),
+                    beamtalk_repl_server:safe_to_existing_atom(OldNameBin)
+                }
+            of
+                {{ok, CurrentName}, {ok, OldName}} ->
+                    Classification = capture_class_removal_snapshot(CurrentNameBin),
+                    try
+                        _ = beamtalk_behaviour_intrinsics:install_class_rename(
+                            CurrentName, OldName, Classification
+                        ),
+                        {ok, OldNameBin}
+                    catch
+                        error:#{error := #beamtalk_error{} = Err} -> {error, Err};
+                        Class:Reason -> {error, {rename_identity_restore_failed, Class, Reason}}
+                    end;
+                _ ->
+                    {error,
+                        {rename_identity_restore_failed, unresolvable_class_atom,
+                            {CurrentNameBin, OldNameBin}}}
+            end
     end.
 
 %% Build the reversed `rewrite_site()` list from `Entry`'s recorded `sites`:
