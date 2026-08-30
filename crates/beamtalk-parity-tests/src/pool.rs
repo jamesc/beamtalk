@@ -12,8 +12,6 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::normalize::project_root;
-
 /// Live-workspace handle returned to the harness.
 #[derive(Debug, Clone)]
 pub struct SharedRepl {
@@ -129,49 +127,13 @@ fn start_workspace() -> Result<SharedRepl, String> {
 
 /// Resolve `<bin>` (or `<bin>.exe` on Windows) next to this test binary.
 ///
-/// This test binary's own `current_exe()` lives at `<profile-dir>/deps/...`,
-/// so its grandparent is the same `<profile-dir>` cargo placed sibling `[[bin]]`
-/// outputs into — including under `cargo llvm-cov`, which builds everything
-/// into `target/llvm-cov-target/<profile>/` rather than plain `target/<profile>/`.
-/// A hardcoded `target/debug` path would silently resolve to a stale,
-/// uninstrumented binary in that case: the parity suite would run against it
-/// happily, but contribute zero coverage signal for beamtalk-cli/-lsp/-mcp.
+/// Thin re-export of the shared resolution logic in `beamtalk-workspace`
+/// (also used by `beamtalk-mcp`'s and `beamtalk-cli`'s own
+/// subprocess-spawning integration tests) — see
+/// [`beamtalk_workspace::resolve_sibling_binary`] for why a hardcoded
+/// `target/debug` path doesn't work under `cargo llvm-cov`.
 pub fn beamtalk_binary(name: &str) -> Result<PathBuf, String> {
-    let suffix = std::env::consts::EXE_SUFFIX;
-    let file = format!("{name}{suffix}");
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(profile_dir) = exe.ancestors().nth(2) {
-            let candidate = profile_dir.join(&file);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-    }
-
-    // Fallback for layouts where current_exe() doesn't follow the usual
-    // `<profile-dir>/deps/<test-binary>` shape.
-    let mut dir = project_root().to_path_buf();
-    let candidate = dir.join("target/debug").join(&file);
-    if candidate.exists() {
-        return Ok(candidate);
-    }
-    // Last resort: walk up from cwd for safety in unusual layouts.
-    if let Ok(mut cwd) = std::env::current_dir() {
-        loop {
-            let c = cwd.join("target/debug").join(&file);
-            if c.exists() {
-                return Ok(c);
-            }
-            if !cwd.pop() {
-                break;
-            }
-        }
-    }
-    let _ = dir.pop();
-    Err(format!(
-        "binary `{name}` not found next to the test binary or in target/debug; run `just build` first"
-    ))
+    beamtalk_workspace::resolve_sibling_binary(name)
 }
 
 fn wait_for_tcp_ready(port: u16, timeout: Duration) -> Result<(), String> {

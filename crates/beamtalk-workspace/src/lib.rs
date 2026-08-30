@@ -39,6 +39,66 @@ pub fn hex_encode(bytes: &[u8]) -> String {
         })
 }
 
+/// Resolve `<name>` (or `<name>.exe` on Windows) as a sibling `[[bin]]`
+/// artifact next to the calling test binary.
+///
+/// The calling test binary's own `current_exe()` lives at
+/// `<profile-dir>/deps/<test-binary>`, so its grandparent is the same
+/// `<profile-dir>` cargo places sibling `[[bin]]` outputs into — including
+/// under `cargo llvm-cov`, which builds everything into
+/// `target/llvm-cov-target/<profile>/` rather than plain
+/// `target/<profile>/`. A hardcoded `target/debug/<name>` path resolves to
+/// a stale, uninstrumented binary in that case: a subprocess-spawning e2e
+/// test runs against it happily while contributing zero coverage signal
+/// for that binary's own crate.
+///
+/// Falls back to walking up from the current directory looking for
+/// `target/debug/<name>`, for callers whose `current_exe()` doesn't follow
+/// the usual `<profile-dir>/deps/<test-binary>` shape.
+///
+/// The shared leaf under every "find a sibling workspace binary from a test
+/// binary" need in these tools: `beamtalk-parity-tests`' CLI/LSP/MCP e2e
+/// drivers, `beamtalk-mcp`'s REPL-spawning integration tests, and
+/// `beamtalk-cli`'s own subprocess-spawning integration tests must not each
+/// carry their own copy of this resolution logic (see
+/// `docs/development/architecture-principles.md` § Duplication & the
+/// Shared-Leaf-Module Pattern).
+///
+/// # Errors
+///
+/// Returns an error message if `<name>` isn't found next to the test
+/// binary or anywhere in `target/debug` walking up from the current
+/// directory.
+pub fn resolve_sibling_binary(name: &str) -> std::result::Result<PathBuf, String> {
+    let suffix = std::env::consts::EXE_SUFFIX;
+    let file = format!("{name}{suffix}");
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(profile_dir) = exe.ancestors().nth(2) {
+            let candidate = profile_dir.join(&file);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    if let Ok(mut cwd) = std::env::current_dir() {
+        loop {
+            let candidate = cwd.join("target/debug").join(&file);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            if !cwd.pop() {
+                break;
+            }
+        }
+    }
+
+    Err(format!(
+        "binary `{name}` not found next to the test binary or in target/debug; run `just build` first"
+    ))
+}
+
 /// SHA256-hash a path string down to a 12-hex-char workspace ID.
 ///
 /// The pure half of [`generate_workspace_id`] — no filesystem access, no

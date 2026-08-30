@@ -605,6 +605,18 @@ jobs:
         # the Justfile) so the badge reflects product-code coverage.
         run: just coverage-rust-cobertura
 
+      - name: Dump workspace startup logs
+        # coverage-rust-cobertura's --ignored pass spawns real REPL/BEAM
+        # nodes too (the parity drivers + beamtalk-mcp's REPL-spawning
+        # tests), same as test-parity above.
+        if: failure()
+        run: |
+          epmd -names || true
+          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
       - name: Generate Erlang coverage (unit + E2E + stdlib)
         run: just coverage-all
 
