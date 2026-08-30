@@ -1,7 +1,7 @@
 # ADR 0117: Splitting `beamtalk-core` into Sub-Crates
 
 ## Status
-Proposed (2026-08-30)
+Accepted (2026-08-30)
 
 ## Context
 
