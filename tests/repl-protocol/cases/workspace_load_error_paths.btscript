@@ -1,0 +1,117 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for `Workspace load:`'s load-path branches (BT-3336): a
+// brand-new class registration, re-loading an already-registered class in
+// place, a compile-error result shape, an undefined class reference inside
+// a method body, and an unmet native `.erl` dependency — the scenarios
+// `beamtalk_workspace_interface_primitives:handle_load/1` and
+// `beamtalk_repl_ops_load`'s load-operation handlers need a live compiler +
+// registered classes to exercise for real.
+//
+// These require E2E (not plain EUnit) for the same reason
+// workspace_load.btscript does: `Workspace` is a singleton actor that only
+// exists in the live REPL process, and confirming "no double-registration"
+// needs the real class registry across REPL turns.
+
+// ===========================================================================
+// NEW CLASS — the class's own gen_server process starts and registers
+// ===========================================================================
+
+Workspace load: "tests/repl-protocol/fixtures/wi_load_new_class.bt"
+// => ["WiLoadNewActor"]
+
+Workspace classes includes: WiLoadNewActor
+// => true
+
+newActor := WiLoadNewActor spawn
+// => Actor(WiLoadNewActor, _)
+
+newActor bump
+// => 1
+
+newActor getCount
+// => 1
+
+// ===========================================================================
+// RE-LOADING AN ALREADY-REGISTERED CLASS — updates in place, no duplicate
+// ===========================================================================
+
+Workspace load: "tests/repl-protocol/fixtures/wi_load_reload_v1.bt"
+// => ["WiLoadReload"]
+
+classCountAfterFirstLoad := Workspace classes size
+// => _
+
+v1 := WiLoadReload new
+// => _
+
+v1 value
+// => 1
+
+// Re-loading the same class name updates the existing registration in
+// place rather than erroring or adding a second entry.
+Workspace load: "tests/repl-protocol/fixtures/wi_load_reload_v2.bt"
+// => ["WiLoadReload"]
+
+classCountAfterSecondLoad := Workspace classes size
+// => _
+
+classCountAfterSecondLoad == classCountAfterFirstLoad
+// => true
+
+v2 := WiLoadReload new
+// => _
+
+v2 value
+// => 2
+
+// ===========================================================================
+// COMPILE ERROR — a structured error, not a crash or a silent no-op
+//
+// The broken source is written to a fresh temp file at runtime (`File
+// tempDirectory`, per CLAUDE.md's cross-platform temp-path rule) rather than
+// committed as a static `.bt` fixture, so the deliberately-invalid syntax
+// never trips the project's `fmt-check-beamtalk` parser over
+// tests/repl-protocol/fixtures/.
+// ===========================================================================
+
+_brokenPath := File tempDirectory ++ "/bt_e2e_wi_load_broken_" ++ (Erlang erlang) unique_integer asString ++ ".bt"
+// => _
+
+File writeAll: _brokenPath contents: "invalid @@@ syntax"
+// => Result ok: nil
+
+Workspace load: _brokenPath
+// => ERROR:
+
+_error kind
+// => _
+
+// ===========================================================================
+// UNDEFINED CLASS REFERENCE IN A METHOD BODY — `Workspace load:` succeeds
+// (a capitalised identifier inside a method body is late-bound, not
+// resolved at load time), and the reference simply resolves to `nil` at
+// dispatch rather than raising — documenting the real behavior rather than
+// assuming a load-time or dispatch-time failure that this language's
+// late-binding semantics don't actually produce.
+// ===========================================================================
+
+Workspace load: "tests/repl-protocol/fixtures/wi_load_undefined_class_reference.bt"
+// => ["WiLoadOrphan"]
+
+orphan := WiLoadOrphan new
+// => _
+
+orphan value
+// => nil
+
+// ===========================================================================
+// UNMET NATIVE DEPENDENCY — a `.bt` file referencing a native `.erl` module
+// that fails to compile is rejected with a structured `native_compile_failed`
+// error BEFORE the `.bt` file itself is even handed to the compiler
+// (`maybe_recompile_native_deps/2`'s pre-step, BT-2091).
+// ===========================================================================
+
+Workspace load: "tests/repl-protocol/fixtures/wi_load_broken_native_project/src/WiLoadBrokenNativeUser.bt"
+// => ERROR:
