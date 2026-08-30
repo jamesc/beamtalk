@@ -203,7 +203,13 @@ impl CoreErlangGenerator {
     /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
     /// ADR 0018: Simple forwarding to `generate_expression`.
-    pub(crate) fn expression_doc(
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodeGenError`](super::CodeGenError) if generating `expr` fails.
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` compiles
+    // individual expressions this way while assembling a REPL module.
+    pub fn expression_doc(
         &mut self,
         expr: &Expression,
     ) -> Result<beamtalk_cerl_doc::Document<'static>> {
@@ -307,7 +313,13 @@ impl CoreErlangGenerator {
     /// value calls set `repl_loop_mutated` deep in the call stack. REPL codegen needs to
     /// know whether the expression returned a `{Result, State}` tuple that must be unpacked.
     /// This method encapsulates the side-channel into an explicit return value.
-    pub(crate) fn expression_doc_with_repl_mutation_tracking(
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodeGenError`](super::CodeGenError) if generating `expr` fails.
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` calls this while
+    // generating REPL-mode expression bodies.
+    pub fn expression_doc_with_repl_mutation_tracking(
         &mut self,
         expr: &crate::ast::Expression,
     ) -> Result<(beamtalk_cerl_doc::Document<'static>, bool)> {
@@ -333,7 +345,9 @@ impl CoreErlangGenerator {
     ///
     /// Use this for internal codegen temporaries (loop variables, function bindings,
     /// etc.) that should never shadow or be confused with user identifiers.
-    pub(crate) fn fresh_temp_var(&mut self, base: &str) -> String {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` mints internal
+    // temporaries (e.g. result variables) while assembling a REPL module.
+    pub fn fresh_temp_var(&mut self, base: &str) -> String {
         self.var_context.fresh_var(base)
     }
 

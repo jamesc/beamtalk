@@ -14,6 +14,7 @@ filesystem/parsing functions that do not require a running REPL workspace.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
 %% Helpers
@@ -2368,4 +2369,416 @@ stamp_version() ->
     case safe_version() of
         V when is_binary(V) -> V;
         undefined -> <<"0.0.0-test-placeholder">>
+    end.
+
+%%====================================================================
+%% handle_term/4 — the protocol-shaped load-project/load-source/unload
+%% entry points (BT-3336). Everything above this point drives the
+%% underlying helpers (sync_project/2, find_bt_files/1, ...) directly;
+%% these instead exercise handle_term/4 itself — the params extraction,
+%% empty-source/bad-module guards, and result-tuple shaping that only run
+%% at the protocol boundary.
+%%====================================================================
+
+handle_term_load_project_success_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"htlp_pkg\"\n">>),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        write_temp_file(
+            SrcDir, "HtlpFoo.bt", <<"Object subclass: HtlpFoo\n  value => 1\n">>
+        ),
+        Params = #{<<"path">> => list_to_binary(Dir)},
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"load-project">>, Params, undefined, undefined
+        ),
+        ?assertMatch({load_project, _Classes, [], _Summary, _Warnings}, Result),
+        {load_project, Classes, [], Summary, _Warnings} = Result,
+        ?assert(lists:member(<<"HtlpFoo">>, Classes)),
+        ?assert(is_binary(Summary))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+handle_term_load_project_missing_manifest_returns_error_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        Params = #{<<"path">> => list_to_binary(Dir)},
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"load-project">>, Params, undefined, undefined
+        ),
+        ?assertMatch({error, _}, Result)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% include_tests/force default to `false` when absent from Params.
+handle_term_load_project_defaults_include_tests_and_force_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"htlp_defaults\"\n">>),
+        ok = file:make_dir(filename:join(Dir, "src")),
+        TestDir = filename:join(Dir, "test"),
+        ok = file:make_dir(TestDir),
+        write_temp_file(
+            TestDir, "HtlpHiddenTest.bt", <<"Object subclass: HtlpHiddenTest\n  x => 1\n">>
+        ),
+        Params = #{<<"path">> => list_to_binary(Dir)},
+        {load_project, Classes, _Errors, _Summary, _Warnings} =
+            beamtalk_repl_ops_load:handle_term(<<"load-project">>, Params, undefined, undefined),
+        %% include_tests defaults to false: the test/ class is not loaded.
+        ?assertNot(lists:member(<<"HtlpHiddenTest">>, Classes))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+handle_term_load_source_empty_returns_error_test() ->
+    Result = beamtalk_repl_ops_load:handle_term(
+        <<"load-source">>, #{<<"source">> => <<>>}, undefined, self()
+    ),
+    ?assertMatch({error, #beamtalk_error{kind = empty_expression}}, Result).
+
+handle_term_load_source_missing_key_returns_error_test() ->
+    %% `source` absent from Params falls to the same `<<>>` default as an
+    %% explicit empty binary.
+    Result = beamtalk_repl_ops_load:handle_term(<<"load-source">>, #{}, undefined, self()),
+    ?assertMatch({error, #beamtalk_error{kind = empty_expression}}, Result).
+
+handle_term_load_source_success_test() ->
+    SessionId = list_to_binary(
+        "htls-ok-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
+    try
+        ClassName = list_to_binary(
+            "HtlsOk" ++ integer_to_list(erlang:unique_integer([positive]))
+        ),
+        Source = iolist_to_binary([<<"Object subclass: ">>, ClassName, <<"\n  value => 1\n">>]),
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"load-source">>, #{<<"source">> => Source}, undefined, SessionPid
+        ),
+        ?assertMatch({loaded, _Classes, _Warnings}, Result),
+        {loaded, Classes, Warnings} = Result,
+        ?assertEqual([], Warnings),
+        ?assert(
+            lists:any(
+                fun(#{name := N}) -> iolist_to_binary([N]) =:= ClassName end, Classes
+            )
+        )
+    after
+        gen_server:stop(SessionPid)
+    end.
+
+handle_term_load_source_compile_error_returns_structured_error_test() ->
+    SessionId = list_to_binary(
+        "htls-err-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
+    try
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"load-source">>, #{<<"source">> => <<"invalid @@@ syntax">>}, undefined, SessionPid
+        ),
+        ?assertMatch({error, #beamtalk_error{}}, Result)
+    after
+        gen_server:stop(SessionPid)
+    end.
+
+handle_term_unload_unknown_module_returns_class_not_found_test() ->
+    Result = beamtalk_repl_ops_load:handle_term(
+        <<"unload">>, #{<<"module">> => <<"HtlUnloadNoSuchClassXyz">>}, undefined, self()
+    ),
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
+
+handle_term_unload_success_test() ->
+    SessionId = list_to_binary(
+        "htlu-ok-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
+    Dir = filename:absname(make_temp_dir()),
+    try
+        ClassName = list_to_binary(
+            "HtluOk" ++ integer_to_list(erlang:unique_integer([positive]))
+        ),
+        Path = write_temp_file(
+            Dir,
+            binary_to_list(ClassName) ++ ".bt",
+            iolist_to_binary([<<"Object subclass: ">>, ClassName, <<"\n  value => 1\n">>])
+        ),
+        {ok, _} = beamtalk_repl_loader:reload_class_file(Path),
+        ClassAtom = binary_to_atom(ClassName, utf8),
+        ?assert(is_pid(beamtalk_runtime_api:whereis_class(ClassAtom))),
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"unload">>, #{<<"module">> => ClassName}, undefined, SessionPid
+        ),
+        ?assertMatch({ok, _Message, <<>>, []}, Result),
+        ?assertEqual(undefined, beamtalk_runtime_api:whereis_class(ClassAtom))
+    after
+        gen_server:stop(SessionPid),
+        rm_temp_dir(Dir)
+    end.
+
+%% handle/4 — the WebSocket-facing wrapper: same dispatch, JSON-encoded at
+%% the edge via beamtalk_repl_ops:encode/2.
+handle_load_source_empty_encodes_json_error_test() ->
+    Msg = {protocol_msg, <<"load-source">>, <<"h-1">>, undefined, #{}},
+    Result = beamtalk_repl_ops_load:handle(
+        <<"load-source">>, #{<<"source">> => <<>>}, Msg, self()
+    ),
+    ?assert(is_binary(Result)),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_load_source_success_encodes_json_result_test() ->
+    SessionId = list_to_binary(
+        "htl-json-ok-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
+    try
+        ClassName = list_to_binary(
+            "HtlJsonOk" ++ integer_to_list(erlang:unique_integer([positive]))
+        ),
+        Source = iolist_to_binary([<<"Object subclass: ">>, ClassName, <<"\n  value => 1\n">>]),
+        Msg = {protocol_msg, <<"load-source">>, <<"h-2">>, undefined, #{}},
+        Result = beamtalk_repl_ops_load:handle(
+            <<"load-source">>, #{<<"source">> => Source}, Msg, SessionPid
+        ),
+        ?assert(is_binary(Result)),
+        Decoded = json:decode(Result),
+        ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded))
+    after
+        gen_server:stop(SessionPid)
+    end.
+
+%%====================================================================
+%% collect_load_warnings/1 (BT-737) — the load-result-shape wrapper over
+%% drain_class_warnings_by_names/1 + format_collision_warning/3.
+%%
+%% `beamtalk_runtime_api`/`beamtalk_class_registry` are shared, heavily-used
+%% modules (per-test `meck` scoping is still process-wide for the lifetime of
+%% the mock, and rebar3 eunit can run different test modules concurrently in
+%% the same node — see `beamtalk_repl_loader_reindent_failure_tests`'s
+%% moduledoc for the general reasoning against mocking a shared module), so
+%% these drive `beamtalk_class_registry:record_class_collision_warning/3` for
+%% real — the actual producer `beamtalk_object_class:update_class/2` calls on
+%% a genuine collision (BT-737) — against a fresh, uniquely-named atom rather
+%% than faulting the drain call itself.
+%%====================================================================
+
+%% A class name with no recorded collision drains to an empty warnings list.
+collect_load_warnings_no_collisions_test() ->
+    Name = "ClwNoCollision" ++ integer_to_list(erlang:unique_integer([positive])),
+    _ = list_to_atom(Name),
+    ?assertEqual([], beamtalk_repl_ops_load:collect_load_warnings([#{name => Name}])).
+
+collect_load_warnings_with_collision_test() ->
+    Name = "ClwCollision" ++ integer_to_list(erlang:unique_integer([positive])),
+    ClassAtom = list_to_atom(Name),
+    ok = beamtalk_class_registry:record_class_collision_warning(
+        ClassAtom, 'bt@pkgA@ClwFoo', 'bt@pkgB@ClwFoo'
+    ),
+    [Warning] = beamtalk_repl_ops_load:collect_load_warnings([#{name => Name}]),
+    ?assert(binary:match(Warning, list_to_binary(Name)) =/= nomatch),
+    %% Draining is destructive (ets:delete_object) — a second call over the
+    %% same class finds nothing left to warn about.
+    ?assertEqual([], beamtalk_repl_ops_load:collect_load_warnings([#{name => Name}])).
+
+%% A class name that is not (yet) an existing atom is dropped by the
+%% safe_to_existing_atom filter rather than minting a fresh atom.
+collect_load_warnings_skips_unknown_atom_class_name_test() ->
+    ?assertEqual(
+        [],
+        beamtalk_repl_ops_load:collect_load_warnings([
+            #{name => "CwUnknownAtomXyzzy123456789"}
+        ])
+    ).
+
+%%====================================================================
+%% build_incremental_summary/4 (BT-1723) — the four unchanged/deleted-count
+%% shape branches (all pure).
+%%====================================================================
+
+build_incremental_summary_no_extras_test() ->
+    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 5, 0, 0),
+    ?assertEqual(<<"Reloaded 2 of 5 files">>, Summary).
+
+build_incremental_summary_unchanged_only_test() ->
+    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 5, 3, 0),
+    ?assertEqual(<<"Reloaded 2 of 5 files (3 unchanged)">>, Summary).
+
+build_incremental_summary_deleted_only_test() ->
+    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 3, 0, 1),
+    ?assertEqual(<<"Reloaded 2 of 3 files (1 deleted)">>, Summary).
+
+build_incremental_summary_unchanged_and_deleted_test() ->
+    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 6, 3, 1),
+    ?assertEqual(<<"Reloaded 2 of 6 files (3 unchanged, 1 deleted)">>, Summary).
+
+%%====================================================================
+%% resolve_module_atoms/2, resolve_class_to_module/1 — mirrors
+%% beamtalk_repl_server_tests.erl's coverage of the (separately
+%% implemented — not shared) analogous functions on that module.
+%%====================================================================
+
+ops_load_resolve_class_to_module_no_registry_test() ->
+    ?assertEqual(
+        some_unknown_class_xyz,
+        beamtalk_repl_ops_load:resolve_class_to_module(some_unknown_class_xyz)
+    ).
+
+ops_load_resolve_module_atoms_explicit_test() ->
+    ?assertEqual([my_module], beamtalk_repl_ops_load:resolve_module_atoms(my_module, [])).
+
+ops_load_resolve_module_atoms_empty_classes_test() ->
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, [])).
+
+ops_load_resolve_module_atoms_from_list_name_test() ->
+    _ = list_to_atom("erlang"),
+    Classes = [#{name => "erlang"}],
+    Result = beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes),
+    ?assert(lists:member(erlang, Result)).
+
+ops_load_resolve_module_atoms_from_binary_name_test() ->
+    _ = list_to_atom("erlang"),
+    Classes = [#{name => <<"erlang">>}],
+    Result = beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes),
+    ?assert(lists:member(erlang, Result)).
+
+ops_load_resolve_module_atoms_unknown_list_name_test() ->
+    Classes = [#{name => "xyzzy_nonexistent_ops_load_99"}],
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes)).
+
+ops_load_resolve_module_atoms_unknown_binary_name_test() ->
+    Classes = [#{name => <<"xyzzy_nonexistent_ops_load_binary_99">>}],
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes)).
+
+ops_load_resolve_module_atoms_empty_name_test() ->
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, [#{name => ""}])).
+
+ops_load_resolve_module_atoms_other_type_test() ->
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, [#{name => 42}])).
+
+%%====================================================================
+%% Provenance edge cases not reached by the existing suite (BT-3336):
+%% a stamp file whose JSON is valid but not an object, the
+%% current_beamtalk_version/0 error branches, and a dependency whose stamp
+%% is fresh (filtered out of collect_stale_dep_provenance/1, rather than
+%% collected).
+%%====================================================================
+
+read_provenance_stamp_non_map_json_is_corrupt_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        StampPath = filename:join(Dir, ".beamtalk-stamp.json"),
+        %% A syntactically valid JSON array, not an object.
+        ok = file:write_file(StampPath, <<"[1,2,3]">>),
+        ?assertMatch(
+            {error, <<"corrupt provenance stamp">>},
+            beamtalk_repl_ops_load:read_provenance_stamp(StampPath)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+read_provenance_stamp_invalid_json_is_corrupt_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        StampPath = filename:join(Dir, ".beamtalk-stamp.json"),
+        ok = file:write_file(StampPath, <<"not json at all {{{">>),
+        ?assertMatch(
+            {error, <<"corrupt provenance stamp">>},
+            beamtalk_repl_ops_load:read_provenance_stamp(StampPath)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% A dependency with a FRESH stamp is filtered out of
+%% collect_stale_dep_provenance/1 (the `fresh -> false` arm of
+%% stale_dep_entry/2) — the existing suite only covers the stale case.
+provenance_collect_stale_deps_skips_fresh_dep_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        FreshDep = filename:join([Dir, "_build", "deps", "fresh_dep"]),
+        ok = filelib:ensure_dir(filename:join(FreshDep, ".keep")),
+        ok = file:write_file(
+            filename:join(FreshDep, ".beamtalk-stamp.json"),
+            iolist_to_binary(
+                json:encode(#{
+                    <<"schema">> => 1,
+                    <<"beamtalk_version">> => stamp_version(),
+                    <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+                })
+            )
+        ),
+        ?assertEqual([], beamtalk_repl_ops_load:collect_stale_dep_provenance(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% current_beamtalk_version/0's `_ -> error` and `catch _:_ -> error` arms
+%% (reached via check_version/1 -> stamp_matches_current/1, without needing
+%% the compiler port up): faulting beamtalk_compiler_server:version/0.
+stamp_matches_current_falls_back_to_otp_axis_when_version_unavailable_test() ->
+    meck:new(beamtalk_compiler_server, [passthrough, non_strict]),
+    meck:expect(beamtalk_compiler_server, version, fun() -> {error, not_running} end),
+    try
+        FreshOtp = #{
+            <<"schema">> => 1,
+            <<"beamtalk_version">> => <<"some-other-version">>,
+            <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+        },
+        %% Version axis unavailable -> skipped; OTP matches -> fresh.
+        ?assertEqual(fresh, beamtalk_repl_ops_load:stamp_matches_current(FreshOtp))
+    after
+        meck:unload(beamtalk_compiler_server)
+    end.
+
+stamp_matches_current_version_check_survives_a_throwing_port_test() ->
+    meck:new(beamtalk_compiler_server, [passthrough, non_strict]),
+    meck:expect(beamtalk_compiler_server, version, fun() -> error(port_down) end),
+    try
+        FreshOtp = #{
+            <<"schema">> => 1,
+            <<"beamtalk_version">> => <<"some-other-version">>,
+            <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+        },
+        ?assertEqual(fresh, beamtalk_repl_ops_load:stamp_matches_current(FreshOtp))
+    after
+        meck:unload(beamtalk_compiler_server)
+    end.
+
+%% fail_stale_dep_attach/1's ?LOG_ERROR + directed-error path, driven end to
+%% end via sync_project/2 with TWO stale deps (the existing
+%% provenance_stale_dep_fails_attach_test only exercises one) so the
+%% lists:join/2 multi-name message path also runs.
+sync_project_fails_attach_with_multiple_stale_deps_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"multidepfail\"\n">>),
+        ok = file:make_dir(filename:join(Dir, "src")),
+        StaleStamp = iolist_to_binary(
+            json:encode(#{
+                <<"schema">> => 1,
+                <<"beamtalk_version">> => stamp_version(),
+                <<"otp_release">> => <<"1-0.0">>
+            })
+        ),
+        lists:foreach(
+            fun(Name) ->
+                DepDir = filename:join([Dir, "_build", "deps", Name]),
+                ok = filelib:ensure_dir(filename:join(DepDir, ".keep")),
+                ok = file:write_file(
+                    filename:join(DepDir, ".beamtalk-stamp.json"), StaleStamp
+                )
+            end,
+            ["dep_one", "dep_two"]
+        ),
+        Result = beamtalk_repl_ops_load:sync_project(Dir, #{}),
+        ?assertMatch({error, #beamtalk_error{kind = stale_dependency}}, Result),
+        {error, #beamtalk_error{message = Message}} = Result,
+        ?assert(binary:match(Message, <<"dep_one">>) =/= nomatch),
+        ?assert(binary:match(Message, <<"dep_two">>) =/= nomatch)
+    after
+        rm_temp_dir(Dir)
     end.

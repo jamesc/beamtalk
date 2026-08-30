@@ -343,4 +343,140 @@ mod tests {
         assert!(text.contains("1 lint"));
         assert!(text.contains("Total"));
     }
+
+    #[test]
+    fn category_label_and_name_cover_every_variant() {
+        // Every `DiagnosticCategory` variant must have a non-empty, distinct
+        // label, and `category_name` must simply forward to `category_label`.
+        let all = [
+            (DiagnosticCategory::Dnu, "Dnu"),
+            (DiagnosticCategory::Type, "Type"),
+            (DiagnosticCategory::Unused, "Unused"),
+            (DiagnosticCategory::EmptyBody, "EmptyBody"),
+            (DiagnosticCategory::Lint, "Lint"),
+            (DiagnosticCategory::DeadAssignment, "DeadAssignment"),
+            (DiagnosticCategory::ExtensionConflict, "ExtensionConflict"),
+            (DiagnosticCategory::Deprecation, "Deprecation"),
+            (DiagnosticCategory::ActorNew, "ActorNew"),
+            (DiagnosticCategory::Visibility, "Visibility"),
+            (DiagnosticCategory::UnresolvedClass, "UnresolvedClass"),
+            (DiagnosticCategory::UnresolvedFfi, "UnresolvedFfi"),
+            (DiagnosticCategory::ArityMismatch, "ArityMismatch"),
+            (DiagnosticCategory::ShadowedClass, "ShadowedClass"),
+            (DiagnosticCategory::TypeAnnotation, "TypeAnnotation"),
+            (DiagnosticCategory::Inheritance, "Inheritance"),
+            (DiagnosticCategory::Sendability, "Sendability"),
+        ];
+        for (cat, expected) in all {
+            assert_eq!(category_label(cat), expected);
+            assert_eq!(
+                category_name(cat),
+                expected,
+                "category_name should match category_label for {cat:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn severity_label_picks_most_severe_nonzero_level() {
+        let mut counts = SeverityCounts::default();
+        assert_eq!(severity_label(&counts), "", "all-zero counts render blank");
+
+        counts.hint = 3;
+        assert_eq!(severity_label(&counts), "3 hint");
+
+        counts.lint = 2;
+        assert_eq!(
+            severity_label(&counts),
+            "2 lint",
+            "lint outranks hint when both present"
+        );
+
+        counts.warning = 1;
+        assert_eq!(
+            severity_label(&counts),
+            "1 warning",
+            "warning outranks lint and hint"
+        );
+
+        counts.error = 5;
+        assert_eq!(
+            severity_label(&counts),
+            "5 error",
+            "error outranks everything else"
+        );
+    }
+
+    #[test]
+    fn display_singular_file_count() {
+        let summary = DiagnosticSummary::from_diagnostics(std::iter::empty(), 1);
+        let text = summary.to_string();
+        assert!(
+            text.contains("Diagnostic summary (1 file):"),
+            "Expected singular 'file', got: {text}"
+        );
+    }
+
+    #[test]
+    fn display_annotates_categories_excluded_from_warnings_as_errors() {
+        let diags = vec![make_diag(
+            Severity::Warning,
+            Some(DiagnosticCategory::Deprecation),
+        )];
+        let summary = DiagnosticSummary::from_diagnostics(&diags, 1);
+        let text = summary.to_string();
+        assert!(
+            text.contains("(excluded from --warnings-as-errors)"),
+            "Expected exclusion annotation for Deprecation, got: {text}"
+        );
+    }
+
+    #[test]
+    fn display_includes_uncategorised_row() {
+        let diags = vec![make_diag(Severity::Warning, None)];
+        let summary = DiagnosticSummary::from_diagnostics(&diags, 1);
+        let text = summary.to_string();
+        assert!(
+            text.contains("Other") && text.contains("1 warning"),
+            "Expected an 'Other' row for uncategorised diagnostics, got: {text}"
+        );
+    }
+
+    #[test]
+    fn display_total_breakdown_includes_every_severity() {
+        let diags = vec![
+            make_diag(Severity::Error, Some(DiagnosticCategory::Type)),
+            make_diag(Severity::Warning, Some(DiagnosticCategory::Type)),
+            make_diag(Severity::Lint, Some(DiagnosticCategory::Lint)),
+            make_diag(Severity::Hint, Some(DiagnosticCategory::Dnu)),
+        ];
+        let summary = DiagnosticSummary::from_diagnostics(&diags, 1);
+        let text = summary.to_string();
+        assert!(
+            text.contains("1 error"),
+            "missing error in breakdown: {text}"
+        );
+        assert!(
+            text.contains("1 warning"),
+            "missing warning in breakdown: {text}"
+        );
+        assert!(text.contains("1 lint"), "missing lint in breakdown: {text}");
+        assert!(text.contains("1 hint"), "missing hint in breakdown: {text}");
+    }
+
+    #[test]
+    fn display_skips_category_with_zero_total() {
+        // Constructed directly (bypassing `from_diagnostics`) to place a
+        // zero-count entry in `by_category` — exercises the `continue` guard
+        // that skips categories with nothing to report.
+        let mut summary = DiagnosticSummary::from_diagnostics(std::iter::empty(), 1);
+        summary
+            .by_category
+            .insert(DiagnosticCategory::Type, SeverityCounts::default());
+        let text = summary.to_string();
+        assert!(
+            !text.contains("Type"),
+            "Expected a zero-count category to be skipped, got: {text}"
+        );
+    }
 }

@@ -278,3 +278,292 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
         _ => Err(miette!("Workspace '{}' is not running", workspace_id)),
     }
 }
+
+/// Tests for the actual stop-a-running-node logic (BT-3333): the TCP
+/// shutdown request/ack, the exit-wait probe, the force-kill fallback, and
+/// `stop_workspace`'s orchestration across all of the above. BT-3326 only
+/// covered the "workspace doesn't exist" error path via a CLI subprocess
+/// test (`cli_workspace.rs`) — none of the branches below had any coverage.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use tungstenite::{Message, WebSocket};
+
+    /// Spawn a fake workspace backend that completes the ADR 0020 auth
+    /// handshake, waits for exactly one `{"op":"shutdown",...}` request, and
+    /// replies with an ack (`error` is `None`) or a rejection (`error` is
+    /// `Some(message)`). The listening socket is dropped as soon as this one
+    /// connection is handled, so a subsequent TCP probe (as
+    /// `wait_for_workspace_exit` performs) sees the port close — simulating
+    /// the BEAM node actually exiting after `init:stop()`.
+    ///
+    /// This is another hand-rolled instance of the same ADR 0020 handshake
+    /// double as `repl/client.rs`'s `spawn_auth_ok_server` (BT-3326) and the
+    /// `tokio`-async doubles in `beamtalk-lsp`/`beamtalk-mcp` — BT-3331
+    /// tracks consolidating all of these; not attempted here since none of
+    /// the existing doubles model "one request then the port closes".
+    fn spawn_shutdown_server(error: Option<&'static str>) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+        let port = listener.local_addr().expect("local_addr").port();
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let Ok(mut ws) = tungstenite::accept(stream) else {
+                return;
+            };
+            let send = |ws: &mut WebSocket<std::net::TcpStream>, v: serde_json::Value| {
+                let _ = ws.send(Message::Text(v.to_string().into()));
+            };
+            send(&mut ws, serde_json::json!({"op": "auth-required"}));
+            if ws.read().is_err() {
+                return;
+            }
+            send(&mut ws, serde_json::json!({"type": "auth_ok"}));
+            send(
+                &mut ws,
+                serde_json::json!({"op": "session-started", "session": "sess-test"}),
+            );
+            let Ok(Message::Text(_)) = ws.read() else {
+                return;
+            };
+            match error {
+                None => send(&mut ws, serde_json::json!({"status": ["done"]})),
+                Some(message) => send(&mut ws, serde_json::json!({"error": message})),
+            }
+            // `ws` (and the captured `listener`) drop here, closing the port.
+        });
+        port
+    }
+
+    /// Build a unique workspace ID per test so parallel `cargo test` threads
+    /// never collide on the same on-disk directory or lockfile.
+    fn unique_ws_id(label: &str) -> String {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("bt3333-shutdown-{label}-{}-{n}", std::process::id())
+    }
+
+    /// RAII guard owning a real (but uniquely-named) workspace directory
+    /// under `~/.beamtalk/workspaces/`, matching the pattern already used by
+    /// `storage.rs`'s and `node_state.rs`'s own tests (there is no
+    /// `BEAMTALK_HOME`-style override yet — see BT-3333's description).
+    /// Removes the directory and lockfile on drop, including on panic, so a
+    /// failing assertion never leaves real state behind.
+    struct WorkspaceFixture {
+        id: String,
+    }
+
+    impl WorkspaceFixture {
+        /// Write metadata + cookie + node.info claiming the node listens on
+        /// `port` with the given `pid`, matching the on-disk shape
+        /// `stop_workspace` reads via `storage`/`node_state`. `nonce` is left
+        /// `None` so `is_node_running` trusts the TCP probe alone.
+        fn new(label: &str, port: u16, pid: u32) -> Self {
+            use crate::commands::workspace::storage::{NodeInfo, WorkspaceMetadata};
+
+            let id = unique_ws_id(label);
+            crate::commands::workspace::storage::save_workspace_metadata(&WorkspaceMetadata {
+                workspace_id: id.clone(),
+                project_path: std::env::temp_dir(),
+                created_at: 0,
+            })
+            .expect("save metadata");
+            crate::commands::workspace::storage::save_workspace_cookie(&id, "cookie")
+                .expect("save cookie");
+            crate::commands::workspace::storage::save_node_info(
+                &id,
+                &NodeInfo {
+                    node_name: format!("{id}@localhost"),
+                    port,
+                    pid,
+                    start_time: None,
+                    nonce: None,
+                    bind_addr: None,
+                },
+            )
+            .expect("save node info");
+            Self { id }
+        }
+    }
+
+    impl Drop for WorkspaceFixture {
+        fn drop(&mut self) {
+            if let Ok(dir) = crate::commands::workspace::storage::workspace_dir(&self.id) {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            if let Ok(base) = crate::commands::workspace::storage::workspaces_base_dir() {
+                let _ = std::fs::remove_file(base.join(format!("{}.lock", self.id)));
+            }
+        }
+    }
+
+    // -- tcp_send_shutdown ---------------------------------------------
+
+    #[test]
+    fn tcp_send_shutdown_acks_returns_ok() {
+        let port = spawn_shutdown_server(None);
+        tcp_send_shutdown("127.0.0.1", port, "cookie").expect("ack should succeed");
+    }
+
+    #[test]
+    fn tcp_send_shutdown_rejected_returns_err_with_message() {
+        let port = spawn_shutdown_server(Some("bad cookie"));
+        let err = tcp_send_shutdown("127.0.0.1", port, "cookie").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Shutdown rejected"), "got: {msg}");
+        assert!(msg.contains("bad cookie"), "got: {msg}");
+    }
+
+    // -- wait_for_workspace_exit -----------------------------------------
+
+    #[test]
+    fn wait_for_workspace_exit_returns_ok_once_port_closes() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener); // Simulate the node having already exited.
+
+        wait_for_workspace_exit("127.0.0.1", port, 5).expect("port already closed");
+    }
+
+    #[test]
+    fn wait_for_workspace_exit_times_out_while_port_stays_open() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+
+        let err = wait_for_workspace_exit("127.0.0.1", port, 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("did not exit within 1s"), "got: {msg}");
+        assert!(msg.contains("--force"), "got: {msg}");
+
+        drop(listener);
+    }
+
+    // -- force_kill_process ------------------------------------------------
+
+    #[test]
+    fn force_kill_process_pid_zero_returns_sentinel_error() {
+        let err = force_kill_process(0).unwrap_err();
+        assert!(err.to_string().contains("process ID unavailable"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn force_kill_process_kills_a_real_running_child() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+
+        force_kill_process(pid).expect("force_kill_process should succeed");
+
+        // Reap the killed child (avoids a zombie) and confirm it is
+        // actually gone, not just that the syscall returned 0.
+        let status = child.wait().expect("wait on killed child");
+        assert!(!status.success(), "SIGKILL'd child should not exit(0)");
+        assert!(!beamtalk_cli::pid_liveness::is_process_alive(pid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn force_kill_process_already_exited_process_returns_ok() {
+        // `true` exits immediately; once reaped, signalling its PID hits the
+        // ESRCH branch, which `force_kill_process` treats as success (the
+        // goal — "not running" — is already achieved).
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+        let pid = child.id();
+        child.wait().expect("wait for true to exit");
+
+        force_kill_process(pid).expect("killing an already-exited pid should be Ok");
+    }
+
+    // -- force_kill_and_wait ------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn force_kill_and_wait_reports_when_port_does_not_release_after_kill() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        // Deliberately unrelated to `child`: the kill succeeds but this port
+        // never closes, exercising the "did not release port" fallback.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+
+        let err = force_kill_and_wait(pid, "127.0.0.1", port, 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("did not release port"), "got: {msg}");
+        assert!(msg.contains("retry shortly"), "got: {msg}");
+
+        let _ = child.wait();
+        drop(listener);
+    }
+
+    // -- stop_workspace orchestration ---------------------------------------
+
+    #[test]
+    fn stop_workspace_graceful_shutdown_succeeds_and_cleans_up() {
+        let port = spawn_shutdown_server(None);
+        // pid is unused on this path: the server acks and its port closes,
+        // so `wait_for_workspace_exit` succeeds without ever force-killing.
+        let fixture = WorkspaceFixture::new("graceful", port, 999_999);
+
+        stop_workspace(Some(&fixture.id), false).expect("graceful stop should succeed");
+
+        assert!(
+            get_node_info(&fixture.id).unwrap().is_none(),
+            "cleanup_stale_node_info should have removed node.info"
+        );
+    }
+
+    #[test]
+    fn stop_workspace_tcp_shutdown_rejected_and_pid_unknown_errors() {
+        let port = spawn_shutdown_server(Some("bad cookie"));
+        // pid=0 is the sentinel for "PID tracking unavailable" (e.g.
+        // Windows) — the rejected-shutdown fallback can't force-kill, so it
+        // must surface a clear error instead of panicking or hanging.
+        let fixture = WorkspaceFixture::new("tcp-reject-pid0", port, 0);
+
+        let err = stop_workspace(Some(&fixture.id), false).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("TCP shutdown failed"), "got: {msg}");
+        assert!(msg.contains("process ID unknown"), "got: {msg}");
+    }
+
+    #[test]
+    fn stop_workspace_force_flag_with_unknown_pid_errors() {
+        // A listener with nobody driving the ADR 0020 protocol on it is
+        // enough for `is_node_running`'s TCP probe — `--force` skips
+        // graceful shutdown entirely, so no handshake ever happens.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let fixture = WorkspaceFixture::new("force-pid0", port, 0);
+
+        let err = stop_workspace(Some(&fixture.id), true).unwrap_err();
+        assert!(
+            err.to_string().contains("Force-kill is not available"),
+            "got: {err}"
+        );
+
+        drop(listener);
+    }
+
+    #[test]
+    fn stop_workspace_when_node_not_running_errors() {
+        // Bind then drop immediately so the port is guaranteed free — the
+        // node.info entry is stale (the node isn't actually listening).
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        let fixture = WorkspaceFixture::new("not-running", port, 4_194_304);
+
+        let err = stop_workspace(Some(&fixture.id), false).unwrap_err();
+        assert!(err.to_string().contains("is not running"), "got: {err}");
+    }
+}

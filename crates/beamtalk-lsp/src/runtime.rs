@@ -34,7 +34,7 @@ use tracing::{debug, info, warn};
 use beamtalk_core::language_service::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolsResponse,
 };
-use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
+use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
 /// handshake and per `evaluate` call. Generous enough that a slow local
@@ -838,17 +838,19 @@ fn handle_push_frame(
 async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::Message;
 
-    // Read auth-required
+    // Read auth-required. Frame recognition goes through
+    // `beamtalk_repl_protocol::handshake` (BT-3330) rather than re-matching
+    // the JSON here — see that module's doc comment for why.
     let auth_required = read_text(ws).await?;
     let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
         .map_err(|e| format!("failed to parse auth-required: {e}"))?;
-    if auth_required_json.get("op").and_then(|v| v.as_str()) != Some("auth-required") {
+    if !handshake::is_auth_required(&auth_required_json) {
         return Err(format!("unexpected pre-auth message: {auth_required_json}"));
     }
 
     // Send auth (no resume — LSP always opens fresh). `client` tags the session
     // surface so `Workspace sessions` can show it originated from the LSP.
-    let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie, "client": "lsp"});
+    let auth_msg = handshake::auth_request(cookie, "lsp", None);
     let auth_str =
         serde_json::to_string(&auth_msg).map_err(|e| format!("failed to serialise auth: {e}"))?;
     ws.send(Message::Text(auth_str.into()))
@@ -859,23 +861,20 @@ async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), S
     let resp = read_text(ws).await?;
     let resp_json: serde_json::Value =
         serde_json::from_str(&resp).map_err(|e| format!("failed to parse auth response: {e}"))?;
-    match resp_json.get("type").and_then(|t| t.as_str()) {
-        Some("auth_ok") => {}
-        Some("auth_error") => {
-            let msg = resp_json
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("authentication failed");
+    match handshake::parse_auth_ack(&resp_json) {
+        Some(handshake::AuthAck::Ok) => {}
+        Some(handshake::AuthAck::Error { message }) => {
+            let msg = message.as_deref().unwrap_or("authentication failed");
             return Err(format!("workspace authentication failed: {msg}"));
         }
-        _ => return Err(format!("unexpected auth response: {resp_json}")),
+        None => return Err(format!("unexpected auth response: {resp_json}")),
     }
 
     // Read session-started
     let started = read_text(ws).await?;
     let started_json: serde_json::Value = serde_json::from_str(&started)
         .map_err(|e| format!("failed to parse session-started: {e}"))?;
-    if started_json.get("op").and_then(|v| v.as_str()) != Some("session-started") {
+    if !handshake::is_session_started(&started_json) {
         return Err(format!("unexpected post-auth message: {started_json}"));
     }
     Ok(())
@@ -1433,18 +1432,29 @@ mod tests {
     // handshake, a malformed reply, a socket that closes mid-request) are
     // reachable deterministically.
     //
-    // Fidelity caveat — this is a test double, not a second implementation
-    // of a shared rule, and nothing here pins it to the real server
-    // (`beamtalk_ws_handler.erl`): the handshake frame shapes below are
-    // transcribed from it, so a change on the Erlang side would leave these
-    // tests green while `perform_auth_handshake` broke against a live
-    // workspace. That gap predates these tests (the `lsp_parity` e2e suite
-    // never attaches a runtime — it exercises only the static
-    // hover/completion/definition/symbol surface, so no suite has ever run
-    // this handshake against a real BEAM node). BT-3330 tracks closing it,
-    // by real-node coverage of the LSP attach path and/or a shared handshake
-    // conformance fixture — which would want to cover the CLI and MCP
-    // clients' identical transcriptions too, not just this one.
+    // Fidelity caveat — this is a test double, not a second implementation of
+    // a shared rule: `perform_auth_handshake` above no longer re-matches the
+    // handshake JSON itself, it builds/recognises every frame through
+    // `beamtalk_repl_protocol::handshake` (BT-3330), which is pinned to
+    // `beamtalk_ws_handler.erl`'s actual production frame shapes via the
+    // shared `ws_auth_handshake_wire_corpus.json` fixture — read on the Rust
+    // side by `handshake::tests::matches_shared_wire_corpus` and on the
+    // Erlang side by `beamtalk_ws_handler_tests`'s
+    // `handshake_pre_auth_frame_matches_shared_wire_corpus_test/0`,
+    // `handshake_auth_error_matches_shared_wire_corpus_test/0`, and
+    // `handshake_success_matches_shared_wire_corpus/0`. A rename on the
+    // Erlang side now fails those Erlang tests directly, rather than leaving
+    // every Rust client's tests green while it broke against a live
+    // workspace. The scripted frames below still aren't a live BEAM node —
+    // the `lsp_parity` e2e suite still never attaches a runtime, so
+    // `connect_to`'s actual I/O (timeouts, reconnect, transport errors) has
+    // no real-node exercise from the LSP specifically — but the wire
+    // *contract* itself is enforced by something executable now, per
+    // `docs/development/architecture-principles.md` §6. The CLI's
+    // `ProtocolClient` and the parity harness's `ReplDriver` share the same
+    // fix; the MCP `ReplClient` additionally gets real-node exercise of this
+    // exact handshake code via its own `#[ignore]` integration tests
+    // (`just test-mcp`).
     // ------------------------------------------------------------------
 
     /// How the fake workspace behaves during the pre-`session-started`

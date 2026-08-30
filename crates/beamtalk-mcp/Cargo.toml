@@ -38,6 +38,12 @@ clap.workspace = true
 # same feature beamtalk-lsp already enables for the identical struct.
 beamtalk-core = { workspace = true, features = ["serde"] }
 
+# why: BT-3340 (ADR 0117 Decision step 2) — `lint`/`project` moved out of
+# `beamtalk-core` into standalone crates; the lint/diagnostic_summary MCP
+# tools call `run_lint_passes` and project-root discovery directly.
+beamtalk-lint.workspace = true
+beamtalk-project.workspace = true
+
 # why: shares manifest parsing / build-layout / dependency-class resolution
 # with `beamtalk lint` so the offline `lint` and `diagnostic_summary` tools
 # resolve git/path dependency classes the same way (BT-2823)

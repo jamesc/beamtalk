@@ -380,7 +380,9 @@ fn check_seq_for_effect_free(
 ///
 /// Uses `Severity::Lint` so the warning is suppressed during normal compilation
 /// and only surfaces when running `beamtalk lint` or in the REPL.
-pub(crate) fn check_effect_free_statements(
+// BT-3340: widened from `pub(crate)` — the standalone `beamtalk-lint`
+// crate's `effect_free_statement` pass calls this directly.
+pub fn check_effect_free_statements(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
     skip_module_expression_lint: bool,

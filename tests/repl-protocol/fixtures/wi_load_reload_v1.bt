@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: v1 of a class re-loaded in place via `Workspace load:` (BT-3336).
+// Used by workspace_load_error_paths.btscript's "already registered" scenario
+// together with wi_load_reload_v2.bt (same class name, different body).
+
+Value subclass: WiLoadReload
+
+  value => 1

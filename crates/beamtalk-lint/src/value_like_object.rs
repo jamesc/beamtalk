@@ -24,10 +24,12 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, Identifier, MethodDefinition, Module};
-use crate::lint::{LintPass, hierarchy_for_lint};
-use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::Diagnostic;
+use crate::{LintPass, hierarchy_for_lint};
+use beamtalk_core::ast::{
+    ClassDefinition, ClassKind, Expression, Identifier, MethodDefinition, Module,
+};
+use beamtalk_core::semantic_analysis::ClassHierarchy;
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that flags `Object subclass:` classes that look like value types.
 ///
@@ -157,16 +159,16 @@ fn is_self_field_access(expr: &Expression, field_names: &HashSet<&str>) -> bool 
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
+    use crate::run_lint_passes;
+    use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
 
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn lint(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         run_lint_passes(&module)
     }
 
-    fn value_like_lints(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn value_like_lints(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         lint(source)
             .into_iter()
             .filter(|d| d.message.contains("Value subclass:"))

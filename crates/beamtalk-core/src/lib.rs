@@ -15,7 +15,10 @@
 #![doc = include_str!("../../../README.md")]
 
 pub mod ast;
-pub(crate) mod ast_walker;
+// BT-3340: widened from `pub(crate)` — `for_each_expr_seq` is used by the
+// standalone `beamtalk-lint` crate now that `lint` has moved out of this
+// crate (ADR 0117 Decision step 2).
+pub mod ast_walker;
 pub mod codegen;
 pub mod compilation;
 pub mod erlang;
@@ -23,13 +26,12 @@ pub(crate) mod ffi_receiver;
 pub mod ffi_type_specs;
 pub mod file_walker;
 pub mod language_service;
-pub mod lint;
 pub(crate) mod method_source_walker;
-pub mod project;
+pub mod near_miss_divider;
 pub mod queries;
-pub mod repl;
 pub mod semantic_analysis;
 pub mod source_analysis;
+pub mod span;
 pub(crate) mod state_threading_selectors;
 pub mod synthetic_selectors;
 pub mod test_helpers;

@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: a class referencing a native `.erl` module that fails to
+// compile (BT-3336). Used by workspace_load_error_paths.btscript's "unmet
+// dependency" scenario — `maybe_recompile_native_deps/2` rejects the load
+// before the `.bt` file itself is even handed to the compiler.
+
+Object subclass: WiLoadBrokenNativeUser
+
+  class go => (Erlang wi_load_broken_native) go

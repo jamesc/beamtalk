@@ -1,0 +1,38 @@
+[
+  {
+    "id": "auth_required",
+    "frame": {"op": "auth-required"},
+    "dynamic_fields": [],
+    "why": "sent by `websocket_init/1` immediately on connect, before any auth message"
+  },
+  {
+    "id": "auth_request",
+    "frame": {"type": "auth", "cookie": "test-cookie-123", "client": "repl"},
+    "dynamic_fields": ["cookie", "client"],
+    "why": "client's auth request without a resume id — `cookie` is the node secret, `client` tags the connecting surface (repl/mcp/lsp) for `Workspace sessions`"
+  },
+  {
+    "id": "auth_request_with_resume",
+    "frame": {"type": "auth", "cookie": "test-cookie-123", "client": "mcp", "resume": "sess-abc"},
+    "dynamic_fields": ["cookie", "client", "resume"],
+    "why": "client's auth request requesting to resume a previous session by id"
+  },
+  {
+    "id": "auth_ok",
+    "frame": {"type": "auth_ok"},
+    "dynamic_fields": [],
+    "why": "handle_auth/2 success response, sent immediately before session-started"
+  },
+  {
+    "id": "auth_error",
+    "frame": {"type": "auth_error", "message": "Invalid cookie"},
+    "dynamic_fields": [],
+    "why": "handle_auth/2's invalid-cookie failure branch — the exact message a byte-size mismatch or hash_equals failure produces"
+  },
+  {
+    "id": "session_started",
+    "frame": {"op": "session-started", "session": "sess-abc"},
+    "dynamic_fields": ["session"],
+    "why": "create_session/3 (and start_or_resume_session/3 on resume), sent right after auth_ok; `session` is a freshly generated or resumed session id"
+  }
+]

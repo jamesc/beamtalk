@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 /// `beamtalk.toml`) take priority over generic markers (`.git/`).
 /// The search stops at the innermost directory containing any marker.
 pub fn discover_project_root(start_dir: &Path) -> PathBuf {
-    beamtalk_core::project::discover_project_root(start_dir)
+    beamtalk_project::discover_project_root(start_dir)
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
 //! This module contains the [`Expression`] enum and its supporting types:
 //! literals, identifiers, message selectors, blocks, cascades, and map pairs.
 
-use crate::source_analysis::Span;
+use crate::span::Span;
 use ecow::{EcoString, eco_format};
 
 use super::ExpressionStatement;

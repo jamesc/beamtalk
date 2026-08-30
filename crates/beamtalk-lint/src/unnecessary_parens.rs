@@ -22,10 +22,10 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
-use crate::ast::{Block, Expression, MessageSelector, Module};
-use crate::ast_walker::for_each_expr_seq;
-use crate::lint::LintPass;
-use crate::source_analysis::Diagnostic;
+use crate::LintPass;
+use beamtalk_core::ast::{Block, Expression, MessageSelector, Module};
+use beamtalk_core::ast_walker::for_each_expr_seq;
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on `Expression::Parenthesized` wrapping expressions
 /// that never require precedence disambiguation.
@@ -239,7 +239,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
                     check_expr(e, diagnostics);
                 }
             }
@@ -259,10 +259,10 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
+    use crate::run_lint_passes;
+    use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
 
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn lint(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         run_lint_passes(&module)

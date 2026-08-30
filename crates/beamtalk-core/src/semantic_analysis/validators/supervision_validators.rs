@@ -296,4 +296,147 @@ mod tests {
             "Expected no warning for Worker with #permanent policy, got: {diagnostics:?}"
         );
     }
+
+    // ── Standalone class-side method definitions ───────────────────────────────
+
+    /// Standalone class-side `supervisionPolicy` override (`MyActor class >> ...`)
+    /// with a valid symbol is collected and validated just like the inline form.
+    #[test]
+    fn standalone_supervision_policy_valid_symbol_no_diagnostics() {
+        let src = "Actor subclass: MyActor\n  go => nil\nMyActor class >> supervisionPolicy -> Symbol => #permanent";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for standalone #permanent, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone class-side `supervisionPolicy` override with an invalid symbol
+    /// is collected and flagged (mirrors the inline-form error path).
+    #[test]
+    fn standalone_supervision_policy_invalid_symbol_is_error() {
+        let src = "Actor subclass: MyActor\n  go => nil\nMyActor class >> supervisionPolicy -> Symbol => #restart";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for standalone #restart, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+    }
+
+    /// A single-expression body that isn't a symbol literal (e.g. an integer)
+    /// is skipped — the static check only applies to symbol-literal bodies.
+    #[test]
+    fn supervision_policy_non_symbol_single_expr_body_is_skipped() {
+        let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => 42\n  go => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for non-symbol single-expr body, got: {diagnostics:?}"
+        );
+    }
+
+    /// An inline class-side method whose selector isn't `children` is skipped
+    /// (the `continue` branch of the selector-name guard).
+    #[test]
+    fn non_children_class_method_is_skipped() {
+        let src = "Supervisor subclass: MySup\n  class other => 1";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics when no `children` method is present, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone class-side `children` method definition (`MySup class >> ...`)
+    /// is collected and validated just like the inline form. Also exercises
+    /// the three `continue` guards in the standalone loop: an instance-side
+    /// standalone method (not class-side), a class-side standalone method on
+    /// an unrelated class, and a class-side standalone method with a
+    /// different selector — none of which should contribute a diagnostic.
+    #[test]
+    fn standalone_children_method_actor_without_policy_warns() {
+        let src = "Actor subclass: Worker\n  go => nil\nObject subclass: Other\n  go2 => nil\nSupervisor subclass: MySup\n  go3 => nil\nMySup >> instanceHelper => nil\nOther class >> children => nil\nMySup class >> notChildren => 1\nMySup class >> children => #(Worker)";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for standalone children method, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("Worker"),
+            "Expected 'Worker' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    // ── check_children_literal_for_policy edge cases ────────────────────────────
+
+    /// `class children` returning a non-list/array expression is a no-op
+    /// (the static check only handles list/array literals).
+    #[test]
+    fn children_non_literal_body_is_ignored() {
+        let src = "Supervisor subclass: MySup\n  class children => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for a non-list children body, got: {diagnostics:?}"
+        );
+    }
+
+    /// Children list elements that aren't recognised (a non-actor identifier,
+    /// a non-actor class reference, and a plain literal) are all skipped
+    /// without warnings; only the real, policy-less Actor subclass warns.
+    #[test]
+    fn children_list_mixed_element_kinds() {
+        let src = "Actor subclass: Worker\n  go => nil\nObject subclass: PlainClass\n  go => nil\nSupervisor subclass: MySup\n  class children => #(1, worker, PlainClass, Worker)";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected exactly 1 warning (only the real Actor subclass), got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("Worker"),
+            "Expected 'Worker' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
 }

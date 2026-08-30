@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
+use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -42,18 +42,21 @@ impl ReplDriver {
             .await
             .map_err(|e| format!("ws connect {url}: {e}"))?;
 
-        // auth-required
+        // auth-required. Frame recognition goes through
+        // `beamtalk_repl_protocol::handshake` (BT-3330) rather than
+        // re-matching the JSON here — see that module's doc comment for why.
         let _required = read_text(&mut ws).await?;
         // auth
-        let auth_msg = serde_json::json!({"type": "auth", "cookie": repl.cookie});
+        let auth_msg = handshake::auth_request(&repl.cookie, "repl", None);
         ws.send(Message::Text(auth_msg.to_string().into()))
             .await
             .map_err(|e| format!("send auth: {e}"))?;
         // auth_ok
         let auth_ok: serde_json::Value = serde_json::from_str(&read_text(&mut ws).await?)
             .map_err(|e| format!("auth_ok: {e}"))?;
-        if auth_ok.get("type").and_then(|v| v.as_str()) != Some("auth_ok") {
-            return Err(format!("workspace auth failed: {auth_ok}"));
+        match handshake::parse_auth_ack(&auth_ok) {
+            Some(handshake::AuthAck::Ok) => {}
+            _ => return Err(format!("workspace auth failed: {auth_ok}")),
         }
         // session-started
         let _session = read_text(&mut ws).await?;

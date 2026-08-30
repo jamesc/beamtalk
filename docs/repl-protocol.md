@@ -29,6 +29,8 @@ The auth message accepts two optional fields:
 
 Session creation is deferred until after successful authentication to prevent resource exhaustion from unauthenticated connections.
 
+Every Rust client (`beamtalk-lsp`, `beamtalk-mcp`, `beamtalk-cli`, the parity test harness) builds/recognises these frames through the shared `beamtalk_repl_protocol::handshake` module rather than re-matching the JSON itself; both it and the Erlang server (`beamtalk_ws_handler.erl`) are pinned to the same `runtime/apps/beamtalk_workspace/test/fixtures/ws_auth_handshake_wire_corpus.json` conformance fixture (BT-3330).
+
 ### Cookie Authentication
 
 The cookie is read from the workspace's `cookie` file at `~/.beamtalk/workspaces/{id}/cookie` (created with `chmod 600` at workspace startup). The server validates it against `erlang:get_cookie()`. This prevents unauthorized access on shared machines.

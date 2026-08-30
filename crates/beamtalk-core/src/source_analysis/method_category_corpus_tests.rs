@@ -176,7 +176,7 @@ fn corpus_has_no_empty_named_categories() {
 }
 
 /// BT-3240: the near-miss-divider lint's source-text scan
-/// (`crate::lint::check_near_miss_dividers`) agrees with this suite's own
+/// (`crate::near_miss_divider::check_near_miss_dividers`) agrees with this suite's own
 /// raw scan (`corpus_has_no_near_miss_dividers`, above) — every
 /// divider-shaped comment anywhere in the corpus parses cleanly, so the
 /// lint (which runs live in the LSP) has nothing to flag today. A hit here
@@ -193,7 +193,7 @@ fn corpus_triggers_no_near_miss_divider_lint() {
     for path in &files {
         let source = read_corpus_file(path);
         let mut diagnostics = Vec::new();
-        crate::lint::check_near_miss_dividers(&source, &mut diagnostics);
+        crate::near_miss_divider::check_near_miss_dividers(&source, &mut diagnostics);
         for diag in diagnostics {
             hits.push(format!("{}: {}", path.display(), diag.message));
         }

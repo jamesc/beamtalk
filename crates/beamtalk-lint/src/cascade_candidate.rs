@@ -21,9 +21,9 @@
 //! because they may have side effects and are not straightforward to extract
 //! into a single cascade receiver.
 
-use crate::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
-use crate::lint::LintPass;
-use crate::source_analysis::Diagnostic;
+use crate::LintPass;
+use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on 3+ consecutive message sends to the same simple
 /// receiver that could be rewritten as a cascade.
@@ -206,7 +206,7 @@ fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
                     recurse(e, diagnostics);
                 }
             }
@@ -226,10 +226,10 @@ fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
+    use crate::run_lint_passes;
+    use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
 
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn lint(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         run_lint_passes(&module)

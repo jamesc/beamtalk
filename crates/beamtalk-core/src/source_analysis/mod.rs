@@ -43,7 +43,6 @@ mod lexer;
 pub mod method_category;
 pub mod method_span;
 mod parser;
-mod span;
 pub mod summary;
 mod token;
 
@@ -76,7 +75,10 @@ pub use parser::{
     Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete,
     needs_blank_line_to_complete, parse, parse_method,
 };
-pub use span::Span;
+// `Span` is defined in the shared leaf module `crate::span` (ADR 0117, Decision
+// step 4) — beneath both `ast` and `source_analysis` — and re-exported here so
+// existing `source_analysis::Span` call sites keep working unchanged.
+pub use crate::span::Span;
 pub use summary::{DiagnosticSummary, SeverityCounts, category_name};
 pub use token::{Token, TokenKind, Trivia};
 

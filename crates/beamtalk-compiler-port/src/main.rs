@@ -1397,7 +1397,7 @@ fn handle_compile_expression(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_core::erlang::generate_repl_expressions_with_index(
+    match beamtalk_repl::codegen::generate_repl_expressions_with_index(
         &expressions,
         &module_name,
         class_module_index,
@@ -1476,7 +1476,7 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_core::erlang::generate_repl_expressions_traced(
+    match beamtalk_repl::codegen::generate_repl_expressions_traced(
         &expressions,
         &source,
         &module_name,
@@ -1590,7 +1590,7 @@ fn handle_inline_class_definition(
             .iter()
             .map(|s| s.expression.clone())
             .collect();
-        match beamtalk_core::erlang::generate_repl_expressions_with_index(
+        match beamtalk_repl::codegen::generate_repl_expressions_with_index(
             &trailing_exprs,
             expr_module_name,
             class_module_index.clone(),

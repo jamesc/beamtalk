@@ -43,6 +43,9 @@ beamtalk-core = { path = "crates/beamtalk-core" }
 beamtalk-desktop-broker = { path = "crates/beamtalk-desktop-broker" }
 beamtalk-etf = { path = "crates/beamtalk-etf" }
 beamtalk-examples = { path = "crates/beamtalk-examples" }
+beamtalk-lint = { path = "crates/beamtalk-lint" }
+beamtalk-project = { path = "crates/beamtalk-project" }
+beamtalk-repl = { path = "crates/beamtalk-repl" }
 beamtalk-repl-protocol = { path = "crates/beamtalk-repl-protocol" }
 beamtalk-workspace = { path = "crates/beamtalk-workspace" }
 

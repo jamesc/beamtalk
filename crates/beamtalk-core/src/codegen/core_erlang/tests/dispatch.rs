@@ -8,9 +8,6 @@
 //! messages, cast sends, and module-existence warning diagnostics.
 
 use super::*;
-use crate::repl::codegen::{
-    generate_repl_expression, generate_repl_expressions, generate_repl_expressions_with_index,
-};
 
 #[test]
 fn test_generate_unary_message_send_creates_future() {
@@ -1024,60 +1021,6 @@ fn test_cascade_binary_selector_error() {
 }
 
 #[test]
-fn test_cascade_repl_expression() {
-    // Test cascade in a full REPL module context
-    // x negated; abs
-    let x_ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
-    let first_msg = Expression::MessageSend {
-        receiver: Box::new(x_ident),
-        selector: MessageSelector::Unary("negated".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 9),
-    };
-
-    let cascade = Expression::Cascade {
-        receiver: Box::new(first_msg),
-        messages: vec![CascadeMessage::new(
-            MessageSelector::Unary("abs".into()),
-            vec![],
-            Span::new(11, 14),
-        )],
-        span: Span::new(0, 14),
-    };
-
-    let code = generate_repl_expression(&cascade, "test_cascade").expect("codegen should work");
-
-    // Should have module structure
-    assert!(
-        code.contains("module 'test_cascade' ['eval'/1]"),
-        "Should have module header. Got:\n{code}"
-    );
-
-    // Should bind the underlying receiver once. BT-2365 (ADR 0081 Phase 1): a
-    // free REPL identifier now resolves via a locals maps:find with a runtime
-    // resolve_name fallthrough rather than a bare maps:get.
-    assert!(
-        code.contains("let _Receiver1 = case call 'maps':'find'('x', State) of"),
-        "Should bind receiver x via locals find. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
-        "Should fall through to resolve_name for free identifier x. Got:\n{code}"
-    );
-
-    // Should send both messages
-    assert!(
-        code.contains("'negated'"),
-        "Should have first message negated. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'abs'"),
-        "Should have second message abs. Got:\n{code}"
-    );
-}
-
-#[test]
 fn test_cascade_field_assignment_arg_hoisted() {
     // obj msg1: (self.x := 5); msg2
     //
@@ -1228,105 +1171,6 @@ fn test_cascade_multiple_field_assignments_state_threading() {
     );
 
     generator.pop_scope();
-}
-
-#[test]
-fn test_standalone_class_reference_uses_dynamic_module_name() {
-    // BT-215: Test that standalone ClassReference uses module_name/1 dynamically
-    // Review comment: Should match generate_beamtalk_class_named pattern (lines 915-922)
-    use crate::ast::{Expression, Identifier, Module};
-    use crate::source_analysis::Span;
-
-    // Create expression: Point (standalone class reference)
-    let expr = Expression::ClassReference {
-        name: Identifier::new("Point", Span::new(0, 5)),
-        span: Span::new(0, 5),
-        package: None,
-    };
-
-    let module = Module {
-        type_aliases: Vec::new(),
-        expressions: vec![bare(expr)],
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 5),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
-        .expect("codegen should succeed");
-
-    // BT-2365 (ADR 0081 Phase 1): an unqualified REPL class reference checks the
-    // session locals map first (so a local shadows the class), then delegates to
-    // the shared runtime resolver. The class object construction and dynamic
-    // module_name lookup now live in beamtalk_workspace:resolve_class_reference/2.
-
-    // Should check the session locals map first (shadowing support).
-    assert!(
-        code.contains("call 'maps':'find'('Point', "),
-        "Should check locals map for the class name first. Got:\n{code}"
-    );
-
-    // Should delegate the miss path to the shared runtime resolver.
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_class_reference'("),
-        "Should delegate to resolve_class_reference on a locals miss. Got:\n{code}"
-    );
-
-    // Should pass the class name as an atom to the resolver.
-    assert!(
-        code.contains("'resolve_class_reference'(") && code.contains("'Point')"),
-        "Should pass the class name atom to the resolver. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_standalone_class_reference_validates_undefined_classes() {
-    // BT-215, BT-597: Test that standalone ClassReference raises class_not_found error for undefined classes
-    use crate::ast::{Expression, Identifier, Module};
-    use crate::source_analysis::Span;
-
-    // Create expression: NonExistentClass (standalone class reference)
-    let expr = Expression::ClassReference {
-        name: Identifier::new("NonExistentClass", Span::new(0, 16)),
-        span: Span::new(0, 16),
-        package: None,
-    };
-
-    let module = Module {
-        type_aliases: Vec::new(),
-        expressions: vec![bare(expr)],
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 16),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
-        .expect("codegen should succeed");
-
-    // BT-2365 (ADR 0081 Phase 1): undefined-class validation now happens in the
-    // runtime resolver (beamtalk_workspace:resolve_class_reference/2), which
-    // raises the same class_not_found error. The REPL codegen emits a locals
-    // check then delegates to that resolver.
-
-    // Should check the session locals map first (shadowing support).
-    assert!(
-        code.contains("call 'maps':'find'('NonExistentClass', "),
-        "Should check locals map for the class name first. Got:\n{code}"
-    );
-
-    // Should delegate to the shared resolver, which raises class_not_found for
-    // a genuinely unknown class.
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_class_reference'(")
-            && code.contains("'NonExistentClass')"),
-        "Should delegate undefined-class handling to resolve_class_reference. Got:\n{code}"
-    );
 }
 
 #[test]
@@ -2451,92 +2295,6 @@ sealed Object subclass: Bar
     );
 }
 
-#[test]
-fn test_repl_expression_spawn_uses_class_module_index() {
-    // When a REPL expression like `Counter spawn` is compiled in a workspace
-    // with package "getting_started", the class_module_index must be consulted
-    // so the generated code calls 'bt@getting_started@counter':'spawn'()
-    // instead of the heuristic fallback 'bt@counter':'spawn'().
-    let src = "Counter spawn";
-    let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, _diags) = crate::source_analysis::parse(tokens);
-    let expressions: Vec<_> = module
-        .expressions
-        .iter()
-        .map(|s| s.expression.clone())
-        .collect();
-
-    let mut index = std::collections::HashMap::new();
-    index.insert(
-        "Counter".to_string(),
-        "bt@getting_started@counter".to_string(),
-    );
-
-    let code = generate_repl_expressions_with_index(&expressions, "repl_test_mod", index)
-        .expect("codegen should work");
-
-    assert!(
-        code.contains("'bt@getting_started@counter':'spawn'"),
-        "spawn must use package-qualified module from class_module_index. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'bt@counter':'spawn'"),
-        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_repl_expression_spawn_without_index_uses_heuristic() {
-    // Without class_module_index, spawn falls back to the heuristic bt@ prefix.
-    let src = "Counter spawn";
-    let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, _diags) = crate::source_analysis::parse(tokens);
-    let expressions: Vec<_> = module
-        .expressions
-        .iter()
-        .map(|s| s.expression.clone())
-        .collect();
-
-    let code =
-        generate_repl_expressions(&expressions, "repl_test_mod").expect("codegen should work");
-
-    assert!(
-        code.contains("'bt@counter':'spawn'"),
-        "Without class_module_index, spawn should use heuristic bt@ prefix. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_repl_expression_spawn_with_args_uses_class_module_index() {
-    // `Counter spawnWith: #{ value: 10 }` must also use class_module_index.
-    let src = "Counter spawnWith: #{ value: 10 }";
-    let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, _diags) = crate::source_analysis::parse(tokens);
-    let expressions: Vec<_> = module
-        .expressions
-        .iter()
-        .map(|s| s.expression.clone())
-        .collect();
-
-    let mut index = std::collections::HashMap::new();
-    index.insert(
-        "Counter".to_string(),
-        "bt@getting_started@counter".to_string(),
-    );
-
-    let code = generate_repl_expressions_with_index(&expressions, "repl_test_mod", index)
-        .expect("codegen should work");
-
-    assert!(
-        code.contains("'bt@getting_started@counter':'spawn'"),
-        "spawnWith: must use package-qualified module from class_module_index. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'bt@counter':'spawn'"),
-        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
-    );
-}
-
 // --- BT-1321: intrinsic async_send → sync_send migration ---
 
 use super::codegen as codegen_source;
@@ -3121,47 +2879,6 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
 }
 
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
-
-#[test]
-fn test_qualified_class_reference_standalone() {
-    // ADR 0070 Phase 2: `json@Parser` as a standalone expression should use
-    // the class registry with the short name 'Parser' and produce the
-    // display name 'json@Parser class' in the class object tuple.
-    use crate::ast::{Expression, Identifier, Module};
-    use crate::source_analysis::Span;
-
-    let expr = Expression::ClassReference {
-        name: Identifier::new("Parser", Span::new(5, 11)),
-        package: Some(Identifier::new("json", Span::new(0, 4))),
-        span: Span::new(0, 11),
-    };
-
-    let module = Module {
-        type_aliases: Vec::new(),
-        expressions: vec![bare(expr)],
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 11),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
-        .expect("codegen should succeed");
-
-    // Registry lookup uses the short class name
-    assert!(
-        code.contains("call 'beamtalk_class_registry':'whereis_class'('Parser')"),
-        "Should look up 'Parser' (short name) in class registry. Got:\n{code}"
-    );
-
-    // Display name in the class object tuple includes package qualifier
-    assert!(
-        code.contains("'json@Parser class'"),
-        "Class object tuple should use 'json@Parser class' as display name. Got:\n{code}"
-    );
-}
 
 #[test]
 fn test_qualified_class_method_call() {

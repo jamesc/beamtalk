@@ -6,7 +6,7 @@
 //! This module contains [`ClassDefinition`], [`ProtocolDefinition`],
 //! [`StandaloneMethodDefinition`], and their supporting types.
 
-use crate::source_analysis::Span;
+use crate::span::Span;
 use ecow::EcoString;
 
 use super::CommentAttachment;

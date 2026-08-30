@@ -35,10 +35,12 @@ pub(crate) use class_validators::{
     check_handle_scope_on_object, check_new_field_names, check_object_new_usage,
     check_value_nil_return, check_value_slot_assignment, check_value_slot_case_collision,
 };
+// BT-3340: widened from `pub(crate)` — the standalone `beamtalk-lint`
+// crate's `effect_free_statement` pass calls this directly.
+pub use lint_validators::check_effect_free_statements;
 pub(crate) use lint_validators::{
-    check_effect_free_statements, check_empty_method_bodies, check_literal_boolean_condition,
-    check_redundant_assignment, check_redundant_local_type_annotation,
-    check_redundant_super_initialize,
+    check_empty_method_bodies, check_literal_boolean_condition, check_redundant_assignment,
+    check_redundant_local_type_annotation, check_redundant_super_initialize,
 };
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
