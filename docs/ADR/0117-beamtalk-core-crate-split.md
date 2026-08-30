@@ -191,6 +191,12 @@ Phases mirror the Decision's five steps. 1-2 are independent and can land in eit
 
 None of this is scheduled against a Linear epic yet — file issues under a new epic if the maintainer wants to act on this ADR, parented separately from BT-3323 (which this is out of scope for).
 
+## Implementation Tracking
+
+**Epic:** BT-3338
+**Issues:** BT-3339 (CI check), BT-3340 (lint/project/repl extraction), BT-3341 (queries⇄semantic_analysis fix, blocked by BT-3339), BT-3342 (queries⇄language_service fix, blocked by BT-3339), BT-3343 (Document API crate), BT-3344 (REPL-codegen test move), BT-3345 (Span extraction), BT-3346 (unparse-round-trip test move)
+**Status:** Planned. Decision step 5 (the full bounded-context crate split) is explicitly out of scope for this epic — revisit once BT-3341/BT-3342 land and the ADR's dependency-graph extraction is re-run to confirm the cross-context cycles are gone.
+
 ## References
 - Related issues: none yet — this ADR did not originate from a Linear issue; came up during BT-3323 (Rust coverage epic)
 - Related ADRs: ADR 0089 (Typed Document Leaves) — the `Document`/`leaf`/`docvec!` API whose placement inside `codegen` is the root of the biggest cycle edge found here
