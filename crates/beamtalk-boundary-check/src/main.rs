@@ -455,20 +455,37 @@ fn prelude_item_name(path_text: &str) -> Option<&str> {
 
 /// Resolves an [`Edge`] whose recorded `target_module` is `"prelude"` to the
 /// real module it re-exports from. Returns `None` when `edge` doesn't target
-/// `prelude` at all (the caller should use `edge.target_module` unchanged).
-/// Returns `Some(Ok(module))` when resolved via `prelude_reexports`.
-/// Returns `Some(Err(()))` when the reference can't be resolved to one
-/// specific module — a glob/bare `crate::prelude` reference, or an item name
-/// not found in `prelude`'s current re-export list — which `run()` always
-/// treats as a violation: letting an unresolvable `prelude` reference
-/// through unflagged would silently reopen the exact hole this checker
-/// exists to close (this gap, and the fix, came out of code review — see the
-/// crate README).
+/// `prelude` at all (the caller should use `edge.target_module` unchanged) —
+/// including when `target_module == "prelude"` only because `module_index`
+/// matched a `super::(super::)*prelude::...` chain: unlike
+/// `queries`/`language_service`/`lint`, `prelude` isn't proven unique across
+/// every Compilation-context subtree (a `pub mod prelude { ... }`
+/// re-export-convenience submodule is common Rust style, e.g. a hypothetical
+/// `codegen::foo::prelude`), so only a `crate`-rooted path can safely be
+/// assumed to mean *the* crate-root `prelude` shim in `lib.rs` — a
+/// `super`-rooted "prelude" is therefore treated as an ordinary, harmless
+/// edge (`run()` filters it out the same as any other non-Language-Service
+/// module name) rather than specially resolved or flagged. Returns
+/// `Some(Ok(module))` when a genuine `crate::prelude::...` reference is
+/// resolved via `prelude_reexports`. Returns `Some(Err(()))` when it can't
+/// be resolved to one specific module — a glob/bare `crate::prelude`
+/// reference, or an item name not found in `prelude`'s current re-export
+/// list — which `run()` always treats as a violation: letting an
+/// unresolvable `prelude` reference through unflagged would silently reopen
+/// the exact hole this checker exists to close (this gap, and the fix, came
+/// out of code review — see the crate README).
 fn resolve_prelude_edge(
     edge: &Edge,
     prelude_reexports: &HashMap<String, String>,
 ) -> Option<Result<String, ()>> {
     if edge.target_module != "prelude" {
+        return None;
+    }
+    let stripped = edge
+        .path_text
+        .strip_prefix("use ")
+        .unwrap_or(&edge.path_text);
+    if !stripped.starts_with("crate::") {
         return None;
     }
     match prelude_item_name(&edge.path_text) {
@@ -627,6 +644,15 @@ impl EdgeVisitor {
 /// that stay *inside* the same Compilation module, e.g. `super::helper` —
 /// harmless, since `run()` only acts on names that match a Language-Service
 /// module.)
+///
+/// `prelude` is a different case: it isn't in [`LANGUAGE_SERVICE_MODULES`],
+/// so a bare `module_index` match on it is never itself a violation — but
+/// [`resolve_prelude_edge`] special-cases `target_module == "prelude"` to
+/// resolve `crate::prelude::...` re-exports. `prelude` is *not* proven
+/// unique the way `queries`/`language_service`/`lint` are (a
+/// `pub mod prelude { ... }` re-export-convenience submodule is common Rust
+/// style), so that resolution logic additionally requires the match to be
+/// `crate`-rooted — see its doc comment.
 fn module_index(names: &[String]) -> Option<usize> {
     if names.first().is_some_and(|s| s == "crate") {
         return if names.len() >= 2 { Some(1) } else { None };
@@ -1144,6 +1170,36 @@ mod tests {
         let edge = Edge {
             target_module: "queries".to_string(),
             path_text: "crate::queries::foo".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let map = HashMap::new();
+        assert!(resolve_prelude_edge(&edge, &map).is_none());
+    }
+
+    #[test]
+    fn resolve_prelude_edge_ignores_super_rooted_prelude_lookalike() {
+        // `module_index` matches `super::prelude::Bar` the same way it
+        // matches `super::queries::Bar` (target_module == "prelude"), but
+        // unlike `queries`, a `prelude` submodule reached via `super::`
+        // could plausibly be a real, unrelated local module (e.g. a
+        // hypothetical `codegen::foo::prelude`) — not the crate-root shim.
+        // Only a `crate`-rooted match should be treated as *the* prelude.
+        let edge = Edge {
+            target_module: "prelude".to_string(),
+            path_text: "super::prelude::Bar".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let map = HashMap::new();
+        assert!(resolve_prelude_edge(&edge, &map).is_none());
+    }
+
+    #[test]
+    fn resolve_prelude_edge_ignores_use_super_rooted_prelude_lookalike() {
+        let edge = Edge {
+            target_module: "prelude".to_string(),
+            path_text: "use super::super::prelude::Bar".to_string(),
             line: 1,
             column: 1,
         };
