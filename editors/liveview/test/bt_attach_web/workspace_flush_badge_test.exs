@@ -137,7 +137,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
       # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
       # races the class-tree/browser-classes load under scheduler load or --cover.
-      render_async(view)
+      render_async(view, 2_000)
 
       # The stub's `increment` is a disk-backed method (origin "both",
       # disk_differs false): the body the editor seeds is exactly the on-disk body.
@@ -172,7 +172,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       # `unflushed` flag instead of recognising the image was back in sync.
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       disk_body = "increment => self.value := self.value + 1"
       new_body = "increment => self.value := self.value + 2"
@@ -231,7 +231,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       # the freshly re-seeded buffer (a same-tab re-click is `phx-update="ignore"`).
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       new_body = "increment => self.value := self.value + 2"
 
@@ -271,7 +271,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
     test "the System Browser opens a blank new-method tab the author can save", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       # Select Counter (always in the stub), then use the owner-only "new method"
       # entry — the editor opens with no tab now, so authoring a brand-new method
@@ -318,7 +318,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
     test "saving a new method with no selector is a local validation error", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 
@@ -347,7 +347,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
     } do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 
@@ -375,7 +375,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
          %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       # Open an existing method tab (to switch to) and a new-method tab.
@@ -411,7 +411,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
     test "saving a new method whose selector is already open folds into that tab", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       # Open the existing `increment` method tab, then a blank new-method tab.
@@ -466,7 +466,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
     setup %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 
       view

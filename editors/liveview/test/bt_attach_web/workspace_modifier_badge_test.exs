@@ -67,7 +67,7 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
 
       # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
       # races the class-tree/browser-classes load under scheduler load or --cover.
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Ledger"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Ledger"})
@@ -107,7 +107,7 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
     test "a plain class shows no class-modifier badges", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Counter"})
@@ -122,7 +122,7 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
     test "a native: class badges Native on its definition tab", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Subprocess"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Subprocess"})
@@ -153,7 +153,7 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
     test "a class-side method badges Class plus the owning class's modifiers", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Ledger"])) |> render_click()
 
@@ -176,7 +176,7 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
     test "an instance-side method on a plain class shows no badges", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 
@@ -198,7 +198,7 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
     test "an observer sees the modifier badges too", %{conn: conn} do
       {:ok, view, _html} = live(observer_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Ledger"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Ledger"})

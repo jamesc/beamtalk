@@ -75,7 +75,7 @@ defmodule BtAttachWeb.WorkspaceGotoDefinitionTest do
 
       # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
       # races the class-tree/browser-classes load under scheduler load or --cover.
-      render_async(view)
+      render_async(view, 2_000)
 
       # `Counter` is a known class in the stub's class tree.
       html = render_hook(view, "goto_definition", %{"token" => "Counter", "code" => "Counter"})
@@ -181,7 +181,7 @@ defmodule BtAttachWeb.WorkspaceGotoDefinitionTest do
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_async(view)
+      render_async(view, 2_000)
 
       html = render_hook(view, "goto_definition", %{"token" => "Counter", "code" => "Counter"})
 
