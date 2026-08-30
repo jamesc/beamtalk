@@ -940,6 +940,35 @@ mod tests {
         foo: String,
     }
 
+    /// The three push-event channels [`RuntimeClient::connect_to`] takes,
+    /// bundled so a connection test names only the receivers it asserts on.
+    /// (The `handle_push_frame` unit tests above build their channels inline
+    /// — each of them asserts on all three.)
+    struct Sinks {
+        flush_tx: mpsc::UnboundedSender<FlushEvent>,
+        flush_rx: mpsc::UnboundedReceiver<FlushEvent>,
+        class_tx: mpsc::UnboundedSender<ClassChangedEvent>,
+        class_rx: mpsc::UnboundedReceiver<ClassChangedEvent>,
+        reload_tx: mpsc::UnboundedSender<ReloadCheckEvent>,
+        reload_rx: mpsc::UnboundedReceiver<ReloadCheckEvent>,
+    }
+
+    impl Sinks {
+        fn new() -> Self {
+            let (flush_tx, flush_rx) = unbounded_channel();
+            let (class_tx, class_rx) = unbounded_channel();
+            let (reload_tx, reload_rx) = unbounded_channel();
+            Self {
+                flush_tx,
+                flush_rx,
+                class_tx,
+                class_rx,
+                reload_tx,
+                reload_rx,
+            }
+        }
+    }
+
     #[test]
     fn decode_rpc_reply_success() {
         let response: ReplResponse =
@@ -965,6 +994,33 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "runtime protocol error: dummy-op error: boom"
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_falls_back_to_legacy_message_field() {
+        // Older producers carry the text in `message`, not `error`.
+        let response: ReplResponse = serde_json::from_value(json!({
+            "id": "1",
+            "status": ["done", "error"],
+            "message": "legacy failure text"
+        }))
+        .unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: dummy-op error: legacy failure text"
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_error_flag_without_any_message() {
+        let response: ReplResponse =
+            serde_json::from_value(json!({"id": "1", "status": ["done", "error"]})).unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: dummy-op error: unknown error"
         );
     }
 
@@ -1331,5 +1387,948 @@ mod tests {
             &reload_tx,
         );
         assert!(reload_rx.try_recv().is_err());
+    }
+
+    /// A dropped receiver is a best-effort signal going nowhere, not a fault:
+    /// `handle_push_frame` must log and carry on rather than panic or unwind
+    /// the listener task. One case per forwarding channel.
+    #[test]
+    fn push_frames_tolerate_dropped_receivers() {
+        let (flush_tx, flush_rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, reload_rx) = unbounded_channel::<ReloadCheckEvent>();
+        drop(flush_rx);
+        drop(class_rx);
+        drop(reload_rx);
+
+        for frame in [
+            json!({
+                "type": "push", "channel": "workspace", "event": "flush_completed",
+                "data": {"files": ["src/counter.bt"]}
+            }),
+            json!({
+                "type": "push", "channel": "classes", "event": "loaded",
+                "data": {"class": "Counter"}
+            }),
+            json!({
+                "type": "push", "channel": "reload_check", "event": "completed",
+                "data": {
+                    "changedClass": "Counter", "changedSelector": "getCount",
+                    "classification": "self_edit", "checked": 0, "notChecked": 0,
+                    "capNote": null, "checkedOwners": [], "findings": []
+                }
+            }),
+        ] {
+            handle_push_frame(&frame, &flush_tx, &class_tx, &reload_tx);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Fake workspace: an in-process WebSocket server speaking just enough of
+    // the REPL wire protocol (`docs/repl-protocol.md`) to drive
+    // `connect_to` / `perform_auth_handshake` / `writer_task` /
+    // `listener_task` end-to-end without a BEAM node. Everything below the
+    // handshake is scripted by the test, so error branches that a real
+    // workspace never produces on demand (auth failure, a truncated
+    // handshake, a malformed reply, a socket that closes mid-request) are
+    // reachable deterministically.
+    //
+    // Fidelity caveat — this is a test double, not a second implementation
+    // of a shared rule, and nothing here pins it to the real server
+    // (`beamtalk_ws_handler.erl`): the handshake frame shapes below are
+    // transcribed from it, so a change on the Erlang side would leave these
+    // tests green while `perform_auth_handshake` broke against a live
+    // workspace. That gap predates these tests (the `lsp_parity` e2e suite
+    // never attaches a runtime — it exercises only the static
+    // hover/completion/definition/symbol surface, so no suite has ever run
+    // this handshake against a real BEAM node). BT-3330 tracks closing it,
+    // by real-node coverage of the LSP attach path and/or a shared handshake
+    // conformance fixture — which would want to cover the CLI and MCP
+    // clients' identical transcriptions too, not just this one.
+    // ------------------------------------------------------------------
+
+    /// How the fake workspace behaves during the pre-`session-started`
+    /// handshake. One variant per branch of [`perform_auth_handshake`] and
+    /// [`read_text`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Handshake {
+        /// The real sequence: `auth-required` → (client auth) → `auth_ok` →
+        /// `session-started`.
+        Ok,
+        /// Same, but a binary frame precedes each text frame — `read_text`
+        /// must skip non-text frames rather than treat them as the handshake.
+        OkWithBinaryNoise,
+        /// Close the socket before sending anything.
+        CloseImmediately,
+        /// Drop the socket (FIN, no close frame) before sending anything.
+        DropImmediately,
+        /// First frame is not JSON.
+        UnparseableAuthRequired,
+        /// First frame is JSON but not `op: auth-required`.
+        WrongPreAuthOp,
+        /// Reply to the client's auth with `auth_error`.
+        AuthError,
+        /// Reply to the client's auth with `auth_error` carrying no `message`.
+        AuthErrorWithoutMessage,
+        /// Reply to the client's auth with an unrecognised `type`.
+        UnexpectedAuthResponse,
+        /// Auth succeeds but the follow-up frame is not `op: session-started`.
+        WrongPostAuthOp,
+    }
+
+    /// Frames the fake workspace sends back for one received request.
+    type Responder = Box<dyn Fn(&serde_json::Value) -> Vec<Message> + Send + Sync>;
+
+    /// A running fake workspace. Aborts its task on drop, so a test that
+    /// returns early never leaks a listener.
+    struct FakeWorkspace {
+        port: u16,
+        /// Every request frame the server received, in arrival order.
+        seen: Arc<Mutex<Vec<serde_json::Value>>>,
+        /// Fires once the server's post-handshake read loop has exited —
+        /// i.e. the client hung up.
+        disconnected: Option<oneshot::Receiver<()>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for FakeWorkspace {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    fn text(value: &serde_json::Value) -> Message {
+        Message::Text(value.to_string().into())
+    }
+
+    /// Spawn a fake workspace on an ephemeral loopback port.
+    async fn spawn_workspace(handshake: Handshake, responder: Responder) -> FakeWorkspace {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let port = listener.local_addr().expect("local addr").port();
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_task = Arc::clone(&seen);
+        let (done_tx, done_rx) = oneshot::channel();
+
+        let task = tokio::spawn(async move {
+            let Ok((stream, _peer)) = listener.accept().await else {
+                return;
+            };
+            let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+                return;
+            };
+
+            if handshake == Handshake::DropImmediately {
+                drop(ws);
+                return;
+            }
+            if handshake == Handshake::CloseImmediately {
+                let _ = ws.close(None).await;
+                return;
+            }
+            if handshake == Handshake::OkWithBinaryNoise {
+                let _ = ws.send(Message::Binary(vec![0xF0, 0x9F].into())).await;
+            }
+
+            match handshake {
+                Handshake::UnparseableAuthRequired => {
+                    let _ = ws.send(Message::Text("not json at all".into())).await;
+                    return;
+                }
+                Handshake::WrongPreAuthOp => {
+                    let _ = ws.send(text(&json!({"op": "something-else"}))).await;
+                    return;
+                }
+                _ => {
+                    let _ = ws.send(text(&json!({"op": "auth-required"}))).await;
+                }
+            }
+
+            // The client's auth frame.
+            let auth = ws.next().await;
+            let Some(Ok(Message::Text(auth))) = auth else {
+                return;
+            };
+            let auth: serde_json::Value = serde_json::from_str(&auth).unwrap_or(json!({}));
+            seen_task.lock().await.push(auth);
+
+            if handshake == Handshake::OkWithBinaryNoise {
+                let _ = ws.send(Message::Binary(vec![0x00].into())).await;
+            }
+            match handshake {
+                Handshake::AuthError => {
+                    let _ = ws
+                        .send(text(
+                            &json!({"type": "auth_error", "message": "invalid cookie"}),
+                        ))
+                        .await;
+                    return;
+                }
+                Handshake::AuthErrorWithoutMessage => {
+                    let _ = ws.send(text(&json!({"type": "auth_error"}))).await;
+                    return;
+                }
+                Handshake::UnexpectedAuthResponse => {
+                    let _ = ws.send(text(&json!({"type": "who_are_you"}))).await;
+                    return;
+                }
+                _ => {
+                    let _ = ws.send(text(&json!({"type": "auth_ok"}))).await;
+                }
+            }
+
+            if handshake == Handshake::WrongPostAuthOp {
+                let _ = ws.send(text(&json!({"op": "not-session-started"}))).await;
+                return;
+            }
+            let _ = ws.send(text(&json!({"op": "session-started"}))).await;
+
+            while let Some(Ok(msg)) = ws.next().await {
+                let Message::Text(body) = msg else { continue };
+                let request: serde_json::Value = serde_json::from_str(&body).unwrap_or(json!({}));
+                seen_task.lock().await.push(request.clone());
+                for frame in responder(&request) {
+                    let closing = matches!(frame, Message::Close(_));
+                    if ws.send(frame).await.is_err() || closing {
+                        break;
+                    }
+                }
+            }
+            let _ = done_tx.send(());
+        });
+
+        FakeWorkspace {
+            port,
+            seen,
+            disconnected: Some(done_rx),
+            task,
+        }
+    }
+
+    /// A responder that answers every request with `value`, echoing the
+    /// request's own correlation id.
+    fn reply_with(value: serde_json::Value) -> Responder {
+        Box::new(move |request| {
+            vec![text(&json!({
+                "id": request["id"],
+                "status": ["done"],
+                "value": value.clone(),
+            }))]
+        })
+    }
+
+    /// A responder that never answers.
+    fn reply_nothing() -> Responder {
+        Box::new(|_| Vec::new())
+    }
+
+    /// Connect a client to `ws`, asserting the handshake succeeded.
+    async fn connect_client(ws: &FakeWorkspace, sinks: &Sinks) -> RuntimeClient {
+        RuntimeClient::connect_to(
+            ws.port,
+            "test-cookie",
+            sinks.flush_tx.clone(),
+            sinks.class_tx.clone(),
+            sinks.reload_tx.clone(),
+        )
+        .await
+        .expect("handshake completes")
+    }
+
+    /// `Result::expect_err` requires `T: Debug`, and `RuntimeClient` (a handle
+    /// over task join handles) does not implement it — unwrap by hand instead.
+    fn expect_connect_failure(
+        result: Result<RuntimeClient, RuntimeError>,
+        ctx: &str,
+    ) -> RuntimeError {
+        match result {
+            Ok(_) => panic!("expected {ctx} to fail, but a client connected"),
+            Err(e) => e,
+        }
+    }
+
+    /// Connect expecting failure, returning the error.
+    async fn connect_err(ws: &FakeWorkspace, sinks: &Sinks) -> RuntimeError {
+        let result = RuntimeClient::connect_to(
+            ws.port,
+            "test-cookie",
+            sinks.flush_tx.clone(),
+            sinks.class_tx.clone(),
+            sinks.reload_tx.clone(),
+        )
+        .await;
+        expect_connect_failure(result, "the handshake")
+    }
+
+    fn assert_connect_error(err: &RuntimeError, port: u16, expected_fragment: &str) {
+        match err {
+            RuntimeError::Connect {
+                port: got_port,
+                reason,
+            } => {
+                assert_eq!(*got_port, port, "error must name the port it dialled");
+                assert!(
+                    reason.contains(expected_fragment),
+                    "expected reason containing {expected_fragment:?}, got {reason:?}"
+                );
+            }
+            other => panic!("expected RuntimeError::Connect, got {other:?}"),
+        }
+    }
+
+    // --- handshake ----------------------------------------------------
+
+    #[tokio::test]
+    async fn connect_to_completes_handshake_and_tags_the_session_as_lsp() {
+        let ws = spawn_workspace(Handshake::Ok, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let _client = connect_client(&ws, &sinks).await;
+
+        // The auth frame is the only thing the server has seen so far.
+        let seen = ws.seen.lock().await;
+        assert_eq!(seen.len(), 1, "exactly the auth frame: {seen:?}");
+        assert_eq!(seen[0]["type"], "auth");
+        assert_eq!(seen[0]["cookie"], "test-cookie");
+        // `Workspace sessions` shows the originating surface from this field.
+        assert_eq!(seen[0]["client"], "lsp");
+        assert!(
+            seen[0].get("resume").is_none(),
+            "the LSP always opens a fresh session"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_to_skips_non_text_frames_during_handshake() {
+        let ws = spawn_workspace(Handshake::OkWithBinaryNoise, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let _client = connect_client(&ws, &sinks).await;
+    }
+
+    #[tokio::test]
+    async fn connect_to_fails_when_nothing_is_listening() {
+        // Bind then drop, so the port is known-free for the length of the test.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+
+        let sinks = Sinks::new();
+        let result = RuntimeClient::connect_to(
+            port,
+            "test-cookie",
+            sinks.flush_tx,
+            sinks.class_tx,
+            sinks.reload_tx,
+        )
+        .await;
+        let err = expect_connect_failure(result, "connecting to a closed port");
+        assert_connect_error(&err, port, "websocket connect failed");
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_close_during_handshake() {
+        let ws = spawn_workspace(Handshake::CloseImmediately, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(&err, ws.port, "closed websocket during handshake");
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_stream_end_during_handshake() {
+        let ws = spawn_workspace(Handshake::DropImmediately, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        // A dropped socket surfaces either as a clean EOF or as a reset,
+        // depending on how the kernel delivers the FIN — both are handshake
+        // read failures, and neither is a successful connect.
+        match &err {
+            RuntimeError::Connect { port, reason } => {
+                assert_eq!(*port, ws.port);
+                assert!(
+                    reason.contains("stream ended during handshake")
+                        || reason.contains("read failed"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("expected RuntimeError::Connect, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_unparseable_auth_required() {
+        let ws = spawn_workspace(Handshake::UnparseableAuthRequired, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(&err, ws.port, "failed to parse auth-required");
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_unexpected_pre_auth_message() {
+        let ws = spawn_workspace(Handshake::WrongPreAuthOp, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(&err, ws.port, "unexpected pre-auth message");
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_auth_error_message() {
+        let ws = spawn_workspace(Handshake::AuthError, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(
+            &err,
+            ws.port,
+            "workspace authentication failed: invalid cookie",
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_auth_error_without_message() {
+        let ws = spawn_workspace(Handshake::AuthErrorWithoutMessage, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(
+            &err,
+            ws.port,
+            "workspace authentication failed: authentication failed",
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_unexpected_auth_response() {
+        let ws = spawn_workspace(Handshake::UnexpectedAuthResponse, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(&err, ws.port, "unexpected auth response");
+    }
+
+    #[tokio::test]
+    async fn connect_to_reports_unexpected_post_auth_message() {
+        let ws = spawn_workspace(Handshake::WrongPostAuthOp, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(&err, ws.port, "unexpected post-auth message");
+    }
+
+    // --- request/response ops -----------------------------------------
+
+    #[tokio::test]
+    async fn evaluate_round_trips_a_value() {
+        let ws = spawn_workspace(Handshake::Ok, reply_with(json!("42"))).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let response = client.evaluate("40 + 2").await.expect("eval reply");
+        assert!(!response.is_error());
+        assert_eq!(response.value, Some(json!("42")));
+
+        let seen = ws.seen.lock().await;
+        let request = seen.last().expect("eval request");
+        assert_eq!(request["op"], "eval");
+        assert_eq!(request["code"], "40 + 2");
+    }
+
+    #[tokio::test]
+    async fn evaluate_surfaces_a_structured_error_reply_as_ok() {
+        // `evaluate` does not decode — a `#beamtalk_error{}` reply comes back
+        // as a successful transport result the caller inspects with
+        // `is_error()`. Only transport failures are `Err`.
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            Box::new(|request| {
+                vec![text(&json!({
+                    "id": request["id"],
+                    "status": ["done", "error"],
+                    "error": "Integer does not understand 'nope'",
+                }))]
+            }),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let response = client.evaluate("1 nope").await.expect("transport ok");
+        assert!(response.is_error());
+        assert_eq!(
+            response.error.as_deref(),
+            Some("Integer does not understand 'nope'")
+        );
+    }
+
+    #[tokio::test]
+    async fn nav_query_decodes_sites_and_sends_the_selector_argument() {
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            reply_with(json!({
+                "sites": [
+                    {"class": "Dashboard", "class_side": false, "method": "refresh",
+                     "line": 14, "source_file": "/proj/src/dashboard.bt"},
+                    {"class": "Counter", "class_side": true, "method": "increment", "line": 3},
+                ]
+            })),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let sites = client
+            .nav_query(&NavQuery::SendersOf("increment".into()))
+            .await
+            .expect("nav-query reply");
+        assert_eq!(sites.len(), 2);
+        assert_eq!(sites[0].class, "Dashboard");
+        assert_eq!(sites[0].line, 14);
+        assert_eq!(
+            sites[0].source_file.as_deref(),
+            Some("/proj/src/dashboard.bt")
+        );
+        // A source-less row still decodes — consumers treat it as non-navigable.
+        assert!(sites[1].source_file.is_none());
+        assert!(sites[1].class_side);
+
+        let seen = ws.seen.lock().await;
+        let request = seen.last().expect("nav-query request");
+        assert_eq!(request["op"], "nav-query");
+        assert_eq!(request["kind"], "senders");
+        assert_eq!(request["selector"], "increment");
+    }
+
+    #[tokio::test]
+    async fn nav_query_sends_the_class_argument_for_references() {
+        let ws = spawn_workspace(Handshake::Ok, reply_with(json!({"sites": []}))).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let sites = client
+            .nav_query(&NavQuery::ReferencesTo("Counter".into()))
+            .await
+            .expect("nav-query reply");
+        assert!(sites.is_empty(), "an empty result set is not an error");
+
+        let seen = ws.seen.lock().await;
+        let request = seen.last().expect("nav-query request");
+        assert_eq!(request["kind"], "references");
+        assert_eq!(request["class"], "Counter");
+        assert!(request.get("selector").is_none());
+    }
+
+    #[tokio::test]
+    async fn nav_query_surfaces_a_structured_error_reply() {
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            Box::new(|request| {
+                vec![text(&json!({
+                    "id": request["id"],
+                    "status": ["done", "error"],
+                    "error": "unknown kind",
+                }))]
+            }),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let err = client
+            .nav_query(&NavQuery::ImplementorsOf("asString".into()))
+            .await
+            .expect_err("error reply");
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: nav-query error: unknown kind"
+        );
+    }
+
+    #[tokio::test]
+    async fn nav_symbols_decodes_classes_and_forwards_the_scope() {
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            reply_with(json!({
+                "classes": [{
+                    "name": "Counter",
+                    "source_file": "/proj/src/counter.bt",
+                    "line": 1,
+                    "methods": [
+                        {"selector": "increment", "class_side": false, "line": 3},
+                        {"selector": "new", "class_side": true},
+                    ],
+                }]
+            })),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let classes = client.nav_symbols(Some("all")).await.expect("nav-symbols");
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].name, "Counter");
+        assert_eq!(classes[0].methods.len(), 2);
+        // A method with no xref entry decodes with `line: None`.
+        assert_eq!(classes[0].methods[1].line, None);
+
+        let seen = ws.seen.lock().await;
+        let request = seen.last().expect("nav-symbols request");
+        assert_eq!(request["op"], "nav-symbols");
+        assert_eq!(request["scope"], "all");
+    }
+
+    #[tokio::test]
+    async fn nav_symbols_omits_the_scope_field_when_none() {
+        let ws = spawn_workspace(Handshake::Ok, reply_with(json!({"classes": []}))).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        assert!(client.nav_symbols(None).await.expect("reply").is_empty());
+        let seen = ws.seen.lock().await;
+        assert!(seen.last().expect("request").get("scope").is_none());
+    }
+
+    #[tokio::test]
+    async fn reload_findings_decodes_the_snapshot() {
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            reply_with(json!({
+                "findings": [{
+                    "owner": "Dashboard",
+                    "changedClass": "Counter",
+                    "selector": "getCount",
+                    "classification": "removal",
+                    "severity": "warning",
+                    "category": null,
+                    "message": "Counter does not understand 'getCount'",
+                    "note": "removed by the reload of Counter",
+                    "sites": [{"method": "refresh", "line": 14}],
+                    "start": 0,
+                    "end": 5,
+                }]
+            })),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let findings = client.reload_findings().await.expect("reload-findings");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].owner, "Dashboard");
+        assert_eq!(findings[0].category, None);
+        assert_eq!(
+            findings[0].sites,
+            vec![ReloadSite {
+                method: "refresh".to_string(),
+                line: 14,
+            }]
+        );
+
+        let seen = ws.seen.lock().await;
+        assert_eq!(seen.last().expect("request")["op"], "reload-findings");
+    }
+
+    #[tokio::test]
+    async fn reload_findings_reports_a_reply_missing_value() {
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            Box::new(|request| vec![text(&json!({"id": request["id"], "status": ["done"]}))]),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let err = client.reload_findings().await.expect_err("no value field");
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: reload-findings: reply missing `value`"
+        );
+    }
+
+    // --- listener behaviour -------------------------------------------
+
+    #[tokio::test]
+    async fn listener_skips_noise_frames_and_still_delivers_the_reply() {
+        // Three frames the listener must step over on its way to the real
+        // reply: unparseable JSON, a reply for an id nobody is waiting on,
+        // and a binary frame.
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            Box::new(|request| {
+                vec![
+                    Message::Text("}{ not json".into()),
+                    text(&json!({"id": "no-such-request", "status": ["done"], "value": "stray"})),
+                    Message::Binary(vec![1, 2, 3].into()),
+                    text(&json!({"id": request["id"], "status": ["done"], "value": "7"})),
+                ]
+            }),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let response = client.evaluate("3 + 4").await.expect("reply arrives");
+        assert_eq!(response.value, Some(json!("7")));
+    }
+
+    #[tokio::test]
+    async fn listener_reports_a_reply_that_is_not_a_repl_response() {
+        // `status` must be a list of strings; an integer fails
+        // `ReplResponse`'s deserialise after the id lookup already matched.
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            Box::new(|request| vec![text(&json!({"id": request["id"], "status": 5}))]),
+        )
+        .await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let err = client.evaluate("1").await.expect_err("malformed reply");
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("runtime protocol error: failed to parse runtime reply:"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn listener_forwards_push_frames_arriving_on_the_socket() {
+        // The push-frame *decoding* is unit-tested above; this covers the
+        // listener's own "is this a push or a reply?" fork on a live socket.
+        let ws = spawn_workspace(
+            Handshake::Ok,
+            Box::new(|request| {
+                vec![
+                    text(&json!({
+                        "type": "push",
+                        "channel": "classes",
+                        "event": "loaded",
+                        "data": {"class": "Counter"},
+                    })),
+                    text(&json!({"id": request["id"], "status": ["done"], "value": "ok"})),
+                ]
+            }),
+        )
+        .await;
+        let mut sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        client.evaluate("Counter new").await.expect("reply");
+        let event = sinks.class_rx.recv().await.expect("class_changed event");
+        assert_eq!(event.class_name, "Counter");
+        assert!(sinks.flush_rx.try_recv().is_err());
+        assert!(sinks.reload_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pending_request_fails_when_the_workspace_closes_the_socket() {
+        let ws = spawn_workspace(Handshake::Ok, Box::new(|_| vec![Message::Close(None)])).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let err = client.evaluate("1").await.expect_err("socket closed");
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: runtime websocket closed before reply"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_times_out_when_the_workspace_never_replies() {
+        // A workspace that accepts the request and then goes quiet — the LSP
+        // must give the editor an error rather than hang its command forever.
+        // The connect itself needs real I/O, so the clock is paused only
+        // afterwards; from there nothing is runnable, tokio auto-advances to
+        // `IO_TIMEOUT`, and the test takes milliseconds rather than 30s.
+        let ws = spawn_workspace(Handshake::Ok, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        tokio::time::pause();
+        let err = client.evaluate("Program sleepForever").await.expect_err(
+            "a workspace that never replies must surface a timeout, not hang the command",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("runtime protocol error: eval timed out after 30s waiting for reply"),
+            "unexpected message: {msg}"
+        );
+        // The op name is interpolated so a failure names the call that hung.
+        assert!(msg.contains("id="), "timeout must name the request: {msg}");
+    }
+
+    // --- lifecycle ----------------------------------------------------
+
+    #[tokio::test]
+    async fn close_shuts_the_client_down_and_later_calls_fail_fast() {
+        let ws = spawn_workspace(Handshake::Ok, reply_with(json!("1"))).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+        client.evaluate("1").await.expect("works before close");
+
+        client.close().await;
+        // `close` aborts the writer task, which drops the request receiver.
+        // Abort takes effect on the aborted task's next poll, so poll for the
+        // observable consequence rather than sleeping a guessed interval. The
+        // sleep (rather than a bare `yield_now`) keeps this correct if the
+        // test is ever moved to a multi-thread runtime, where yielding does
+        // not guarantee another worker gets scheduled.
+        for _ in 0..500 {
+            if client.inner.sender.is_closed() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert!(client.inner.sender.is_closed(), "writer task did not stop");
+
+        let err = client.evaluate("1").await.expect_err("client is shut down");
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: runtime client shut down"
+        );
+
+        // Idempotent: a second close is a no-op, not a panic.
+        client.close().await;
+    }
+
+    #[tokio::test]
+    async fn dropping_the_last_clone_tears_down_the_connection() {
+        let mut ws = spawn_workspace(Handshake::Ok, reply_with(json!("1"))).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+        let clone = client.clone();
+        client.evaluate("1").await.expect("connected");
+
+        drop(client);
+        // One handle still alive: the connection must survive.
+        clone.evaluate("1").await.expect("clone keeps it alive");
+
+        drop(clone);
+        // `RuntimeInner::drop` aborts both tasks, so the server sees EOF.
+        let disconnected = ws.disconnected.take().expect("receiver");
+        tokio::time::timeout(Duration::from_secs(5), disconnected)
+            .await
+            .expect("workspace should see the client hang up")
+            .expect("server task ran to completion");
+    }
+
+    // --- discovery (`connect`) ----------------------------------------
+
+    #[tokio::test]
+    async fn connect_reports_workspace_not_found_for_an_unresolvable_project_path() {
+        let sinks = Sinks::new();
+        let path = std::path::Path::new("/definitely/not/a/real/beamtalk/project");
+        let result =
+            RuntimeClient::connect(path, sinks.flush_tx, sinks.class_tx, sinks.reload_tx).await;
+        let err = expect_connect_failure(result, "connecting to an unresolvable path");
+        match err {
+            RuntimeError::WorkspaceNotFound {
+                project_path,
+                reason,
+            } => {
+                assert_eq!(project_path, path.display().to_string());
+                assert!(
+                    reason.starts_with("failed to derive workspace id:"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("expected WorkspaceNotFound, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_reports_workspace_not_found_when_no_port_file_exists() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let sinks = Sinks::new();
+        let result = RuntimeClient::connect(
+            project.path(),
+            sinks.flush_tx,
+            sinks.class_tx,
+            sinks.reload_tx,
+        )
+        .await;
+        let err = expect_connect_failure(result, "connecting with no port file");
+        match err {
+            RuntimeError::WorkspaceNotFound { reason, .. } => {
+                assert!(reason.contains("port file"), "unexpected reason: {reason}");
+            }
+            other => panic!("expected WorkspaceNotFound, got {other:?}"),
+        }
+    }
+
+    /// A workspace state directory (`~/.beamtalk/workspaces/<id>/`) for
+    /// `project`, removed on drop. The id is a hash of the project path, so a
+    /// throwaway temp dir can never collide with a real workspace — the same
+    /// approach `beamtalk-mcp`'s `read_port_file` tests take.
+    struct WorkspaceFiles {
+        dir: std::path::PathBuf,
+    }
+
+    impl WorkspaceFiles {
+        fn new(project: &Path, port: Option<u16>, cookie: Option<&str>) -> Self {
+            let id = beamtalk_workspace::generate_workspace_id(project).expect("workspace id");
+            let dir = beamtalk_workspace::workspaces_base_dir()
+                .expect("workspaces dir")
+                .join(id);
+            std::fs::create_dir_all(&dir).expect("create workspace dir");
+            if let Some(port) = port {
+                std::fs::write(dir.join("port"), format!("{port}\ntest-nonce\n")).expect("port");
+            }
+            if let Some(cookie) = cookie {
+                std::fs::write(dir.join("cookie"), cookie).expect("cookie");
+            }
+            Self { dir }
+        }
+    }
+
+    impl Drop for WorkspaceFiles {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_reports_workspace_not_found_when_the_cookie_file_is_missing() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let _files = WorkspaceFiles::new(project.path(), Some(1), None);
+
+        let sinks = Sinks::new();
+        let result = RuntimeClient::connect(
+            project.path(),
+            sinks.flush_tx,
+            sinks.class_tx,
+            sinks.reload_tx,
+        )
+        .await;
+        let err = expect_connect_failure(result, "connecting with no cookie file");
+        match err {
+            RuntimeError::WorkspaceNotFound { reason, .. } => assert!(
+                reason.contains("cookie file"),
+                "unexpected reason: {reason}"
+            ),
+            other => panic!("expected WorkspaceNotFound, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_discovers_the_port_and_cookie_and_authenticates() {
+        let ws = spawn_workspace(Handshake::Ok, reply_with(json!("discovered"))).await;
+        let project = tempfile::tempdir().expect("tempdir");
+        let _files =
+            WorkspaceFiles::new(project.path(), Some(ws.port), Some("discovered-cookie\n"));
+
+        let sinks = Sinks::new();
+        let client = RuntimeClient::connect(
+            project.path(),
+            sinks.flush_tx.clone(),
+            sinks.class_tx.clone(),
+            sinks.reload_tx.clone(),
+        )
+        .await
+        .expect("discovery + handshake");
+
+        let response = client.evaluate("1").await.expect("reply");
+        assert_eq!(response.value, Some(json!("discovered")));
+
+        // The cookie read from disk is the one presented to the workspace,
+        // trimmed of the trailing newline the port/cookie writer leaves.
+        let seen = ws.seen.lock().await;
+        assert_eq!(seen[0]["cookie"], "discovered-cookie");
     }
 }
