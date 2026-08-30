@@ -73,6 +73,10 @@ defmodule BtAttachWeb.WorkspaceGotoDefinitionTest do
     test "clicking a class name opens its class definition tab", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
+      # races the class-tree/browser-classes load under scheduler load or --cover.
+      render_async(view)
+
       # `Counter` is a known class in the stub's class tree.
       html = render_hook(view, "goto_definition", %{"token" => "Counter", "code" => "Counter"})
 
@@ -176,6 +180,8 @@ defmodule BtAttachWeb.WorkspaceGotoDefinitionTest do
       StubWorkspaceClient.set_implementors("Counter", [site("Other", "Counter")])
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view)
 
       html = render_hook(view, "goto_definition", %{"token" => "Counter", "code" => "Counter"})
 

@@ -332,6 +332,10 @@ defmodule BtAttachWeb.WorkspaceGitRevertRefreshTest do
     test "a ClassRemoved push is handled without crashing the LiveView", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
+      # races the class-tree/browser-classes load under scheduler load or --cover.
+      render_async(view)
+
       send(view.pid, {:beamtalk_announcement, make_ref(), :ClassRemoved, :handler, %{}})
 
       # The process survives and the refresh re-pulls the browser class list.

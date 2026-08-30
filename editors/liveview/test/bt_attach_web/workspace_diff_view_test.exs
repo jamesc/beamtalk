@@ -68,6 +68,10 @@ defmodule BtAttachWeb.WorkspaceDiffViewTest do
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
+      # races the class-tree/browser-classes load under scheduler load or --cover.
+      render_async(view)
+
       # Record a change so the Changes table has a row carrying the seeded diff.
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
