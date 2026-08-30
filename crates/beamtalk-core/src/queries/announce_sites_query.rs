@@ -49,6 +49,7 @@
 //! contribute results. A completely unparseable source returns an empty list.
 
 use super::selector_span;
+use crate::announce_selectors::is_announce_selector;
 use crate::ast::{Expression, Pattern, StringSegment};
 use crate::source_analysis::{Span, lex_with_eof, parse};
 
@@ -59,11 +60,6 @@ const PREFIX_LINES: u32 = 1;
 /// The synthetic class header used to make a bare method definition parseable.
 /// The single newline at the end is counted by [`PREFIX_LINES`].
 const SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticAnnounceSitesScope\n";
-
-/// The announce selectors recognised as emission sites. The event argument is
-/// always the first keyword argument; `announceAndWait:timeout:` carries the
-/// timeout as a second argument, which is ignored here.
-const ANNOUNCE_SELECTORS: [&str; 3] = ["announce:", "announceAndWait:", "announceAndWait:timeout:"];
 
 /// A single `announce:` emission site discovered while walking a method's AST.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,11 +105,6 @@ pub fn find_announce_sites_in_source(method_source: &str) -> Vec<AnnounceHit> {
         hit.line = hit.line.saturating_sub(PREFIX_LINES).max(1);
     }
     hits
-}
-
-/// Whether `selector_name` is one of the recognised announce selectors.
-pub(crate) fn is_announce_selector(selector_name: &str) -> bool {
-    ANNOUNCE_SELECTORS.contains(&selector_name)
 }
 
 /// Resolve an `announce:` event argument expression to its announcement class

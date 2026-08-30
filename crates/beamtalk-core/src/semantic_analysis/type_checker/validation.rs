@@ -15,6 +15,7 @@
 
 use std::collections::HashMap;
 
+use crate::announce_selectors::is_announce_selector;
 use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
@@ -980,7 +981,7 @@ impl TypeChecker {
         // Two boundaries share this check (ADR 0103): actor *instance* message
         // arguments (#1) and Announcement payloads (#3) — both copy the term
         // across a process boundary. The wording differs; the tier rule does not.
-        let is_announce = crate::queries::announce_sites_query::is_announce_selector(selector);
+        let is_announce = is_announce_selector(selector);
         let is_actor_message = !is_class_side && receiver_is_actor;
         if !is_announce && !is_actor_message {
             return;
