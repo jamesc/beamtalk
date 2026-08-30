@@ -36,10 +36,16 @@ use proptest::prelude::*;
 /// Near-valid Beamtalk fragments for REPL codegen testing.
 ///
 /// Deliberately duplicated from `beamtalk-core/tests/codegen_property_tests.rs`
-/// rather than shared: the two files are integration tests of different
-/// crates (`beamtalk-repl` vs `beamtalk-core`), so sharing this small,
-/// test-only fixture generator would require a new shared test-support
-/// crate — disproportionate for a handful of literal fragments.
+/// rather than shared through `beamtalk_core::test_helpers::test_support`
+/// (the established shared-leaf home for cross-crate property-test
+/// generators, e.g. `arb_declared_type`, BT-3100): unlike that generator,
+/// this one has no correctness-sensitive invariant that could silently
+/// drift, and this repo's own precedent already treats it as below the
+/// threshold worth extracting — `codegen::core_erlang_validity_tests`
+/// keeps its own copy of this exact array/generator alongside imports of
+/// *other* `test_support` helpers in the very same file, despite being
+/// unit tests inside `beamtalk-core` itself with no cross-crate feature
+/// gymnastics needed to share it.
 const FRAGMENTS: &[&str] = &[
     "42",
     "\"hello\"",
