@@ -109,29 +109,21 @@ const LANGUAGE_SERVICE_MODULES: &[&str] = &["queries", "language_service", "lint
 /// going unscanned.
 const OTHER_MODULES: &[&str] = &["repl", "project"];
 
-/// Known, already-tracked violations ADR 0117 Decision step 3 (BT-3341,
-/// BT-3342) removes. Keyed by (file path relative to repo root, target
-/// module, *exact* `crate::...` path text of the one tracked edge) — not
-/// just (file, module), so that a new, unrelated edge from the same file
-/// into the same module (e.g. a second `queries::` call added later) still
-/// fails instead of silently matching this entry. Remove an entry here in
-/// the *same* PR that removes the corresponding edge from the code — this
-/// list exists to stop *new* edges from landing while these two are still
-/// open, not to launder them indefinitely. `run()` fails if an entry here no
-/// longer matches a real edge, so it can't silently go stale either.
-const ALLOWLIST: &[(&str, &str, &str)] = &[
-    // BT-3341 (blocked by this check, BT-3339): the ADR 0103 process-
-    // boundary sendability check reaches into
-    // `queries::announce_sites_query::is_announce_selector` — a
-    // three-string membership check, not a real query dependency. ADR 0117
-    // Decision step 3 moves it into a shared leaf module below both
-    // `semantic_analysis` and `queries` (pattern: `synthetic_selectors.rs`).
-    (
-        "crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs",
-        "queries",
-        "crate::queries::announce_sites_query::is_announce_selector",
-    ),
-];
+/// Known, already-tracked violations ADR 0117 Decision step 3 (BT-3342)
+/// removes. Keyed by (file path relative to repo root, target module,
+/// *exact* `crate::...` path text of the one tracked edge) — not just
+/// (file, module), so that a new, unrelated edge from the same file into
+/// the same module (e.g. a second `queries::` call added later) still fails
+/// instead of silently matching this entry. Remove an entry here in the
+/// *same* PR that removes the corresponding edge from the code — this list
+/// exists to stop *new* edges from landing while these are still open, not
+/// to launder them indefinitely. `run()` fails if an entry here no longer
+/// matches a real edge, so it can't silently go stale either.
+///
+/// BT-3341 (the `queries::announce_sites_query::is_announce_selector` edge)
+/// was fixed by moving `is_announce_selector` into the shared leaf module
+/// `announce_selectors.rs`; its entry has been removed from this list.
+const ALLOWLIST: &[(&str, &str, &str)] = &[];
 
 /// True when `entry` (a single [`ALLOWLIST`] tuple: file, target module,
 /// exact `crate::...` path text) covers the edge described by `file`,

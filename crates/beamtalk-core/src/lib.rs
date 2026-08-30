@@ -14,6 +14,7 @@
 
 #![doc = include_str!("../../../README.md")]
 
+pub(crate) mod announce_selectors;
 pub mod ast;
 // BT-3340: widened from `pub(crate)` — `for_each_expr_seq` is used by the
 // standalone `beamtalk-lint` crate now that `lint` has moved out of this
