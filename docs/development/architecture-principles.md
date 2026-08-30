@@ -79,11 +79,28 @@ use beamtalk_cli::repl::ReplContext; // ❌ WRONG!
 
 ### Enforcement
 
-**Decision:** Document only (no automated enforcement)
+**Decision:** Document only (no automated enforcement) for the binary/library layer boundary above.
 
 **Rationale:** Solo developer, code review sufficient. Can add `cargo-deny` later if team grows.
 
 **Action on violation:** Flag in code review, refactor immediately.
+
+**Exception — `beamtalk-core`'s own Compilation/Language Service boundary is
+automatically enforced.** ADR 0117 found this diagram's `queries/ (Language
+Service)` line had silently drifted out of sync with the code (a
+`semantic_analysis → queries` production edge, plus an extensive `queries ⇄
+language_service` cycle, existed with nothing to catch them) — exactly the
+failure mode "document only" accepts the risk of. `just check-boundary`
+(`crates/beamtalk-boundary-check`, BT-3339) now fails CI if a production
+`use`/fully-qualified edge inside `beamtalk-core` crosses from the
+Compilation bounded context (`ast`, `source_analysis`, `unparse`, `codegen`,
+`semantic_analysis`, `compilation`) into Language Service (`queries`,
+`language_service`, `lint`); the reverse direction is unrestricted. This
+doesn't change the "document only" decision for the coarser binary/library
+boundary above — only for this specific, already-drifted-once edge. See
+`docs/ADR/0117-beamtalk-core-crate-split.md`; the layer diagram above still
+reflects that ADR's *aspirational* module names (`parse`/`analyse`) rather
+than the real ones, corrected as later phases of that ADR land.
 
 ---
 
