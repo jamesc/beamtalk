@@ -127,6 +127,13 @@ jobs:
         # docs/development/surface-parity.md. Fails fast on inventory drift.
         run: just check-surface-drift
 
+      - name: Compilation → Language Service boundary check (BT-3339)
+        # Fails if a production edge inside beamtalk-core crosses from the
+        # Compilation bounded context (ast/source_analysis/unparse/codegen/
+        # semantic_analysis/compilation) into Language Service (queries/
+        # language_service/lint) — see ADR 0117 Decision step 1.
+        run: just check-boundary
+
   # ─── Desktop app (Tauri) crate tests (BT-3061) ─────────────────────────
   # desktop/src-tauri is excluded from the root Cargo workspace (root
   # Cargo.toml's `exclude`, see desktop/README.md) because it needs the

@@ -1,0 +1,32 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-boundary-check"
+description = "Compilation -> Language Service dependency-direction checker (BT-3339 / ADR 0117)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["beamtalk", "architecture", "dependency", "ci"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "beamtalk-boundary-check"
+path = "src/main.rs"
+
+[dependencies]
+# Real Rust parser (not text/regex heuristics) so `use` edges and
+# fully-qualified `crate::module::...` call sites are found precisely,
+# without the string-literal/brace-counting pitfalls a hand-rolled
+# text scanner would hit (Rust source is full of `{}` inside string
+# literals — format!() calls, error messages, etc.). Build-time only,
+# not shipped in any release artifact.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+
+[lints]
+workspace = true
