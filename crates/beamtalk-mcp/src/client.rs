@@ -14,6 +14,7 @@ use std::time::Duration;
 
 pub use beamtalk_repl_protocol::ReplResponse;
 use beamtalk_repl_protocol::RequestBuilder;
+use beamtalk_repl_protocol::handshake;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::{
@@ -894,21 +895,19 @@ async fn perform_auth_handshake<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    // Read auth-required
+    // Read auth-required. Frame recognition goes through
+    // `beamtalk_repl_protocol::handshake` (BT-3330) rather than re-matching
+    // the JSON here — see that module's doc comment for why.
     let auth_required = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
     let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
         .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
-    match auth_required_json.get("op").and_then(|v| v.as_str()) {
-        Some("auth-required") => {}
-        _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
+    if !handshake::is_auth_required(&auth_required_json) {
+        return Err(format!("Unexpected pre-auth message: {auth_required_json}"));
     }
 
     // Send auth with optional resume. `client` tags the session surface so
     // `Workspace sessions` can show it originated from the MCP server.
-    let mut auth_msg = serde_json::json!({"type": "auth", "cookie": cookie, "client": "mcp"});
-    if let Some(r) = resume {
-        auth_msg["resume"] = serde_json::Value::String(r.to_string());
-    }
+    let auth_msg = handshake::auth_request(cookie, "mcp", resume);
     let auth_str =
         serde_json::to_string(&auth_msg).map_err(|e| format!("Failed to serialize auth: {e}"))?;
     ws.send(Message::Text(auth_str.into()))
@@ -919,30 +918,23 @@ where
     let auth_response = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
     let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
         .map_err(|e| format!("Failed to parse auth response: {e}"))?;
-    match auth_json.get("type").and_then(|t| t.as_str()) {
-        Some("auth_ok") => {}
-        Some("auth_error") => {
-            let msg = auth_json
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Authentication failed");
+    match handshake::parse_auth_ack(&auth_json) {
+        Some(handshake::AuthAck::Ok) => {}
+        Some(handshake::AuthAck::Error { message }) => {
+            let msg = message.as_deref().unwrap_or("Authentication failed");
             return Err(format!("Workspace authentication failed: {msg}"));
         }
-        _ => return Err(format!("Unexpected auth response: {auth_json}")),
+        None => return Err(format!("Unexpected auth response: {auth_json}")),
     }
 
     // Read session-started
     let session_started = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
     let session_json: serde_json::Value = serde_json::from_str(&session_started)
         .map_err(|e| format!("Failed to parse session-started: {e}"))?;
-    match session_json.get("op").and_then(|v| v.as_str()) {
-        Some("session-started") => {}
-        _ => return Err(format!("Unexpected post-auth message: {session_json}")),
+    if !handshake::is_session_started(&session_json) {
+        return Err(format!("Unexpected post-auth message: {session_json}"));
     }
-    Ok(session_json
-        .get("session")
-        .and_then(|v| v.as_str())
-        .map(String::from))
+    Ok(handshake::session_id(&session_json))
 }
 
 /// Read the next text message from a WebSocket stream.

@@ -295,6 +295,77 @@ auth_invalid_cookie_rejected_test() ->
     ?assert(lists:keymember(close, 1, Frames)).
 
 %%% ===========================================================================
+%%% BT-3330: shared wire-corpus conformance (auth handshake)
+%%% ===========================================================================
+%%%
+%%% This module's *production* code — `websocket_init/1` and
+%%% `websocket_handle/2`'s auth branches, not a transcription of them — is
+%%% checked here against the same JSON fixture the Rust side reads in
+%%% `beamtalk-repl-protocol/src/handshake.rs: matches_shared_wire_corpus`.
+%%% Neither side hand-derives the other's expected literal values; both read
+%%% `ws_auth_handshake_wire_corpus.json`. See that Rust module's doc comment
+%%% and `docs/development/architecture-principles.md` §6. The success-path
+%%% case (`auth_ok` + `session-started`) lives in `auth_session_test_/0`
+%%% below — it needs the same live session supervisor the other post-auth
+%%% success tests do.
+
+%% Load the shared auth-handshake wire-string conformance corpus from the
+%% repo tree (BT-3099's `beamtalk_test_corpus` walks up from the test CWD to
+%% the project root, then reads the fixture both surfaces share).
+load_ws_auth_handshake_wire_corpus() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "ws_auth_handshake_wire_corpus.json"
+    ]).
+
+%% Pull the one case with `id` = Id out of the corpus.
+wire_corpus_case(Id, Cases) ->
+    case [C || C <- Cases, maps:get(<<"id">>, C) =:= Id] of
+        [Case] -> Case;
+        _ -> error({wire_corpus_case_not_found, Id})
+    end.
+
+%% Assert every field in a corpus case's `frame` that is NOT listed in its
+%% `dynamic_fields` is present in `Actual` with an identical value. Dynamic
+%% fields (cookies, session ids) legitimately vary per connection, so their
+%% presence — not their exact value — is the contract; skip them here.
+assert_fixed_fields(Case, Actual) ->
+    Frame = maps:get(<<"frame">>, Case),
+    Dynamic = maps:get(<<"dynamic_fields">>, Case),
+    maps:foreach(
+        fun(K, V) ->
+            case lists:member(K, Dynamic) of
+                true -> ?assert(maps:is_key(K, Actual));
+                false -> ?assertEqual(V, maps:get(K, Actual, undefined))
+            end
+        end,
+        Frame
+    ).
+
+handshake_pre_auth_frame_matches_shared_wire_corpus_test() ->
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    AuthRequired = wire_corpus_case(<<"auth_required">>, Cases),
+    {[{text, Bin}], _State} = beamtalk_ws_handler:websocket_init(unauth_state()),
+    assert_fixed_fields(AuthRequired, json:decode(Bin)).
+
+handshake_auth_error_matches_shared_wire_corpus_test() ->
+    %% Same invalid-cookie scenario as auth_invalid_cookie_rejected_test/0,
+    %% checked against the shared corpus's auth_error case instead of a
+    %% hand-written expectation.
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    AuthError = wire_corpus_case(<<"auth_error">>, Cases),
+    WrongCookie = <<"definitely-not-the-node-cookie-xyzzy">>,
+    Json = iolist_to_binary(
+        json:encode(#{<<"type">> => <<"auth">>, <<"cookie">> => WrongCookie})
+    ),
+    {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    assert_fixed_fields(AuthError, first_text(Frames)).
+
+%%% ===========================================================================
 %%% websocket_handle/2 — non-text frames + post-auth dispatch
 %%% ===========================================================================
 
@@ -975,13 +1046,38 @@ has_frame_with(Frames, K, V) ->
         Frames
     ).
 
+%% Like has_frame_with/3, but returns the decoded frame itself instead of a
+%% boolean — used by the BT-3330 shared-corpus checks, which need to compare
+%% more than one field on the matched frame.
+first_frame_with(Frames, K, V) ->
+    Decoded = lists:filtermap(
+        fun
+            ({text, Bin}) ->
+                case catch json:decode(Bin) of
+                    M when is_map(M) -> {true, M};
+                    _ -> false
+                end;
+            (_) ->
+                false
+        end,
+        Frames
+    ),
+    case [D || D <- Decoded, maps:get(K, D, undefined) =:= V] of
+        [Match | _] -> Match;
+        [] -> error({no_frame_with, K, V, Frames})
+    end.
+
 auth_session_test_() ->
     {foreach, fun session_setup/0, fun session_cleanup/1, [
         fun(_) -> {"auth success creates session", fun auth_success_creates_session/0} end,
         fun(_) -> {"resume alive session", fun resume_alive_session/0} end,
         fun(_) -> {"resume dead session creates new", fun resume_dead_session_creates_new/0} end,
         fun(_) -> {"resume unknown session creates new", fun resume_unknown_creates_new/0} end,
-        fun(_) -> {"non-binary resume creates new", fun resume_non_binary_creates_new/0} end
+        fun(_) -> {"non-binary resume creates new", fun resume_non_binary_creates_new/0} end,
+        fun(_) ->
+            {"auth success matches shared wire corpus",
+                fun handshake_success_matches_shared_wire_corpus/0}
+        end
     ]}.
 
 auth_success_creates_session() ->
@@ -991,6 +1087,24 @@ auth_success_creates_session() ->
     ?assert(is_pid(State#ws_state.session_pid)),
     ?assert(has_frame_with(Frames, <<"type">>, <<"auth_ok">>)),
     ?assert(has_frame_with(Frames, <<"op">>, <<"session-started">>)).
+
+%% BT-3330: completes the shared-corpus conformance checks started above
+%% (`handshake_pre_auth_frame_matches_shared_wire_corpus_test/0`,
+%% `handshake_auth_error_matches_shared_wire_corpus_test/0`) with the
+%% success-path frames, which need this fixture's live session supervisor.
+handshake_success_matches_shared_wire_corpus() ->
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    AuthOk = wire_corpus_case(<<"auth_ok">>, Cases),
+    SessionStarted = wire_corpus_case(<<"session_started">>, Cases),
+    AuthRequest = wire_corpus_case(<<"auth_request">>, Cases),
+    ClientSurface = maps:get(<<"client">>, maps:get(<<"frame">>, AuthRequest)),
+    Json = auth_json(#{<<"client">> => ClientSurface}),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assert(State#ws_state.authenticated),
+    assert_fixed_fields(AuthOk, first_frame_with(Frames, <<"type">>, <<"auth_ok">>)),
+    assert_fixed_fields(
+        SessionStarted, first_frame_with(Frames, <<"op">>, <<"session-started">>)
+    ).
 
 resume_alive_session() ->
     %% A live process registered as an existing session triggers the resume

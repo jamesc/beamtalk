@@ -13,6 +13,7 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use beamtalk_repl_protocol::handshake;
 use miette::{IntoDiagnostic, Result, miette};
 use tungstenite::{Error as WsError, Message, WebSocket};
 
@@ -132,53 +133,44 @@ impl ProtocolClient {
     /// 3. Receive `auth_ok` (or `auth_error` on bad credentials).
     /// 4. Receive `session-started`; populate `self.session_id`.
     ///
-    /// Mirrors the pattern established in the MCP client
-    /// (`beamtalk-mcp/src/client.rs: perform_auth_handshake`).
+    /// Frame building/recognition is shared with the MCP client
+    /// (`beamtalk-mcp/src/client.rs: perform_auth_handshake`) and the other
+    /// Rust surfaces via `beamtalk_repl_protocol::handshake` (BT-3330) — only
+    /// the I/O below (sync `tungstenite` reads/writes) is specific to this
+    /// client.
     fn perform_auth_handshake(&mut self, resume: Option<&str>) -> Result<()> {
-        // Read auth-required message (pre-auth, no session yet)
+        // Read auth-required message (pre-auth, no session yet).
         let auth_required = self.read_response()?;
-        match auth_required.get("op").and_then(|v| v.as_str()) {
-            Some("auth-required") => {}
-            _ => return Err(miette!("Unexpected pre-auth message: {auth_required}")),
+        if !handshake::is_auth_required(&auth_required) {
+            return Err(miette!("Unexpected pre-auth message: {auth_required}"));
         }
 
         // Build auth message with optional resume field. `client` records the
         // originating surface so `Workspace sessions` can show where a session
         // came from; every CLI command (repl, transcript, completion probe)
         // connects through this client, so they all report `repl`.
-        let mut auth_msg =
-            serde_json::json!({"type": "auth", "cookie": self.cookie.as_str(), "client": "repl"});
-        if let Some(res) = resume {
-            auth_msg["resume"] = serde_json::Value::String(res.to_string());
-        }
+        let auth_msg = handshake::auth_request(self.cookie.as_str(), "repl", resume);
         self.send_only(&auth_msg)?;
 
         // Read auth response
         let auth_response = self.read_response()?;
-        match auth_response.get("type").and_then(|t| t.as_str()) {
-            Some("auth_ok") => {}
-            Some("auth_error") => {
-                let msg = auth_response
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Authentication failed");
+        match handshake::parse_auth_ack(&auth_response) {
+            Some(handshake::AuthAck::Ok) => {}
+            Some(handshake::AuthAck::Error { message }) => {
+                let msg = message.as_deref().unwrap_or("Authentication failed");
                 return Err(miette!("Workspace authentication failed: {msg}"));
             }
-            _ => {
+            None => {
                 return Err(miette!("Unexpected auth response: {}", auth_response));
             }
         }
 
         // Read session-started message (sent after auth_ok)
         let session_msg = self.read_response()?;
-        match session_msg.get("op").and_then(|v| v.as_str()) {
-            Some("session-started") => {}
-            _ => return Err(miette!("Unexpected session message: {session_msg}")),
+        if !handshake::is_session_started(&session_msg) {
+            return Err(miette!("Unexpected session message: {session_msg}"));
         }
-        self.session_id = session_msg
-            .get("session")
-            .and_then(|s| s.as_str())
-            .map(String::from);
+        self.session_id = handshake::session_id(&session_msg);
 
         Ok(())
     }

@@ -12,6 +12,7 @@
 //! diverging when the protocol evolves.
 
 pub mod format;
+pub mod handshake;
 mod request;
 mod response;
 
