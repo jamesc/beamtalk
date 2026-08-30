@@ -36,10 +36,10 @@
 
 use std::collections::HashSet;
 
+use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
-use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Lint pass that warns about dead variable assignments inside blocks on value types.

@@ -25,8 +25,10 @@
 
 use std::collections::HashSet;
 
-use beamtalk_core::ast::{Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment};
 use crate::LintPass;
+use beamtalk_core::ast::{
+    Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
+};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns when a block parameter name shadows an outer variable.

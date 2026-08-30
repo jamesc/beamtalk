@@ -24,8 +24,10 @@
 
 use std::collections::HashSet;
 
-use beamtalk_core::ast::{ClassDefinition, ClassKind, Expression, Identifier, MethodDefinition, Module};
 use crate::{LintPass, hierarchy_for_lint};
+use beamtalk_core::ast::{
+    ClassDefinition, ClassKind, Expression, Identifier, MethodDefinition, Module,
+};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
 

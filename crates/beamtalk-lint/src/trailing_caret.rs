@@ -14,8 +14,8 @@
 //! increment => count + 1
 //! ```
 
-use beamtalk_core::ast::{Expression, MethodDefinition, Module};
 use crate::LintPass;
+use beamtalk_core::ast::{Expression, MethodDefinition, Module};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that flags redundant trailing `^` on the last method expression.

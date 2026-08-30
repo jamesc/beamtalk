@@ -17,8 +17,8 @@
 //! answer => 42
 //! ```
 
-use beamtalk_core::ast::Module;
 use crate::LintPass;
+use beamtalk_core::ast::Module;
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that flags effect-free statements whose values are silently discarded.

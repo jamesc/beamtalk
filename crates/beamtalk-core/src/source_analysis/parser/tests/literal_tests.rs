@@ -919,7 +919,6 @@ fn parse_match_with_guard() {
     }
 }
 
-
 /// Non-local return (`^`) inside a match arm body should parse as `Return`.
 #[test]
 fn match_arm_with_non_local_return() {

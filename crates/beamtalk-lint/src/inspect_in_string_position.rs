@@ -24,8 +24,8 @@
 //! "result: {x printString}"
 //! ```
 
-use beamtalk_core::ast::{Expression, MessageSelector, Module, StringSegment};
 use crate::LintPass;
+use beamtalk_core::ast::{Expression, MessageSelector, Module, StringSegment};
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that warns on `inspect` sends used directly in string position

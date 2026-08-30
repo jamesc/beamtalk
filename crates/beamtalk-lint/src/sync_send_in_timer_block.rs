@@ -19,8 +19,8 @@
 //! Timer every: 1000 do: [self refresh!]
 //! ```
 
-use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector, Module};
 use crate::LintPass;
+use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector, Module};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on synchronous `self` sends inside `Timer every:do:`

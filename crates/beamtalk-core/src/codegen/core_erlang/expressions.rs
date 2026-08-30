@@ -2313,6 +2313,11 @@ impl CoreErlangGenerator {
     /// Returns `(extraction_docs, bound_pairs)` where:
     /// - `extraction_docs` are the element-extraction let-bindings
     /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodeGenError`] if the pattern uses an unsupported shape or
+    /// element extraction otherwise fails.
     #[allow(clippy::too_many_lines, clippy::type_complexity)]
     // BT-3340: widened from `pub(crate)` — `beamtalk-repl` calls this while
     // destructuring a REPL binding pattern against an already-evaluated RHS.

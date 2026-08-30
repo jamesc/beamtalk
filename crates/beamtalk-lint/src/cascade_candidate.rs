@@ -21,8 +21,8 @@
 //! because they may have side effects and are not straightforward to extract
 //! into a single cascade receiver.
 
-use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
 use crate::LintPass;
+use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on 3+ consecutive message sends to the same simple

@@ -2715,8 +2715,7 @@ fn run_module_analysis(
 fn build_native_type_registry(
     path: &str,
 ) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
-    let project_root =
-        beamtalk_project::package::find_package_root(std::path::Path::new(path))?;
+    let project_root = beamtalk_project::package::find_package_root(std::path::Path::new(path))?;
     let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
     let layout = beamtalk_cli::build_layout::BuildLayout::new(&project_root);
     beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
@@ -2968,10 +2967,7 @@ fn resolve_extraction_files(
     Vec<std::path::PathBuf>,
     std::collections::HashSet<std::path::PathBuf>,
 ) {
-    beamtalk_project::package::resolve_extraction_files(
-        std::path::Path::new(path),
-        source_files,
-    )
+    beamtalk_project::package::resolve_extraction_files(std::path::Path::new(path), source_files)
 }
 
 /// BT-2921: Resolve the current package name from `path`'s `beamtalk.toml`,
@@ -2985,8 +2981,7 @@ fn resolve_extraction_files(
 /// malformed (visibility checks conservatively disabled, matching CLI lint's
 /// error-path behaviour).
 fn resolve_current_package(path: &str) -> Option<String> {
-    let project_root =
-        beamtalk_project::package::find_package_root(std::path::Path::new(path))?;
+    let project_root = beamtalk_project::package::find_package_root(std::path::Path::new(path))?;
     let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
     match beamtalk_cli::manifest::find_manifest_full(&project_root) {
         Ok(Some(m)) => Some(m.package.name),

@@ -22,9 +22,9 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
+use crate::LintPass;
 use beamtalk_core::ast::{Block, Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::for_each_expr_seq;
-use crate::LintPass;
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on `Expression::Parenthesized` wrapping expressions

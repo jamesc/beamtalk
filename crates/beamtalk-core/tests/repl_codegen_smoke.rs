@@ -1594,7 +1594,6 @@ fn test_string_interpolation_simple_variable() {
     );
 }
 
-
 #[test]
 fn test_string_interpolation_multiple_expressions() {
     // "a{x}b{y}c" — multiple expression segments
@@ -1624,7 +1623,6 @@ fn test_string_interpolation_multiple_expressions() {
     );
 }
 
-
 #[test]
 fn test_string_interpolation_only_expression() {
     // "{name}" — only an interpolation, no literal segments
@@ -1647,7 +1645,6 @@ fn test_string_interpolation_only_expression() {
     );
 }
 
-
 #[test]
 fn test_string_interpolation_integer_expression() {
     // "{42}" — integer literal in interpolation
@@ -1666,7 +1663,6 @@ fn test_string_interpolation_integer_expression() {
         "Should dispatch displayString on integer. Got:\n{code}"
     );
 }
-
 
 // ---- extracted from crates/beamtalk-core/src/source_analysis/parser/tests/literal_tests.rs:921-931 ----
 
@@ -1703,4 +1699,3 @@ fn codegen_empty_match_errors() {
     let result = beamtalk_repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_err(), "Empty match should fail codegen");
 }
-

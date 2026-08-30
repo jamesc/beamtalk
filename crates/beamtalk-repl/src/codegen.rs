@@ -20,7 +20,9 @@ use beamtalk_core::ast::{Expression, Pattern};
 use beamtalk_core::codegen::core_erlang::document::Document;
 use beamtalk_core::codegen::core_erlang::document::leaf;
 use beamtalk_core::codegen::core_erlang::document::leaf::{atom, var};
-use beamtalk_core::codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use beamtalk_core::codegen::core_erlang::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, Result,
+};
 use beamtalk_core::docvec;
 
 // ── Public API ──────────────────────────────────────────────────────────

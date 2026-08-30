@@ -2117,10 +2117,7 @@ impl CoreErlangGenerator {
     /// Sets the class module index, initialising the context if absent.
     // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this before
     // generating a REPL module so cross-class self-sends resolve.
-    pub fn set_class_module_index(
-        &mut self,
-        index: std::collections::HashMap<String, String>,
-    ) {
+    pub fn set_class_module_index(&mut self, index: std::collections::HashMap<String, String>) {
         self.class_context_mut().class_module_index = index;
     }
 

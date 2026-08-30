@@ -74,7 +74,12 @@ fn near_valid_beamtalk() -> impl Strategy<Value = String> {
             } else {
                 (1..len)
                     .prop_map(move |cut| {
-                        let safe_cut = s.floor_char_boundary(cut);
+                        // MSRV-1.85-compatible stand-in for `str::floor_char_boundary`
+                        // (stable since 1.91, past this crate's pinned MSRV).
+                        let mut safe_cut = cut;
+                        while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
+                            safe_cut -= 1;
+                        }
                         if safe_cut == 0 {
                             s.clone()
                         } else {
