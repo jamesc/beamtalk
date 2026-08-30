@@ -16,13 +16,17 @@
 //! is full of `{}` inside string literals, which defeats brace-counting) and
 //! fails when a production `use crate::<module>::...` import or
 //! fully-qualified `crate::<module>::...` path reaches into `queries`,
-//! `language_service`, or `lint`.
+//! `language_service`, or `lint`. That includes a `crate::<module>::...`
+//! reference written inside a macro call (`format!`, `assert_eq!`, `vec!`,
+//! ...) — macro bodies are opaque token streams to `syn`'s AST-level `Path`
+//! visitor, so those are found by a separate raw-token scan, not missed.
 //!
 //! Test-only edges are allowed (Cargo permits cyclic dev-dependencies): any
 //! item gated by `#[cfg(test)]` (directly, or nested inside an enclosing
-//! `#[cfg(test)] mod`) or `#[test]`, and any whole file under a `tests/`
-//! directory or named `test(s).rs` / `*_test(s).rs` / `test_*.rs`, is
-//! skipped.
+//! `#[cfg(test)] mod`), `#[test]`, or a multi-segment test-runner attribute
+//! ending in `::test` (`#[tokio::test]`, `#[async_std::test]`, ...), and any
+//! whole file under a `tests/` directory or named `test(s).rs` /
+//! `*_test(s).rs` / `test_*.rs`, is skipped.
 //!
 //! Run via `just check-boundary` — the binary discovers the repo root by
 //! walking up from `CARGO_MANIFEST_DIR`, so it can be invoked from any
@@ -33,7 +37,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use proc_macro2::Span;
+use proc_macro2::{Span, TokenStream, TokenTree};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::visit::Visit;
@@ -62,12 +66,15 @@ const LANGUAGE_SERVICE_MODULES: &[&str] = &["queries", "language_service", "lint
 
 /// Known, already-tracked violations ADR 0117 Decision step 3 (BT-3341,
 /// BT-3342) removes. Keyed by (file path relative to repo root, target
-/// module). Remove an entry here in the *same* PR that removes the
-/// corresponding edge from the code — this list exists to stop *new* edges
-/// from landing while these two are still open, not to launder them
-/// indefinitely. `run()` fails if an entry here no longer matches a real
-/// edge, so it can't silently go stale either.
-const ALLOWLIST: &[(&str, &str)] = &[
+/// module, *exact* `crate::...` path text of the one tracked edge) — not
+/// just (file, module), so that a new, unrelated edge from the same file
+/// into the same module (e.g. a second `queries::` call added later) still
+/// fails instead of silently matching this entry. Remove an entry here in
+/// the *same* PR that removes the corresponding edge from the code — this
+/// list exists to stop *new* edges from landing while these two are still
+/// open, not to launder them indefinitely. `run()` fails if an entry here no
+/// longer matches a real edge, so it can't silently go stale either.
+const ALLOWLIST: &[(&str, &str, &str)] = &[
     // BT-3341 (blocked by this check, BT-3339): the ADR 0103 process-
     // boundary sendability check reaches into
     // `queries::announce_sites_query::is_announce_selector` — a
@@ -77,8 +84,24 @@ const ALLOWLIST: &[(&str, &str)] = &[
     (
         "crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs",
         "queries",
+        "crate::queries::announce_sites_query::is_announce_selector",
     ),
 ];
+
+/// True when `entry` (a single [`ALLOWLIST`] tuple: file, target module,
+/// exact `crate::...` path text) covers the edge described by `file`,
+/// `module`, and `path_text`. Scoped to the exact path text — not just
+/// (file, module) — so an entry allow-listing one specific call site never
+/// silently swallows a different, unrelated edge that happens to share the
+/// same file and target module.
+fn allowlist_matches(
+    entry: &(&str, &str, &str),
+    file: &str,
+    module: &str,
+    path_text: &str,
+) -> bool {
+    entry.0 == file && entry.1 == module && entry.2 == path_text
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -115,7 +138,7 @@ fn run() -> Result<(), Vec<String>> {
     let core_src = repo_root.join(CORE_SRC);
 
     let mut violations = Vec::new();
-    let mut allowlist_matched: HashSet<(String, String)> = HashSet::new();
+    let mut allowlist_matched: HashSet<(String, String, String)> = HashSet::new();
     let mut files_scanned = 0usize;
 
     for module in COMPILATION_MODULES {
@@ -153,10 +176,14 @@ fn run() -> Result<(), Vec<String>> {
                 if !LANGUAGE_SERVICE_MODULES.contains(&edge.target_module.as_str()) {
                     continue;
                 }
-                let allow_key = (rel.clone(), edge.target_module.clone());
+                let allow_key = (
+                    rel.clone(),
+                    edge.target_module.clone(),
+                    edge.path_text.clone(),
+                );
                 if ALLOWLIST
                     .iter()
-                    .any(|(f, t)| *f == allow_key.0 && *t == allow_key.1)
+                    .any(|e| allowlist_matches(e, &allow_key.0, &allow_key.1, &allow_key.2))
                 {
                     allowlist_matched.insert(allow_key);
                     continue;
@@ -184,13 +211,19 @@ fn run() -> Result<(), Vec<String>> {
 
     // Every ALLOWLIST entry must correspond to a real, still-present edge —
     // otherwise the allowlist has gone stale (the violation was fixed, or
-    // never existed under that path) and should be deleted.
-    for (file, target) in ALLOWLIST {
-        if !allowlist_matched.contains(&((*file).to_string(), (*target).to_string())) {
+    // never existed under that path/text) and should be deleted.
+    for (file, target, path_text) in ALLOWLIST {
+        let key = (
+            (*file).to_string(),
+            (*target).to_string(),
+            (*path_text).to_string(),
+        );
+        if !allowlist_matched.contains(&key) {
             violations.push(format!(
-                "ALLOWLIST entry ({file}, {target}) in \
+                "ALLOWLIST entry ({file}, {target}, {path_text}) in \
                  crates/beamtalk-boundary-check/src/main.rs no longer matches any edge — \
-                 remove it (the violation it covered appears to be fixed)."
+                 remove it (the violation it covered appears to be fixed, or its exact \
+                 `crate::...` path text changed and the entry needs updating)."
             ));
         }
     }
@@ -314,6 +347,35 @@ impl EdgeVisitor {
             column: start.column + 1,
         });
     }
+
+    /// Macro bodies (`format!(...)`, `assert_eq!(...)`, `vec![...]`, a
+    /// custom `docvec!`, ...) are opaque `TokenStream`s to `syn` — none of
+    /// their contents show up as `Path` AST nodes, so `visit_path` alone
+    /// never sees a `crate::<module>::...` reference written inside one.
+    /// This walks the raw tokens (recursing into `(...)`/`[...]`/`{...}`
+    /// groups, since a macro's own delimiters and any nested call like
+    /// `assert_eq!(f(crate::queries::x()), 1)` are just more tokens) looking
+    /// for the `crate :: ident ( :: ident )*` pattern and records each hit
+    /// exactly like a real path edge.
+    fn scan_token_stream(&mut self, tokens: TokenStream) {
+        let toks: Vec<TokenTree> = tokens.into_iter().collect();
+        let mut i = 0;
+        while i < toks.len() {
+            if let TokenTree::Ident(id) = &toks[i] {
+                if id == "crate" {
+                    if let Some((module, path_text, span, next)) = parse_crate_path(&toks, i) {
+                        self.record(&module, path_text, span);
+                        i = next;
+                        continue;
+                    }
+                }
+            }
+            if let TokenTree::Group(g) = &toks[i] {
+                self.scan_token_stream(g.stream());
+            }
+            i += 1;
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for EdgeVisitor {
@@ -372,6 +434,15 @@ impl<'ast> Visit<'ast> for EdgeVisitor {
         }
         syn::visit::visit_path(self, path);
     }
+
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        // `visit_macro`'s default impl already walks `mac.path` (covering a
+        // macro invoked as `crate::some_module::some_macro!(...)`) through
+        // `visit_path` above; this additionally scans the macro's argument
+        // tokens, which the default impl does not descend into at all.
+        self.scan_token_stream(mac.tokens.clone());
+        syn::visit::visit_macro(self, mac);
+    }
 }
 
 fn path_to_string(path: &SynPath) -> String {
@@ -380,6 +451,44 @@ fn path_to_string(path: &SynPath) -> String {
         .map(|s| s.ident.to_string())
         .collect::<Vec<_>>()
         .join("::")
+}
+
+/// Parses a `crate :: ident ( :: ident )*` token pattern out of a raw macro
+/// token stream, starting at `toks[start]` (which must be the `crate`
+/// identifier — checked by the caller). Returns the module name (the first
+/// segment after `crate`), the full dotted path text (`crate::a::b::c`),
+/// the span of that first segment (for diagnostics — matches how
+/// [`EdgeVisitor::visit_path`] reports a real `Path` edge), and the index of
+/// the next unconsumed token. Returns `None` if `crate` isn't followed by at
+/// least one `:: ident` (a bare `crate` token some other way — there's no
+/// such usage in this codebase, but failing closed here would just mean a
+/// missed edge, not a false positive, so this is intentionally permissive
+/// about what counts as "a `::` pair").
+fn parse_crate_path(toks: &[TokenTree], start: usize) -> Option<(String, String, Span, usize)> {
+    let mut i = start + 1;
+    let mut segments: Vec<String> = Vec::new();
+    let mut first_span: Option<Span> = None;
+    while is_coloncolon(toks.get(i), toks.get(i + 1)) {
+        let TokenTree::Ident(seg) = toks.get(i + 2)? else {
+            break;
+        };
+        if first_span.is_none() {
+            first_span = Some(seg.span());
+        }
+        segments.push(seg.to_string());
+        i += 3;
+    }
+    let module = segments.first()?.clone();
+    let path_text = format!("crate::{}", segments.join("::"));
+    Some((module, path_text, first_span?, i))
+}
+
+/// True when the two tokens are the `::` pair (two adjacent `:` `Punct`
+/// tokens — `proc_macro2` always represents `::` this way, regardless of
+/// whether the first is reported as `Joint` or `Alone` spacing).
+fn is_coloncolon(a: Option<&TokenTree>, b: Option<&TokenTree>) -> bool {
+    matches!(a, Some(TokenTree::Punct(p)) if p.as_char() == ':')
+        && matches!(b, Some(TokenTree::Punct(p)) if p.as_char() == ':')
 }
 
 /// Recursively flattens a `UseTree` into (full segment path, span) leaves.
@@ -445,14 +554,16 @@ fn item_attrs(item: &Item) -> &[Attribute] {
     }
 }
 
-/// True for `#[test]`, or any `#[cfg(...)]` whose predicate mentions `test`
-/// as a bare, non-negated term (`cfg(test)`, `cfg(any(test, ...))`,
+/// True for `#[test]`, a multi-segment test-runner attribute ending in
+/// `::test` (`#[tokio::test]`, `#[async_std::test]`, `#[actix_rt::test]`,
+/// ...), or any `#[cfg(...)]` whose predicate mentions `test` as a bare,
+/// non-negated term (`cfg(test)`, `cfg(any(test, ...))`,
 /// `cfg(all(test, ...))`). `cfg(not(test))` deliberately does *not* count —
 /// erring toward still scanning code is the safe direction (it can only
 /// produce an over-strict false positive needing an allowlist entry, never
 /// hide a real production edge).
 fn is_test_gated(attr: &Attribute) -> bool {
-    if attr.path().is_ident("test") {
+    if is_test_attr_path(attr.path()) {
         return true;
     }
     if !attr.path().is_ident("cfg") {
@@ -462,6 +573,13 @@ fn is_test_gated(attr: &Attribute) -> bool {
         return false;
     };
     cfg_predicate_mentions_test(&meta)
+}
+
+/// `#[test]` is a single-segment path, but `#[tokio::test]` and friends are
+/// not — a bare `attr.path().is_ident("test")` only matches the former, so
+/// this also accepts any path whose *last* segment is `test`.
+fn is_test_attr_path(path: &SynPath) -> bool {
+    path.segments.last().is_some_and(|s| s.ident == "test")
 }
 
 fn cfg_predicate_mentions_test(meta: &Meta) -> bool {
@@ -609,5 +727,64 @@ mod tests {
         assert!(is_test_only_file(Path::new("a/b/test_helpers_only.rs")));
         assert!(!is_test_only_file(Path::new("a/b/validation.rs")));
         assert!(!is_test_only_file(Path::new("a/b/mod.rs")));
+    }
+
+    #[test]
+    fn finds_edge_inside_format_macro() {
+        let edges = edges_in("fn f() { let _ = format!(\"{}\", crate::queries::foo()); }\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "queries");
+        assert_eq!(edges[0].1, "crate::queries::foo");
+    }
+
+    #[test]
+    fn finds_edge_inside_vec_macro() {
+        let edges = edges_in("fn f() { let _ = vec![crate::lint::bar()]; }\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "lint");
+    }
+
+    #[test]
+    fn finds_edge_inside_nested_macro_call() {
+        // assert_eq!(g(crate::language_service::baz()), 1) — the edge is
+        // inside a plain call nested *inside* the macro's own token group,
+        // exercising the recursive descent into `TokenTree::Group`.
+        let edges = edges_in("fn f() { assert_eq!(g(crate::language_service::baz()), 1); }\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "language_service");
+    }
+
+    #[test]
+    fn ignores_macro_edge_inside_cfg_test_mod() {
+        let edges = edges_in(
+            "#[cfg(test)]\nmod tests {\n    fn t() { let _ = format!(\"{}\", crate::queries::foo()); }\n}\n",
+        );
+        assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn ignores_edge_inside_tokio_test_fn() {
+        let edges = edges_in("#[tokio::test]\nasync fn t() { crate::queries::foo(); }\n");
+        assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn allowlist_requires_exact_path_text_match() {
+        let entry = (
+            "crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs",
+            "queries",
+            "crate::queries::announce_sites_query::is_announce_selector",
+        );
+        assert!(allowlist_matches(&entry, entry.0, entry.1, entry.2));
+        // Same file and target module, but a different call site — this
+        // must NOT be covered by an entry scoped to one specific edge, or a
+        // new unrelated violation could land silently in an already-
+        // allow-listed file.
+        assert!(!allowlist_matches(
+            &entry,
+            entry.0,
+            entry.1,
+            "crate::queries::hover_provider::unrelated_call"
+        ));
     }
 }
