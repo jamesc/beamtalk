@@ -1195,6 +1195,14 @@ browse_setup() ->
         },
         class_methods => #{
             'startingAt:' => #{block => fun(_, _, _) -> erlang:error(must_not_run) end, arity => 1}
+        },
+        %% BT-3337: an INDEXED (not synthetic) class-side selector with real
+        %% stored source, so browse-method-source's class-side `Call =
+        %% {class_method, Selector}` branch reaches a genuine source read
+        %% rather than the null-source synthetic/unindexed degrade paths the
+        %% existing `spawn` row already covers.
+        class_method_source => #{
+            'startingAt:' => <<"startingAt: n =>\n  self new">>
         }
     }),
 
@@ -1283,7 +1291,10 @@ browse_xref() ->
         class_method_row('new', 1, synthetic, class_body),
         class_method_row('new:', 1, synthetic, class_body),
         class_method_row('spawn', 1, synthetic, class_body),
-        class_method_row('spawn:', 1, synthetic, class_body)
+        class_method_row('spawn:', 1, synthetic, class_body),
+        %% BT-3337: a real, indexed (not synthetic) class-side method, paired
+        %% with the `class_method_source` entry above.
+        class_method_row('startingAt:', 120, indexed, class_body)
     ].
 
 method_row(Selector, Line, SourceStatus, Provenance) ->
@@ -1823,6 +1834,143 @@ browse_tests(#{class_name := Class}) ->
                 )
             ),
             ?assert(true)
+        end},
+
+        %%============================================================
+        %% BT-3337 — not-found / validation error branches reached through
+        %% handle_term/4 for every parameterised op.
+        %%============================================================
+
+        {"browse-categories: unknown class is a not-found error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-categories">>,
+                #{<<"class">> => <<"__bt3337_never_a_class__">>},
+                make_msg(),
+                self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-categories: missing class is an argument error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-categories">>, #{}, make_msg(), self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-categories: a class with no on-disk source degrades to no dividers", fun() ->
+            %% The fixture class has no beamtalk_source module attribute, so
+            %% class_source_file/1 resolves to `nil` and current_disk_source/2
+            %% has nothing to read — the honest "nothing to group" empty state.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-categories">>, #{<<"class">> => Class}, make_msg(), self()
+                )
+            ),
+            ?assertEqual(false, maps:get(<<"has_dividers">>, Value)),
+            ?assertEqual([], maps:get(<<"categories">>, Value))
+        end},
+        {"browse-method-source: unknown class is a not-found error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-method-source">>,
+                #{
+                    <<"class">> => <<"__bt3337_never_a_class__">>,
+                    <<"side">> => <<"instance">>,
+                    <<"selector">> => <<"foo">>
+                },
+                make_msg(),
+                self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-method-source: missing selector is an argument error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-method-source">>,
+                #{<<"class">> => Class, <<"side">> => <<"instance">>},
+                make_msg(),
+                self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-class-definition: unknown class is a not-found error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-class-definition">>,
+                #{<<"class">> => <<"__bt3337_never_a_class__">>},
+                make_msg(),
+                self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-class-definition: missing class is an argument error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-class-definition">>, #{}, make_msg(), self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-protocols: missing side is an argument error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-protocols">>, #{<<"class">> => Class}, make_msg(), self()
+            ),
+            Decoded = assert_error_response(Response),
+            ?assertNotEqual(
+                nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"`side` is required">>)
+            )
+        end},
+        {"browse-protocols: a non-binary side is an argument error", fun() ->
+            %% validate_side/1's catch-all clause: neither `undefined` nor a
+            %% binary at all — a raw JSON number/bool would land here.
+            Response = beamtalk_repl_ops_browse:handle_term(
+                <<"browse-protocols">>,
+                #{<<"class">> => Class, <<"side">> => 42},
+                make_msg(),
+                self()
+            ),
+            ?assertMatch({error, _}, Response)
+        end},
+        {"browse-native-source: neither class nor module is an argument error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-native-source">>, #{}, make_msg(), self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+        {"browse-native-source: an unloaded module name is a not-found error", fun() ->
+            %% resolve_module/1's `code:is_loaded/1 =:= false` branch: `ok`
+            %% already exists as an atom (used throughout this suite) but
+            %% names no loaded module.
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-native-source">>, #{<<"module">> => <<"ok">>}, make_msg(), self()
+            ),
+            Decoded = assert_error_response(Response),
+            ?assertNotEqual(
+                nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)
+            )
+        end},
+        {"browse-alias-source: missing name is an argument error", fun() ->
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-alias-source">>, #{}, make_msg(), self()
+            ),
+            _ = assert_error_response(Response)
+        end},
+
+        %%============================================================
+        %% BT-3337 — method_text_fields/4's class-side `indexed` branch: a
+        %% real class-method source read (distinct from the existing
+        %% synthetic-`spawn` null-source case above).
+        %%============================================================
+
+        {"browse-method-source: an indexed class method returns its real source", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-method-source">>,
+                    #{
+                        <<"class">> => Class,
+                        <<"side">> => <<"class">>,
+                        <<"selector">> => <<"startingAt:">>
+                    },
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(<<"indexed">>, maps:get(<<"source_status">>, Value)),
+            ?assertNotEqual(nomatch, binary:match(maps:get(<<"source">>, Value), <<"self new">>))
         end}
     ].
 
@@ -2182,3 +2330,77 @@ protocol_of(Protocols, Selector) ->
         [ProtocolName | _] -> ProtocolName;
         [] -> undefined
     end.
+
+%%====================================================================
+%% BT-3337 — dead-pid resilience: class_row/2 and state_slots/2 must never
+%% crash a browse when the class process has already exited (a TOCTOU race
+%% between `all_classes/0` and the per-class reflection calls).
+%%====================================================================
+
+dead_pid() ->
+    Pid = spawn(fun() -> ok end),
+    %% Give the process a beat to actually exit before we call against it.
+    timer:sleep(20),
+    ?assertNot(is_process_alive(Pid)),
+    Pid.
+
+class_row_dead_pid_is_filtered_out_test() ->
+    ?assertEqual(false, beamtalk_repl_ops_browse:class_row(dead_pid(), sets:new())).
+
+state_slots_dead_pid_degrades_to_empty_list_test() ->
+    %% Both `instance_variables` and `field_defaults` safe_class_call/2 reads
+    %% degrade to `undefined` against a dead pid, so FieldList/DefaultsMap
+    %% both fall back to their empty defaults.
+    ?assertEqual([], beamtalk_repl_ops_browse:state_slots(dead_pid(), #{})).
+
+%%====================================================================
+%% BT-3337 — alias_field_binary/1's Erlang-string clause: `.app`-file
+%% `expansion`/`source_file`/`doc` fields round-trip as Erlang strings
+%% (via `escape_erlang_string` + `file:consult`), never as binaries.
+%%====================================================================
+
+alias_field_binary_string_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_repl_ops_browse:alias_field_binary("Integer")).
+
+alias_field_binary_unrecognised_shape_is_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_repl_ops_browse:alias_field_binary(42)).
+
+alias_row_normalises_string_shaped_fields_test() ->
+    %% `alias_row/3` reuses `alias_field_binary/1` for every text field —
+    %% this pins the whole row against the string-shaped `.app`-file source
+    %% (not just the atom/binary shapes the existing `alias_row_normalises_
+    %% app_file_shapes_test` above already covers).
+    Entry = #{
+        name => 'Direction',
+        expansion => "#north | #south",
+        doc => "A direction.",
+        source_file => "src/direction.bt",
+        internal => false
+    },
+    Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"mypkg">>, <<"project">>),
+    ?assertEqual(<<"#north | #south">>, maps:get(<<"expansion">>, Row)),
+    ?assertEqual(<<"A direction.">>, maps:get(<<"doc">>, Row)),
+    ?assertEqual(<<"src/direction.bt">>, maps:get(<<"source_file">>, Row)).
+
+%%====================================================================
+%% BT-3337 — delegate_callers_of_native_module/1's `none` sentinel guard
+%% (`meta_backing_module/1`'s "no backing module" answer, never a real
+%% native module name).
+%%====================================================================
+
+delegate_callers_of_native_module_none_is_empty_test() ->
+    ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(none)).
+
+delegate_callers_of_native_module_unbacked_module_is_empty_test() ->
+    %% A real, loaded module that backs no class at all.
+    ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(lists)).
+
+%%====================================================================
+%% BT-3337 — native_module_editable_target/1 (BT-2670): a module with no
+%% readable on-disk `.erl` source (a core BIF module) is not editable.
+%%====================================================================
+
+native_module_editable_target_no_source_is_not_editable_test() ->
+    ?assertEqual(
+        {error, not_editable}, beamtalk_repl_ops_browse:native_module_editable_target(erlang)
+    ).

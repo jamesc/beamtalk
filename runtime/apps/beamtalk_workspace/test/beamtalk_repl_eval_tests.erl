@@ -1409,6 +1409,37 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
     code:purge(ModuleName),
     code:delete(ModuleName).
 
+-doc """
+BT-3337: `register_class/0` RETURNING `{error, Reason}` (rather than
+throwing) is a distinct branch from the exception path above — same
+structured-error contract, no exception ever raised.
+""".
+handle_protocol_definition_register_class_returns_error_tuple_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    ModuleName = '__bt_test_error_return_register_protocol',
+    Forms = [
+        {attribute, 1, module, ModuleName},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0, [
+            {clause, 3, [], [], [
+                {tuple, 3, [{atom, 3, error}, {atom, 3, registration_declined}]}
+            ]}
+        ]}
+    ],
+    {ok, ModuleName, Binary} = compile:forms(Forms),
+    ProtocolInfo = #{
+        binary => Binary,
+        module_name => ModuleName,
+        protocols => [<<"DeclineProto">>]
+    },
+    Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+    ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result),
+    {error, Err, _, _, _} = Result,
+    ?assertEqual(registration_error, Err#beamtalk_error.kind),
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"registration_declined">>)),
+    code:purge(ModuleName),
+    code:delete(ModuleName).
+
 -doc "Test that successful protocol definition calls register_class/0.".
 handle_protocol_definition_success_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
@@ -1615,6 +1646,29 @@ eval_setup() ->
     end,
     %% Allow the runtime to register its bootstrap classes before compiling.
     timer:sleep(300),
+    %% BT-3337: a live beamtalk_workspace_meta is needed by reload_file/1,
+    %% precheck_method/4, remove_method/3,4 (non-stdlib), and a standalone
+    %% method definition reached through do_eval/2 — all recompile from the
+    %% class source workspace_meta records, same fixture pattern as
+    %% handle_method_definition_with_source_compile_fail_test/0 above.
+    %% `repl => false` avoids the disk-persistence side effect
+    %% beamtalk_repl_loader_precheck_tests.erl's fixture also steers clear of.
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid)
+    end,
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"eval_success_ws">>,
+        project_path => undefined,
+        created_at => erlang:system_time(second),
+        repl => false
+    }),
+    %% precheck_method/4's signature-diff baseline (previous/3) needs a live
+    %% store — without it every diff exits `noproc` (BT-3337).
+    case whereis(beamtalk_workspace_signature_store) of
+        undefined -> {ok, _} = beamtalk_workspace_signature_store:start_link();
+        _ -> ok
+    end,
     ok.
 
 eval_teardown(_) ->
@@ -1622,7 +1676,22 @@ eval_teardown(_) ->
     %% tests (and later test modules in the shared EUnit node) see the baseline
     %% "compiler not running" state this fixture started from.
     _ = application:stop(beamtalk_compiler),
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid)
+    end,
+    case whereis(beamtalk_workspace_signature_store) of
+        undefined -> ok;
+        SigStorePid -> gen_server:stop(SigStorePid)
+    end,
     ok.
+
+%% BT-3337: seed workspace_meta with `ClassSource` under `ClassNameBin` so a
+%% recompile-from-recorded-source path (reload_method_definition,
+%% precheck_method, remove_method) has real source to work from — mirrors
+%% what `Workspace load:` does for a file-backed class.
+seed_class_source(ClassNameBin, ClassSource) ->
+    ok = beamtalk_workspace_meta:set_class_source(ClassNameBin, ClassSource).
 
 eval_success_test_() ->
     {setup, fun eval_setup/0, fun eval_teardown/1, [
@@ -1650,7 +1719,57 @@ eval_success_test_() ->
         {"reload_class_file/1 missing file", fun reload_class_file_arity1/0},
         {"handle_load/3 missing file delegates", fun handle_load3_missing/0},
         {"handle_load_source/3 invalid delegates", fun handle_load_source3_invalid/0},
-        {"new_class/2 invalid delegates", fun new_class_invalid/0}
+        {"new_class/2 invalid delegates", fun new_class_invalid/0},
+        %% BT-3337 — `:help <Alias>` short-circuit reached through do_eval/2.
+        {"do_eval routes :help through the session alias table", fun do_eval_help_for_alias/0},
+        %% BT-3337 — standalone `Class >> selector => body` method definition.
+        {"do_eval standalone method definition reloads the target class",
+            fun do_eval_standalone_method_definition/0},
+        %% BT-3337 — a live actor registry pid threaded into eval bindings.
+        {"do_eval threads a live actor registry pid into bindings",
+            fun do_eval_with_actor_registry/0},
+        %% BT-3337 — do_dispatch/5 (BT-2691 connected-mode entry dispatch).
+        {"do_dispatch unary success sends to the class object", fun do_dispatch_unary_success/0},
+        {"do_dispatch keyword success passes argv", fun do_dispatch_keyword_success/0},
+        {"do_dispatch surfaces Program exit: as script_exit", fun do_dispatch_script_exit/0},
+        {"do_dispatch wraps a runtime exception", fun do_dispatch_runtime_exception/0},
+        {"do_dispatch: class atom exists but names no loaded class",
+            fun do_dispatch_class_not_loaded/0},
+        {"do_dispatch: unknown selector is a does_not_understand error",
+            fun do_dispatch_unknown_selector/0},
+        %% BT-3337 — eval_with_self/2 (ADR 0095 Inspector `evaluate:`).
+        {"eval_with_self rejects a class definition",
+            fun eval_with_self_rejects_class_definition/0},
+        {"eval_with_self rejects a method definition",
+            fun eval_with_self_rejects_method_definition/0},
+        {"eval_with_self rejects a protocol definition",
+            fun eval_with_self_rejects_protocol_definition/0},
+        {"eval_with_self rejects a type alias definition",
+            fun eval_with_self_rejects_type_alias_definition/0},
+        {"eval_with_self evaluates an expression with self bound", fun eval_with_self_success/0},
+        {"eval_with_self wraps a compile error", fun eval_with_self_compile_error/0},
+        {"eval_with_self wraps a runtime exception", fun eval_with_self_runtime_exception/0},
+        %% BT-3337 — precheck_method/4 (ADR 0105 Phase 3 precheck).
+        {"precheck_method refuses a stdlib class", fun precheck_method_stdlib_refused/0},
+        {"precheck_method delegates for a non-stdlib class", fun precheck_method_delegates/0},
+        %% BT-3337 — remove_method/3,4 stdlib-policy branches.
+        {"remove_method/3 refuses a stdlib class", fun remove_method3_stdlib_refused/0},
+        {"remove_method/4 allow_stdlib reaches the loader", fun remove_method4_allow_stdlib/0},
+        {"remove_method/4 refuse_stdlib with a non-stdlib class reaches the loader",
+            fun remove_method4_refuse_stdlib_non_stdlib/0},
+        %% BT-3337 — remove_class/1 both branches.
+        {"remove_class/1 removes a live user class", fun remove_class_success/0},
+        {"remove_class/1 unknown name is a structured error", fun remove_class_unknown/0},
+        %% BT-3337 — thin forwarding wrappers over beamtalk_repl_loader.
+        {"move_class/2 delegates to the loader", fun move_class_delegates/0},
+        {"revert_remove_class/2 delegates to the loader", fun revert_remove_class_delegates/0},
+        {"rewrite_sites/2 delegates to the loader", fun rewrite_sites_delegates/0},
+        {"validate_sites/2 delegates to the loader", fun validate_sites_delegates/0},
+        {"emit_remove_change_entry/5 delegates to the loader",
+            fun emit_remove_change_entry_delegates/0},
+        %% BT-3337 — reload_file/1 (BT-2598 disk-revert reload).
+        {"reload_file/1 reloads a class and repopulates its source cache",
+            fun reload_file_success/0}
     ]}.
 
 state0() ->
@@ -1836,6 +1955,99 @@ normalize_method_source_commented_full_definition_unchanged_test() ->
     Src = <<"// --- Section ---\n/// Doc.\nincrement => self.value + 1">>,
     ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
 
+%%====================================================================
+%% BT-3337 — normalize_method_source/2's private helpers: header_separator/1
+%% (all five last-char branches), skip_leading_comments/1's no-trailing-
+%% newline clause, has_method_header/2's `class ` recursion + trim_leading_ws/1,
+%% header_after_token/1's identifier-continuation guard,
+%% binary_has_arrow_before_break/1's `.`/newline breaks, and first_token/1's
+%% fallback clause.
+%%====================================================================
+
+normalize_method_source_header_separator_newline_test() ->
+    %% A `//` comment WITH a trailing newline immediately followed by a bare
+    %% body: header_separator/1 sees the prefix ending in `\n` -> no extra
+    %% separator is inserted.
+    Src = <<"//x\nbareBody">>,
+    ?assertEqual(
+        <<"//x\nincrement => bareBody">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
+    ).
+
+normalize_method_source_header_separator_space_test() ->
+    %% A `//` comment with NO trailing newline: skip_leading_comments/1's
+    %% single-element split clause returns an empty Body, so the whole
+    %% comment becomes the Prefix — header_separator/1 reads its own last
+    %% byte, here a trailing space, and inserts no extra separator.
+    Src = <<"// comment ends with space ">>,
+    ?assertEqual(
+        <<Src/binary, "increment => ">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
+    ).
+
+normalize_method_source_header_separator_tab_test() ->
+    Src = <<"// comment ends with tab\t">>,
+    ?assertEqual(
+        <<Src/binary, "increment => ">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
+    ).
+
+normalize_method_source_header_separator_cr_test() ->
+    Src = <<"// comment ends with cr\r">>,
+    ?assertEqual(
+        <<Src/binary, "increment => ">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
+    ).
+
+normalize_method_source_header_separator_other_inserts_newline_test() ->
+    %% A comment-only source ending in ordinary text (no trailing whitespace)
+    %% would otherwise glue the injected header onto the comment line, so a
+    %% `\n` separator is inserted instead.
+    Src = <<"// comment ends with letter">>,
+    ?assertEqual(
+        <<Src/binary, "\nincrement => ">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
+    ).
+
+normalize_method_source_class_side_header_unchanged_test() ->
+    %% A `class ` modifier is skipped, then leading whitespace after it is
+    %% trimmed (trim_leading_ws/1's recursive clause) before matching the
+    %% selector header.
+    Src = <<"class   make => 5">>,
+    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"make">>, Src)).
+
+normalize_method_source_identifier_continuation_not_a_header_test() ->
+    %% `incremented + 1` for selector `increment` shares no header: the char
+    %% right after the token is a lowercase continuation, not a delimiter.
+    ?assertEqual(
+        <<"increment => incremented + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented + 1">>)
+    ).
+
+normalize_method_source_dot_break_not_a_header_test() ->
+    %% No `=>` arrow appears before the first `.` statement break, so this is
+    %% not a header even though the body starts with the selector token.
+    ?assertEqual(
+        <<"foo => foo bar. baz">>,
+        beamtalk_repl_eval:normalize_method_source(<<"foo">>, <<"foo bar. baz">>)
+    ).
+
+normalize_method_source_newline_break_not_a_header_test() ->
+    %% No `=>` arrow appears before the first newline statement break either.
+    ?assertEqual(
+        <<"foo => foo bar\nbaz">>,
+        beamtalk_repl_eval:normalize_method_source(<<"foo">>, <<"foo bar\nbaz">>)
+    ).
+
+normalize_method_source_first_token_fallback_test() ->
+    %% first_token/1's fallback clause: a selector binary whose split on
+    %% `:`/` ` yields an empty leading segment (e.g. it starts with `:`) is
+    %% returned unmodified rather than truncated to that empty head.
+    ?assertEqual(
+        <<":weird => body">>,
+        beamtalk_repl_eval:normalize_method_source(<<":weird">>, <<"body">>)
+    ).
+
 do_show_codegen_with_binding() ->
     %% A non-internal binding key is forwarded as a known var to the codegen
     %% compiler (exercises the KnownVars comprehension in do_show_codegen).
@@ -1866,6 +2078,335 @@ new_class_invalid() ->
         <<"Actor subclass: NewClsInvalid\n  v => 1">>, <<"/nonexistent/dir/x.bt">>
     ),
     ?assertMatch({error, _}, Result).
+
+%%====================================================================
+%% BT-3337 — do_eval/2 branches not reached by the tests above:
+%% the `:help <Alias>` short-circuit, a standalone method definition, and a
+%% live actor-registry pid threaded into bindings.
+%%====================================================================
+
+do_eval_help_for_alias() ->
+    AliasSource = "type EvalHelpAlias = Integer",
+    {ok, <<"EvalHelpAlias">>, _, _, State1} =
+        beamtalk_repl_eval:do_eval(AliasSource, state0()),
+    Result = beamtalk_repl_eval:do_eval("Beamtalk help: EvalHelpAlias", State1),
+    ?assertMatch({ok, _HelpText, <<>>, [], _}, Result),
+    {ok, HelpText, _, _, _} = Result,
+    ?assert(binary:match(HelpText, <<"EvalHelpAlias">>) =/= nomatch).
+
+do_eval_standalone_method_definition() ->
+    ClassSource = "Actor subclass: EvalStandaloneMethodCls\n  value => 5",
+    {ok, <<"EvalStandaloneMethodCls">>, _, _, State1} =
+        beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    %% reload_method_definition recompiles from the recorded class source
+    %% (mirroring `Workspace load:`) — seed it the same way an on-disk load
+    %% would have.
+    seed_class_source(<<"EvalStandaloneMethodCls">>, ClassSource),
+    MethodSource = "EvalStandaloneMethodCls >> value2 => 6",
+    Result = beamtalk_repl_eval:do_eval(MethodSource, State1),
+    ?assertMatch({ok, _, <<>>, _, _}, Result).
+
+do_eval_with_actor_registry() ->
+    %% A non-undefined actor-registry pid is threaded into the eval bindings
+    %% map (INTERNAL_REGISTRY_KEY) and stripped again on the way out. A
+    %% minimal fake registry answers the post-eval `list_actors` cleanup
+    %% call (a real pid, but not self() — gen_server:call(self(), _) would
+    %% deadlock-detect against the calling test process itself).
+    FakeRegistry = spawn(fun() ->
+        receive
+            {'$gen_call', From, list_actors} -> gen_server:reply(From, [])
+        end
+    end),
+    State = beamtalk_repl_state:set_actor_registry(FakeRegistry, state0()),
+    Result = beamtalk_repl_eval:do_eval("5 + 5", State),
+    ?assertMatch({ok, 10, _, _, _}, Result).
+
+%%====================================================================
+%% BT-3337 — do_dispatch/5 (BT-2691 connected-mode `beamtalk run` entry
+%% dispatch): success (unary + keyword), Program exit:, a wrapped runtime
+%% exception, and resolve_entry/2's remaining error branches.
+%%====================================================================
+
+do_dispatch_unary_success() ->
+    ClassSource =
+        "Object subclass: EvalDispatchCls\n"
+        "  class run => 42",
+    {ok, <<"EvalDispatchCls">>, _, _, _} = beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    Result = beamtalk_repl_eval:do_dispatch(
+        <<"EvalDispatchCls">>, <<"run">>, [], undefined, state0()
+    ),
+    ?assertMatch({ok, 42, _, _, _}, Result).
+
+do_dispatch_keyword_success() ->
+    ClassSource =
+        "Object subclass: EvalDispatchMainCls\n"
+        "  class main: args :: List(String) -> Integer =>\n"
+        "    args size",
+    {ok, <<"EvalDispatchMainCls">>, _, _, _} =
+        beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    Result = beamtalk_repl_eval:do_dispatch(
+        <<"EvalDispatchMainCls">>, <<"main:">>, [<<"a">>, <<"b">>, <<"c">>], undefined, state0()
+    ),
+    ?assertMatch({ok, 3, _, _, _}, Result).
+
+do_dispatch_script_exit() ->
+    ClassSource =
+        "Object subclass: EvalDispatchExitCls\n"
+        "  class run => Program exit: 7",
+    {ok, <<"EvalDispatchExitCls">>, _, _, _} =
+        beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    Result = beamtalk_repl_eval:do_dispatch(
+        <<"EvalDispatchExitCls">>, <<"run">>, [], undefined, state0()
+    ),
+    ?assertMatch({script_exit, 7, _, _, _}, Result).
+
+do_dispatch_runtime_exception() ->
+    ClassSource =
+        "Object subclass: EvalDispatchBoomCls\n"
+        "  class run => 1 zork",
+    {ok, <<"EvalDispatchBoomCls">>, _, _, _} =
+        beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    Result = beamtalk_repl_eval:do_dispatch(
+        <<"EvalDispatchBoomCls">>, <<"run">>, [], undefined, state0()
+    ),
+    ?assertMatch({error, {eval_error, _Class, _ExObj}, _, _, _}, Result).
+
+do_dispatch_class_not_loaded() ->
+    %% `ok` already exists as an atom (it is used everywhere in this test
+    %% suite) but names no loaded class — resolve_entry/2's whereis_class
+    %% `undefined` branch, distinct from an atom that does not exist at all.
+    Result = beamtalk_repl_eval:do_dispatch(<<"ok">>, <<"run">>, [], undefined, state0()),
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found}, <<>>, [], _}, Result).
+
+do_dispatch_unknown_selector() ->
+    ClassSource =
+        "Object subclass: EvalDispatchDnuCls\n"
+        "  class run => 42",
+    {ok, <<"EvalDispatchDnuCls">>, _, _, _} =
+        beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    Result = beamtalk_repl_eval:do_dispatch(
+        <<"EvalDispatchDnuCls">>,
+        <<"__bt3337_never_atom_selector__">>,
+        [],
+        undefined,
+        state0()
+    ),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, <<>>, [], _}, Result),
+    {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
+    ?assert(binary:match(Msg, <<"EvalDispatchDnuCls">>) =/= nomatch).
+
+%%====================================================================
+%% BT-3337 — eval_with_self/2 (ADR 0095 §1, BT-2503): every
+%% definition-shaped rejection, a successful evaluate-in-context, a compile
+%% error, and a wrapped runtime exception.
+%%====================================================================
+
+eval_with_self_rejects_class_definition() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "Actor subclass: EvalSelfRejCls\n  v => 1"),
+    ?assertMatch({error, #beamtalk_error{kind = eval_failed}}, Result).
+
+eval_with_self_rejects_method_definition() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "EvalSelfRejCls >> foo => 1"),
+    ?assertMatch({error, #beamtalk_error{kind = eval_failed}}, Result).
+
+eval_with_self_rejects_protocol_definition() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "Protocol define: EvalSelfRejProto"),
+    ?assertMatch({error, #beamtalk_error{kind = eval_failed}}, Result).
+
+eval_with_self_rejects_type_alias_definition() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "type EvalSelfRejAlias = Integer"),
+    ?assertMatch({error, #beamtalk_error{kind = eval_failed}}, Result).
+
+eval_with_self_success() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "self + 1"),
+    ?assertEqual({ok, 43}, Result).
+
+eval_with_self_compile_error() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "+++ not valid"),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+eval_with_self_runtime_exception() ->
+    Result = beamtalk_repl_eval:eval_with_self(42, "self zork"),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%%====================================================================
+%% BT-3337 — precheck_method/4 (ADR 0105 Phase 3, BT-2782): the stdlib
+%% refusal and the non-stdlib delegate-to-loader branch.
+%%====================================================================
+
+precheck_method_stdlib_refused() ->
+    %% `Object` ships as a stdlib class, so its methods are read-only.
+    Result = beamtalk_repl_eval:precheck_method(<<"Object">>, <<"foo">>, <<"1">>, instance),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result).
+
+precheck_method_delegates() ->
+    ClassSource = "Actor subclass: EvalPrecheckCls\n  v => 1",
+    {ok, <<"EvalPrecheckCls">>, _, _, _} = beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    seed_class_source(<<"EvalPrecheckCls">>, ClassSource),
+    Result = beamtalk_repl_eval:precheck_method(
+        <<"EvalPrecheckCls">>, <<"v">>, <<"2">>, instance
+    ),
+    ?assertMatch({ok, _}, Result).
+
+%%====================================================================
+%% BT-3337 — remove_method/3,4 (ADR 0112 Phase 1, BT-3184): the stdlib-policy
+%% branches.
+%%====================================================================
+
+remove_method3_stdlib_refused() ->
+    Result = beamtalk_repl_eval:remove_method(<<"Object">>, <<"printString">>, instance),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result).
+
+remove_method4_allow_stdlib() ->
+    %% allow_stdlib skips the gate entirely and reaches the loader — whatever
+    %% it returns for a selector this class does not locally define.
+    Result = beamtalk_repl_eval:remove_method(
+        <<"Object">>, <<"__bt3337_no_such_selector__">>, instance, allow_stdlib
+    ),
+    ?assertMatch({error, _}, Result).
+
+remove_method4_refuse_stdlib_non_stdlib() ->
+    ClassSource = "Actor subclass: EvalRemoveMethodCls\n  v => 1",
+    {ok, <<"EvalRemoveMethodCls">>, _, _, _} = beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    seed_class_source(<<"EvalRemoveMethodCls">>, ClassSource),
+    Result = beamtalk_repl_eval:remove_method(
+        <<"EvalRemoveMethodCls">>, <<"v">>, instance, refuse_stdlib
+    ),
+    ?assertMatch({ok, <<"EvalRemoveMethodCls">>}, Result).
+
+%%====================================================================
+%% BT-3337 — remove_class/1 (BT-2664 new-class revert case).
+%%====================================================================
+
+remove_class_success() ->
+    ClassSource = "Actor subclass: EvalRemoveClassCls\n  v => 1",
+    {ok, <<"EvalRemoveClassCls">>, _, _, _} = beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    Result = beamtalk_repl_eval:remove_class(<<"EvalRemoveClassCls">>),
+    ?assertMatch({ok, _Module}, Result).
+
+remove_class_unknown() ->
+    Result = beamtalk_repl_eval:remove_class(<<"__bt3337_never_a_class__">>),
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
+
+%%====================================================================
+%% BT-3337 — thin forwarding wrappers over beamtalk_repl_loader: only the
+%% delegating call site itself needs to be reached (BT-3335 owns the
+%% loader's own branch coverage).
+%%====================================================================
+
+move_class_delegates() ->
+    Result = beamtalk_repl_eval:move_class('EvalNoSuchMoveCls', <<"new/path.bt">>),
+    ?assertMatch({error, _}, Result).
+
+revert_remove_class_delegates() ->
+    %% A target path that does not exist yet is not itself a failure —
+    %% revert_remove_class/2 reuses new_class/2's install chokepoint, which
+    %% happily creates the class fresh (mirroring what a genuine `changes
+    %% revert:` of a `'remove-class'` entry does). Clean the class back up
+    %% so it does not linger for later tests in the shared EUnit node.
+    Result = beamtalk_repl_eval:revert_remove_class(
+        <<"Actor subclass: EvalRevertRemoveClassCls\n  v => 1">>,
+        <<"eval_revert_remove_class_cls.bt">>
+    ),
+    ?assertMatch({ok, _}, Result),
+    beamtalk_repl_eval:remove_class(<<"EvalRevertRemoveClassCls">>).
+
+rewrite_sites_delegates() ->
+    Result = beamtalk_repl_eval:rewrite_sites(undefined, []),
+    ?assertMatch({error, _}, Result).
+
+validate_sites_delegates() ->
+    Result = beamtalk_repl_eval:validate_sites(undefined, []),
+    ?assertMatch({error, _}, Result).
+
+emit_remove_change_entry_delegates() ->
+    %% Best-effort append; returns ok even when there is nothing to record.
+    Result = beamtalk_repl_eval:emit_remove_change_entry(
+        <<"__bt3337_never_a_class__">>, foo, instance, <<"repl">>, human
+    ),
+    ?assertEqual(ok, Result).
+
+%%====================================================================
+%% BT-3337 — reload_file/1 (BT-2598 disk-revert reload): the success path,
+%% which also exercises repopulate_class_sources/2 and class_name_binaries/1.
+%%====================================================================
+
+reload_file_success() ->
+    Path = filename:join(temp_dir(), "bt3337_reload_file_test.bt"),
+    ok = file:write_file(Path, <<"Actor subclass: EvalReloadFileCls\n  v => 1\n">>),
+    Result = beamtalk_repl_eval:reload_file(Path),
+    file:delete(Path),
+    ?assertMatch({ok, [<<"EvalReloadFileCls">>]}, Result),
+    %% repopulate_class_sources/2 recorded the freshly-read source text.
+    ?assertMatch(
+        Src when is_list(Src),
+        beamtalk_workspace_meta:get_class_source(<<"EvalReloadFileCls">>)
+    ).
+
+%%====================================================================
+%% BT-3337 — class_name_binary/1 and class_name_binaries/1 pure-mapping
+%% branches (atom / binary / string name key, unrecognised shape).
+%%====================================================================
+
+class_name_binary_atom_test() ->
+    ?assertEqual(<<"Foo">>, beamtalk_repl_eval:class_name_binary(#{name => 'Foo'})).
+
+class_name_binary_binary_test() ->
+    ?assertEqual(<<"Foo">>, beamtalk_repl_eval:class_name_binary(#{name => <<"Foo">>})).
+
+class_name_binary_string_test() ->
+    ?assertEqual(<<"Foo">>, beamtalk_repl_eval:class_name_binary(#{name => "Foo"})).
+
+class_name_binary_unrecognised_test() ->
+    ?assertEqual(undefined, beamtalk_repl_eval:class_name_binary(#{})),
+    ?assertEqual(undefined, beamtalk_repl_eval:class_name_binary(#{name => 42})).
+
+class_name_binaries_filters_unrecognised_test() ->
+    ?assertEqual(
+        [<<"Foo">>, <<"Bar">>],
+        beamtalk_repl_eval:class_name_binaries([
+            #{name => 'Foo'}, #{}, #{name => <<"Bar">>}
+        ])
+    ).
+
+%%====================================================================
+%% BT-3337 — repopulate_class_sources/2 (BT-2598): a read failure is
+%% non-fatal, and a successful read seeds the workspace_meta source cache
+%% for each named class, skipping entries with no recognisable name.
+%%====================================================================
+
+repopulate_class_sources_read_failure_is_noop_test() ->
+    ?assertEqual(
+        ok,
+        beamtalk_repl_eval:repopulate_class_sources(
+            "/nonexistent/bt3337_repopulate.bt", [#{name => 'DoesNotMatter'}]
+        )
+    ).
+
+repopulate_class_sources_success_test() ->
+    %% A standalone workspace_meta instance, mirroring
+    %% handle_method_definition_with_source_compile_fail_test/0 above — this
+    %% test does not run inside the eval_success_test_/0 fixture.
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid)
+    end,
+    {ok, WsPid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"repopulate_test_ws">>,
+        project_path => undefined,
+        created_at => erlang:system_time(second)
+    }),
+    Path = filename:join(temp_dir(), "bt3337_repopulate_sources_test.bt"),
+    ok = file:write_file(Path, <<"Actor subclass: RepopulatedCls\n  v => 1\n">>),
+    Result = beamtalk_repl_eval:repopulate_class_sources(
+        Path, [#{name => 'RepopulatedCls'}, #{}]
+    ),
+    file:delete(Path),
+    ?assertEqual(ok, Result),
+    Src = beamtalk_workspace_meta:get_class_source(<<"RepopulatedCls">>),
+    gen_server:stop(WsPid),
+    ?assert(is_list(Src)),
+    ?assertNotEqual(nomatch, string:find(Src, "RepopulatedCls")).
 
 %%====================================================================
 %% announce_binding_changed payload (ADR 0093 §2, BT-2530)

@@ -395,6 +395,27 @@ diagnostics_non_binary_mode_passed_through_unchanged_test() ->
     ).
 
 %%====================================================================
+%% BT-3337 — diagnostics_for/2's `{ok, Diagnostics}` success branch: the
+%% compiler port has to be running to answer at all (the `{error, _}`
+%% degrade-to-`[]` branch above already covers the port-down case).
+%%====================================================================
+
+diagnostics_for_success_returns_diagnostics_list_test() ->
+    application:ensure_all_started(compiler),
+    StartResult = application:ensure_all_started(beamtalk_compiler),
+    %% Let a freshly-started compiler port come up before compiling.
+    case StartResult of
+        {ok, [_ | _]} -> timer:sleep(200);
+        _ -> ok
+    end,
+    Result = beamtalk_repl_ops_dev:diagnostics_for(<<"1 + 1">>, <<"expression">>),
+    %% Leave the app the way this test found it (mirrors
+    %% beamtalk_repl_eval_tests.erl's eval_teardown/1 discipline) — later
+    %% no-compiler-running tests in the shared EUnit node depend on it.
+    _ = application:stop(beamtalk_compiler),
+    ?assert(is_list(Result)).
+
+%%====================================================================
 %% handle/4 -- show-codegen class+selector (BT-1236)
 %%====================================================================
 
@@ -514,6 +535,94 @@ handle_hover_empty_code_test() ->
     Decoded = json:decode(Result),
     ?assertEqual(<<>>, maps:get(<<"docs">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+%%====================================================================
+%% BT-3337 — hover_docs/2 (BT-2555): every parse_receiver_and_prefix/1 shape
+%% it dispatches on.
+%%====================================================================
+
+hover_docs_empty_trailing_token_is_empty_test() ->
+    %% `{Receiver, <<>>}` — a line ending in whitespace. Defensive: the JS
+    %% client never sends this shape, but the code path exists.
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<"Integer ">>, #{})).
+
+hover_docs_multitoken_expression_hovers_the_trailing_word_test() ->
+    %% `{expression, _, Word}` — a multi-token receiver expression; only the
+    %% trailing word is offered for hover (full receiver inference is future
+    %% work), and a lowercase word with no binding degrades to `<<>>`.
+    ?assertEqual(
+        <<>>, beamtalk_repl_ops_dev:hover_docs(<<"\"hello\" size c">>, #{})
+    ).
+
+hover_docs_bare_class_name_test() ->
+    %% `{undefined, Word}` where Word classifies as a class — hover_class/2's
+    %% `{class, ClassName}` branch. Whatever format_class_docs/1 returns for
+    %% the real bootstrap `Integer` class, the result is always a binary.
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<"Integer">>, #{}),
+    ?assert(is_binary(Docs)).
+
+hover_docs_bare_lowercase_token_is_empty_test() ->
+    %% A bare lowercase token (an instance/binding) is intentionally NOT
+    %% hovered in v1 — hover_class/2's non-class fallback clause.
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<"count">>, #{})).
+
+hover_docs_class_side_method_test() ->
+    %% `{Receiver, Word}` with an uppercase class receiver — hover_method/3's
+    %% `{class, ClassName}` branch (format_method_doc_class_side/2).
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<"Integer new">>, #{}),
+    ?assert(is_binary(Docs)).
+
+hover_docs_instance_side_method_test() ->
+    %% `{Receiver, Word}` with a lowercase binding receiver classifying to an
+    %% instance — hover_method/3's `{instance, ClassName}` branch
+    %% (format_method_doc/2), via classify_by_binding/2's primitive_class_of
+    %% path.
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<"n printString">>, #{n => 5}),
+    ?assert(is_binary(Docs)).
+
+hover_docs_unclassifiable_receiver_method_is_empty_test() ->
+    %% hover_method/3's `undefined` branch: a lowercase receiver with no
+    %% matching binding.
+    ?assertEqual(
+        <<>>, beamtalk_repl_ops_dev:hover_docs(<<"nosuchbinding printString">>, #{})
+    ).
+
+%%====================================================================
+%% BT-3337 — classify_receiver/2's remaining branches: the empty receiver, an
+%% uppercase token that names neither a class nor a binding, a lowercase
+%% token that is not yet an interned atom, a digit-leading token that is not
+%% a bare integer literal, and an unresolvable package-qualified name.
+%%====================================================================
+
+classify_receiver_empty_is_undefined_test() ->
+    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<>>, #{})).
+
+classify_receiver_uppercase_unknown_and_unbound_is_undefined_test() ->
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:classify_receiver(<<"NoSuchClassBt3337Dev">>, #{})
+    ).
+
+classify_receiver_lowercase_never_interned_is_undefined_test() ->
+    %% safe_to_existing_atom/1's `{error, badarg}` branch: this exact binary
+    %% has never been interned as an atom anywhere in the VM.
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:classify_receiver(
+            <<"__bt3337_never_interned_lowercase_token__">>, #{}
+        )
+    ).
+
+classify_receiver_non_integer_digit_leading_is_undefined_test() ->
+    %% Guards against a float literal (`3.14`) being misclassified as Integer
+    %% — the whole token must be digits.
+    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<"3.14">>, #{})).
+
+classify_receiver_unresolvable_qualified_name_is_undefined_test() ->
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:classify_receiver(<<"nosuchpkg3337@Foo">>, #{})
+    ).
 
 %%====================================================================
 %% handle/4 -- methods with unknown class
@@ -1075,6 +1184,20 @@ erlang_complete_unknown_module_returns_empty_test() ->
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-complete">>,
         #{<<"prefix">> => <<"x">>, <<"module">> => <<"no_such_mod_xyz99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([], maps:get(<<"completions">>, Decoded)).
+
+erlang_complete_existing_atom_not_a_loaded_module_returns_empty_test() ->
+    %% BT-3337: distinct from the badarg case above — `ok` already exists as
+    %% an atom (used throughout this suite) but names no loaded module, so
+    %% `code:get_object_code/1`'s `error` branch is reached instead.
+    Msg = make_msg(<<"erlang-complete">>, <<"ec-4">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-complete">>,
+        #{<<"prefix">> => <<"x">>, <<"module">> => <<"ok">>},
         Msg,
         self()
     ),

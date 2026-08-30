@@ -121,7 +121,10 @@ module loading to beamtalk_repl_loader (BT-863).
     wrap_load_err/3,
     normalize_method_source/2,
     resolve_entry/2,
-    is_keyword_selector/1
+    is_keyword_selector/1,
+    class_name_binary/1,
+    class_name_binaries/1,
+    repopulate_class_sources/2
 ]).
 -endif.
 

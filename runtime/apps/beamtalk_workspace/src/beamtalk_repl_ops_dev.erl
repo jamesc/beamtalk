@@ -53,7 +53,12 @@ Extracted from beamtalk_repl_server (BT-705).
     builtin_keywords/0,
     %% BT-3087: white-box test of the local-overrides-wins dedup fix for
     %% "all methods including inherited".
-    collect_all_methods/2
+    collect_all_methods/2,
+    %% BT-3337: white-box tests of the receiver classifier, the hover
+    %% resolver, and the diagnostics side-effect-free compile path.
+    classify_receiver/2,
+    hover_docs/2,
+    diagnostics_for/2
 ]).
 -endif.
 
