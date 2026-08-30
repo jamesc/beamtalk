@@ -1432,6 +1432,19 @@ mod tests {
     // workspace never produces on demand (auth failure, a truncated
     // handshake, a malformed reply, a socket that closes mid-request) are
     // reachable deterministically.
+    //
+    // Fidelity caveat — this is a test double, not a second implementation
+    // of a shared rule, and nothing here pins it to the real server
+    // (`beamtalk_ws_handler.erl`): the handshake frame shapes below are
+    // transcribed from it, so a change on the Erlang side would leave these
+    // tests green while `perform_auth_handshake` broke against a live
+    // workspace. That gap predates these tests (the `lsp_parity` e2e suite
+    // never attaches a runtime — it exercises only the static
+    // hover/completion/definition/symbol surface, so no suite has ever run
+    // this handshake against a real BEAM node). BT-3330 tracks closing it,
+    // by real-node coverage of the LSP attach path and/or a shared handshake
+    // conformance fixture — which would want to cover the CLI and MCP
+    // clients' identical transcriptions too, not just this one.
     // ------------------------------------------------------------------
 
     /// How the fake workspace behaves during the pre-`session-started`
@@ -1730,14 +1743,17 @@ mod tests {
         // A dropped socket surfaces either as a clean EOF or as a reset,
         // depending on how the kernel delivers the FIN — both are handshake
         // read failures, and neither is a successful connect.
-        assert_connect_error(&err, ws.port, "");
-        let RuntimeError::Connect { reason, .. } = &err else {
-            unreachable!()
-        };
-        assert!(
-            reason.contains("stream ended during handshake") || reason.contains("read failed"),
-            "unexpected reason: {reason}"
-        );
+        match &err {
+            RuntimeError::Connect { port, reason } => {
+                assert_eq!(*port, ws.port);
+                assert!(
+                    reason.contains("stream ended during handshake")
+                        || reason.contains("read failed"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("expected RuntimeError::Connect, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -2113,6 +2129,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn request_times_out_when_the_workspace_never_replies() {
+        // A workspace that accepts the request and then goes quiet — the LSP
+        // must give the editor an error rather than hang its command forever.
+        // The connect itself needs real I/O, so the clock is paused only
+        // afterwards; from there nothing is runnable, tokio auto-advances to
+        // `IO_TIMEOUT`, and the test takes milliseconds rather than 30s.
+        let ws = spawn_workspace(Handshake::Ok, reply_nothing()).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        tokio::time::pause();
+        let err = client.evaluate("Program sleepForever").await.expect_err(
+            "a workspace that never replies must surface a timeout, not hang the command",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("runtime protocol error: eval timed out after 30s waiting for reply"),
+            "unexpected message: {msg}"
+        );
+        // The op name is interpolated so a failure names the call that hung.
+        assert!(msg.contains("id="), "timeout must name the request: {msg}");
+    }
+
     // --- lifecycle ----------------------------------------------------
 
     #[tokio::test]
@@ -2124,13 +2164,16 @@ mod tests {
 
         client.close().await;
         // `close` aborts the writer task, which drops the request receiver.
-        // Abort is asynchronous, so wait for the channel to actually close
-        // rather than sleeping a guessed interval.
-        for _ in 0..400 {
+        // Abort takes effect on the aborted task's next poll, so poll for the
+        // observable consequence rather than sleeping a guessed interval. The
+        // sleep (rather than a bare `yield_now`) keeps this correct if the
+        // test is ever moved to a multi-thread runtime, where yielding does
+        // not guarantee another worker gets scheduled.
+        for _ in 0..500 {
             if client.inner.sender.is_closed() {
                 break;
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
         assert!(client.inner.sender.is_closed(), "writer task did not stop");
 
