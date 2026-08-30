@@ -20,14 +20,17 @@
 #[path = "../cli_common/mod.rs"]
 mod cli_common;
 
+mod cli_attach;
 mod cli_build;
 mod cli_doc;
 mod cli_doctor;
 mod cli_fmt;
 mod cli_lint;
+mod cli_logs;
 mod cli_new;
 mod cli_run;
 mod cli_test;
 mod cli_transcript;
+mod cli_workspace;
 mod gen_native;
 mod native_type_extraction;

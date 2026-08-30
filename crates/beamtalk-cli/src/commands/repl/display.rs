@@ -325,4 +325,33 @@ mod tests {
         let rendered = strip_ansi(&format_error("undefined variable: x"));
         assert_eq!(rendered, "Error: undefined variable: x");
     }
+
+    // --- history_path ---
+
+    #[test]
+    fn history_path_ends_in_repl_history_file() {
+        let path = history_path().expect("history_path should succeed");
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("repl_history")
+        );
+    }
+
+    // --- print_help / display_codegen smoke tests ---
+    //
+    // These just print to stdout; there's no return value to assert on, so
+    // the tests exist to exercise the lines (and confirm no panic) rather
+    // than to check specific formatted output.
+
+    #[test]
+    fn print_help_does_not_panic() {
+        print_help();
+    }
+
+    #[test]
+    fn display_codegen_falls_back_to_raw_output_when_core_pp_is_absent() {
+        // `core_pp` is not installed in the test environment, so this always
+        // exercises the "print unmodified Core Erlang" fallback path.
+        display_codegen("module test.\n  'foo'/0 = fun () -> ok\nend");
+    }
 }
