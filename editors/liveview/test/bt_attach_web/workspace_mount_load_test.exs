@@ -199,10 +199,10 @@ defmodule BtAttachWeb.WorkspaceMountLoadTest do
     test "a source (ClassLoaded) push landing before the fold is not clobbered",
          %{conn: conn} do
       # A user-defined class appears via eval; the ClassLoaded push refreshes the
-      # browser surface BEFORE the fold and marks source_loaded. We then make the
-      # mount snapshot STALER (drop the class) before releasing the gate: without
-      # the loaded-flag guard the fold would revert the class tree to the staler
-      # snapshot; with the guard the fold skips the already-loaded source surface.
+      # browser surface BEFORE the fold and marks browser_classes_loaded. We then
+      # make the mount snapshot STALER (drop the class) before releasing the gate:
+      # without the loaded-flag guard the fold would revert the class tree to the
+      # staler snapshot; with the guard the fold skips the already-loaded surface.
       :ok = StubWorkspaceClient.arm_mount_gate()
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
@@ -265,6 +265,63 @@ defmodule BtAttachWeb.WorkspaceMountLoadTest do
     end
   end
 
+  describe "BT-3321 direct-write-before-fold race (deterministic via the mount gate)" do
+    # BT-2619's guard only covered a *push* (`:do_source_refresh`/`:BindingChanged`)
+    # landing before the fold. `save_method` (and `ClassModals`'s remove/rename/
+    # new-class paths) write `changes`/`browser_classes` directly, bypassing
+    # `:do_source_refresh` entirely — so before BT-3321 split the combined
+    # `:source_loaded` flag into independent `:browser_classes_loaded` /
+    # `:changes_loaded` flags (each set by the surface's own apply function on
+    # success, not just by a push), a direct write racing the mount fold the same
+    # way a push could was silently clobbered.
+
+    test "a save_method landing before the fold is not clobbered by the mount read",
+         %{conn: conn} do
+      :ok = StubWorkspaceClient.arm_mount_gate()
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # The mount-load task is blocked on browse_classes. Save a method while it's
+      # pending — a direct write to `changes` via `assign_changes/1`, never
+      # touching `:do_source_refresh`. With the fix this sets `changes_loaded`
+      # immediately, before the fold ever runs.
+      render_hook(view, "save_method", %{
+        "class" => "Counter",
+        "selector" => "increment",
+        "source" => "increment => self.value := self.value + 7"
+      })
+
+      # The Changes pane row is in the DOM regardless of the active dock tab
+      # (only `hidden` toggles), so a plain `render/1` sees it — deliberately
+      # NOT `render_click(view, "dock_tab", %{"tab" => "changes"})`: that event
+      # is itself a direct write (`Dock`'s `dock_tab` handler pipes through
+      # `WorkspaceLive.assign_changes()`) and would set `changes_loaded` on its
+      # own, masking whether `save_method`'s own write set it. Matched by the
+      # specific table row, not a bare "increment" substring — the save also
+      # leaves a persistent "Saved increment on Counter" banner that would make
+      # this assertion pass regardless of whether the ChangeLog row itself
+      # survives the fold.
+      changes_row = ~s(<td class="k">Counter</td><td>increment</td>)
+      assert render(view) =~ changes_row
+
+      # Manufacture a staler mount snapshot: the gate only delays the task's
+      # FIRST read (browse_classes), so its later `changes` read genuinely
+      # happens after the save, not before it — there's no live "the RPC
+      # snapshot predates the save" race to reproduce here. Clearing `:changes`
+      # now makes that read see an empty ChangeLog regardless, which exercises
+      # the same fold-vs-flag branch: without the loaded-flag guard the fold
+      # would blank the just-saved change; with the guard (`changes_loaded` set
+      # true by the save) the fold skips this surface.
+      StubWorkspaceClient.clear_changes()
+
+      :ok = StubWorkspaceClient.release_mount_gate()
+      _ = render_async(view, 5_000)
+
+      assert render(view) =~ changes_row
+      assert Process.alive?(view.pid)
+    end
+  end
+
   describe "BT-2619 empty workspace + autoflush" do
     test "a genuinely-empty workspace still shows its empty state after mount", %{conn: conn} do
       # No push occurs, so both loaded flags stay false and the (empty-but-success)
@@ -284,8 +341,9 @@ defmodule BtAttachWeb.WorkspaceMountLoadTest do
     test "autoflush always folds in even after a source push (no competing push)",
          %{conn: conn} do
       # autoflush has no live push, so the mount fold must apply it unconditionally
-      # — even when a source push set source_loaded. We seed autoflush true and
-      # assert the post-save git refresh gate sees it (a save shells out to git).
+      # — even when a source push set browser_classes_loaded. We seed autoflush
+      # true and assert the post-save git refresh gate sees it (a save shells out
+      # to git).
       StubWorkspaceClient.set_autoflush(true)
       :ok = StubWorkspaceClient.arm_mount_gate()
 

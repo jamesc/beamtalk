@@ -345,6 +345,19 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     {:ok, class}
   end
 
+  @doc """
+  Test helper (BT-3321): drop every recorded `:changes` entry WITHOUT the
+  bookkeeping `flush/0` does (no summary, doesn't touch `compiled_sources`).
+  Lets a test manufacture a mount-load task's `changes` read resolving to a
+  staler snapshot than a save that already landed — mirroring
+  `clear_defined_classes/0`'s role in the equivalent `browser_classes` race
+  test. Since the mount gate only delays the task's *first* read, its
+  `changes` read genuinely runs after the save either way; this doesn't
+  simulate the read happening earlier, just gives it different (stale) data
+  to see, which exercises the same loaded-flag fold branch.
+  """
+  def clear_changes, do: put(:changes, %{})
+
   def flush do
     changes = get(:changes)
     put(:changes, %{})

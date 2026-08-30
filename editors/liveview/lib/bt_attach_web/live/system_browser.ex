@@ -654,9 +654,16 @@ defmodule BtAttachWeb.Live.SystemBrowser do
 
   # Public: `WorkspaceLive.handle_async(:mount_load, …)` folds the off-socket
   # mount read through this directly (`&SystemBrowser.apply_browser_classes/2`).
+  #
+  # BT-3321: marks `:browser_classes_loaded` on every SUCCESSFUL apply, not
+  # just a push refresh — a direct write (`ClassModals`'s remove/rename/new-
+  # class, or `refresh_after_source_change/1`) racing the mount-time fold
+  # needs this flag too, or `handle_async(:mount_load, …)` would later
+  # overwrite it with the stale pre-write snapshot. Monotonic (never reset to
+  # `false` here): see `WorkspaceLive.bind_session/3`'s flag-init comment.
   def apply_browser_classes(socket, {:value, rows}) when is_list(rows) do
     socket
-    |> assign(browser_classes: rows, browser_error: nil)
+    |> assign(browser_classes: rows, browser_error: nil, browser_classes_loaded: true)
     |> apply_default_browser_source(rows)
   end
 

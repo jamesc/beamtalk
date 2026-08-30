@@ -701,19 +701,26 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:changes_error, nil)
       |> assign(:autoflush, false)
       # BT-2619 (race): per-surface "loaded" flags gating the async mount fold so a
-      # live push that lands BEFORE the mount load resolves is not clobbered by the
-      # (staler) mount snapshot. `:source_loaded` covers the source-dependent pair
-      # (browser_classes + changes — they always refresh together via
-      # `:do_source_refresh`); `:bindings_loaded` covers the bindings pane. Both
-      # start `false` and are set `true` ONLY by a *successful* push refresh (see
-      # `:do_source_refresh` / `:BindingChanged`); `handle_async(:mount_load, …)`
-      # then applies a surface's mount read only while its flag is still `false`.
-      # Success-only gating is the crux of the edge case: an early push that ERRORED
-      # leaves the flag `false`, so the later-completing mount load's *successful*
-      # data still folds in (no lingering error flash). A remount = new process =
-      # fresh `false` flags, so reconnect/resume re-loads normally. `autoflush` has
-      # no competing push, so it always folds in (no flag).
-      |> assign(:source_loaded, false)
+      # live push — or a direct synchronous write (BT-3321) — that lands BEFORE the
+      # mount load resolves is not clobbered by the (staler) mount snapshot.
+      # `:browser_classes_loaded` and `:changes_loaded` are independent (BT-3321:
+      # split from one combined `:source_loaded` — the two surfaces do NOT always
+      # refresh together, e.g. `save_method`/`ClassModals` write `changes` or
+      # `browser_classes` directly, bypassing `:do_source_refresh`);
+      # `:bindings_loaded` covers the bindings pane. All three start `false` and
+      # are set `true` ONLY by a *successful* apply of that surface's data —
+      # whether from a push refresh, a direct write, or the mount fold itself (see
+      # `apply_changes/2`, `SystemBrowser.apply_browser_classes/2`,
+      # `apply_bindings/2`) — never by a separate post-hoc marker; `handle_async(
+      # :mount_load, …)` then applies a surface's mount read only while its flag is
+      # still `false`. Success-only, monotonic (false→true, never back) gating is
+      # the crux of the edge case: an early write that ERRORED leaves the flag
+      # `false`, so the later-completing mount load's *successful* data still
+      # folds in (no lingering error flash). A remount = new process = fresh
+      # `false` flags, so reconnect/resume re-loads normally. `autoflush` has no
+      # competing push, so it always folds in (no flag).
+      |> assign(:browser_classes_loaded, false)
+      |> assign(:changes_loaded, false)
       |> assign(:bindings_loaded, false)
       |> start_mount_load(pid)
       # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
@@ -1158,7 +1165,6 @@ defmodule BtAttachWeb.WorkspaceLive do
       socket
       |> assign(source_refresh_pending: false)
       |> MethodEditor.refresh_after_source_change()
-      |> mark_source_loaded()
       # BT-2588: this is the one place `:save_echo_pending` is cleared — see
       # `resync_active_tab/2`'s docs for why it must NOT self-clear (a
       # synchronous caller with more than one `resync_active_tab/2` call in its
@@ -1202,34 +1208,38 @@ defmodule BtAttachWeb.WorkspaceLive do
   # initial* state, so blindly overwriting would clobber that fresher push with
   # staler mount data.
   #
-  # We gate each surface on its per-surface "loaded" flag (`:source_loaded` for
-  # the browser_classes + changes pair, `:bindings_loaded` for bindings): a flag
-  # is set `true` ONLY by a *successful* push refresh (see `:do_source_refresh` /
-  # `:BindingChanged`), so we apply a surface's mount read only while its flag is
-  # still `false`, then set it `true` so a later sync refresh path stays the source
-  # of truth.
+  # We gate each surface on its own "loaded" flag (`:browser_classes_loaded`,
+  # `:changes_loaded`, `:bindings_loaded` — BT-3321: independent flags, not one
+  # shared `:source_loaded`, since `browser_classes` and `changes` each have
+  # their own direct-write callers too, not just `:do_source_refresh`/
+  # `:BindingChanged`): a flag is set `true` ONLY by a *successful* apply of
+  # that surface's data (see `apply_changes/2`, `SystemBrowser.apply_browser_
+  # classes/2`, `apply_bindings/2`), so we apply a surface's mount read only
+  # while its flag is still `false`, then force it `true` so a later sync
+  # refresh path stays the source of truth.
   #
-  # Success-only gating is what handles the "early push errored, mount succeeded"
-  # edge case: a push refresh that fired before this fold and itself failed (e.g.
-  # `ClassLoaded` while the workspace was momentarily unreachable → `changes_error`
-  # set, list still empty) leaves the flag `false` — so this fold's *successful*
-  # mount data still folds in and the pane shows real data rather than getting
-  # stuck on the transient error until the next push. A genuinely-empty workspace
-  # (no push at all) keeps both flags `false`, so the empty-but-successful mount
-  # read still applies and the panes render their empty state.
+  # Success-only gating is what handles the "early write errored, mount
+  # succeeded" edge case: a write that fired before this fold and itself
+  # failed (e.g. `ClassLoaded` while the workspace was momentarily unreachable
+  # → `changes_error` set, list still empty) leaves the flag `false` — so this
+  # fold's *successful* mount data still folds in and the pane shows real data
+  # rather than getting stuck on the transient error until the next write. A
+  # genuinely-empty workspace (no write at all) keeps every flag `false`, so
+  # the empty-but-successful mount read still applies and the panes render
+  # their empty state.
   #
   # `autoflush` is a stable settings probe with no live push, so it always folds in.
   def handle_async(:mount_load, {:ok, result}, socket) do
     socket =
       socket
       |> fold_mount_read(
-        :source_loaded,
+        :browser_classes_loaded,
         result.browser_classes,
         &SystemBrowser.apply_browser_classes/2
       )
       |> fold_mount_read(:bindings_loaded, result.bindings, &apply_bindings/2)
-      |> fold_mount_read(:source_loaded, result.changes, &apply_changes/2)
-      |> assign(source_loaded: true, bindings_loaded: true)
+      |> fold_mount_read(:changes_loaded, result.changes, &apply_changes/2)
+      |> assign(browser_classes_loaded: true, changes_loaded: true, bindings_loaded: true)
       # autoflush has no competing live push — always apply the mount read.
       |> apply_autoflush(result.autoflush)
 
@@ -1621,7 +1631,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp read_changes(socket), do: Facade.dispatch(:changes, %{}, RequestContext.build(socket))
 
   # Fold a completed `:changes` read into the socket. Pure (no dispatch); shared by
-  # `handle_async(:mount_load, …)` and the sync refresh path.
+  # `handle_async(:mount_load, …)` and every direct-write caller (`save_method`,
+  # `ClassModals`, `Dock`'s git-panel refreshes, `:do_source_refresh`).
   defp apply_changes(socket, rows) when is_list(rows) do
     # Prune expanded-diff carets for rows that have left @changes (flush /
     # revert), so a re-saved method doesn't re-appear already-expanded. Keyed
@@ -1629,7 +1640,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     # the template's `expanded` lookup below.
     live_keys = MapSet.new(rows, &{&1.class, &1.selector, &1[:side]})
     expanded = MapSet.intersection(socket.assigns.expanded_changes, live_keys)
-    assign(socket, changes: rows, changes_error: nil, expanded_changes: expanded)
+
+    # BT-3321: mark this surface loaded on every SUCCESSFUL apply, not just a
+    # push refresh — a direct write (e.g. `save_method`) racing the mount-time
+    # fold needs this flag too, or `handle_async(:mount_load, …)` would later
+    # overwrite it with the stale pre-write snapshot. Monotonic (never reset
+    # to `false` here): see `bind_session/3`'s flag-init comment.
+    assign(socket,
+      changes: rows,
+      changes_error: nil,
+      expanded_changes: expanded,
+      changes_loaded: true
+    )
   end
 
   defp apply_changes(socket, {:error, reason}) do
@@ -1749,31 +1771,23 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # BT-2619: fold one mount read into its surface's assigns only if a *successful*
-  # live push hasn't already loaded that surface. `loaded_key` is the per-surface
-  # flag (`:source_loaded` / `:bindings_loaded`): it is `true` only when a push
-  # refresh succeeded, so a `false` flag means either no push landed yet OR a push
-  # landed but errored — in both cases the mount read (which carries real,
-  # successful data here) should win. We do NOT clear the flag here; the caller
-  # sets all flags `true` after the fold so the post-mount sync refresh path
-  # remains the source of truth.
+  # write hasn't already loaded that surface. `loaded_key` is the per-surface
+  # flag (`:browser_classes_loaded` / `:changes_loaded` / `:bindings_loaded`,
+  # BT-3321): it is `true` only when a write succeeded, so a `false` flag means
+  # either no write landed yet OR one landed but errored — in both cases the
+  # mount read (which carries real, successful data here) should win. We do NOT
+  # clear the flag here; the caller sets all flags `true` after the fold so the
+  # post-mount sync refresh path remains the source of truth.
   defp fold_mount_read(socket, loaded_key, read, apply_fun) do
     if socket.assigns[loaded_key], do: socket, else: apply_fun.(socket, read)
   end
 
-  # BT-2619: mark the source-dependent surfaces (browser_classes + changes) as
-  # loaded by a push — but ONLY when the push refresh actually succeeded (neither
-  # surface holds an error). An errored push leaves the flag `false` so a
-  # later-completing mount fold's successful data can still replace the transient
-  # error (no lingering error flash). Idempotent: re-marking after a later success
-  # just re-affirms `true`.
-  defp mark_source_loaded(socket) do
-    if is_nil(socket.assigns.browser_error) and is_nil(socket.assigns.changes_error),
-      do: assign(socket, :source_loaded, true),
-      else: socket
-  end
-
   # BT-2619: mark the bindings surface as loaded by a push — only on a successful
-  # refresh (no `bindings_error`), mirroring `mark_source_loaded/1`.
+  # refresh (no `bindings_error`). `browser_classes`/`changes` no longer need an
+  # equivalent here (BT-3321): `SystemBrowser.apply_browser_classes/2` and
+  # `apply_changes/2` each set their own flag inline on success, so every
+  # caller of `refresh_after_source_change/1` (this handler included) marks
+  # both surfaces loaded as a side effect of the same call chain.
   defp mark_bindings_loaded(socket) do
     if is_nil(socket.assigns.bindings_error),
       do: assign(socket, :bindings_loaded, true),
