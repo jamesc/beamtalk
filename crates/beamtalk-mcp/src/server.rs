@@ -6151,6 +6151,90 @@ mod tests {
         assert_eq!(error.is_error, Some(true));
     }
 
+    // --- tool_router (the "tool listing" dispatch surface) ---
+    //
+    // `#[tool_router]` generates `call_tool`/`list_tools` on `ServerHandler`
+    // itself, but those need a live `RequestContext<RoleServer>` (a `Peer`
+    // wired to a real transport) to invoke — plumbing that belongs to rmcp's
+    // own test suite, not ours. `ToolRouter::list_all`/`get`/`has_route` give
+    // the same registry data without that transport dependency, so the tool
+    // list every `#[tool]` method above populates is covered directly.
+
+    #[test]
+    fn tool_router_registers_every_tool_exactly_once() {
+        let router = BeamtalkMcp::tool_router();
+        let names: Vec<String> = router
+            .list_all()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+
+        let expected = [
+            "evaluate",
+            "complete",
+            "load_project",
+            "load_file",
+            "inspect",
+            "list_actors",
+            "supervision_tree",
+            "list_classes",
+            "reload_class",
+            "docs",
+            "unload",
+            "interrupt",
+            "show_codegen",
+            "test",
+            "lint",
+            "diagnostic_summary",
+            "search_examples",
+            "search_classes",
+            "enable_tracing",
+            "disable_tracing",
+            "get_traces",
+            "export_traces",
+            "actor_stats",
+            "describe",
+            "list_packages",
+            "package_classes",
+            "save_method",
+            "try_method",
+            "save_class",
+            "remove_method",
+            "remove_class",
+            "rename_class",
+            "rename_method",
+            "flush",
+            "list_changes",
+            "dirty_methods",
+            "precheck_method",
+            "recheck_image",
+        ];
+        for name in expected {
+            assert!(
+                names.iter().any(|n| n == name),
+                "tool_router should register {name:?}, got {names:?}"
+            );
+            assert!(router.has_route(name), "has_route({name:?}) should be true");
+            assert!(
+                router.get(name).is_some(),
+                "get({name:?}) should find a Tool"
+            );
+        }
+        assert_eq!(
+            names.len(),
+            expected.len(),
+            "tool_router registered an unexpected tool — update this test's `expected` list \
+             alongside any new #[tool] handler, got {names:?}"
+        );
+    }
+
+    #[test]
+    fn tool_router_rejects_unknown_tool_name() {
+        let router = BeamtalkMcp::tool_router();
+        assert!(!router.has_route("no_such_tool"));
+        assert!(router.get("no_such_tool").is_none());
+    }
+
     // --- ServerHandler::get_info ---
 
     #[test]
