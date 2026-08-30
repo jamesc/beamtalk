@@ -1233,12 +1233,17 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 
 # Tests that are `--ignored` for reasons unrelated to coverage measurement:
 # environment prerequisites the coverage job doesn't (and shouldn't) set up.
-#   - valid_specs_pass_dialyzer_validation: needs a pre-built Dialyzer PLT,
-#     already covered by the separate `just dialyzer` CI lint step.
+#   - valid_specs_pass_dialyzer_validation / negative_test_invalid_spec_detected_by_dialyzer:
+#     both need a Dialyzer PLT, already covered by the separate `just dialyzer`
+#     CI lint step. Unlike that job, the coverage job doesn't cache the PLT
+#     (`ensure_plt()` self-heals by building one from scratch), so skipping
+#     only the first and not the second would still eat a full from-scratch
+#     PLT build into the coverage job's time budget for no reason.
 #   - live_front's suite: needs a real `dist-liveview` release + a running
 #     workspace, built only by manual setup (see the module doc comment in
 #     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
+    --skip negative_test_invalid_spec_detected_by_dialyzer \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \
     --skip bad_cookie_readiness_resolves_within_the_default_budget \
