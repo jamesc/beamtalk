@@ -108,6 +108,10 @@ defmodule BtAttachWeb.WorkspaceDismissNoticeTest do
     test "ok: dismissing save_result clears it", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time class-tree load before selecting a row —
+      # otherwise this races start_async(:mount_load, …) under scheduler load.
+      render_async(view, 2_000)
+
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
 
@@ -151,6 +155,7 @@ defmodule BtAttachWeb.WorkspaceDismissNoticeTest do
       view |> form("#eval-form") |> render_submit(%{expr: class_src})
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 2_000)
       view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
       view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
 

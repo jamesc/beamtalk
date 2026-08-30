@@ -167,6 +167,10 @@ defmodule BtAttachWeb.WorkspaceGitRevertRefreshTest do
     test "a revert is blocked when the file has unflushed in-memory edits", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # `path_has_pending_edits?/2` (Dock) maps the pending class to a file via
+      # `browser_classes`, so this guard needs the mount-load class tree too.
+      render_async(view, 2_000)
+
       # Save a method on Counter (src/counter.bt) → a pending ChangeLog entry.
       render_hook(view, "save_method", %{
         "class" => "Counter",
@@ -331,6 +335,10 @@ defmodule BtAttachWeb.WorkspaceGitRevertRefreshTest do
 
     test "a ClassRemoved push is handled without crashing the LiveView", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
+      # races the class-tree/browser-classes load under scheduler load or --cover.
+      render_async(view, 2_000)
 
       send(view.pid, {:beamtalk_announcement, make_ref(), :ClassRemoved, :handler, %{}})
 

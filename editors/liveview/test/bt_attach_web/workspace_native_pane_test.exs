@@ -64,6 +64,10 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
          %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time class-tree load before selecting a row —
+      # otherwise this races start_async(:mount_load, …) under scheduler load.
+      render_async(view, 2_000)
+
       # Real user flow through the System Browser DOM: pick the native: class in
       # the tree, open its "class definition" entry, then toggle the Erlang pane —
       # no synthetic events.

@@ -63,6 +63,10 @@ defmodule BtAttachWeb.WorkspaceHeaderPackageBadgeTest do
     test "a project class shows the bare project package name", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time class-tree load before selecting a row —
+      # otherwise this races start_async(:mount_load, …) under scheduler load.
+      render_async(view, 2_000)
+
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Counter"})
 
@@ -111,6 +115,8 @@ defmodule BtAttachWeb.WorkspaceHeaderPackageBadgeTest do
   describe "method tab package badge (BT-2642)" do
     test "a project method tab shows the project package name", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 

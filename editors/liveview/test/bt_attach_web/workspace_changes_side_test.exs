@@ -104,6 +104,12 @@ defmodule BtAttachWeb.WorkspaceChangesSideTest do
       })
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # BT-3315: await the mount-time class-tree/changes load before reading
+      # the Changes pane — otherwise this races start_async(:mount_load, …)
+      # under scheduler load (result.changes folds in the same async).
+      render_async(view, 2_000)
+
       changes_html = render_click(view, "dock_tab", %{"tab" => "changes"})
 
       # (1) Visually distinguishable: the Kind column renders "instance" for
@@ -187,6 +193,12 @@ defmodule BtAttachWeb.WorkspaceChangesSideTest do
       })
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # BT-3315: await the mount-time class-tree/changes load before reading
+      # the Changes pane — otherwise this races start_async(:mount_load, …)
+      # under scheduler load (result.changes folds in the same async).
+      render_async(view, 2_000)
+
       changes_html = render_click(view, "dock_tab", %{"tab" => "changes"})
 
       assert kind_cell_for(changes_html, class, "bar", "remove (class)")

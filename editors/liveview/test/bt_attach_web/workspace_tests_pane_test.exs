@@ -280,6 +280,10 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
     test "switching to a filter that hides the selected class clears it", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time class-tree load before selecting a row —
+      # otherwise this races start_async(:mount_load, …) under scheduler load.
+      render_async(view, 2_000)
+
       # Select a project class — its instance selectors fill the method pane.
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       assert render(view) =~ "increment"
@@ -293,6 +297,8 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
     test "switching to a filter that still shows the class keeps the selection", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       assert render(view) =~ "increment"
@@ -329,6 +335,8 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
     test "changing the dropdown dispatches the browser_source event", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       assert render(view) =~ "increment"

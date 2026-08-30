@@ -61,6 +61,10 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
     test "selecting a method shows a doc toggle and rendered doc-comment", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      # BT-3315: await the mount-time start_async(:mount_load, …) — otherwise this
+      # races the class-tree/browser-classes load under scheduler load or --cover.
+      render_async(view, 2_000)
+
       # Select Counter (always present in the stub), then open the `increment`
       # method — the stub carries a signature and a Markdown `///` doc for it.
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
@@ -92,6 +96,8 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
     test "a method with no doc-comment renders no doc block at all (BT-2604)", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      render_async(view, 2_000)
+
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 
       html =
@@ -106,6 +112,8 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
 
     test "the expanded state is sticky across tab switches", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
@@ -131,6 +139,8 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
     test "an observer sees the read-only doc block", %{conn: conn} do
       {:ok, view, _html} = live(observer_conn(conn), "/")
 
+      render_async(view, 2_000)
+
       # The doc block rides the `:read`-capability browse ops, so it renders for
       # an observer even though the editable source form below does not.
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
@@ -153,6 +163,8 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
   describe "class-definition doc block (BT-2558)" do
     test "opening a class definition renders the class comment as docs", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view, 2_000)
 
       # Select Counter, then open its definition via the System Browser's "class
       # definition" entry — it reads the class comment for the doc block. (The
@@ -178,6 +190,8 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
     test "opening a class definition seeds the editor with the class skeleton",
          %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_async(view, 2_000)
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
 
