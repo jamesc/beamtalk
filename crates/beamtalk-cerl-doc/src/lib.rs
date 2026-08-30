@@ -3,18 +3,24 @@
 
 //! Wadler-Lindig document tree for Core Erlang code generation (ADR 0018).
 //!
-//! **DDD Context:** Compilation — Code Generation
+//! **DDD Context:** Compilation — Code Generation (shared leaf, ADR 0117 step 4)
 //!
-//! This module provides a composable `Document` type for building Core Erlang
+//! This crate provides a composable `Document` type for building Core Erlang
 //! output declaratively. Instead of writing directly to a string buffer with
 //! manual indentation tracking, codegen functions return `Document` values
 //! that are rendered in a final pass.
 //!
+//! It is a shared leaf: both `beamtalk-core`'s `codegen` (Core Erlang
+//! generation) and `unparse` (Beamtalk-source pretty-printing) depend on this
+//! crate directly, and neither depends on the other for it — see
+//! `docs/development/architecture-principles.md` §6 and
+//! `docs/ADR/0117-beamtalk-core-crate-split.md`, Decision step 4.
+//!
 //! # Example
 //!
 //! ```
-//! use beamtalk_core::codegen::core_erlang::document::{Document, line, nest, nil};
-//! use beamtalk_core::docvec;
+//! use beamtalk_cerl_doc::{Document, line, nest, nil};
+//! use beamtalk_cerl_doc::docvec;
 //!
 //! let doc = docvec![
 //!     "'method_table'/0 = fun () ->",
@@ -25,6 +31,8 @@
 //!
 //! Based on Gleam's Document implementation, adapted for Beamtalk's needs.
 
+pub mod binary;
+pub mod escape;
 pub mod leaf;
 
 /// Indentation width used throughout Core Erlang generation.
@@ -43,7 +51,7 @@ pub enum Document<'a> {
     /// A borrowed string literal.
     Str(&'a str),
     /// An owned string — the internal backing for the typed-leaf helpers
-    /// (`document::leaf` and `unparse::leaf`).
+    /// ([`leaf`] and `unparse::leaf`).
     ///
     /// **Internal, not part of the public `Document` API (ADR 0089 Phase 3).**
     /// Codegen call sites must construct text leaves through a typed-leaf
@@ -120,8 +128,8 @@ impl<'a> Documentable<'a> for isize {
 /// Documents are concatenated directly — no separator is inserted.
 ///
 /// ```
-/// use beamtalk_core::docvec;
-/// use beamtalk_core::codegen::core_erlang::document::Document;
+/// use beamtalk_cerl_doc::docvec;
+/// use beamtalk_cerl_doc::Document;
 ///
 /// let doc = docvec!["hello", " ", "world"];
 /// assert_eq!(doc.to_pretty_string(), "hello world");
@@ -129,26 +137,26 @@ impl<'a> Documentable<'a> for isize {
 #[macro_export]
 macro_rules! docvec {
     () => {
-        $crate::codegen::core_erlang::document::Document::Vec(Vec::new())
+        $crate::Document::Vec(Vec::new())
     };
 
     ($first:expr $(,)?) => {
-        $crate::codegen::core_erlang::document::Document::Vec(
-            vec![$crate::codegen::core_erlang::document::Documentable::to_doc($first)]
+        $crate::Document::Vec(
+            vec![$crate::Documentable::to_doc($first)]
         )
     };
 
     ($first:expr, $($rest:expr),+ $(,)?) => {
-        match $crate::codegen::core_erlang::document::Documentable::to_doc($first) {
-            $crate::codegen::core_erlang::document::Document::Vec(mut vec) => {
+        match $crate::Documentable::to_doc($first) {
+            $crate::Document::Vec(mut vec) => {
                 $(
-                    vec.push($crate::codegen::core_erlang::document::Documentable::to_doc($rest));
+                    vec.push($crate::Documentable::to_doc($rest));
                 )*
-                $crate::codegen::core_erlang::document::Document::Vec(vec)
+                $crate::Document::Vec(vec)
             },
             first => {
-                $crate::codegen::core_erlang::document::Document::Vec(
-                    vec![first, $($crate::codegen::core_erlang::document::Documentable::to_doc($rest)),+]
+                $crate::Document::Vec(
+                    vec![first, $($crate::Documentable::to_doc($rest)),+]
                 )
             }
         }

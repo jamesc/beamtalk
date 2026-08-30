@@ -5,10 +5,10 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::{call_self_p0, generate_comparison_bif, param};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// String primitive implementations.
 pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {

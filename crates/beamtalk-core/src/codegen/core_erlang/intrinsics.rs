@@ -22,12 +22,12 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
-use super::document::{Document, join, leaf};
 use super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
 };
 use crate::ast::{Block, Expression, MessageSelector, WellKnownSelector};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, join, leaf};
 
 /// Hint shown when a structural intrinsic reached via generic dispatch
 /// (`perform:`/`perform:withArguments:`) can't tell — from an

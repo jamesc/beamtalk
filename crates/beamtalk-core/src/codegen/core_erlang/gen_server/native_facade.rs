@@ -13,12 +13,12 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::spec_codegen;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodDefinition, MethodKind, Module};
-use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 
 impl CoreErlangGenerator {
     /// Generates a native facade module for a `native:` actor class (ADR 0056).

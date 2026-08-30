@@ -7,10 +7,10 @@
 //!
 //! Contains BIF generators for error-related classes: `Exception`, `StackFrame`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::param;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Exception primitive implementations (BT-338).
 ///

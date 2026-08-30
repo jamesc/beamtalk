@@ -7,10 +7,10 @@
 //!
 //! Contains BIF generators for immutable value types: `Tuple`, `Set`, `Object`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::param;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Tuple primitive implementations (BT-417).
 ///

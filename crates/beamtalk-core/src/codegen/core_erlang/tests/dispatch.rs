@@ -3276,7 +3276,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:')"),
         "spawn/1 error stub must name selector 'spawnWith:'. Got:\n{code}"
     );
-    let abstract_hint = CoreErlangGenerator::binary_string_literal(
+    let abstract_hint = beamtalk_cerl_doc::binary::binary_string_literal(
         "Abstract classes cannot be instantiated. Subclass it first.",
     );
     assert_eq!(
@@ -3427,8 +3427,9 @@ fn test_spawn_with_args_validates_map_argument() {
         code.contains("call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:')"),
         "type_error must name selector 'spawnWith:'. Got:\n{code}"
     );
-    let dict_hint =
-        CoreErlangGenerator::binary_string_literal("spawnWith: expects a Dictionary argument");
+    let dict_hint = beamtalk_cerl_doc::binary::binary_string_literal(
+        "spawnWith: expects a Dictionary argument",
+    );
     assert!(
         code.contains(dict_hint.as_str()),
         "type_error must include the Dictionary hint. Got:\n{code}"

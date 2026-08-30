@@ -8,10 +8,10 @@
 //! Lists are Erlang linked lists — fast prepend, sequential access.
 //! Complex operations delegate to `beamtalk_list` helper module.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::{build_error_doc, call_p0_self, call_self_p0, param};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// List primitive implementations (BT-419).
 pub(crate) fn generate_list_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {

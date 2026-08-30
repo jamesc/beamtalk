@@ -532,10 +532,10 @@
 use std::collections::HashMap;
 
 use super::control_flow::StateAccFallbackReason;
-use super::document::{Document, join, leaf};
 use super::{CoreErlangGenerator, NlrBoundary};
-use crate::docvec;
 use crate::source_analysis::Span;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, join, leaf};
 
 // ─── Frame identity ─────────────────────────────────────────────────────────
 

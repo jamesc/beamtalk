@@ -1714,7 +1714,7 @@ Actor subclass: Counter
     // ChangeLog-diffed `methodSource` must drop it.
     let expected_method_source_entry = format!(
         "'methodSource' => ~{{'getValue' => #{{{}}}#}}~",
-        CoreErlangGenerator::binary_byte_segments("getValue => value")
+        beamtalk_cerl_doc::binary::binary_byte_segments("getValue => value")
     );
     assert!(
         code.contains(&expected_method_source_entry),
@@ -1861,7 +1861,7 @@ Actor subclass: Counter
     // binary literal (per-byte segments, not a plain string), so compare
     // against the same byte-segment encoding codegen itself produces.
     let expected_signature_bytes =
-        CoreErlangGenerator::binary_byte_segments("getValue -> Integer =>");
+        beamtalk_cerl_doc::binary::binary_byte_segments("getValue -> Integer =>");
     assert!(
         code.contains(&expected_signature_bytes),
         "explicit user-written return-type annotation must survive in \
@@ -3897,7 +3897,7 @@ fn test_native_facade_meta_includes_native_flag() {
 
 #[test]
 fn test_meta_superclass_is_single_quoted_atom() {
-    // BT-2328: the document::leaf migration must emit the meta-map superclass as a
+    // BT-2328: the leaf-constructor migration must emit the meta-map superclass as a
     // single-quoted atom (`'superclass' => 'Actor'`). A stray leading quote ahead of
     // leaf::atom produced `''Actor'`, which desyncs Core Erlang atom quoting.
     let module = make_native_actor_module();

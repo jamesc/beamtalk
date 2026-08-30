@@ -3,13 +3,13 @@
 
 //! Filter list operations: `select:` and `reject:`.
 
-use super::super::super::document::Document;
-use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_list_select(

@@ -16,14 +16,14 @@
 //! - Multi-expression sequencing with state threading
 //! - Test module generation (no workspace bindings)
 
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
+use beamtalk_cerl_doc::leaf::{atom, var};
 use beamtalk_core::ast::{Expression, Pattern};
-use beamtalk_core::codegen::core_erlang::document::Document;
-use beamtalk_core::codegen::core_erlang::document::leaf;
-use beamtalk_core::codegen::core_erlang::document::leaf::{atom, var};
 use beamtalk_core::codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, Result,
 };
-use beamtalk_core::docvec;
 
 // ── Public API ──────────────────────────────────────────────────────────
 

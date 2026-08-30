@@ -36,11 +36,11 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
-use super::document::Document;
-use super::document::leaf;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Strips any number of `Parenthesized` wrappers to expose the syntactic
 /// shape underneath — `(expr)`, `((expr))`, etc. all see through to `expr`.

@@ -9,10 +9,10 @@
 //! `handle_cast/2`, `handle_call/3`, `handle_info/2`, `code_change/3`,
 //! and `terminate/2`.
 
-use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Module, TypeAnnotation};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 
 /// BT-1951 (ADR 0078): Identifies a single class's `initialize` method in the
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.

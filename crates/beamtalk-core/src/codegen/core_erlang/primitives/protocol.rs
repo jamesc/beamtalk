@@ -8,9 +8,9 @@
 //! Maps `@primitive "protocolXxx"` declarations in `stdlib/src/Protocol.bt`
 //! to direct calls into `beamtalk_protocol_registry`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Generates Core Erlang for a Protocol class method primitive.
 ///

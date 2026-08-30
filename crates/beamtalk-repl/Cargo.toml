@@ -19,6 +19,10 @@ categories = ["compilers", "development-tools"]
 # expression compilation and state threading to `CoreErlangGenerator`
 # (`codegen::core_erlang`).
 beamtalk-core.workspace = true
+# why: shared leaf for the Core Erlang Document/leaf/docvec! pretty-printing
+# API (BT-3343, ADR 0117 step 4) — REPL module assembly builds `Document`
+# values directly rather than only through `CoreErlangGenerator`.
+beamtalk-cerl-doc.workspace = true
 
 [dev-dependencies]
 ecow.workspace = true

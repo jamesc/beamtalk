@@ -8,10 +8,10 @@
 //! Contains BIF generators for BEAM process and concurrency types:
 //! `Pid`, `Port`, `Reference`, `Future`, `FileHandle`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::{binary_bif, param};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Generates BIFs for opaque BEAM types (Pid, Port, Reference) (BT-681).
 ///

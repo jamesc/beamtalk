@@ -32,10 +32,10 @@
 //! | [`binary_lit`]   | `#{#<…>(…), …}#`            | `Document::String(Self::binary_string_literal(s))` |
 //! | [`annotated`]    | `( Expr -\| [Line, {'file', F}] )` | hand-rolled `-\|` annotation docvecs |
 
-use super::Document;
-use crate::codegen::core_erlang::CoreErlangGenerator;
-use crate::codegen::core_erlang::util::{escape_atom_chars, escape_core_erlang_string};
+use crate::Document;
+use crate::binary::{binary_byte_segments, binary_string_literal};
 use crate::docvec;
+use crate::escape::{escape_atom_chars, escape_core_erlang_string};
 
 /// `'escaped_name'` — a quoted Core Erlang atom.
 ///
@@ -80,7 +80,7 @@ pub fn var(name: impl Into<String>) -> Document<'static> {
 
 /// `"escaped string"` — a Core Erlang double-quoted string literal.
 ///
-/// The contents are escaped via `util::escape_core_erlang_string`
+/// The contents are escaped via `escape::escape_core_erlang_string`
 /// (backslashes and double quotes), then wrapped in double quotes.
 ///
 /// Replaces hand-rolled `docvec!["\"", Document::String(escaped), "\""]` call
@@ -163,8 +163,8 @@ pub fn fname(name: impl Into<String>, arity: usize) -> Document<'static> {
 /// literal holding the UTF-8 bytes of `s`.
 ///
 /// This is the wire form for Beamtalk `String` values. The bytes are rendered
-/// by the canonical `CoreErlangGenerator::binary_string_literal` builder, so
-/// the output is byte-for-byte identical to the call sites it replaces.
+/// by the canonical [`binary_string_literal`] builder, so the output is
+/// byte-for-byte identical to the call sites it replaces.
 ///
 /// Replaces `Document::String(Self::binary_string_literal(s))` call sites —
 /// string-literal codegen, error hints, and REPL source binaries.
@@ -174,7 +174,7 @@ pub fn fname(name: impl Into<String>, arity: usize) -> Document<'static> {
 /// ```
 #[must_use]
 pub fn binary_lit(s: impl AsRef<str>) -> Document<'static> {
-    Document::Owned(CoreErlangGenerator::binary_string_literal(s.as_ref()))
+    Document::Owned(binary_string_literal(s.as_ref()))
 }
 
 /// `#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(…)` — the *unwrapped*
@@ -185,16 +185,15 @@ pub fn binary_lit(s: impl AsRef<str>) -> Document<'static> {
 /// between interpolated expression segments inside a single enclosing `#{…}#`.
 /// [`binary_lit`] would add its own wrapper and corrupt that construction, so
 /// this helper is the typed-leaf entry point for the unwrapped form. The bytes
-/// are rendered by the canonical
-/// `CoreErlangGenerator::binary_byte_segments` builder, so the output is
-/// byte-for-byte identical to the call site it replaces.
+/// are rendered by the canonical [`binary_byte_segments`] builder, so the
+/// output is byte-for-byte identical to the call site it replaces.
 ///
 /// ```text
 /// binary_segments("hi") => #<104>(8,1,'integer',['unsigned'|['big']]),#<105>(...)
 /// ```
 #[must_use]
 pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
-    Document::Owned(CoreErlangGenerator::binary_byte_segments(s.as_ref()))
+    Document::Owned(binary_byte_segments(s.as_ref()))
 }
 
 /// A `.bt` source position: the file it came from and its 1-based line number.
@@ -262,7 +261,7 @@ pub fn annotated(expr: Document<'static>, span: &BtSpan<'_>) -> Document<'static
 /// to a leaf instead of smuggling whitespace through [`var`] (which is reserved
 /// for variable *names*). Used where the column of the first line must be set
 /// explicitly because the pretty-printer does not track the current column —
-/// the leading run pairs with a [`nest`](super::nest) that indents the
+/// the leading run pairs with a [`nest`](crate::nest) that indents the
 /// continuation lines.
 ///
 /// ```text
@@ -353,13 +352,13 @@ mod tests {
     #[test]
     fn binary_lit_matches_canonical_builder() {
         // Byte-equivalent to the existing binary_string_literal builder.
-        let expected = CoreErlangGenerator::binary_string_literal("hi");
+        let expected = binary_string_literal("hi");
         assert_eq!(binary_lit("hi").to_pretty_string(), expected);
     }
 
     #[test]
     fn binary_lit_empty_string() {
-        let expected = CoreErlangGenerator::binary_string_literal("");
+        let expected = binary_string_literal("");
         assert_eq!(binary_lit("").to_pretty_string(), expected);
     }
 

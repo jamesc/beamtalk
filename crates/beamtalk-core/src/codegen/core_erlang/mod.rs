@@ -92,7 +92,6 @@ mod block_analysis;
 mod class_builder_source;
 mod control_flow;
 mod dispatch_codegen;
-pub mod document;
 pub mod erlang_types;
 mod expressions;
 mod gen_server;
@@ -110,15 +109,15 @@ mod value_type_codegen;
 mod variable_context;
 
 // Re-export utility functions for IDE queries
-pub use util::escape_atom_chars;
+pub use beamtalk_cerl_doc::escape::escape_atom_chars;
 pub use util::escape_erlang_string;
 pub use util::to_module_name;
 
 use crate::ast::{Block, ClassKind, Expression, MessageSelector, Module, WellKnownSelector};
-use crate::docvec;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
-use document::leaf;
-use document::{Document, INDENT, line, nest};
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
+use beamtalk_cerl_doc::{Document, INDENT, line, nest};
 use ecow::EcoString;
 use primitive_bindings::PrimitiveBindingTable;
 use std::collections::HashSet;
@@ -4500,7 +4499,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        let params_doc = document::join(
+        let params_doc = beamtalk_cerl_doc::join(
             self.current_method_params
                 .iter()
                 .map(|p| leaf::var(p.clone())),
