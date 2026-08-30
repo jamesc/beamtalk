@@ -56,6 +56,21 @@ Since the ADR's own table already lists `queries` as depending on `semantic_anal
 
 The remaining ~6,400 lines are shared leaf modules (`ast_walker`, `ffi_receiver`, `method_source_walker`, `state_threading_selectors`, `test_helpers`, `file_walker`, `ffi_type_specs`, `erlang`, `synthetic_selectors`, `tool_expr`) consumed across nearly every module above; **only four of the ten are actually `pub(crate)`** in `lib.rs` (`ast_walker`, `ffi_receiver`, `method_source_walker`, `state_threading_selectors`) — the other six (`test_helpers`, `file_walker`, `ffi_type_specs`, `erlang`, `synthetic_selectors`, `tool_expr`) are already `pub`. Several of them are also not pure leaves: `test_helpers.rs` and `erlang.rs` both reach upward into `semantic_analysis`/`codegen`/`repl`/`unparse`, and `ffi_type_specs.rs` reaches into `codegen`/`semantic_analysis`. A crate split would still need a visibility audit, but starting from "6 of 10 already public, several already depend upward" rather than "all 10 are crate-private, pure downward leaves."
 
+### What `beamtalk-core`'s actual consumers use (post-review addition)
+
+`beamtalk-core` has three consumers today: `beamtalk-cli`, `beamtalk-lsp`, `beamtalk-mcp`. Grepping each consumer crate's own source for `beamtalk_core::<module>` (i.e. what they use across the public-API boundary, not `beamtalk-core`'s internal `crate::` edges) gives an empirical answer to "is there a shared core beneath the compiler proper":
+
+| Module | `beamtalk-lsp` | `beamtalk-mcp` | `beamtalk-cli` |
+|---|:---:|:---:|:---:|
+| `source_analysis`, `semantic_analysis`, `unparse`, `queries`, `language_service`, `project` | ✓ | ✓ | ✓ |
+| `lint` | | ✓ | ✓ |
+| **`codegen`** (90,631 lines, ~35% of the crate) | | | ✓ (only) |
+| **`repl`** | | | ✓ (only) |
+
+Neither `beamtalk-lsp` nor `beamtalk-mcp` references `codegen` or `repl` anywhere in their own source. Only `beamtalk-cli` does (it's the only consumer that actually compiles to Core Erlang / builds and runs code). So the shared-core boundary isn't just an abstract DDD label — it's already visible in how the three consumers actually use the crate: **parse + analyze + unparse + query/lint is what LSP and MCP need; `codegen` (and its REPL-codegen sibling `repl`) is CLI-only.**
+
+The catch: today they get `codegen` anyway, transitively, through exactly one thread — `unparse` imports `codegen::core_erlang::document::{Document, leaf}` (the edge already flagged above), and `semantic_analysis` depends on `unparse` (`format_default_value`). So `beamtalk-lsp`/`beamtalk-mcp` currently pull in all of `codegen` despite never calling it. Extracting the Document API to a shared leaf (Decision step 4 below) isn't just intra-Compilation hygiene, then — it's the one fix that would let a future `beamtalk-analysis`-shaped crate exclude `codegen` entirely, which *would* be a real, measurable build-time/type-checking-scope win for LSP and MCP specifically (not for the CLI, which needs `codegen` regardless) — see the revised Consequences note.
+
 ### Constraints
 
 - CLAUDE.md's ThreadedIr rule and the extensive `verify()`-backed state-threading invariants live inside `codegen` — the part of the crate a split would most need to touch (to break the `codegen`↔`unparse` and `codegen`↔`repl` edges) is also the part the codebase treats as most sensitive to regress.
@@ -83,12 +98,13 @@ The original version of this Decision (see git history) picked the wrong four cy
      - **(a, recommended default) Merge `queries` and `language_service` into one module.** They are already one DDD context per CLAUDE.md; splitting that context into two Rust modules with no enforced boundary between them is very plausibly *why* they drifted into an unnoticed cycle. Merging removes the cycle by construction and matches the DDD-context framing this Decision is built on.
      - **(b)** If the author has a specific reason to keep them separate (e.g. wanting `queries` usable standalone by a non-LSP consumer — the MCP search tool in ADR 0062 is the closest candidate, worth checking whether it actually needs `queries` without `language_service`), extract the shared protocol types into a leaf module beneath both, and audit that no other `queries → language_service` behavioral call remains beyond type usage.
      Size: M, pending the spike.
-4. **Do the remaining intra-Compilation hygiene fixes whenever convenient** — none of these block a Language-Service/Compilation split, so they're not on the critical path:
+4. **Do the remaining intra-Compilation hygiene fixes whenever convenient** — none of these block a Language-Service/Compilation split, so they're not on the critical path, but the first item has a second justification beyond hygiene (see Context, "What `beamtalk-core`'s actual consumers use", and Consequences/Neutral): it's the one thing standing between `beamtalk-lsp`/`beamtalk-mcp` and never having to compile `codegen` at all, so consider prioritizing it ahead of the other three:
    - Extract `codegen::core_erlang::document` (`Document`/`leaf`/`docvec!`) to a shared leaf beneath `codegen` and `unparse`. Size: M. (Leaves `codegen`'s own one-way dependency on `unparse` — `unparse_method_display_signature` etc. — untouched; that edge doesn't need fixing.)
    - Move the REPL-codegen test cases out of `codegen`'s test tree into `repl`'s. Size: S. (Hygiene only — Cargo permits cyclic dev-dependencies, so this was never split-blocking.)
    - Extract `source_analysis::Span` (+ needed parser item) to a shared leaf beneath `ast` and `source_analysis`. Size: S-M.
    - Move `source_analysis`'s unparse-round-trip tests into `unparse`'s test tree. Size: S. (Also hygiene only, for the same dev-dependency reason.)
 5. **Split at the bounded-context boundary once step 3 lands**: `beamtalk-compilation` (the current SCC, `ast`/`source_analysis`/`unparse`/`codegen`/`semantic_analysis`/`compilation`, ~225k lines, staying one crate — no further internal splitting proposed, see Consequences on why parallel-build payoff is low for a linear pipeline regardless) beneath `beamtalk-language-service` (merged `queries`+`language_service`, ~24k lines, per option 3a) and `beamtalk-repl` (~1.2k lines), with `lint`/`project` already extracted in step 2. Re-run the dependency-graph extraction first to confirm — by reading production vs. test call sites directly, not by grepping `use crate::` paths, which is what produced the wrong graph in the first place (see Context).
+   - **Refinement worth costing out at that point, given the consumer-usage evidence in Context**: once step 4's Document-API extraction lands, `codegen` (90,631 lines) has no production dependents left except `beamtalk-cli` and `beamtalk-repl`'s own codegen helper. A `beamtalk-codegen` crate separate from the rest of Compilation (`ast`/`source_analysis`/`semantic_analysis`/`unparse`/`compilation`) would let `beamtalk-lsp`/`beamtalk-mcp` depend on the analysis crate without `codegen` at all — a real build-time/type-checking-scope win for those two, unlike the rest of this split (see Consequences/Neutral). Whether this is worth doing alongside or separately from the Language-Service extraction is a sizing question for whoever executes this step, not decided here.
 
 ## Prior Art
 
@@ -155,6 +171,7 @@ This was not in the original version of this ADR — it emerged from this review
 
 ### Neutral
 - Given the pipeline shape (`source_analysis` → `semantic_analysis` → `codegen`/`unparse` is fundamentally sequential even once cycle-free), a `beamtalk-compilation`/`beamtalk-language-service` split's main benefit is boundary enforcement and touch-surface reduction on unrelated changes — not parallel build speedup, since a linear dependency chain compiles serially with or without crate boundaries. This tempers how much the split (Decision step 5) is worth pursuing even after step 3 lands; that judgment call is deferred to whoever executes step 5, informed by real profiling at that time rather than assumed here.
+- **This "no build-time benefit" framing holds for `beamtalk-cli` (needs the whole pipeline regardless) but not for `beamtalk-lsp`/`beamtalk-mcp`** — see the Context addition on actual consumer usage. Neither references `codegen` (90,631 lines, ~35% of the crate) or `repl` at all; they currently compile them anyway only because `unparse`'s Document-API dependency on `codegen` (Decision step 4's first item) drags it in transitively. If that extraction lands and `codegen`/`repl` end up in their own crate separate from whatever `beamtalk-lsp`/`beamtalk-mcp` actually depend on, that *is* a real, measurable win for those two — smaller compile units, smaller `rust-analyzer` project scope while working on tooling code. This is a concrete reason to prioritize that specific hygiene item over the other three in step 4, independent of whether the full bounded-context split (step 5) ever happens.
 
 ## Implementation
 
