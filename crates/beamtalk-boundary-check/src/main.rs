@@ -61,8 +61,25 @@ const COMPILATION_MODULES: &[&str] = &[
 ];
 
 /// The Language Service bounded context — the consumer. Compilation must
-/// never import from these in production code.
+/// never import from these in production code. `lint`'s own module header
+/// (`crates/beamtalk-core/src/lint/mod.rs`) says `DDD Context: Compilation`,
+/// but that's stale documentation, not this list being wrong: `lint` is
+/// consumed by `queries::diagnostic_provider` and nothing in Compilation
+/// imports it (verified at BT-3339 landing — see the crate README), so
+/// grouping it with the other Language-Service-consumed modules here matches
+/// the actual dependency direction. Tracked as a doc fix in BT-3353.
 const LANGUAGE_SERVICE_MODULES: &[&str] = &["queries", "language_service", "lint"];
+
+/// Top-level `beamtalk-core/src` modules that belong to neither bounded
+/// context this checker gates — `repl` (its own DDD Context: REPL) and
+/// `project` (DDD Context: Build System, per their own module headers).
+/// Listed explicitly (rather than treating "not Compilation, not Language
+/// Service" as implicitly fine) so [`run`]'s directory-drift check can tell
+/// "a module nobody classified yet" apart from "a module deliberately left
+/// out of both lists" — a new top-level directory under `CORE_SRC` that
+/// isn't in any of the three lists fails the check instead of silently
+/// going unscanned.
+const OTHER_MODULES: &[&str] = &["repl", "project"];
 
 /// Known, already-tracked violations ADR 0117 Decision step 3 (BT-3341,
 /// BT-3342) removes. Keyed by (file path relative to repo root, target
@@ -138,6 +155,7 @@ fn run() -> Result<(), Vec<String>> {
     let core_src = repo_root.join(CORE_SRC);
 
     let mut violations = Vec::new();
+    violations.extend(check_module_list_drift(&core_src)?);
     let mut allowlist_matched: HashSet<(String, String, String)> = HashSet::new();
     let mut files_scanned = 0usize;
 
@@ -252,6 +270,48 @@ fn find_repo_root() -> Result<PathBuf, String> {
 
 fn env_var(name: &str) -> Result<String, String> {
     std::env::var(name).map_err(|_| format!("environment variable {name} not set"))
+}
+
+/// Lists every top-level directory directly under `core_src` and fails if
+/// any of them isn't accounted for in [`COMPILATION_MODULES`],
+/// [`LANGUAGE_SERVICE_MODULES`], or [`OTHER_MODULES`] — otherwise a new
+/// module added to `beamtalk-core/src` (or one of these three lists falling
+/// out of date some other way, e.g. a rename) would simply never be
+/// scanned, with nothing here or in CI signaling the gap. This is the
+/// module-list analogue of `run`'s `files_scanned == 0` guard: both exist so
+/// this checker fails loudly on drift instead of silently checking less
+/// than it claims to.
+fn check_module_list_drift(core_src: &Path) -> Result<Vec<String>, Vec<String>> {
+    let mut known: HashSet<&str> = HashSet::new();
+    known.extend(COMPILATION_MODULES.iter().copied());
+    known.extend(LANGUAGE_SERVICE_MODULES.iter().copied());
+    known.extend(OTHER_MODULES.iter().copied());
+
+    let entries = fs::read_dir(core_src)
+        .map_err(|e| vec![format!("failed to read {}: {e}", core_src.display())])?;
+    let mut unclassified = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|e| vec![format!("dir entry error in {}: {e}", core_src.display())])?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| vec![format!("failed to stat {}: {e}", entry.path().display())])?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !known.contains(name.as_str()) {
+            unclassified.push(format!(
+                "{}/{name} is a new top-level module not classified into COMPILATION_MODULES, \
+                 LANGUAGE_SERVICE_MODULES, or OTHER_MODULES in \
+                 crates/beamtalk-boundary-check/src/main.rs — add it to whichever bounded \
+                 context it belongs to (see docs/beamtalk-ddd-model.md) so this checker \
+                 actually scans it",
+                core_src.display()
+            ));
+        }
+    }
+    Ok(unclassified)
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -766,6 +826,33 @@ mod tests {
     fn ignores_edge_inside_tokio_test_fn() {
         let edges = edges_in("#[tokio::test]\nasync fn t() { crate::queries::foo(); }\n");
         assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn module_list_drift_clean_when_every_dir_is_classified() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for m in COMPILATION_MODULES
+            .iter()
+            .chain(LANGUAGE_SERVICE_MODULES)
+            .chain(OTHER_MODULES)
+        {
+            fs::create_dir(dir.path().join(m)).expect("create module dir");
+        }
+        // A file alongside the module directories must not be mistaken for
+        // an unclassified module (only directories are considered).
+        fs::write(dir.path().join("lib.rs"), "").expect("write lib.rs");
+        let drift = check_module_list_drift(dir.path()).expect("no I/O error");
+        assert!(drift.is_empty(), "unexpected drift: {drift:?}");
+    }
+
+    #[test]
+    fn module_list_drift_flags_unclassified_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(dir.path().join("ast")).expect("create ast dir");
+        fs::create_dir(dir.path().join("ir")).expect("create unclassified dir");
+        let drift = check_module_list_drift(dir.path()).expect("no I/O error");
+        assert_eq!(drift.len(), 1);
+        assert!(drift[0].contains("ir"), "unexpected message: {}", drift[0]);
     }
 
     #[test]
