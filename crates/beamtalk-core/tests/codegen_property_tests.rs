@@ -5,7 +5,7 @@
 //!
 //! These tests verify that the code generator handles all parsed ASTs safely:
 //!
-//! 1. **`generate` never panics** — codegen returns Ok or Err, never panics
+//! 1. **`generate_module` never panics** — codegen returns Ok or Err, never panics
 //! 2. **`generate_repl_expression` never panics** — REPL codegen is safe
 //! 3. **Generated output is valid UTF-8** — output is always a valid String
 //! 4. **Successful codegen produces non-empty output** — no silent empty results
@@ -13,12 +13,25 @@
 //! **DDD Context:** Code Generation
 //!
 //! ADR 0011 Phase 2 (extended).
+//!
+//! BT-3340 (ADR 0117 Decision step 2): a Cargo integration test (not a unit
+//! test embedded in `beamtalk-core::src`), because half these properties
+//! exercise `beamtalk-repl::codegen::generate_repl_expression` —
+//! `beamtalk-repl` depends on `beamtalk-core`, so a unit test compiled as
+//! part of `beamtalk-core` itself (`--cfg test` baked into the same
+//! compilation as the library) would need a second, `--cfg test`-free copy
+//! of `beamtalk-core` in the graph for `beamtalk-repl` to build against —
+//! Cargo reports that as "multiple different versions of crate
+//! `beamtalk_core`" and refuses to compile. An integration test avoids this:
+//! it links `beamtalk-core` as an ordinary external dependency (no `--cfg
+//! test` on the library itself), the same normal build `beamtalk-repl`
+//! already depends on, so there is exactly one `beamtalk-core` in the graph.
 
+use beamtalk_core::ast::Module;
+use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_repl::codegen::generate_repl_expression;
 use proptest::prelude::*;
-
-use crate::codegen::core_erlang::{CodegenOptions, generate_module};
-use crate::repl::codegen::generate_repl_expression;
-use crate::source_analysis::{lex_with_eof, parse};
 
 // ============================================================================
 // Generators
@@ -80,17 +93,29 @@ fn near_valid_beamtalk() -> impl Strategy<Value = String> {
 // Helpers
 // ============================================================================
 
-fn parse_source(source: &str) -> crate::ast::Module {
+fn parse_source(source: &str) -> Module {
     let tokens = lex_with_eof(source);
     let (module, _) = parse(tokens);
     module
 }
 
+/// Standard proptest configuration for this suite: at least 512 cases
+/// (overridable via `PROPTEST_CASES`), matching
+/// `beamtalk_core::test_helpers::test_support::proptest_config_default` —
+/// that helper is `#[cfg(test)]`-gated (deliberately unavailable to
+/// dependent crates, including this integration test binary), so it's
+/// reproduced here rather than imported.
+fn proptest_config() -> ProptestConfig {
+    let default = ProptestConfig::default();
+    ProptestConfig {
+        cases: default.cases.max(512),
+        ..default
+    }
+}
+
 // ============================================================================
 // Property tests
 // ============================================================================
-
-use crate::test_helpers::test_support::proptest_config_default as proptest_config;
 
 proptest! {
     #![proptest_config(proptest_config())]

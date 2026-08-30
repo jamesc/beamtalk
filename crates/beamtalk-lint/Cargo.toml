@@ -1,0 +1,23 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-lint"
+description = "Beamtalk style/redundancy lint passes (beamtalk lint)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compiler", "beam", "smalltalk", "lint"]
+categories = ["compilers", "development-tools"]
+
+[dependencies]
+# why: BT-3340 (ADR 0117 Decision step 2) — lint passes walk the AST
+# (`ast`), classify class kinds (`semantic_analysis::ClassHierarchy`), and
+# emit `source_analysis::Diagnostic`s; all three stay in beamtalk-core.
+beamtalk-core.workspace = true
+
+[lints]
+workspace = true

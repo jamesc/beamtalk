@@ -96,7 +96,7 @@ fn discover_package_corpora() -> (
         return (example_corpora, class_corpora);
     };
 
-    let root = beamtalk_core::project::discover_project_root(&cwd);
+    let root = beamtalk_project::discover_project_root(&cwd);
 
     // Root package corpus
     let dev_dir = root.join("_build").join("dev");
@@ -2654,7 +2654,7 @@ struct LintResult {
 /// `queries::diagnostic_provider::compute_project_diagnostics_with_analysis`
 /// (BT-3240) and `beamtalk lint`'s `collect_diagnostics`: needed so the
 /// near-miss `// === Name ===` divider check can scan `source` directly
-/// (`beamtalk_core::lint::check_near_miss_dividers`) instead of relying on
+/// (`beamtalk_core::near_miss_divider::check_near_miss_dividers`) instead of relying on
 /// the AST's `Comment::span`, which is actually the *following
 /// declaration's* span, not the comment's own.
 fn run_module_analysis(
@@ -2673,7 +2673,7 @@ fn run_module_analysis(
 ) {
     use beamtalk_core::semantic_analysis::ClassHierarchy;
 
-    diags.extend(beamtalk_core::lint::run_lint_passes(module));
+    diags.extend(beamtalk_lint::run_lint_passes(module));
 
     let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
     let options = beamtalk_core::CompilerOptions {
@@ -2701,7 +2701,7 @@ fn run_module_analysis(
     // be contained in any `@expect`-annotated declaration's target span, so
     // running it through that pass first would be a no-op at best. See that
     // function's BT-3240 comment for the full reasoning.
-    beamtalk_core::lint::check_near_miss_dividers(source, &mut diags);
+    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut diags);
 
     (diags, analysis_result.class_hierarchy)
 }
@@ -2716,7 +2716,7 @@ fn build_native_type_registry(
     path: &str,
 ) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
     let project_root =
-        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))?;
+        beamtalk_project::package::find_package_root(std::path::Path::new(path))?;
     let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
     let layout = beamtalk_cli::build_layout::BuildLayout::new(&project_root);
     beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
@@ -2954,12 +2954,12 @@ fn lint_error(file: &str, message: String) -> LintResult {
 }
 
 /// BT-2060: Package root / source-file resolution now lives in
-/// [`beamtalk_core::project::package`] so CLI lint and MCP lint share one
+/// [`beamtalk_project::package`] so CLI lint and MCP lint share one
 /// implementation.
 ///
 /// This thin wrapper exists only to keep the MCP call sites readable — it
 /// forwards to
-/// [`beamtalk_core::project::package::resolve_extraction_files`] and adapts
+/// [`beamtalk_project::package::resolve_extraction_files`] and adapts
 /// the `&str` path argument the MCP layer carries around.
 fn resolve_extraction_files(
     path: &str,
@@ -2968,7 +2968,7 @@ fn resolve_extraction_files(
     Vec<std::path::PathBuf>,
     std::collections::HashSet<std::path::PathBuf>,
 ) {
-    beamtalk_core::project::package::resolve_extraction_files(
+    beamtalk_project::package::resolve_extraction_files(
         std::path::Path::new(path),
         source_files,
     )
@@ -2986,7 +2986,7 @@ fn resolve_extraction_files(
 /// error-path behaviour).
 fn resolve_current_package(path: &str) -> Option<String> {
     let project_root =
-        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))?;
+        beamtalk_project::package::find_package_root(std::path::Path::new(path))?;
     let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
     match beamtalk_cli::manifest::find_manifest_full(&project_root) {
         Ok(Some(m)) => Some(m.package.name),
@@ -3020,7 +3020,7 @@ fn merge_dependency_class_infos(
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
 ) -> bool {
     let Some(project_root) =
-        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))
+        beamtalk_project::package::find_package_root(std::path::Path::new(path))
     else {
         return false;
     };
@@ -4052,7 +4052,7 @@ mod tests {
     }
 
     // BT-2060: `find_package_root` tests moved to
-    // `beamtalk_core::project::package` tests — the MCP helper is now a thin
+    // `beamtalk_project::package` tests — the MCP helper is now a thin
     // wrapper around the shared implementation, so duplicating the
     // ancestor-walk assertions here would only lock in behaviour twice.
 

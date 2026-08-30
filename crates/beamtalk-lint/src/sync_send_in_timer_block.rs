@@ -19,9 +19,9 @@
 //! Timer every: 1000 do: [self refresh!]
 //! ```
 
-use crate::ast::{Block, Expression, Identifier, MessageSelector, Module};
-use crate::lint::LintPass;
-use crate::source_analysis::Diagnostic;
+use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector, Module};
+use crate::LintPass;
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on synchronous `self` sends inside `Timer every:do:`
 /// and `Timer after:do:` blocks.
@@ -77,7 +77,7 @@ fn check_message_send(
     selector: &MessageSelector,
     arguments: &[Expression],
     is_cast: bool,
-    span: crate::source_analysis::Span,
+    span: beamtalk_core::source_analysis::Span,
     in_timer_block: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -237,7 +237,7 @@ fn walk_for_timer_sends(
 
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
                     walk_for_timer_sends(e, in_timer_block, diagnostics);
                 }
             }
@@ -257,10 +257,10 @@ fn walk_for_timer_sends(
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::run_lint_passes;
+    use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn lint(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         assert!(
@@ -270,7 +270,7 @@ mod tests {
         run_lint_passes(&module)
     }
 
-    fn timer_lints(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn timer_lints(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         lint(source)
             .into_iter()
             .filter(|d| d.message.contains("Timer block"))

@@ -1040,7 +1040,9 @@ pub fn generate(module: &Module) -> Result<String> {
 /// - **`ValueType`**: Plain maps with immutable semantics, sync function calls
 /// - **Repl**: Interactive evaluation with bindings map
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodeGenContext {
+// BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets `context` to
+// `CodeGenContext::Repl` on the generator it owns.
+pub enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
@@ -1604,9 +1606,20 @@ impl Drop for BranchContextGuard<'_> {
     clippy::struct_excessive_bools,
     reason = "Generator flags are context switches, not configuration"
 )]
-pub(crate) struct CoreErlangGenerator {
+// BT-3340: widened from `pub(crate)` to `pub` (ADR 0117 Decision step 2),
+// which brought this struct under the `missing_debug_implementations` lint
+// (public-only). Not deriving `Debug`: several fields (e.g.
+// `PrimitiveBindingTable`) are internal codegen state with no existing
+// `Debug` impl, and this struct was never meant to be inspected/printed —
+// only constructed and driven through its own methods.
+#[allow(missing_debug_implementations)]
+// BT-3340: widened from `pub(crate)` — the standalone `beamtalk-repl` crate
+// (ADR 0117 Decision step 2) builds `CoreErlangGenerator` directly and reads
+// its REPL-relevant state. Its many other fields stay module-private; only
+// this struct and the specific members `beamtalk-repl` touches are `pub`.
+pub struct CoreErlangGenerator {
     /// The module name being generated (ref-counted for O(1) clone).
-    pub(crate) module_name: EcoString,
+    pub module_name: EcoString,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments. BT-3131: `VersionCounter` is the
@@ -1714,7 +1727,9 @@ pub(crate) struct CoreErlangGenerator {
     hybrid_mutated_fields: std::collections::HashSet<String>,
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
-    pub(crate) context: CodeGenContext,
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this to
+    // `CodeGenContext::Repl` around its own generation calls.
+    pub context: CodeGenContext,
     /// BT-1475: Nesting depth of block (closure) bodies.
     /// When > 0, self-cast sends in Actor context must route through the
     /// actor mailbox (`beamtalk_message_dispatch:cast/3`) instead of calling
@@ -1895,7 +1910,9 @@ pub(crate) struct CoreErlangGenerator {
 
 impl CoreErlangGenerator {
     /// Creates a new code generator for the given module name.
-    pub(crate) fn new(module_name: &str) -> Self {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` constructs its
+    // own generator.
+    pub fn new(module_name: &str) -> Self {
         Self {
             module_name: EcoString::from(module_name),
             var_context: VariableContext::new(),
@@ -1959,14 +1976,16 @@ impl CoreErlangGenerator {
     // returning safe defaults when the context is absent.
 
     /// Returns `true` if REPL mode is active.
-    pub(crate) fn is_repl_mode(&self) -> bool {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` queries/sets this
+    // around its own generation calls.
+    pub fn is_repl_mode(&self) -> bool {
         self.repl_context
             .as_ref()
             .is_some_and(|ctx| ctx.is_repl_mode)
     }
 
     /// Sets the REPL mode flag, initialising the context if absent.
-    pub(crate) fn set_is_repl_mode(&mut self, value: bool) {
+    pub fn set_is_repl_mode(&mut self, value: bool) {
         self.repl_context_mut().is_repl_mode = value;
     }
 
@@ -1983,14 +2002,16 @@ impl CoreErlangGenerator {
     }
 
     /// Returns `true` if workspace mode is active.
-    pub(crate) fn workspace_mode(&self) -> bool {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` queries/sets this
+    // around its own generation calls.
+    pub fn workspace_mode(&self) -> bool {
         self.repl_context
             .as_ref()
             .is_some_and(|ctx| ctx.workspace_mode)
     }
 
     /// Sets workspace mode, initialising the context if absent.
-    pub(crate) fn set_workspace_mode(&mut self, value: bool) {
+    pub fn set_workspace_mode(&mut self, value: bool) {
         self.repl_context_mut().workspace_mode = value;
     }
 
@@ -2094,7 +2115,9 @@ impl CoreErlangGenerator {
     }
 
     /// Sets the class module index, initialising the context if absent.
-    pub(crate) fn set_class_module_index(
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` sets this before
+    // generating a REPL module so cross-class self-sends resolve.
+    pub fn set_class_module_index(
         &mut self,
         index: std::collections::HashMap<String, String>,
     ) {
@@ -2435,12 +2458,14 @@ impl CoreErlangGenerator {
     }
 
     /// Pushes a new scope for variable bindings.
-    pub(crate) fn push_scope(&mut self) {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` pushes/pops its
+    // own scopes around REPL binding generation.
+    pub fn push_scope(&mut self) {
         self.var_context.push_scope();
     }
 
     /// Pops the current scope, discarding its bindings.
-    pub(crate) fn pop_scope(&mut self) {
+    pub fn pop_scope(&mut self) {
         self.var_context.pop_scope();
     }
 
@@ -2450,7 +2475,9 @@ impl CoreErlangGenerator {
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.
-    pub(crate) fn bind_var(&mut self, name: &str, core_var: &str) {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` binds
+    // `__bindings__`/workspace variable names before generating a REPL body.
+    pub fn bind_var(&mut self, name: &str, core_var: &str) {
         self.var_context.bind(name, core_var);
     }
 
@@ -2462,7 +2489,9 @@ impl CoreErlangGenerator {
     ///
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc` or `StateAccN`.
     /// Otherwise returns `State` or `StateN`.
-    pub(crate) fn current_state_var(&self) -> String {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` reads the current
+    // state variable name while threading REPL bindings.
+    pub fn current_state_var(&self) -> String {
         render_state_prefix(
             self.in_hybrid_loop,
             self.in_loop_body,
@@ -2475,7 +2504,9 @@ impl CoreErlangGenerator {
     /// When inside a hybrid-params loop (`in_hybrid_loop = true`) or normal context,
     /// returns `State1`, `State2`, etc.
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc1`, etc.
-    pub(crate) fn next_state_var(&mut self) -> String {
+    // BT-3340: widened from `pub(crate)` — `beamtalk-repl` advances the
+    // state version while threading REPL bindings.
+    pub fn next_state_var(&mut self) -> String {
         self.state_threading.next_var(VersionPrefix::State);
         render_state_prefix(
             self.in_hybrid_loop,

@@ -21,7 +21,7 @@ use crate::commands::build::collect_source_files_from_dir;
 use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::file_walker::FileWalker;
-use beamtalk_core::project::package;
+use beamtalk_project::package;
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
@@ -41,7 +41,7 @@ use tracing::warn;
 /// `source` is the module's raw source text — BT-3257, mirroring
 /// `queries::diagnostic_provider::compute_project_diagnostics_with_analysis`
 /// (BT-3240): needed so the near-miss `// === Name ===` divider check can
-/// scan `source` directly (`beamtalk_core::lint::check_near_miss_dividers`)
+/// scan `source` directly (`beamtalk_core::near_miss_divider::check_near_miss_dividers`)
 /// instead of relying on the AST's `Comment::span`, which is actually the
 /// *following declaration's* span, not the comment's own.
 #[allow(clippy::too_many_arguments)] // BT-2910 added pre_loaded_protocols/pre_loaded_aliases; each param is load-bearing context
@@ -66,7 +66,7 @@ fn collect_diagnostics(
         .into_iter()
         .filter(|d| d.severity == Severity::Lint)
         .collect();
-    lint_diags.extend(beamtalk_core::lint::run_lint_passes(module));
+    lint_diags.extend(beamtalk_lint::run_lint_passes(module));
 
     // BT-1547: Run semantic analysis to collect all categorised diagnostics
     // so that `@expect` directives can match them. Without this, `@expect type`
@@ -118,7 +118,7 @@ fn collect_diagnostics(
     // be contained in any `@expect`-annotated declaration's target span, so
     // running it through that pass first would be a no-op at best. See that
     // function's BT-3240 comment for the full reasoning.
-    beamtalk_core::lint::check_near_miss_dividers(source, &mut lint_diags);
+    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut lint_diags);
 
     lint_diags
 }
@@ -478,7 +478,7 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 /// class produces spurious `Unresolved class` diagnostics.
 ///
 /// BT-2060: Thin camino wrapper around
-/// [`beamtalk_core::project::package::collect_package_source_files_with_errors`]
+/// [`beamtalk_project::package::collect_package_source_files_with_errors`]
 /// so MCP and CLI share the underlying implementation. Walk errors are logged
 /// via the `tracing` stack that CLI already uses.
 fn collect_package_class_files(
@@ -662,7 +662,7 @@ fn parse_and_extract_class_infos(
 /// rather than bailing out when the short relative path runs out of parents.
 ///
 /// BT-2060: Camino wrapper around
-/// [`beamtalk_core::project::package::find_package_root`] so MCP and CLI share
+/// [`beamtalk_project::package::find_package_root`] so MCP and CLI share
 /// the same implementation.
 pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
     package::find_package_root(start.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())

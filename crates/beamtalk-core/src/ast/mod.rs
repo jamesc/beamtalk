@@ -200,7 +200,9 @@ impl Module {
     /// `for class in &module.classes { for method in … }` and a separate
     /// `for standalone in &module.method_definitions { … }` loop when the
     /// per-method logic does not need the enclosing `ClassDefinition` context.
-    pub(crate) fn all_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
+    // BT-3340: widened from `pub(crate)` — several lint passes in the
+    // standalone `beamtalk-lint` crate iterate every method this way.
+    pub fn all_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
         self.classes
             .iter()
             .flat_map(|c| c.methods.iter().chain(c.class_methods.iter()))

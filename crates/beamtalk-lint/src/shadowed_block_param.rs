@@ -25,9 +25,9 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment};
-use crate::lint::LintPass;
-use crate::source_analysis::Diagnostic;
+use beamtalk_core::ast::{Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment};
+use crate::LintPass;
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns when a block parameter name shadows an outer variable.
 pub(crate) struct ShadowedBlockParamPass;
@@ -120,8 +120,8 @@ fn check_expr_seq(
 }
 
 /// Define pattern-bound variable names in the lint scope.
-fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintScope) {
-    use crate::ast::Pattern;
+fn define_pattern_vars_in_scope(pattern: &beamtalk_core::ast::Pattern, scope: &mut LintScope) {
+    use beamtalk_core::ast::Pattern;
     match pattern {
         Pattern::Variable(id) => scope.define(id.name.as_str()),
         Pattern::Tuple { elements, .. } => {
@@ -311,8 +311,8 @@ fn check_block(block: &Block, scope: &mut LintScope, diagnostics: &mut Vec<Diagn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lint::LintPass;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::LintPass;
+    use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
     fn lint(src: &str) -> Vec<Diagnostic> {
         let tokens = lex_with_eof(src);

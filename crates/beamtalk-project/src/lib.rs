@@ -6,6 +6,12 @@
 //! **DDD Context:** Build System
 //!
 //! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.).
+//!
+//! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::project`
+//! into its own crate — `project` depended only on `beamtalk-core::file_walker`
+//! (and `test_helpers` in tests) with no back-edges from the rest of the
+//! crate, so this is a mechanical move giving a real, `cargo`-enforced
+//! boundary.
 
 pub mod package;
 
@@ -87,7 +93,7 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::unique_temp_dir;
+    use beamtalk_core::test_helpers::unique_temp_dir;
     use std::fs;
 
     #[test]

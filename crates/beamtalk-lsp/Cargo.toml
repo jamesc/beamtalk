@@ -20,6 +20,9 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true, features = ["serde"] }
+# why: BT-3340 (ADR 0117 Decision step 2) — `project` (root discovery) moved
+# out of `beamtalk-core` into a standalone crate.
+beamtalk-project.workspace = true
 beamtalk-repl-protocol = { workspace = true }
 beamtalk-workspace = { workspace = true }
 tower-lsp = { workspace = true }

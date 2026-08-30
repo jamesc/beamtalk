@@ -95,7 +95,7 @@ pub struct ProjectDiagnosticContext<'a> {
 /// * `module` - The parsed AST
 /// * `source` - The module's raw source text (BT-3240: needed to give the
 ///   near-miss-divider check an accurate comment span — see
-///   `crate::lint::near_miss_divider::scan_source`'s doc)
+///   `crate::near_miss_divider::scan_source`'s doc)
 /// * `initial_diagnostics` - Pre-analysis diagnostics (parse + any earlier passes,
 ///   e.g. `@primitive` validation from the CLI compiler); the function appends
 ///   semantic and post-analysis diagnostics to this list.
@@ -217,9 +217,12 @@ pub fn compute_project_diagnostics_with_analysis(
     // divider convention requires a plain `//` line) get no signal anywhere
     // today — they silently fall back to an ordinary comment and the
     // methods below are mis-categorized with no diagnostic. Unlike every
-    // other pass in `crate::lint` (which are `beamtalk lint`-only), this one
-    // check also runs here so it reaches the LSP's live diagnostics too —
-    // see `crate::lint::check_near_miss_dividers`'s doc for why. Scans
+    // lint pass in the standalone `beamtalk-lint` crate (`beamtalk
+    // lint`-only), this one check also runs here so it reaches the LSP's
+    // live diagnostics too — see `crate::near_miss_divider::check_near_miss_dividers`'s
+    // doc (BT-3340: this check stays a `beamtalk-core` leaf module rather
+    // than moving to `beamtalk-lint` with the rest, precisely so this call
+    // doesn't need a new crate dependency) for why. Scans
     // `source` directly (not `module`) so the diagnostic's span is the
     // comment's own line, not the AST's (inaccurate, see that doc) token span.
     //
@@ -246,7 +249,7 @@ pub fn compute_project_diagnostics_with_analysis(
     //   unaffected while still guaranteeing *this* check's diagnostics can
     //   never be promoted to a build-breaking severity by any project
     //   config, by construction rather than by coincidence.
-    crate::lint::check_near_miss_dividers(source, &mut diagnostics);
+    crate::near_miss_divider::check_near_miss_dividers(source, &mut diagnostics);
 
     (diagnostics, analysis_result)
 }

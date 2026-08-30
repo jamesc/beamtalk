@@ -36,11 +36,11 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{
+use beamtalk_core::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
-use crate::lint::{LintPass, hierarchy_for_lint};
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::{LintPass, hierarchy_for_lint};
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Lint pass that warns about dead variable assignments inside blocks on value types.
 pub(crate) struct DeadBlockAssignmentPass;
@@ -293,8 +293,8 @@ fn walk_expr(
 
 /// Check destructure pattern names for dead assignments before defining them.
 fn check_destructure_for_dead_assignments(
-    pattern: &crate::ast::Pattern,
-    span: crate::source_analysis::Span,
+    pattern: &beamtalk_core::ast::Pattern,
+    span: beamtalk_core::source_analysis::Span,
     scope: &LintScope,
     safe_params: Option<&HashSet<String>>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -313,7 +313,7 @@ fn check_destructure_for_dead_assignments(
 
 /// Walk match arms, scoping pattern-bound variables to each arm.
 fn walk_match_arms(
-    arms: &[crate::ast::MatchArm],
+    arms: &[beamtalk_core::ast::MatchArm],
     scope: &mut LintScope,
     safe_params: Option<&HashSet<String>>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -388,7 +388,7 @@ fn accumulator_params(block: &Block, msg_ctx: Option<&BlockMessageContext>) -> H
 /// Emit a dead-assignment warning diagnostic.
 fn emit_dead_assignment_warning(
     name: &str,
-    span: crate::source_analysis::Span,
+    span: beamtalk_core::source_analysis::Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     diagnostics.push(
@@ -410,14 +410,14 @@ fn emit_dead_assignment_warning(
 }
 
 /// Collect all variable names bound by a pattern.
-fn collect_pattern_var_names(pattern: &crate::ast::Pattern) -> Vec<String> {
+fn collect_pattern_var_names(pattern: &beamtalk_core::ast::Pattern) -> Vec<String> {
     let mut names = Vec::new();
     collect_pattern_var_names_inner(pattern, &mut names);
     names
 }
 
-fn collect_pattern_var_names_inner(pattern: &crate::ast::Pattern, names: &mut Vec<String>) {
-    use crate::ast::Pattern;
+fn collect_pattern_var_names_inner(pattern: &beamtalk_core::ast::Pattern, names: &mut Vec<String>) {
+    use beamtalk_core::ast::Pattern;
     match pattern {
         Pattern::Variable(id) => names.push(id.name.to_string()),
         Pattern::Tuple { elements, .. } => {
@@ -462,8 +462,8 @@ fn collect_pattern_var_names_inner(pattern: &crate::ast::Pattern, names: &mut Ve
 }
 
 /// Define pattern-bound variable names in the lint scope.
-fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintScope) {
-    use crate::ast::Pattern;
+fn define_pattern_vars_in_scope(pattern: &beamtalk_core::ast::Pattern, scope: &mut LintScope) {
+    use beamtalk_core::ast::Pattern;
     match pattern {
         Pattern::Variable(id) => scope.define(id.name.as_str()),
         Pattern::Tuple { elements, .. } => {
@@ -512,8 +512,8 @@ fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lint::LintPass;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::LintPass;
+    use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
     fn lint(src: &str) -> Vec<Diagnostic> {
         let tokens = lex_with_eof(src);
@@ -825,10 +825,10 @@ Object subclass: Foo
         let mut diags = Vec::new();
         DeadBlockAssignmentPass.check(&module, &mut diags);
         // Apply @expect directives
-        crate::queries::diagnostic_provider::apply_expect_directives(&module, &mut diags);
+        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diags);
         let lint_diags: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == crate::source_analysis::Severity::Lint)
+            .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Lint)
             .collect();
         assert!(
             lint_diags.is_empty(),
@@ -843,7 +843,7 @@ Object subclass: Foo
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].category,
-            Some(crate::source_analysis::DiagnosticCategory::DeadAssignment),
+            Some(beamtalk_core::source_analysis::DiagnosticCategory::DeadAssignment),
             "Expected DeadAssignment category on lint diagnostic"
         );
     }

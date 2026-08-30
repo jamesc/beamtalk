@@ -1,0 +1,26 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-repl"
+description = "REPL-specific Core Erlang code generation (workspace bindings, trace mode)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compiler", "beam", "smalltalk", "repl"]
+categories = ["compilers", "development-tools"]
+
+[dependencies]
+# why: BT-3340 (ADR 0117 Decision step 2) — REPL codegen delegates
+# expression compilation and state threading to `CoreErlangGenerator`
+# (`codegen::core_erlang`).
+beamtalk-core.workspace = true
+
+[dev-dependencies]
+ecow.workspace = true
+
+[lints]
+workspace = true

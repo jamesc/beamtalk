@@ -17,9 +17,9 @@
 //! answer => 42
 //! ```
 
-use crate::ast::Module;
-use crate::lint::LintPass;
-use crate::source_analysis::Diagnostic;
+use beamtalk_core::ast::Module;
+use crate::LintPass;
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that flags effect-free statements whose values are silently discarded.
 pub(crate) struct EffectFreeStatementPass;
@@ -27,7 +27,7 @@ pub(crate) struct EffectFreeStatementPass;
 impl LintPass for EffectFreeStatementPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
         // BT-979: lint always checks module.expressions (skip_module_expression_lint = false)
-        crate::semantic_analysis::validators::check_effect_free_statements(
+        beamtalk_core::semantic_analysis::validators::check_effect_free_statements(
             module,
             diagnostics,
             false,
@@ -37,10 +37,10 @@ impl LintPass for EffectFreeStatementPass {
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::run_lint_passes;
+    use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn lint(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         assert!(

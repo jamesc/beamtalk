@@ -1,0 +1,32 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-project"
+description = "Beamtalk project/workspace root discovery and manifest parsing"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["compiler", "beam", "smalltalk", "manifest"]
+categories = ["compilers", "development-tools"]
+
+[dependencies]
+# why: BT-3340 (ADR 0117 Decision step 2) — project discovery walks
+# `beamtalk-core::file_walker` to locate manifest/marker files.
+beamtalk-core.workspace = true
+# why: `discover_project_root` treats `~/.beamtalk` (global config) as not
+# a project marker; resolves the global config dir to compare against.
+beamtalk-home.workspace = true
+# why: `collect_package_source_files_with_errors` surfaces per-directory
+# walk failures as `miette::Report`, matching `FileWalker::walk_pathbuf`'s
+# own error type.
+miette.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[lints]
+workspace = true
