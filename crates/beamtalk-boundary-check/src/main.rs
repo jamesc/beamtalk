@@ -21,6 +21,28 @@
 //! ...) — macro bodies are opaque token streams to `syn`'s AST-level `Path`
 //! visitor, so those are found by a separate raw-token scan, not missed.
 //!
+//! Two edges that don't literally start with `crate::` are also caught, so
+//! they can't quietly reopen this exact hole (found in code review — see the
+//! crate README):
+//!
+//! - **`super::(super::)*<module>::...`**: any chain of one or more leading
+//!   `super` segments landing on a Language-Service module name is treated
+//!   the same as a `crate::<module>::...` edge, without needing to compute
+//!   how many `super`s a given file needs to actually reach the crate root —
+//!   no module anywhere inside a Compilation-context subtree is ever itself
+//!   named `queries`/`language_service`/`lint`, so a chain that resolves to
+//!   one of those names (and compiles) can only mean the real top-level
+//!   sibling module.
+//! - **`crate::prelude::<Item>`**: `beamtalk-core`'s `lib.rs` re-exports a
+//!   mix of Compilation- and Language-Service-origin items through
+//!   `pub mod prelude`. A reference through that shim is resolved back to
+//!   the item's real origin module (by parsing `lib.rs`'s `prelude` block,
+//!   not a hand-maintained list — see [`parse_module_reexport_aliases`])
+//!   before being classified; a `crate::prelude::...` reference this checker
+//!   can't resolve to one specific item (a glob import, or an item genuinely
+//!   missing from `prelude`'s current re-export list) is *always* flagged,
+//!   since it can't be proven safe.
+//!
 //! Test-only edges are allowed (Cargo permits cyclic dev-dependencies): any
 //! item gated by `#[cfg(test)]` (directly, or nested inside an enclosing
 //! `#[cfg(test)] mod`), `#[test]`, or a multi-segment test-runner attribute
@@ -32,7 +54,7 @@
 //! walking up from `CARGO_MANIFEST_DIR`, so it can be invoked from any
 //! working directory.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -150,9 +172,74 @@ fn main() -> ExitCode {
     }
 }
 
+/// Classifies one already-collected [`Edge`] (from a file at `rel`, inside
+/// Compilation module `module`) against `LANGUAGE_SERVICE_MODULES` and
+/// `ALLOWLIST`, resolving a `crate::prelude::...` reference first via
+/// `prelude_reexports`. Returns `Some(violation message)` when the edge is a
+/// violation; `None` when it's fine — either the (resolved) target isn't a
+/// Language-Service module, or it's covered by an `ALLOWLIST` entry, in
+/// which case that entry's key is inserted into `allowlist_matched` so
+/// `run()`'s later "did every ALLOWLIST entry actually match something"
+/// pass can tell it was used.
+fn classify_edge(
+    edge: &Edge,
+    rel: &str,
+    module: &str,
+    prelude_reexports: &HashMap<String, String>,
+    allowlist_matched: &mut HashSet<(String, String, String)>,
+) -> Option<String> {
+    let effective_module = match resolve_prelude_edge(edge, prelude_reexports) {
+        None => edge.target_module.clone(),
+        Some(Ok(resolved)) => resolved,
+        Some(Err(())) => {
+            return Some(format!(
+                "{rel}:{}:{}: `{}` (in Compilation module `{module}`) references \
+                 `crate::prelude::...` in a way this checker can't resolve to one specific \
+                 underlying module (a glob/bare import, or an item not found in prelude's \
+                 current re-export list) — resolve to the specific underlying module so this \
+                 checker can verify it doesn't reach into Language Service, or update \
+                 `prelude`'s re-export list / crates/beamtalk-boundary-check/src/main.rs if \
+                 this checker's resolution logic is out of date",
+                edge.line, edge.column, edge.path_text
+            ));
+        }
+    };
+    if !LANGUAGE_SERVICE_MODULES.contains(&effective_module.as_str()) {
+        return None;
+    }
+    let allow_key = (
+        rel.to_string(),
+        effective_module.clone(),
+        edge.path_text.clone(),
+    );
+    if ALLOWLIST
+        .iter()
+        .any(|e| allowlist_matches(e, &allow_key.0, &allow_key.1, &allow_key.2))
+    {
+        allowlist_matched.insert(allow_key);
+        return None;
+    }
+    let via_prelude = effective_module != edge.target_module;
+    Some(format!(
+        "{rel}:{}:{}: `{}` (in Compilation module `{module}`) imports from Language Service \
+         module `{}` via `{}`{}",
+        edge.line,
+        edge.column,
+        module,
+        effective_module,
+        edge.path_text,
+        if via_prelude {
+            " (resolved through crate::prelude::...)"
+        } else {
+            ""
+        }
+    ))
+}
+
 fn run() -> Result<(), Vec<String>> {
     let repo_root = find_repo_root().map_err(|e| vec![e])?;
     let core_src = repo_root.join(CORE_SRC);
+    let prelude_reexports = parse_module_reexport_aliases(&repo_root).map_err(|e| vec![e])?;
 
     let mut violations = Vec::new();
     violations.extend(check_module_list_drift(&core_src)?);
@@ -191,26 +278,15 @@ fn run() -> Result<(), Vec<String>> {
             visitor.visit_file(&parsed);
 
             for edge in visitor.found {
-                if !LANGUAGE_SERVICE_MODULES.contains(&edge.target_module.as_str()) {
-                    continue;
+                if let Some(v) = classify_edge(
+                    &edge,
+                    &rel,
+                    module,
+                    &prelude_reexports,
+                    &mut allowlist_matched,
+                ) {
+                    violations.push(v);
                 }
-                let allow_key = (
-                    rel.clone(),
-                    edge.target_module.clone(),
-                    edge.path_text.clone(),
-                );
-                if ALLOWLIST
-                    .iter()
-                    .any(|e| allowlist_matches(e, &allow_key.0, &allow_key.1, &allow_key.2))
-                {
-                    allowlist_matched.insert(allow_key);
-                    continue;
-                }
-                violations.push(format!(
-                    "{rel}:{}:{}: `{}` (in Compilation module `{module}`) imports from \
-                     Language Service module `{}` via `{}`",
-                    edge.line, edge.column, module, edge.target_module, edge.path_text
-                ));
             }
         }
     }
@@ -314,6 +390,93 @@ fn check_module_list_drift(core_src: &Path) -> Result<Vec<String>, Vec<String>> 
     Ok(unclassified)
 }
 
+/// Parses `<core_src>/lib.rs`'s `pub mod prelude { ... }` block and returns
+/// a map from each re-exported item's externally-visible name to the real
+/// module it comes from (e.g. `"LanguageService" -> "language_service"`).
+/// Built by parsing `lib.rs` itself — not a hand-maintained mirror of
+/// `prelude`'s contents — so it can't drift the way a duplicated list could
+/// (CLAUDE.md § No duplicate implementations): if `prelude` gains or loses a
+/// re-export, this map picks it up on the next run with no edit needed here.
+///
+/// Only items re-exported via `pub use crate::<module>::{...}` are
+/// resolvable this way; a glob (`pub use crate::<module>::*`) or a
+/// non-`crate::`-rooted re-export inside `prelude` contributes nothing to
+/// the map, which is fine — [`resolve_prelude_edge`] treats an unresolvable
+/// `crate::prelude::<name>` reference as always requiring attention rather
+/// than silently assuming it's safe.
+fn parse_module_reexport_aliases(repo_root: &Path) -> Result<HashMap<String, String>, String> {
+    let lib_rs = repo_root.join(CORE_SRC).join("lib.rs");
+    let text = fs::read_to_string(&lib_rs)
+        .map_err(|e| format!("failed to read {}: {e}", lib_rs.display()))?;
+    let parsed = syn::parse_file(&text)
+        .map_err(|e| format!("failed to parse {} as Rust source: {e}", lib_rs.display()))?;
+
+    let mut map = HashMap::new();
+    for item in &parsed.items {
+        let Item::Mod(m) = item else { continue };
+        if m.ident != "prelude" {
+            continue;
+        }
+        let Some((_, items)) = &m.content else {
+            continue;
+        };
+        for inner in items {
+            let Item::Use(u) = inner else { continue };
+            let mut prefix: Vec<syn::Ident> = Vec::new();
+            let mut leaves: Vec<(Vec<syn::Ident>, Span)> = Vec::new();
+            walk_use_tree(&u.tree, &mut prefix, &mut leaves);
+            for (segments, _span) in leaves {
+                if segments.len() >= 2 && segments[0] == "crate" {
+                    let module = segments[1].to_string();
+                    let Some(exported_name) = segments.last() else {
+                        continue;
+                    };
+                    map.insert(exported_name.to_string(), module);
+                }
+            }
+        }
+    }
+    Ok(map)
+}
+
+/// Extracts the item name immediately following `crate::prelude::` (or
+/// `use crate::prelude::`) from an [`Edge::path_text`] — e.g.
+/// `"crate::prelude::LanguageService::something"` -> `Some("LanguageService")`,
+/// `"use crate::prelude::LanguageService"` -> `Some("LanguageService")`.
+/// `None` for a bare `crate::prelude`/`use crate::prelude` reference (the
+/// module itself, or a glob leaf — see [`walk_use_tree`]'s doc comment on
+/// how a glob's leaf omits the `*`), which [`resolve_prelude_edge`] treats
+/// as unresolvable.
+fn prelude_item_name(path_text: &str) -> Option<&str> {
+    let rest = path_text.strip_prefix("use ").unwrap_or(path_text);
+    let rest = rest.strip_prefix("crate::prelude::")?;
+    rest.split("::").next().filter(|s| !s.is_empty())
+}
+
+/// Resolves an [`Edge`] whose recorded `target_module` is `"prelude"` to the
+/// real module it re-exports from. Returns `None` when `edge` doesn't target
+/// `prelude` at all (the caller should use `edge.target_module` unchanged).
+/// Returns `Some(Ok(module))` when resolved via `prelude_reexports`.
+/// Returns `Some(Err(()))` when the reference can't be resolved to one
+/// specific module — a glob/bare `crate::prelude` reference, or an item name
+/// not found in `prelude`'s current re-export list — which `run()` always
+/// treats as a violation: letting an unresolvable `prelude` reference
+/// through unflagged would silently reopen the exact hole this checker
+/// exists to close (this gap, and the fix, came out of code review — see the
+/// crate README).
+fn resolve_prelude_edge(
+    edge: &Edge,
+    prelude_reexports: &HashMap<String, String>,
+) -> Option<Result<String, ()>> {
+    if edge.target_module != "prelude" {
+        return None;
+    }
+    match prelude_item_name(&edge.path_text) {
+        Some(name) => Some(prelude_reexports.get(name).cloned().ok_or(())),
+        None => Some(Err(())),
+    }
+}
+
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     if !dir.exists() {
         return Err(format!(
@@ -411,22 +574,28 @@ impl EdgeVisitor {
     /// Macro bodies (`format!(...)`, `assert_eq!(...)`, `vec![...]`, a
     /// custom `docvec!`, ...) are opaque `TokenStream`s to `syn` — none of
     /// their contents show up as `Path` AST nodes, so `visit_path` alone
-    /// never sees a `crate::<module>::...` reference written inside one.
-    /// This walks the raw tokens (recursing into `(...)`/`[...]`/`{...}`
-    /// groups, since a macro's own delimiters and any nested call like
-    /// `assert_eq!(f(crate::queries::x()), 1)` are just more tokens) looking
-    /// for the `crate :: ident ( :: ident )*` pattern and records each hit
-    /// exactly like a real path edge.
+    /// never sees a `crate::<module>::...`/`super::(super::)*<module>::...`
+    /// reference written inside one. This walks the raw tokens (recursing
+    /// into `(...)`/`[...]`/`{...}` groups, since a macro's own delimiters
+    /// and any nested call like `assert_eq!(f(crate::queries::x()), 1)` are
+    /// just more tokens) looking for an `ident ( :: ident )*` pattern rooted
+    /// at `crate` or `super` and records each hit exactly like a real path
+    /// edge.
     fn scan_token_stream(&mut self, tokens: TokenStream) {
         let toks: Vec<TokenTree> = tokens.into_iter().collect();
         let mut i = 0;
         while i < toks.len() {
             if let TokenTree::Ident(id) = &toks[i] {
-                if id == "crate" {
-                    if let Some((module, path_text, span, next)) = parse_crate_path(&toks, i) {
-                        self.record(&module, path_text, span);
-                        i = next;
-                        continue;
+                if id == "crate" || id == "super" {
+                    if let Some((segments, next)) = parse_dotted_ident_path(&toks, i) {
+                        let names: Vec<String> = segments.iter().map(|(n, _)| n.clone()).collect();
+                        if let Some(idx) = module_index(&names) {
+                            let module = names[idx].clone();
+                            let path_text = names.join("::");
+                            self.record(&module, path_text, segments[idx].1);
+                            i = next;
+                            continue;
+                        }
                     }
                 }
             }
@@ -435,6 +604,38 @@ impl EdgeVisitor {
             }
             i += 1;
         }
+    }
+}
+
+/// If `names` starts with `crate` followed by at least one more segment,
+/// returns `Some(1)` (the always-fixed index of the module name after a
+/// `crate::` root). If `names` starts with one or more `super` segments
+/// followed by at least one more segment, returns the index of that
+/// segment (equal to the number of leading `super`s — `super::queries` is
+/// index 1, `super::super::queries` is index 2, ...). Otherwise `None` (a
+/// bare `crate`/`super` with nothing following, or neither root).
+///
+/// Correctness of treating a `super`-rooted match the same as a
+/// `crate`-rooted one does *not* require knowing how many `super`s a given
+/// file actually needs to reach the crate root: no module anywhere inside a
+/// Compilation-context subtree is itself named `queries`, `language_service`,
+/// or `lint` (verified at BT-3339 landing — see the crate README), so a
+/// `super`-chain landing on one of those exact names can only be real Rust
+/// code that compiles by genuinely reaching the true top-level sibling
+/// module — there is no closer, shadowing target it could otherwise mean.
+/// (This also means the function deliberately returns an index for chains
+/// that stay *inside* the same Compilation module, e.g. `super::helper` —
+/// harmless, since `run()` only acts on names that match a Language-Service
+/// module.)
+fn module_index(names: &[String]) -> Option<usize> {
+    if names.first().is_some_and(|s| s == "crate") {
+        return if names.len() >= 2 { Some(1) } else { None };
+    }
+    let super_count = names.iter().take_while(|s| s.as_str() == "super").count();
+    if super_count > 0 && names.len() > super_count {
+        Some(super_count)
+    } else {
+        None
     }
 }
 
@@ -471,26 +672,31 @@ impl<'ast> Visit<'ast> for EdgeVisitor {
         let mut leaves: Vec<(Vec<syn::Ident>, Span)> = Vec::new();
         walk_use_tree(&i.tree, &mut prefix, &mut leaves);
         for (segments, span) in leaves {
-            if segments.len() >= 2 && segments[0] == "crate" {
-                let module = segments[1].to_string();
-                let path_text = format!(
-                    "use crate::{}",
-                    segments[1..]
-                        .iter()
-                        .map(std::string::ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join("::")
-                );
-                self.record(&module, path_text, span);
-            }
+            let names: Vec<String> = segments
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
+            let Some(idx) = module_index(&names) else {
+                continue;
+            };
+            let module = names[idx].clone();
+            let path_text = format!("use {}", names.join("::"));
+            self.record(&module, path_text, span);
         }
     }
 
     fn visit_path(&mut self, path: &'ast SynPath) {
-        if path.segments.len() >= 2 && path.segments[0].ident == "crate" {
-            let module = path.segments[1].ident.to_string();
-            let path_text = path_to_string(path);
-            self.record(&module, path_text, path.segments[1].ident.span());
+        let starts_with_root = path
+            .segments
+            .first()
+            .is_some_and(|s| s.ident == "crate" || s.ident == "super");
+        if starts_with_root {
+            let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            if let Some(idx) = module_index(&names) {
+                let module = names[idx].clone();
+                let path_text = path_to_string(path);
+                self.record(&module, path_text, path.segments[idx].ident.span());
+            }
         }
         syn::visit::visit_path(self, path);
     }
@@ -513,34 +719,34 @@ fn path_to_string(path: &SynPath) -> String {
         .join("::")
 }
 
-/// Parses a `crate :: ident ( :: ident )*` token pattern out of a raw macro
-/// token stream, starting at `toks[start]` (which must be the `crate`
-/// identifier — checked by the caller). Returns the module name (the first
-/// segment after `crate`), the full dotted path text (`crate::a::b::c`),
-/// the span of that first segment (for diagnostics — matches how
-/// [`EdgeVisitor::visit_path`] reports a real `Path` edge), and the index of
-/// the next unconsumed token. Returns `None` if `crate` isn't followed by at
-/// least one `:: ident` (a bare `crate` token some other way — there's no
-/// such usage in this codebase, but failing closed here would just mean a
+/// Parses an `ident ( :: ident )*` token pattern out of a raw macro token
+/// stream, starting at `toks[start]` (checked by the caller to be an `Ident`
+/// — `crate` or `super`, the two roots [`scan_token_stream`] cares about,
+/// though this function itself doesn't care which). Returns every segment
+/// name paired with its span (`toks[start]` itself included as the first
+/// entry, mirroring [`module_index`]'s expectations) and the index of the
+/// next unconsumed token. A trailing bare root with no `:: ident` after it
+/// (there's no such usage in this codebase) still returns the one-element
+/// segment list rather than `None` — failing closed here would just mean a
 /// missed edge, not a false positive, so this is intentionally permissive
-/// about what counts as "a `::` pair").
-fn parse_crate_path(toks: &[TokenTree], start: usize) -> Option<(String, String, Span, usize)> {
+/// about what counts as "a `::` pair".
+fn parse_dotted_ident_path(
+    toks: &[TokenTree],
+    start: usize,
+) -> Option<(Vec<(String, Span)>, usize)> {
+    let TokenTree::Ident(first) = toks.get(start)? else {
+        return None;
+    };
+    let mut segments = vec![(first.to_string(), first.span())];
     let mut i = start + 1;
-    let mut segments: Vec<String> = Vec::new();
-    let mut first_span: Option<Span> = None;
     while is_coloncolon(toks.get(i), toks.get(i + 1)) {
         let TokenTree::Ident(seg) = toks.get(i + 2)? else {
             break;
         };
-        if first_span.is_none() {
-            first_span = Some(seg.span());
-        }
-        segments.push(seg.to_string());
+        segments.push((seg.to_string(), seg.span()));
         i += 3;
     }
-    let module = segments.first()?.clone();
-    let path_text = format!("crate::{}", segments.join("::"));
-    Some((module, path_text, first_span?, i))
+    Some((segments, i))
 }
 
 /// True when the two tokens are the `::` pair (two adjacent `:` `Punct`
@@ -574,9 +780,14 @@ fn walk_use_tree(
             out.push((full, span));
         }
         UseTree::Rename(r) => {
+            // The externally-visible name after `as` — not `r.ident` (the
+            // original name), which callers resolving `prelude`
+            // re-exports by their visible name (e.g.
+            // `parse_module_reexport_aliases`) need to match what
+            // production code actually writes at the use site.
             let mut full = prefix.clone();
-            full.push(r.ident.clone());
-            let span = r.ident.span();
+            full.push(r.rename.clone());
+            let span = r.rename.span();
             out.push((full, span));
         }
         UseTree::Glob(g) => {
@@ -826,6 +1037,188 @@ mod tests {
     fn ignores_edge_inside_tokio_test_fn() {
         let edges = edges_in("#[tokio::test]\nasync fn t() { crate::queries::foo(); }\n");
         assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn finds_super_chain_use_edge() {
+        let edges = edges_in("use super::super::queries::foo;\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "queries");
+        assert_eq!(edges[0].1, "use super::super::queries::foo");
+    }
+
+    #[test]
+    fn finds_super_chain_path_edge() {
+        let edges = edges_in("fn f() { super::super::language_service::Position::new(); }\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "language_service");
+        assert_eq!(edges[0].1, "super::super::language_service::Position::new");
+    }
+
+    #[test]
+    fn finds_super_chain_edge_inside_macro() {
+        let edges = edges_in("fn f() { let _ = format!(\"{}\", super::lint::check()); }\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "lint");
+        assert_eq!(edges[0].1, "super::lint::check");
+    }
+
+    #[test]
+    fn ignores_super_chain_edge_inside_cfg_test_mod() {
+        let edges = edges_in(
+            "#[cfg(test)]\nmod tests {\n    fn t() { super::super::queries::foo(); }\n}\n",
+        );
+        assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn single_super_targeting_a_plain_item_is_harmless() {
+        // `super::helper` isn't a Language-Service module name, so it's
+        // recorded (module_index doesn't know or care what it points at)
+        // but filtered out downstream in `run()` — exercised here just to
+        // confirm it doesn't panic and records the expected module name.
+        let edges = edges_in("fn f() { super::helper(); }\n");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "helper");
+    }
+
+    #[test]
+    fn self_prefixed_path_is_not_recorded() {
+        // `self::` is never treated as a root at all (never escapes the
+        // current module), so this should record nothing.
+        let edges = edges_in("fn f() { let x = self::local(); }\n");
+        assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn bare_use_super_glob_is_not_recorded() {
+        // `use super::*;` has no segment after the lone `super`, so
+        // `module_index` correctly declines to treat it as a resolvable
+        // edge (unlike `crate::prelude::*`, this isn't specially flagged —
+        // no current usage of this pattern exists in the codebase either).
+        let edges = edges_in("use super::*;\n");
+        assert!(edges.is_empty(), "unexpected edges: {edges:?}");
+    }
+
+    #[test]
+    fn module_index_handles_crate_and_super_roots() {
+        let crate_names = vec!["crate".to_string(), "queries".to_string()];
+        assert_eq!(module_index(&crate_names), Some(1));
+
+        let bare_crate = vec!["crate".to_string()];
+        assert_eq!(module_index(&bare_crate), None);
+
+        let one_super = vec!["super".to_string(), "queries".to_string()];
+        assert_eq!(module_index(&one_super), Some(1));
+
+        let two_supers = vec![
+            "super".to_string(),
+            "super".to_string(),
+            "queries".to_string(),
+        ];
+        assert_eq!(module_index(&two_supers), Some(2));
+
+        let bare_super = vec!["super".to_string()];
+        assert_eq!(module_index(&bare_super), None);
+
+        let neither = vec!["self".to_string(), "queries".to_string()];
+        assert_eq!(module_index(&neither), None);
+    }
+
+    #[test]
+    fn prelude_item_name_extracts_from_use_and_path_forms() {
+        assert_eq!(
+            prelude_item_name("use crate::prelude::LanguageService"),
+            Some("LanguageService")
+        );
+        assert_eq!(
+            prelude_item_name("crate::prelude::LanguageService::new"),
+            Some("LanguageService")
+        );
+        assert_eq!(prelude_item_name("use crate::prelude"), None);
+        assert_eq!(prelude_item_name("crate::queries::foo"), None);
+    }
+
+    #[test]
+    fn resolve_prelude_edge_returns_none_for_non_prelude_edge() {
+        let edge = Edge {
+            target_module: "queries".to_string(),
+            path_text: "crate::queries::foo".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let map = HashMap::new();
+        assert!(resolve_prelude_edge(&edge, &map).is_none());
+    }
+
+    #[test]
+    fn resolve_prelude_edge_resolves_known_reexport() {
+        let edge = Edge {
+            target_module: "prelude".to_string(),
+            path_text: "crate::prelude::LanguageService::new".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let mut map = HashMap::new();
+        map.insert(
+            "LanguageService".to_string(),
+            "language_service".to_string(),
+        );
+        assert_eq!(
+            resolve_prelude_edge(&edge, &map),
+            Some(Ok("language_service".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_prelude_edge_flags_unknown_item_as_unresolvable() {
+        let edge = Edge {
+            target_module: "prelude".to_string(),
+            path_text: "crate::prelude::SomethingNew".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let map = HashMap::new(); // "SomethingNew" not in the map
+        assert_eq!(resolve_prelude_edge(&edge, &map), Some(Err(())));
+    }
+
+    #[test]
+    fn resolve_prelude_edge_flags_glob_or_bare_reference_as_unresolvable() {
+        let edge = Edge {
+            target_module: "prelude".to_string(),
+            path_text: "use crate::prelude".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let map = HashMap::new();
+        assert_eq!(resolve_prelude_edge(&edge, &map), Some(Err(())));
+    }
+
+    #[test]
+    fn parse_module_reexport_aliases_reads_lib_rs_prelude_block() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let core_src_dir = dir.path().join(CORE_SRC);
+        fs::create_dir_all(&core_src_dir).expect("mkdir core_src");
+        fs::write(
+            core_src_dir.join("lib.rs"),
+            "pub mod prelude {\n\
+             \x20   pub use crate::ast::ClassDefinition;\n\
+             \x20   pub use crate::language_service::{LanguageService, Position};\n\
+             \x20   pub use crate::source_analysis::Span;\n\
+             }\n",
+        )
+        .expect("write lib.rs");
+        let map = parse_module_reexport_aliases(dir.path()).expect("parse ok");
+        assert_eq!(map.get("ClassDefinition").map(String::as_str), Some("ast"));
+        assert_eq!(
+            map.get("LanguageService").map(String::as_str),
+            Some("language_service")
+        );
+        assert_eq!(
+            map.get("Position").map(String::as_str),
+            Some("language_service")
+        );
+        assert_eq!(map.get("Span").map(String::as_str), Some("source_analysis"));
     }
 
     #[test]
