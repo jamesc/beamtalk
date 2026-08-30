@@ -5,10 +5,10 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::{binary_bif, generate_comparison_bif};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Float primitive implementations.
 pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {

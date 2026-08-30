@@ -42,14 +42,14 @@
 //! Non-mutating calls return `None` here and fall through to the ordinary dispatch
 //! to the `Collection.bt` method, preserving existing behaviour.
 
-use super::super::super::document::{Document, leaf};
 use super::super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, BlockParameter, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
     MessageSelector,
 };
-use crate::docvec;
 use crate::source_analysis::Span;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, leaf};
 
 // ── Synthetic AST builders ──────────────────────────────────────────────────
 // These construct the desugared `inject:into:` tree. Spans are inherited from the

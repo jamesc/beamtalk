@@ -5,12 +5,12 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::document::Document;
-use super::document::leaf::{atom, var};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
-use crate::docvec;
 use crate::source_analysis::Span;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf::{atom, var};
 
 /// BT-2709/BT-2710: Which runtime guard a dispatchable binary operator emits
 /// for an unknown/generic receiver. The two variants differ only in the guard

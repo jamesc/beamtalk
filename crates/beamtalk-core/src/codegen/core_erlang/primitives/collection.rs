@@ -16,10 +16,10 @@
 //! Concrete subclasses (List, Set, Dictionary) retain their own `@primitive`
 //! overrides handled by `list.rs`, `misc.rs`, and `dictionary.rs`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::param;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Collection primitive implementations.
 pub(crate) fn generate_collection_bif(

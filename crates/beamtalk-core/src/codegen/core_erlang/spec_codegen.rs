@@ -63,12 +63,12 @@ use std::collections::HashSet;
 
 use ecow::EcoString;
 
-use super::document::leaf::{atom, int_lit};
-use super::document::{Document, join};
 use super::selector_mangler::safe_class_method_fn_name;
 use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation, to_module_name};
-use crate::docvec;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf::{atom, int_lit};
+use beamtalk_cerl_doc::{Document, join};
 
 /// Converts a `TypeAnnotation` to its Core Erlang abstract type representation.
 ///

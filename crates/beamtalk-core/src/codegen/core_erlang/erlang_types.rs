@@ -59,7 +59,8 @@
 
 use std::fmt;
 
-use super::util::{escape_atom_chars, to_module_name};
+use super::util::to_module_name;
+use beamtalk_cerl_doc::escape::escape_atom_chars;
 
 /// A Core Erlang atom value object.
 ///
@@ -113,8 +114,8 @@ impl ErlangAtom {
 impl fmt::Display for ErlangAtom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // BT-3089: delegate to the one canonical atom-escaping funnel
-        // (`util::escape_atom_chars`, also used by `leaf::atom`) instead of
-        // hand-rolling a second escape table here.
+        // (`beamtalk_cerl_doc::escape::escape_atom_chars`, also used by
+        // `leaf::atom`) instead of hand-rolling a second escape table here.
         write!(f, "'{}'", escape_atom_chars(&self.name))
     }
 }

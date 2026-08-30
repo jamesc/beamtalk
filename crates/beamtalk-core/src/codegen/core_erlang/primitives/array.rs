@@ -10,10 +10,10 @@
 //! canonical index→value `'data'` map (ADR 0090):
 //!   `#{'$beamtalk_class' => 'Array', 'data' => #{0 => V0, 1 => V1, ...}}`
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::param;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Array primitive implementations (BT-822).
 pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {

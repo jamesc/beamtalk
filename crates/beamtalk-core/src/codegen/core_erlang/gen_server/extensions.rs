@@ -32,10 +32,10 @@
 //! a target known to be an `Actor` subclass gets the 3-arity state-threading
 //! shape.
 
-use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module, StandaloneMethodDefinition};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 
 impl CoreErlangGenerator {
     /// Returns the foreign cross-class extension methods declared in `module`.

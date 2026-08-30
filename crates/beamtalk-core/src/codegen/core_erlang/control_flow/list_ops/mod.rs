@@ -28,11 +28,11 @@ mod transform_ops;
 #[cfg(test)]
 mod tests;
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
 /// variable (BT-524 `is_list` guard):

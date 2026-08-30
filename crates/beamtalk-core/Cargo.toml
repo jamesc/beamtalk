@@ -23,6 +23,11 @@ stacker.workspace = true
 dirs.workspace = true
 # why: shared leaf for ~/.beamtalk resolution (see docs/development/architecture-principles.md §6)
 beamtalk-home.workspace = true
+# why: shared leaf for the Core Erlang Document/leaf/docvec! pretty-printing
+# API (ADR 0089), so `codegen` and `unparse` depend on it directly instead of
+# `unparse` depending on `codegen` for it (see
+# docs/development/architecture-principles.md §6, ADR 0117 step 4).
+beamtalk-cerl-doc.workspace = true
 # why: BT-2859 — no longer optional: `ffi_type_specs`'s on-disk spec cache
 # (ADR 0075) unconditionally derives Serialize/Deserialize on its cache-entry
 # type. The `serde` *feature* below still independently gates the optional

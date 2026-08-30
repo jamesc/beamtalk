@@ -19,8 +19,6 @@
 
 use std::collections::HashSet;
 
-use super::document::Document;
-use super::document::leaf;
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result};
 use crate::ast::{
@@ -28,7 +26,9 @@ use crate::ast::{
     Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
     StringSegment,
 };
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed

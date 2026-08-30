@@ -31,14 +31,14 @@ mod exception_handling;
 mod list_ops;
 mod while_loops;
 
-use super::document::{Document, join, leaf};
 use super::threaded_ir;
 use super::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, OpenScopeResult, Result, block_analysis,
 };
 use crate::ast::Expression;
-use crate::docvec;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, join, leaf};
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 

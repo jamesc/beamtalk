@@ -3,13 +3,13 @@
 
 //! Basic list iteration operations: `do:` and `collect:`.
 
-use super::super::super::document::Document;
-use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 impl CoreErlangGenerator {
     /// Generates code for `list do:` iteration.

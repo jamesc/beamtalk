@@ -23,9 +23,9 @@
 //! `beamtalk_method_resolver:resolve/2` instead, since method lookup is a
 //! separate domain service.
 
-use super::super::document::Document;
-use super::super::document::leaf;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Zero-arg tower intrinsics: the selector name is also the
 /// `beamtalk_behaviour_intrinsics` function name, called as `func(Self)`.

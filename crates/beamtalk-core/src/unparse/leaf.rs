@@ -11,7 +11,7 @@
 //! no intent. ADR 0089 replaced those open leaves with this small parallel API
 //! so each call site declares *what kind* of leaf it produces.
 //!
-//! # Why this is separate from `document::leaf`
+//! # Why this is separate from `beamtalk_cerl_doc::leaf`
 //!
 //! These helpers produce **Beamtalk syntax**, not Core Erlang. The escaping
 //! rules differ entirely:
@@ -22,7 +22,7 @@
 //!   triggering interpolation.
 //!
 //! Sharing the Core Erlang leaf API here would be incorrect, so this module is
-//! intentionally a sibling rather than a reuse of `document::leaf`.
+//! intentionally a sibling rather than a reuse of `beamtalk_cerl_doc::leaf`.
 //!
 //! # The single chokepoint
 //!
@@ -31,7 +31,7 @@
 //! variant, this module remains the *only* place in the unparser that
 //! constructs an owned-string leaf.
 
-use crate::codegen::core_erlang::document::Document;
+use beamtalk_cerl_doc::Document;
 
 /// A Beamtalk identifier, operator, keyword part, or other syntactic name.
 ///

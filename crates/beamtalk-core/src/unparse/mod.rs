@@ -45,11 +45,9 @@ use crate::ast::{
     ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
     StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
-use crate::codegen::core_erlang::document::{
-    DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil,
-};
-use crate::docvec;
 use crate::source_analysis::{Severity, lex_with_eof, parse, parse_method};
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil};
 
 // --- Public entry points ---
 

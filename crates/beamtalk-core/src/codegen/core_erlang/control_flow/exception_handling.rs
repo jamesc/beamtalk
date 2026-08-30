@@ -48,15 +48,15 @@
 //!     primop 'raw_raise'(_Type, _Error, _Stacktrace)
 //! ```
 
-use super::super::document::Document;
-use super::super::document::{join, leaf};
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
 use super::super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::super::{CodeGenContext, CoreErlangGenerator, OpenScopeResult, Result, block_analysis};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{join, leaf};
 
 impl CoreErlangGenerator {
     fn state_acc_var_doc(state_version: usize) -> Document<'static> {

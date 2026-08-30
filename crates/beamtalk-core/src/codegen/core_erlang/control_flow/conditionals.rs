@@ -50,8 +50,6 @@
 //! that inner state variable names do not conflict with the outer
 //! `State{N}` chain managed by the method body generator.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::super::gen_server::BodyExprKind;
 use super::super::threaded_ir::{
     self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
@@ -59,8 +57,10 @@ use super::super::threaded_ir::{
 use super::super::{CoreErlangGenerator, OpenScopeResult, Result};
 use super::StateAccFallbackReason;
 use crate::ast::{Block, Expression};
-use crate::docvec;
 use crate::source_analysis::Span;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 impl CoreErlangGenerator {
     /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's

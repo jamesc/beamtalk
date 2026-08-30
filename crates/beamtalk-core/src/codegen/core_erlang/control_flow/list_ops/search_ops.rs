@@ -3,13 +3,13 @@
 
 //! Search/detect list operations: `anySatisfy:`, `allSatisfy:`, and `detect:`.
 
-use super::super::super::document::Document;
-use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// BT-3028: binds the `detect:` answer out of a mutation-threading fold result,
 /// raising `not_found` when nothing matched.

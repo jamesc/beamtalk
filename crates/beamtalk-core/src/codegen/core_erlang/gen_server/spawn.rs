@@ -8,10 +8,10 @@
 //! Generates `spawn/0`, `spawn/1` class methods and `new/0`, `new/1` error
 //! methods that prevent incorrect actor instantiation.
 
-use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::Module;
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 
 impl CoreErlangGenerator {
     /// Generates a Document for registering an actor instance with the hot reload
@@ -440,32 +440,6 @@ impl CoreErlangGenerator {
             ),
             "\n",
         ]
-    }
-
-    /// Returns a Core Erlang binary string literal for the given string.
-    ///
-    /// Produces: `#{#<byte1>(8,1,'integer',['unsigned'|['big']]), ...}#`
-    pub(crate) fn binary_string_literal(s: &str) -> String {
-        let mut result = String::from("#{");
-        result.push_str(&Self::binary_byte_segments(s));
-        result.push_str("}#");
-        result
-    }
-
-    /// Returns Core Erlang binary byte segments for a string, without `#{...}#` wrapping.
-    ///
-    /// Used by `binary_string_literal` and string interpolation codegen.
-    /// Produces: `#<byte1>(8,1,'integer',['unsigned'|['big']]),#<byte2>(...), ...`
-    pub(in crate::codegen::core_erlang) fn binary_byte_segments(s: &str) -> String {
-        use std::fmt::Write;
-        let mut result = String::new();
-        for (i, byte) in s.bytes().enumerate() {
-            if i > 0 {
-                result.push(',');
-            }
-            write!(result, "#<{byte}>(8,1,'integer',['unsigned'|['big']])").unwrap();
-        }
-        result
     }
 
     /// Generates the `superclass/0` class method for reflection.

@@ -25,7 +25,7 @@
 //! [`safe_class_method_selector`] and [`safe_class_method_fn_name`].
 //!
 //! Quoting an atom string for Core Erlang output is **not** done here: that is
-//! the job of the `document::leaf::atom` typed-leaf helper (ADR 0089), which
+//! the job of the `leaf::atom` (from `beamtalk_cerl_doc`) typed-leaf helper (ADR 0089), which
 //! escapes and wraps the name so no raw `'…'` fragment is built by hand.
 
 /// Maximum length for an Erlang/Core Erlang atom (hard VM limit).

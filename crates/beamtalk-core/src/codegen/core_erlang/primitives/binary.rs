@@ -8,10 +8,10 @@
 //! Maps `@primitive` selectors on Binary to their Erlang runtime
 //! functions in `beamtalk_binary`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::param;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Binary primitive implementations (ADR 0086).
 pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {

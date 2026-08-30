@@ -12,11 +12,11 @@
 
 use std::fmt::Write as _;
 
-use super::document::leaf::{atom, string_lit};
-use super::document::{Document, join};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Expression, ExpressionStatement, Identifier};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf::{atom, string_lit};
+use beamtalk_cerl_doc::{Document, join};
 
 /// Builds a versioned Core Erlang variable name.
 ///
@@ -76,22 +76,14 @@ pub(super) fn ext_var(idx: usize) -> String {
     s
 }
 
-/// Escapes a string for use inside a Core Erlang double-quoted string literal.
-///
-/// Replaces `\` with `\\` and `"` with `\"` so the result is safe to embed
-/// between `"..."` in generated `.core` source.
-pub(super) fn escape_core_erlang_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 /// Escapes special characters for embedding in an Erlang string literal.
 ///
 /// Handles `\`, `"`, `\n`, `\r`, `\t`, and `\0` so the result is safe to
 /// embed between `"..."` in generated Erlang source (e.g. `-eval` arguments,
 /// path strings passed to `erlc`, `.app` descriptions).
 ///
-/// This is distinct from `escape_core_erlang_string`, which is a lighter
-/// variant for Core Erlang `.core` output.
+/// This is distinct from `beamtalk_cerl_doc::escape::escape_core_erlang_string`,
+/// which is a lighter variant for Core Erlang `.core` output.
 #[must_use]
 pub fn escape_erlang_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -99,44 +91,6 @@ pub fn escape_erlang_string(s: &str) -> String {
         match c {
             '\\' => result.push_str("\\\\"),
             '"' => result.push_str("\\\""),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            '\0' => result.push_str("\\0"),
-            _ => result.push(c),
-        }
-    }
-    result
-}
-
-/// Escapes special characters in an atom name for Core Erlang.
-///
-/// This is the single canonical funnel for atom escaping (BT-875, BT-3089):
-/// every atom emitted through [`leaf::atom`](super::document::leaf::atom)
-/// passes through here, and other atom-formatting call sites (e.g.
-/// `beamtalk-cli`'s generated-EUnit-source atom formatter) should reuse this
-/// function rather than hand-rolling their own escape table.
-///
-/// Escapes:
-/// - `\` → `\\`, `'` → `\'` — required to keep the surrounding `'...'`
-///   delimiters and any embedded backslash unambiguous.
-/// - `\n`, `\r`, `\t`, `\0` — **necessary, not just cosmetic** (BT-3089):
-///   Beamtalk quoted-symbol literals (`#'foo bar'`) have no backslash-escape
-///   syntax of their own — the lexer (`lex_symbol_or_hash`) accepts *any*
-///   literal character up to the closing `'`, including a raw newline typed
-///   directly in the source. A `Literal::Symbol` carrying one of these
-///   characters reaches `leaf::atom` unchanged; without escaping them here,
-///   the generated `.core` source would contain a literal control character
-///   embedded inside a quoted atom, breaking the "one term per line"
-///   assumption the rest of the pipeline (and any downstream tooling) relies
-///   on. Mirrors [`escape_core_erlang_string`]'s equivalent table.
-#[must_use]
-pub fn escape_atom_chars(name: &str) -> String {
-    let mut result = String::with_capacity(name.len());
-    for c in name.chars() {
-        match c {
-            '\'' => result.push_str("\\'"),
-            '\\' => result.push_str("\\\\"),
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '\t' => result.push_str("\\t"),
@@ -252,7 +206,7 @@ impl CoreErlangGenerator {
     pub(crate) fn expression_doc(
         &mut self,
         expr: &Expression,
-    ) -> Result<super::document::Document<'static>> {
+    ) -> Result<beamtalk_cerl_doc::Document<'static>> {
         self.generate_expression(expr)
     }
 
@@ -266,7 +220,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<(
-        super::document::Document<'static>,
+        beamtalk_cerl_doc::Document<'static>,
         Option<super::OpenScopeResult>,
     )> {
         self.last_open_scope_result = None;
@@ -293,11 +247,11 @@ impl CoreErlangGenerator {
     pub(super) fn closed_expression_doc(
         &mut self,
         expr: &Expression,
-    ) -> Result<super::document::Document<'static>> {
+    ) -> Result<beamtalk_cerl_doc::Document<'static>> {
         let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
         Ok(match open_scope {
             Some(super::OpenScopeResult::Value(result_var)) => {
-                docvec![doc, super::document::leaf::var(result_var)]
+                docvec![doc, beamtalk_cerl_doc::leaf::var(result_var)]
             }
             Some(super::OpenScopeResult::NoValue) => docvec![doc, "'nil'"],
             None => doc,
@@ -323,7 +277,7 @@ impl CoreErlangGenerator {
     /// pushed as-is with no closing `let _ = ... in` appended at all.
     pub(super) fn push_discarded_stmt(
         &mut self,
-        docs: &mut Vec<super::document::Document<'static>>,
+        docs: &mut Vec<beamtalk_cerl_doc::Document<'static>>,
         expr: &Expression,
     ) -> Result<()> {
         let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
@@ -332,7 +286,7 @@ impl CoreErlangGenerator {
                 docs.push(doc);
                 docs.push(docvec![
                     "let _ = ",
-                    super::document::leaf::var(result_var),
+                    beamtalk_cerl_doc::leaf::var(result_var),
                     " in "
                 ]);
             }
@@ -356,7 +310,7 @@ impl CoreErlangGenerator {
     pub(crate) fn expression_doc_with_repl_mutation_tracking(
         &mut self,
         expr: &crate::ast::Expression,
-    ) -> Result<(super::document::Document<'static>, bool)> {
+    ) -> Result<(beamtalk_cerl_doc::Document<'static>, bool)> {
         self.set_repl_loop_mutated(false);
         let doc = self.generate_expression(expr)?;
         let mutated = self.repl_loop_mutated();
@@ -417,13 +371,13 @@ impl CoreErlangGenerator {
     pub(super) fn case_clause_fallback(
         &mut self,
         var_prefix: &str,
-    ) -> super::document::Document<'static> {
+    ) -> beamtalk_cerl_doc::Document<'static> {
         let var = self.fresh_temp_var(var_prefix);
         docvec![
             " <",
-            super::document::leaf::var(var.clone()),
+            beamtalk_cerl_doc::leaf::var(var.clone()),
             "> when 'true' -> call 'erlang':'error'({'case_clause', ",
-            super::document::leaf::var(var),
+            beamtalk_cerl_doc::leaf::var(var),
             "})",
         ]
     }
@@ -656,61 +610,6 @@ mod tests {
     #[test]
     fn test_user_package_prefix_bt_only() {
         assert_eq!(user_package_prefix("bt@counter"), None);
-    }
-
-    #[test]
-    fn test_escape_atom_chars_normal() {
-        assert_eq!(escape_atom_chars("normal"), "normal");
-    }
-
-    #[test]
-    fn test_escape_atom_chars_quote() {
-        assert_eq!(escape_atom_chars("it's"), "it\\'s");
-    }
-
-    #[test]
-    fn test_escape_atom_chars_backslash() {
-        assert_eq!(escape_atom_chars("back\\slash"), "back\\\\slash");
-    }
-
-    /// BT-3089: a quoted symbol literal (`#'foo\nbar'`, real newline typed
-    /// in source — Beamtalk quoted symbols have no backslash-escape syntax
-    /// of their own) must not reach the generated `.core` source as a raw
-    /// embedded control character.
-    #[test]
-    fn test_escape_atom_chars_control_characters() {
-        assert_eq!(escape_atom_chars("foo\nbar"), "foo\\nbar");
-        assert_eq!(escape_atom_chars("foo\rbar"), "foo\\rbar");
-        assert_eq!(escape_atom_chars("foo\tbar"), "foo\\tbar");
-        assert_eq!(escape_atom_chars("foo\0bar"), "foo\\0bar");
-    }
-
-    #[test]
-    fn test_escape_atom_chars_mixed() {
-        assert_eq!(escape_atom_chars("it's\na\\b"), "it\\'s\\na\\\\b");
-    }
-
-    #[test]
-    fn test_escape_core_erlang_string_plain() {
-        assert_eq!(escape_core_erlang_string("hello"), "hello");
-    }
-
-    #[test]
-    fn test_escape_core_erlang_string_backslash() {
-        assert_eq!(escape_core_erlang_string("a\\b"), "a\\\\b");
-    }
-
-    #[test]
-    fn test_escape_core_erlang_string_double_quote() {
-        assert_eq!(escape_core_erlang_string("say \"hi\""), "say \\\"hi\\\"");
-    }
-
-    #[test]
-    fn test_escape_core_erlang_string_windows_path() {
-        assert_eq!(
-            escape_core_erlang_string("C:\\Users\\foo\\bar.bt"),
-            "C:\\\\Users\\\\foo\\\\bar.bt"
-        );
     }
 
     #[test]

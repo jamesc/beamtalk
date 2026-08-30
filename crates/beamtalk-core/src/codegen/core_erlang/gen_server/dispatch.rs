@@ -8,10 +8,10 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
-use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Block, Expression, MethodKind, Module};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 
 /// Collects all primary method names and arities from a module.
 ///

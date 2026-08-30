@@ -68,11 +68,11 @@
 //! of that function is for an unrelated purpose (conditionals/exception-handling/match-arm
 //! classification), never a second recheck of the same Actor-body-mutation question.
 
-use super::document::{Document, leaf};
 use super::threaded_ir::{BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CoreErlangGenerator, Result};
 use crate::ast::Expression;
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, leaf};
 
 /// Where a threading construct sits in its enclosing method body. Drives how the
 /// bound logical value (tuple element 1) is returned/stored.

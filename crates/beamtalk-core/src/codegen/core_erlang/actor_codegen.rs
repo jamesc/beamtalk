@@ -12,15 +12,15 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use super::document::leaf;
-use super::document::leaf::{atom, fname};
-use super::document::{Document, INDENT, join, line, nest};
 use super::selector_mangler::{safe_class_method_fn_name, sealed_fn_name};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
+use beamtalk_cerl_doc::leaf::{atom, fname};
+use beamtalk_cerl_doc::{Document, INDENT, join, line, nest};
 
 impl CoreErlangGenerator {
     /// Generates a full actor module with `gen_server` behaviour.

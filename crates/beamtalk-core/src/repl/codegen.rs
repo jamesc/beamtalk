@@ -17,11 +17,11 @@
 //! - Test module generation (no workspace bindings)
 
 use crate::ast::{Expression, Pattern};
-use crate::codegen::core_erlang::document::Document;
-use crate::codegen::core_erlang::document::leaf;
-use crate::codegen::core_erlang::document::leaf::{atom, var};
 use crate::codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
+use beamtalk_cerl_doc::leaf::{atom, var};
 
 // ── Public API ──────────────────────────────────────────────────────────
 

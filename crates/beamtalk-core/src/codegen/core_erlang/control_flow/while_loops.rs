@@ -32,12 +32,12 @@
 //! these `case`s directly into the same function as an enclosing `try`
 //! (removing the `letrec`/`apply` boundary), reconsider this note.
 
-use super::super::document::{Document, join, leaf};
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, join, leaf};
 
 /// Result of pre-extracting hybrid loop fields: pre-extraction docs, readonly params, mutated params.
 ///

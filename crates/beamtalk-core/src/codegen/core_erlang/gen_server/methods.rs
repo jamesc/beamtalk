@@ -8,8 +8,6 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
-use super::super::document::leaf::fname;
-use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
 use super::super::value_type_codegen::has_opaque_native_representation;
@@ -22,11 +20,13 @@ use crate::ast::{
     MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition,
     ProtocolMethodSignature, StateDeclaration, TypeAnnotation, TypeParamDecl, WellKnownSelector,
 };
-use crate::docvec;
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use crate::semantic_analysis::{InferredType, TypeProvenance};
 use crate::source_analysis::Span;
 use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf::fname;
+use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 use ecow::EcoString;
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
@@ -6368,13 +6368,13 @@ mod tests {
         );
         // Values are baked verbatim as binary literals.
         assert!(
-            output.contains(&CoreErlangGenerator::binary_string_literal(
+            output.contains(&beamtalk_cerl_doc::binary::binary_string_literal(
                 "0.4.0-dev+abc123"
             )),
             "beamtalk_version value not baked correctly. Got: {output}"
         );
         assert!(
-            output.contains(&CoreErlangGenerator::binary_string_literal("28-16.4")),
+            output.contains(&beamtalk_cerl_doc::binary::binary_string_literal("28-16.4")),
             "otp_release value not baked correctly. Got: {output}"
         );
     }

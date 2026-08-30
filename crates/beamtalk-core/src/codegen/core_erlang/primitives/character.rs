@@ -8,10 +8,10 @@
 //! Characters are integers (Unicode codepoints) at the BEAM level.
 //! Simple operations use direct BIFs; predicates delegate to `beamtalk_character`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::{generate_comparison_bif, param};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Character primitive implementations (BT-339).
 pub(crate) fn generate_character_bif(

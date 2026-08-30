@@ -9,10 +9,10 @@
 //! state from a stateful parent is supplied by the super-init chain (BT-1417,
 //! see `gen_server/callbacks.rs`), not by this module.
 
-use super::super::document::{Document, leaf, line};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, Module};
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, leaf, line};
 
 impl CoreErlangGenerator {
     /// Generates only the current class's own state fields (not inherited).

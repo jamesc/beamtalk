@@ -591,7 +591,7 @@ impl MessageSelector {
     /// the Erlang atom's textual content — Beamtalk selector characters
     /// (letters, digits, `:`, operator symbols) never need escaping to be
     /// valid atom *content*; `leaf::atom` (the BT-875-sanctioned funnel, see
-    /// `codegen::core_erlang::util::escape_atom_chars`) is what decides
+    /// `beamtalk_cerl_doc::escape::escape_atom_chars`) is what decides
     /// whether/how the text gets quoted for Core Erlang output. There is no
     /// separate "mangling" step.
     #[must_use]

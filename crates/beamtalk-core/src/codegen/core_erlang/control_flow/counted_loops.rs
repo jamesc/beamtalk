@@ -9,12 +9,12 @@
 //! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::super::{CoreErlangGenerator, Result};
 use super::{CountedLoopFrame, ThreadingPlan, class_var_arg_doc};
 use crate::ast::{Block, Expression};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_repeat(

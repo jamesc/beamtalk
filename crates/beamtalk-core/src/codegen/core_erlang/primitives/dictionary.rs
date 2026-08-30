@@ -7,10 +7,10 @@
 //!
 //! Dictionaries are Erlang maps — immutable key-value collections.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::{call_p0_self, call_self_p0, param};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Dictionary primitive implementations (BT-418).
 pub(crate) fn generate_dictionary_bif(

@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::super::document::Document;
+use beamtalk_cerl_doc::Document;
 
 /// Block primitive implementations.
 pub(crate) fn generate_block_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {

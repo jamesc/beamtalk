@@ -24,13 +24,13 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use super::document::Document;
-use super::document::leaf::{atom, fname};
 use super::selector_mangler::safe_class_method_fn_name;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, spec_codegen};
 use crate::ast::{MethodKind, Module, SupervisorKind};
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf::{atom, fname};
 
 impl CoreErlangGenerator {
     /// Generates an OTP supervisor module for `Supervisor subclass:` or

@@ -14,7 +14,6 @@ use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
 use super::control_flow::ThreadingPlan;
-use super::document::{Document, INDENT, concat, join, leaf, line, nest};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -23,7 +22,8 @@ use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind,
     Module, TypeAnnotation, WellKnownSelector,
 };
-use crate::docvec;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::{Document, INDENT, concat, join, leaf, line, nest};
 
 /// Classification of how a value-type method body expression should be handled
 /// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]

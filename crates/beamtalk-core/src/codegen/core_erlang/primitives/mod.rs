@@ -30,9 +30,9 @@ mod reflection;
 mod string;
 mod value_types;
 
-use super::document::Document;
-use super::document::leaf;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Core Erlang expression for `printString` — delegates to the runtime's
 /// `beamtalk_primitive:print_string/1` which formats any value for display.

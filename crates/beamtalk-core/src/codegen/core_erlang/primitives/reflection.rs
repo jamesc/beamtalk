@@ -8,10 +8,10 @@
 //! Contains BIF generators for introspection and meta-level classes:
 //! `CompiledMethod`, `Symbol`.
 
-use super::super::document::Document;
-use super::super::document::leaf;
 use super::binary_bif;
-use crate::docvec;
+use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 
 /// Symbol primitive implementations (BT-273).
 ///
