@@ -106,7 +106,12 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     package_type_aliases/1,
     class_definition_text/7,
     validate_alias/1,
-    safe_relative_path/1
+    safe_relative_path/1,
+    %% BT-3337: dead-pid resilience (class_row/2, state_slots/2) and the
+    %% alias-field string-shape normaliser.
+    class_row/2,
+    state_slots/2,
+    alias_field_binary/1
 ]).
 -endif.
 
