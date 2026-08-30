@@ -21,10 +21,6 @@ defmodule BtAttachWeb.Router do
     plug :require_authenticated
   end
 
-  pipeline :api do
-    plug :accepts, ["json"]
-  end
-
   pipeline :readiness do
     plug :accepts, ["json"]
     plug :fetch_session
