@@ -33,15 +33,21 @@
 //!   named `queries`/`language_service`/`lint`, so a chain that resolves to
 //!   one of those names (and compiles) can only mean the real top-level
 //!   sibling module.
-//! - **`crate::prelude::<Item>`**: `beamtalk-core`'s `lib.rs` re-exports a
-//!   mix of Compilation- and Language-Service-origin items through
-//!   `pub mod prelude`. A reference through that shim is resolved back to
-//!   the item's real origin module (by parsing `lib.rs`'s `prelude` block,
-//!   not a hand-maintained list — see [`parse_module_reexport_aliases`])
-//!   before being classified; a `crate::prelude::...` reference this checker
-//!   can't resolve to one specific item (a glob import, or an item genuinely
-//!   missing from `prelude`'s current re-export list) is *always* flagged,
-//!   since it can't be proven safe.
+//! - **`crate::prelude::<Item>`** (and, equivalently, a
+//!   `super::(super::)*prelude::<Item>` chain landing on that exact name):
+//!   `beamtalk-core`'s `lib.rs` re-exports a mix of Compilation- and
+//!   Language-Service-origin items through `pub mod prelude`. A reference
+//!   through that shim is resolved back to the item's real origin module (by
+//!   parsing `lib.rs`'s `prelude` block, not a hand-maintained list — see
+//!   [`parse_module_reexport_aliases`]) before being classified; a
+//!   `crate::prelude::...`/`super::(super::)*prelude::...` reference this
+//!   checker can't resolve to one specific item (a glob import, or an item
+//!   genuinely missing from `prelude`'s current re-export list) is *always*
+//!   flagged, since it can't be proven safe. Treating a `super`-rooted match
+//!   the same as a `crate`-rooted one is safe because [`run`] separately
+//!   enforces, on every run (not by one-time manual audit), that no
+//!   Compilation module ever nests a local `prelude` submodule of its own —
+//!   see [`find_nested_prelude_mod`].
 //!
 //! Test-only edges are allowed (Cargo permits cyclic dev-dependencies): any
 //! item gated by `#[cfg(test)]` (directly, or nested inside an enclosing
@@ -271,6 +277,18 @@ fn run() -> Result<(), Vec<String>> {
             })?;
             files_scanned += 1;
 
+            if find_nested_prelude_mod(&parsed.items) {
+                violations.push(format!(
+                    "{rel}: declares a local `mod prelude` inside Compilation module \
+                     `{module}` — this breaks the invariant `resolve_prelude_edge` and \
+                     `module_index` rely on (see their doc comments) to treat every \
+                     `super::(super::)*prelude::...` chain as unambiguously the crate-root \
+                     `prelude` shim in lib.rs. Rename this submodule, or if it genuinely needs \
+                     to be called `prelude`, teach the resolver to disambiguate before removing \
+                     this guard."
+                ));
+            }
+
             let mut visitor = EdgeVisitor {
                 test_depth: 0,
                 found: Vec::new(),
@@ -390,6 +408,37 @@ fn check_module_list_drift(core_src: &Path) -> Result<Vec<String>, Vec<String>> 
     Ok(unclassified)
 }
 
+/// Recursively searches `items` — a file's top-level items, or the body of a
+/// nested `mod { ... }` block — for a `mod prelude` declaration at any
+/// depth, in either form Rust allows: inline (`mod prelude { ... }`) or
+/// pointing at a separate file (`mod prelude;`, `content` is `None` for that
+/// form but the `Item::Mod` with `ident == "prelude"` still appears here).
+///
+/// This is the run-every-time invariant guard [`resolve_prelude_edge`] and
+/// [`module_index`] depend on: [`run`] calls this for every parsed
+/// Compilation-module file and fails the check the moment it finds a hit,
+/// which is what makes it safe to treat a `super::(super::)*prelude::...`
+/// chain as unambiguously *the* crate-root `prelude` shim — the same way
+/// `queries`/`language_service`/`lint` are unambiguous by not existing
+/// anywhere else in the Compilation-context subtree, except proven here on
+/// every run instead of by one-time manual audit (`prelude` is common enough
+/// re-export-convenience Rust style that a one-time audit alone would be
+/// worth much less).
+fn find_nested_prelude_mod(items: &[Item]) -> bool {
+    for item in items {
+        let Item::Mod(m) = item else { continue };
+        if m.ident == "prelude" {
+            return true;
+        }
+        if let Some((_, inner)) = &m.content {
+            if find_nested_prelude_mod(inner) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Parses `<core_src>/lib.rs`'s `pub mod prelude { ... }` block and returns
 /// a map from each re-exported item's externally-visible name to the real
 /// module it comes from (e.g. `"LanguageService" -> "language_service"`).
@@ -439,53 +488,61 @@ fn parse_module_reexport_aliases(repo_root: &Path) -> Result<HashMap<String, Str
     Ok(map)
 }
 
-/// Extracts the item name immediately following `crate::prelude::` (or
-/// `use crate::prelude::`) from an [`Edge::path_text`] — e.g.
+/// Extracts the item name immediately following the `prelude` segment of an
+/// [`Edge::path_text`] whose root is either `crate::prelude::` or a
+/// `super::(super::)*prelude::` chain (an optional leading `use ` is
+/// stripped first) — e.g.
 /// `"crate::prelude::LanguageService::something"` -> `Some("LanguageService")`,
-/// `"use crate::prelude::LanguageService"` -> `Some("LanguageService")`.
-/// `None` for a bare `crate::prelude`/`use crate::prelude` reference (the
-/// module itself, or a glob leaf — see [`walk_use_tree`]'s doc comment on
-/// how a glob's leaf omits the `*`), which [`resolve_prelude_edge`] treats
-/// as unresolvable.
+/// `"use crate::prelude::LanguageService"` -> `Some("LanguageService")`,
+/// `"super::prelude::LanguageService"` -> `Some("LanguageService")`,
+/// `"use super::super::prelude::LanguageService"` -> `Some("LanguageService")`.
+/// Splitting on the literal `"::prelude::"` substring (rather than stripping
+/// a fixed `crate::prelude::` prefix) is what makes both roots resolve the
+/// same way without needing to know how many `super`s a given chain used.
+/// `None` for a bare `crate::prelude`/`super::prelude`/`use crate::prelude`
+/// reference (the module itself, or a glob leaf — see [`walk_use_tree`]'s
+/// doc comment on how a glob's leaf omits the `*`), which
+/// [`resolve_prelude_edge`] treats as unresolvable.
 fn prelude_item_name(path_text: &str) -> Option<&str> {
     let rest = path_text.strip_prefix("use ").unwrap_or(path_text);
-    let rest = rest.strip_prefix("crate::prelude::")?;
-    rest.split("::").next().filter(|s| !s.is_empty())
+    let (_, after_prelude) = rest.split_once("::prelude::")?;
+    after_prelude.split("::").next().filter(|s| !s.is_empty())
 }
 
 /// Resolves an [`Edge`] whose recorded `target_module` is `"prelude"` to the
 /// real module it re-exports from. Returns `None` when `edge` doesn't target
-/// `prelude` at all (the caller should use `edge.target_module` unchanged) —
-/// including when `target_module == "prelude"` only because `module_index`
-/// matched a `super::(super::)*prelude::...` chain: unlike
-/// `queries`/`language_service`/`lint`, `prelude` isn't proven unique across
-/// every Compilation-context subtree (a `pub mod prelude { ... }`
-/// re-export-convenience submodule is common Rust style, e.g. a hypothetical
-/// `codegen::foo::prelude`), so only a `crate`-rooted path can safely be
-/// assumed to mean *the* crate-root `prelude` shim in `lib.rs` — a
-/// `super`-rooted "prelude" is therefore treated as an ordinary, harmless
-/// edge (`run()` filters it out the same as any other non-Language-Service
-/// module name) rather than specially resolved or flagged. Returns
-/// `Some(Ok(module))` when a genuine `crate::prelude::...` reference is
-/// resolved via `prelude_reexports`. Returns `Some(Err(()))` when it can't
-/// be resolved to one specific module — a glob/bare `crate::prelude`
+/// `prelude` at all (the caller should use `edge.target_module` unchanged).
+/// Returns `Some(Ok(module))` when a genuine `crate::prelude::...` **or**
+/// `super::(super::)*prelude::...` reference is resolved via
+/// `prelude_reexports`. Returns `Some(Err(()))` when it can't be resolved to
+/// one specific module — a glob/bare `crate::prelude`/`super::prelude`
 /// reference, or an item name not found in `prelude`'s current re-export
 /// list — which `run()` always treats as a violation: letting an
 /// unresolvable `prelude` reference through unflagged would silently reopen
 /// the exact hole this checker exists to close (this gap, and the fix, came
 /// out of code review — see the crate README).
+///
+/// A `super`-rooted match is deliberately resolved exactly the same as a
+/// `crate`-rooted one — unlike `queries`/`language_service`/`lint`, `prelude`
+/// isn't a name this function can independently prove unique across every
+/// Compilation-context subtree, so this correctness *does* depend on no
+/// Compilation module ever nesting a local `prelude` submodule of its own (a
+/// `pub mod prelude { ... }` re-export-convenience submodule is otherwise
+/// common Rust style). That precondition isn't just documented — [`run`]
+/// checks it on every invocation via [`find_nested_prelude_mod`] and fails
+/// loudly the moment it stops holding, rather than this function silently
+/// assuming it forever. An earlier version of this function required a
+/// `crate`-rooted path specifically to sidestep that risk without the
+/// invariant check, which reopened a false negative: a `super::prelude::X`
+/// reference from a depth-1 file (e.g. `ast/mod.rs`) is exactly as much
+/// *the* crate-root `prelude` as `crate::prelude::X` is, and went unresolved
+/// (silently treated as an ordinary, harmless edge) under that restriction
+/// (found in code review — see the crate README).
 fn resolve_prelude_edge(
     edge: &Edge,
     prelude_reexports: &HashMap<String, String>,
 ) -> Option<Result<String, ()>> {
     if edge.target_module != "prelude" {
-        return None;
-    }
-    let stripped = edge
-        .path_text
-        .strip_prefix("use ")
-        .unwrap_or(&edge.path_text);
-    if !stripped.starts_with("crate::") {
         return None;
     }
     match prelude_item_name(&edge.path_text) {
@@ -648,11 +705,13 @@ impl EdgeVisitor {
 /// `prelude` is a different case: it isn't in [`LANGUAGE_SERVICE_MODULES`],
 /// so a bare `module_index` match on it is never itself a violation — but
 /// [`resolve_prelude_edge`] special-cases `target_module == "prelude"` to
-/// resolve `crate::prelude::...` re-exports. `prelude` is *not* proven
-/// unique the way `queries`/`language_service`/`lint` are (a
-/// `pub mod prelude { ... }` re-export-convenience submodule is common Rust
-/// style), so that resolution logic additionally requires the match to be
-/// `crate`-rooted — see its doc comment.
+/// resolve `crate::prelude::...` (and, equivalently, `super`-rooted)
+/// re-exports, the same as this function treats `queries`/`language_service`/
+/// `lint`. `prelude` isn't proven unique the way those three are by
+/// construction (a `pub mod prelude { ... }` re-export-convenience submodule
+/// is common Rust style) — instead [`run`] proves it on every run, via
+/// [`find_nested_prelude_mod`], by checking no Compilation module actually
+/// nests one. See [`resolve_prelude_edge`]'s doc comment.
 fn module_index(names: &[String]) -> Option<usize> {
     if names.first().is_some_and(|s| s == "crate") {
         return if names.len() >= 2 { Some(1) } else { None };
@@ -1166,6 +1225,27 @@ mod tests {
     }
 
     #[test]
+    fn prelude_item_name_extracts_from_super_rooted_forms() {
+        // A `super::(super::)*prelude::...` chain resolves the item name
+        // exactly the same way a `crate::prelude::...` one does — see
+        // `resolve_prelude_edge`'s doc comment on why that's safe.
+        assert_eq!(
+            prelude_item_name("super::prelude::LanguageService"),
+            Some("LanguageService")
+        );
+        assert_eq!(
+            prelude_item_name("super::super::prelude::LanguageService::new"),
+            Some("LanguageService")
+        );
+        assert_eq!(
+            prelude_item_name("use super::super::prelude::LanguageService"),
+            Some("LanguageService")
+        );
+        assert_eq!(prelude_item_name("use super::prelude"), None);
+        assert_eq!(prelude_item_name("super::helper"), None);
+    }
+
+    #[test]
     fn resolve_prelude_edge_returns_none_for_non_prelude_edge() {
         let edge = Edge {
             target_module: "queries".to_string(),
@@ -1178,33 +1258,65 @@ mod tests {
     }
 
     #[test]
-    fn resolve_prelude_edge_ignores_super_rooted_prelude_lookalike() {
-        // `module_index` matches `super::prelude::Bar` the same way it
-        // matches `super::queries::Bar` (target_module == "prelude"), but
-        // unlike `queries`, a `prelude` submodule reached via `super::`
-        // could plausibly be a real, unrelated local module (e.g. a
-        // hypothetical `codegen::foo::prelude`) — not the crate-root shim.
-        // Only a `crate`-rooted match should be treated as *the* prelude.
+    fn resolve_prelude_edge_resolves_super_rooted_reexport_same_as_crate_rooted() {
+        // Regression test (should-still-catch direction): a
+        // `super::prelude::X` reference from a depth-1 file (e.g.
+        // `ast/mod.rs`) is exactly as much *the* crate-root `prelude` as
+        // `crate::prelude::X` is, and must resolve — and be flagged when
+        // `X` is Language-Service-origin — the same way. An earlier version
+        // of `resolve_prelude_edge` required a `crate`-rooted path
+        // specifically and silently let this case through unresolved (found
+        // in code review).
         let edge = Edge {
             target_module: "prelude".to_string(),
-            path_text: "super::prelude::Bar".to_string(),
+            path_text: "super::prelude::LanguageService".to_string(),
             line: 1,
             column: 1,
         };
-        let map = HashMap::new();
-        assert!(resolve_prelude_edge(&edge, &map).is_none());
+        let mut map = HashMap::new();
+        map.insert(
+            "LanguageService".to_string(),
+            "language_service".to_string(),
+        );
+        assert_eq!(
+            resolve_prelude_edge(&edge, &map),
+            Some(Ok("language_service".to_string()))
+        );
     }
 
     #[test]
-    fn resolve_prelude_edge_ignores_use_super_rooted_prelude_lookalike() {
+    fn resolve_prelude_edge_resolves_use_multi_super_rooted_reexport() {
         let edge = Edge {
             target_module: "prelude".to_string(),
-            path_text: "use super::super::prelude::Bar".to_string(),
+            path_text: "use super::super::prelude::LanguageService".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let mut map = HashMap::new();
+        map.insert(
+            "LanguageService".to_string(),
+            "language_service".to_string(),
+        );
+        assert_eq!(
+            resolve_prelude_edge(&edge, &map),
+            Some(Ok("language_service".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_prelude_edge_flags_super_rooted_unknown_item_as_unresolvable() {
+        // A `super::prelude::...` reference to an item this checker can't
+        // find in prelude's current re-export list must still be flagged,
+        // exactly like the crate-rooted case — it must never silently pass
+        // through as harmless just because it's super-rooted.
+        let edge = Edge {
+            target_module: "prelude".to_string(),
+            path_text: "super::prelude::SomethingNew".to_string(),
             line: 1,
             column: 1,
         };
         let map = HashMap::new();
-        assert!(resolve_prelude_edge(&edge, &map).is_none());
+        assert_eq!(resolve_prelude_edge(&edge, &map), Some(Err(())));
     }
 
     #[test]
@@ -1248,6 +1360,58 @@ mod tests {
         };
         let map = HashMap::new();
         assert_eq!(resolve_prelude_edge(&edge, &map), Some(Err(())));
+    }
+
+    // `find_nested_prelude_mod` — the invariant guard `resolve_prelude_edge`
+    // and `module_index` depend on to treat every `super`-rooted "prelude"
+    // match as unambiguously the crate-root shim. Covers both directions:
+    // it must actually catch a nested `prelude` submodule (should-still-catch),
+    // and it must not flag ordinary, unrelated module structure
+    // (shouldn't-false-positive).
+
+    #[test]
+    fn find_nested_prelude_mod_catches_inline_declaration() {
+        let file = syn::parse_file("mod helper;\nmod prelude {\n    pub fn x() {}\n}\n")
+            .expect("test fixture must parse");
+        assert!(find_nested_prelude_mod(&file.items));
+    }
+
+    #[test]
+    fn find_nested_prelude_mod_catches_file_backed_declaration() {
+        // `mod prelude;` (pointing at a separate file) parses to an
+        // `Item::Mod` with `content: None` — must still be caught, not just
+        // the inline-body form.
+        let file = syn::parse_file("mod helper;\nmod prelude;\n").expect("test fixture must parse");
+        assert!(find_nested_prelude_mod(&file.items));
+    }
+
+    #[test]
+    fn find_nested_prelude_mod_catches_nested_at_any_depth() {
+        let file =
+            syn::parse_file("mod outer {\n    mod inner {\n        mod prelude {}\n    }\n}\n")
+                .expect("test fixture must parse");
+        assert!(find_nested_prelude_mod(&file.items));
+    }
+
+    #[test]
+    fn find_nested_prelude_mod_ignores_unrelated_modules() {
+        // Shouldn't-false-positive direction: ordinary module structure with
+        // no submodule literally named `prelude`, at any depth, must not be
+        // flagged.
+        let file = syn::parse_file(
+            "mod helper;\nmod validation {\n    mod checks {\n        pub fn f() {}\n    }\n}\n",
+        )
+        .expect("test fixture must parse");
+        assert!(!find_nested_prelude_mod(&file.items));
+    }
+
+    #[test]
+    fn find_nested_prelude_mod_ignores_non_module_items_named_prelude() {
+        // A function, const, or other item merely *named* `prelude` is not
+        // a submodule and must not trip the guard — only `mod prelude`.
+        let file = syn::parse_file("fn prelude() {}\nconst prelude: u8 = 0;\n")
+            .expect("test fixture must parse");
+        assert!(!find_nested_prelude_mod(&file.items));
     }
 
     #[test]
