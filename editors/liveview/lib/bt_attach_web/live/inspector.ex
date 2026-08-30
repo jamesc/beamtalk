@@ -227,8 +227,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # Inspector and leave the Bindings pane (and the column) visible — the
   # whole-column show/hide stays on `toggle_inspector`/`.panel-toggle`. We
   # reset the inspector target/rows/crumbs/error back to the empty state and
-  # tear down the live subscription via `track_object(nil)` so re-inspecting
-  # an object later rebinds cleanly. Unfreeze too, so a frozen pane doesn't
+  # tear down the live subscription via `track_pane(nil)` so re-inspecting an
+  # object later rebinds cleanly. Unfreeze too, so a frozen pane doesn't
   # reopen stale on the next inspect. `show_inspector` is intentionally left
   # untouched.
   def handle_event("close_inspector", _params, socket) do
@@ -241,9 +241,8 @@ defmodule BtAttachWeb.Live.Inspector do
         inspect_error: nil,
         inspect_frozen: false
       )
-      |> track_object(nil)
 
-    {:noreply, socket}
+    {:noreply, update_docked_pane(socket, &track_pane(&1, socket, nil))}
   end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the
@@ -258,7 +257,7 @@ defmodule BtAttachWeb.Live.Inspector do
       crumbs = win.crumbs ++ [%{label: to_string(name), term: term}]
 
       {:noreply,
-       update_window(socket, id, fn w -> inspect_window(socket, w, name, term, crumbs) end)}
+       update_window(socket, id, fn w -> inspect_pane(w, socket, name, term, crumbs) end)}
     else
       _ -> {:noreply, socket}
     end
@@ -276,7 +275,7 @@ defmodule BtAttachWeb.Live.Inspector do
       crumbs = Enum.take(win.crumbs, i + 1)
 
       {:noreply,
-       update_window(socket, id, fn w -> inspect_window(socket, w, label, term, crumbs) end)}
+       update_window(socket, id, fn w -> inspect_pane(w, socket, label, term, crumbs) end)}
     else
       _ -> {:noreply, socket}
     end
@@ -407,7 +406,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # went nil / changed).
   def handle_info(:do_object_refresh, %{assigns: %{inspect_watch: term}} = socket)
       when not is_nil(term) do
-    {:noreply, refresh_inspector(assign(socket, refresh_pending: false), term)}
+    socket = assign(socket, refresh_pending: false)
+    {:noreply, update_docked_pane(socket, &refresh_pane(&1, socket, term))}
   end
 
   def handle_info(:do_object_refresh, socket) do
@@ -429,7 +429,7 @@ defmodule BtAttachWeb.Live.Inspector do
         cond do
           # Pending refresh for this pid: re-read + flash, clearing the flag.
           w.refresh_pending and watched_pid?(w.watch, pid) ->
-            refresh_window(%{w | refresh_pending: false}, socket, w.watch)
+            refresh_pane(%{w | refresh_pending: false}, socket, w.watch)
 
           # Still watching this pid but not pending (already serviced / never
           # scheduled): clear any stale flag so it can't wedge future
@@ -454,82 +454,143 @@ defmodule BtAttachWeb.Live.Inspector do
   # `handle_event`-only): the REPL's Inspect-it action, and session
   # mount/terminate's window-desk resume/stash.
 
+  # ── shared docked/window "pane" core (BT-3319) ───────────────────────────
+  #
+  # The docked pane's state lives in `socket.assigns` under `inspect_`-
+  # prefixed keys (plus two unprefixed assigns, `flash_gen`/`refresh_pending`);
+  # a floating window's state is the same 11 fields, unprefixed, in one plain
+  # map in `socket.assigns.windows`. `docked_pane/1` projects the docked
+  # assigns into that same unprefixed shape (tagged `id: :docked`) so the
+  # five `inspect_term/4`+`inspect_window/5`-shaped pairs below collapse into
+  # one core each, operating on a plain "pane" map — a window's map already
+  # has this shape, so a window call site hands its `w` straight to a core
+  # with no conversion; only the docked side needs this accessor pair.
+  defp docked_pane(socket) do
+    %{
+      id: :docked,
+      target: socket.assigns.inspect_target,
+      rows: socket.assigns.inspect_rows,
+      crumbs: socket.assigns.inspect_crumbs,
+      error: socket.assigns.inspect_error,
+      watch: socket.assigns.inspect_watch,
+      stats: socket.assigns.inspect_stats,
+      frozen: socket.assigns.inspect_frozen,
+      refresh_pending: socket.assigns.refresh_pending,
+      flash_gen: socket.assigns.flash_gen,
+      poke_result: socket.assigns.poke_result,
+      poke_error: socket.assigns.poke_error
+    }
+  end
+
+  defp assign_docked_pane(socket, pane) do
+    assign(socket,
+      inspect_target: pane.target,
+      inspect_rows: pane.rows,
+      inspect_crumbs: pane.crumbs,
+      inspect_error: pane.error,
+      inspect_watch: pane.watch,
+      inspect_stats: pane.stats,
+      inspect_frozen: pane.frozen,
+      refresh_pending: pane.refresh_pending,
+      flash_gen: pane.flash_gen,
+      poke_result: pane.poke_result,
+      poke_error: pane.poke_error
+    )
+  end
+
+  # Apply a pane-core function to the docked pane and write the result back
+  # onto `socket.assigns` in one step — what each remaining direct docked
+  # call site needs (`close_inspector`, the coalesced `:do_object_refresh`,
+  # unfreeze, the poked-inspector refresh) so it stays a one-line pipe step
+  # instead of hand-rolling the project/apply/write-back dance every time.
+  defp update_docked_pane(socket, fun), do: assign_docked_pane(socket, fun.(docked_pane(socket)))
+
   # Inspect a single live term via the read-surface `inspect` op and assign
   # the resulting structured-field rows plus the drill breadcrumb (`crumbs`).
   # Object-valued fields are flagged drillable, carrying their live term so
   # the next drill follows the reference one level deeper. Non-object terms
-  # are not inspectable, so we say so rather than guess.
+  # are not inspectable, so we say so rather than guess. Public API kept for
+  # `WorkspaceLive`'s direct calls (REPL Inspect-it, `inspect_binding/3`);
+  # delegates to the shared `inspect_pane/5` core via the docked-pane
+  # accessors.
   def inspect_term(socket, label, term, crumbs) do
+    assign_docked_pane(socket, inspect_pane(docked_pane(socket), socket, label, term, crumbs))
+  end
+
+  # Inspect a live `term` into a `pane` — the docked Inspector or one
+  # floating window (BT-3319: formerly `inspect_term/4` + `inspect_window/5`,
+  # documented there as a "parameterised twin"/"mirrors the docked" pair with
+  # no shared implementation): read the object's fields via the read-surface,
+  # set the pane's target/rows/crumbs/error, then (re)arm its per-object
+  # watch + stats. A re-inspect (drill / crumb walk-back) rebinds the watch
+  # onto the new head and releases the previous one — but only if no OTHER
+  # pane (a window or the docked pane) still needs that pid.
+  #
+  # BT-2634: a supervisor's content is its CHILDREN / supervision tree, not
+  # actor instance vars. Each child row carries a live `{:beamtalk_supervisor,
+  # …}` / `{:beamtalk_object, …}` handle, so the existing "drill" event
+  # follows it as its own reference (ADR 0095), and the crumb walk-back
+  # re-inspects the supervisor handle (re-listing its children). Live-
+  # tracking is deliberately NOT armed for a supervisor (`track_pane/3`'s
+  # catch-all): no field-flash, no per-object watch, no pid-stats poll
+  # against a supervisor.
+  defp inspect_pane(pane, socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
-        # BT-2634: a supervisor's content is its CHILDREN / supervision tree,
-        # not actor instance vars. Each child row carries a live
-        # `{:beamtalk_supervisor, …}` / `{:beamtalk_object, …}` handle, so the
-        # existing "drill" event follows it as its own reference (ADR 0095),
-        # and the crumb walk-back re-inspects the supervisor handle
-        # (re-listing its children). Live-tracking is deliberately NOT armed
-        # for a supervisor (`track_object/2`'s catch-all): no field-flash, no
-        # per-object watch, no pid-stats poll against a supervisor.
         {:ok, {:supervisor_children, child_rows}} ->
-          socket
-          |> assign(
-            inspect_target: target_info(label, term),
-            inspect_rows: supervisor_child_rows(child_rows),
-            inspect_crumbs: crumbs,
-            inspect_error: nil
-          )
-          |> track_object(term)
+          %{
+            pane
+            | target: target_info(label, term),
+              rows: supervisor_child_rows(child_rows),
+              crumbs: crumbs,
+              error: nil
+          }
+          |> track_pane(socket, term)
 
         {:ok, fields} when is_map(fields) ->
-          socket
-          |> assign(
-            inspect_target: target_info(label, term),
-            inspect_rows: field_rows(fields),
-            inspect_crumbs: crumbs,
-            inspect_error: nil
-          )
-          |> track_object(term)
+          %{
+            pane
+            | target: target_info(label, term),
+              rows: field_rows(fields),
+              crumbs: crumbs,
+              error: nil
+          }
+          |> track_pane(socket, term)
 
         {:ok, scalar} ->
-          socket
-          |> assign(
-            inspect_target: target_info(label, term),
-            inspect_rows: [
-              %{
-                name: "value",
-                value: Workspace.format_value(scalar),
-                term: scalar,
-                drillable: false,
-                kind: term_kind(scalar)
-              }
-            ],
-            inspect_crumbs: crumbs,
-            inspect_error: nil
-          )
-          |> track_object(term)
+          %{
+            pane
+            | target: target_info(label, term),
+              rows: [
+                %{
+                  name: "value",
+                  value: Workspace.format_value(scalar),
+                  term: scalar,
+                  drillable: false,
+                  kind: term_kind(scalar)
+                }
+              ],
+              crumbs: crumbs,
+              error: nil
+          }
+          |> track_pane(socket, scalar)
 
         {:error, reason} ->
           # A failed inspect leaves no coherent head: reset the crumbs + rows
           # so a later freeze/poke doesn't act on a stale level, and drop any
           # watch.
-          socket
-          |> assign(
-            inspect_target: nil,
-            inspect_rows: [],
-            inspect_crumbs: [],
-            inspect_error: Workspace.render_error(reason)
-          )
-          |> track_object(nil)
+          %{pane | target: nil, rows: [], crumbs: [], error: Workspace.render_error(reason)}
+          |> track_pane(socket, nil)
       end
     else
-      socket
-      |> assign(
-        inspect_target: target_info(label, term),
-        inspect_rows: [],
-        inspect_crumbs: crumbs,
-        inspect_error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
-      )
-      |> track_object(term)
+      %{
+        pane
+        | target: target_info(label, term),
+          rows: [],
+          crumbs: crumbs,
+          error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
+      }
+      |> track_pane(socket, term)
     end
   end
 
@@ -557,10 +618,11 @@ defmodule BtAttachWeb.Live.Inspector do
   # ── live Inspector tracking (BT-2492, backend BT-2489 / ADR 0095 §5) ─────────
 
   # Arm (or tear down) the per-object change subscription + pid-stats read
-  # for the newly-inspected `term`, called on every `inspect_term/4` so
-  # re-inspecting a different object (a drill, a crumb walk-back, a fresh
-  # binding) rebinds the watch onto the *current* object and drops the
-  # previous one. The flow keeps the contract honest:
+  # for a `pane`'s newly-inspected `term` (BT-3319: formerly `track_object/2`
+  # + `track_window/3`), called on every `inspect_pane/5` so re-inspecting a
+  # different object (a drill, a crumb walk-back, a fresh binding) rebinds
+  # the watch onto the *current* object and drops the previous one. The flow
+  # keeps the contract honest:
   #
   #   * A pid-backed object → subscribe THIS LiveView pid (over distribution)
   #     to its `{:object_changed, …}` stream, read its pid stats now, and
@@ -570,63 +632,64 @@ defmodule BtAttachWeb.Live.Inspector do
   #   * A non-pid term (a scalar field, a drilled value) has nothing to
   #     watch: drop any prior subscription and clear the stats/watch.
   #
-  # The previously-watched term (`:inspect_watch`) is always unsubscribed
-  # first so the workspace never keeps pushing changes for an object we
-  # navigated away from.
-  defp track_object(socket, {:beamtalk_object, _class, _module, pid} = term) when is_pid(pid) do
+  # The pane's previously-watched term is always unsubscribed first so the
+  # workspace never keeps pushing changes for an object we navigated away
+  # from.
+  defp track_pane(pane, socket, {:beamtalk_object, _class, _module, pid} = term)
+       when is_pid(pid) do
     # Reset any in-flight coalesced-refresh flag: a pending `:do_object_refresh`
-    # timer was scheduled for the *previous* object, so clearing the flag lets
-    # the NEW object's first change push schedule its own refresh immediately
-    # (the stale timer, if it still fires, is a harmless no-op on the fresh
-    # watch).
-    socket = unwatch(assign(socket, refresh_pending: false))
+    # / `:do_window_refresh` timer was scheduled for the *previous* object, so
+    # clearing the flag lets the NEW object's first change push schedule its
+    # own refresh immediately (the stale timer, if it still fires, is a
+    # harmless no-op on the fresh watch).
+    pane = unwatch_pane(%{pane | refresh_pending: false}, socket)
 
-    socket =
-      if socket.assigns.inspect_frozen do
+    pane =
+      if pane.frozen do
         # Frozen: hold the snapshot — no live subscription, but read stats
-        # once so the chips populate. `:inspect_watch` stays nil (nothing to
+        # once so the chips populate. `watch` stays nil (nothing to
         # unsubscribe).
-        assign(socket, inspect_watch: nil)
+        %{pane | watch: nil}
       else
         case Facade.dispatch(
                :subscribe_object,
                %{term: term, pid: self()},
                RequestContext.build(socket)
              ) do
-          :ok -> assign(socket, inspect_watch: term)
+          :ok -> %{pane | watch: term}
           # A non-:ok (term not watchable, dist hiccup) leaves the pane
           # un-watched rather than claiming a live subscription that isn't
           # there.
-          _ -> assign(socket, inspect_watch: nil)
+          _ -> %{pane | watch: nil}
         end
       end
 
-    socket
-    |> refresh_stats(term)
-    |> assign(poke_result: nil, poke_error: nil)
+    pane
+    |> refresh_pane_stats(socket, term)
+    |> Map.merge(%{poke_result: nil, poke_error: nil})
   end
 
   # Non-object target: nothing to track. Drop any prior watch and clear
   # stats.
-  defp track_object(socket, _term) do
-    socket
-    |> unwatch()
-    |> assign(inspect_stats: nil, poke_result: nil, poke_error: nil)
+  defp track_pane(pane, socket, _term) do
+    pane
+    |> unwatch_pane(socket)
+    |> Map.merge(%{stats: nil, poke_result: nil, poke_error: nil})
   end
 
-  # Drop the docked Inspector's per-object subscription (if any) and forget
-  # the watched term. Idempotent: a nil watch unsubscribes nothing.
+  # Drop a pane's per-object subscription (if any) and forget the watched
+  # term. Idempotent: a nil watch unsubscribes nothing.
   #
   # Reference-aware (BT-2493): the workspace keys subscriptions by `(pid,
   # subscriber)` and our subscriber is always this LiveView, so one
-  # unsubscribe would silence EVERY this-pid watcher in this process. If a
-  # floating window still watches the same actor, we must NOT unsubscribe
-  # here — the window still needs the push. (Before floating windows existed
-  # the docked pane was the sole watcher, so this collapses to the original
-  # unconditional unsubscribe.)
-  defp unwatch(%{assigns: %{inspect_watch: term}} = socket)
-       when not is_nil(term) do
-    unless docked_pid_watched_by_window?(socket, term) do
+  # unsubscribe would silence EVERY this-pid watcher in this process. If
+  # another pane (the docked Inspector, or a floating window) still watches
+  # the same actor, we must NOT unsubscribe here — that pane still needs the
+  # push.
+  defp unwatch_pane(%{watch: nil} = pane, _socket), do: pane
+
+  defp unwatch_pane(%{watch: term} = pane, socket) do
+    unless pane_watched_elsewhere?(socket, term, pane.id) do
       Facade.dispatch(
         :unsubscribe_object,
         %{term: term, pid: self()},
@@ -634,80 +697,93 @@ defmodule BtAttachWeb.Live.Inspector do
       )
     end
 
-    assign(socket, inspect_watch: nil)
+    %{pane | watch: nil}
   end
 
-  defp unwatch(socket), do: assign(socket, inspect_watch: nil)
-
-  # True when the pid backing the docked pane's `term` is also watched by an
-  # open floating window — so the docked pane releasing it must keep the
-  # subscription alive for the window.
-  defp docked_pid_watched_by_window?(socket, {:beamtalk_object, _c, _m, pid})
+  # True when the pid backing `term` is still watched by some pane OTHER
+  # than `except_id` (`:docked` for the docked Inspector, a window's `id`
+  # otherwise) — used to avoid unsubscribing a pid a sibling pane still
+  # depends on. This is the one place the docked pane and a window genuinely
+  # differ (which sibling panes to scan), so `except_id` is threaded
+  # explicitly rather than hidden: the docked pane never compares itself
+  # against its own watch (there's only one docked pane), so it's excluded
+  # by construction whenever `except_id` is `:docked`.
+  defp pane_watched_elsewhere?(socket, {:beamtalk_object, _c, _m, pid}, except_id)
        when is_pid(pid) do
-    Enum.any?(socket.assigns[:windows] || [], fn w -> watched_pid?(w.watch, pid) end)
+    docked = except_id != :docked and watched_pid?(socket.assigns[:inspect_watch], pid)
+
+    windowed =
+      Enum.any?(socket.assigns.windows, fn w ->
+        w.id != except_id and watched_pid?(w.watch, pid)
+      end)
+
+    docked or windowed
   end
 
-  defp docked_pid_watched_by_window?(_socket, _term), do: false
+  defp pane_watched_elsewhere?(_socket, _term, _except_id), do: false
 
   # Read the inspected actor's live process metrics (mailbox/reductions/
-  # status/…) and assign the snapshot for the head chips. A read failure
+  # status/…) and set the snapshot on the pane's head chips (BT-3319:
+  # formerly `refresh_stats/2` + `refresh_window_stats/3`). A read failure
   # clears the chips rather than rendering stale numbers — the change stream
   # still drives the field flash, so the pane stays useful even when stats
   # are momentarily unavailable.
-  defp refresh_stats(socket, term) do
+  defp refresh_pane_stats(pane, socket, term) do
     case Facade.dispatch(:pid_stats, %{term: term}, RequestContext.build(socket)) do
-      {:ok, stats} when is_map(stats) -> assign(socket, inspect_stats: stats)
-      _ -> assign(socket, inspect_stats: nil)
+      {:ok, stats} when is_map(stats) -> %{pane | stats: stats}
+      _ -> %{pane | stats: nil}
     end
   end
 
-  # Re-read the *already-watched* object's fields + stats after a change push
-  # (BT-2492) WITHOUT re-arming the subscription — the watch is still live,
-  # so `track_object/2` would needlessly unsubscribe + resubscribe. The drill
+  # Re-read a `pane`'s *already-watched* object's fields + stats after a
+  # change push (BT-2492) WITHOUT re-arming the subscription — the watch is
+  # still live, so `track_pane/3` would needlessly unsubscribe + resubscribe
+  # (BT-3319: formerly `refresh_inspector/2` + `refresh_window/3`). The drill
   # breadcrumb is preserved (same level); only the field values + stats
-  # refresh. `:flash_gen` bumps so the FieldFlash hook flashes the changed
-  # cells. The target label/crumbs come from the current head (the last
-  # crumb's label).
-  defp refresh_inspector(socket, {:beamtalk_object, _class, _module, pid} = term)
+  # refresh. `flash_gen` bumps so the FieldFlash hook flashes the changed
+  # cells. The target label/crumbs come from the pane's current head (the
+  # last crumb's label).
+  defp refresh_pane(pane, socket, {:beamtalk_object, _class, _module, pid} = term)
        when is_pid(pid) do
-    label = current_inspect_label(socket)
+    label = pane_label(pane)
 
     case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
       {:ok, fields} when is_map(fields) ->
-        socket
-        |> assign(
-          inspect_target: target_info(label, term),
-          inspect_rows: field_rows(fields),
-          inspect_error: nil
-        )
-        |> refresh_stats(term)
-        |> bump_flash()
+        %{
+          pane
+          | target: target_info(label, term),
+            rows: field_rows(fields),
+            error: nil
+        }
+        |> refresh_pane_stats(socket, term)
+        |> bump_pane_flash()
 
       {:ok, _scalar} ->
         # The object resolved to a scalar (no fields) — refresh stats +
         # flash; the row already reflects the value the next render reads.
-        socket |> refresh_stats(term) |> bump_flash()
+        pane |> refresh_pane_stats(socket, term) |> bump_pane_flash()
 
       {:error, _reason} ->
         # A transient read failure on a live refresh: keep the existing rows
         # rather than blanking the pane mid-track; the next push retries.
-        socket
+        pane
     end
   end
 
-  defp refresh_inspector(socket, _term), do: socket
+  defp refresh_pane(pane, _socket, _term), do: pane
 
-  # The label of the inspector head right now — the last drill crumb,
-  # falling back to the target label. Used so a live refresh re-renders the
-  # head with the same label the user navigated to.
-  defp current_inspect_label(socket) do
-    case List.last(socket.assigns.inspect_crumbs) do
+  # The label of a pane's head right now — the last drill crumb, falling
+  # back to the target label. Used so a live refresh re-renders the head
+  # with the same label the user navigated to (BT-3319: formerly
+  # `current_inspect_label/1` + `window_label/1`).
+  defp pane_label(pane) do
+    case List.last(pane.crumbs) do
       %{label: label} -> label
-      _ -> (socket.assigns.inspect_target || %{})[:label] || "value"
+      _ -> (pane.target || %{})[:label] || "value"
     end
   end
 
-  defp bump_flash(socket), do: assign(socket, :flash_gen, socket.assigns.flash_gen + 1)
+  defp bump_pane_flash(pane), do: %{pane | flash_gen: pane.flash_gen + 1}
 
   # The coalescing window for a burst of `{:object_changed, …}` pushes. A
   # small delay collapses a flurry of rapid writes into a single re-read +
@@ -781,7 +857,7 @@ defmodule BtAttachWeb.Live.Inspector do
       z: z
     }
 
-    win = inspect_window(socket, win, label, term, win.crumbs)
+    win = inspect_pane(win, socket, label, term, win.crumbs)
 
     socket
     |> assign(:windows, socket.assigns.windows ++ [win])
@@ -907,198 +983,6 @@ defmodule BtAttachWeb.Live.Inspector do
     assign(socket, :windows, windows)
   end
 
-  # Inspect a live `term` into a window `w` (parameterised twin of the docked
-  # `inspect_term/4`): read the object's fields via the read-surface, set the
-  # window's target/rows/crumbs/error, then (re)arm its per-object watch +
-  # stats. A re-inspect (drill / crumb walk-back) rebinds the watch onto the
-  # new head and releases the previous one — but only if no OTHER watcher
-  # (window or docked pane) still needs that pid (so closing one of two
-  # windows on the same actor doesn't silence the other).
-  defp inspect_window(socket, w, label, term, crumbs) do
-    if Workspace.inspectable?(term) do
-      case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
-        # BT-2634: a supervisor renders its children / supervision tree
-        # (drillable child handles), not actor instance vars — the
-        # float-window twin of the docked supervisor case. `track_window/3`
-        # does not arm a watch for a supervisor term (its no-track
-        # catch-all), so no field-flash / pid-stats.
-        {:ok, {:supervisor_children, child_rows}} ->
-          %{
-            w
-            | target: target_info(label, term),
-              rows: supervisor_child_rows(child_rows),
-              crumbs: crumbs,
-              error: nil
-          }
-          |> track_window(socket, term)
-
-        {:ok, fields} when is_map(fields) ->
-          %{
-            w
-            | target: target_info(label, term),
-              rows: field_rows(fields),
-              crumbs: crumbs,
-              error: nil
-          }
-          |> track_window(socket, term)
-
-        {:ok, scalar} ->
-          %{
-            w
-            | target: target_info(label, term),
-              rows: [
-                %{
-                  name: "value",
-                  value: Workspace.format_value(scalar),
-                  term: scalar,
-                  drillable: false,
-                  kind: term_kind(scalar)
-                }
-              ],
-              crumbs: crumbs,
-              error: nil
-          }
-          |> track_window(socket, scalar)
-
-        {:error, reason} ->
-          %{
-            w
-            | target: nil,
-              rows: [],
-              crumbs: [],
-              error: Workspace.render_error(reason)
-          }
-          |> track_window(socket, nil)
-      end
-    else
-      %{
-        w
-        | target: target_info(label, term),
-          rows: [],
-          crumbs: crumbs,
-          error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
-      }
-      |> track_window(socket, term)
-    end
-  end
-
-  # Arm (or tear down) a window's per-object change subscription + pid-stats
-  # read for `term`, called on every `inspect_window/5`. Mirrors the docked
-  # `track_object/2` but scoped to one window's `watch`. The
-  # previously-watched term is released first (guarded so a pid another
-  # watcher still needs is kept subscribed), then a non-frozen pid-backed
-  # head re-subscribes + reads stats.
-  defp track_window(w, socket, {:beamtalk_object, _c, _m, pid} = term) when is_pid(pid) do
-    w = unwatch_window(w, socket)
-
-    w =
-      if w.frozen do
-        %{w | watch: nil}
-      else
-        case Facade.dispatch(
-               :subscribe_object,
-               %{term: term, pid: self()},
-               RequestContext.build(socket)
-             ) do
-          :ok -> %{w | watch: term}
-          _ -> %{w | watch: nil}
-        end
-      end
-
-    %{w | refresh_pending: false}
-    |> refresh_window_stats(socket, term)
-    |> Map.merge(%{poke_result: nil, poke_error: nil})
-  end
-
-  defp track_window(w, socket, _term) do
-    w
-    |> unwatch_window(socket)
-    |> Map.merge(%{stats: nil, poke_result: nil, poke_error: nil})
-  end
-
-  # Drop a window's per-object subscription, unless the same pid is still
-  # watched by another window or the docked pane (reference-aware
-  # unsubscribe). Idempotent.
-  defp unwatch_window(%{watch: nil} = w, _socket), do: w
-
-  defp unwatch_window(%{watch: term} = w, socket) do
-    unless pid_watched_elsewhere?(socket, term, w.id) do
-      Facade.dispatch(
-        :unsubscribe_object,
-        %{term: term, pid: self()},
-        RequestContext.build(socket)
-      )
-    end
-
-    %{w | watch: nil}
-  end
-
-  # True when the pid backing `term` is still watched by some watcher OTHER
-  # than window `except_id` — another floating window, or the docked
-  # Inspector. Used to avoid unsubscribing a pid a sibling watcher still
-  # depends on (the workspace keys subscriptions by `(pid, subscriber)`, so
-  # one unsubscribe would silence all this-pid watchers in this LiveView).
-  defp pid_watched_elsewhere?(socket, {:beamtalk_object, _c, _m, pid}, except_id)
-       when is_pid(pid) do
-    docked = watched_pid?(socket.assigns[:inspect_watch], pid)
-
-    windowed =
-      Enum.any?(socket.assigns.windows, fn w ->
-        w.id != except_id and watched_pid?(w.watch, pid)
-      end)
-
-    docked or windowed
-  end
-
-  defp pid_watched_elsewhere?(_socket, _term, _except_id), do: false
-
-  # Read a window's inspected actor's live pid stats for its head chips. A
-  # failure clears the chips rather than rendering stale numbers (same
-  # contract as the docked `refresh_stats/2`).
-  defp refresh_window_stats(w, socket, term) do
-    case Facade.dispatch(:pid_stats, %{term: term}, RequestContext.build(socket)) do
-      {:ok, stats} when is_map(stats) -> %{w | stats: stats}
-      _ -> %{w | stats: nil}
-    end
-  end
-
-  # Re-read a window's *already-watched* object after a change push WITHOUT
-  # re-arming the subscription (the watch is still live). Bumps the window's
-  # `flash_gen` so its FieldFlash hook flashes the changed cells. Mirrors the
-  # docked `refresh_inspector/2`.
-  defp refresh_window(w, socket, {:beamtalk_object, _c, _m, pid} = term) when is_pid(pid) do
-    label = window_label(w)
-
-    case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
-      {:ok, fields} when is_map(fields) ->
-        %{
-          w
-          | target: target_info(label, term),
-            rows: field_rows(fields),
-            error: nil
-        }
-        |> refresh_window_stats(socket, term)
-        |> bump_window_flash()
-
-      {:ok, _scalar} ->
-        w |> refresh_window_stats(socket, term) |> bump_window_flash()
-
-      {:error, _reason} ->
-        w
-    end
-  end
-
-  # The label at a window's current head: its last drill crumb, falling back
-  # to its target label.
-  defp window_label(w) do
-    case List.last(w.crumbs) do
-      %{label: label} -> label
-      _ -> (w.target || %{})[:label] || "value"
-    end
-  end
-
-  defp bump_window_flash(w), do: %{w | flash_gen: w.flash_gen + 1}
-
   # Per-window freeze toggle (the docked `toggle_freeze/1`, scoped to one
   # window). Unfreeze re-arms the window's watch on its current head and
   # catches up; freeze drops its subscription (reference-aware) and holds
@@ -1110,7 +994,7 @@ defmodule BtAttachWeb.Live.Inspector do
       {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
         w
         |> rearm_window_watch(socket, term)
-        |> refresh_window(socket, term)
+        |> refresh_pane(socket, term)
 
       _ ->
         w
@@ -1119,7 +1003,7 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp toggle_window_freeze(socket, w) do
     w
-    |> unwatch_window(socket)
+    |> unwatch_pane(socket)
     |> Map.put(:frozen, true)
   end
 
@@ -1187,7 +1071,7 @@ defmodule BtAttachWeb.Live.Inspector do
         # exception. Unfreeze to see the new state.
         case w.watch do
           {:beamtalk_object, _c, _m, p} = watched when is_pid(p) ->
-            refresh_window(w, socket, watched)
+            refresh_pane(w, socket, watched)
 
           _ ->
             w
@@ -1254,7 +1138,7 @@ defmodule BtAttachWeb.Live.Inspector do
         socket
 
       w ->
-        _ = unwatch_window(w, socket)
+        _ = unwatch_pane(w, socket)
         assign(socket, :windows, Enum.reject(socket.assigns.windows, &(&1.id == id)))
     end
   end
@@ -1330,9 +1214,8 @@ defmodule BtAttachWeb.Live.Inspector do
 
     case head_term(socket) do
       {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
-        socket
-        |> rearm_watch(term)
-        |> refresh_inspector(term)
+        socket = rearm_watch(socket, term)
+        update_docked_pane(socket, &refresh_pane(&1, socket, term))
 
       _ ->
         socket
@@ -1343,7 +1226,7 @@ defmodule BtAttachWeb.Live.Inspector do
     # Freeze: drop the subscription, keep the current rows/stats as the
     # snapshot.
     socket
-    |> unwatch()
+    |> update_docked_pane(&unwatch_pane(&1, socket))
     |> assign(inspect_frozen: true)
   end
 
@@ -1429,7 +1312,7 @@ defmodule BtAttachWeb.Live.Inspector do
   # snapshot, and a non-object head has nothing to re-read.
   defp refresh_poked_inspector(%{assigns: %{inspect_watch: term}} = socket)
        when not is_nil(term) do
-    refresh_inspector(socket, term)
+    update_docked_pane(socket, &refresh_pane(&1, socket, term))
   end
 
   defp refresh_poked_inspector(socket), do: socket
@@ -1664,8 +1547,7 @@ defmodule BtAttachWeb.Live.Inspector do
 
   # True when `watch` is a pid-backed term watching `pid` — the shared
   # predicate every docked/window change-push router (`handle_info`) and
-  # watch-sharing check (`docked_pid_watched_by_window?/2`,
-  # `pid_watched_elsewhere?/3`) uses to decide whether a push/unsubscribe
+  # `pane_watched_elsewhere?/3` uses to decide whether a push/unsubscribe
   # applies to a given watcher.
   defp watched_pid?({:beamtalk_object, _c, _m, watched}, pid)
        when is_pid(watched) and is_pid(pid),

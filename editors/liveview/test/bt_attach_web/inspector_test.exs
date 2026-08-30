@@ -556,6 +556,37 @@ defmodule BtAttachWeb.Live.InspectorTest do
       assert {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
       assert socket.assigns.inspect_watch == nil
     end
+
+    test "closing the docked pane while a window still watches the same pid keeps the window's subscription alive" do
+      pid = self()
+      term = object_term(pid)
+      StubWorkspaceClient.put_bindings([{"counter", term}])
+
+      socket = Inspector.open_window_for_term(base_socket(), "counter", term)
+      {:noreply, socket} = Inspector.handle_event("inspect", %{"name" => "counter"}, socket)
+
+      assert socket.assigns.inspect_watch == term
+      [win] = socket.assigns.windows
+      assert win.watch == term
+
+      StubWorkspaceClient.clear_calls()
+
+      # Closing the docked pane first (the reverse order of the test above) —
+      # the open window still needs the subscription, so it must survive.
+      {:noreply, socket} = Inspector.handle_event("close_inspector", %{}, socket)
+
+      refute {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+      assert socket.assigns.inspect_watch == nil
+      [win] = socket.assigns.windows
+      assert win.watch == term
+
+      # Closing the window too — now nothing watches `term` — actually
+      # releases it.
+      {:noreply, socket} = Inspector.handle_event("window_close", %{"id" => win.id}, socket)
+
+      assert {:unsubscribe_object_changes, term, pid} in StubWorkspaceClient.calls()
+      assert socket.assigns.windows == []
+    end
   end
 
   describe "window_poke (BT-3303)" do
@@ -1210,6 +1241,14 @@ defmodule BtAttachWeb.Live.InspectorTest do
 
       assert [%{name: "value", value: "42", drillable: false, kind: "int"}] =
                docked.assigns.inspect_rows
+
+      # BT-3319: the docked pane and a window share one `inspect_pane/5` core,
+      # so a scalar head has no pid to watch on EITHER side (this used to
+      # differ: the docked pane armed a watch on the original pid-backed
+      # term, while the window correctly tracked the scalar — see the window
+      # assertion below, which pinned only the window's half of this).
+      assert docked.assigns.inspect_watch == nil
+      assert docked.assigns.inspect_stats == nil
 
       floated = Inspector.open_window_for_term(base_socket(), "counter", term)
 
