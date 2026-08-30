@@ -18,6 +18,13 @@ actual behavior — the byte-identical declaration-site rewrite, the
 exercised end-to-end, mirroring `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
 identical fixture pattern (real `.bt` files on disk, `project_path` set so
 `classify_source_file/1` classifies them as flushable).
+
+BT-3335 adds the dependency-class refusal case (the fixture pattern above
+covers stdlib/dynamic already) and `revert_rename_sites/1` coverage for a
+pending move entry — including the fix `move_class_revert_round_trip_test_`
+guards: reverting a pure move (`old_class == class`, no identity change) used
+to kill the class being reverted, see `finish_rename_class_revert/1`'s own
+doc.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -270,4 +277,155 @@ move_class_stdlib_refusal(#{proj_dir := ProjDir}) ->
     Result = beamtalk_repl_loader:move_class('Object', NewPath),
     [
         ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result)
+    ].
+
+%%====================================================================
+%% Refusal: a dependency class's `.bt` source lives outside the active
+%% project tree (`classify_source_file/1`'s "dependency" classification) —
+%% same reasoning `classRenameTo/2` already applies. Distinct from the
+%% stdlib case above: this class lives on a real, readable file, just one
+%% `Workspace flush` could never reach.
+%%====================================================================
+
+move_class_dependency_refusal_test_() ->
+    {setup, fun setup_dependency/0, fun teardown_dynamic/1, fun move_class_dependency_refusal/1}.
+
+setup_dependency() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    application:ensure_all_started(beamtalk_runtime),
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    %% `ProjDir` is the active project tree; the fixture class's own source
+    %% file lives OUTSIDE it (`OutsideDir`), so `classify_source_file/1`
+    %% classifies it "dependency" rather than "flushable".
+    ProjDir = filename:join(temp_dir(), "bt-move-class-dep-proj-" ++ Unique),
+    OutsideDir = filename:join(temp_dir(), "bt-move-class-dep-outside-" ++ Unique),
+    ok = filelib:ensure_path(ProjDir),
+    ok = filelib:ensure_path(OutsideDir),
+    GadgetPath = filename:join(OutsideDir, "bt3272_dep_gadget.bt"),
+    ok = file:write_file(GadgetPath, dep_gadget_source()),
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"move_class_dep_test_ws">>,
+        project_path => list_to_binary(ProjDir),
+        created_at => erlang:system_time(second),
+        repl => false
+    }),
+    beamtalk_compiler_server:clear_classes(),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _Classes, _State1} = beamtalk_repl_loader:handle_load(GadgetPath, State0),
+    #{proj_dir => ProjDir, gadget_path => GadgetPath}.
+
+dep_gadget_source() ->
+    <<
+        "Value subclass: Bt3272DepGadget\n"
+        "  greet -> String => \"hi\""
+    >>.
+
+move_class_dependency_refusal(#{proj_dir := ProjDir, gadget_path := GadgetPath}) ->
+    NewPath = list_to_binary(filename:join(ProjDir, "dep_gadget.bt")),
+    Result = beamtalk_repl_loader:move_class('Bt3272DepGadget', NewPath),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
+        %% Refused before any ChangeLog entry or disk write — the dependency
+        %% file is untouched, exactly like the stdlib refusal above.
+        ?_assertEqual(true, filelib:is_regular(GadgetPath)),
+        ?_assertEqual({ok, dep_gadget_source()}, file:read_file(GadgetPath))
+    ].
+
+%%====================================================================
+%% Revert (ADR 0114 § Undo, BT-3274/BT-3335): a pending `moveClass:to:`
+%% entry is a `'rename-class'` ChangeEntry with `old_class == class` (a pure
+%% file-location move never changes a class's name — `move_class/2`'s own
+%% doc). `revert_rename_sites/1` must restore the class to its exact
+%% pre-move state without disturbing its live identity — this is the one
+%% shape `revert_rename_sites/1`'s general-purpose "restore the CURRENT
+%% (post-rename) name" logic was never exercised against before BT-3335: the
+%% CURRENT and OLD names being IDENTICAL made `finish_rename_class_revert/1`
+%% resolve both to the same live pid and treat its own just-reinstalled
+%% process as a stale leftover registration to retire — reverting a pending
+%% move used to kill the class it was reverting. See
+%% `finish_rename_class_revert/1`'s own doc for the fix.
+%%====================================================================
+
+move_class_revert_round_trip_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1,
+        fun move_class_revert_round_trip/1}.
+
+move_class_revert_round_trip(#{proj_dir := ProjDir}) ->
+    NewPath = filename:join([ProjDir, "moved", "bt3272_gadget.bt"]),
+    NewPathBin = list_to_binary(NewPath),
+    OldPid = beamtalk_class_registry:whereis_class('Bt3272Gadget'),
+    ok = beamtalk_repl_loader:move_class('Bt3272Gadget', NewPathBin),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    RevertResult = beamtalk_repl_loader:revert_rename_sites(Entry),
+    PidAfter = beamtalk_class_registry:whereis_class('Bt3272Gadget'),
+    [
+        ?_assertEqual({ok, <<"Bt3272Gadget">>}, RevertResult),
+        %% The class survives its own revert: still live, under its own
+        %% (unchanged-throughout) name.
+        ?_assert(is_pid(PidAfter)),
+        ?_assert(is_process_alive(PidAfter)),
+        ?_assertEqual(OldPid, PidAfter),
+        %% Its tracked source is exactly what it was before the move — the
+        %% move never rewrote content, only recorded a path change, so the
+        %% revert's reverse-splice restores byte-identical text.
+        ?_assertEqual(
+            gadget_source(),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3272Gadget">>)
+            )
+        ),
+        %% Genuinely live: dispatch resolves through the reverted class.
+        ?_assertMatch(
+            {ok, _, _, _, _},
+            beamtalk_repl_eval:do_eval(
+                "Bt3272Gadget new greet", beamtalk_repl_state:new(undefined, 0)
+            )
+        )
+    ].
+
+%%====================================================================
+%% Revert refusal: an intervening, unrelated edit to the class's tracked
+%% source between the move and this revert (another session, an ordinary
+%% `compile:source:` patch, ...) is refused loudly rather than spliced over —
+%% `verify_current_spans/1`'s drift check, revert's own analogue of
+%% `'remove-class'` revert's disk-comparison drift check (BT-3213), applied
+%% to a tracked-source SPAN.
+%%====================================================================
+
+move_class_revert_after_drift_test_() ->
+    {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1,
+        fun move_class_revert_after_drift/1}.
+
+move_class_revert_after_drift(#{proj_dir := ProjDir}) ->
+    NewPath = filename:join([ProjDir, "moved", "bt3272_gadget.bt"]),
+    NewPathBin = list_to_binary(NewPath),
+    ok = beamtalk_repl_loader:move_class('Bt3272Gadget', NewPathBin),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    %% `resolve_class_span/2` clamps a class's span to end BEFORE its first
+    %% method (this fixture's only member), so the recorded definition site
+    %% covers just the HEADER line — the drift edit must land there (not in
+    %% the method body past it) to be inside the span this check compares.
+    DriftedSource =
+        "Value subclass: Bt3272GadgetDrifted\n  greet -> String => \"hi\"",
+    ok = beamtalk_workspace_meta:set_class_source(<<"Bt3272Gadget">>, DriftedSource),
+    Result = beamtalk_repl_loader:revert_rename_sites(Entry),
+    [
+        ?_assertMatch({error, {revert_site_drifted, <<"Bt3272Gadget">>, _}}, Result),
+        %% Refused loudly — the drifted (edited) source is left exactly as
+        %% the intervening edit left it, never silently spliced over by the
+        %% now-stale revert.
+        ?_assertEqual(
+            list_to_binary(DriftedSource),
+            unicode:characters_to_binary(
+                beamtalk_workspace_meta:get_class_source(<<"Bt3272Gadget">>)
+            )
+        )
     ].

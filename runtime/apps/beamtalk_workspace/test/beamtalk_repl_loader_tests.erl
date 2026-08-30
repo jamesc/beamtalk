@@ -1272,7 +1272,16 @@ loader_integration_test_() ->
             end},
             {"load_class_module/3 brand-new inline class has no class-def entry", fun() ->
                 t_load_class_module_brand_new_inline_no_class_def_entry(Proj)
-            end}
+            end},
+            %% BT-3335: a 'class-def' redefinition whose sourceFile has gone
+            %% missing from disk between the original handle_load and this
+            %% redefinition downgrades to memory-only (`disk_read_failed`)
+            %% rather than crashing — `add_class_def_span_or_downgrade/4`'s
+            %% own `file:read_file/1` failure branch.
+            {"load_class_module/3 redefinition with unreadable sourceFile is not flushable",
+                fun() ->
+                    t_load_class_module_redefinition_disk_read_failed_not_flushable(Proj)
+                end}
         ]
     end}.
 
@@ -2026,6 +2035,52 @@ t_load_class_module_redefinition_state_after_method_not_flushable(_Proj) ->
     ?assertEqual(0, maps:get(flushed, Summary)),
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
+
+%% BT-3335: `add_class_def_span_or_downgrade/4`'s `file:read_file/1` branch —
+%% the class's `sourceFile` classifies flushable (still resolves to a path
+%% inside the project tree) and the resubmitted skeleton IS header+state-only,
+%% but the file itself is gone from disk by the time this redefinition is
+%% processed (deleted out from under the workspace — another session, git, an
+%% external tool). Downgrades to memory-only with `disk_read_failed` rather
+%% than raising or trusting a stale/absent disk span.
+t_load_class_module_redefinition_disk_read_failed_not_flushable(_Proj) ->
+    Proj = live_project_dir(),
+    ok = beamtalk_workspace_changelog:clear(),
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "DefDiskReadFailed.bt",
+        <<"Actor subclass: DefDiskReadFailed\n  state: x = 0\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    NewSource = "Actor subclass: DefDiskReadFailed\n  state: x = 1\n",
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        NewSource, Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    %% The class's BEAM module attribute already carries this `sourceFile` —
+    %% deleting the file now makes the redefinition's flushability check
+    %% (which re-reads it, not the attribute) fail.
+    ok = file:delete(Path),
+    {ok, <<"DefDiskReadFailed">>, no_trailing, _State2} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, NewSource, State1
+    ),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:active_entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"DefDiskReadFailed">>
+    ],
+    ?assertEqual(false, beamtalk_workspace_changelog:entry_flushable(Entry)),
+    ?assertEqual(
+        <<"disk_read_failed">>, beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    ?assertEqual(0, maps:get(flushed, Summary)),
+    %% Never resurrected by flush — the class stays live in memory even
+    %% though its own downgraded entry is not flushable.
+    ?assertEqual(false, filelib:is_regular(Path)),
+    ?assert(is_pid(beamtalk_class_registry:whereis_class('DefDiskReadFailed'))).
 
 %% Redefining more than one class in a single eval (an unusual REPL-typed
 %% multi-class expression, not the `:def` tab's own shape — that tab always
