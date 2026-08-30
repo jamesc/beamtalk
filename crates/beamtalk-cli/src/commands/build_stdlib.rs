@@ -762,72 +762,51 @@ fn synthesize_value_auto_methods(
     }
 }
 
-/// Mark Timer class methods that spawn their block argument in a separate BEAM process.
-///
-/// BT-1312: replaces hardcoded list in `validators.rs` so the self-capture validator
-/// can skip false-positive warnings.
-fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
-    let mut found_after = false;
-    let mut found_every = false;
-    for m in class_methods.iter_mut() {
-        match m.selector.as_str() {
-            "after:do:" => {
-                m.spawns_block = true;
-                found_after = true;
-            }
-            "every:do:" => {
-                m.spawns_block = true;
-                found_every = true;
-            }
-            _ => {}
+/// Iterate `methods`, set `spawns_block = true` for every selector listed in
+/// `selectors`, then verify every selector was matched. Bails with a diagnostic
+/// naming `context` and any unmatched selectors — an unmatched selector means
+/// the stdlib source no longer defines a method this metadata assumes exists.
+fn mark_spawns_for_selectors(
+    methods: &mut [MethodMeta],
+    selectors: &[&str],
+    context: &str,
+) -> Result<()> {
+    for m in methods.iter_mut() {
+        if selectors.iter().any(|&s| s == m.selector) {
+            m.spawns_block = true;
         }
     }
-    if !found_after || !found_every {
+    let missing: Vec<&str> = selectors
+        .iter()
+        .copied()
+        .filter(|&s| methods.iter().all(|m| m.selector != s))
+        .collect();
+    if !missing.is_empty() {
         miette::bail!(
-            "Timer metadata mismatch: expected class methods `after:do:` and `every:do:` \
-             but found_after={found_after}, found_every={found_every}"
+            "{context} metadata mismatch: expected spawning selectors {selectors:?} \
+             but not found: {missing:?}"
         );
     }
     Ok(())
 }
 
-/// Mark `Parallel` class methods that spawn their block arguments in separate
-/// BEAM processes.
+/// Mark Timer class methods that spawn their block argument in a separate BEAM process.
 ///
-/// BT-2974: mirrors `mark_timer_spawns` — feeds the same `spawns_block_selectors()`
-/// metadata a future lint uses to warn when a synchronous `self` send appears
-/// inside a spawned-block argument (deadlock risk: an actor blocks in
-/// `Parallel all:`, a block does a synchronous send back to the same actor,
-/// and hangs).
+/// BT-1312: replaces hardcoded list in `validators.rs` so the self-capture validator
+/// can skip false-positive warnings.
+fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
+    mark_spawns_for_selectors(class_methods, &["after:do:", "every:do:"], "Timer")
+}
+
+/// Mark `Parallel` class methods that spawn their block arguments in separate
+/// BEAM processes (BT-2974).
+///
+/// Feeds the `spawns_block_selectors()` metadata a future lint uses to warn when
+/// a synchronous `self` send appears inside a spawned-block argument (deadlock
+/// risk: an actor blocks in `Parallel all:`, a block does a synchronous send back
+/// to the same actor, and hangs).
 fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
-    let mut found_all = false;
-    let mut found_all_timeout = false;
-    let mut found_any = false;
-    for m in class_methods.iter_mut() {
-        match m.selector.as_str() {
-            "all:" => {
-                m.spawns_block = true;
-                found_all = true;
-            }
-            "all:timeout:" => {
-                m.spawns_block = true;
-                found_all_timeout = true;
-            }
-            "any:" => {
-                m.spawns_block = true;
-                found_any = true;
-            }
-            _ => {}
-        }
-    }
-    if !found_all || !found_all_timeout || !found_any {
-        miette::bail!(
-            "Parallel metadata mismatch: expected class methods `all:`, `all:timeout:`, \
-             `any:` but found_all={found_all}, found_all_timeout={found_all_timeout}, \
-             found_any={found_any}"
-        );
-    }
-    Ok(())
+    mark_spawns_for_selectors(class_methods, &["all:", "all:timeout:", "any:"], "Parallel")
 }
 
 /// Mark `Collection>>parallelCollect:` and `parallelCollect:maxConcurrency:`
@@ -840,29 +819,11 @@ fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 /// against doesn't apply to their own call sites the way it does to the two
 /// public entry points.
 fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
-    let mut found = false;
-    let mut found_max_concurrency = false;
-    for m in methods.iter_mut() {
-        match m.selector.as_str() {
-            "parallelCollect:" => {
-                m.spawns_block = true;
-                found = true;
-            }
-            "parallelCollect:maxConcurrency:" => {
-                m.spawns_block = true;
-                found_max_concurrency = true;
-            }
-            _ => {}
-        }
-    }
-    if !found || !found_max_concurrency {
-        miette::bail!(
-            "Collection metadata mismatch: expected instance methods `parallelCollect:` \
-             and `parallelCollect:maxConcurrency:` but found={found}, \
-             found_max_concurrency={found_max_concurrency}"
-        );
-    }
-    Ok(())
+    mark_spawns_for_selectors(
+        methods,
+        &["parallelCollect:", "parallelCollect:maxConcurrency:"],
+        "Collection",
+    )
 }
 
 /// A single stdlib type-alias declaration collected by
