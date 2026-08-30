@@ -5,6 +5,13 @@
 //!
 //! Every AST node carries a `Span` indicating its position in the source file.
 //! This enables accurate error messages and IDE features like go-to-definition.
+//!
+//! Shared leaf module beneath both [`crate::ast`] and [`crate::source_analysis`]
+//! (ADR 0117, Decision step 4): `ast` needs `Span` on every node, while
+//! `source_analysis` needs it to produce those nodes and to track token/lexer
+//! positions, so the type lives here rather than inside either of its two
+//! consumers. `source_analysis` re-exports it as `source_analysis::Span` for
+//! backward compatibility with existing call sites.
 
 use std::ops::Range;
 

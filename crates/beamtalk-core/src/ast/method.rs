@@ -6,7 +6,7 @@
 //! This module contains [`MethodDefinition`], [`ParameterDefinition`],
 //! and [`MethodKind`].
 
-use crate::source_analysis::Span;
+use crate::span::Span;
 use ecow::EcoString;
 
 use super::CommentAttachment;
