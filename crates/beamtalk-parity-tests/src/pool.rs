@@ -12,8 +12,6 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::normalize::project_root;
-
 /// Live-workspace handle returned to the harness.
 #[derive(Debug, Clone)]
 pub struct SharedRepl {
@@ -127,31 +125,15 @@ fn start_workspace() -> Result<SharedRepl, String> {
     })
 }
 
-/// Resolve `target/debug/<bin>` (or `.exe` on Windows) by walking up from cwd.
+/// Resolve `<bin>` (or `<bin>.exe` on Windows) next to this test binary.
+///
+/// Thin re-export of the shared resolution logic in `beamtalk-workspace`
+/// (also used by `beamtalk-mcp`'s and `beamtalk-cli`'s own
+/// subprocess-spawning integration tests) — see
+/// [`beamtalk_workspace::resolve_sibling_binary`] for why a hardcoded
+/// `target/debug` path doesn't work under `cargo llvm-cov`.
 pub fn beamtalk_binary(name: &str) -> Result<PathBuf, String> {
-    let suffix = std::env::consts::EXE_SUFFIX;
-    let file = format!("{name}{suffix}");
-    let mut dir = project_root().to_path_buf();
-    let candidate = dir.join("target/debug").join(&file);
-    if candidate.exists() {
-        return Ok(candidate);
-    }
-    // Fallback: walk up from cwd for safety in unusual layouts.
-    if let Ok(mut cwd) = std::env::current_dir() {
-        loop {
-            let c = cwd.join("target/debug").join(&file);
-            if c.exists() {
-                return Ok(c);
-            }
-            if !cwd.pop() {
-                break;
-            }
-        }
-    }
-    let _ = dir.pop();
-    Err(format!(
-        "binary `{name}` not found in target/debug; run `just build` first"
-    ))
+    beamtalk_workspace::resolve_sibling_binary(name)
 }
 
 fn wait_for_tcp_ready(port: u16, timeout: Duration) -> Result<(), String> {

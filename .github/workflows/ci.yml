@@ -540,7 +540,12 @@ jobs:
   coverage:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 25 -> 45: coverage-rust now runs a second, serialized pass over the
+    # e2e/ignored test suites (beamtalk-mcp/-cli's integration tests, the
+    # beamtalk-parity-tests REPL/MCP/CLI/LSP drivers) that were previously
+    # skipped entirely — real wall-clock cost for a coverage number that
+    # actually reflects those surfaces. See Justfile's coverage-rust-cobertura.
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
@@ -599,6 +604,18 @@ jobs:
         # Excludes test-harness/build-tooling crates (see `llvm_cov_ignore` in
         # the Justfile) so the badge reflects product-code coverage.
         run: just coverage-rust-cobertura
+
+      - name: Dump workspace startup logs
+        # coverage-rust-cobertura's --ignored pass spawns real REPL/BEAM
+        # nodes too (the parity drivers + beamtalk-mcp's REPL-spawning
+        # tests), same as test-parity above.
+        if: failure()
+        run: |
+          epmd -names || true
+          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
+            echo "=== $f ==="
+            cat "$f"
+          done
 
       - name: Generate Erlang coverage (unit + E2E + stdlib)
         run: just coverage-all

@@ -1002,8 +1002,7 @@ mod tests {
         fn drop(&mut self) {
             // Stop workspace explicitly to avoid port leaks on CI.
             if let Some(ref ws_id) = self.workspace_id {
-                let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
-                if let Some(bin) = find_binary(&bin_name) {
+                if let Some(bin) = find_binary("beamtalk") {
                     let _ = Command::new(bin)
                         .args(["workspace", "stop", ws_id])
                         .stdin(Stdio::null())
@@ -1015,18 +1014,15 @@ mod tests {
         }
     }
 
-    /// Walk up from cwd to find a binary in target/debug/.
+    /// Resolve `beamtalk` as a sibling `[[bin]]` next to this test binary.
+    ///
+    /// Delegates to `beamtalk_workspace::resolve_sibling_binary` rather than
+    /// a hardcoded `target/debug` path — see its doc comment for why that
+    /// silently breaks (finds a stale, uninstrumented binary) under `cargo
+    /// llvm-cov`, which these tests run under to measure their own
+    /// coverage.
     fn find_binary(name: &str) -> Option<std::path::PathBuf> {
-        let mut dir = std::env::current_dir().ok()?;
-        loop {
-            let candidate = dir.join("target/debug").join(name);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-            if !dir.pop() {
-                return None;
-            }
-        }
+        beamtalk_workspace::resolve_sibling_binary(name).ok()
     }
 
     /// Maximum number of REPL startup attempts before giving up.
@@ -1075,9 +1071,8 @@ mod tests {
     /// `LazyLock` initializer so retry logic can call it in a loop.
     #[allow(clippy::too_many_lines)]
     fn try_start_repl(attempt: usize) -> Result<ReplWorkspace, String> {
-        let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
-        let bin = find_binary(&bin_name).ok_or_else(|| {
-            format!("Could not find target/debug/{bin_name} — run `cargo build` first")
+        let bin = find_binary("beamtalk").ok_or_else(|| {
+            "Could not find `beamtalk` binary — run `cargo build` first".to_string()
         })?;
 
         // Start REPL with stdin=null so it exits after workspace startup.
@@ -2176,8 +2171,7 @@ mod tests {
     async fn test_zzz_cleanup() {
         if let Ok(repl) = REPL.as_ref() {
             if let Some(ref ws_id) = repl.workspace_id {
-                let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
-                if let Some(bin) = find_binary(&bin_name) {
+                if let Some(bin) = find_binary("beamtalk") {
                     let _ = Command::new(bin)
                         .args(["workspace", "stop", ws_id])
                         .stdin(Stdio::null())

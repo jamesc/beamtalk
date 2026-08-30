@@ -30,13 +30,17 @@ pub fn project_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Path to the debug `beamtalk` binary.
-///
-/// Used by ignored integration tests that spawn the binary via
+/// Path to the `beamtalk` binary, for tests that spawn it via
 /// `std::process::Command` rather than `assert_cmd`.
+///
+/// Delegates to `beamtalk_workspace::resolve_sibling_binary` rather than a
+/// hardcoded `target/debug` path — see its doc comment for why that
+/// silently breaks (finds a stale, uninstrumented binary) under `cargo
+/// llvm-cov`, which these tests run under to measure their own coverage.
 #[allow(dead_code)]
 pub fn beamtalk_binary() -> PathBuf {
-    project_root().join("target/debug/beamtalk")
+    beamtalk_workspace::resolve_sibling_binary("beamtalk")
+        .expect("beamtalk binary not found; run `cargo build` first")
 }
 
 /// Path to the `beamtalk` binary built by `cargo`.
