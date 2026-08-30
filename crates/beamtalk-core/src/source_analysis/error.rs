@@ -84,6 +84,9 @@ mod tests {
 
         let err = LexError::unterminated_string(Span::new(0, 10));
         assert_eq!(err.to_string(), "unterminated string literal");
+
+        let err = LexError::unterminated_comment(Span::new(0, 4));
+        assert_eq!(err.to_string(), "unterminated block comment");
     }
 
     #[test]
