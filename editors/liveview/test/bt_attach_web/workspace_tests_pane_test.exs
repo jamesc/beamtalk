@@ -65,14 +65,17 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
     test "Run all resolves off-socket and renders per-case pass/fail", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      # Opening the Tests tab discovers the stub catalogue.
+      # Opening the Tests tab discovers the stub catalogue — kicks off a
+      # `:test_discover` `start_async` (BT-2599), so await it (BT-3322: the
+      # default 100ms `render_async/1` timeout is too tight under scheduler
+      # load) rather than reading a plain `render/1` immediately.
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      assert render(view) =~ "StubDemoTest"
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
       # Run all kicks off the `:test_op` async task and returns immediately; the
       # per-case rows land once the async result resolves via handle_async.
       render_click(view, "run_tests")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "testOne"
       assert html =~ "testTwo"
@@ -85,7 +88,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       render_click(view, "dock_tab", %{"tab" => "tests"})
 
       render_click(view, "load_tests")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       # The post-load re-discovery shows the catalogue, and no error banner.
       assert html =~ "StubDemoTest"
@@ -102,7 +105,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       render_click(view, "dock_tab", %{"tab" => "tests"})
 
       render_click(view, "run_tests")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       refute html =~ "testOne"
       assert Process.alive?(view.pid)
@@ -117,7 +120,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       render_click(view, "dock_tab", %{"tab" => "tests"})
 
       render_click(view, "run_tests")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "unexpected_test_result"
       assert Process.alive?(view.pid)
@@ -132,7 +135,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       render_click(view, "dock_tab", %{"tab" => "tests"})
 
       render_click(view, "load_tests")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "Not authorized"
       assert Process.alive?(view.pid)
@@ -147,7 +150,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       render_click(view, "dock_tab", %{"tab" => "tests"})
 
       render_click(view, "load_tests")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "unexpected_test_result"
       assert Process.alive?(view.pid)
@@ -161,7 +164,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       # The first open seeds the nil sentinel ("Loading tests…") and kicks off the
       # `:test_discover` async task; the catalogue lands once it resolves.
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "StubDemoTest"
       refute html =~ "No TestCase subclasses"
@@ -171,12 +174,12 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
     test "Refresh re-discovers off-socket without blocking the socket", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      assert render_async(view) =~ "StubDemoTest"
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
       # Manual refresh kicks off another `:test_discover` and returns immediately;
       # the refreshed catalogue fills in from handle_async.
       render_click(view, "tests_refresh")
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "StubDemoTest"
       assert Process.alive?(view.pid)
@@ -204,7 +207,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       refute html =~ "StubDemoTest"
       refute html =~ "No TestCase subclasses"
@@ -218,7 +221,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "unexpected_test_result"
       assert Process.alive?(view.pid)
@@ -231,7 +234,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      html = render_async(view)
+      html = render_async(view, 2_000)
 
       assert html =~ "discovery failed unexpectedly"
       refute html =~ "No TestCase subclasses"
@@ -241,12 +244,18 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
     test "a clean Load tests re-discovers the freshly-loaded catalogue", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      assert render_async(view) =~ "StubDemoTest"
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
-      # Load (a `:test_op` async) then its `apply_test_load` kicks off the
-      # `:test_discover` re-discovery; render_async drains both. No error banner.
+      # Load kicks off a `:test_op` async; its completion handler
+      # (`apply_test_load`) starts a second, chained `:test_discover` task to
+      # re-discover the catalogue. `render_async/2` only waits for tasks
+      # pending at the moment it's called (BT-3322), so the `:test_discover`
+      # task — which doesn't exist yet when we call it right after
+      # `render_click` — isn't covered by that first wait. A second
+      # `render_async/2` call takes a fresh snapshot that does catch it.
       render_click(view, "load_tests")
-      html = render_async(view)
+      _ = render_async(view, 2_000)
+      html = render_async(view, 2_000)
 
       assert html =~ "StubDemoTest"
       refute html =~ "failed to load"
@@ -264,10 +273,14 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "tests"})
-      assert render_async(view) =~ "StubDemoTest"
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
+      # See the sibling "clean Load tests" test above (BT-3322): the load's
+      # `:test_op` completion chains a second `:test_discover` task that a
+      # single `render_async/2` call can miss, so wait twice.
       render_click(view, "load_tests")
-      html = render_async(view)
+      _ = render_async(view, 2_000)
+      html = render_async(view, 2_000)
 
       assert html =~ "failed to load"
       # The catalogue still re-discovers (banner sits beside the catalogue).
