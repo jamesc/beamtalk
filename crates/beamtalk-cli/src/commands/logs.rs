@@ -299,3 +299,178 @@ fn print_if_matches(line: &str, min_level: Option<LogLevel>, format: Option<LogF
         println!("{trimmed}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- LogFormat::from_str_arg ---
+
+    #[test]
+    fn log_format_parses_text_and_json_case_insensitively() {
+        assert_eq!(LogFormat::from_str_arg("text").unwrap(), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_arg("TEXT").unwrap(), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_arg("json").unwrap(), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_arg("JSON").unwrap(), LogFormat::Json);
+    }
+
+    #[test]
+    fn log_format_rejects_unknown_value() {
+        let err = LogFormat::from_str_arg("xml").unwrap_err();
+        assert!(err.to_string().contains("Unknown log format"));
+    }
+
+    // --- LogLevel::from_str_arg ---
+
+    #[test]
+    fn log_level_parses_all_known_levels() {
+        assert_eq!(LogLevel::from_str_arg("debug").unwrap(), LogLevel::Debug);
+        assert_eq!(LogLevel::from_str_arg("info").unwrap(), LogLevel::Info);
+        assert_eq!(LogLevel::from_str_arg("notice").unwrap(), LogLevel::Notice);
+        assert_eq!(
+            LogLevel::from_str_arg("warning").unwrap(),
+            LogLevel::Warning
+        );
+        assert_eq!(LogLevel::from_str_arg("warn").unwrap(), LogLevel::Warning);
+        assert_eq!(LogLevel::from_str_arg("error").unwrap(), LogLevel::Error);
+        // Case-insensitive
+        assert_eq!(LogLevel::from_str_arg("DEBUG").unwrap(), LogLevel::Debug);
+    }
+
+    #[test]
+    fn log_level_rejects_unknown_value() {
+        let err = LogLevel::from_str_arg("critical").unwrap_err();
+        assert!(err.to_string().contains("Unknown log level"));
+    }
+
+    #[test]
+    fn log_level_ordering_is_severity_ascending() {
+        assert!(LogLevel::Debug < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Notice);
+        assert!(LogLevel::Notice < LogLevel::Warning);
+        assert!(LogLevel::Warning < LogLevel::Error);
+    }
+
+    // --- LogLevel::from_log_line ---
+
+    #[test]
+    fn from_log_line_detects_each_level_marker() {
+        assert_eq!(
+            LogLevel::from_log_line("2026-01-01 [debug] starting up"),
+            Some(LogLevel::Debug)
+        );
+        assert_eq!(
+            LogLevel::from_log_line("[info] listening on port 9000"),
+            Some(LogLevel::Info)
+        );
+        assert_eq!(
+            LogLevel::from_log_line("[notice] cache warmed"),
+            Some(LogLevel::Notice)
+        );
+        assert_eq!(
+            LogLevel::from_log_line("[warning] retrying connection"),
+            Some(LogLevel::Warning)
+        );
+        assert_eq!(
+            LogLevel::from_log_line("[warn] short form also matches"),
+            Some(LogLevel::Warning)
+        );
+        assert_eq!(
+            LogLevel::from_log_line("[error] crashed"),
+            Some(LogLevel::Error)
+        );
+    }
+
+    #[test]
+    fn from_log_line_returns_none_without_marker() {
+        assert_eq!(
+            LogLevel::from_log_line("    at some_module:some_fun/1"),
+            None
+        );
+    }
+
+    #[test]
+    fn from_log_line_is_case_insensitive() {
+        assert_eq!(
+            LogLevel::from_log_line("[ERROR] uppercase marker"),
+            Some(LogLevel::Error)
+        );
+    }
+
+    // --- matches_level ---
+
+    #[test]
+    fn matches_level_filters_below_minimum() {
+        assert!(!matches_level("[debug] noisy", LogLevel::Warning, None));
+        assert!(matches_level("[error] boom", LogLevel::Warning, None));
+        assert!(matches_level(
+            "[warning] exactly at threshold",
+            LogLevel::Warning,
+            None
+        ));
+    }
+
+    #[test]
+    fn matches_level_shows_continuation_lines_without_marker() {
+        // Lines with no recognizable level marker are always shown — they may
+        // be continuation lines from a multi-line log entry.
+        assert!(matches_level(
+            "    stack trace continues here",
+            LogLevel::Error,
+            None
+        ));
+    }
+
+    #[test]
+    fn matches_level_uses_json_extraction_when_format_is_json() {
+        let line = r#"{"level":"warning","msg":"disk almost full"}"#;
+        assert!(matches_level(
+            line,
+            LogLevel::Warning,
+            Some(LogFormat::Json)
+        ));
+        assert!(!matches_level(line, LogLevel::Error, Some(LogFormat::Json)));
+    }
+
+    #[test]
+    fn matches_level_falls_back_to_text_detection_when_json_field_missing() {
+        // Format is Json but the line has no "level" field — falls back to
+        // the text-based `[level]` marker detection.
+        let line = "[error] no json level field here";
+        assert!(matches_level(line, LogLevel::Error, Some(LogFormat::Json)));
+    }
+
+    // --- extract_json_level ---
+
+    #[test]
+    fn extract_json_level_parses_known_levels() {
+        assert_eq!(
+            extract_json_level(r#"{"level":"debug"}"#),
+            Some(LogLevel::Debug)
+        );
+        assert_eq!(
+            extract_json_level(r#"{"level":"error","msg":"x"}"#),
+            Some(LogLevel::Error)
+        );
+    }
+
+    #[test]
+    fn extract_json_level_returns_none_when_field_absent() {
+        assert_eq!(extract_json_level(r#"{"msg":"no level here"}"#), None);
+    }
+
+    #[test]
+    fn extract_json_level_returns_none_for_unrecognized_value() {
+        assert_eq!(
+            extract_json_level(r#"{"level":"critical"}"#),
+            None,
+            "unrecognized level strings should not match any LogLevel"
+        );
+    }
+
+    #[test]
+    fn extract_json_level_returns_none_for_malformed_marker() {
+        // Marker present but unterminated (no closing quote before EOL).
+        assert_eq!(extract_json_level(r#"{"level":"debug"#), None);
+    }
+}

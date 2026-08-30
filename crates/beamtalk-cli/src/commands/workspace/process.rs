@@ -696,3 +696,119 @@ fn read_pid_file(workspace_id: &str) -> Result<Option<u32>> {
         Some(pid) => Some(pid),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ws_health_delay_ms ---
+
+    #[test]
+    fn ws_health_delay_starts_at_base_probe_delay() {
+        assert_eq!(ws_health_delay_ms(0), READINESS_PROBE_DELAY_MS);
+        assert_eq!(ws_health_delay_ms(9), READINESS_PROBE_DELAY_MS);
+    }
+
+    #[test]
+    fn ws_health_delay_doubles_every_ten_attempts() {
+        assert_eq!(ws_health_delay_ms(10), READINESS_PROBE_DELAY_MS * 2);
+        assert_eq!(ws_health_delay_ms(19), READINESS_PROBE_DELAY_MS * 2);
+        assert_eq!(ws_health_delay_ms(20), READINESS_PROBE_DELAY_MS * 4);
+    }
+
+    #[test]
+    fn ws_health_delay_caps_at_max_delay() {
+        // Far enough along that doubling would blow past the cap.
+        assert_eq!(ws_health_delay_ms(1000), WS_HEALTH_MAX_DELAY_MS);
+        // Confirm the cap doesn't overflow even for pathologically large attempts.
+        assert_eq!(ws_health_delay_ms(usize::MAX), WS_HEALTH_MAX_DELAY_MS);
+    }
+
+    // --- ws_err_detail ---
+
+    #[test]
+    fn ws_err_detail_empty_when_no_error_recorded() {
+        assert_eq!(ws_err_detail(None), "");
+    }
+
+    #[test]
+    fn ws_err_detail_formats_recorded_error() {
+        assert_eq!(
+            ws_err_detail(Some("connection refused")),
+            " Last WebSocket error: connection refused."
+        );
+    }
+
+    // --- build_workspace_eval_cmd ---
+
+    #[test]
+    fn build_workspace_eval_cmd_includes_all_workspace_parameters() {
+        let cmd = build_workspace_eval_cmd(
+            "/ws/pid",
+            "/ws/startup.log",
+            "my-workspace",
+            "/home/user/project",
+            9000,
+            "{127,0,0,1}",
+            true,
+            14400,
+            "info",
+            "",
+            "",
+        );
+
+        assert!(cmd.contains("os:getpid()"));
+        assert!(cmd.contains("/ws/pid"));
+        assert!(cmd.contains("my-workspace"));
+        assert!(cmd.contains("/home/user/project"));
+        assert!(cmd.contains("tcp_port => 9000"));
+        assert!(cmd.contains("bind_addr => {127,0,0,1}"));
+        assert!(cmd.contains("auto_cleanup => true"));
+        assert!(cmd.contains("max_idle_seconds => 14400"));
+        assert!(cmd.contains("log_level, info"));
+        assert!(cmd.contains("/ws/startup.log"));
+        // The whole sequence must be wrapped in try/catch so a crash writes
+        // startup.log instead of being silently swallowed by -detached.
+        assert!(cmd.starts_with("try "));
+        assert!(cmd.contains("catch C___:R___:S___"));
+    }
+
+    #[test]
+    fn build_workspace_eval_cmd_includes_optional_fragments_when_present() {
+        let cmd = build_workspace_eval_cmd(
+            "/ws/pid",
+            "/ws/startup.log",
+            "ws2",
+            "/proj",
+            0,
+            "any",
+            false,
+            3600,
+            "warning",
+            "{ok, _} = application:ensure_all_started(some_hex_dep), ",
+            "{ok, _} = application:ensure_all_started(my_otp_app), ",
+        );
+
+        assert!(cmd.contains("auto_cleanup => false"));
+        assert!(cmd.contains("some_hex_dep"));
+        assert!(cmd.contains("my_otp_app"));
+    }
+
+    #[test]
+    fn build_workspace_eval_cmd_omits_optional_fragments_when_empty() {
+        let cmd = build_workspace_eval_cmd(
+            "/ws/pid", "/ws/log", "ws3", "/proj", 1234, "x", true, 100, "debug", "", "",
+        );
+        assert!(!cmd.contains("ensure_all_started(some_hex_dep)"));
+        assert!(!cmd.contains("ensure_all_started(my_otp_app)"));
+    }
+
+    // --- read_pid_file ---
+
+    #[test]
+    fn read_pid_file_returns_none_for_missing_workspace() {
+        // A workspace ID that has never been created has no `pid` file on disk.
+        let result = read_pid_file("bt-3326-nonexistent-workspace-test-fixture");
+        assert!(matches!(result, Ok(None)));
+    }
+}

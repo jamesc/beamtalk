@@ -397,3 +397,181 @@ impl ReplClient {
         self.send_request(&RequestBuilder::unload(class_name))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use tungstenite::{Message, WebSocket};
+
+    /// Spawn a minimal fake workspace backend on an OS-assigned port.
+    ///
+    /// Accepts connections in a loop (one background thread per connection,
+    /// since [`ReplClient::interrupt`] opens a *second* connection alongside
+    /// the main one). Each connection completes the real auth handshake
+    /// (`auth-required` -> read `auth` -> `auth_ok` -> `session-started`)
+    /// before handing subsequent parsed request frames to `handler`, which
+    /// may reply on the same socket. Returns the bound port.
+    ///
+    /// This is a third hand-rolled instance of the same ADR 0020 handshake
+    /// double already written for `beamtalk-lsp/src/runtime.rs`'s
+    /// `FakeWorkspace`/`spawn_workspace` and `beamtalk-mcp/src/server.rs`'s
+    /// `FakeRepl`/`spawn_fake_repl` — BT-3331 tracks consolidating those two.
+    /// Deliberately not reused as-is here: both of those are `tokio`-async
+    /// (`tokio::net::TcpListener` / `tokio_tungstenite`), while `ReplClient`
+    /// and the rest of `beamtalk-cli`'s REPL transport are synchronous
+    /// (`std::net::TcpStream` + blocking `tungstenite`) with no `tokio`
+    /// dependency to justify pulling in for tests only. BT-3331 has been
+    /// updated to note this sync variant so its extraction accounts for the
+    /// async/sync split rather than assuming a single shared shape.
+    fn spawn_auth_ok_server(
+        handler: impl Fn(serde_json::Value, &mut WebSocket<std::net::TcpStream>) + Send + Sync + 'static,
+    ) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+        let port = listener.local_addr().expect("local_addr").port();
+        let handler = std::sync::Arc::new(handler);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let handler = std::sync::Arc::clone(&handler);
+                std::thread::spawn(move || {
+                    let Ok(mut ws) = tungstenite::accept(stream) else {
+                        return;
+                    };
+                    let send = |ws: &mut WebSocket<std::net::TcpStream>, v: serde_json::Value| {
+                        let _ = ws.send(Message::Text(v.to_string().into()));
+                    };
+                    send(&mut ws, serde_json::json!({"op": "auth-required"}));
+                    if ws.read().is_err() {
+                        return;
+                    }
+                    send(&mut ws, serde_json::json!({"type": "auth_ok"}));
+                    send(
+                        &mut ws,
+                        serde_json::json!({"op": "session-started", "session": "sess-test"}),
+                    );
+                    while let Ok(Message::Text(text)) = ws.read() {
+                        if let Ok(req) = serde_json::from_str(&text) {
+                            handler(req, &mut ws);
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    /// Spawn a fake backend that rejects auth with the given message.
+    fn spawn_auth_error_server(message: &'static str) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+        let port = listener.local_addr().expect("local_addr").port();
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                if let Ok(mut ws) = tungstenite::accept(stream) {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"op": "auth-required"})
+                            .to_string()
+                            .into(),
+                    ));
+                    let _ = ws.read();
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({"type": "auth_error", "message": message})
+                            .to_string()
+                            .into(),
+                    ));
+                }
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn connect_to_unbound_port_fails_with_connect_error() {
+        // Bind then immediately drop, guaranteeing nothing is listening on
+        // this port for the actual connect attempt below.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+
+        let Err(err) = ReplClient::connect("127.0.0.1", port, "cookie") else {
+            panic!("expected connect to fail against an unbound port");
+        };
+        assert!(err.to_string().contains("Failed to connect"));
+    }
+
+    #[test]
+    fn connect_with_bad_cookie_surfaces_auth_error_message() {
+        let port = spawn_auth_error_server("bad cookie");
+        let Err(err) = ReplClient::connect("127.0.0.1", port, "wrong-cookie") else {
+            panic!("expected connect to fail on auth_error");
+        };
+        assert!(err.to_string().contains("bad cookie"));
+    }
+
+    #[test]
+    fn connect_success_assigns_server_session_id() {
+        let port = spawn_auth_ok_server(|_req, _ws| {});
+        let client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        assert_eq!(client.session_id(), Some("sess-test"));
+    }
+
+    #[test]
+    fn eval_roundtrip_returns_server_value() {
+        let port = spawn_auth_ok_server(|req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("eval") {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "value": "42"})
+                        .to_string()
+                        .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let resp = client.eval("21 + 21").expect("eval should succeed");
+        assert_eq!(resp.value, Some(serde_json::json!("42")));
+    }
+
+    #[test]
+    fn list_actors_roundtrip_returns_actor_list() {
+        let port = spawn_auth_ok_server(|req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("actors") {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "actors": []})
+                        .to_string()
+                        .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let resp = client.list_actors().expect("list_actors should succeed");
+        assert!(resp.actors.is_some_and(|a| a.is_empty()));
+    }
+
+    #[test]
+    fn interrupt_opens_separate_connection_and_succeeds() {
+        let port = spawn_auth_ok_server(|req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("interrupt") {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"]}).to_string().into(),
+                ));
+            }
+        });
+        let client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        client.interrupt().expect("interrupt should succeed");
+    }
+
+    #[test]
+    fn unload_roundtrip_returns_response() {
+        let port = spawn_auth_ok_server(|req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("unload") {
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "value": "Counter"})
+                        .to_string()
+                        .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let resp = client.unload("Counter").expect("unload should succeed");
+        assert_eq!(resp.value, Some(serde_json::json!("Counter")));
+    }
+}
