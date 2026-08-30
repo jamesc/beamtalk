@@ -4571,4 +4571,1686 @@ mod tests {
 
         assert!(compute_doc_method_categories(file.to_str().unwrap(), "NoSuchClass").is_none());
     }
+
+    // ------------------------------------------------------------------
+    // MCP tool handlers against a fake REPL (BT-3324)
+    // ------------------------------------------------------------------
+    //
+    // `server.rs`'s tool handlers take a concrete `Arc<ReplClient>`, not a
+    // trait object — the same shape BT-3325 found in beamtalk-lsp's
+    // runtime.rs, with no mockable seam to introduce. Rather than add one
+    // neither the CLI nor the REPL wire protocol needs, this fake stands in
+    // for a real REPL server: a loopback WebSocket listener that performs the
+    // ADR 0020 auth handshake and then answers requests through a per-test
+    // responder closure, so a real `ReplClient` connects to it exactly as it
+    // would to `beamtalk repl` — and the tool handler methods below run
+    // as ordinary async fns against it, unignored and BEAM-free.
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    /// Frame(s) the fake REPL sends back for one received request.
+    type FakeReplResponder = Box<dyn Fn(&serde_json::Value) -> serde_json::Value + Send + Sync>;
+
+    /// A running fake REPL. Aborts its task (and so its listener/connection)
+    /// on drop, so a test that returns early never leaks a socket.
+    struct FakeRepl {
+        port: u16,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for FakeRepl {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    fn ws_text(value: &serde_json::Value) -> Message {
+        Message::Text(value.to_string().into())
+    }
+
+    /// Spawn a fake REPL on an ephemeral loopback port. Performs the ADR 0020
+    /// handshake (`auth-required` -> client `auth` -> `auth_ok` ->
+    /// `session-started`) unconditionally — handshake robustness itself is
+    /// `client.rs`'s concern (covered live via `just test-mcp`) — then
+    /// answers every subsequent request via `responder`, defaulting `id`
+    /// (echoed from the request) and `status` (`["done"]`) when the
+    /// responder didn't set them.
+    async fn spawn_fake_repl(responder: FakeReplResponder) -> FakeRepl {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let port = listener.local_addr().expect("local addr").port();
+
+        let task = tokio::spawn(async move {
+            let Ok((stream, _peer)) = listener.accept().await else {
+                return;
+            };
+            let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+                return;
+            };
+
+            let _ = ws
+                .send(ws_text(&serde_json::json!({"op": "auth-required"})))
+                .await;
+            let Some(Ok(Message::Text(_auth))) = ws.next().await else {
+                return;
+            };
+            let _ = ws
+                .send(ws_text(&serde_json::json!({"type": "auth_ok"})))
+                .await;
+            let _ = ws
+                .send(ws_text(
+                    &serde_json::json!({"op": "session-started", "session": "fake-session"}),
+                ))
+                .await;
+
+            while let Some(Ok(msg)) = ws.next().await {
+                let Message::Text(body) = msg else { continue };
+                let request: serde_json::Value =
+                    serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({}));
+                let mut reply = responder(&request);
+                if reply.get("id").is_none() {
+                    reply["id"] = request
+                        .get("id")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                }
+                if reply.get("status").is_none() {
+                    reply["status"] = serde_json::json!(["done"]);
+                }
+                if ws.send(ws_text(&reply)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        FakeRepl { port, task }
+    }
+
+    /// A responder that always answers with `value` in the response's
+    /// top-level `value` field (the shape every `evaluate`-backed tool reads).
+    fn respond_value(value: serde_json::Value) -> FakeReplResponder {
+        Box::new(move |_req| serde_json::json!({"value": value.clone()}))
+    }
+
+    /// A responder that returns an arbitrary response object verbatim, for
+    /// shaping fields `respond_value` doesn't cover (`class_list`, `actors`,
+    /// `completions`, `errors`, …).
+    fn respond(response: serde_json::Value) -> FakeReplResponder {
+        Box::new(move |_req| response.clone())
+    }
+
+    /// A responder that always errors with `message`.
+    fn respond_error(message: &'static str) -> FakeReplResponder {
+        Box::new(move |_req| serde_json::json!({"status": ["done", "error"], "error": message}))
+    }
+
+    /// A responder that dispatches on the request's `code` field (the
+    /// `evaluate` payload) — for handlers like `list_packages` that issue
+    /// more than one distinct `evaluate` call per tool invocation.
+    fn respond_by_code(cases: Vec<(&'static str, serde_json::Value)>) -> FakeReplResponder {
+        Box::new(move |req| {
+            let code = req.get("code").and_then(|v| v.as_str()).unwrap_or("");
+            cases
+                .iter()
+                .find(|(prefix, _)| code.starts_with(prefix))
+                .map_or_else(
+                    || serde_json::json!({"value": serde_json::Value::Null}),
+                    |(_, v)| v.clone(),
+                )
+        })
+    }
+
+    /// Connect a real `ReplClient` to a fake REPL and wrap it in a
+    /// `BeamtalkMcp`. The `FakeRepl` handle must outlive the returned server
+    /// — dropping it aborts the listener task, which owns the socket.
+    async fn fake_mcp(responder: FakeReplResponder) -> (FakeRepl, BeamtalkMcp) {
+        let fake = spawn_fake_repl(responder).await;
+        let client = ReplClient::connect(fake.port, "test-cookie", None)
+            .await
+            .expect("fake REPL handshake should succeed");
+        (fake, BeamtalkMcp::new(Arc::new(client)))
+    }
+
+    /// Concatenate a `CallToolResult`'s text content blocks for substring
+    /// assertions, ignoring non-text blocks (none of these tools emit any).
+    fn call_text(result: &CallToolResult) -> String {
+        result
+            .content
+            .iter()
+            .filter_map(ContentBlock::as_text)
+            .map(|t| t.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // --- evaluate ---
+
+    #[tokio::test]
+    async fn evaluate_returns_value_and_output() {
+        let (_fake, mcp) =
+            fake_mcp(respond(serde_json::json!({"value": "3", "output": "hi\n"}))).await;
+        let result = mcp
+            .evaluate(Parameters(EvaluateParams {
+                code: "1 + 2".to_string(),
+                trace: None,
+            }))
+            .await
+            .expect("evaluate should not raise a protocol error");
+        assert_eq!(result.is_error, Some(false));
+        let text = call_text(&result);
+        assert!(text.contains('3'), "expected value in {text:?}");
+        assert!(text.contains("Output: hi"), "expected output in {text:?}");
+    }
+
+    #[tokio::test]
+    async fn evaluate_trace_renders_steps() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "steps": [{"src": "1 + 2", "value": "3"}]
+        })))
+        .await;
+        let result = mcp
+            .evaluate(Parameters(EvaluateParams {
+                code: "1 + 2".to_string(),
+                trace: Some(true),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(!call_text(&result).is_empty());
+    }
+
+    #[tokio::test]
+    async fn evaluate_error_includes_line_and_hint() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "status": ["done", "error"],
+            "error": "boom",
+            "line": 3,
+            "hint": "try again"
+        })))
+        .await;
+        let result = mcp
+            .evaluate(Parameters(EvaluateParams {
+                code: "bogus".to_string(),
+                trace: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        let text = call_text(&result);
+        assert!(text.contains("boom"), "expected error message in {text:?}");
+    }
+
+    // --- complete ---
+
+    #[tokio::test]
+    async fn complete_returns_joined_completions() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "completions": ["size", "sqrt"]
+        })))
+        .await;
+        let result = mcp
+            .complete(Parameters(CompleteParams {
+                code: "3 s".to_string(),
+                cursor: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        let text = call_text(&result);
+        assert!(text.contains("size") && text.contains("sqrt"));
+    }
+
+    #[tokio::test]
+    async fn complete_empty_reports_no_completions() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"completions": []}))).await;
+        let result = mcp
+            .complete(Parameters(CompleteParams {
+                code: "zzz".to_string(),
+                cursor: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(call_text(&result), "No completions available");
+    }
+
+    // --- load_project ---
+
+    #[tokio::test]
+    async fn load_project_success_lists_classes_and_summary() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "classes": ["Counter", "Greeter"],
+            "summary": "2 files compiled"
+        })))
+        .await;
+        let result = mcp
+            .load_project(Parameters(LoadProjectParams {
+                path: ".".to_string(),
+                include_tests: Some(true),
+                force: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        let text = call_text(&result);
+        assert!(text.contains("Counter") && text.contains("Greeter"));
+        assert!(text.contains("2 files compiled"));
+    }
+
+    #[tokio::test]
+    async fn load_project_partial_errors_reports_failed_files() {
+        // `errors` non-empty with an overall `status: done` (no top-level
+        // error flag) is the per-file-partial-failure shape `check_response!`
+        // does not catch — a distinct branch from a fully-failed response.
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "classes": ["Counter"],
+            "errors": [{"path": "src/bad.bt", "line": 4, "message": "parse error", "hint": "check syntax"}],
+            "summary": "1 of 2 files compiled"
+        })))
+        .await;
+        let result = mcp
+            .load_project(Parameters(LoadProjectParams {
+                path: ".".to_string(),
+                include_tests: None,
+                force: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        let text = call_text(&result);
+        assert!(text.contains("src/bad.bt"));
+        assert!(text.contains("parse error"));
+        assert!(text.contains("check syntax"));
+        assert!(text.contains("Counter"));
+    }
+
+    #[tokio::test]
+    async fn load_project_full_failure_is_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("path does not exist")).await;
+        let result = mcp
+            .load_project(Parameters(LoadProjectParams {
+                path: "/nope".to_string(),
+                include_tests: None,
+                force: Some(true),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(call_text(&result).contains("path does not exist"));
+    }
+
+    // --- load_file ---
+
+    #[tokio::test]
+    async fn load_file_success_with_warnings() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "value": "Counter",
+            "warnings": ["unused variable x"]
+        })))
+        .await;
+        let result = mcp
+            .load_file(Parameters(LoadFileParams {
+                path: "src/counter.bt".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        let text = call_text(&result);
+        assert!(text.contains("Counter"));
+        assert!(text.contains("unused variable x"));
+    }
+
+    #[tokio::test]
+    async fn load_file_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("file not found")).await;
+        let result = mcp
+            .load_file(Parameters(LoadFileParams {
+                path: "src/missing.bt".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- inspect ---
+
+    #[tokio::test]
+    async fn inspect_string_state_is_used_verbatim() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"state": "a nice actor"}))).await;
+        let result = mcp
+            .inspect(Parameters(InspectParams {
+                actor: "<0.1.0>".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(call_text(&result), "a nice actor");
+    }
+
+    #[tokio::test]
+    async fn inspect_object_state_is_pretty_printed() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"state": {"count": 3}}))).await;
+        let result = mcp
+            .inspect(Parameters(InspectParams {
+                actor: "<0.1.0>".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("count"));
+    }
+
+    #[tokio::test]
+    async fn inspect_no_state_available() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .inspect(Parameters(InspectParams {
+                actor: "<0.1.0>".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(call_text(&result), "No state available");
+    }
+
+    #[tokio::test]
+    async fn inspect_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("no such actor")).await;
+        let result = mcp
+            .inspect(Parameters(InspectParams {
+                actor: "<0.999.0>".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- list_actors ---
+
+    #[tokio::test]
+    async fn list_actors_success() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "actors": [{"pid": "<0.1.0>", "class": "Counter", "module": "bt@counter", "spawned_at": 0}]
+        })))
+        .await;
+        let result = mcp.list_actors().await.unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(call_text(&result).contains("Counter"));
+    }
+
+    #[tokio::test]
+    async fn list_actors_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("workspace unavailable")).await;
+        let result = mcp.list_actors().await.unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- supervision_tree ---
+
+    #[tokio::test]
+    async fn supervision_tree_default_scope() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("#()"))).await;
+        let result = mcp
+            .supervision_tree(Parameters(SupervisionTreeParams { scope: None }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+    }
+
+    #[tokio::test]
+    async fn supervision_tree_system_scope() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("#()"))).await;
+        let result = mcp
+            .supervision_tree(Parameters(SupervisionTreeParams {
+                scope: Some("system".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+    }
+
+    #[tokio::test]
+    async fn supervision_tree_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("nope")).await;
+        let result = mcp
+            .supervision_tree(Parameters(SupervisionTreeParams { scope: None }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- list_classes ---
+
+    #[tokio::test]
+    async fn list_classes_success() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "class_list": [{"name": "Counter", "superclass": "Object", "doc": "a counter", "sealed": false, "abstract": false}]
+        })))
+        .await;
+        let result = mcp
+            .list_classes(Parameters(ListClassesParams { filter: None }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(call_text(&result).contains("Counter"));
+    }
+
+    #[tokio::test]
+    async fn list_classes_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("nope")).await;
+        let result = mcp
+            .list_classes(Parameters(ListClassesParams {
+                filter: Some("stdlib".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- reload_class ---
+
+    #[tokio::test]
+    async fn reload_class_success_default_message() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .reload_class(Parameters(ReloadClassParams {
+                class: "Counter".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(call_text(&result), "Class reloaded successfully");
+    }
+
+    #[tokio::test]
+    async fn reload_class_rejects_invalid_class_name() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .reload_class(Parameters(ReloadClassParams {
+                class: "not_a_class".to_string(),
+            }))
+            .await
+            .expect_err("lowercase class name should be rejected before touching the client");
+        assert!(err.message.contains("Invalid class name"));
+    }
+
+    #[tokio::test]
+    async fn reload_class_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("migration failed")).await;
+        let result = mcp
+            .reload_class(Parameters(ReloadClassParams {
+                class: "Counter".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- docs ---
+
+    #[tokio::test]
+    async fn docs_class_lookup() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("Counter docs"))).await;
+        let result = mcp
+            .docs(Parameters(DocsParams {
+                class: Some("Counter".to_string()),
+                erlang_module: None,
+                selector: None,
+            }))
+            .await
+            .unwrap();
+        // `docs`' success path builds `CallToolResult` via `::default()` (to
+        // also carry `structured_content`), so `is_error` is `None` on
+        // success rather than `Some(false)` — unlike the `success()`
+        // constructor most other tools use.
+        assert_ne!(result.is_error, Some(true));
+        assert!(call_text(&result).contains("Counter docs"));
+    }
+
+    #[tokio::test]
+    async fn docs_erlang_module_with_selector() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("lists:map/2 docs"))).await;
+        let result = mcp
+            .docs(Parameters(DocsParams {
+                class: None,
+                erlang_module: Some("lists".to_string()),
+                selector: Some("map".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_ne!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn docs_rejects_both_class_and_erlang_module() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .docs(Parameters(DocsParams {
+                class: Some("Counter".to_string()),
+                erlang_module: Some("lists".to_string()),
+                selector: None,
+            }))
+            .await
+            .expect_err("both class and erlang_module should be rejected");
+        assert!(err.message.contains("either"));
+    }
+
+    #[tokio::test]
+    async fn docs_rejects_neither_class_nor_erlang_module() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .docs(Parameters(DocsParams {
+                class: None,
+                erlang_module: None,
+                selector: None,
+            }))
+            .await
+            .expect_err("neither class nor erlang_module should be rejected");
+        assert!(err.message.contains("Provide"));
+    }
+
+    #[tokio::test]
+    async fn docs_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("no docs")).await;
+        let result = mcp
+            .docs(Parameters(DocsParams {
+                class: Some("Counter".to_string()),
+                erlang_module: None,
+                selector: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- unload ---
+
+    #[tokio::test]
+    async fn unload_success() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .unload(Parameters(UnloadParams {
+                class: "Counter".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("Counter"));
+    }
+
+    #[tokio::test]
+    async fn unload_rejects_invalid_class_name() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .unload(Parameters(UnloadParams {
+                class: "bad".to_string(),
+            }))
+            .await
+            .expect_err("lowercase class name should be rejected");
+        assert!(err.message.contains("Invalid class name"));
+    }
+
+    #[tokio::test]
+    async fn unload_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("class in use")).await;
+        let result = mcp
+            .unload(Parameters(UnloadParams {
+                class: "Counter".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- interrupt ---
+
+    #[tokio::test]
+    async fn interrupt_success() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp.interrupt().await.unwrap();
+        assert_eq!(call_text(&result), "Interrupt sent");
+    }
+
+    #[tokio::test]
+    async fn interrupt_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("nothing running")).await;
+        let result = mcp.interrupt().await.unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- show_codegen ---
+
+    #[tokio::test]
+    async fn show_codegen_from_code_snippet() {
+        let (_fake, mcp) =
+            fake_mcp(respond(serde_json::json!({"core_erlang": "'add'/2 = ..."}))).await;
+        let result = mcp
+            .show_codegen(Parameters(ShowCodegenParams {
+                code: Some("1 + 2".to_string()),
+                class: None,
+                selector: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(call_text(&result).contains("add"));
+    }
+
+    #[tokio::test]
+    async fn show_codegen_from_class_with_warnings() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "core_erlang": "module 'counter'",
+            "warnings": ["deprecated selector"]
+        })))
+        .await;
+        let result = mcp
+            .show_codegen(Parameters(ShowCodegenParams {
+                code: None,
+                class: Some("Counter".to_string()),
+                selector: Some("increment".to_string()),
+            }))
+            .await
+            .unwrap();
+        let text = call_text(&result);
+        assert!(text.contains("module 'counter'"));
+        assert!(text.contains("deprecated selector"));
+    }
+
+    #[tokio::test]
+    async fn show_codegen_rejects_selector_without_class() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .show_codegen(Parameters(ShowCodegenParams {
+                code: None,
+                class: None,
+                selector: Some("increment".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(call_text(&result).contains("requires"));
+    }
+
+    #[tokio::test]
+    async fn show_codegen_rejects_neither_code_nor_class() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .show_codegen(Parameters(ShowCodegenParams {
+                code: None,
+                class: None,
+                selector: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(call_text(&result).contains("Provide"));
+    }
+
+    #[tokio::test]
+    async fn show_codegen_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("compile failed")).await;
+        let result = mcp
+            .show_codegen(Parameters(ShowCodegenParams {
+                code: Some("bogus".to_string()),
+                class: None,
+                selector: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- test ---
+
+    #[tokio::test]
+    async fn test_by_class_success() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "results": {"passed": 3, "failed": 0}
+        })))
+        .await;
+        let result = mcp
+            .test(Parameters(TestParams {
+                class: Some("CounterTest".to_string()),
+                file: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(call_text(&result).contains("passed"));
+    }
+
+    #[tokio::test]
+    async fn test_by_file_and_all_default() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "results": {"passed": 1, "failed": 0}
+        })))
+        .await;
+        let by_file = mcp
+            .test(Parameters(TestParams {
+                class: None,
+                file: Some("test/counter_test.bt".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(by_file.is_error, Some(false));
+
+        let (_fake2, mcp2) = fake_mcp(respond(serde_json::json!({
+            "results": {"passed": 1, "failed": 0}
+        })))
+        .await;
+        let all = mcp2
+            .test(Parameters(TestParams {
+                class: None,
+                file: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(all.is_error, Some(false));
+    }
+
+    #[tokio::test]
+    async fn test_rejects_class_and_file_together() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .test(Parameters(TestParams {
+                class: Some("CounterTest".to_string()),
+                file: Some("test/counter_test.bt".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(call_text(&result).contains("mutually exclusive"));
+    }
+
+    #[tokio::test]
+    async fn test_failures_are_reported_as_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "status": ["done", "test-error"],
+            "results": {"passed": 1, "failed": 1}
+        })))
+        .await;
+        let result = mcp
+            .test(Parameters(TestParams {
+                class: None,
+                file: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(call_text(&result).contains("TEST FAILURES"));
+    }
+
+    #[tokio::test]
+    async fn test_execution_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("no such class")).await;
+        let result = mcp
+            .test(Parameters(TestParams {
+                class: Some("NoSuch".to_string()),
+                file: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- lint / diagnostic_summary (offline — no REPL touched) ---
+
+    #[tokio::test]
+    async fn lint_tool_reports_clean_file() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("clean.bt");
+        std::fs::write(&file, "Object subclass: Clean\n  foo => 1\n").unwrap();
+        let result = mcp
+            .lint(Parameters(LintParams {
+                path: Some(file.to_str().unwrap().to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_ne!(result.is_error, Some(true));
+        assert!(result.structured_content.is_some());
+    }
+
+    #[tokio::test]
+    async fn lint_tool_reports_errors_for_nonexistent_path() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .lint(Parameters(LintParams {
+                path: Some("/nonexistent/path/nope".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn diagnostic_summary_tool_runs_offline() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("clean.bt");
+        std::fs::write(&file, "Object subclass: Clean\n  foo => 1\n").unwrap();
+        let result = mcp
+            .diagnostic_summary(Parameters(DiagnosticSummaryParams {
+                path: Some(file.to_str().unwrap().to_string()),
+            }))
+            .await
+            .unwrap();
+        // Like `docs`, `diagnostic_summary` builds its `CallToolResult` via
+        // `::default()` and never sets `is_error` — it never fails.
+        assert_ne!(result.is_error, Some(true));
+        assert!(result.structured_content.is_some());
+    }
+
+    // --- search_examples / search_classes (offline — no REPL touched) ---
+
+    #[tokio::test]
+    async fn search_examples_finds_results_for_a_known_topic() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .search_examples(Parameters(SearchExamplesParams {
+                query: "closures".to_string(),
+                limit: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(!call_text(&result).contains("No examples found"));
+    }
+
+    #[tokio::test]
+    async fn search_examples_reports_no_results() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .search_examples(Parameters(SearchExamplesParams {
+                query: "zzznonexistentqueryxyz999".to_string(),
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("No examples found"));
+    }
+
+    #[tokio::test]
+    async fn search_classes_finds_results_for_a_known_topic() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .search_classes(Parameters(SearchClassesParams {
+                query: "collection".to_string(),
+                limit: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(!call_text(&result).contains("No classes found"));
+    }
+
+    #[tokio::test]
+    async fn search_classes_reports_no_results() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .search_classes(Parameters(SearchClassesParams {
+                query: "zzznonexistentqueryxyz999".to_string(),
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("No classes found"));
+    }
+
+    // --- tracing tools ---
+
+    #[tokio::test]
+    async fn enable_tracing_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp.enable_tracing().await.unwrap();
+        assert_eq!(ok.is_error, Some(false));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("nope")).await;
+        let error = mcp2.enable_tracing().await.unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn disable_tracing_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp.disable_tracing().await.unwrap();
+        assert_eq!(ok.is_error, Some(false));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("nope")).await;
+        let error = mcp2.disable_tracing().await.unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn get_traces_returns_value_or_placeholder() {
+        let (_fake, mcp) = fake_mcp(respond(
+            serde_json::json!({"value": [{"actor": "<0.1.0>"}]}),
+        ))
+        .await;
+        let result = mcp
+            .get_traces(Parameters(GetTracesParams {
+                actor: Some("<0.1.0>".to_string()),
+                selector: None,
+                class: None,
+                outcome: None,
+                min_duration_ns: Some(1000),
+                limit: Some(10),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("0.1.0"));
+
+        let (_fake2, mcp2) = fake_mcp(respond(serde_json::json!({}))).await;
+        let empty = mcp2
+            .get_traces(Parameters(GetTracesParams {
+                actor: None,
+                selector: None,
+                class: None,
+                outcome: None,
+                min_duration_ns: None,
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&empty).contains("No traces captured"));
+    }
+
+    #[tokio::test]
+    async fn get_traces_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("tracing disabled")).await;
+        let result = mcp
+            .get_traces(Parameters(GetTracesParams {
+                actor: None,
+                selector: None,
+                class: None,
+                outcome: None,
+                min_duration_ns: None,
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn export_traces_returns_value_or_placeholder() {
+        let (_fake, mcp) = fake_mcp(respond(
+            serde_json::json!({"value": {"path": "t.json", "count": 2}}),
+        ))
+        .await;
+        let result = mcp
+            .export_traces(Parameters(ExportTracesParams {
+                path: Some("t.json".to_string()),
+                actor: None,
+                selector: None,
+                class: None,
+                outcome: None,
+                min_duration_ns: None,
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("t.json"));
+
+        let (_fake2, mcp2) = fake_mcp(respond(serde_json::json!({}))).await;
+        let empty = mcp2
+            .export_traces(Parameters(ExportTracesParams {
+                path: None,
+                actor: None,
+                selector: None,
+                class: None,
+                outcome: None,
+                min_duration_ns: None,
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&empty).contains("No traces to export"));
+    }
+
+    #[tokio::test]
+    async fn export_traces_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("disk full")).await;
+        let result = mcp
+            .export_traces(Parameters(ExportTracesParams {
+                path: None,
+                actor: None,
+                selector: None,
+                class: None,
+                outcome: None,
+                min_duration_ns: None,
+                limit: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn actor_stats_returns_value_or_placeholder() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"value": {"calls": 5}}))).await;
+        let result = mcp
+            .actor_stats(Parameters(ActorStatsParams {
+                actor: Some("<0.1.0>".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("calls"));
+
+        let (_fake2, mcp2) = fake_mcp(respond(serde_json::json!({}))).await;
+        let empty = mcp2
+            .actor_stats(Parameters(ActorStatsParams { actor: None }))
+            .await
+            .unwrap();
+        assert_eq!(call_text(&empty), "No stats available.");
+    }
+
+    #[tokio::test]
+    async fn actor_stats_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("no such actor")).await;
+        let result = mcp
+            .actor_stats(Parameters(ActorStatsParams { actor: None }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- describe / list_packages / package_classes ---
+
+    #[tokio::test]
+    async fn describe_reports_ops_and_versions() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+            "ops": ["eval", "complete"],
+            "versions": {"protocol": 1}
+        })))
+        .await;
+        let result = mcp.describe().await.unwrap();
+        assert_eq!(result.is_error, Some(false));
+        let text = call_text(&result);
+        assert!(text.contains("eval"));
+        assert!(text.contains("protocol"));
+    }
+
+    #[tokio::test]
+    async fn describe_empty_response_has_fallback_text() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp.describe().await.unwrap();
+        assert_eq!(call_text(&result), "No describe information available");
+    }
+
+    #[tokio::test]
+    async fn describe_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("nope")).await;
+        let result = mcp.describe().await.unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn list_packages_success_with_details() {
+        let (_fake, mcp) = fake_mcp(respond_by_code(vec![
+            (
+                "Package all collect:",
+                serde_json::json!({"value": "stdlib v1 (10 classes)"}),
+            ),
+            ("Package all", serde_json::json!({"value": "#(\"stdlib\")"})),
+        ]))
+        .await;
+        let result = mcp.list_packages().await.unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(call_text(&result).contains("stdlib v1"));
+    }
+
+    #[tokio::test]
+    async fn list_packages_detail_failure_falls_back_to_names() {
+        let (_fake, mcp) = fake_mcp(respond_by_code(vec![
+            (
+                "Package all collect:",
+                serde_json::json!({"status": ["done", "error"], "error": "boom"}),
+            ),
+            ("Package all", serde_json::json!({"value": "#(\"stdlib\")"})),
+        ]))
+        .await;
+        let result = mcp.list_packages().await.unwrap();
+        assert_eq!(result.is_error, Some(false));
+        assert!(call_text(&result).contains("stdlib"));
+    }
+
+    #[tokio::test]
+    async fn list_packages_none_loaded() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"value": "nil"}))).await;
+        let result = mcp.list_packages().await.unwrap();
+        assert_eq!(call_text(&result), "No packages loaded");
+    }
+
+    #[tokio::test]
+    async fn list_packages_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("nope")).await;
+        let result = mcp.list_packages().await.unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn package_classes_success() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("#(\"Counter\")"))).await;
+        let result = mcp
+            .package_classes(Parameters(PackageClassesParams {
+                package: "stdlib".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("Counter"));
+    }
+
+    #[tokio::test]
+    async fn package_classes_rejects_invalid_package_name() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .package_classes(Parameters(PackageClassesParams {
+                package: "bad name!".to_string(),
+            }))
+            .await
+            .expect_err("package name with spaces/punctuation should be rejected");
+        assert!(err.message.contains("Invalid package name"));
+    }
+
+    #[tokio::test]
+    async fn package_classes_empty_package_reports_not_loaded() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("nil"))).await;
+        let result = mcp
+            .package_classes(Parameters(PackageClassesParams {
+                package: "missing_pkg".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("No classes found"));
+    }
+
+    #[tokio::test]
+    async fn package_classes_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("nope")).await;
+        let result = mcp
+            .package_classes(Parameters(PackageClassesParams {
+                package: "stdlib".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- save_method / try_method / save_class ---
+
+    #[tokio::test]
+    async fn save_method_success_default_message() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .save_method(Parameters(SaveMethodParams {
+                class: "Counter".to_string(),
+                selector: "#increment".to_string(),
+                body: "self value: self value + 1".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("Counter"));
+        assert!(call_text(&result).contains("increment"));
+    }
+
+    #[tokio::test]
+    async fn save_method_rejects_invalid_selector() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .save_method(Parameters(SaveMethodParams {
+                class: "Counter".to_string(),
+                selector: "bad selector".to_string(),
+                body: "1".to_string(),
+            }))
+            .await
+            .expect_err("selector with a space should be rejected");
+        assert!(err.message.contains("selector"));
+    }
+
+    #[tokio::test]
+    async fn save_method_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("compile error")).await;
+        let result = mcp
+            .save_method(Parameters(SaveMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                body: "bogus".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn try_method_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp
+            .try_method(Parameters(TryMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                body: "1".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&ok).contains("ephemeral"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("compile error")).await;
+        let error = mcp2
+            .try_method(Parameters(TryMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                body: "bogus".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn save_class_success() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .save_class(Parameters(SaveClassParams {
+                source: "Object subclass: Greeter\n  greet => \"hi\"".to_string(),
+                path: "src/greeter.bt".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("src/greeter.bt"));
+    }
+
+    #[tokio::test]
+    async fn save_class_rejects_empty_path_and_source() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let empty_path = mcp
+            .save_class(Parameters(SaveClassParams {
+                source: "Object subclass: Greeter".to_string(),
+                path: String::new(),
+            }))
+            .await
+            .expect_err("empty path should be rejected");
+        assert!(empty_path.message.contains("path"));
+
+        let (_fake2, mcp2) = fake_mcp(respond(serde_json::json!({}))).await;
+        let empty_source = mcp2
+            .save_class(Parameters(SaveClassParams {
+                source: String::new(),
+                path: "src/greeter.bt".to_string(),
+            }))
+            .await
+            .expect_err("empty source should be rejected");
+        assert!(empty_source.message.contains("source"));
+    }
+
+    #[tokio::test]
+    async fn save_class_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("already exists")).await;
+        let result = mcp
+            .save_class(Parameters(SaveClassParams {
+                source: "Object subclass: Greeter".to_string(),
+                path: "src/greeter.bt".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    // --- remove_method / remove_class / rename_class / rename_method ---
+
+    #[tokio::test]
+    async fn remove_method_success_and_with_if_absent() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let plain = mcp
+            .remove_method(Parameters(RemoveMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                if_absent: None,
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&plain).contains("removed"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_value(serde_json::json!("nil"))).await;
+        let with_fallback = mcp2
+            .remove_method(Parameters(RemoveMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                if_absent: Some("nil".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(with_fallback.is_error, Some(false));
+    }
+
+    #[tokio::test]
+    async fn remove_method_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("selector_not_found")).await;
+        let result = mcp
+            .remove_method(Parameters(RemoveMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                if_absent: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn remove_class_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp
+            .remove_class(Parameters(RemoveClassParams {
+                class: "Counter".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&ok).contains("not yet flushed"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("sealed class")).await;
+        let error = mcp2
+            .remove_class(Parameters(RemoveClassParams {
+                class: "Object".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn rename_class_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("Accumulator"))).await;
+        let ok = mcp
+            .rename_class(Parameters(RenameClassParams {
+                class: "Counter".to_string(),
+                new_name: "Accumulator".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&ok).contains("Accumulator"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("name collision")).await;
+        let error = mcp2
+            .rename_class(Parameters(RenameClassParams {
+                class: "Counter".to_string(),
+                new_name: "Object".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn rename_method_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("Counter"))).await;
+        let ok = mcp
+            .rename_method(Parameters(RenameMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                new_selector: "incrementBy".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&ok).contains("Counter"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("selector collision")).await;
+        let error = mcp2
+            .rename_method(Parameters(RenameMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                new_selector: "value".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    // --- flush / list_changes / dirty_methods / precheck_method / recheck_image ---
+
+    #[tokio::test]
+    async fn flush_success_no_filter() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .flush(Parameters(FlushParams {
+                class: None,
+                file: None,
+                kind: None,
+                confirm_destructive: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(call_text(&result), "Flushed");
+    }
+
+    #[tokio::test]
+    async fn flush_scoped_by_class_with_confirm_destructive() {
+        let (_fake, mcp) = fake_mcp(respond_value(serde_json::json!("1 file written"))).await;
+        let result = mcp
+            .flush(Parameters(FlushParams {
+                class: Some("Counter".to_string()),
+                file: None,
+                kind: None,
+                confirm_destructive: Some(true),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&result).contains("1 file written"));
+    }
+
+    #[tokio::test]
+    async fn flush_scoped_by_kind() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let result = mcp
+            .flush(Parameters(FlushParams {
+                class: None,
+                file: None,
+                kind: Some("new-class".to_string()),
+                confirm_destructive: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false));
+    }
+
+    #[tokio::test]
+    async fn flush_rejects_multiple_filters() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .flush(Parameters(FlushParams {
+                class: Some("Counter".to_string()),
+                file: Some("src/counter.bt".to_string()),
+                kind: None,
+                confirm_destructive: None,
+            }))
+            .await
+            .expect_err("class + file together should be rejected");
+        assert!(err.message.contains("mutually exclusive"));
+    }
+
+    #[tokio::test]
+    async fn flush_rejects_invalid_kind() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let err = mcp
+            .flush(Parameters(FlushParams {
+                class: None,
+                file: None,
+                kind: Some("bad kind!".to_string()),
+                confirm_destructive: None,
+            }))
+            .await
+            .expect_err("kind with punctuation should be rejected");
+        assert!(err.message.contains("identifier"));
+    }
+
+    #[tokio::test]
+    async fn flush_error() {
+        let (_fake, mcp) = fake_mcp(respond_error("conflict")).await;
+        let result = mcp
+            .flush(Parameters(FlushParams {
+                class: None,
+                file: None,
+                kind: None,
+                confirm_destructive: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn list_changes_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp.list_changes().await.unwrap();
+        assert_eq!(call_text(&ok), "No changes");
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("nope")).await;
+        let error = mcp2.list_changes().await.unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn dirty_methods_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp.dirty_methods().await.unwrap();
+        assert_eq!(call_text(&ok), "No dirty methods");
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("nope")).await;
+        let error = mcp2.dirty_methods().await.unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn precheck_method_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp
+            .precheck_method(Parameters(PrecheckMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                body: "1".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(call_text(&ok).contains("no findings"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("nope")).await;
+        let error = mcp2
+            .precheck_method(Parameters(PrecheckMethodParams {
+                class: "Counter".to_string(),
+                selector: "increment".to_string(),
+                body: "1".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn recheck_image_success_and_error() {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+        let ok = mcp.recheck_image().await.unwrap();
+        assert!(call_text(&ok).contains("no findings"));
+
+        let (_fake2, mcp2) = fake_mcp(respond_error("nope")).await;
+        let error = mcp2.recheck_image().await.unwrap();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    // --- tool_router (the "tool listing" dispatch surface) ---
+    //
+    // `#[tool_router]` generates `call_tool`/`list_tools` on `ServerHandler`
+    // itself, but those need a live `RequestContext<RoleServer>` (a `Peer`
+    // wired to a real transport) to invoke — plumbing that belongs to rmcp's
+    // own test suite, not ours. `ToolRouter::list_all`/`get`/`has_route` give
+    // the same registry data without that transport dependency, so the tool
+    // list every `#[tool]` method above populates is covered directly.
+
+    #[test]
+    fn tool_router_registers_every_tool_exactly_once() {
+        let router = BeamtalkMcp::tool_router();
+        let names: Vec<String> = router
+            .list_all()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+
+        let expected = [
+            "evaluate",
+            "complete",
+            "load_project",
+            "load_file",
+            "inspect",
+            "list_actors",
+            "supervision_tree",
+            "list_classes",
+            "reload_class",
+            "docs",
+            "unload",
+            "interrupt",
+            "show_codegen",
+            "test",
+            "lint",
+            "diagnostic_summary",
+            "search_examples",
+            "search_classes",
+            "enable_tracing",
+            "disable_tracing",
+            "get_traces",
+            "export_traces",
+            "actor_stats",
+            "describe",
+            "list_packages",
+            "package_classes",
+            "save_method",
+            "try_method",
+            "save_class",
+            "remove_method",
+            "remove_class",
+            "rename_class",
+            "rename_method",
+            "flush",
+            "list_changes",
+            "dirty_methods",
+            "precheck_method",
+            "recheck_image",
+        ];
+        for name in expected {
+            assert!(
+                names.iter().any(|n| n == name),
+                "tool_router should register {name:?}, got {names:?}"
+            );
+            assert!(router.has_route(name), "has_route({name:?}) should be true");
+            assert!(
+                router.get(name).is_some(),
+                "get({name:?}) should find a Tool"
+            );
+        }
+        assert_eq!(
+            names.len(),
+            expected.len(),
+            "tool_router registered an unexpected tool — update this test's `expected` list \
+             alongside any new #[tool] handler, got {names:?}"
+        );
+    }
+
+    #[test]
+    fn tool_router_rejects_unknown_tool_name() {
+        let router = BeamtalkMcp::tool_router();
+        assert!(!router.has_route("no_such_tool"));
+        assert!(router.get("no_such_tool").is_none());
+    }
+
+    // --- ServerHandler::get_info ---
+
+    #[test]
+    fn get_info_advertises_tool_capabilities_and_instructions() {
+        // get_info is synchronous and never touches the client, but
+        // BeamtalkMcp::new needs one to construct — a disconnected client
+        // would work equally well here; reuse fake_mcp's async constructor
+        // via a tiny blocking runtime for symmetry with the rest of this
+        // module. `fake` is kept alive (unused otherwise) for the same
+        // reason every other test holds onto it: dropping it early would
+        // abort the listener task that owns the socket.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (fake, mcp) = rt.block_on(fake_mcp(respond(serde_json::json!({}))));
+        let info = mcp.get_info();
+        assert!(info.capabilities.tools.is_some());
+        assert!(info.instructions.unwrap().contains("evaluate"));
+        drop(fake);
+    }
 }
