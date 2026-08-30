@@ -127,16 +127,36 @@ fn start_workspace() -> Result<SharedRepl, String> {
     })
 }
 
-/// Resolve `target/debug/<bin>` (or `.exe` on Windows) by walking up from cwd.
+/// Resolve `<bin>` (or `<bin>.exe` on Windows) next to this test binary.
+///
+/// This test binary's own `current_exe()` lives at `<profile-dir>/deps/...`,
+/// so its grandparent is the same `<profile-dir>` cargo placed sibling `[[bin]]`
+/// outputs into — including under `cargo llvm-cov`, which builds everything
+/// into `target/llvm-cov-target/<profile>/` rather than plain `target/<profile>/`.
+/// A hardcoded `target/debug` path would silently resolve to a stale,
+/// uninstrumented binary in that case: the parity suite would run against it
+/// happily, but contribute zero coverage signal for beamtalk-cli/-lsp/-mcp.
 pub fn beamtalk_binary(name: &str) -> Result<PathBuf, String> {
     let suffix = std::env::consts::EXE_SUFFIX;
     let file = format!("{name}{suffix}");
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(profile_dir) = exe.ancestors().nth(2) {
+            let candidate = profile_dir.join(&file);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    // Fallback for layouts where current_exe() doesn't follow the usual
+    // `<profile-dir>/deps/<test-binary>` shape.
     let mut dir = project_root().to_path_buf();
     let candidate = dir.join("target/debug").join(&file);
     if candidate.exists() {
         return Ok(candidate);
     }
-    // Fallback: walk up from cwd for safety in unusual layouts.
+    // Last resort: walk up from cwd for safety in unusual layouts.
     if let Ok(mut cwd) = std::env::current_dir() {
         loop {
             let c = cwd.join("target/debug").join(&file);
@@ -150,7 +170,7 @@ pub fn beamtalk_binary(name: &str) -> Result<PathBuf, String> {
     }
     let _ = dir.pop();
     Err(format!(
-        "binary `{name}` not found in target/debug; run `just build` first"
+        "binary `{name}` not found next to the test binary or in target/debug; run `just build` first"
     ))
 }
 
