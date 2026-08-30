@@ -97,7 +97,7 @@ pub use method::*;
 pub use pattern::*;
 pub use well_known::*;
 
-use crate::source_analysis::Span;
+use crate::span::Span;
 use ecow::EcoString;
 
 /// Top-level container for a Beamtalk module (Aggregate Root).

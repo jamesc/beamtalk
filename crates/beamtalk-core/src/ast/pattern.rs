@@ -6,7 +6,7 @@
 //! This module contains [`Pattern`], [`MatchArm`], and binary segment types
 //! used in pattern matching and destructuring.
 
-use crate::source_analysis::Span;
+use crate::span::Span;
 use ecow::EcoString;
 
 use super::CommentAttachment;

@@ -287,7 +287,7 @@ impl WellKnownSelector {
 mod tests {
     use super::*;
     use crate::ast::KeywordPart;
-    use crate::source_analysis::Span;
+    use crate::span::Span;
 
     /// All variants, used for exhaustive round-trip testing.
     const ALL_VARIANTS: &[WellKnownSelector] = &[

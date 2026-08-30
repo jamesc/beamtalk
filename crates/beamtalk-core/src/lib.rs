@@ -30,6 +30,7 @@ pub mod queries;
 pub mod repl;
 pub mod semantic_analysis;
 pub mod source_analysis;
+pub mod span;
 pub(crate) mod state_threading_selectors;
 pub mod synthetic_selectors;
 pub mod test_helpers;
