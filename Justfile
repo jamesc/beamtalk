@@ -1231,16 +1231,83 @@ coverage: coverage-rust coverage-runtime
 #                             beamtalk-examples lib stays measured, ~99%)
 llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/main\.rs)'
 
+# Tests that are `--ignored` for reasons unrelated to coverage measurement:
+# environment prerequisites the coverage job doesn't (and shouldn't) set up.
+#   - valid_specs_pass_dialyzer_validation: needs a pre-built Dialyzer PLT,
+#     already covered by the separate `just dialyzer` CI lint step.
+#   - live_front's suite: needs a real `dist-liveview` release + a running
+#     workspace, built only by manual setup (see the module doc comment in
+#     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
+coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
+    --skip predict_node_name_matches_a_live_epmd_registration \
+    --skip resolve_registered_node_name_matches_a_live_epmd_registration \
+    --skip bad_cookie_readiness_resolves_within_the_default_budget \
+    --skip a_real_port_conflict_exits_within_the_calibrated_grace_period \
+    --skip detach_kills_the_front_and_it_exits_cleanly \
+    --skip dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang"
+
+# `--lib --bins --tests` rather than `--all-targets`: the `--include-ignored`/
+# `--skip`/`--test-threads` args below are libtest flags, but this
+# workspace's `[[bench]]` targets (build_bench, compiler_pipeline) use
+# `harness = false` (Criterion), which rejects unrecognized args outright
+# rather than ignoring them. Excluding benches from what's
+# coverage-instrumented here is fine — they exercise the same product code
+# paths regular tests already cover.
+#
+# Explicit `clean` + `--no-report` on every run, rather than the default
+# clean-before-run behavior: we need three separate test-running
+# invocations (force-build the e2e binaries below, then two more passes)
+# to all accumulate into the SAME profile pool, with only the first one
+# resetting it. `--no-report`/`--no-clean` can't be combined (cargo-llvm-cov
+# rejects it outright), so a single explicit `clean --workspace` up front
+# is what makes accumulation across the rest possible.
+#
+# Two test passes sharing that one profile pool, not one `--include-ignored`
+# run: the ignored suites (beamtalk-mcp's client.rs, beamtalk-cli's own
+# integration tests, and the beamtalk-parity-tests e2e drivers) each spawn
+# a real REPL/BEAM node per test. `just test-mcp`/`test-parity`/
+# `test-integration` already run them with `--test-threads=1` for exactly
+# this reason — running them at cargo's default parallelism alongside
+# everything else starves them of CPU/RAM and produces spurious
+# "Evaluation crashed: killed" failures. Forcing the *entire* workspace
+# (beamtalk-core's ~5,300 tests included) single-threaded to accommodate
+# them would blow past the coverage job's time budget for no reason, so
+# the fast suites keep default parallelism in pass 1 and only the
+# REPL-spawning ignored tests are serialized in pass 2.
+#
+# The e2e-binary force-build happens between the clean and the two test
+# passes, not before: beamtalk-parity-tests' CLI/LSP/MCP e2e drivers spawn
+# beamtalk/-lsp/-mcp/-compiler-port as subprocesses, locating them next to
+# their own test binary (see beamtalk_binary() in
+# crates/beamtalk-parity-tests/src/pool.rs). Neither `cargo test` nor
+# `cargo llvm-cov` build a package's plain `[[bin]]` artifact unless
+# something forces it (an in-crate integration test referencing
+# CARGO_BIN_EXE_*, or an explicit `cargo build`) — normal `just test-parity`
+# never notices because `test-parity: build` always runs a full build
+# first, but `cargo llvm-cov` builds into its own separate target dir and
+# has no such prerequisite. Without this, the parity suite's ignored e2e
+# tests spawn nothing usable and contribute zero coverage for
+# beamtalk-cli/-lsp/-mcp — silently, since the drivers report a normal
+# "compiler/LSP/MCP not available" test failure, not a missing-binary error.
+[private]
+_coverage-rust-run-tests:
+    cargo llvm-cov clean --workspace
+    cargo llvm-cov run --no-report -p beamtalk-lsp --bin beamtalk-lsp -- --help > /dev/null 2>&1 || true
+    cargo llvm-cov run --no-report -p beamtalk-mcp --bin beamtalk-mcp -- --help > /dev/null 2>&1 || true
+    cargo llvm-cov run --no-report -p beamtalk-compiler-port --bin beamtalk-compiler-port -- --help > /dev/null 2>&1 || true
+    cargo llvm-cov --no-report --lib --bins --tests --workspace
+    cargo llvm-cov --no-report --lib --bins --tests --workspace -- --ignored --test-threads=1 {{coverage_rust_skip}}
+
 # Generate Rust coverage (requires cargo-llvm-cov)
-coverage-rust:
+coverage-rust: _coverage-rust-run-tests
     @echo "📊 Generating Rust coverage..."
-    cargo llvm-cov --all-targets --workspace --ignore-filename-regex '{{llvm_cov_ignore}}' --html
+    cargo llvm-cov report --ignore-filename-regex '{{llvm_cov_ignore}}' --html
     @echo "  📁 HTML report: target/llvm-cov/html/index.html"
 
 # Generate Rust coverage as Cobertura XML for the CI coverage badge.
-coverage-rust-cobertura:
+coverage-rust-cobertura: _coverage-rust-run-tests
     @echo "📊 Generating Rust coverage (Cobertura)..."
-    cargo llvm-cov --all-targets --workspace --ignore-filename-regex '{{llvm_cov_ignore}}' --cobertura --output-path coverage.cobertura.xml
+    cargo llvm-cov report --ignore-filename-regex '{{llvm_cov_ignore}}' --cobertura --output-path coverage.cobertura.xml
 
 # Unix-only: uses bash process substitution and piping
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.

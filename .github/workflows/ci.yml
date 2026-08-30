@@ -540,7 +540,12 @@ jobs:
   coverage:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 25 -> 45: coverage-rust now runs a second, serialized pass over the
+    # e2e/ignored test suites (beamtalk-mcp/-cli's integration tests, the
+    # beamtalk-parity-tests REPL/MCP/CLI/LSP drivers) that were previously
+    # skipped entirely — real wall-clock cost for a coverage number that
+    # actually reflects those surfaces. See Justfile's coverage-rust-cobertura.
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
