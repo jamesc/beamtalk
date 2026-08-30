@@ -179,7 +179,7 @@ pub(crate) fn compile_expression_to_core(
         .ok_or_else(|| "No expression found in parsed source".to_string())?;
 
     // Generate Core Erlang test module (no workspace bindings)
-    beamtalk_core::repl::codegen::generate_test_expression(&expr.expression, module_name)
+    beamtalk_repl::codegen::generate_test_expression(&expr.expression, module_name)
         .map_err(|e| format!("{e}"))
 }
 

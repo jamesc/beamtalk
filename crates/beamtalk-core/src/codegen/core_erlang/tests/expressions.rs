@@ -8,7 +8,6 @@
 //! state-variable field access patterns.
 
 use super::*;
-use crate::repl::codegen::{generate_repl_expression, generate_test_expression};
 
 #[test]
 fn test_generate_literal_integer() {
@@ -1179,18 +1178,14 @@ fn test_generate_map_literal_with_atoms() {
 
 #[test]
 fn test_generate_map_literal_compiles() {
-    let pairs = vec![MapPair::new(
-        Expression::Literal(Literal::Symbol("key".into()), Span::new(2, 6)),
-        Expression::Literal(Literal::String("value".into()), Span::new(10, 17)),
-        Span::new(2, 17),
-    )];
-
-    let map_expr = Expression::MapLiteral {
-        pairs,
-        span: Span::new(0, 19),
-    };
-
-    let code = generate_repl_expression(&map_expr, "test_map_lit").expect("codegen should succeed");
+    // BT-3340: uses the shared `codegen()` class-method helper (workspace
+    // mode) rather than `generate_repl_expression` — map-literal Core
+    // Erlang representation doesn't depend on REPL vs class-method context,
+    // and this keeps the test (which needs the `#[cfg(test)]`-only
+    // `assert_compiles_through_erlc`, a dev-dependency-gated helper not
+    // reachable from the standalone `beamtalk-repl` crate) inside
+    // `beamtalk-core` rather than needing a crate boundary crossing.
+    let code = codegen("Object subclass: T\n  m => #{#key => \"value\"}");
 
     // Verify the generated Core Erlang contains the map literal syntax
     assert!(
@@ -1205,8 +1200,11 @@ fn test_generate_map_literal_compiles() {
         "String should be represented as binary"
     );
 
-    // Verify the generated code compiles through erlc
-    crate::test_helpers::assert_compiles_through_erlc("test_map_lit", &code);
+    // Verify the generated code compiles through erlc. Module name must
+    // match `codegen()`'s hardcoded module name ("test"), not an arbitrary
+    // label — `erlc` rejects a mismatch between the `-module` attribute and
+    // the source file name it derives from this argument.
+    crate::test_helpers::assert_compiles_through_erlc("test", &code);
 }
 
 #[test]
@@ -1284,130 +1282,6 @@ fn test_dictionary_size_on_identifier() {
     assert!(
         output.contains("beamtalk_message_dispatch") && output.contains("'size'"),
         "Should generate unified dispatch for size. Got: {output}"
-    );
-}
-
-#[test]
-fn test_string_interpolation_simple_variable() {
-    // "Hello, {name}!" — variable interpolation
-    let segments = vec![
-        StringSegment::Literal("Hello, ".into()),
-        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
-            "name",
-            Span::new(8, 12),
-        ))),
-        StringSegment::Literal("!".into()),
-    ];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 15),
-    };
-    let code = generate_test_expression(&expression, "test_interp").expect("codegen should work");
-    // Should dispatch displayString via beamtalk_message_dispatch
-    assert!(
-        code.contains("'displayString'"),
-        "Should dispatch displayString. Got:\n{code}"
-    );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'"),
-        "Should use beamtalk_message_dispatch for dispatch. Got:\n{code}"
-    );
-    // Binary construction with byte segments and binary variable
-    assert!(
-        code.contains("#<"),
-        "Should contain byte segments for literal parts. Got:\n{code}"
-    );
-    assert!(
-        code.contains("('all',8,'binary',['unsigned'|['big']])"),
-        "Should contain binary variable segment. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_string_interpolation_no_interpolation() {
-    // Plain string — compiles as regular string literal (zero overhead)
-    let lit = Literal::String("Hello, World!".into());
-    let generator = CoreErlangGenerator::new("test");
-    let doc = generator.generate_literal(&lit).unwrap();
-    let code = doc.to_pretty_string();
-    // Should be a plain binary literal, no dispatch
-    assert!(
-        !code.contains("displayString"),
-        "Plain string should NOT dispatch displayString. Got:\n{code}"
-    );
-    assert!(
-        code.starts_with("#{"),
-        "Plain string should be binary literal. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_string_interpolation_multiple_expressions() {
-    // "a{x}b{y}c" — multiple expression segments
-    let segments = vec![
-        StringSegment::Literal("a".into()),
-        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
-            "x",
-            Span::new(2, 3),
-        ))),
-        StringSegment::Literal("b".into()),
-        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
-            "y",
-            Span::new(5, 6),
-        ))),
-        StringSegment::Literal("c".into()),
-    ];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 8),
-    };
-    let code = generate_test_expression(&expression, "test_multi").expect("codegen should work");
-    // Should have two displayString dispatches
-    let dispatch_count = code.matches("'displayString'").count();
-    assert_eq!(
-        dispatch_count, 2,
-        "Should have 2 displayString dispatches. Got {dispatch_count}:\n{code}"
-    );
-}
-
-#[test]
-fn test_string_interpolation_only_expression() {
-    // "{name}" — only an interpolation, no literal segments
-    let segments = vec![StringSegment::Interpolation(Expression::Identifier(
-        Identifier::new("name", Span::new(1, 5)),
-    ))];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 6),
-    };
-    let code = generate_test_expression(&expression, "test_bare").expect("codegen should work");
-    assert!(
-        code.contains("'displayString'"),
-        "Should dispatch displayString even for bare expression. Got:\n{code}"
-    );
-    // Binary should contain only the variable segment
-    assert!(
-        code.contains("('all',8,'binary',['unsigned'|['big']])"),
-        "Should contain binary variable segment. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_string_interpolation_integer_expression() {
-    // "{42}" — integer literal in interpolation
-    let segments = vec![StringSegment::Interpolation(Expression::Literal(
-        Literal::Integer(42),
-        Span::new(1, 3),
-    ))];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 4),
-    };
-    let code = generate_test_expression(&expression, "test_int").expect("codegen should work");
-    // Should dispatch displayString on the integer
-    assert!(
-        code.contains("'displayString'"),
-        "Should dispatch displayString on integer. Got:\n{code}"
     );
 }
 

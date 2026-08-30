@@ -49,7 +49,7 @@
 //! and, as a side effect, also catches a `///`-shaped near-miss written
 //! immediately above a method with no blank line, which the AST swallows
 //! whole into that method's plain-`String` `doc_comment` field (no
-//! `Comment`, no span, invisible to an AST walk). [`crate::lint::check_near_miss_dividers`]
+//! `Comment`, no span, invisible to an AST walk). [`check_near_miss_dividers`]
 //! is the thin, `pub` wrapper every caller actually reaches: BT-3240 wired
 //! it into `queries::diagnostic_provider` (the LSP-facing pipeline); BT-3257
 //! threaded `source: &str` through `beamtalk lint`'s `collect_diagnostics`
@@ -58,9 +58,46 @@
 //! this file's accept/reject decision ([`check_comment_text`]) but inherited
 //! the AST's span imprecision. All three callers now agree, by construction,
 //! on both *whether* something is a near-miss and *where* it is.
+//!
+//! # Why this lives at the crate root, not inside `lint/` (BT-3340)
+//!
+//! Every sibling lint pass moved into the standalone `beamtalk-lint` crate
+//! (ADR 0117 Decision step 2). This one check stays behind: it's called
+//! from `queries::diagnostic_provider`, which stays inside `beamtalk-core`
+//! (it isn't part of this issue's scope) — and `beamtalk-lint` necessarily
+//! depends on `beamtalk-core` (for `ast`/`semantic_analysis`/
+//! `source_analysis`), so `beamtalk-core` depending back on `beamtalk-lint`
+//! for this one call would be a real, `cargo`-rejected crate cycle. Keeping
+//! this source-text scan as a shared leaf module at the crate root — the
+//! same shape as `synthetic_selectors.rs` — lets `queries` call it directly
+//! with no new dependency, while `beamtalk-lint`'s callers (`beamtalk-cli`,
+//! `beamtalk-mcp`) simply call `beamtalk_core::near_miss_divider::check_near_miss_dividers`
+//! alongside `beamtalk_lint::run_lint_passes` instead of getting both from
+//! one crate.
 
 use crate::ast::CommentKind;
 use crate::source_analysis::{Diagnostic, Span, parse_divider_name};
+
+/// Runs the source-text near-miss-divider scan (BT-3240) and appends its
+/// findings to `diagnostics`. See [`scan_source`]'s doc for why this check
+/// takes `source` directly instead of a `Module`: `Comment::span` in the AST
+/// is stamped with the *following declaration's* span, not the comment's
+/// own, so only a source-text scan can give an accurate, comment-sized span.
+///
+/// Every lint pass proper lives in the standalone `beamtalk-lint` crate and
+/// is reachable through its `run_lint_passes`. This one check instead has
+/// three direct callers — `queries::diagnostic_provider` (so it also reaches
+/// the LSP's `publishDiagnostics`), `beamtalk lint`'s `collect_diagnostics`,
+/// and MCP's `run_module_analysis` (BT-3257) — because a silently-mis-parsed
+/// section divider is cheap to fix the moment it's written and easy to miss
+/// later, and every surface should point at the comment's own line rather
+/// than the AST's imprecise span. It stays out of `beamtalk build`'s output:
+/// `beam_compiler.rs` filters every `Severity::Lint` diagnostic there,
+/// matching the "only shown by `beamtalk lint`" contract lint diagnostics
+/// generally follow.
+pub fn check_near_miss_dividers(source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    diagnostics.extend(scan_source(source));
+}
 
 /// Scans `source` for a single-line `//`, `///`, or `/* ... */` comment that
 /// looks like it's trying to be a `// === Name ===` divider but doesn't

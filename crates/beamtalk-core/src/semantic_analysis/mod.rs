@@ -41,7 +41,10 @@ pub(crate) mod scope;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
 pub mod type_checker;
-pub(crate) mod validators;
+// BT-3340: widened from `pub(crate)` — `check_effect_free_statements` is
+// used by the standalone `beamtalk-lint` crate; the rest of this module
+// stays `pub(crate)`-reexported within it.
+pub mod validators;
 
 // Property-based tests for semantic analysis (ADR 0011 Phase 2)
 #[cfg(test)]

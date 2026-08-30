@@ -25,7 +25,7 @@
 //!
 //! Without this, MCP `lint`/`diagnostic_summary` report false-positive
 //! `Unresolved class` diagnostics for every class defined only in a
-//! dependency, because [`beamtalk_core::project::package`] only walks the
+//! dependency, because [`beamtalk_project::package`] only walks the
 //! package's own `src/`/`test/` directories.
 //!
 //! **Transitive dependencies (BT-2836):** [`resolve_dependency_class_infos`]

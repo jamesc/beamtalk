@@ -9,9 +9,20 @@
 //! warnings. They are suppressed during normal `check`/`compile` and only
 //! reported by `beamtalk lint`.
 //!
+//! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::lint`
+//! into its own crate — `lint` depended only on the Compilation bounded
+//! context (`ast`, `ast_walker`, `semantic_analysis`, `source_analysis`) in
+//! production, with no back-edges, so this is a mechanical move giving a
+//! real, `cargo`-enforced boundary. The one exception is the
+//! near-miss-divider check (BT-3240): it stayed behind as
+//! `beamtalk_core::near_miss_divider`, a shared leaf module, because
+//! `queries::diagnostic_provider` (which stays in `beamtalk-core`) calls it
+//! directly — see that module's doc for why moving it here would have
+//! created a crate cycle.
+//!
 //! # Adding a New Lint
 //!
-//! 1. Create `crates/beamtalk-core/src/lint/<your_lint>.rs`.
+//! 1. Create `crates/beamtalk-lint/src/<your_lint>.rs`.
 //! 2. Declare `pub(crate) struct YourLintPass;` implementing [`LintPass`].
 //! 3. Add `mod your_lint;` below (keep alphabetical).
 //! 4. Push `Box::new(your_lint::YourLintPass)` into `all_passes()` (keep alphabetical).
@@ -23,7 +34,6 @@ mod cascade_candidate;
 mod dead_block_assignment;
 mod effect_free_statement;
 mod inspect_in_string_position;
-mod near_miss_divider;
 mod shadowed_block_param;
 mod sync_send_in_timer_block;
 mod trailing_caret;
@@ -31,9 +41,9 @@ mod unnecessary_parens;
 mod value_like_object;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
-use crate::ast::Module;
-use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::Diagnostic;
+use beamtalk_core::ast::Module;
+use beamtalk_core::semantic_analysis::ClassHierarchy;
+use beamtalk_core::source_analysis::Diagnostic;
 
 /// A single lint pass.
 ///
@@ -89,29 +99,4 @@ pub fn run_lint_passes(module: &Module) -> Vec<Diagnostic> {
         pass.check(module, &mut diagnostics);
     }
     diagnostics
-}
-
-/// Runs the source-text near-miss-divider scan (BT-3240) and appends its
-/// findings to `diagnostics`. See `near_miss_divider::scan_source`'s doc for
-/// why this check takes `source` directly instead of a `Module`: `Comment::span`
-/// in the AST is stamped with the *following declaration's* span, not the
-/// comment's own, so only a source-text scan can give an accurate,
-/// comment-sized span.
-///
-/// Every other pass in this module is [`Severity::Lint`]-only and reachable
-/// solely through [`run_lint_passes`]. This one check instead has three
-/// direct callers — `queries::diagnostic_provider` (so it also reaches the
-/// LSP's `publishDiagnostics`), `beamtalk lint`'s `collect_diagnostics`, and
-/// MCP's `run_module_analysis` (BT-3257) — because a silently-mis-parsed
-/// section divider is cheap to fix the moment it's written and easy to miss
-/// later, and every surface should point at the comment's own line rather
-/// than the AST's imprecise span. It stays out of `beamtalk build`'s output:
-/// `beam_compiler.rs` filters every `Severity::Lint` diagnostic there,
-/// matching the "only shown by `beamtalk lint`" contract the rest of this
-/// module relies on.
-///
-/// `pub` (not `pub(crate)`): called from `beamtalk-cli` and `beamtalk-mcp`,
-/// not just from within this crate.
-pub fn check_near_miss_dividers(source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    diagnostics.extend(near_miss_divider::scan_source(source));
 }

@@ -4184,7 +4184,7 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
 
     roots = roots
         .into_iter()
-        .map(|root| beamtalk_core::project::discover_project_root(&root))
+        .map(|root| beamtalk_project::discover_project_root(&root))
         .collect();
 
     roots.sort_unstable();

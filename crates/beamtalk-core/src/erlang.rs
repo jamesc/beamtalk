@@ -78,11 +78,13 @@ pub use crate::codegen::core_erlang::{
     CodeGenError, CodegenOptions, GeneratedModule, Result, generate, generate_module,
     generate_module_with_warnings, primitive_bindings,
 };
-// BT-1462: REPL/test expression generation now lives in the REPL boundary
-pub use crate::repl::codegen::{
-    generate_repl_expression, generate_repl_expressions, generate_repl_expressions_traced,
-    generate_repl_expressions_with_index, generate_test_expression,
-};
+// BT-1462: REPL/test expression generation lived in the REPL boundary here;
+// BT-3340 (ADR 0117 Decision step 2) moved that boundary out to the
+// standalone `beamtalk-repl` crate. Re-exporting it from here would make
+// `beamtalk-core` depend on `beamtalk-repl`, which itself depends on
+// `beamtalk-core` for `codegen`/`ast`/`source_analysis` — a crate cycle.
+// Callers (`beamtalk-cli`, `beamtalk-compiler-port`) now import
+// `beamtalk_repl::codegen::{generate_repl_expression, ...}` directly.
 // Re-export Diagnostic so callers can inspect GeneratedModule::warnings
 pub use crate::source_analysis::Diagnostic;
 

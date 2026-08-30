@@ -16,12 +16,14 @@
 //! - Multi-expression sequencing with state threading
 //! - Test module generation (no workspace bindings)
 
-use crate::ast::{Expression, Pattern};
-use crate::codegen::core_erlang::document::Document;
-use crate::codegen::core_erlang::document::leaf;
-use crate::codegen::core_erlang::document::leaf::{atom, var};
-use crate::codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::docvec;
+use beamtalk_core::ast::{Expression, Pattern};
+use beamtalk_core::codegen::core_erlang::document::Document;
+use beamtalk_core::codegen::core_erlang::document::leaf;
+use beamtalk_core::codegen::core_erlang::document::leaf::{atom, var};
+use beamtalk_core::codegen::core_erlang::{
+    CodeGenContext, CodeGenError, CoreErlangGenerator, Result,
+};
+use beamtalk_core::docvec;
 
 // ── Public API ──────────────────────────────────────────────────────────
 
@@ -881,9 +883,9 @@ impl<'a> ReplAssembler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expression, Identifier, Literal};
-    use crate::codegen::core_erlang::CodeGenError;
-    use crate::source_analysis::Span;
+    use beamtalk_core::ast::{Expression, Identifier, Literal};
+    use beamtalk_core::codegen::core_erlang::CodeGenError;
+    use beamtalk_core::source_analysis::Span;
     use ecow::EcoString;
     use std::collections::HashMap;
 
@@ -931,7 +933,7 @@ mod tests {
 
     /// Creates a unary message send expression (receiver selector).
     fn unary_send(receiver: Expression, selector: &str) -> Expression {
-        use crate::ast::MessageSelector;
+        use beamtalk_core::ast::MessageSelector;
         Expression::MessageSend {
             receiver: Box::new(receiver),
             selector: MessageSelector::Unary(EcoString::from(selector)),

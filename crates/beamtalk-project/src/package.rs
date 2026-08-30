@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::file_walker::FileWalker;
+use beamtalk_core::file_walker::FileWalker;
 
 /// Canonicalize `path`, falling back to the original path on any I/O error.
 ///

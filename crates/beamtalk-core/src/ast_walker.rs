@@ -42,7 +42,10 @@ use crate::ast::{Expression, ExpressionStatement, Module, StringSegment};
 ///
 /// Block bodies are **not** included — they are nested inside expression trees,
 /// not top-level statement sequences.
-pub(crate) fn for_each_expr_seq<F>(module: &Module, mut f: F)
+///
+/// `pub` (not `pub(crate)`): BT-3340 moved lint passes into the standalone
+/// `beamtalk-lint` crate; `unnecessary_parens`'s pass calls this from there.
+pub fn for_each_expr_seq<F>(module: &Module, mut f: F)
 where
     F: FnMut(&[ExpressionStatement]),
 {

@@ -24,9 +24,9 @@
 //! "result: {x printString}"
 //! ```
 
-use crate::ast::{Expression, MessageSelector, Module, StringSegment};
-use crate::lint::LintPass;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::LintPass;
+use beamtalk_core::ast::{Expression, MessageSelector, Module, StringSegment};
+use beamtalk_core::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that warns on `inspect` sends used directly in string position
 /// (`++` operands and string-interpolation segments).
@@ -203,10 +203,10 @@ fn walk(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::lint::run_lint_passes;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::run_lint_passes;
+    use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
-    fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn lint(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         assert!(
@@ -216,7 +216,7 @@ mod tests {
         run_lint_passes(&module)
     }
 
-    fn inspect_lints(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    fn inspect_lints(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
         lint(source)
             .into_iter()
             .filter(|d| d.message.contains("`inspect` returns an Inspector"))
