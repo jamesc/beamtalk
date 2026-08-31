@@ -3085,7 +3085,11 @@ mod tests {
     /// before/after ordering `is_stdlib_up_to_date` compares, without
     /// depending on real wall-clock timing between writes.
     fn set_mtime(path: &Utf8Path, time: SystemTime) {
-        fs::File::open(path.as_std_path())
+        // Windows' `SetFileTime` needs a handle opened with write access;
+        // a read-only `File::open` handle gets `PermissionDenied` (code 5).
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path.as_std_path())
             .unwrap()
             .set_modified(time)
             .unwrap();
