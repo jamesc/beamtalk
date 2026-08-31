@@ -376,15 +376,13 @@ display_string(X) ->
 Render the kind-headed, positional label for a live process (ADR 0094).
 
 Returns `Actor(ClassName, pid)` for actor instances and
-`Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` /
-`ChildSupervisor(ClassName, pid)` (BT-3366, ADR 0118) for supervisors, with
-the kind head determined by ancestry. The label is derived **directly from
-the tuple** — no message is sent to the process — so it is safe to use as
-the timeout/dead-process fallback for a wedged actor.
+`Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` for
+supervisors, with the kind head determined by ancestry. The label is derived
+**directly from the tuple** — no message is sent to the process — so it is
+safe to use as the timeout/dead-process fallback for a wedged actor.
 
-The kind words `Actor`, `Supervisor`, `DynamicSupervisor`, and
-`ChildSupervisor` are reserved and must not be shadowed by user `Value`
-classes (validation tracked as follow-up).
+The kind words `Actor`, `Supervisor`, and `DynamicSupervisor` are reserved and
+must not be shadowed by user `Value` classes (validation tracked as follow-up).
 """.
 -spec process_label(#beamtalk_object{} | tuple()) -> binary().
 process_label(#beamtalk_object{class = ClassName, pid = Identity}) ->
@@ -393,16 +391,9 @@ process_label(#beamtalk_object{class = ClassName, pid = Identity}) ->
     ]);
 process_label({beamtalk_supervisor, ClassName, _Module, Pid}) ->
     Head =
-        try
-            case beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') of
-                true ->
-                    <<"DynamicSupervisor(">>;
-                false ->
-                    case beamtalk_class_registry:inherits_from(ClassName, 'ChildSupervisor') of
-                        true -> <<"ChildSupervisor(">>;
-                        false -> <<"Supervisor(">>
-                    end
-            end
+        try beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') of
+            true -> <<"DynamicSupervisor(">>;
+            _ -> <<"Supervisor(">>
         catch
             _:_ -> <<"Supervisor(">>
         end,
