@@ -77,6 +77,9 @@ sha2.workspace = true
 # why: RAII temp-dir cleanup for test fixtures (auto-removes on panic, unlike
 # manual std::env::temp_dir() + remove_dir_all)
 tempfile = "3.14"
+# why: BT-3331 — `test_support`'s shared loopback WS auth-handshake double,
+# consolidating this crate's own hand-rolled `FakeRepl`/`spawn_fake_repl`.
+beamtalk-repl-protocol = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true

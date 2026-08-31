@@ -4580,28 +4580,19 @@ mod tests {
     // responder closure, so a real `ReplClient` connects to it exactly as it
     // would to `beamtalk repl` — and the tool handler methods below run
     // as ordinary async fns against it, unignored and BEAM-free.
-    use futures_util::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::Message;
+    // BT-3331: the loopback WS server performing the ADR 0020 handshake
+    // (listener bind, handshake frames, request/response loop) used to be
+    // hand-rolled here; it's now shared with `beamtalk-lsp`'s equivalent
+    // fake workspace via `beamtalk_repl_protocol::test_support` (see that
+    // module's doc comment for the full extraction rationale). `FakeRepl`
+    // aliases the shared server type under this file's existing name, so
+    // every call site below (`fake.port`) is unchanged.
+    use beamtalk_repl_protocol::test_support::{HandshakeMode, spawn as spawn_ws, text};
 
-    /// Frame(s) the fake REPL sends back for one received request.
+    type FakeRepl = beamtalk_repl_protocol::test_support::FakeWsServer;
+
+    /// Frame the fake REPL sends back for one received request.
     type FakeReplResponder = Box<dyn Fn(&serde_json::Value) -> serde_json::Value + Send + Sync>;
-
-    /// A running fake REPL. Aborts its task (and so its listener/connection)
-    /// on drop, so a test that returns early never leaks a socket.
-    struct FakeRepl {
-        port: u16,
-        task: tokio::task::JoinHandle<()>,
-    }
-
-    impl Drop for FakeRepl {
-        fn drop(&mut self) {
-            self.task.abort();
-        }
-    }
-
-    fn ws_text(value: &serde_json::Value) -> Message {
-        Message::Text(value.to_string().into())
-    }
 
     /// Spawn a fake REPL on an ephemeral loopback port. Performs the ADR 0020
     /// handshake (`auth-required` -> client `auth` -> `auth_ok` ->
@@ -4611,55 +4602,20 @@ mod tests {
     /// (echoed from the request) and `status` (`["done"]`) when the
     /// responder didn't set them.
     async fn spawn_fake_repl(responder: FakeReplResponder) -> FakeRepl {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind loopback");
-        let port = listener.local_addr().expect("local addr").port();
-
-        let task = tokio::spawn(async move {
-            let Ok((stream, _peer)) = listener.accept().await else {
-                return;
-            };
-            let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
-                return;
-            };
-
-            let _ = ws
-                .send(ws_text(&serde_json::json!({"op": "auth-required"})))
-                .await;
-            let Some(Ok(Message::Text(_auth))) = ws.next().await else {
-                return;
-            };
-            let _ = ws
-                .send(ws_text(&serde_json::json!({"type": "auth_ok"})))
-                .await;
-            let _ = ws
-                .send(ws_text(
-                    &serde_json::json!({"op": "session-started", "session": "fake-session"}),
-                ))
-                .await;
-
-            while let Some(Ok(msg)) = ws.next().await {
-                let Message::Text(body) = msg else { continue };
-                let request: serde_json::Value =
-                    serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({}));
-                let mut reply = responder(&request);
-                if reply.get("id").is_none() {
-                    reply["id"] = request
-                        .get("id")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null);
-                }
-                if reply.get("status").is_none() {
-                    reply["status"] = serde_json::json!(["done"]);
-                }
-                if ws.send(ws_text(&reply)).await.is_err() {
-                    break;
-                }
+        let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(move |request| {
+            let mut reply = responder(request);
+            if reply.get("id").is_none() {
+                reply["id"] = request
+                    .get("id")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
             }
+            if reply.get("status").is_none() {
+                reply["status"] = serde_json::json!(["done"]);
+            }
+            vec![text(&reply)]
         });
-
-        FakeRepl { port, task }
+        spawn_ws(HandshakeMode::Ok, "fake-session", responder).await
     }
 
     /// A responder that always answers with `value` in the response's
