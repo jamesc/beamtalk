@@ -212,7 +212,8 @@ fn rewrite_prose_links(
 fn rewrite_outside_code_fences(text: &str, source: &str, dest: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_fence = false;
-    for line in text.split('\n') {
+    let mut lines = text.split('\n').peekable();
+    while let Some(line) = lines.next() {
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
             in_fence = !in_fence;
@@ -222,11 +223,11 @@ fn rewrite_outside_code_fences(text: &str, source: &str, dest: &str) -> String {
         } else {
             out.push_str(&replace_outside_md_brackets(line, source, dest));
         }
-        out.push('\n');
-    }
-    // split('\n') on a string not ending in '\n' adds an extra empty segment
-    if !text.ends_with('\n') && out.ends_with('\n') {
-        out.pop();
+        // Only re-insert the separator between lines, so a string that ends
+        // (or doesn't end) in '\n' round-trips exactly when nothing matched.
+        if lines.peek().is_some() {
+            out.push('\n');
+        }
     }
     out
 }
@@ -1066,4 +1067,538 @@ pub(super) fn write_site_landing_page(
         .wrap_err("Failed to write site index.html")?;
     debug!("Generated site landing page");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn utf8(dir: &TempDir) -> Utf8PathBuf {
+        Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap()
+    }
+
+    // -----------------------------------------------------------------
+    // Prose docs
+    // -----------------------------------------------------------------
+
+    const PAGES: &[(&str, &str, &str)] = &[
+        ("a.md", "a.html", "Doc A"),
+        ("installation.md", "installation.html", "Installation"),
+    ];
+
+    #[test]
+    fn generate_prose_docs_renders_pages_and_index() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        fs::write(
+            docs_source.join("a.md"),
+            "# Doc A\n\nSee [installation.md](installation.md) and installation.md directly.\n",
+        )
+        .unwrap();
+        fs::write(
+            docs_source.join("installation.md"),
+            "# Installation\n\nInstall it.\n",
+        )
+        .unwrap();
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        generate_prose_docs(&docs_source, &site_root, PAGES, &[], true).unwrap();
+
+        let a_html = fs::read_to_string(site_root.join("docs/a.html")).unwrap();
+        // Full markdown link retitled, bare filename reference rewritten too.
+        assert!(a_html.contains("installation.html"));
+        assert!(!a_html.contains("installation.md"));
+
+        let index_html = fs::read_to_string(site_root.join("docs/index.html")).unwrap();
+        assert!(index_html.contains("Doc A"));
+        // installation.html has a landing_card_meta description, "a.html" does not.
+        assert!(index_html.contains("Install the Beamtalk toolchain"));
+        assert!(index_html.contains("<li><a href=\"a.html\">Doc A</a></li>"));
+    }
+
+    #[test]
+    fn generate_prose_docs_errors_on_missing_source() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        // Only write one of the two pages.
+        fs::write(docs_source.join("a.md"), "# Doc A\n").unwrap();
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        let err = generate_prose_docs(&docs_source, &site_root, PAGES, &[], false).unwrap_err();
+        assert!(format!("{err:?}").contains("installation.md"));
+    }
+
+    #[test]
+    fn prose_nav_reflects_active_page_and_learning_flag() {
+        let with_learning = prose_nav("a.html", PAGES, true);
+        assert!(with_learning.contains("Learn Beamtalk"));
+        assert!(with_learning.contains("<a href=\"a.html\" class=\"active\">Doc A</a>"));
+
+        let without_learning = prose_nav("installation.html", PAGES, false);
+        assert!(!without_learning.contains("Learn Beamtalk"));
+        assert!(
+            without_learning
+                .contains("<a href=\"installation.html\" class=\"active\">Installation</a>")
+        );
+    }
+
+    #[test]
+    fn rewrite_prose_links_retitles_full_links_and_bare_refs() {
+        let markdown = "[installation.md](installation.md) then installation.md again.";
+        let out = rewrite_prose_links(markdown, PAGES, &[]);
+        assert!(out.contains("[Installation](installation.html)"));
+        assert!(out.contains("installation.html again"));
+        assert!(!out.contains("installation.md"));
+    }
+
+    #[test]
+    fn rewrite_prose_links_applies_extra_links_outside_fences() {
+        let markdown = "See ADR 0001.\n\n```text\nADR 0001 in code stays put\n```\n";
+        let extra = vec![("ADR 0001".to_string(), "[ADR 1](0001.html)".to_string())];
+        let out = rewrite_prose_links(markdown, &[], &extra);
+        assert!(out.contains("See [ADR 1](0001.html)."));
+        assert!(out.contains("ADR 0001 in code stays put"));
+    }
+
+    #[test]
+    fn rewrite_outside_code_fences_skips_fenced_blocks() {
+        let text = "before FOO\n```\nFOO inside fence\n```\nafter FOO";
+        let out = rewrite_outside_code_fences(text, "FOO", "BAR");
+        assert_eq!(out, "before BAR\n```\nFOO inside fence\n```\nafter BAR");
+    }
+
+    #[test]
+    fn rewrite_outside_code_fences_preserves_trailing_newline_state() {
+        let with_newline = "FOO\n";
+        assert_eq!(
+            rewrite_outside_code_fences(with_newline, "FOO", "BAR"),
+            "BAR\n"
+        );
+        let without_newline = "FOO";
+        assert_eq!(
+            rewrite_outside_code_fences(without_newline, "FOO", "BAR"),
+            "BAR"
+        );
+    }
+
+    #[test]
+    fn replace_outside_md_brackets_skips_link_text_but_not_href() {
+        let line = "[FOO](FOO) and bare FOO";
+        let out = replace_outside_md_brackets(line, "FOO", "BAR");
+        // Inside [...] left untouched, href and bare text replaced.
+        assert_eq!(out, "[FOO](BAR) and bare BAR");
+    }
+
+    #[test]
+    fn replace_outside_md_brackets_handles_multibyte_chars() {
+        let line = "caf\u{e9} FOO caf\u{e9}";
+        let out = replace_outside_md_brackets(line, "FOO", "BAR");
+        assert_eq!(out, "caf\u{e9} BAR caf\u{e9}");
+    }
+
+    // -----------------------------------------------------------------
+    // ADRs
+    // -----------------------------------------------------------------
+
+    fn write_adr(dir: &Utf8Path, name: &str, content: &str) {
+        fs::write(dir.join(name), content).unwrap();
+    }
+
+    #[test]
+    fn generate_adr_docs_returns_empty_when_dir_missing() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        let links = generate_adr_docs(&docs_source, &site_root, false).unwrap();
+        assert!(links.is_empty());
+        assert!(!site_root.join("adr").exists());
+    }
+
+    #[test]
+    fn generate_adr_docs_returns_empty_when_only_template_present() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let adr_dir = docs_source.join("ADR");
+        fs::create_dir_all(&adr_dir).unwrap();
+        write_adr(&adr_dir, "TEMPLATE.md", "# ADR NNNN: Template\n");
+        write_adr(&adr_dir, "no-number.md", "# Not Numbered\n");
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        let links = generate_adr_docs(&docs_source, &site_root, false).unwrap();
+        assert!(links.is_empty());
+        // Output directory is still created even though nothing was rendered.
+        assert!(site_root.join("adr").exists());
+    }
+
+    #[test]
+    fn generate_adr_docs_renders_pages_index_and_cross_links() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let adr_dir = docs_source.join("ADR");
+        fs::create_dir_all(&adr_dir).unwrap();
+        write_adr(
+            &adr_dir,
+            "0001-first.md",
+            "# ADR 0001: First Decision\n\n## Status\n\nAccepted — see notes\n\nSee 0002-second.md for the follow-up.\n",
+        );
+        write_adr(
+            &adr_dir,
+            "0002-second.md",
+            "# ADR 0002: Second Decision\n\n## Status\n\nProposed\n\nRefers back to ADR 0001.\n",
+        );
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        let links = generate_adr_docs(&docs_source, &site_root, true).unwrap();
+        assert_eq!(links.len(), 4);
+        assert!(
+            links
+                .iter()
+                .any(|(src, dest)| src == "ADR/0001-first.md" && dest == "../adr/0001-first.html")
+        );
+
+        let first_html = fs::read_to_string(site_root.join("adr/0001-first.html")).unwrap();
+        assert!(first_html.contains("0002-second.html"));
+        assert!(!first_html.contains("0002-second.md"));
+        assert!(first_html.contains("Accepted"));
+
+        let second_html = fs::read_to_string(site_root.join("adr/0002-second.html")).unwrap();
+        // "ADR 0001" reference rewritten into a link to the first ADR.
+        assert!(second_html.contains("0001-first.html"));
+
+        let index_html = fs::read_to_string(site_root.join("adr/index.html")).unwrap();
+        assert!(index_html.contains("First Decision"));
+        assert!(index_html.contains("Second Decision"));
+        assert!(index_html.contains("Learn Beamtalk"));
+    }
+
+    #[test]
+    fn discover_adrs_sorts_by_number_and_skips_non_adr_files() {
+        let src_dir = TempDir::new().unwrap();
+        let adr_dir = utf8(&src_dir);
+        write_adr(&adr_dir, "0002-second.md", "# ADR 0002: Second\n");
+        write_adr(&adr_dir, "0001-first.md", "# ADR 0001: First\n");
+        write_adr(&adr_dir, "TEMPLATE.md", "# ADR NNNN: Template\n");
+        write_adr(&adr_dir, "README.txt", "not markdown");
+
+        let adrs = discover_adrs(&adr_dir).unwrap();
+        assert_eq!(adrs.len(), 2);
+        assert_eq!(adrs[0].number, "0001");
+        assert_eq!(adrs[1].number, "0002");
+    }
+
+    #[test]
+    fn extract_adr_title_variants() {
+        assert_eq!(
+            extract_adr_title("# ADR 0001: No Compound Assignment\n"),
+            "No Compound Assignment"
+        );
+        // "adr " prefix but no colon falls back to the full heading text.
+        assert_eq!(
+            extract_adr_title("# ADR without a colon\n"),
+            "ADR without a colon"
+        );
+        // Non-ADR heading is used verbatim.
+        assert_eq!(extract_adr_title("# Just A Title\n"), "Just A Title");
+        // No H1 present at all.
+        assert_eq!(extract_adr_title("no heading here\n"), "Untitled ADR");
+    }
+
+    #[test]
+    fn extract_adr_status_variants() {
+        assert_eq!(
+            extract_adr_status("## Status\n\nAccepted — with context\n"),
+            "Accepted"
+        );
+        assert_eq!(
+            extract_adr_status("## Status\n\nImplemented\n\n## Context\nmore\n"),
+            "Implemented"
+        );
+        assert_eq!(extract_adr_status("no status section\n"), "Unknown");
+        // Status heading with no non-empty line before the next heading.
+        assert_eq!(
+            extract_adr_status("## Status\n\n## Context\nSomething\n"),
+            "Unknown"
+        );
+    }
+
+    #[test]
+    fn rewrite_adr_internal_links_rewrites_sibling_md_refs() {
+        let adrs = vec![AdrInfo {
+            number: "0001".to_string(),
+            slug: "0001-first".to_string(),
+            title: "First".to_string(),
+            status: "Accepted".to_string(),
+            output_file: "0001-first.html".to_string(),
+        }];
+        let content = "See 0001-first.md for details.";
+        assert_eq!(
+            rewrite_adr_internal_links(content, &adrs),
+            "See 0001-first.html for details."
+        );
+    }
+
+    #[test]
+    fn adr_nav_marks_active_entries() {
+        let adrs = vec![
+            AdrInfo {
+                number: "0001".to_string(),
+                slug: "0001-first".to_string(),
+                title: "First".to_string(),
+                status: "Accepted".to_string(),
+                output_file: "0001-first.html".to_string(),
+            },
+            AdrInfo {
+                number: "0002".to_string(),
+                slug: "0002-second".to_string(),
+                title: "Second".to_string(),
+                status: "Proposed".to_string(),
+                output_file: "0002-second.html".to_string(),
+            },
+        ];
+
+        let index_nav = adr_nav("index.html", &adrs, false);
+        assert!(index_nav.contains("<a href=\"index.html\" class=\"active\">All ADRs</a>"));
+        assert!(!index_nav.contains("Learn Beamtalk"));
+
+        let item_nav = adr_nav("0002-second.html", &adrs, true);
+        assert!(item_nav.contains("Learn Beamtalk"));
+        assert!(item_nav.contains("0002-second.html\" class=\"active\">0002 — Second"));
+    }
+
+    // -----------------------------------------------------------------
+    // Learning guide
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn generate_learning_guide_returns_false_when_dir_missing() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        assert!(!generate_learning_guide(&docs_source, &site_root).unwrap());
+    }
+
+    #[test]
+    fn generate_learning_guide_returns_false_when_no_numbered_chapters() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let learning_dir = docs_source.join("learning");
+        fs::create_dir_all(&learning_dir).unwrap();
+        fs::write(learning_dir.join("README.md"), "# Learn Beamtalk\n").unwrap();
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        assert!(!generate_learning_guide(&docs_source, &site_root).unwrap());
+    }
+
+    #[test]
+    fn generate_learning_guide_renders_chapters_with_readme_index() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let learning_dir = docs_source.join("learning");
+        fs::create_dir_all(&learning_dir).unwrap();
+        fs::write(
+            learning_dir.join("01-getting-started.md"),
+            "# Getting Started\n\nHello.\n",
+        )
+        .unwrap();
+        fs::write(
+            learning_dir.join("02-next-steps.md"),
+            "## Next Steps\n\nSee 01-getting-started.md.\n",
+        )
+        .unwrap();
+        fs::write(
+            learning_dir.join("README.md"),
+            "# Learn Beamtalk\n\nSee ../beamtalk-language-features.md and \
+             ../beamtalk-syntax-rationale.md and 01-getting-started.md.\n",
+        )
+        .unwrap();
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        assert!(generate_learning_guide(&docs_source, &site_root).unwrap());
+
+        let ch1 = fs::read_to_string(site_root.join("learning/01-getting-started.html")).unwrap();
+        assert!(ch1.contains("↑ Contents"));
+        assert!(ch1.contains("Next Steps")); // next-chapter nav link
+
+        let ch2 = fs::read_to_string(site_root.join("learning/02-next-steps.html")).unwrap();
+        assert!(ch2.contains("Getting Started")); // prev-chapter nav link
+        assert!(ch2.contains("01-getting-started.html"));
+
+        let index = fs::read_to_string(site_root.join("learning/index.html")).unwrap();
+        assert!(index.contains("../docs/language-features.html"));
+        assert!(index.contains("../docs/syntax-rationale.html"));
+        assert!(index.contains("01-getting-started.html"));
+    }
+
+    #[test]
+    fn generate_learning_guide_falls_back_to_list_without_readme() {
+        let src_dir = TempDir::new().unwrap();
+        let docs_source = utf8(&src_dir);
+        let learning_dir = docs_source.join("learning");
+        fs::create_dir_all(&learning_dir).unwrap();
+        fs::write(
+            learning_dir.join("01-getting-started.md"),
+            "# Getting Started\n",
+        )
+        .unwrap();
+
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        assert!(generate_learning_guide(&docs_source, &site_root).unwrap());
+
+        let index = fs::read_to_string(site_root.join("learning/index.html")).unwrap();
+        assert!(index.contains("<ol>"));
+        assert!(index.contains("01-getting-started.html"));
+    }
+
+    #[test]
+    fn discover_chapters_skips_non_markdown_and_unnumbered_files() {
+        let src_dir = TempDir::new().unwrap();
+        let learning_dir = utf8(&src_dir);
+        fs::write(learning_dir.join("01-intro.md"), "# Intro\n").unwrap();
+        fs::write(learning_dir.join("README.md"), "# Readme\n").unwrap();
+        fs::write(learning_dir.join("notes.txt"), "not markdown").unwrap();
+
+        let chapters = discover_chapters(&learning_dir).unwrap();
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(chapters[0].slug, "01-intro");
+    }
+
+    #[test]
+    fn extract_chapter_title_variants() {
+        assert_eq!(
+            extract_chapter_title("# Getting Started\n"),
+            "Getting Started"
+        );
+        assert_eq!(extract_chapter_title("## Sub Heading\n"), "Sub Heading");
+        assert_eq!(extract_chapter_title("no heading\n"), "Untitled Chapter");
+        // Hash with no following space is not treated as a heading.
+        assert_eq!(
+            extract_chapter_title("#NoSpace\nmore text\n"),
+            "Untitled Chapter"
+        );
+    }
+
+    #[test]
+    fn rewrite_chapter_internal_links_rewrites_sibling_md_refs() {
+        let chapters = vec![ChapterInfo {
+            number: "01".to_string(),
+            slug: "01-intro".to_string(),
+            title: "Intro".to_string(),
+            output_file: "01-intro.html".to_string(),
+        }];
+        let content = "See 01-intro.md next.";
+        assert_eq!(
+            rewrite_chapter_internal_links(content, &chapters),
+            "See 01-intro.html next."
+        );
+    }
+
+    #[test]
+    fn chapter_nav_placeholders_at_boundaries() {
+        let first = ChapterInfo {
+            number: "01".to_string(),
+            slug: "01-a".to_string(),
+            title: "A".to_string(),
+            output_file: "01-a.html".to_string(),
+        };
+        let second = ChapterInfo {
+            number: "02".to_string(),
+            slug: "02-b".to_string(),
+            title: "B".to_string(),
+            output_file: "02-b.html".to_string(),
+        };
+
+        let start = chapter_nav(None, Some(&second));
+        assert!(start.contains("chapter-nav-placeholder"));
+        assert!(start.contains("02-b.html"));
+
+        let end = chapter_nav(Some(&first), None);
+        assert!(end.contains("01-a.html"));
+        assert!(end.contains("chapter-nav-placeholder"));
+
+        let none = chapter_nav(None, None);
+        assert_eq!(none.matches("chapter-nav-placeholder").count(), 2);
+    }
+
+    #[test]
+    fn learning_nav_marks_active_chapter() {
+        let chapters = vec![ChapterInfo {
+            number: "01".to_string(),
+            slug: "01-a".to_string(),
+            title: "A".to_string(),
+            output_file: "01-a.html".to_string(),
+        }];
+        let nav = learning_nav("01-a.html", &chapters);
+        assert!(nav.contains("01-a.html\" class=\"active\">01 — A"));
+        let index_nav = learning_nav("index.html", &chapters);
+        assert!(index_nav.contains("index.html\" class=\"active\">All Chapters"));
+    }
+
+    // -----------------------------------------------------------------
+    // Landing page
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn landing_card_meta_known_and_unknown_files() {
+        assert_eq!(
+            landing_card_meta("security.html"),
+            ("🔒", landing_card_meta("security.html").1)
+        );
+        assert!(!landing_card_meta("security.html").1.is_empty());
+        assert_eq!(landing_card_meta("unknown-file.html"), ("📄", ""));
+    }
+
+    #[test]
+    fn learning_card_desc_is_nonempty() {
+        let (emoji, desc) = learning_card_desc();
+        assert_eq!(emoji, "");
+        assert!(!desc.is_empty());
+    }
+
+    #[test]
+    fn write_site_landing_page_includes_cards_for_all_pages() {
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        write_site_landing_page(&site_root, PAGES, true).unwrap();
+
+        let html = fs::read_to_string(site_root.join("index.html")).unwrap();
+        assert!(html.contains("Learn Beamtalk"));
+        assert!(html.contains("docs/a.html"));
+        assert!(html.contains("docs/installation.html"));
+        assert!(html.contains("Install the Beamtalk toolchain"));
+        assert!(html.contains("counter.bt"));
+    }
+
+    #[test]
+    fn write_site_landing_page_omits_learning_card_when_unavailable() {
+        let out_dir = TempDir::new().unwrap();
+        let site_root = utf8(&out_dir);
+
+        write_site_landing_page(&site_root, PAGES, false).unwrap();
+
+        let html = fs::read_to_string(site_root.join("index.html")).unwrap();
+        // The top-nav "Learn Beamtalk" link is always present in site mode
+        // (from `layout::page_header`); only the landing-page card is gated
+        // on `learning_available`.
+        assert!(!html.contains("<h2>Learn Beamtalk</h2>"));
+    }
 }
