@@ -2481,4 +2481,61 @@ mod tests {
             ]
         );
     }
+
+    /// BT-3368 review follow-up: the REPL's `beamtalk_repl_eval` module
+    /// (`runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl`) has a
+    /// hand-rolled Erlang mirror of `lex_string`/`lex_character`'s span
+    /// computation (`skip_string_literal/1`/`skip_character_literal/1`),
+    /// needed because the workspace app cannot depend on this Rust crate. A
+    /// shared corpus fixture
+    /// (`runtime/apps/beamtalk_workspace/test/fixtures/
+    /// string_and_character_literal_span_corpus.json`) pins both
+    /// implementations to the same cases — string escapes (backslash and
+    /// doubled-quote) and character-literal payloads — so the two can't
+    /// silently drift apart. The Erlang side asserts the identical cases in
+    /// `beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`.
+    #[test]
+    fn string_and_character_literal_span_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join(
+                "runtime/apps/beamtalk_workspace/test/fixtures/\
+                 string_and_character_literal_span_corpus.json",
+            );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let kind = case["kind"].as_str().expect("case.kind is a string");
+            let source = case["source"].as_str().expect("case.source is a string");
+            let expected_end = case["expected_end"]
+                .as_u64()
+                .expect("case.expected_end is a number");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = lex(source);
+            assert!(
+                !tokens.is_empty(),
+                "expected at least one token for {source:?} ({why})"
+            );
+            assert!(
+                matches!(
+                    (kind, tokens[0].kind()),
+                    ("string", TokenKind::String(_) | TokenKind::StringStart(_))
+                        | ("character", TokenKind::Character(_))
+                ),
+                "expected a {kind} token for {source:?}, got {:?} ({why})",
+                tokens[0].kind()
+            );
+            assert_eq!(
+                u64::from(tokens[0].span().end()),
+                expected_end,
+                "span-end mismatch for {source:?} ({why})"
+            );
+        }
+    }
 }

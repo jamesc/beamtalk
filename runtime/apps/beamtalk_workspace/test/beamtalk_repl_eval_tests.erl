@@ -831,6 +831,45 @@ extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
     %% Escaped-payload form (`$\c`) consumes all three characters together.
     ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
 
+%% BT-3368 review follow-up (CLAUDE.md Essential Rules: a "mirrors" claim
+%% across the Rust/Erlang boundary needs a shared conformance fixture, not
+%% just a comment): `skip_string_literal/1`/`skip_character_literal/1` are
+%% hand-rolled Erlang mirrors of the Rust lexer's `lex_string/0`/
+%% `lex_character/0` span computation. Both sides run the exact same cases
+%% from `test/fixtures/string_and_character_literal_span_corpus.json` — see
+%% `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`
+%% for the Rust side.
+string_and_character_literal_span_matches_shared_corpus_test() ->
+    Path = filename:join([
+        code:lib_dir(beamtalk_workspace),
+        "test",
+        "fixtures",
+        "string_and_character_literal_span_corpus.json"
+    ]),
+    {ok, Raw} = file:read_file(Path),
+    Cases = json:decode(Raw),
+    ?assert(length(Cases) > 0),
+    lists:foreach(fun assert_literal_span_case/1, Cases).
+
+assert_literal_span_case(#{
+    <<"kind">> := Kind,
+    <<"source">> := SourceBin,
+    <<"expected_end">> := ExpectedEnd,
+    <<"why">> := Why
+}) ->
+    Source = unicode:characters_to_list(SourceBin),
+    Remaining =
+        case Kind of
+            <<"string">> -> beamtalk_repl_eval:skip_string_literal(Source);
+            <<"character">> -> beamtalk_repl_eval:skip_character_literal(Source)
+        end,
+    Consumed = length(Source) - length(Remaining),
+    ?assertEqual(
+        ExpectedEnd,
+        Consumed,
+        lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
+    ).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================

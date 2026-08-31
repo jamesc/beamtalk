@@ -107,6 +107,8 @@ module loading to beamtalk_repl_loader (BT-863).
 -export([
     announce_binding_changed/2,
     extract_assignment/1,
+    skip_string_literal/1,
+    skip_character_literal/1,
     maybe_await_future/1,
     rebuild_bindings_from_steps/2,
     should_purge_module/2,
@@ -1678,11 +1680,12 @@ extract_assignment(Expression) ->
 -doc """
 True when `Expression` has a second top-level statement following the
 first, found by scanning left to right and tracking `[]`/`()`/`{}` nesting
-depth and `"..."` string spans (BT-3368).
+depth (BT-3368). A `"..."` string or `$x` character literal is skipped
+atomically via `skip_string_literal/1`/`skip_character_literal/1` — as a
+single lexeme, never character-by-character — so nothing inside either one
+(a `.`, a newline, a bracket) is ever individually inspected.
 
-Two signals count as a statement boundary, and only at depth 0, outside any
-string — a nested one (inside a block/collection literal, itself part of
-the *same* enclosing statement) must never count:
+Two signals count as a statement boundary, and only at depth 0:
 
   - A `.` followed by whitespace then more content — Smalltalk-family
     statement-separator syntax (the pre-existing check, now depth-aware:
@@ -1701,51 +1704,88 @@ the *same* enclosing statement) must never count:
 """.
 -spec has_second_top_level_statement(string()) -> boolean().
 has_second_top_level_statement(Expression) ->
-    scan_for_second_top_level_statement(Expression, 0, false).
+    scan_for_second_top_level_statement(Expression, 0).
 
--spec scan_for_second_top_level_statement(string(), integer(), boolean()) -> boolean().
-scan_for_second_top_level_statement([], _Depth, _InString) ->
+-spec scan_for_second_top_level_statement(string(), integer()) -> boolean().
+scan_for_second_top_level_statement([], _Depth) ->
     false;
-%% Mirrors lex_string/0 (source_analysis/lexer.rs): inside a string, a `\`
-%% escapes whatever follows it — including another `\` or a `"` — so the two
-%% characters are consumed as one unit and never independently reopen/close
-%% the string (`"it\"s"` is one string token; matching a bare `$"` first
-%% would wrongly end the string one character early on that escaped quote).
-scan_for_second_top_level_statement([$\\, _Escaped | Rest], Depth, true) ->
-    scan_for_second_top_level_statement(Rest, Depth, true);
-%% Mirrors lex_character/0 (source_analysis/lexer.rs): outside a string, `$`
-%% starts a one-character literal (`$(`, `$"`, `$\n`, ...) whose payload
-%% character is consumed atomically and must never itself be read as a
-%% bracket/quote/period — `$(` is the character `(`, not an opening
-%% bracket that leaves `Depth` permanently unbalanced.
-scan_for_second_top_level_statement([$$, $\\, _Escaped | Rest], Depth, false) ->
-    scan_for_second_top_level_statement(Rest, Depth, false);
-scan_for_second_top_level_statement([$$, _Payload | Rest], Depth, false) ->
-    scan_for_second_top_level_statement(Rest, Depth, false);
-scan_for_second_top_level_statement([$" | Rest], Depth, InString) ->
-    scan_for_second_top_level_statement(Rest, Depth, not InString);
-scan_for_second_top_level_statement([_ | Rest], Depth, true) ->
-    scan_for_second_top_level_statement(Rest, Depth, true);
-scan_for_second_top_level_statement([C | Rest], Depth, false) when
+scan_for_second_top_level_statement([$" | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_string_literal(Chars), Depth);
+scan_for_second_top_level_statement([$$ | _] = Chars, Depth) ->
+    scan_for_second_top_level_statement(skip_character_literal(Chars), Depth);
+scan_for_second_top_level_statement([C | Rest], Depth) when
     C =:= $[; C =:= $(; C =:= ${
 ->
-    scan_for_second_top_level_statement(Rest, Depth + 1, false);
-scan_for_second_top_level_statement([C | Rest], Depth, false) when
+    scan_for_second_top_level_statement(Rest, Depth + 1);
+scan_for_second_top_level_statement([C | Rest], Depth) when
     C =:= $]; C =:= $); C =:= $}
 ->
-    scan_for_second_top_level_statement(Rest, max(Depth - 1, 0), false);
-scan_for_second_top_level_statement([$. | Rest], 0, false) ->
+    scan_for_second_top_level_statement(Rest, max(Depth - 1, 0));
+scan_for_second_top_level_statement([$. | Rest], 0) ->
     case re:run(Rest, "^\\s+\\S", []) of
         {match, _} -> true;
-        nomatch -> scan_for_second_top_level_statement(Rest, 0, false)
+        nomatch -> scan_for_second_top_level_statement(Rest, 0)
     end;
-scan_for_second_top_level_statement([$\n | Rest], 0, false) ->
+scan_for_second_top_level_statement([$\n | Rest], 0) ->
     case re:run(Rest, "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*:=", []) of
         {match, _} -> true;
-        nomatch -> scan_for_second_top_level_statement(Rest, 0, false)
+        nomatch -> scan_for_second_top_level_statement(Rest, 0)
     end;
-scan_for_second_top_level_statement([_ | Rest], Depth, false) ->
-    scan_for_second_top_level_statement(Rest, Depth, false).
+scan_for_second_top_level_statement([_ | Rest], Depth) ->
+    scan_for_second_top_level_statement(Rest, Depth).
+
+-doc """
+Skips one string literal starting at the opening `"`, returning the
+characters immediately after its closing `"` (BT-3368 review follow-up).
+
+Mirrors `lex_string/0` (`source_analysis/lexer.rs`) exactly: `""` (doubled
+delimiter) is a literal `"` inside the string, and `\` escapes whatever
+character follows it — including another `\` or a `"` — so that pair is
+always consumed together and never independently reopens/closes the
+string. An unterminated string (malformed input that would already have
+failed compilation before reaching here) returns `[]`.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/
+string_and_character_literal_span_corpus.json` — see
+`beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`
+and `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`.
+""".
+-spec skip_string_literal(string()) -> string().
+skip_string_literal([$" | Rest]) ->
+    skip_string_literal_body(Rest).
+
+-spec skip_string_literal_body(string()) -> string().
+skip_string_literal_body([]) ->
+    [];
+skip_string_literal_body([$", $" | Rest]) ->
+    skip_string_literal_body(Rest);
+skip_string_literal_body([$" | Rest]) ->
+    Rest;
+skip_string_literal_body([$\\, _Escaped | Rest]) ->
+    skip_string_literal_body(Rest);
+skip_string_literal_body([$\\]) ->
+    [];
+skip_string_literal_body([_ | Rest]) ->
+    skip_string_literal_body(Rest).
+
+-doc """
+Skips one character literal starting at `$`, returning the characters
+immediately after its single payload character (BT-3368 review follow-up).
+
+Mirrors `lex_character/0` (`source_analysis/lexer.rs`) exactly: `$x` (any
+payload character, including `(`, `"`, `.`, another `$`, ...) or `$\x` (an
+escaped payload — `$\n`, `$\(`, ...) is consumed atomically as one token,
+never letting the payload be read as bracket/quote/period syntax. A `$`
+with no payload (malformed/truncated input) returns `[]`.
+""".
+-spec skip_character_literal(string()) -> string().
+skip_character_literal([$$, $\\, _Escaped | Rest]) ->
+    Rest;
+skip_character_literal([$$, _Payload | Rest]) ->
+    Rest;
+skip_character_literal([$$]) ->
+    [].
 
 -doc "Auto-await a Future if the result is a tagged future tuple (BT-840).".
 -spec maybe_await_future(term()) -> term().
