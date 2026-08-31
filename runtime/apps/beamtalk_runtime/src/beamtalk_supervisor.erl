@@ -908,8 +908,10 @@ Start a DynamicSupervisor's default (no per-call args) child (BT-3365).
 
 This is the arity-2 half of the zero-static-arg MFA `spec_to_otp/2` builds
 for a DynamicSupervisor's `simple_one_for_one` template (`{beamtalk_supervisor,
-start_dynamic_child, [ChildModule, DefaultArgs]}`, `DefaultArgs` always `#{}`
-today). OTP applies this function at arity 2 whenever no extra args were
+start_dynamic_child, [ChildModule, DefaultArgs]}`). `DefaultArgs` is `#{}` for
+the plain `#spawn` startFn, or the baked args map for a childClass whose
+`class supervisionSpec` override sets `withArgs:` (startFn `#spawnWith:`) —
+either way, OTP applies this function at arity 2 whenever no extra args were
 appended to the template for a given start — i.e. the no-arg `startChild`
 call (`supervisor:start_child(SupPid, [])`).
 
@@ -1022,6 +1024,17 @@ spec_to_otp(BtSpec, Mode) ->
                         %% Static children start once at supervisor-init time and never
                         %% have extra args appended, so a single baked arg is correct.
                         {ChildModule, start_link, [#{}]};
+                    'spawnWith:' when Mode =:= dynamic ->
+                        %% BT-3365 (review follow-up): a DynamicSupervisor childClass
+                        %% can override `class supervisionSpec` to bake default args via
+                        %% `withArgs:` (SupervisionSpec.bt childSpec), which also compiles
+                        %% to startFn #spawnWith:. That hits the exact same arity-mismatch
+                        %% badarg as the plain #spawn case once `startChild: args` appends
+                        %% its own args on top of the baked ones — so it needs the same
+                        %% zero-static-arg indirection, using the baked map as DefaultArgs
+                        %% instead of #{}.
+                        [InitArgsMap] = lists:nth(3, StartElems),
+                        {beamtalk_supervisor, start_dynamic_child, [ChildModule, InitArgsMap]};
                     'spawnWith:' ->
                         %% #(self args) uses list syntax (#(...)) so it compiles to an
                         %% Erlang list [ArgsMap] — use it directly as the start_link arg.

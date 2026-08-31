@@ -2481,6 +2481,91 @@ spec_to_otp_dynamic_spawn_uses_zero_static_arg_mfa_test() ->
         bt1990_cleanup_class_obj(ClassObj)
     end.
 
+spec_to_otp_dynamic_spawnWith_uses_zero_static_arg_mfa_test() ->
+    %% BT-3365 review follow-up: a DynamicSupervisor childClass can override
+    %% `class supervisionSpec` to bake default args via `withArgs:`, which
+    %% also compiles to startFn #spawnWith: (not just the plain #spawn
+    %% case above). That hits the exact same arity-mismatch badarg once
+    %% `startChild: args` appends its own args on top of the baked ones, so
+    %% it needs the same zero-static-arg indirection — using the baked map
+    %% as start_dynamic_child's DefaultArgs instead of #{}.
+    ClassObj = bt1990_make_counter_class_obj(),
+    try
+        BakedArgs = #{value => 7},
+        StartArray = #{
+            '$beamtalk_class' => 'Array',
+            data => #{0 => ClassObj, 1 => 'spawnWith:', 2 => [BakedArgs]}
+        },
+        BtSpec = #{
+            id => 'TestCounter',
+            start => StartArray,
+            restart => permanent,
+            shutdown => 5000,
+            type => worker
+        },
+        OtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec, dynamic),
+        ?assertMatch(
+            #{start := {beamtalk_supervisor, start_dynamic_child, [test_counter, BakedArgs]}},
+            OtpSpec
+        ),
+        %% Mode defaults to `static` and stays on the pre-BT-3365 shape.
+        StaticOtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec),
+        ?assertMatch(#{start := {test_counter, start_link, [BakedArgs]}}, StaticOtpSpec)
+    after
+        bt1990_cleanup_class_obj(ClassObj)
+    end.
+
+startChild_arity2_with_dynamic_spawnWith_spec_delivers_args_test() ->
+    %% BT-3365 review follow-up regression: startChild: args on a real
+    %% simple_one_for_one supervisor built from a dynamic-mode #spawnWith:
+    %% spec (baked default args) must start the child with the caller's
+    %% args, not the baked default, and not crash with badarg.
+    ClassObj = bt1990_make_counter_class_obj(),
+    set_child_class(ClassObj),
+    %% test_counter:init/1 stores its single arg directly as `value` (unlike
+    %% a real compiled actor's spawnWith:, which merges an args map into
+    %% default state) — so the baked default here is the bare term 7, not a
+    %% map, matching how the other startChild_arity2_* tests in this file
+    %% pass a bare term (e.g. self()) through the same path.
+    BakedArgs = 7,
+    StartArray = #{
+        '$beamtalk_class' => 'Array',
+        data => #{0 => ClassObj, 1 => 'spawnWith:', 2 => [BakedArgs]}
+    },
+    BtSpec = #{
+        id => 'TestCounter',
+        start => StartArray,
+        restart => permanent,
+        shutdown => 5000,
+        type => worker
+    },
+    OtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec, dynamic),
+    SupFlags = #{strategy => simple_one_for_one, intensity => 3, period => 5},
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [OtpSpec]}),
+    try
+        Self = {beamtalk_supervisor, 'BT3365SpawnWithSup', ?MODULE, SupPid},
+
+        %% No-arg startChild uses the baked default (7).
+        {ok, DefaultChild} = beamtalk_supervisor:startChild(Self),
+        DefaultPid = element(4, DefaultChild),
+        DefaultProxy = #beamtalk_object{
+            class = 'Counter', class_mod = test_counter, pid = DefaultPid
+        },
+        ?assertEqual(7, beamtalk_message_dispatch:send(DefaultProxy, getValue, [])),
+
+        %% startChild: args uses the caller's args (99), not the baked
+        %% default and not a badarg crash.
+        Result = beamtalk_supervisor:startChild(Self, 99),
+        ?assertMatch({ok, {beamtalk_object, 'Counter', test_counter, _}}, Result),
+        {ok, Child} = Result,
+        ChildPid = element(4, Child),
+        Proxy = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = ChildPid},
+        ?assertEqual(99, beamtalk_message_dispatch:send(Proxy, getValue, []))
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        gen_server:stop(SupPid)
+    end.
+
 %%====================================================================
 %% BT-3365: DynamicSupervisor(C)>>startChild: with a child needing init args
 %%====================================================================
