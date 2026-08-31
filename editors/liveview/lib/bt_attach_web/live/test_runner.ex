@@ -51,8 +51,8 @@ defmodule BtAttachWeb.Live.TestRunner do
   `list_tests`/`run_tests`/`load_tests` ops or the RBAC gates they ride
   (CLAUDE.md no-duplicate-implementations).
 
-  State (`:test_classes`, `:test_results`, `:tests_error`, `:tests_running`,
-  `:tests_discover_keep_error`) stays on the LiveView's own socket —
+  State (`:test_classes`, `:test_results`, `:tests_error`, `:tests_error_owner`,
+  `:tests_running`, `:tests_discover_keep_error`) stays on the LiveView's own socket —
   initialised in `WorkspaceLive.bind_session/3` and mount, same as the
   Dock/Inspector/MethodEditor/SystemBrowser assigns. `WorkspaceLive` still
   owns `handle_event/3` / `handle_async/3` (`Phoenix.LiveView` callback
@@ -108,9 +108,17 @@ defmodule BtAttachWeb.Live.TestRunner do
   # BT-2599) rather than stalling the LiveView process against a slow node. We
   # reset `test_classes` to the nil sentinel so the pane shows its "discovering"
   # state (not the misleading "No TestCase subclasses" empty-state) until the
-  # `handle_async(:test_discover, …)` fold resolves.
+  # `handle_async(:test_discover, …)` fold resolves. We also reset `tests_error`/
+  # `tests_error_owner` here (BT-3358): a `:run_load`-owned error is deliberately
+  # immune to a *stale* discovery landing late (see `apply_test_classes/3`), but
+  # this refresh is a fresh, user-requested discovery, not a stale one — it must
+  # still be able to clear a standing error rather than being blocked by its own
+  # owner guard forever.
   def handle_event("tests_refresh", _params, socket) do
-    {:noreply, socket |> assign(:test_classes, nil) |> discover_test_classes()}
+    {:noreply,
+     socket
+     |> assign(test_classes: nil, tests_error: nil, tests_error_owner: nil)
+     |> discover_test_classes()}
   end
 
   # Run every loaded TestCase subclass (`test-all`).
@@ -152,6 +160,13 @@ defmodule BtAttachWeb.Live.TestRunner do
   # is a memory/atom-table attack vector) — instead it is mapped through a fixed
   # whitelist to the assign we clear. Unknown keys are ignored (no-op), matching
   # the existing "clear to nil" convention every backing handler uses.
+  def handle_event("dismiss_notice", %{"key" => "tests_error"}, socket) do
+    # BT-3358: also clear `tests_error_owner` — otherwise a dismissed
+    # `:run_load`-owned error would keep suppressing a later, genuinely fresh
+    # `:discover`-owned one via `apply_test_classes/3`'s guard.
+    {:noreply, assign(socket, tests_error: nil, tests_error_owner: nil)}
+  end
+
   def handle_event("dismiss_notice", %{"key" => key}, socket) do
     case dismiss_key_to_assign(key) do
       nil -> {:noreply, socket}
@@ -163,13 +178,14 @@ defmodule BtAttachWeb.Live.TestRunner do
 
   # The dismiss-key whitelist: every scalar status assign any pane's `.notice`
   # can render, across all five extractions — `browser_error`/`native_view`'s
-  # implicit errors are handled inline elsewhere, but every OTHER pane's plain
-  # "here's an error string" banner dismisses through here.
+  # implicit errors are handled inline elsewhere, and `"tests_error"` has its
+  # own `handle_event/3` clause above (BT-3358, it clears a second assign
+  # alongside it) — every OTHER pane's plain "here's an error string" banner
+  # dismisses through here.
   defp dismiss_key_to_assign("browser_error"), do: :browser_error
   defp dismiss_key_to_assign("output"), do: :output
   defp dismiss_key_to_assign("changes_error"), do: :changes_error
   defp dismiss_key_to_assign("git_error"), do: :git_error
-  defp dismiss_key_to_assign("tests_error"), do: :tests_error
   defp dismiss_key_to_assign("save_result"), do: :save_result
   defp dismiss_key_to_assign("save_error"), do: :save_error
   defp dismiss_key_to_assign("flush_result"), do: :flush_result
@@ -209,15 +225,24 @@ defmodule BtAttachWeb.Live.TestRunner do
   # Leave `test_classes` at the nil sentinel so the pane shows only the error —
   # not the misleading "No TestCase subclasses" empty-state — and retries on the
   # next open/refresh.
+  #
+  # BT-3358: an uncancelled tab-open discovery can crash after a `:test_op`
+  # result already set `tests_error` — same clobber risk `apply_test_classes/3`
+  # guards against, so this must not overwrite a `:run_load`-owned error either.
   def handle_async(:test_discover, {:exit, reason}, socket) do
     Logger.error("test discovery crashed: #{inspect(reason)}", domain: [:beamtalk, :liveview])
 
-    {:noreply,
-     assign(socket,
-       test_classes: nil,
-       tests_error: "Couldn't discover tests — the discovery failed unexpectedly.",
-       tests_discover_keep_error: false
-     )}
+    socket = assign(socket, test_classes: nil, tests_discover_keep_error: false)
+
+    if socket.assigns[:tests_error_owner] == :run_load do
+      {:noreply, socket}
+    else
+      {:noreply,
+       assign(socket,
+         tests_error: "Couldn't discover tests — the discovery failed unexpectedly.",
+         tests_error_owner: :discover
+       )}
+    end
   end
 
   # BT-2597: the off-socket test run/load (`run_tests/2` / `load_tests/1`)
@@ -250,7 +275,8 @@ defmodule BtAttachWeb.Live.TestRunner do
      assign(socket,
        tests_running: false,
        test_results: nil,
-       tests_error: "The test run failed unexpectedly."
+       tests_error: "The test run failed unexpectedly.",
+       tests_error_owner: :run_load
      )}
   end
 
@@ -294,20 +320,51 @@ defmodule BtAttachWeb.Live.TestRunner do
   # On success we normally clear `tests_error` (a stale failure heals), but when
   # `keep_error?` is true (a partial load is showing its compile-error summary)
   # we leave `tests_error` intact so the banner survives the re-discovery.
+  #
+  # BT-3358: `run_tests`/`load_tests` never cancel an already-in-flight
+  # tab-open `:test_discover` task (there is no reason to — discovery isn't
+  # itself owner-gated and a `run_tests` doesn't need fresher classes), so
+  # that stale discovery's `handle_async` can land *after* a `:test_op`
+  # result already set `tests_error`. `tests_error_owner` names whoever wrote
+  # the CURRENT `tests_error`: only touch it here when it isn't `:run_load` —
+  # a discovery result (success or failure, below) must never overwrite a
+  # fresher run/load error, whichever order the two async tasks finish in.
   defp apply_test_classes(socket, {:ok, classes}, keep_error?) when is_list(classes) do
     socket = assign(socket, :test_classes, classes)
-    if keep_error?, do: socket, else: assign(socket, :tests_error, nil)
+
+    cond do
+      socket.assigns[:tests_error_owner] == :run_load -> socket
+      keep_error? -> socket
+      true -> assign(socket, tests_error: nil, tests_error_owner: nil)
+    end
   end
 
-  defp apply_test_classes(socket, {:error, reason}, _keep_error?),
-    # Leave the catalogue as the nil sentinel (not []) so the pane shows only the
-    # error — not the misleading "No TestCase subclasses" empty-state — and so
-    # re-opening the tab retries discovery (a transient failure heals).
-    do: assign(socket, test_classes: nil, tests_error: FacadeError.render(reason))
+  defp apply_test_classes(socket, {:error, reason}, _keep_error?) do
+    # Leave the catalogue as the nil sentinel (not []) so the pane shows only
+    # the error — not the misleading "No TestCase subclasses" empty-state —
+    # and so re-opening the tab retries discovery (a transient failure heals).
+    if socket.assigns[:tests_error_owner] == :run_load do
+      assign(socket, :test_classes, nil)
+    else
+      assign(socket,
+        test_classes: nil,
+        tests_error: FacadeError.render(reason),
+        tests_error_owner: :discover
+      )
+    end
+  end
 
-  defp apply_test_classes(socket, _other, _keep_error?),
-    do:
-      assign(socket, test_classes: nil, tests_error: FacadeError.render(:unexpected_test_result))
+  defp apply_test_classes(socket, _other, _keep_error?) do
+    if socket.assigns[:tests_error_owner] == :run_load do
+      assign(socket, :test_classes, nil)
+    else
+      assign(socket,
+        test_classes: nil,
+        tests_error: FacadeError.render(:unexpected_test_result),
+        tests_error_owner: :discover
+      )
+    end
+  end
 
   # Run all tests (`class` = nil) or a single class (`run_tests`, `:execute`).
   #
@@ -321,7 +378,7 @@ defmodule BtAttachWeb.Live.TestRunner do
     ctx = RequestContext.build(socket)
 
     socket
-    |> assign(tests_running: true, tests_error: nil)
+    |> assign(tests_running: true, tests_error: nil, tests_error_owner: nil)
     |> cancel_async(:test_op, :cancelled)
     |> start_async(:test_op, fn ->
       # Off the LiveView process — capture only `ctx`, never `socket`.
@@ -338,7 +395,7 @@ defmodule BtAttachWeb.Live.TestRunner do
     ctx = RequestContext.build(socket)
 
     socket
-    |> assign(tests_running: true, tests_error: nil)
+    |> assign(tests_running: true, tests_error: nil, tests_error_owner: nil)
     |> cancel_async(:test_op, :cancelled)
     |> start_async(:test_op, fn ->
       {:load, Facade.dispatch(:load_tests, %{}, ctx)}
@@ -350,14 +407,23 @@ defmodule BtAttachWeb.Live.TestRunner do
   # (mirrors `apply_git_status/2`). An error (incl. a non-Owner RBAC denial)
   # surfaces as `tests_error` and clears any stale results.
   defp apply_test_result(socket, {:ok, result}) when is_map(result),
-    do: assign(socket, test_results: result, tests_error: nil)
+    do: assign(socket, test_results: result, tests_error: nil, tests_error_owner: nil)
 
   defp apply_test_result(socket, {:error, reason}),
-    do: assign(socket, test_results: nil, tests_error: FacadeError.render(reason))
+    do:
+      assign(socket,
+        test_results: nil,
+        tests_error: FacadeError.render(reason),
+        tests_error_owner: :run_load
+      )
 
   defp apply_test_result(socket, _other),
     do:
-      assign(socket, test_results: nil, tests_error: FacadeError.render(:unexpected_test_result))
+      assign(socket,
+        test_results: nil,
+        tests_error: FacadeError.render(:unexpected_test_result),
+        tests_error_owner: :run_load
+      )
 
   # Apply a completed `load_tests` dispatch: refresh the catalogue to show
   # whatever loaded, surfacing partial compile errors as `tests_error`. The
@@ -372,7 +438,11 @@ defmodule BtAttachWeb.Live.TestRunner do
   defp apply_test_load(socket, {:ok, %{"errors" => [_ | _] = errors}}),
     do:
       socket
-      |> assign(test_classes: nil, tests_error: load_tests_error(errors))
+      |> assign(
+        test_classes: nil,
+        tests_error: load_tests_error(errors),
+        tests_error_owner: :run_load
+      )
       |> discover_test_classes(true)
 
   # A clean load simply re-discovers the catalogue off-socket; the
@@ -382,10 +452,14 @@ defmodule BtAttachWeb.Live.TestRunner do
     do: socket |> assign(test_classes: nil) |> discover_test_classes()
 
   defp apply_test_load(socket, {:error, reason}),
-    do: assign(socket, tests_error: FacadeError.render(reason))
+    do: assign(socket, tests_error: FacadeError.render(reason), tests_error_owner: :run_load)
 
   defp apply_test_load(socket, _other),
-    do: assign(socket, tests_error: FacadeError.render(:unexpected_test_result))
+    do:
+      assign(socket,
+        tests_error: FacadeError.render(:unexpected_test_result),
+        tests_error_owner: :run_load
+      )
 
   # Summarise compile errors from a partial test load into one line. Each error
   # is a `%{"path" => ..., "message" => ...}` map (the load-project error shape).
