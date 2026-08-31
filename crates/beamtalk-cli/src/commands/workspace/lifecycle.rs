@@ -39,6 +39,24 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         // If metadata is valid, return it. If it is corrupted/empty (e.g. from a
         // crashed write), fall through to recreate the workspace metadata.
         if let Ok(metadata) = get_workspace_metadata(workspace_id) {
+            // Self-heal a legacy non-absolute `project_path` (BT-3354 case 2): a
+            // named workspace created before its project directory existed falls
+            // back to storing the raw, relative path (`canonicalize()` fails at
+            // creation time, see below) and metadata is never otherwise rewritten.
+            // Once the directory exists, this — the next successful lookup by
+            // name — can canonicalize it for free using the caller's own
+            // `project_path`, so the workspace doesn't carry a stale relative
+            // path forever.
+            if !metadata.project_path.is_absolute() {
+                if let Ok(canonical_project_path) = project_path.canonicalize() {
+                    let healed = WorkspaceMetadata {
+                        project_path: canonical_project_path,
+                        ..metadata
+                    };
+                    save_workspace_metadata(&healed)?;
+                    return Ok(healed);
+                }
+            }
             return Ok(metadata);
         }
     }
@@ -550,6 +568,117 @@ mod tests {
             Some(ws_id.clone()),
             "a non-absolute stored project_path must never match, even a \
              byte-identical query"
+        );
+    }
+
+    /// Removes a directory on drop, including when the test panics — used by
+    /// the self-heal test below to clean up the real directory it creates on
+    /// disk (separate from `CleanupWorkspaceDirs`, which only removes
+    /// `~/.beamtalk/workspaces/*` entries).
+    struct CleanupDir(PathBuf);
+
+    impl Drop for CleanupDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Regression test for BT-3354 case 2: a named workspace created before its
+    /// project directory exists stores a relative `project_path` (see
+    /// `test_create_workspace_impl_falls_back_to_raw_path_when_canonicalize_fails`
+    /// above) that, pre-fix, would never be corrected once the directory later
+    /// appeared. `create_workspace_impl`'s early-return path (the one every
+    /// subsequent by-name lookup takes) now re-attempts `canonicalize()` and
+    /// heals the stored metadata in place when it succeeds.
+    #[test]
+    fn test_create_workspace_impl_self_heals_relative_project_path_once_directory_exists() {
+        let pid = std::process::id();
+        let ws_id = format!("test_bt3354_selfheal_{pid}");
+        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+
+        let relative_dir = PathBuf::from(format!("bt3354-selfheal-dir-{pid}"));
+        let _dir_cleanup = CleanupDir(relative_dir.clone());
+
+        // First lookup: the directory doesn't exist yet, so
+        // `create_workspace_impl`'s own `canonicalize()` fails and it falls back
+        // to storing the raw relative path — reproducing a named workspace
+        // created ahead of its project directory.
+        let metadata = create_workspace_impl(&ws_id, &relative_dir).unwrap();
+        assert_eq!(metadata.project_path, relative_dir);
+        assert!(!metadata.project_path.is_absolute());
+
+        // The directory now appears (e.g. the project is scaffolded afterwards).
+        fs::create_dir_all(&relative_dir).unwrap();
+
+        // The next successful by-name lookup should self-heal the stored path
+        // rather than carrying the stale relative path forever.
+        let healed = create_workspace_impl(&ws_id, &relative_dir).unwrap();
+        assert!(
+            healed.project_path.is_absolute(),
+            "project_path should be canonicalized once the directory exists, got {:?}",
+            healed.project_path
+        );
+        assert_eq!(healed.project_path, relative_dir.canonicalize().unwrap());
+
+        // And the healed path is persisted on disk, not just returned in memory.
+        let reloaded = get_workspace_metadata(&ws_id).unwrap();
+        assert_eq!(reloaded.project_path, healed.project_path);
+    }
+
+    /// BT-3354 case 1 ("orphaned node on upgrade") analysis: not reproducible
+    /// in the current code, and this test is the evidence backing that
+    /// decision (recorded on the issue) rather than a remediation.
+    ///
+    /// An unnamed workspace's id is always `generate_workspace_id` — a SHA256
+    /// hash of the *canonicalized project directory* — computed fresh by every
+    /// caller (every direct `create_workspace_impl` caller such as `run .`,
+    /// and `resolve_workspace_id_or_cwd`'s fallback) directly from the
+    /// directory in question. It is never read back from the possibly-stale
+    /// `metadata.project_path` field the BT-3332 fix hardened, and that was
+    /// already true before BT-3332 too. So a legacy workspace whose metadata
+    /// still carries a bare relative `project_path` keeps the *same*
+    /// `workspace_id` it always had, and a later caller re-derives that
+    /// identical id straight from the directory — reusing the existing
+    /// workspace (and any running node it has) rather than minting a new,
+    /// orphaned one.
+    #[test]
+    fn test_legacy_relative_metadata_does_not_orphan_workspace_id() {
+        // The id a (pre- or post-fix) `generate_workspace_id` call has always
+        // produced for this test's own crate directory — standing in for
+        // "the project directory", since it's real, absolute, and stable.
+        let project_dir = std::env::current_dir().unwrap();
+        let ws_id = beamtalk_workspace::generate_workspace_id(&project_dir).unwrap();
+        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+
+        // Seed metadata exactly as a pre-BT-3332 binary would have: correct id,
+        // but a bare relative `project_path`.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        save_workspace_metadata(&WorkspaceMetadata {
+            workspace_id: ws_id.clone(),
+            project_path: PathBuf::from("."),
+            created_at: now,
+        })
+        .unwrap();
+
+        // find_workspace_by_project_path correctly refuses to match via the
+        // legacy relative metadata (BT-3332 defense in depth)...
+        assert_eq!(find_workspace_by_project_path(&project_dir).unwrap(), None);
+
+        // ...but replaying exactly what `resolve_workspace_id_or_cwd`'s
+        // fallback does — recompute the id straight from the directory — lands
+        // on the very same id as the legacy workspace already on disk, not a
+        // new one, so no orphan is created.
+        let resolved = find_workspace_by_project_path(&project_dir)
+            .unwrap()
+            .unwrap_or(beamtalk_workspace::generate_workspace_id(&project_dir).unwrap());
+        assert_eq!(
+            resolved, ws_id,
+            "the resolved id must match the legacy workspace's own id for the \
+             same directory, or a real running node under that id would be \
+             orphaned"
         );
     }
 }
