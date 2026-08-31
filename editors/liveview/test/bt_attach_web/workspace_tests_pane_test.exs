@@ -61,6 +61,18 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
     })
   end
 
+  defp eventually(fun), do: eventually(fun, 20)
+  defp eventually(fun, 0), do: fun.()
+
+  defp eventually(fun, retries) do
+    if fun.() do
+      true
+    else
+      Process.sleep(50)
+      eventually(fun, retries - 1)
+    end
+  end
+
   describe "F1: non-blocking test run/load (start_async, BT-2597)" do
     test "Run all resolves off-socket and renders per-case pass/fail", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
@@ -176,6 +188,69 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       html = render_async(view, 2_000)
 
       assert html =~ "unexpected_test_result"
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  describe "BT-3358 load_tests/run_tests vs. tab-open discovery race (deterministic via the discover gate)" do
+    # BT-3328 fixed the *test* symptom of this race (these tests weren't
+    # awaiting the tab-open's own discovery, so its handle_async could
+    # sometimes run before or after the :test_op's, making assertions on
+    # tests_error flap). The production race Claude Review flagged on that
+    # PR is still live: `run_tests`/`load_tests` never cancel that tab-open
+    # `:test_discover` task, so it can complete AFTER their own result —
+    # `apply_test_classes/3`'s unconditional `tests_error: nil` on success
+    # would then clobber the error banner they just set. The stub's one-shot
+    # discover gate (`arm_discover_gate/0`) blocks the tab-open discovery's
+    # `list_tests` read so the test can deliver that exact ordering.
+
+    test "a load_tests error is not clobbered by a stale tab-open discovery landing after it",
+         %{conn: conn} do
+      StubWorkspaceClient.set_load_tests({:error, :unauthorized})
+      :ok = StubWorkspaceClient.arm_discover_gate()
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Opens the Tests tab, starting the tab-open :test_discover task — its
+      # list_tests read is now blocked on the gate.
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      # Fire load_tests while that discovery is still in flight. Its own
+      # :test_op is independent of :test_discover (never touches the gate)
+      # and completes immediately against the synchronous stub. Poll via a
+      # plain render/1 (not render_async/2): the still-blocked :test_discover
+      # task is also pending, and render_async/2 waits for every task that
+      # was in flight when it's called (BT-3322) — it would hang on the gate.
+      render_click(view, "load_tests")
+      assert eventually(fn -> render(view) =~ "Not authorized" end)
+
+      # Release the stale tab-open discovery now — it resolves successfully
+      # AFTER load_tests's own result already set tests_error. Without the
+      # tests_error_owner guard (BT-3358), apply_test_classes/3's
+      # unconditional tests_error: nil on success would clobber it here.
+      :ok = StubWorkspaceClient.release_discover_gate()
+      _ = render_async(view, 2_000)
+
+      assert render(view) =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a run_tests error is not clobbered by a stale tab-open discovery landing after it",
+         %{conn: conn} do
+      StubWorkspaceClient.set_run_tests({:error, :unauthorized})
+      :ok = StubWorkspaceClient.arm_discover_gate()
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      render_click(view, "run_tests")
+      assert eventually(fn -> render(view) =~ "Not authorized" end)
+
+      :ok = StubWorkspaceClient.release_discover_gate()
+      _ = render_async(view, 2_000)
+
+      assert render(view) =~ "Not authorized"
+      refute render(view) =~ "testOne"
       assert Process.alive?(view.pid)
     end
   end

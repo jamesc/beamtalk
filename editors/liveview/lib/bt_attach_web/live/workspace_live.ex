@@ -438,6 +438,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:test_classes, nil)
       |> assign(:test_results, nil)
       |> assign(:tests_error, nil)
+      # BT-3358: which op last set `:tests_error` — `:run_load` (a `run_tests`/
+      # `load_tests` result) or `nil` (discovery, or nothing yet). Lets a
+      # `:test_discover` fold that lands after a `:test_op` result (the tab-open
+      # discovery was never cancelled and completes later — see
+      # `TestRunner.apply_test_classes/3`) tell "my own stale error/success"
+      # apart from "a fresher run/load error I must not clobber".
+      |> assign(:tests_error_owner, nil)
       # BT-2597: a run/load is in flight on the workspace node. Set while the
       # `:test_op` async task runs so the run/load controls disable themselves —
       # `phx-disable-with` alone reverts as soon as the (now-immediate) event
