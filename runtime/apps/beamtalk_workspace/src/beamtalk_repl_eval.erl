@@ -1706,6 +1706,13 @@ has_second_top_level_statement(Expression) ->
 -spec scan_for_second_top_level_statement(string(), integer(), boolean()) -> boolean().
 scan_for_second_top_level_statement([], _Depth, _InString) ->
     false;
+%% Mirrors lex_string/0 (source_analysis/lexer.rs): inside a string, a `\`
+%% escapes whatever follows it — including another `\` or a `"` — so the two
+%% characters are consumed as one unit and never independently reopen/close
+%% the string (`"it\"s"` is one string token; matching a bare `$"` first
+%% would wrongly end the string one character early on that escaped quote).
+scan_for_second_top_level_statement([$\\, _Escaped | Rest], Depth, true) ->
+    scan_for_second_top_level_statement(Rest, Depth, true);
 scan_for_second_top_level_statement([$" | Rest], Depth, InString) ->
     scan_for_second_top_level_statement(Rest, Depth, not InString);
 scan_for_second_top_level_statement([_ | Rest], Depth, true) ->

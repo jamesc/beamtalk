@@ -792,6 +792,26 @@ extract_assignment_nested_period_in_cascade_is_still_one_statement_test() ->
         "  register",
     ?assertEqual({ok, account}, beamtalk_repl_eval:extract_assignment(Src)).
 
+%% BT-3368 regression guard (review follow-up): a backslash-escaped quote
+%% inside a string literal (`"a\"b"`, per `lex_string/0`'s handling of `\`
+%% in `source_analysis/lexer.rs`) must not be mistaken for the string's
+%% closing delimiter — otherwise a `.` or newline that's still genuinely
+%% *inside* the string reads as depth-0 code and wrongly triggers a bail.
+extract_assignment_escaped_quote_in_string_is_still_one_statement_test() ->
+    %% s := "a\"b. c"  (one statement: a single-quoted string containing an
+    %% escaped quote, then ". " — which must stay inside the string).
+    Src = "s := \"a\\\"b. c\"",
+    ?assertEqual({ok, s}, beamtalk_repl_eval:extract_assignment(Src)),
+    %% Same shape, but the content after the escaped quote uses a newline +
+    %% ident-looking continuation instead of a period.
+    Src2 = "s := \"a\\\"b\nident := 1\"",
+    ?assertEqual({ok, s}, beamtalk_repl_eval:extract_assignment(Src2)),
+    %% An escaped backslash (`\\`) immediately before a REAL closing quote
+    %% must still close the string — only an odd run of backslashes escapes
+    %% the quote.
+    Src3 = "s := \"a\\\\\". y := 2",
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment(Src3)).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================
