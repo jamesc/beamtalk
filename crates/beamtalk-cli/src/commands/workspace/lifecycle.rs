@@ -28,6 +28,20 @@ use super::storage::{
     workspaces_base_dir,
 };
 
+/// Best-effort project-identity fingerprint for `project_path` (BT-3355):
+/// the package `name` from its `beamtalk.toml`, when the path is valid UTF-8
+/// and a manifest exists and parses there. `None` on any failure — this
+/// gates an *optional* confirmation for the self-heal below, not workspace
+/// creation itself, so a missing/malformed manifest (or non-UTF-8 path) must
+/// never turn into a hard error here.
+fn project_fingerprint(project_path: &Path) -> Option<String> {
+    let utf8_path = camino::Utf8Path::from_path(project_path)?;
+    beamtalk_cli::manifest::find_manifest(utf8_path)
+        .ok()
+        .flatten()
+        .map(|manifest| manifest.name)
+}
+
 /// Inner logic for workspace creation, called under an already-held lock.
 ///
 /// Does NOT acquire the lock itself — callers are responsible for holding
@@ -47,22 +61,25 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             // name — can canonicalize it for free using the caller's own
             // `project_path`.
             //
-            // This trusts the current call's `project_path` as authoritative for
-            // an existing named workspace, which a later `--workspace <name>`
-            // invoked from an unrelated directory (typo, wrong cwd, moved
-            // project) could abuse to silently repoint the stored path — not
-            // just the informational path shown by `workspace list`/`status`,
-            // but the value the *next* detached node start for this workspace
-            // reads back (see `process.rs`'s `prepare_workspace_paths`) to set
-            // the runtime's project root, scoping live-reload file loading and
-            // `git` operations. It doesn't affect message routing (that's keyed
-            // by `workspace_id`, not this field), and it carries the exact same
-            // caller-supplied-path trust the pre-existing creation-time fallback
-            // below already has (unchanged since BT-3332) — this just lets that
-            // same trust fire again on a later lookup instead of only once at
-            // creation. Logged rather than blocked outright; narrowing this
-            // further (e.g. requiring the resolved directory to independently
-            // look like the same project) is left as a follow-up (BT-3355).
+            // Naively this trusts the current call's `project_path` as
+            // authoritative for an existing named workspace, which a later
+            // `--workspace <name>` invoked from an unrelated directory (typo,
+            // wrong cwd, moved project) could abuse to silently repoint the
+            // stored path — not just the informational path shown by `workspace
+            // list`/`status`, but the value the *next* detached node start for
+            // this workspace reads back (see `process.rs`'s
+            // `prepare_workspace_paths`) to set the runtime's project root,
+            // scoping live-reload file loading and `git` operations. It doesn't
+            // affect message routing (that's keyed by `workspace_id`, not this
+            // field).
+            //
+            // BT-3355 narrows this: the heal only fires when `metadata`'s
+            // recorded `project_fingerprint` (the `beamtalk.toml` package name
+            // at the last successful record) is either absent (legacy metadata
+            // predating this field — falls back to the pre-BT-3355 unconditional
+            // trust, still logged) or matches the CURRENT caller's own directory
+            // — an unrelated project reports a different name (or none) and is
+            // rejected rather than silently repointing the stored path.
             //
             // Gated on no node currently running for this workspace: healing
             // only ever fires for legacy, not-yet-corrected metadata, so a
@@ -73,9 +90,28 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
                 .flatten()
                 .is_some_and(|info| is_node_running(&info, Some(workspace_id)));
             if !metadata.project_path.is_absolute() && !node_is_running {
+                let current_fingerprint = project_fingerprint(project_path);
+                let identity_confirmed = match &metadata.project_fingerprint {
+                    None => true,
+                    Some(recorded) => current_fingerprint.as_ref() == Some(recorded),
+                };
+                if !identity_confirmed {
+                    eprintln!(
+                        "Not updating workspace '{workspace_id}' project_path: the current \
+                         directory's project identity ({current:?}) doesn't match the one \
+                         recorded for it ({recorded:?}) — re-run from the workspace's actual \
+                         project directory, or pass an unambiguous path, to avoid repointing \
+                         the wrong workspace.",
+                        current = current_fingerprint,
+                        recorded = metadata.project_fingerprint
+                    );
+                    return Ok(metadata);
+                }
                 if let Ok(canonical_project_path) = project_path.canonicalize() {
                     let healed = WorkspaceMetadata {
                         project_path: canonical_project_path,
+                        project_fingerprint: current_fingerprint
+                            .or_else(|| metadata.project_fingerprint.clone()),
                         ..metadata.clone()
                     };
                     // Best-effort: a failed heal write (disk full, permissions)
@@ -142,6 +178,13 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         workspace_id: workspace_id.to_string(),
         project_path: canonical_project_path,
         created_at: now,
+        // BT-3355: recorded now so a later self-heal (above) can confirm an
+        // out-of-directory `--workspace <name>` invocation is still the same
+        // project before trusting its `project_path`. `None` when the project
+        // has no readable `beamtalk.toml` (or a non-UTF-8 path) — that's not
+        // an error here, it just leaves this heal ungated, same as legacy
+        // metadata predating this field.
+        project_fingerprint: project_fingerprint(project_path),
     };
 
     save_workspace_metadata(&metadata)?;
@@ -552,6 +595,7 @@ mod tests {
                 workspace_id: ws_id.clone(),
                 project_path: PathBuf::from(relative_path),
                 created_at: now,
+                project_fingerprint: None, // legacy metadata (BT-3355 predates this field)
             })
             .unwrap();
         }
@@ -662,6 +706,78 @@ mod tests {
         assert_eq!(reloaded.project_path, healed.project_path);
     }
 
+    /// Regression test for BT-3355: the self-heal above must not trust a
+    /// `--workspace <name>` invocation from an unrelated directory just
+    /// because the stored `project_path` happens to be relative. Reproduces
+    /// the "wrong directory" scenario BT-3355's own acceptance criteria name
+    /// — a mismatched `project_fingerprint` (the `beamtalk.toml` package
+    /// name) must reject the heal rather than silently repointing it.
+    #[test]
+    fn test_create_workspace_impl_rejects_heal_from_wrong_project_directory() {
+        let pid = std::process::id();
+        let ws_id = format!("test_bt3355_wrong_dir_{pid}");
+        let _cleanup = CleanupWorkspaceDirs(std::slice::from_ref(&ws_id));
+
+        // The workspace's real project, with its own beamtalk.toml.
+        let real_dir = PathBuf::from(format!("bt3355-real-project-{pid}"));
+        let _real_cleanup = CleanupDir(real_dir.clone());
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::write(
+            real_dir.join("beamtalk.toml"),
+            "[package]\nname = \"bt3355_real_project\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        // An unrelated directory — a different project that also happens to
+        // exist (e.g. a typo'd path, or the wrong cwd) — with its own,
+        // different, package name.
+        let wrong_dir = PathBuf::from(format!("bt3355-wrong-project-{pid}"));
+        let _wrong_cleanup = CleanupDir(wrong_dir.clone());
+        fs::create_dir_all(&wrong_dir).unwrap();
+        fs::write(
+            wrong_dir.join("beamtalk.toml"),
+            "[package]\nname = \"bt3355_wrong_project\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        // Seed metadata as it would look right after BT-3354's self-heal
+        // already recorded the real project's fingerprint, but with a
+        // (still legacy-shaped) relative `project_path` — e.g. the directory
+        // was moved after the fingerprint was recorded.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        save_workspace_metadata(&WorkspaceMetadata {
+            workspace_id: ws_id.clone(),
+            project_path: real_dir.clone(),
+            created_at: now,
+            project_fingerprint: Some("bt3355_real_project".to_string()),
+        })
+        .unwrap();
+
+        // A later `--workspace <name>` invocation from the WRONG directory
+        // must not repoint project_path to it, even though `wrong_dir`
+        // exists and canonicalizes fine — its fingerprint doesn't match.
+        let rejected = create_workspace_impl(&ws_id, &wrong_dir).unwrap();
+        assert_eq!(
+            rejected.project_path, real_dir,
+            "a project_fingerprint mismatch must reject the heal, leaving \
+             project_path unchanged"
+        );
+        assert!(!rejected.project_path.is_absolute());
+
+        // Not persisted either.
+        let reloaded = get_workspace_metadata(&ws_id).unwrap();
+        assert_eq!(reloaded.project_path, real_dir);
+
+        // Sanity: a lookup from the SAME (real) directory — matching
+        // fingerprint — still heals normally.
+        let healed = create_workspace_impl(&ws_id, &real_dir).unwrap();
+        assert!(healed.project_path.is_absolute());
+        assert_eq!(healed.project_path, real_dir.canonicalize().unwrap());
+    }
+
     /// BT-3354 case 1 ("orphaned node on upgrade") analysis: not reproducible
     /// in the current code, and this test is the evidence backing that
     /// decision (recorded on the issue) rather than a remediation.
@@ -697,6 +813,7 @@ mod tests {
             workspace_id: ws_id.clone(),
             project_path: PathBuf::from("."),
             created_at: now,
+            project_fingerprint: None, // legacy metadata (BT-3355 predates this field)
         })
         .unwrap();
 

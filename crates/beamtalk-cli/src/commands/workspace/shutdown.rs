@@ -368,6 +368,7 @@ mod tests {
                 workspace_id: id.clone(),
                 project_path: std::env::temp_dir(),
                 created_at: 0,
+                project_fingerprint: None,
             })
             .expect("save metadata");
             crate::commands::workspace::storage::save_workspace_cookie(&id, "cookie")

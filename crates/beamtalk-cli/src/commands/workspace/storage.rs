@@ -21,6 +21,17 @@ pub struct WorkspaceMetadata {
     pub project_path: PathBuf,
     /// Unix timestamp (seconds) when the workspace was created.
     pub created_at: u64,
+    /// Project-identity fingerprint (BT-3355): the package `name` from the
+    /// project's `beamtalk.toml` at the time `project_path` was last
+    /// successfully recorded, or `None` if no manifest was readable then.
+    /// `create_workspace_impl`'s self-heal of a legacy non-absolute
+    /// `project_path` (BT-3354) only fires when this matches the current
+    /// caller's own directory, so a `--workspace <name>` invocation from an
+    /// unrelated directory can't silently repoint an already-fingerprinted
+    /// workspace. `#[serde(default)]` so metadata written before this field
+    /// existed deserializes as `None` (legacy, ungated) rather than failing.
+    #[serde(default)]
+    pub project_fingerprint: Option<String>,
 }
 
 /// Node information stored in ~/.beamtalk/workspaces/{id}/node.info
