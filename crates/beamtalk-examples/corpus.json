@@ -32953,6 +32953,33 @@
       "explanation": "Base value-object class for BT-908 fixture. Defines a class method (wrap:) that subclasses should inherit correctly."
     },
     {
+      "id": "tests-repl-protocol-fixtures-bt3367-sealed-factory",
+      "title": "Bt3367SealedResult",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Bt3367SealedResult",
+        "Value",
+        "async",
+        "bt3367_sealed_factory",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "ok:details:",
+        "process",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3367 fixture: a sealed Value class with a class-side factory method that\n// is not itself declared `class sealed` — the shape that triggered the\n// REPL-only dispatch bug (a class-level `sealed` flag leaking into every\n// class method's own is_sealed bit when the class is recovered from\n// already-loaded BEAM metadata, wrongly enabling the BT-1639 direct-call\n// optimization for a method that constructs `self`).\nsealed Value subclass: Bt3367SealedResult\n  field: checkName = \"\"\n  field: details = \"\"\n\n  class ok: aName details: aDetails =>\n    Bt3367SealedResult checkName: aName details: aDetails",
+      "explanation": "BT-3367 fixture: a sealed Value class with a class-side factory method that is not itself declared `class sealed` — the shape that triggered the REPL-only dispatch bug (a class-level `sealed` flag leaking into every class method's own is_sealed bit when the class is recovered from already-loaded BEAM metadata, wrongly enabling the BT-1639 direct-call optimization for a method that constructs `self`)."
+    },
+    {
       "id": "tests-repl-protocol-fixtures-chat-member",
       "title": "ChatMember",
       "category": "repl-protocol-fixtures",
