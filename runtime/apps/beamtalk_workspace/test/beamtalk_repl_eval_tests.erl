@@ -746,6 +746,20 @@ extract_assignment_multiline_test() ->
 extract_assignment_no_space_v2_test() ->
     ?assertEqual({ok, abc}, beamtalk_repl_eval:extract_assignment("abc:=123")).
 
+%% BT-3368: a second top-level statement on its own line (no `.` at all)
+%% must bail to `none`, exactly like the existing period-separated case —
+%% otherwise the first statement's variable gets clobbered with the whole
+%% call's `Result` (the last statement's value) in process_eval_result/4.
+extract_assignment_newline_separated_statements_test() ->
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("alpha := 111\nbeta := 222")),
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("a1 := 1\na2 := 2\na3 := 3")).
+
+%% A trailing newline with nothing (or only whitespace) after it is not a
+%% second statement — the single assignment is still detected.
+extract_assignment_trailing_newline_test() ->
+    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n")),
+    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n  \n")).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================
@@ -1700,6 +1714,10 @@ eval_success_test_() ->
         {"do_eval assignment binds variable", fun do_eval_assignment_binds/0},
         {"do_eval reads existing binding", fun do_eval_reads_binding/0},
         {"do_eval multi-statement returns last", fun do_eval_multi_statement/0},
+        {"do_eval multi-statement newline-separated bindings (BT-3368)",
+            fun do_eval_multi_statement_newline_separated_bindings/0},
+        {"do_eval multi-statement newline-separated bindings, three vars (BT-3368)",
+            fun do_eval_multi_statement_newline_separated_bindings_three/0},
         {"do_eval runtime error wraps in _error", fun do_eval_runtime_error/0},
         {"do_eval inline class definition", fun do_eval_class_definition/0},
         {"do_eval protocol definition", fun do_eval_protocol_definition/0},
@@ -1804,6 +1822,29 @@ do_eval_multi_statement() ->
     {ok, Value, _Output, _Warnings, _State} =
         beamtalk_repl_eval:do_eval("1 + 1. 2 + 2. 10 * 5", state0()),
     ?assertEqual(50, Value).
+
+%% BT-3368: a multi-statement `eval` call (statements on separate lines, no
+%% `.` separators) binds every variable to its OWN value — the first
+%% variable must not be silently overwritten with the call's final value.
+do_eval_multi_statement_newline_separated_bindings() ->
+    {ok, Value, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval("alpha := 111\nbeta := 222", state0()),
+    ?assertEqual(222, Value),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(111, maps:get(alpha, Bindings)),
+    ?assertEqual(222, maps:get(beta, Bindings)),
+    %% A later, separate eval call sees the correctly-bound first variable.
+    {ok, AlphaValue, _Output2, _Warnings2, _State2} =
+        beamtalk_repl_eval:do_eval("alpha", State),
+    ?assertEqual(111, AlphaValue).
+
+do_eval_multi_statement_newline_separated_bindings_three() ->
+    {ok, _Value, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval("a1 := 1\na2 := 2\na3 := 3", state0()),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(1, maps:get(a1, Bindings)),
+    ?assertEqual(2, maps:get(a2, Bindings)),
+    ?assertEqual(3, maps:get(a3, Bindings)).
 
 do_eval_runtime_error() ->
     %% Sending an unknown message raises a does_not_understand; do_eval catches

@@ -1643,10 +1643,25 @@ rebuild_bindings_from_steps(Steps, Bindings) ->
         Steps
     ).
 
--doc "Extract variable name from assignment expression.".
+-doc """
+Extract variable name from assignment expression.
+
+`Expression` is the *whole* source text of a REPL `eval` call, which may
+contain more than one top-level statement (BT-3368). The caller
+(`process_eval_result/4`) uses a match here to re-bind `VarName` to the
+call's own `Result` — correct only when `Result` and `VarName`'s assignment
+are the *same* statement, i.e. `Expression` is a single statement. A `.`
+followed by more content (existing check), or a `\n` followed by more
+content (BT-3368: statements are also commonly separated by newlines with
+no `.` at all, e.g. `alpha := 111\nbeta := 222`), both signal a second
+top-level statement, so both bail to `none` — leaving the per-statement
+bindings already threaded correctly through eval's own `State` map
+untouched, rather than clobbering the first/earlier variable with the
+last statement's value.
+""".
 -spec extract_assignment(string()) -> {ok, atom()} | none.
 extract_assignment(Expression) ->
-    case re:run(Expression, "\\.\\s+\\S", []) of
+    case re:run(Expression, "(\\.\\s+\\S)|(\\n\\s*\\S)", []) of
         {match, _} ->
             none;
         nomatch ->
