@@ -4,27 +4,24 @@
 //! REPL-boundary Core Erlang codegen tests, exercised through
 //! `beamtalk-repl::codegen`'s public functions.
 //!
-//! BT-3340 (ADR 0117 Decision step 2): a Cargo integration test, not a unit
-//! test embedded in `beamtalk-core::src` -- these tests were originally unit
-//! tests inside `codegen::core_erlang::tests::{gen_server,dispatch,
-//! expressions}` and `source_analysis::parser::tests::literal_tests`
-//! (white-box tests of `CoreErlangGenerator` internals via `use super::*`),
-//! but every one of them actually only exercises `beamtalk-repl`'s public
-//! REPL-codegen entry points against public `beamtalk-core` AST types -- none
-//! of them touch `CoreErlangGenerator` or other codegen internals directly.
+//! BT-3344 (ADR 0117 Decision step 4): moved here from
+//! `beamtalk-core`'s own `tests/` tree, where these tests originally lived
+//! as the last surviving edge from `codegen`'s test tree into `repl` (test-
+//! only; see BT-3340, ADR 0117 Decision step 2, for the production-code
+//! split). Before that, they were unit tests inside
+//! `codegen::core_erlang::tests::{gen_server,dispatch,expressions}` and
+//! `source_analysis::parser::tests::literal_tests` (white-box tests of
+//! `CoreErlangGenerator` internals via `use super::*`), but every one of
+//! them actually only exercises `beamtalk-repl`'s public REPL-codegen entry
+//! points against public `beamtalk-core` AST types -- none of them touch
+//! `CoreErlangGenerator` or other codegen internals directly. They belong
+//! here, in `beamtalk-repl`'s own test suite, exercising its own public API.
 //!
-//! They can't stay unit tests now that `repl` has moved to the standalone
-//! `beamtalk-repl` crate (which depends on `beamtalk-core`): a unit test
-//! compiled as part of `beamtalk-core` itself bakes `--cfg test` into the
-//! same compilation as the library, so `beamtalk-repl`'s build against
-//! `beamtalk-core` (no `--cfg test`) and this crate's own test build become
-//! two different-cfg copies of the same package -- Cargo reports that as
-//! "multiple different versions of crate `beamtalk_core`" and refuses to
-//! compile. An integration test avoids this: it links `beamtalk-core`
-//! normally (no `--cfg test` on the library itself), matching the copy
-//! `beamtalk-repl` already depends on, so there is exactly one
-//! `beamtalk-core` in the graph -- see `tests/codegen_property_tests.rs` for
-//! the same reasoning applied to the REPL property tests.
+//! Kept as a Cargo integration test (linking `beamtalk-repl` and
+//! `beamtalk-core` as ordinary external dependencies) rather than folded
+//! into `beamtalk-repl::codegen`'s existing `#[cfg(test)] mod tests` --
+//! that keeps this large, scenario-driven suite out of the unit-test module
+//! that exercises `codegen`'s internals directly.
 
 use beamtalk_core::ast::*;
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};

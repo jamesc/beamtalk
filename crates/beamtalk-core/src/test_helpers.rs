@@ -241,6 +241,90 @@ pub mod test_support {
     }
 
     // ========================================================================
+    // Near-valid Beamtalk fragment generator (BT-3344)
+    // ========================================================================
+    //
+    // A small, fast "fuzz-adjacent robustness" generator: near-valid source
+    // snippets built from a hand-curated fragment list plus truncation and
+    // concatenation. Shared by `beamtalk-core`'s and `beamtalk-repl`'s own
+    // `tests/codegen_property_tests.rs` (both need the exact same "never
+    // panics on near-valid input" properties, one for `generate_module`, one
+    // for `generate_repl_expression`) via this crate's `test` feature, the
+    // same mechanism [`arb_declared_type`] established (BT-3100) — see
+    // `beamtalk-core/Cargo.toml`'s `[features] test` entry for how a
+    // dependent crate opts in from its own `[dev-dependencies]`.
+    //
+    // Deliberately *not* what [`arb_program`] below exists for: `arb_program`
+    // explores the semantic space (nested blocks, `^`, state threading) that
+    // this flat fragment list can't reach. This generator is for properties
+    // that only need cheap, varied "probably still tokenizes/mostly parses"
+    // input, not grammar-driven coverage.
+
+    /// Near-valid Beamtalk fragments for property-test seed generation.
+    const NEAR_VALID_BEAMTALK_FRAGMENTS: &[&str] = &[
+        "42",
+        "\"hello\"",
+        "true",
+        "false",
+        "nil",
+        "x := 42",
+        "x + y",
+        "[:x | x + 1]",
+        "Object subclass: Foo\n  state: x = 0\n  bar => x",
+        "Actor subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
+        "#(1, 2, 3)",
+        "#{#a => 1}",
+        "self",
+        "^42",
+        "3 timesRepeat: [x := x + 1]",
+        "#[first, ...rest] := #[1, 2, 3]",
+        "[1] ensure: [nil]",
+        "x match: { 1 => \"one\", _ => \"other\" }",
+    ];
+
+    fn valid_beamtalk_fragment() -> impl Strategy<Value = String> {
+        prop::sample::select(NEAR_VALID_BEAMTALK_FRAGMENTS)
+            .prop_map(std::string::ToString::to_string)
+    }
+
+    /// Near-valid Beamtalk source: a valid fragment, a valid fragment
+    /// truncated at a random (char-boundary-safe) point, or two valid
+    /// fragments concatenated on separate lines.
+    pub fn near_valid_beamtalk() -> impl Strategy<Value = String> {
+        prop_oneof![
+            valid_beamtalk_fragment(),
+            // Truncated
+            valid_beamtalk_fragment().prop_flat_map(|s| {
+                let len = s.len();
+                if len <= 1 {
+                    Just(s).boxed()
+                } else {
+                    (1..len)
+                        .prop_map(move |cut| {
+                            // MSRV-1.85-compatible stand-in for
+                            // `str::floor_char_boundary` (stable since 1.91,
+                            // past this crate's pinned MSRV). Always floors
+                            // to a valid boundary, including 0 (an empty
+                            // prefix) -- no special-casing needed, unlike an
+                            // earlier version of this generator that
+                            // returned the untruncated string at that
+                            // boundary instead (BT-3344 code review).
+                            let mut safe_cut = cut;
+                            while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
+                                safe_cut -= 1;
+                            }
+                            s[..safe_cut].to_string()
+                        })
+                        .boxed()
+                }
+            }),
+            // Multiple fragments
+            (valid_beamtalk_fragment(), valid_beamtalk_fragment())
+                .prop_map(|(a, b)| format!("{a}\n{b}")),
+        ]
+    }
+
+    // ========================================================================
     // Grammar-driven Beamtalk program generator (BT-3116)
     // ========================================================================
     //
@@ -706,9 +790,11 @@ pub mod test_support {
     ///
     /// Sets `cases` to at least 512 (overridable via `PROPTEST_CASES` env var).
     ///
-    /// Gated on `#[cfg(test)]` because `proptest` is a dev-dependency; it is not
-    /// available to dependent crates that enable the `"test"` feature.
-    #[cfg(test)]
+    /// Available to dependent crates the same way as [`arb_declared_type`] and
+    /// [`near_valid_beamtalk`]: enable this crate's `test` feature (which pulls
+    /// in `proptest` as a normal, non-dev dependency via `dep:proptest`) rather
+    /// than `#[cfg(test)]`-only, which would make it invisible to a dependent
+    /// crate's own integration tests (BT-3344).
     #[must_use]
     pub fn proptest_config_default() -> proptest::prelude::ProptestConfig {
         let default = proptest::prelude::ProptestConfig::default();

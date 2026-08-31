@@ -6,93 +6,34 @@
 //! These tests verify that the code generator handles all parsed ASTs safely:
 //!
 //! 1. **`generate_module` never panics** — codegen returns Ok or Err, never panics
-//! 2. **`generate_repl_expression` never panics** — REPL codegen is safe
-//! 3. **Generated output is valid UTF-8** — output is always a valid String
-//! 4. **Successful codegen produces non-empty output** — no silent empty results
+//! 2. **Generated output is valid UTF-8** — output is always a valid String
+//! 3. **Successful codegen produces non-empty output** — no silent empty results
 //!
 //! **DDD Context:** Code Generation
 //!
 //! ADR 0011 Phase 2 (extended).
 //!
-//! BT-3340 (ADR 0117 Decision step 2): a Cargo integration test (not a unit
-//! test embedded in `beamtalk-core::src`), because half these properties
-//! exercise `beamtalk-repl::codegen::generate_repl_expression` —
-//! `beamtalk-repl` depends on `beamtalk-core`, so a unit test compiled as
-//! part of `beamtalk-core` itself (`--cfg test` baked into the same
-//! compilation as the library) would need a second, `--cfg test`-free copy
-//! of `beamtalk-core` in the graph for `beamtalk-repl` to build against —
-//! Cargo reports that as "multiple different versions of crate
-//! `beamtalk_core`" and refuses to compile. An integration test avoids this:
-//! it links `beamtalk-core` as an ordinary external dependency (no `--cfg
-//! test` on the library itself), the same normal build `beamtalk-repl`
-//! already depends on, so there is exactly one `beamtalk-core` in the graph.
+//! BT-3344 (ADR 0117 Decision step 4): the REPL-specific properties that
+//! used to live here (`generate_repl_expression` never panics / produces
+//! non-empty output) moved to
+//! `beamtalk-repl/tests/codegen_property_tests.rs` — they exercised only
+//! `beamtalk-repl::codegen`'s public API, the last remaining edge from
+//! `codegen`'s test tree into `repl` (test-only; see BT-3340, ADR 0117
+//! Decision step 2, for the production-code split). What's left here needs
+//! no such cross-crate care: it exercises only `beamtalk-core`'s own
+//! `generate_module`, so this could be a plain unit test, but it stays a
+//! Cargo integration test for consistency with its sibling file above.
+//!
+//! The near-valid-input generator and proptest config (below, via
+//! `test_helpers::test_support`) are shared with that sibling file rather
+//! than duplicated — see `test_support::near_valid_beamtalk`'s own doc
+//! comment for why (code review on BT-3344's PR).
 
 use beamtalk_core::ast::Module;
 use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_repl::codegen::generate_repl_expression;
+use beamtalk_core::test_helpers::test_support::{near_valid_beamtalk, proptest_config_default};
 use proptest::prelude::*;
-
-// ============================================================================
-// Generators
-// ============================================================================
-
-/// Near-valid Beamtalk fragments for codegen testing.
-const FRAGMENTS: &[&str] = &[
-    "42",
-    "\"hello\"",
-    "true",
-    "false",
-    "nil",
-    "x := 42",
-    "x + y",
-    "[:x | x + 1]",
-    "Object subclass: Foo\n  state: x = 0\n  bar => x",
-    "Actor subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
-    "#(1, 2, 3)",
-    "#{#a => 1}",
-    "self",
-    "^42",
-    "3 timesRepeat: [x := x + 1]",
-    "#[first, ...rest] := #[1, 2, 3]",
-    "[1] ensure: [nil]",
-    "x match: { 1 => \"one\", _ => \"other\" }",
-];
-
-fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
-}
-
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    prop_oneof![
-        valid_fragment(),
-        // Truncated
-        valid_fragment().prop_flat_map(|s| {
-            let len = s.len();
-            if len <= 1 {
-                Just(s).boxed()
-            } else {
-                (1..len)
-                    .prop_map(move |cut| {
-                        // MSRV-1.85-compatible stand-in for `str::floor_char_boundary`
-                        // (stable since 1.91, past this crate's pinned MSRV).
-                        let mut safe_cut = cut;
-                        while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
-                            safe_cut -= 1;
-                        }
-                        if safe_cut == 0 {
-                            s.clone()
-                        } else {
-                            s[..safe_cut].to_string()
-                        }
-                    })
-                    .boxed()
-            }
-        }),
-        // Multiple fragments
-        (valid_fragment(), valid_fragment()).prop_map(|(a, b)| format!("{a}\n{b}")),
-    ]
-}
 
 // ============================================================================
 // Helpers
@@ -104,26 +45,12 @@ fn parse_source(source: &str) -> Module {
     module
 }
 
-/// Standard proptest configuration for this suite: at least 512 cases
-/// (overridable via `PROPTEST_CASES`), matching
-/// `beamtalk_core::test_helpers::test_support::proptest_config_default` —
-/// that helper is `#[cfg(test)]`-gated (deliberately unavailable to
-/// dependent crates, including this integration test binary), so it's
-/// reproduced here rather than imported.
-fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    ProptestConfig {
-        cases: default.cases.max(512),
-        ..default
-    }
-}
-
 // ============================================================================
 // Property tests
 // ============================================================================
 
 proptest! {
-    #![proptest_config(proptest_config())]
+    #![proptest_config(proptest_config_default())]
 
     /// Property 1: `generate_module` never panics on arbitrary parsed input.
     ///
@@ -143,27 +70,7 @@ proptest! {
         let _result = generate_module(&module, options);
     }
 
-    /// Property 2: `generate_repl_expression` never panics.
-    ///
-    /// Each top-level expression in the parsed module is tried individually.
-    #[test]
-    fn generate_repl_expression_never_panics(input in "\\PC{0,300}") {
-        let module = parse_source(&input);
-        for expr in &module.expressions {
-            let _result = generate_repl_expression(&expr.expression, "prop_test_repl");
-        }
-    }
-
-    /// Property 2b: `generate_repl_expression` never panics on near-valid input.
-    #[test]
-    fn generate_repl_expression_never_panics_near_valid(input in near_valid_beamtalk()) {
-        let module = parse_source(&input);
-        for expr in &module.expressions {
-            let _result = generate_repl_expression(&expr.expression, "prop_test_repl");
-        }
-    }
-
-    /// Property 3: Successful codegen always produces valid, non-empty output.
+    /// Property 2: Successful codegen always produces valid, non-empty output.
     #[test]
     fn successful_codegen_produces_output(input in near_valid_beamtalk()) {
         let module = parse_source(&input);
@@ -183,21 +90,6 @@ proptest! {
                 input,
                 &output[..snippet_end],
             );
-        }
-    }
-
-    /// Property 4: REPL expression codegen output contains module structure.
-    #[test]
-    fn repl_codegen_output_structure(input in near_valid_beamtalk()) {
-        let module = parse_source(&input);
-        for expr in &module.expressions {
-            if let Ok(output) = generate_repl_expression(&expr.expression, "prop_test_repl") {
-                prop_assert!(
-                    !output.is_empty(),
-                    "generate_repl_expression returned Ok with empty output for input {:?}",
-                    input,
-                );
-            }
         }
     }
 }
