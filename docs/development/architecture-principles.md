@@ -40,10 +40,16 @@ The beamtalk codebase is organized into **layers with unidirectional dependencie
 │ beamtalk-language-service (library) │  ← Language Service (queries, IDE API)
 ├─────────────────────────────────────┤
 │ beamtalk-core (library)             │  ← Compiler core (Compilation, reusable)
-│  ├─ parse/       (Lexer, Parser)    │
-│  └─ analyse/     (Semantic Analysis)│
+│  ├─ ast/, source_analysis/          │     (Lexer, Parser, AST)
+│  ├─ semantic_analysis/, compilation/│     (Type checking, compilation units)
+│  └─ unparse/                        │     (Beamtalk source pretty-printing)
 └─────────────────────────────────────┘
 ```
+
+`beamtalk-core` keeps its name rather than being renamed to `beamtalk-compilation`
+(ADR 0117 Implementation Tracking, BT-3363) — see that ADR's Decision for the
+rationale (lower-risk, smaller-diff option; a rename would touch every
+consumer for a purely cosmetic gain).
 
 `beamtalk-codegen` (BT-3362, ADR 0117 Decision step 5) and
 `beamtalk-language-service` (BT-3361, same step) each depend on
@@ -106,42 +112,47 @@ enforced.** ADR 0117 found this diagram's `queries/ (Language Service)` line
 had silently drifted out of sync with the code (a `semantic_analysis →
 queries` production edge, plus an extensive `queries ⇄ language_service`
 cycle, existed with nothing to catch them) — exactly the failure mode
-"document only" accepts the risk of. `just check-boundary`
-(`crates/beamtalk-boundary-check`, BT-3339) fails CI if a production
-`use`/fully-qualified edge inside `beamtalk-core` crosses into a
-Language-Service-named module; the reverse direction is unrestricted. This
-doesn't change the "document only" decision for the coarser binary/library
-boundary above — only for this specific, already-drifted-once edge.
+"document only" accepts the risk of. Between BT-3339 and BT-3361, a
+dedicated `just check-boundary` binary (`crates/beamtalk-boundary-check`)
+parsed every `.rs` file under `beamtalk-core`'s Compilation modules with
+`syn` and failed CI on a production edge into a Language-Service-named
+module — the only way to enforce the rule while `queries`/`language_service`
+were still Rust modules living *inside* `beamtalk-core`, where Cargo has no
+visibility.
 
-BT-3361 (ADR 0117 Decision step 5) went a step further: `language_service`
-and its `queries` submodule moved out of `beamtalk-core` entirely into the
-standalone `beamtalk-language-service` crate (`beamtalk-core`'s Compilation
-bounded context — `ast`, `source_analysis`, `unparse`, `semantic_analysis`,
-`compilation` — never depends on it), so this direction is now
-**cargo-enforced** for any cross-crate edge, on top of what `check-boundary`
-already caught for the intra-crate case. `check-boundary` keeps
-`queries`/`language_service` (alongside `lint`, moved out earlier by
-BT-3340) in its module list purely as a regression guard — see
-`crates/beamtalk-boundary-check/README.md`. See
-`docs/ADR/0117-beamtalk-core-crate-split.md`.
+BT-3361 (ADR 0117 Decision step 5) moved `language_service` and its
+`queries` submodule out of `beamtalk-core` entirely into the standalone
+`beamtalk-language-service` crate; BT-3362 did the same for `codegen`, into
+`beamtalk-codegen`. Both new crates depend on `beamtalk-core`, never the
+reverse — a workspace `Cargo.toml` edge in the wrong direction is now a
+*compile error* (a cyclic package dependency), not something a separate
+checker needs to detect by parsing source. With `queries`, `language_service`,
+`lint`, and `codegen` no longer existing as directories under
+`beamtalk-core/src` at all, and the remaining Compilation modules (`ast`,
+`source_analysis`, `unparse`, `semantic_analysis`, `compilation`) free to
+depend on each other (that's internal cohesion within one bounded context,
+not a boundary this doc restricts), `check-boundary` had nothing left to
+check that Cargo doesn't already — BT-3363 (ADR 0117 Implementation
+Tracking) retired the crate, its `just check-boundary` recipe, and its CI
+step.
 
-BT-3362 (ADR 0117 Decision step 5, Wave 2) did the same for `codegen`
-(~88k lines, 35% of `beamtalk-core`): it moved into the standalone
-`beamtalk-codegen` crate, downward-only deps on `beamtalk-core` and
-`beamtalk-cerl-doc`. Unlike `language_service`/`queries`, `codegen` was
-never a *forbidden* edge target — nothing inside `beamtalk-core` ever
-imported from it — so `check-boundary`'s module list simply drops it rather
-than adding it as a regression guard. The measurable win is on the consumer
-side: `beamtalk-lsp` and `beamtalk-lint` never needed `codegen` (they
-analyze code, never generate it) but used to compile all of it anyway as
-part of `beamtalk-core`; now they don't
-(`cargo tree -p beamtalk-lsp -i beamtalk-codegen` and the `beamtalk-lint`
-equivalent both come up empty). `beamtalk-mcp` is the one exception: it
-already depended on `beamtalk-cli` before this split (to reuse its
-manifest/build-layout logic, BT-2823) and `beamtalk-cli` genuinely drives
-codegen (`beamtalk build`/`beamtalk test`), so `beamtalk-mcp` still compiles
-`beamtalk-codegen` transitively — a pre-existing coupling this split doesn't
-change either way, not a new gap it introduces.
+The split's measurable win is on the consumer side: `beamtalk-lsp` and
+`beamtalk-lint` never needed `codegen` (~90k lines, ~35% of the pre-split
+`beamtalk-core`) — they analyze code, never generate it — but used to
+compile all of it anyway as part of the monolithic `beamtalk-core`; now
+they don't (`cargo tree -p beamtalk-lsp -i beamtalk-codegen` and the
+`beamtalk-lint` equivalent both come up empty). `beamtalk-mcp` is the one
+exception: it already depended on `beamtalk-cli` before this split (to
+reuse its manifest/build-layout logic, BT-2823) and `beamtalk-cli`
+genuinely drives codegen (`beamtalk build`/`beamtalk test`), so
+`beamtalk-mcp` still compiles `beamtalk-codegen` transitively — a
+pre-existing coupling this split doesn't change either way, not a new gap
+it introduces. Real before/after `cargo build -p beamtalk-lsp -p
+beamtalk-mcp` (and `cargo check`) timings, measured across this crate split,
+are recorded in `docs/ADR/0117-beamtalk-core-crate-split.md`'s
+Implementation Tracking section (BT-3363).
+
+See `docs/ADR/0117-beamtalk-core-crate-split.md`.
 
 ---
 
