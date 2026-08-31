@@ -258,6 +258,7 @@ mod tests {
         let ws = TestWorkspace::new("meta_rt");
         let project_path = std::env::temp_dir().join("test-project");
         let metadata = WorkspaceMetadata {
+            project_fingerprint: None,
             workspace_id: ws.id.clone(),
             project_path: project_path.clone(),
             created_at: 1_000_000,
@@ -389,6 +390,7 @@ mod tests {
     fn test_workspace_exists_true_after_creation() {
         let ws = TestWorkspace::new("exists_true");
         let metadata = WorkspaceMetadata {
+            project_fingerprint: None,
             workspace_id: ws.id.clone(),
             project_path: std::env::temp_dir().join("test"),
             created_at: 1_000_000,
@@ -629,6 +631,7 @@ mod tests {
         let ws = TestWorkspace::new("list_test");
         let project_path = std::env::temp_dir().join("list-test-project");
         let metadata = WorkspaceMetadata {
+            project_fingerprint: None,
             workspace_id: ws.id.clone(),
             project_path: project_path.clone(),
             created_at: 2_000_000,
@@ -659,6 +662,7 @@ mod tests {
 
         for ws in [&ws_a, &ws_b] {
             let metadata = WorkspaceMetadata {
+                project_fingerprint: None,
                 workspace_id: ws.id.clone(),
                 project_path: std::env::temp_dir().join("sort-test"),
                 created_at: 1_000_000,
@@ -688,6 +692,7 @@ mod tests {
     fn test_stop_workspace_fails_when_not_running() {
         let ws = TestWorkspace::new("stop_not_running");
         let metadata = WorkspaceMetadata {
+            project_fingerprint: None,
             workspace_id: ws.id.clone(),
             project_path: std::env::temp_dir().join("stop-test"),
             created_at: 1_000_000,
@@ -705,6 +710,7 @@ mod tests {
         let ws = TestWorkspace::new("status_test");
         let project_path = std::env::temp_dir().join("status-test");
         let metadata = WorkspaceMetadata {
+            project_fingerprint: None,
             workspace_id: ws.id.clone(),
             project_path: project_path.clone(),
             created_at: 3_000_000,
@@ -780,6 +786,7 @@ mod tests {
         // tests that also save metadata pointing at current_dir().
         let project_path = std::env::current_dir().unwrap().join("find_by_path_unique");
         let metadata = WorkspaceMetadata {
+            project_fingerprint: None,
             workspace_id: ws.id.clone(),
             project_path: project_path.clone(),
             created_at: 1_000_000,
