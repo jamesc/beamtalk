@@ -195,7 +195,9 @@ None of this is scheduled against a Linear epic yet — file issues under a new 
 
 **Epic:** BT-3338
 **Issues:** BT-3339 (CI check), BT-3340 (lint/project/repl extraction), BT-3341 (queries⇄semantic_analysis fix, blocked by BT-3339), BT-3342 (queries⇄language_service fix, blocked by BT-3339), BT-3343 (Document API crate — done, extracted into `beamtalk-cerl-doc`), BT-3344 (REPL-codegen test move — done), BT-3345 (Span extraction), BT-3346 (unparse-round-trip test move)
-**Status:** In progress. BT-3343, BT-3341, and BT-3344 have landed; the rest are still Planned. Decision step 5 (the full bounded-context crate split) is explicitly out of scope for this epic — revisit once BT-3341/BT-3342 land and the ADR's dependency-graph extraction is re-run to confirm the cross-context cycles are gone.
+**Status:** Complete — all eight issues are Done.
+
+**Step 5 epic:** BT-3359. The dependency-graph re-run this ADR required before step 5 was performed on 2026-08-31 (production vs. `#[cfg(test)]` edges verified directly, per the Implementation section's instruction). Findings: the cross-context cycles are gone; `language_service` (incl. the merged `queries`) has zero production references to `codegen`; the only remaining back-edges into `codegen` are two leaf-file edges (`ffi_type_specs.rs`'s import of `escape_erlang_string`, and the `erlang.rs` re-export shim). The split — including the Decision step 5 refinement (a separate `beamtalk-codegen` crate, so `beamtalk-lsp`/`beamtalk-mcp`/`beamtalk-lint` stop compiling `codegen` entirely) — is tracked as BT-3360 (sever the two leaf back-edges), BT-3361 (extract `beamtalk-language-service`), BT-3362 (extract `beamtalk-codegen`, blocked by BT-3360/BT-3361), and BT-3363 (simplify `beamtalk-boundary-check` to what cargo can't enforce, measure the LSP/MCP build delta, and record `beamtalk-core`'s fate — facade vs. rename to `beamtalk-compilation` — back into this ADR).
 
 ## References
 - Related issues: none yet — this ADR did not originate from a Linear issue; came up during BT-3323 (Rust coverage epic)
