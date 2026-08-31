@@ -1650,21 +1650,18 @@ Extract variable name from assignment expression.
 contain more than one top-level statement (BT-3368). The caller
 (`process_eval_result/4`) uses a match here to re-bind `VarName` to the
 call's own `Result` — correct only when `Result` and `VarName`'s assignment
-are the *same* statement, i.e. `Expression` is a single statement. A `.`
-followed by more content (existing check), or a `\n` followed by more
-content (BT-3368: statements are also commonly separated by newlines with
-no `.` at all, e.g. `alpha := 111\nbeta := 222`), both signal a second
-top-level statement, so both bail to `none` — leaving the per-statement
-bindings already threaded correctly through eval's own `State` map
-untouched, rather than clobbering the first/earlier variable with the
-last statement's value.
+are the *same* statement, i.e. `Expression` is a single statement. Bails to
+`none` whenever `has_second_top_level_statement/1` finds a second top-level
+statement, leaving the per-statement bindings already threaded correctly
+through eval's own `State` map untouched, rather than clobbering the
+first/earlier variable with the last statement's value.
 """.
 -spec extract_assignment(string()) -> {ok, atom()} | none.
 extract_assignment(Expression) ->
-    case re:run(Expression, "(\\.\\s+\\S)|(\\n\\s*\\S)", []) of
-        {match, _} ->
+    case has_second_top_level_statement(Expression) of
+        true ->
             none;
-        nomatch ->
+        false ->
             case
                 re:run(
                     Expression,
@@ -1677,6 +1674,62 @@ extract_assignment(Expression) ->
                 nomatch -> none
             end
     end.
+
+-doc """
+True when `Expression` has a second top-level statement following the
+first, found by scanning left to right and tracking `[]`/`()`/`{}` nesting
+depth and `"..."` string spans (BT-3368).
+
+Two signals count as a statement boundary, and only at depth 0, outside any
+string — a nested one (inside a block/collection literal, itself part of
+the *same* enclosing statement) must never count:
+
+  - A `.` followed by whitespace then more content — Smalltalk-family
+    statement-separator syntax (the pre-existing check, now depth-aware:
+    `self.opened := self.opened + 1. self.opened` inside a class-method
+    block literal is two statements *of that block*, not of the enclosing
+    top-level assignment).
+  - A newline whose next line itself opens with `ident :=` — REPL input is
+    just as commonly separated by bare newlines with no `.` at all (e.g.
+    `alpha := 111\nbeta := 222`). Narrower than the period check (shape-
+    gated, not "any content") because an ordinary newline is not statement-
+    significant in this grammar at all — it's only a *weak* signal here,
+    so a single assignment whose own right-hand side merely continues onto
+    later lines (`result :=\n  42`, or a multi-line block/collection
+    literal whose body doesn't itself open with `ident :=`) must not
+    trigger it.
+""".
+-spec has_second_top_level_statement(string()) -> boolean().
+has_second_top_level_statement(Expression) ->
+    scan_for_second_top_level_statement(Expression, 0, false).
+
+-spec scan_for_second_top_level_statement(string(), integer(), boolean()) -> boolean().
+scan_for_second_top_level_statement([], _Depth, _InString) ->
+    false;
+scan_for_second_top_level_statement([$" | Rest], Depth, InString) ->
+    scan_for_second_top_level_statement(Rest, Depth, not InString);
+scan_for_second_top_level_statement([_ | Rest], Depth, true) ->
+    scan_for_second_top_level_statement(Rest, Depth, true);
+scan_for_second_top_level_statement([C | Rest], Depth, false) when
+    C =:= $[; C =:= $(; C =:= ${
+->
+    scan_for_second_top_level_statement(Rest, Depth + 1, false);
+scan_for_second_top_level_statement([C | Rest], Depth, false) when
+    C =:= $]; C =:= $); C =:= $}
+->
+    scan_for_second_top_level_statement(Rest, max(Depth - 1, 0), false);
+scan_for_second_top_level_statement([$. | Rest], 0, false) ->
+    case re:run(Rest, "^\\s+\\S", []) of
+        {match, _} -> true;
+        nomatch -> scan_for_second_top_level_statement(Rest, 0, false)
+    end;
+scan_for_second_top_level_statement([$\n | Rest], 0, false) ->
+    case re:run(Rest, "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*:=", []) of
+        {match, _} -> true;
+        nomatch -> scan_for_second_top_level_statement(Rest, 0, false)
+    end;
+scan_for_second_top_level_statement([_ | Rest], Depth, false) ->
+    scan_for_second_top_level_statement(Rest, Depth, false).
 
 -doc "Auto-await a Future if the result is a tagged future tuple (BT-840).".
 -spec maybe_await_future(term()) -> term().

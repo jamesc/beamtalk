@@ -760,6 +760,38 @@ extract_assignment_trailing_newline_test() ->
     ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n")),
     ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n  \n")).
 
+%% BT-3368 regression guard: a SINGLE assignment whose right-hand side
+%% merely continues onto later lines (a multi-line block/collection
+%% literal, or the value on a continuation line) must NOT be mistaken for
+%% multiple statements — none of the continuation lines themselves open
+%% with `ident :=`, so this must still resolve to the one real assignment.
+extract_assignment_multiline_rhs_is_still_one_statement_test() ->
+    ?assertEqual({ok, result}, beamtalk_repl_eval:extract_assignment("result :=\n  42")),
+    ?assertEqual(
+        {ok, doubler},
+        beamtalk_repl_eval:extract_assignment("doubler := [\n  :x |\n  x * 2\n]")
+    ).
+
+%% BT-3368 regression guard (review follow-up): a period *nested* inside a
+%% block/collection literal — itself part of the single outer assignment's
+%% right-hand side — must not be mistaken for the pre-existing
+%% period-separates-statements signal. `docs/beamtalk-language-features.md`'s
+%% own `ClassBuilder` cascade example is exactly this shape: multiple
+%% semicolon-chained keyword sends whose block-literal bodies use `.` to
+%% separate their *own* internal statements, all as one top-level
+%% assignment.
+extract_assignment_nested_period_in_cascade_is_still_one_statement_test() ->
+    Src =
+        "account := Object classBuilder\n"
+        "  name: #Account;\n"
+        "  superclass: Object;\n"
+        "  classVars: #{ #opened => 0 };\n"
+        "  fields: #{ #balance => 0 };\n"
+        "  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n"
+        "  classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };\n"
+        "  register",
+    ?assertEqual({ok, account}, beamtalk_repl_eval:extract_assignment(Src)).
+
 %% ===================================================================
 %% compile_expression_via_port catch clauses (BT-627)
 %% ===================================================================
