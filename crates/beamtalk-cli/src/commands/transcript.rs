@@ -70,7 +70,13 @@ pub fn run(name_or_id: Option<&str>, recent: Option<usize>) -> Result<()> {
     // Connect to workspace REPL backend
     let mut client = TranscriptClient::connect(node_info.connect_host(), node_info.port, &cookie)?;
 
-    // Set up Ctrl-C handler
+    // Set up Ctrl-C handler.
+    //
+    // `ctrlc::set_handler` may only be installed once per process — a second
+    // call anywhere in this binary returns `Err`. No unit test may reach this
+    // line more than once across the whole `beamtalk-cli` test binary; see
+    // this module's `tests::run_early_returns` doc comment for the tests that
+    // deliberately stop short of it.
     let running = Arc::new(AtomicBool::new(true));
     let r = Arc::clone(&running);
     ctrlc::set_handler(move || {
