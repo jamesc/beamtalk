@@ -37,7 +37,7 @@ The beamtalk codebase is organized into **layers with unidirectional dependencie
 │ beamtalk-workspace (library)        │  ← Workspace/session management
 ├─────────────────────────────────────┤
 │ beamtalk-core (library)             │  ← Compiler core (reusable)
-│  ├─ queries/     (Language Service) │
+│  ├─ language_service/ (Lang Svc)    │
 │  ├─ parse/       (Lexer, Parser)    │
 │  ├─ analyse/     (Semantic Analysis)│
 │  └─ codegen/     (Core Erlang gen)  │
@@ -49,13 +49,13 @@ The beamtalk codebase is organized into **layers with unidirectional dependencie
 **✅ ALLOWED:**
 - `beamtalk-cli` depends on `beamtalk-core`
 - `beamtalk-lsp` depends on `beamtalk-core`
-- `queries` depends on `parse`, `analyse`, `codegen`
+- `language_service` depends on `parse`, `analyse`, `codegen`
 - `codegen` depends on `parse` (needs AST types)
 
 **❌ FORBIDDEN:**
 - `beamtalk-core` importing `beamtalk-cli`
 - `parse` importing `codegen`
-- `codegen` importing `queries`
+- `codegen` importing `language_service`
 
 ### Rationale
 
@@ -94,10 +94,16 @@ failure mode "document only" accepts the risk of. `just check-boundary`
 (`crates/beamtalk-boundary-check`, BT-3339) now fails CI if a production
 `use`/fully-qualified edge inside `beamtalk-core` crosses from the
 Compilation bounded context (`ast`, `source_analysis`, `unparse`, `codegen`,
-`semantic_analysis`, `compilation`) into Language Service (`queries`,
-`language_service`, `lint`); the reverse direction is unrestricted. This
-doesn't change the "document only" decision for the coarser binary/library
-boundary above — only for this specific, already-drifted-once edge. See
+`semantic_analysis`, `compilation`) into Language Service (`language_service`,
+`lint`); the reverse direction is unrestricted. `queries` and
+`language_service` were originally two separate Rust modules for the one
+Language Service DDD context; BT-3342 merged `queries` into
+`language_service`, removing the `queries ⇄ language_service` cycle by
+construction rather than by CI enforcement (that cycle was never something
+`check-boundary` gated in the first place, since both sides were already
+inside the same bounded context). This doesn't change the "document only"
+decision for the coarser binary/library boundary above — only for this
+specific, already-drifted-once edge. See
 `docs/ADR/0117-beamtalk-core-crate-split.md`; the layer diagram above still
 reflects that ADR's *aspirational* module names (`parse`/`analyse`) rather
 than the real ones, corrected as later phases of that ADR land.

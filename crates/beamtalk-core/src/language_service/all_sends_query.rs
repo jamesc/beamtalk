@@ -6,7 +6,7 @@
 //! **DDD Context:** Language Service
 //!
 //! Backs `SystemNavigation unimplementedSelectors` (BT-2206). Where
-//! [`crate::queries::senders_query`] filters by one known selector, this query
+//! [`crate::language_service::senders_query`] filters by one known selector, this query
 //! collects EVERY [`Expression::MessageSend`] and [`Cascade`] message in a
 //! single pass — selector name, 1-based line number (relative to the input
 //! source), and the syntactic kind of receiver

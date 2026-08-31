@@ -1726,7 +1726,7 @@ mod display_tests {
         // Narrowing residual must render structurally, never the alias name
         // (ADR 0108 Decision — "Display through normalisation, scoped
         // honestly"). Mirrors the hover-level pin in
-        // `queries::hover_provider`'s test module.
+        // `language_service::hover_provider`'s test module.
         let aliased = InferredType::simple_union(&["#temporary", "#transient", "#permanent"])
             .tag_alias_expansion("RestartStrategy".into(), Span::new(0, 1));
         let residual = InferredType::difference(

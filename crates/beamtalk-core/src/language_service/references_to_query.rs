@@ -15,7 +15,7 @@
 //! # Parsing strategy
 //!
 //! Reuses the synthetic-class-header trick from
-//! [`crate::queries::senders_query`]: a bare method definition is not a valid
+//! [`crate::language_service::senders_query`]: a bare method definition is not a valid
 //! top-level form, so the input is wrapped in
 //! `Object subclass: __SyntheticReferencesScope\n` before lexing/parsing.
 //! Line numbers are translated back to input-source space by subtracting the

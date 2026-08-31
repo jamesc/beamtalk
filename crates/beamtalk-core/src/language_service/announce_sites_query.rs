@@ -36,7 +36,7 @@
 //!
 //! # Parsing strategy
 //!
-//! Identical to [`crate::queries::all_sends_query`]: `CompiledMethod source`
+//! Identical to [`crate::language_service::all_sends_query`]: `CompiledMethod source`
 //! returns a bare method definition (signature + body, no class header), which
 //! the parser does not accept at the top level. The input is wrapped in a
 //! synthetic class definition before lexing/parsing, and line numbers are

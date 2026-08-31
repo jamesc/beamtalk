@@ -1124,7 +1124,8 @@ fn parse_standalone_method_with_field_assignment() {
         "Method body should not be empty — it contains `self.count := 5`"
     );
     // Also verify no empty-body warning from semantic analysis
-    let all_diags = crate::queries::diagnostic_provider::compute_diagnostics(&module, vec![]);
+    let all_diags =
+        crate::language_service::diagnostic_provider::compute_diagnostics(&module, vec![]);
     let empty_body_warnings: Vec<_> = all_diags
         .iter()
         .filter(|d| d.message.contains("empty body"))
@@ -1187,7 +1188,8 @@ fn parse_combined_class_with_standalone_method_field_assign() {
         "Standalone method body should not be empty — contains `self.count := 5`"
     );
 
-    let all_diags = crate::queries::diagnostic_provider::compute_diagnostics(&module, parse_diags);
+    let all_diags =
+        crate::language_service::diagnostic_provider::compute_diagnostics(&module, parse_diags);
     let empty_body_warnings: Vec<_> = all_diags
         .iter()
         .filter(|d| d.message.contains("empty body"))

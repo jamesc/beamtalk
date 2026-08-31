@@ -30,8 +30,8 @@ use crate::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
     StateDeclaration,
 };
+use crate::language_service::enrich_hierarchy_with_inferred_returns_and_aliases;
 use crate::language_service::{HoverInfo, Position};
-use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
@@ -50,7 +50,7 @@ use crate::source_analysis::Span;
 ///   an alias-typed value or annotation resolves and displays
 ///   `AliasName (expansion)` instead of an unresolved nominal class. `None`
 ///   when the caller has no project-wide alias table available yet (see
-///   [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
+///   [`crate::language_service::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
 ///   doc).
 ///
 /// # Returns
@@ -60,7 +60,7 @@ use crate::source_analysis::Span;
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::queries::hover_provider::compute_hover;
+/// use beamtalk_core::language_service::hover_provider::compute_hover;
 /// use beamtalk_core::language_service::Position;
 /// use beamtalk_core::semantic_analysis::ClassHierarchy;
 /// use beamtalk_core::source_analysis::{lex_with_eof, parse};

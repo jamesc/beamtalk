@@ -29,7 +29,6 @@ pub mod file_walker;
 pub mod language_service;
 pub(crate) mod method_source_walker;
 pub mod near_miss_divider;
-pub mod queries;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub mod span;

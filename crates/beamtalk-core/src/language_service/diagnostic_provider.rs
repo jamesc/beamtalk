@@ -270,7 +270,7 @@ pub fn compute_project_diagnostics_with_analysis(
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::queries::diagnostic_provider::compute_diagnostics;
+/// use beamtalk_core::language_service::diagnostic_provider::compute_diagnostics;
 /// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let source = "x := 42";

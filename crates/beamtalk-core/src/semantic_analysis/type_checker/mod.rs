@@ -375,7 +375,7 @@ pub fn infer_types_and_returns(
 /// tagged with the alias's display name (see [`TypeProvenance::Aliased`]) —
 /// instead of an unresolved nominal class.
 ///
-/// Used by [`crate::queries::hover_provider`] so hover on an alias-typed
+/// Used by [`crate::language_service::hover_provider`] so hover on an alias-typed
 /// binding shows `RestartStrategy (#temporary | #transient | #permanent)`
 /// rather than either the bare expansion or an "unresolved class" mis-read.
 /// `alias_registry = None` is identical to [`infer_types_and_returns`].

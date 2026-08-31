@@ -174,7 +174,7 @@ pub fn validate_selector_input(sel: &str) -> Result<(), String> {
 /// single unit, and `@` so package-qualified names like `json@Parser` do too
 /// (BT-1659). This is the canonical Rust definition — the CLI REPL's
 /// tab-completer (`crates/beamtalk-cli/src/commands/repl/helper.rs`) and the
-/// LSP's static completion provider (`queries::completion_provider`) both
+/// LSP's static completion provider (`language_service::completion_provider`) both
 /// delegate here rather than keeping their own copies (BT-3083).
 ///
 /// The live REPL/MCP completion engine (`beamtalk_repl_ops_dev:is_identifier_char/1`

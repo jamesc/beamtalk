@@ -9,7 +9,7 @@
 //! - **`semantic_analysis::type_checker::validation::check_arg_sendability`**
 //!   (ADR 0103) — treats an announce send's payload argument as crossing a
 //!   process boundary, the same as an actor-instance message argument.
-//! - **`queries::announce_sites_query`** — mines `announce:` emission sites
+//! - **`language_service::announce_sites_query`** — mines `announce:` emission sites
 //!   out of a method's AST for `SystemNavigation announcementsSentBy:`
 //!   (BT-2475).
 //!

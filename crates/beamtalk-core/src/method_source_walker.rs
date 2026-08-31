@@ -11,7 +11,7 @@
 //! or every class reference ([`find_all_references_in_source`]). Both functions
 //! are needed by two DDD contexts:
 //!
-//! - **Language Service** (`queries::all_sends_query`, `queries::references_to_query`)
+//! - **Language Service** (`language_service::all_sends_query`, `language_service::references_to_query`)
 //!   for `SystemNavigation unimplementedSelectors` / `referencesTo:` queries.
 //! - **Code Generation** (`codegen::core_erlang::gen_server::methods`)
 //!   to bake per-method xref data into `register_class/0` (ADR 0087 Phase 2).
@@ -38,7 +38,8 @@ use crate::ast::{
 use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, parse};
 
 // ---------------------------------------------------------------------------
-// selector_span helper (previously in `queries/mod.rs`)
+// selector_span helper (previously in `queries/mod.rs`, now
+// `language_service/mod.rs` — see ADR 0117, BT-3342)
 // ---------------------------------------------------------------------------
 
 /// Returns the source span covering a keyword selector's keyword tokens, if any.
@@ -46,10 +47,10 @@ use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, p
 /// For a keyword selector with at least one part, merges the span of the first
 /// and last keyword tokens. Returns `None` for unary and binary selectors.
 ///
-/// Used by [`crate::queries`] siblings (`senders_query`, `all_sends_query`,
-/// `announce_sites_query`, `ffi_sites_query`) and by the send-walker in this
-/// module so the single implementation can be shared without reaching upward
-/// into `queries`.
+/// Used by [`crate::language_service`] provider siblings (`senders_query`,
+/// `all_sends_query`, `announce_sites_query`, `ffi_sites_query`) and by the
+/// send-walker in this module so the single implementation can be shared
+/// without reaching upward into `language_service`.
 pub(crate) fn selector_span(selector: &MessageSelector) -> Option<Span> {
     match selector {
         MessageSelector::Keyword(parts) if !parts.is_empty() => {
@@ -1083,7 +1084,7 @@ const REFS_SYNTHETIC_PREFIX: &str = "Object subclass: __SyntheticReferencesScope
 ///
 /// Used by the xref codegen (ADR 0087 Phase 2, BT-2298) to bake per-method
 /// `references` rows into `register_class/0`, and re-exported by
-/// [`crate::queries::references_to_query`] for Language Service use.
+/// [`crate::language_service::references_to_query`] for Language Service use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceHit {
     /// The referenced class name (as written in source).

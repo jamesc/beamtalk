@@ -69,7 +69,7 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
 - **Type checker**: `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`
   - Stub for future gradual typing (Phase 3)
 
-- **Integration**: `crates/beamtalk-core/src/queries/diagnostic_provider.rs`
+- **Integration**: `crates/beamtalk-core/src/language_service/diagnostic_provider.rs`
   - `compute_diagnostics()` calls `analyse_full()` with an `AnalysisContext::default().with_known_vars(...)`
   - Merges parse + semantic diagnostics
   - REPL-aware variable handling

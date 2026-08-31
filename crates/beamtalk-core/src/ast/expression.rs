@@ -425,7 +425,7 @@ impl Expression {
     /// Single authority for "unwrap parens" (BT-3089) — this was
     /// independently reimplemented in `ffi_receiver.rs`,
     /// `codegen::core_erlang` (`CoreErlangGenerator::peel_parens`),
-    /// `queries::ffi_sites_query`, and
+    /// `language_service::ffi_sites_query`, and
     /// `semantic_analysis::type_checker::narrowing::extract`. Lives on
     /// `Expression` itself, in `ast` — the bottom of the dependency graph —
     /// so every consumer above it (codegen, queries, `semantic_analysis`) can

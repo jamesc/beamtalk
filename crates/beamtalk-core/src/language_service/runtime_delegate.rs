@@ -9,9 +9,10 @@
 //! The LSP can answer navigation queries (`textDocument/references`,
 //! `textDocument/implementation`, etc.) in one of two modes:
 //!
-//! * **Cold-file mode** — the in-process Rust AST walker
-//!   ([`crate::queries`]). Used when no workspace runtime is attached, or
-//!   when the `delegateToRuntime` initialization flag is off.
+//! * **Cold-file mode** — the in-process Rust AST walker (this module's
+//!   sibling provider submodules, e.g. [`crate::language_service::references_provider`]).
+//!   Used when no workspace runtime is attached, or when the
+//!   `delegateToRuntime` initialization flag is off.
 //! * **Runtime-attached mode** — the LSP forwards the query to the running
 //!   workspace via the `nav-query` REPL op, which calls into
 //!   `beamtalk_xref` (the maintained selector→sites index) and returns

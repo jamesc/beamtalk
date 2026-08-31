@@ -861,7 +861,7 @@ pub(crate) fn compile_source_with_bindings(
             &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
-    let diag_ctx = beamtalk_core::queries::diagnostic_provider::ProjectDiagnosticContext {
+    let diag_ctx = beamtalk_core::language_service::diagnostic_provider::ProjectDiagnosticContext {
         options: options.clone(),
         cross_file_classes: cross_file_classes.clone(),
         pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
@@ -886,7 +886,7 @@ pub(crate) fn compile_source_with_bindings(
     // codegen re-deriving the class hierarchy, semantic facts, and inferred
     // method return types from scratch (a second full type-checking pass).
     let (new_diagnostics, analysis_result) =
-        beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
+        beamtalk_core::language_service::diagnostic_provider::compute_project_diagnostics_with_analysis(
             &module,
             &source,
             diagnostics,

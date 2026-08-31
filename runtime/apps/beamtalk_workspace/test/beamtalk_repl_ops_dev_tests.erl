@@ -2159,7 +2159,7 @@ load_word_boundary_corpus() ->
 
 %% BT-3083 conformance: every keyword in the shared corpus must be offered
 %% here and by the Rust LSP's static `add_keyword_completions`
-%% (`crates/beamtalk-core/src/queries/completion_provider.rs`). The corpus is
+%% (`crates/beamtalk-core/src/language_service/completion_provider.rs`). The corpus is
 %% the single source of truth both implementations are pinned to; the Rust
 %% side asserts the identical cases in
 %% `completion_provider::tests::keyword_completions_cover_shared_vocabulary_corpus`.

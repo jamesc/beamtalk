@@ -18,6 +18,29 @@
 //! - **Go to Definition** - Navigate to symbol definitions
 //! - **Find References** - Locate all usages of a symbol
 //!
+//! # Providers
+//!
+//! Each language service capability is implemented by a "Provider" module —
+//! a domain service in the DDD ubiquitous language, aligned with LSP
+//! terminology (`CompletionProvider`, `DiagnosticProvider`, `HoverProvider`).
+//! `queries` and `language_service` were originally two separate Rust
+//! modules for the same DDD bounded context; ADR 0117 (BT-3342) merged them
+//! into this one module to remove the dependency cycle that split
+//! encouraged (`SimpleLanguageService`'s orchestrator calling into these
+//! providers, and the providers importing this module's result/protocol
+//! types, are both intra-module now rather than crossing an unenforced
+//! boundary):
+//!
+//! - [`completion_provider`] - Suggest completions at cursor position
+//! - [`definition_provider`] - Go-to-definition (single-file and cross-file)
+//! - [`diagnostic_provider`] - Collect errors and warnings
+//! - [`document_symbols_provider`] - Return document outline symbols
+//! - [`folding_range_provider`] - Return foldable ranges for section dividers
+//! - [`hover_provider`] - Show information on hover
+//! - [`implementors_provider`] - Find every class that defines a given selector (BT-2241)
+//! - [`references_provider`] - Find all references to a symbol across files
+//! - [`signature_help_provider`] - Show parameter info for keyword messages
+//!
 //! # Performance Requirements
 //!
 //! From `docs/beamtalk-architecture.md`:
@@ -49,8 +72,25 @@
 //! assert!(diagnostics.is_empty());
 //! ```
 
+pub mod all_sends_query;
+pub mod announce_sites_query;
+pub mod completion_provider;
+pub mod definition_provider;
+pub mod diagnostic_provider;
+pub mod document_symbols_provider;
+mod erlang_modules;
+pub mod ffi_sites_query;
+pub mod field_accesses_query;
+pub mod folding_range_provider;
+pub mod hover_provider;
+pub mod implementors_provider;
 mod project_index;
+pub mod references_provider;
+pub mod references_to_query;
 pub mod runtime_delegate;
+pub mod selector_rename_query;
+pub mod senders_query;
+pub mod signature_help_provider;
 mod value_objects;
 
 // Re-export value objects at the module level
@@ -72,11 +112,91 @@ mod property_tests;
 use crate::ast::{
     Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern, TypeAnnotation,
 };
-use crate::semantic_analysis::type_checker::NativeTypeRegistry;
+use crate::semantic_analysis::type_checker::{NativeTypeRegistry, TypeMap};
+use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, infer_types_and_returns};
 use crate::source_analysis::{Lexer, Span, Token, TokenKind};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::HashMap;
+
+/// Re-exported from [`crate::method_source_walker`] so sibling provider
+/// modules (`senders_query`, `all_sends_query`, `announce_sites_query`,
+/// `ffi_sites_query`) can reach it via `super::selector_span` without
+/// importing across layers.
+pub(crate) use crate::method_source_walker::selector_span;
+
+/// Enriches a class hierarchy with method return types inferred from a module's source,
+/// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass (BT-1047).
+///
+/// Returns `(Some(enriched_copy), type_map)` when inference produces any results,
+/// cloning the hierarchy and applying the inferred types. Returns `(None, type_map)`
+/// when there is nothing to infer, avoiding the allocation of an unnecessary clone.
+///
+/// The [`TypeMap`] is returned from the same pass so callers do not need to run
+/// a second `infer_types` call.
+///
+/// Used by [`completion_provider`] and [`hover_provider`] so both share identical
+/// enrichment logic (BT-1014).
+///
+/// BT-2867: `native_type_registry`, when `Some`, lets expressions *downstream*
+/// of a typed FFI call (e.g. `x := (Erlang m) f:. x bar`) see `x`'s real type
+/// in the returned [`TypeMap`] too — not just the FFI call site itself, which
+/// callers already special-case separately via their own `native_types`
+/// parameter.
+///
+/// `alias_registry` is `None` here (ADR 0108, BT-2897) — [`ProjectIndex`]
+/// does not yet track a project-wide alias table (that's LSP integration,
+/// deferred to the later ADR 0108 phase BT-2901), so completions see aliases
+/// as ordinary unresolved names for now. [`hover_provider::compute_hover`]
+/// takes its own `alias_registry` parameter and calls
+/// [`enrich_hierarchy_with_inferred_returns_and_aliases`] directly instead of
+/// this function when a caller has one to offer.
+pub(crate) fn enrich_hierarchy_with_inferred_returns(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+) -> (Option<ClassHierarchy>, TypeMap) {
+    let (type_map, inferred) = infer_types_and_returns(module, hierarchy, native_type_registry);
+    let enriched = if inferred.is_empty() {
+        None
+    } else {
+        let mut h = hierarchy.clone();
+        h.apply_inferred_return_types(&inferred);
+        Some(h)
+    };
+    (enriched, type_map)
+}
+
+/// [`enrich_hierarchy_with_inferred_returns`], additionally threading a type
+/// alias registry (ADR 0108, BT-2897) through to
+/// [`infer_types_and_returns_with_aliases`] so the underlying [`TypeMap`]
+/// resolves and tags alias references (see [`TypeProvenance::Aliased`]).
+/// `alias_registry = None` is identical to
+/// [`enrich_hierarchy_with_inferred_returns`].
+///
+/// [`TypeProvenance::Aliased`]: crate::semantic_analysis::type_checker::TypeProvenance
+pub(crate) fn enrich_hierarchy_with_inferred_returns_and_aliases(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> (Option<ClassHierarchy>, TypeMap) {
+    let (type_map, inferred) =
+        crate::semantic_analysis::type_checker::infer_types_and_returns_with_aliases(
+            module,
+            hierarchy,
+            native_type_registry,
+            alias_registry,
+        );
+    let enriched = if inferred.is_empty() {
+        None
+    } else {
+        let mut h = hierarchy.clone();
+        h.apply_inferred_return_types(&inferred);
+        Some(h)
+    };
+    (enriched, type_map)
+}
 
 /// The language service trait.
 ///
@@ -130,7 +250,7 @@ pub trait LanguageService {
     /// Returns folding ranges for a file: one per `// === Name ===` section
     /// divider category (BT-3237), plus one per class body and one per
     /// method body (BT-3260) — see
-    /// [`crate::queries::folding_range_provider`] for why the latter exist
+    /// [`crate::language_service::folding_range_provider`] for why the latter exist
     /// (indentation-equivalent folding, so registering this provider at all
     /// doesn't regress a divider-less file's fold arrows). Empty only for a
     /// file with no classes, or none with anything multi-line to fold.
@@ -339,8 +459,8 @@ impl SimpleLanguageService {
     pub fn check_native_delegate(
         &self,
         location: &Location,
-    ) -> Option<crate::queries::definition_provider::NativeDelegateInfo> {
-        crate::queries::definition_provider::check_native_delegate(
+    ) -> Option<crate::language_service::definition_provider::NativeDelegateInfo> {
+        crate::language_service::definition_provider::check_native_delegate(
             location,
             self.files.iter().map(|(path, data)| (path, &data.module)),
         )
@@ -355,11 +475,13 @@ impl SimpleLanguageService {
         &self,
         file: &Utf8PathBuf,
         position: Position,
-    ) -> Option<crate::queries::definition_provider::FfiCallInfo> {
+    ) -> Option<crate::language_service::definition_provider::FfiCallInfo> {
         let file_data = self.get_file(file)?;
         let offset = position.to_byte_offset(&file_data.source)?;
-        let mut info =
-            crate::queries::definition_provider::check_ffi_call(&file_data.module, offset.get())?;
+        let mut info = crate::language_service::definition_provider::check_ffi_call(
+            &file_data.module,
+            offset.get(),
+        )?;
 
         // Enrich with line number from the native type registry if available.
         if !info.function_name.is_empty() {
@@ -491,7 +613,7 @@ impl SimpleLanguageService {
     /// call to itself.
     #[must_use]
     pub fn find_selector_send_sites_across_files(&self, selector_name: &str) -> Vec<Location> {
-        crate::queries::references_provider::find_selector_send_sites(
+        crate::language_service::references_provider::find_selector_send_sites(
             selector_name,
             self.files.iter().map(|(path, data)| (path, &data.module)),
         )
@@ -656,7 +778,7 @@ impl SimpleLanguageService {
     /// `Location` per defining class.
     #[must_use]
     pub fn find_selector_declarations(&self, selector_name: &str) -> Vec<Location> {
-        crate::queries::references_provider::find_selector_declarations(
+        crate::language_service::references_provider::find_selector_declarations(
             selector_name,
             self.files.iter().map(|(path, data)| (path, &data.module)),
         )
@@ -678,7 +800,7 @@ impl SimpleLanguageService {
     /// multiple files (test fixtures, overlapping workspace roots).
     #[must_use]
     pub fn find_class_declarations(&self, class_name: &str) -> Vec<Location> {
-        crate::queries::references_provider::find_class_declarations(
+        crate::language_service::references_provider::find_class_declarations(
             class_name,
             self.files.iter().map(|(path, data)| (path, &data.module)),
         )
@@ -741,7 +863,7 @@ impl SimpleLanguageService {
     /// line collapse it to `span.start()`.
     #[must_use]
     pub fn find_implementors(&self, selector_name: &str) -> Vec<Location> {
-        crate::queries::implementors_provider::find_implementors(
+        crate::language_service::implementors_provider::find_implementors(
             selector_name,
             self.files.iter().map(|(path, data)| (path, &data.module)),
         )
@@ -809,7 +931,7 @@ impl SimpleLanguageService {
     /// the name as a protocol class — so `prepareTypeHierarchy` on a protocol
     /// name still lands on the protocol header.
     fn find_class_declaration_location(&self, class_name: &str) -> Option<Location> {
-        crate::queries::definition_provider::find_class_or_protocol_declaration(
+        crate::language_service::definition_provider::find_class_or_protocol_declaration(
             class_name,
             &self.project_index,
             self.files.iter().map(|(path, data)| (path, &data.module)),
@@ -1044,13 +1166,15 @@ impl SimpleLanguageService {
     fn find_selector_at_offset(
         module: &Module,
         offset: u32,
-    ) -> Option<crate::queries::definition_provider::SelectorLookup> {
+    ) -> Option<crate::language_service::definition_provider::SelectorLookup> {
         // Check top-level expressions
         for stmt in &module.expressions {
-            if let Some(result) = crate::queries::definition_provider::find_selector_lookup_in_expr(
-                &stmt.expression,
-                offset,
-            ) {
+            if let Some(result) =
+                crate::language_service::definition_provider::find_selector_lookup_in_expr(
+                    &stmt.expression,
+                    offset,
+                )
+            {
                 return Some(result);
             }
         }
@@ -1059,7 +1183,7 @@ impl SimpleLanguageService {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
                 for stmt in &method.body {
                     if let Some(result) =
-                        crate::queries::definition_provider::find_selector_lookup_in_expr(
+                        crate::language_service::definition_provider::find_selector_lookup_in_expr(
                             &stmt.expression,
                             offset,
                         )
@@ -1073,7 +1197,7 @@ impl SimpleLanguageService {
         for smd in &module.method_definitions {
             for stmt in &smd.method.body {
                 if let Some(result) =
-                    crate::queries::definition_provider::find_selector_lookup_in_expr(
+                    crate::language_service::definition_provider::find_selector_lookup_in_expr(
                         &stmt.expression,
                         offset,
                     )
@@ -1758,7 +1882,7 @@ impl LanguageService for SimpleLanguageService {
                 // "unknown protocol" — parity with the CLI's `build`/`lint`
                 // wiring (BT-2910), mirrors `cross_file_classes` above.
                 let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
-                let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
+                let ctx = crate::language_service::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
                     pre_loaded_protocols,
@@ -1772,7 +1896,7 @@ impl LanguageService for SimpleLanguageService {
                     diagnostics_overrides: self.diagnostics_overrides.clone(),
                     ..Default::default()
                 };
-                crate::queries::diagnostic_provider::compute_project_diagnostics(
+                crate::language_service::diagnostic_provider::compute_project_diagnostics(
                     &data.module,
                     &data.source,
                     data.diagnostics.clone(),
@@ -1796,7 +1920,7 @@ impl LanguageService for SimpleLanguageService {
         // ADR 0108 Phase 8 (BT-2901): Pass the project-wide alias registry so
         // alias names are offered alongside class/protocol names in
         // type-annotation position.
-        crate::queries::completion_provider::compute_completions_with_aliases(
+        crate::language_service::completion_provider::compute_completions_with_aliases(
             &file_data.module,
             &file_data.source,
             position,
@@ -1815,7 +1939,7 @@ impl LanguageService for SimpleLanguageService {
         // alias-typed value's hover resolves and renders
         // `AliasName (expansion)` instead of falling back to its bare
         // structural expansion.
-        crate::queries::hover_provider::compute_hover(
+        crate::language_service::hover_provider::compute_hover(
             &file_data.module,
             &file_data.source,
             position,
@@ -1828,7 +1952,7 @@ impl LanguageService for SimpleLanguageService {
     fn signature_help(&self, file: &Utf8PathBuf, position: Position) -> Option<SignatureHelp> {
         let file_data = self.get_file(file)?;
 
-        crate::queries::signature_help_provider::compute_signature_help(
+        crate::language_service::signature_help_provider::compute_signature_help(
             &file_data.module,
             &file_data.source,
             position,
@@ -1847,14 +1971,14 @@ impl LanguageService for SimpleLanguageService {
             Self::find_selector_at_offset(&file_data.module, offset.get())
         {
             let receiver_context =
-                crate::queries::definition_provider::resolve_receiver_class_context(
+                crate::language_service::definition_provider::resolve_receiver_class_context(
                     &file_data.module,
                     offset.get(),
                     &selector_lookup,
                     self.project_index.hierarchy(),
                     self.native_types.as_deref(),
                 );
-            return crate::queries::definition_provider::find_method_definition_cross_file_with_receiver(
+            return crate::language_service::definition_provider::find_method_definition_cross_file_with_receiver(
                 selector_lookup.selector_name.as_str(),
                 receiver_context.as_ref(),
                 &self.project_index,
@@ -1881,12 +2005,12 @@ impl LanguageService for SimpleLanguageService {
             offset.get(),
         ) {
             let receiver_context =
-                crate::queries::definition_provider::resolve_enclosing_superclass_context(
+                crate::language_service::definition_provider::resolve_enclosing_superclass_context(
                     &file_data.module,
                     offset.get(),
                     self.project_index.hierarchy(),
                 )?;
-            return crate::queries::definition_provider::find_overridden_method_definition(
+            return crate::language_service::definition_provider::find_overridden_method_definition(
                 selector_name.as_str(),
                 &receiver_context,
                 &self.project_index,
@@ -1898,7 +2022,7 @@ impl LanguageService for SimpleLanguageService {
         let (ident, _span, _ctx) = self.find_identifier_at_position(file, position)?;
 
         // Cross-file definition lookup via definition provider
-        crate::queries::definition_provider::find_definition_cross_file(
+        crate::language_service::definition_provider::find_definition_cross_file(
             &ident.name,
             file,
             &file_data.module,
@@ -1921,7 +2045,7 @@ impl LanguageService for SimpleLanguageService {
         if let Some(selector_lookup) =
             Self::find_selector_at_offset(&file_data.module, offset.get())
         {
-            return crate::queries::references_provider::find_selector_references(
+            return crate::language_service::references_provider::find_selector_references(
                 selector_lookup.selector_name.as_str(),
                 self.files.iter().map(|(path, data)| (path, &data.module)),
             );
@@ -1937,7 +2061,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             offset.get(),
         ) {
-            return crate::queries::references_provider::find_selector_references(
+            return crate::language_service::references_provider::find_selector_references(
                 selector_name.as_str(),
                 self.files.iter().map(|(path, data)| (path, &data.module)),
             );
@@ -1972,7 +2096,7 @@ impl LanguageService for SimpleLanguageService {
             || self.project_index.alias_registry().has_alias(&ident.name)
             || ctx == IdentifierContext::TypeReference
         {
-            return crate::queries::references_provider::find_class_references(
+            return crate::language_service::references_provider::find_class_references(
                 &ident.name,
                 self.files.iter().map(|(path, data)| (path, &data.module)),
             );
@@ -2014,7 +2138,7 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        crate::queries::document_symbols_provider::compute_document_symbols(
+        crate::language_service::document_symbols_provider::compute_document_symbols(
             &file_data.module,
             &file_data.source,
         )
@@ -2025,7 +2149,7 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        crate::queries::folding_range_provider::compute_folding_ranges(
+        crate::language_service::folding_range_provider::compute_folding_ranges(
             &file_data.module,
             &file_data.source,
         )

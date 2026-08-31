@@ -194,8 +194,8 @@ None of this is scheduled against a Linear epic yet — file issues under a new 
 ## Implementation Tracking
 
 **Epic:** BT-3338
-**Issues:** BT-3339 (CI check), BT-3340 (lint/project/repl extraction), BT-3341 (queries⇄semantic_analysis fix, blocked by BT-3339), BT-3342 (queries⇄language_service fix, blocked by BT-3339), BT-3343 (Document API crate — done, extracted into `beamtalk-cerl-doc`), BT-3344 (REPL-codegen test move — done), BT-3345 (Span extraction), BT-3346 (unparse-round-trip test move)
-**Status:** In progress. BT-3343, BT-3341, and BT-3344 have landed; the rest are still Planned. Decision step 5 (the full bounded-context crate split) is explicitly out of scope for this epic — revisit once BT-3341/BT-3342 land and the ADR's dependency-graph extraction is re-run to confirm the cross-context cycles are gone.
+**Issues:** BT-3339 (CI check), BT-3340 (lint/project/repl extraction), BT-3341 (queries⇄semantic_analysis fix, blocked by BT-3339), BT-3342 (queries⇄language_service fix, blocked by BT-3339 — done, merged `queries` into `language_service`), BT-3343 (Document API crate — done, extracted into `beamtalk-cerl-doc`), BT-3344 (REPL-codegen test move — done), BT-3345 (Span extraction), BT-3346 (unparse-round-trip test move)
+**Status:** In progress. BT-3343, BT-3341, BT-3344, and BT-3342 have landed; the rest are still Planned. Decision step 5 (the full bounded-context crate split) is explicitly out of scope for this epic — revisit once the ADR's dependency-graph extraction is re-run to confirm the cross-context cycles are gone.
 
 ## References
 - Related issues: none yet — this ADR did not originate from a Linear issue; came up during BT-3323 (Rust coverage epic)

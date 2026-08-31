@@ -544,7 +544,7 @@ fn resolve_receiver_class(
 
 /// Builds a `SignatureHelp` from a resolved `MethodInfo`.
 /// Builds signature help from a resolved `ClassHierarchy::MethodInfo`
-/// (BT-3097). Like [`crate::queries::hover_provider`]'s resolved-call
+/// (BT-3097). Like [`crate::language_service::hover_provider`]'s resolved-call
 /// display, `MethodInfo` has no parameter names — only types — so each
 /// parameter renders as `keyword: Type` via the shared
 /// [`crate::unparse::render_signature_text`] core (`SignatureParam { name:

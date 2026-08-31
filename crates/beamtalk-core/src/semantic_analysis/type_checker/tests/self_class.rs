@@ -533,7 +533,7 @@ fn new_on_actor_subclass_no_longer_dnu() {
     // `check_actor_new_usage` validator (BT-563/BT-1524), still a hard
     // compile error; see `test_actor_new_error_in_standalone_method` in
     // `semantic_analysis::tests` and `error_actor_subclass_new` in
-    // `queries::diagnostic_provider::tests`.
+    // `language_service::diagnostic_provider::tests`.
     let source = "
 Actor subclass: Worker
   state: v = 0

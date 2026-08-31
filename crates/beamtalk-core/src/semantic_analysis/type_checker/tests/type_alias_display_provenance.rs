@@ -3,7 +3,7 @@
 
 //! ADR 0108 / BT-2897: display-name provenance for diagnostics.
 //!
-//! Hover coverage lives in `queries::hover_provider`'s own test module
+//! Hover coverage lives in `language_service::hover_provider`'s own test module
 //! (`compute_hover` is the hover entry point, not part of this crate's
 //! `semantic_analysis::type_checker`). This file covers the diagnostic side:
 //! membership-violation wording naming the alias (with a "did you mean"

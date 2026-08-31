@@ -51,7 +51,7 @@
 //! whole into that method's plain-`String` `doc_comment` field (no
 //! `Comment`, no span, invisible to an AST walk). [`check_near_miss_dividers`]
 //! is the thin, `pub` wrapper every caller actually reaches: BT-3240 wired
-//! it into `queries::diagnostic_provider` (the LSP-facing pipeline); BT-3257
+//! it into `language_service::diagnostic_provider` (the LSP-facing pipeline); BT-3257
 //! threaded `source: &str` through `beamtalk lint`'s `collect_diagnostics`
 //! and MCP's `run_module_analysis` so those two surfaces call it too,
 //! instead of a since-removed AST-based `NearMissDividerPass` that shared
@@ -63,7 +63,7 @@
 //!
 //! Every sibling lint pass moved into the standalone `beamtalk-lint` crate
 //! (ADR 0117 Decision step 2). This one check stays behind: it's called
-//! from `queries::diagnostic_provider`, which stays inside `beamtalk-core`
+//! from `language_service::diagnostic_provider`, which stays inside `beamtalk-core`
 //! (it isn't part of this issue's scope) — and `beamtalk-lint` necessarily
 //! depends on `beamtalk-core` (for `ast`/`semantic_analysis`/
 //! `source_analysis`), so `beamtalk-core` depending back on `beamtalk-lint`
@@ -86,7 +86,7 @@ use crate::source_analysis::{Diagnostic, Span, parse_divider_name};
 ///
 /// Every lint pass proper lives in the standalone `beamtalk-lint` crate and
 /// is reachable through its `run_lint_passes`. This one check instead has
-/// three direct callers — `queries::diagnostic_provider` (so it also reaches
+/// three direct callers — `language_service::diagnostic_provider` (so it also reaches
 /// the LSP's `publishDiagnostics`), `beamtalk lint`'s `collect_diagnostics`,
 /// and MCP's `run_module_analysis` (BT-3257) — because a silently-mis-parsed
 /// section divider is cheap to fix the moment it's written and easy to miss

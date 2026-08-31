@@ -2693,7 +2693,9 @@ fn run_module_analysis(
             .filter(|d| d.category.is_some()),
     );
 
-    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
+    beamtalk_core::language_service::diagnostic_provider::apply_expect_directives(
+        module, &mut diags,
+    );
 
     // BT-3257: mirrors `compute_project_diagnostics_with_analysis`'s
     // placement — appended after `apply_expect_directives` because a

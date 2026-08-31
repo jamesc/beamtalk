@@ -969,7 +969,7 @@ Backs `Behaviour>>renameSelector:to:''s reference-site rewrite:
 `beamtalk_xref:senders_of/1' only carries a *line* number per sending
 method, and a whole-method span is too coarse to splice a single send's
 selector token(s) without corrupting the rest of the body — see
-`beamtalk_core::queries::selector_rename_query::find_selector_send_spans''s
+`beamtalk_core::language_service::selector_rename_query::find_selector_send_spans''s
 module doc for the full "why not regex" rationale (a multi-keyword
 selector like `at:put:' can have arbitrary nested expressions between its
 keyword parts). `MethodSource' is expected to be the OWNING method's own
@@ -1065,7 +1065,7 @@ rewrite counterpart to `find_selector_send_spans/4' for the definition site
 itself: a `'rename-method'' ChangeLog entry's `sites[0]' must be a narrow
 selector-token splice, never the whole method body, or a rewrite would
 corrupt the method's own parameter names/logic. See
-`beamtalk_core::queries::selector_rename_query::find_definition_selector_spans''s
+`beamtalk_core::language_service::selector_rename_query::find_definition_selector_spans''s
 module doc for the full resolution strategy (exact `KeywordPart' spans for
 a keyword selector; a small modifier-skipping re-lex for unary/binary,
 which the parser gives no dedicated span at all).

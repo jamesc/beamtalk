@@ -7,16 +7,20 @@
 //! layering for `beamtalk-core`: the **Compilation** bounded context (`ast`,
 //! `source_analysis`, `unparse`, `codegen`, `semantic_analysis`,
 //! `compilation`) is consumed by the **Language Service** context
-//! (`queries`, `language_service`, `lint`), never the other way round. ADR
-//! 0117's review found that rule had silently gone stale — a
+//! (`language_service`, `lint`), never the other way round. ADR 0117's
+//! review found that rule had silently gone stale — a
 //! `semantic_analysis -> queries` production edge, plus an extensive
-//! `queries <-> language_service` cycle, existed with nothing to catch them.
-//! This binary is the fix: it parses every `.rs` file under each Compilation
-//! module with `syn` (a real parser, not text/regex heuristics — Rust source
-//! is full of `{}` inside string literals, which defeats brace-counting) and
-//! fails when a production `use crate::<module>::...` import or
-//! fully-qualified `crate::<module>::...` path reaches into `queries`,
-//! `language_service`, or `lint`. That includes a `crate::<module>::...`
+//! `queries <-> language_service` cycle (the two were originally separate
+//! Rust modules for the same DDD bounded context), existed with nothing to
+//! catch them. BT-3342 merged `queries` into `language_service`, removing
+//! that second cycle by construction; this binary is the fix for the class
+//! of problem — new edges crossing the boundary in the wrong direction —
+//! rather than just that one drift: it parses every `.rs` file under each
+//! Compilation module with `syn` (a real parser, not text/regex heuristics —
+//! Rust source is full of `{}` inside string literals, which defeats
+//! brace-counting) and fails when a production `use crate::<module>::...`
+//! import or fully-qualified `crate::<module>::...` path reaches into
+//! `language_service` or `lint`. That includes a `crate::<module>::...`
 //! reference written inside a macro call (`format!`, `assert_eq!`, `vec!`,
 //! ...) — macro bodies are opaque token streams to `syn`'s AST-level `Path`
 //! visitor, so those are found by a separate raw-token scan, not missed.
@@ -30,9 +34,9 @@
 //!   the same as a `crate::<module>::...` edge, without needing to compute
 //!   how many `super`s a given file needs to actually reach the crate root —
 //!   no module anywhere inside a Compilation-context subtree is ever itself
-//!   named `queries`/`language_service`/`lint`, so a chain that resolves to
-//!   one of those names (and compiles) can only mean the real top-level
-//!   sibling module.
+//!   named `language_service`/`lint`, so a chain that resolves to one of
+//!   those names (and compiles) can only mean the real top-level sibling
+//!   module.
 //! - **`crate::prelude::<Item>`** (and, equivalently, a
 //!   `super::(super::)*prelude::<Item>` chain landing on that exact name):
 //!   `beamtalk-core`'s `lib.rs` re-exports a mix of Compilation- and
@@ -92,11 +96,15 @@ const COMPILATION_MODULES: &[&str] = &[
 /// never import from these in production code. `lint`'s own module header
 /// (`crates/beamtalk-core/src/lint/mod.rs`) says `DDD Context: Compilation`,
 /// but that's stale documentation, not this list being wrong: `lint` is
-/// consumed by `queries::diagnostic_provider` and nothing in Compilation
-/// imports it (verified at BT-3339 landing — see the crate README), so
-/// grouping it with the other Language-Service-consumed modules here matches
-/// the actual dependency direction. Tracked as a doc fix in BT-3353.
-const LANGUAGE_SERVICE_MODULES: &[&str] = &["queries", "language_service", "lint"];
+/// consumed by `language_service::diagnostic_provider` and nothing in
+/// Compilation imports it (verified at BT-3339 landing — see the crate
+/// README), so grouping it with `language_service` here matches the actual
+/// dependency direction. Tracked as a doc fix in BT-3353. `queries` used to
+/// be a separate top-level module here too, until BT-3342 merged it into
+/// `language_service` to remove the `queries <-> language_service` cycle by
+/// construction — see `docs/ADR/0117-beamtalk-core-crate-split.md` Decision
+/// step 3.
+const LANGUAGE_SERVICE_MODULES: &[&str] = &["language_service", "lint"];
 
 /// Top-level `beamtalk-core/src` modules that belong to neither bounded
 /// context this checker gates — `repl` (its own DDD Context: REPL) and
@@ -109,11 +117,11 @@ const LANGUAGE_SERVICE_MODULES: &[&str] = &["queries", "language_service", "lint
 /// going unscanned.
 const OTHER_MODULES: &[&str] = &["repl", "project"];
 
-/// Known, already-tracked violations ADR 0117 Decision step 3 (BT-3342)
-/// removes. Keyed by (file path relative to repo root, target module,
-/// *exact* `crate::...` path text of the one tracked edge) — not just
-/// (file, module), so that a new, unrelated edge from the same file into
-/// the same module (e.g. a second `queries::` call added later) still fails
+/// Known, already-tracked violations ADR 0117 Decision step 3 removes.
+/// Keyed by (file path relative to repo root, target module, *exact*
+/// `crate::...` path text of the one tracked edge) — not just (file,
+/// module), so that a new, unrelated edge from the same file into the same
+/// module (e.g. a second `language_service::` call added later) still fails
 /// instead of silently matching this entry. Remove an entry here in the
 /// *same* PR that removes the corresponding edge from the code — this list
 /// exists to stop *new* edges from landing while these are still open, not
@@ -123,6 +131,10 @@ const OTHER_MODULES: &[&str] = &["repl", "project"];
 /// BT-3341 (the `queries::announce_sites_query::is_announce_selector` edge)
 /// was fixed by moving `is_announce_selector` into the shared leaf module
 /// `announce_selectors.rs`; its entry has been removed from this list.
+/// BT-3342 (the `queries <-> language_service` cycle) was fixed by merging
+/// `queries` into `language_service` — that edge never had an ALLOWLIST
+/// entry in the first place, since this checker only gates Compilation ->
+/// Language Service edges, not edges within Language Service itself.
 const ALLOWLIST: &[(&str, &str, &str)] = &[];
 
 /// True when `entry` (a single [`ALLOWLIST`] tuple: file, target module,
@@ -411,8 +423,8 @@ fn check_module_list_drift(core_src: &Path) -> Result<Vec<String>, Vec<String>> 
 /// Compilation-module file and fails the check the moment it finds a hit,
 /// which is what makes it safe to treat a `super::(super::)*prelude::...`
 /// chain as unambiguously *the* crate-root `prelude` shim — the same way
-/// `queries`/`language_service`/`lint` are unambiguous by not existing
-/// anywhere else in the Compilation-context subtree, except proven here on
+/// `language_service`/`lint` are unambiguous by not existing anywhere else
+/// in the Compilation-context subtree, except proven here on
 /// every run instead of by one-time manual audit (`prelude` is common enough
 /// re-export-convenience Rust style that a one-time audit alone would be
 /// worth much less).
@@ -515,7 +527,7 @@ fn prelude_item_name(path_text: &str) -> Option<&str> {
 /// out of code review — see the crate README).
 ///
 /// A `super`-rooted match is deliberately resolved exactly the same as a
-/// `crate`-rooted one — unlike `queries`/`language_service`/`lint`, `prelude`
+/// `crate`-rooted one — unlike `language_service`/`lint`, `prelude`
 /// isn't a name this function can independently prove unique across every
 /// Compilation-context subtree, so this correctness *does* depend on no
 /// Compilation module ever nesting a local `prelude` submodule of its own (a
@@ -573,7 +585,7 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
 /// directory, or its own name marks it as a test module (`tests.rs`,
 /// `test.rs`, `test_*.rs`, `*_test.rs`, `*_tests.rs`). This matches how
 /// this codebase actually names its test files (verified against every
-/// existing `crate::{queries,language_service,lint}::` reference inside the
+/// existing `crate::{language_service,lint}::` reference inside the
 /// Compilation modules as of BT-3339 landing — see the crate README);
 /// individual `#[cfg(test)]`/`#[test]` items *inside* an otherwise-production
 /// file are handled separately, by the AST visitor below.
@@ -677,14 +689,15 @@ impl EdgeVisitor {
 /// returns `Some(1)` (the always-fixed index of the module name after a
 /// `crate::` root). If `names` starts with one or more `super` segments
 /// followed by at least one more segment, returns the index of that
-/// segment (equal to the number of leading `super`s — `super::queries` is
-/// index 1, `super::super::queries` is index 2, ...). Otherwise `None` (a
+/// segment (equal to the number of leading `super`s —
+/// `super::language_service` is index 1, `super::super::language_service`
+/// is index 2, ...). Otherwise `None` (a
 /// bare `crate`/`super` with nothing following, or neither root).
 ///
 /// Correctness of treating a `super`-rooted match the same as a
 /// `crate`-rooted one does *not* require knowing how many `super`s a given
 /// file actually needs to reach the crate root: no module anywhere inside a
-/// Compilation-context subtree is itself named `queries`, `language_service`,
+/// Compilation-context subtree is itself named `language_service`
 /// or `lint` (verified at BT-3339 landing — see the crate README), so a
 /// `super`-chain landing on one of those exact names can only be real Rust
 /// code that compiles by genuinely reaching the true top-level sibling
@@ -698,8 +711,8 @@ impl EdgeVisitor {
 /// so a bare `module_index` match on it is never itself a violation — but
 /// [`resolve_prelude_edge`] special-cases `target_module == "prelude"` to
 /// resolve `crate::prelude::...` (and, equivalently, `super`-rooted)
-/// re-exports, the same as this function treats `queries`/`language_service`/
-/// `lint`. `prelude` isn't proven unique the way those three are by
+/// re-exports, the same as this function treats `language_service`/`lint`.
+/// `prelude` isn't proven unique the way those two are by
 /// construction (a `pub mod prelude { ... }` re-export-convenience submodule
 /// is common Rust style) — instead [`run`] proves it on every run, via
 /// [`find_nested_prelude_mod`], by checking no Compilation module actually

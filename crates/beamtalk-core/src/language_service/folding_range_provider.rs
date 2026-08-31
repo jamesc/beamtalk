@@ -15,7 +15,7 @@
 //! - One range per named [`source_analysis::MethodCategory`], spanning from
 //!   the divider's own banner line through the end of the category's last
 //!   method — computed via [`source_analysis::MethodCategory::span`], the
-//!   exact same call [`crate::queries::document_symbols_provider`] uses for
+//!   exact same call [`crate::language_service::document_symbols_provider`] uses for
 //!   its `DocumentSymbolKind::Category` container span, so folding and
 //!   outline always agree. Classes with **no** dividers contribute none of
 //!   these — the implicit unnamed leading category (methods before the
@@ -251,8 +251,9 @@ Object subclass: Counter
 ";
         let module = parse_module(source);
         let folding_ranges = compute_folding_ranges(&module, source);
-        let symbols =
-            crate::queries::document_symbols_provider::compute_document_symbols(&module, source);
+        let symbols = crate::language_service::document_symbols_provider::compute_document_symbols(
+            &module, source,
+        );
         let category = symbols[0]
             .children
             .iter()

@@ -2065,7 +2065,7 @@ read_class_meta(Module) ->
     end.
 
 %% BT-3083: this list and the LSP's static `add_keyword_completions`
-%% (`crates/beamtalk-core/src/queries/completion_provider.rs`) are two
+%% (`crates/beamtalk-core/src/language_service/completion_provider.rs`) are two
 %% engines that cannot literally share code (Erlang vs. Rust) but should
 %% offer the same control-flow vocabulary — a keyword missing from one and
 %% not the other is a completion gap on whichever surface is missing it.

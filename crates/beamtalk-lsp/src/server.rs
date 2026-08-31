@@ -21,12 +21,12 @@ use crate::runtime::{
     RuntimeClient, RuntimeError,
 };
 
+use beamtalk_core::language_service::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::language_service::{
     CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
     Location as BtLocation, NavQuery, NavSite, NavSymbolClass, Position as BtPosition,
     RuntimeLocation, SimpleLanguageService, nav_site_to_location,
 };
-use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
 use beamtalk_core::tool_expr::{
@@ -1913,7 +1913,7 @@ impl LanguageServer for Backend {
                     let range = std::fs::read_to_string(&erl_path)
                         .ok()
                         .and_then(|content| {
-                            beamtalk_core::queries::definition_provider::handle_call_clause_line(
+                            beamtalk_core::language_service::definition_provider::handle_call_clause_line(
                                 &content,
                                 &delegate_info.selector,
                             )

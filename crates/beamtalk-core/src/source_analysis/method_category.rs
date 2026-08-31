@@ -64,7 +64,7 @@
 //!
 //! # Known limitations (BT-2601 code review)
 //!
-//! - **Fields are not nested into categories.** [`crate::queries::document_symbols_provider`]
+//! - **Fields are not nested into categories.** [`crate::language_service::document_symbols_provider`]
 //!   still renders a class's `state:`/`classState:` fields as flat, top-level
 //!   children of the class symbol regardless of where dividers place them.
 //!   A divider written directly above a field (rather than a method) is
@@ -143,9 +143,9 @@ impl MethodCategory {
     /// with every method in the category, in source order.
     ///
     /// Shared by every consumer that needs "the range this category covers"
-    /// — [`crate::queries::document_symbols_provider`] (the
+    /// — [`crate::language_service::document_symbols_provider`] (the
     /// `DocumentSymbolKind::Category` container) and
-    /// [`crate::queries::folding_range_provider`] (BT-3237) both call this
+    /// [`crate::language_service::folding_range_provider`] (BT-3237) both call this
     /// rather than re-deriving the merge, so outline and foldingRange always
     /// agree exactly.
     ///

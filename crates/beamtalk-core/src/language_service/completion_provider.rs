@@ -26,9 +26,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
 use crate::ast::{ClassDefinition, ClassKind, Expression, MethodDefinition, Module};
+use crate::language_service::enrich_hierarchy_with_inferred_returns;
+use crate::language_service::erlang_modules;
 use crate::language_service::{Completion, CompletionKind, Position};
-use crate::queries::enrich_hierarchy_with_inferred_returns;
-use crate::queries::erlang_modules;
 use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
@@ -107,7 +107,7 @@ enum ClassContext<'a> {
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::queries::completion_provider::compute_completions;
+/// use beamtalk_core::language_service::completion_provider::compute_completions;
 /// use beamtalk_core::language_service::Position;
 /// use beamtalk_core::semantic_analysis::ClassHierarchy;
 /// use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -149,7 +149,7 @@ pub fn compute_completions(
 /// A separate function — rather than adding the parameter to
 /// [`compute_completions`] directly — keeps that function's signature
 /// source-compatible with every existing caller and test; mirrors
-/// [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
+/// [`crate::language_service::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
 /// identical "`_with_aliases`" wrapper shape, added for the same reason.
 /// `alias_registry = None` behaves identically to [`compute_completions`].
 #[must_use]
