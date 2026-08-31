@@ -6,14 +6,12 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-Erlang runtime glue for Beamtalk Supervisor, DynamicSupervisor, and
-ChildSupervisor.
+Erlang runtime glue for Beamtalk Supervisor and DynamicSupervisor.
 
 This module provides the BEAM interop entry points called from the
-Supervisor, DynamicSupervisor, and ChildSupervisor stdlib methods via Erlang
-FFI. Generated `init/1` callbacks delegate to `static_init/2`,
-`dynamic_init/2`, and `child_init/2` (Phase 3 codegen; `child_init/2` added
-BT-3366 / ADR 0118) to avoid gen_server deadlocks. `is_supervisor/1` is used
+Supervisor and DynamicSupervisor stdlib methods via Erlang FFI.
+Generated `init/1` callbacks delegate to `static_init/2` and `dynamic_init/2`
+(Phase 3 codegen) to avoid gen_server deadlocks. `is_supervisor/1` is used
 for compile-time routing and child spec construction.
 
 ## Design (ADR 0059 Phase 2)
@@ -41,7 +39,6 @@ functions that call OTP APIs from the caller's process context.
     current/1,
     static_init/2,
     dynamic_init/2,
-    child_init/2,
     whichChildren/1,
     whichChild/2,
     terminateChild/2,
@@ -49,9 +46,6 @@ functions that call OTP APIs from the caller's process context.
     'terminateChild:child:'/2,
     startChild/1,
     startChild/2,
-    childStartChild/1,
-    childStartChild/2,
-    childTerminateChild/2,
     countChildren/1,
     stop/1,
     build_child_specs/1,
@@ -206,38 +200,6 @@ dynamic_init(Module, ClassName) ->
         domain => [beamtalk, runtime]
     }),
     {ok, {SupFlags, Specs}}.
-
--doc """
-Initialize a child supervisor without calling through the class gen_server
-(BT-3366, ADR 0118).
-
-Called from the generated `init/1` callback of ChildSupervisor subclasses.
-Same deadlock avoidance rationale as `static_init/2` and `dynamic_init/2`.
-
-Unlike `dynamic_init/2` (`simple_one_for_one` with a single fixed template
-child spec, replayed identically for every `startChild`), a ChildSupervisor
-starts with NO children and a plain `one_for_one` strategy: each
-`childStartChild/1,2` call registers its own permanent, uniquely-identified
-OTP child spec at runtime (`build_child_supervisor_spec/2`), so a
-crash-triggered restart replays that specific child's own original args —
-the OTP-native "config-preserving restart" primitive `simple_one_for_one`
-cannot provide.
-""".
--spec child_init(module(), atom()) -> {ok, {map(), [map()]}}.
-child_init(Module, ClassName) ->
-    ClassSelf = make_init_class_self(ClassName, Module),
-    ClassVars = #{},
-    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
-    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
-    SupFlags = #{strategy => one_for_one, intensity => MaxR, period => MaxT},
-    ?LOG_DEBUG("ChildSupervisor init", #{
-        supervisor => ClassName,
-        strategy => one_for_one,
-        max_restarts => MaxR,
-        restart_window => MaxT,
-        domain => [beamtalk, runtime]
-    }),
-    {ok, {SupFlags, []}}.
 
 -doc """
 Return the running supervisor instance, or nil if not started.
@@ -555,170 +517,6 @@ startChild(Self, Args) ->
     end).
 
 -doc """
-Start a new child with default args under a ChildSupervisor (BT-3366).
-
-Called from `startChild` on ChildSupervisor instances. Equivalent to
-`childStartChild/2` with `Args = nil` — see its doc for the full contract.
-""".
--spec childStartChild(term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
-childStartChild(Self) ->
-    do_child_start_child(Self, nil, startChild).
-
--doc """
-Start a new child with args under a ChildSupervisor (BT-3366, ADR 0118).
-
-Called from `startChild: args` on ChildSupervisor instances. Builds a
-fresh, permanent OTP child spec via `build_child_supervisor_spec/2` and
-registers it with `supervisor:start_child/2` under the plain `one_for_one`
-supervisor started by `child_init/2`. Because the full spec — including
-`Args` — is permanently registered, OTP replays the exact same start
-arguments on any crash-triggered restart of this specific child.
-
-## Return shape
-
-Returns `{ok, {beamtalk_object, ChildClass, ChildModule, ChildPid}}` (workers
-only — a ChildSupervisor's children are not themselves supervisors). On
-`supervisor:start_child/2` failure returns
-`{error, #beamtalk_error{kind = child_start_failed}}`. On a stale handle
-returns `{error, #beamtalk_error{kind = stale_handle}}`. FFI coercion wraps
-this into a Beamtalk `Result` for the stdlib method body.
-""".
--spec childStartChild(term(), term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
-childStartChild(Self, Args) ->
-    do_child_start_child(Self, Args, 'startChild:').
-
--spec do_child_start_child(term(), term(), atom()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
-do_child_start_child(Self, Args, Selector) ->
-    SupPid = element(4, Self),
-    SupMod = element(3, Self),
-    SupClass = element(2, Self),
-    ChildClassObj = SupMod:'childClass'(),
-    ChildClassPid = element(4, ChildClassObj),
-    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
-    ChildModule = element(3, ChildClassObj),
-    with_live_supervisor(SupClass, Selector, fun() ->
-        OtpSpec = build_child_supervisor_spec(ChildClassPid, Args),
-        case supervisor:start_child(SupPid, OtpSpec) of
-            {ok, ChildPid} ->
-                ?LOG_INFO("ChildSupervisor child started", #{
-                    supervisor => SupClass,
-                    child => ChildClass,
-                    module => ChildModule,
-                    child_pid => ChildPid,
-                    domain => [beamtalk, runtime]
-                }),
-                announce_child_added(SupClass, ChildClass, ChildPid),
-                {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
-            {error, Reason} ->
-                ?LOG_ERROR("ChildSupervisor child start failed", #{
-                    supervisor => SupClass,
-                    child => ChildClass,
-                    reason => Reason,
-                    domain => [beamtalk, runtime]
-                }),
-                announce_child_crashed(SupClass, ChildClass, Reason),
-                Error = beamtalk_error:new(
-                    child_start_failed,
-                    SupClass,
-                    Selector,
-                    iolist_to_binary(
-                        io_lib:format("supervisor start_child failed: ~p", [Reason])
-                    )
-                ),
-                {error, Error}
-        end
-    end).
-
--doc """
-Build a fresh, uniquely-identified OTP child spec for a ChildSupervisor
-child (BT-3366, ADR 0118).
-
-Reuses `SupervisionSpec`/`childSpec` (Beamtalk) for start-fn selection,
-restart-policy defaulting (from the child class's `supervisionPolicy`), and
-shutdown-timeout defaulting — see `spec_to_otp/1` — rather than duplicating
-that logic. Only the `id` is overridden: a fresh `erlang:unique_integer/1`
-rather than the class-name atom `SupervisionSpec` defaults to, because a
-ChildSupervisor may hold many children of the same class and OTP requires
-each permanent child spec id to be unique. An integer (never
-`list_to_atom/1` on caller data) avoids leaking the atom table as children
-are started and terminated repeatedly over a long-running node's lifetime.
-""".
--spec build_child_supervisor_spec(pid(), term()) -> map().
-build_child_supervisor_spec(ChildClassPid, Args) ->
-    BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
-    BtSpec2 =
-        case Args of
-            nil -> BtSpec;
-            _ -> beamtalk_message_dispatch:send(BtSpec, 'withArgs:', [Args])
-        end,
-    BtDict = beamtalk_message_dispatch:send(BtSpec2, 'childSpec', []),
-    UniqueId = erlang:unique_integer([positive, monotonic]),
-    spec_to_otp(maps:put(id, UniqueId, BtDict)).
-
--doc """
-Terminate a child under a ChildSupervisor and delete its permanent child
-spec (BT-3366, ADR 0118).
-
-Unlike DynamicSupervisor's `simple_one_for_one` (where
-`supervisor:delete_child/2` crashes the supervisor — the shared template is
-not a real per-child spec), a ChildSupervisor's `one_for_one` children each
-own a real permanent spec that OTP keeps forever unless explicitly deleted.
-Leaving it registered after termination would leak spec entries across many
-add/remove cycles — the issue's explicit "no leaked spec entries" acceptance
-criterion — so this always follows a successful `terminate_child/2` with
-`delete_child/2`.
-
-`supervisor:terminate_child/2` on a non-`simple_one_for_one` supervisor
-requires the child spec Id, not the Pid, so this looks up the live Id via
-`supervisor:which_children/1` by matching Pid — mirroring `whichChild/2`'s
-existing pid-matching pattern.
-
-Idempotent: a child that has already crashed and is gone (id not found among
-`which_children`) returns `{ok, nil}`, matching `terminateChild/2`'s
-"child already gone is success" convention (ADR 0080 Phase 1).
-""".
--spec childTerminateChild(term(), term()) -> {ok, nil} | {error, #beamtalk_error{}}.
-childTerminateChild(Self, Child) ->
-    SupPid = element(4, Self),
-    SupClass = element(2, Self),
-    ChildPid = element(4, Child),
-    with_live_supervisor(SupClass, 'terminateChild:', fun() ->
-        case
-            lists:search(
-                fun({_Id, CPid, _, _}) -> CPid =:= ChildPid end,
-                supervisor:which_children(SupPid)
-            )
-        of
-            {value, {Id, _, _, _}} ->
-                terminate_and_delete_child(SupClass, SupPid, Id);
-            false ->
-                {ok, nil}
-        end
-    end).
-
--spec terminate_and_delete_child(atom(), pid(), term()) -> {ok, nil} | {error, #beamtalk_error{}}.
-terminate_and_delete_child(SupClass, SupPid, Id) ->
-    TerminateResult = supervisor:terminate_child(SupPid, Id),
-    Result = handle_terminate_child_result(SupClass, #{child_id => Id}, TerminateResult),
-    case TerminateResult of
-        ok ->
-            case supervisor:delete_child(SupPid, Id) of
-                ok ->
-                    ok;
-                {error, DeleteReason} ->
-                    ?LOG_WARNING("ChildSupervisor delete_child failed after terminate", #{
-                        supervisor => SupClass,
-                        child_id => Id,
-                        reason => DeleteReason,
-                        domain => [beamtalk, runtime]
-                    })
-            end;
-        _ ->
-            ok
-    end,
-    Result.
-
--doc """
 Return the count of active children.
 
 Called from `count` on Supervisor and DynamicSupervisor instances.
@@ -782,8 +580,7 @@ ClassName must be the base class name atom (e.g., 'WebApp', not 'WebApp class').
 -spec is_supervisor(atom()) -> boolean().
 is_supervisor(ClassName) ->
     beamtalk_class_registry:inherits_from(ClassName, 'Supervisor') orelse
-        beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') orelse
-        beamtalk_class_registry:inherits_from(ClassName, 'ChildSupervisor').
+        beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor').
 
 -doc """
 Register the OTP application root supervisor (BT-1191).

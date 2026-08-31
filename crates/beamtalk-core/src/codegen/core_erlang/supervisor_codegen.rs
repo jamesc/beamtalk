@@ -5,10 +5,10 @@
 //!
 //! **DDD Context:** Code Generation
 //!
-//! Generates `-behaviour(supervisor)` modules for `Supervisor subclass:`,
-//! `DynamicSupervisor subclass:`, and `ChildSupervisor subclass:` classes. The
-//! generated module is intentionally thin (~60 lines of Core Erlang) — all
-//! restart logic lives in the stdlib and `beamtalk_supervisor.erl`.
+//! Generates `-behaviour(supervisor)` modules for `Supervisor subclass:` and
+//! `DynamicSupervisor subclass:` classes. The generated module is intentionally
+//! thin (~60 lines of Core Erlang) — all restart logic lives in the stdlib and
+//! `beamtalk_supervisor.erl`.
 //!
 //! ## Generated structure
 //!
@@ -20,12 +20,6 @@
 //! For `DynamicSupervisor subclass: WorkerPool`:
 //! - `start_link/0` — same
 //! - `init/1` — `simple_one_for_one` with `childClass`, `maxRestarts`, `restartWindow`
-//!
-//! For `ChildSupervisor subclass: MonitorSupervisor` (BT-3366, ADR 0118):
-//! - `start_link/0` — same
-//! - `init/1` — plain `one_for_one` with an empty initial child list; each
-//!   `startChild:` call registers its own permanent OTP child spec at runtime
-//!   (`beamtalk_supervisor:child_init/2`)
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -65,7 +59,6 @@ impl CoreErlangGenerator {
         })? {
             SupervisorKind::Static => self.generate_static_supervisor(module),
             SupervisorKind::Dynamic => self.generate_dynamic_supervisor(module),
-            SupervisorKind::Child => self.generate_child_supervisor(module),
         }
     }
 
@@ -277,103 +270,6 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// Generates a child supervisor module (`ChildSupervisor subclass:`, BT-3366 / ADR 0118).
-    ///
-    /// Structurally identical to `generate_dynamic_supervisor` — same exports
-    /// (`childClass/0` is reused via `generate_dynamic_child_class`, which is
-    /// generic on class name), same `start_link/0`. The only difference is
-    /// `init/1`, which delegates to `beamtalk_supervisor:child_init/2` (plain
-    /// `one_for_one` with an empty initial child list) instead of
-    /// `dynamic_init/2` (`simple_one_for_one` with a fixed template).
-    fn generate_child_supervisor(&mut self, module: &Module) -> Result<Document<'static>> {
-        let class = module.classes.first().ok_or_else(|| {
-            CodeGenError::Internal("child supervisor module must have a class".to_string())
-        })?;
-        let class_name = class.name.name.clone();
-        let module_name = self.module_name.clone();
-
-        // Build export list as Documents (CLAUDE.md: use Document/docvec!, never format!)
-        let mut class_method_exports: Document<'static> = Document::Nil;
-        for m in class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
-            let arity = m.selector.arity() + 2;
-            class_method_exports = docvec![
-                class_method_exports,
-                ", ",
-                fname(safe_class_method_fn_name(m.selector.name().as_ref()), arity),
-            ];
-        }
-
-        let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
-        let file_attr = self.file_attr();
-        let source_path_attr = self.source_path_attr();
-        let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
-        let spec_attrs = spec_codegen::generate_class_specs(
-            class,
-            true,
-            Some(&self.alias_registry),
-            Some(&referenced_aliases),
-        );
-        let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
-            .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-        let alias_type_attrs =
-            spec_codegen::generate_alias_type_attrs(&self.alias_registry, &referenced_aliases);
-        let alias_type_suffix: Document<'static> =
-            spec_codegen::format_alias_type_attributes(&alias_type_attrs)
-                .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        // Module header
-        // BT-3366: childClass/0 is called directly by beamtalk_supervisor's
-        // childStartChild/1,2 (SupMod:'childClass'()), same as DynamicSupervisor.
-        docs.push(docvec![
-            "module ",
-            atom(module_name.to_string()),
-            " ['start_link'/0, 'init'/1, 'childClass'/0",
-            class_method_exports,
-            ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
-            "  attributes ['behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
-            beamtalk_class_attr,
-            file_attr,
-            source_path_attr,
-            alias_type_suffix,
-            spec_suffix,
-            "]\n",
-            "\n",
-        ]);
-
-        // start_link/0
-        docs.push(Self::generate_sup_start_link(&module_name));
-        docs.push(Document::Str("\n\n"));
-
-        // init/1 for child supervisor
-        docs.push(Self::generate_child_sup_init(&class_name, &module_name));
-        docs.push(Document::Str("\n\n"));
-
-        // childClass/0 — called by beamtalk_supervisor:childStartChild to resolve the child module
-        docs.push(Self::generate_dynamic_child_class(&class_name));
-        docs.push(Document::Str("\n"));
-
-        // User-defined class-side method functions
-        if !class.class_methods.is_empty() {
-            docs.push(self.generate_class_method_functions(class)?);
-            docs.push(Document::Str("\n"));
-        }
-
-        // superclass/0, __beamtalk_meta/0, register_class/0
-        docs.push(self.generate_superclass_function(module)?);
-        docs.push(Document::Str("\n"));
-        docs.push(self.generate_meta_function(module, false)?);
-        docs.push(self.generate_register_class(module, false)?);
-
-        docs.push(Document::Str("end\n"));
-        Ok(Document::Vec(docs))
-    }
-
     /// Generates `start_link/0` for both static and dynamic supervisors.
     ///
     /// Registers the supervisor locally under `?MODULE` (the Erlang module atom),
@@ -430,29 +326,6 @@ impl CoreErlangGenerator {
         docvec![
             "'init'/1 = fun (_Args) ->",
             "\n    call 'beamtalk_supervisor':'dynamic_init'(",
-            atom(module_name.to_string()),
-            ", ",
-            atom(class_name.to_string()),
-            ")",
-        ]
-    }
-
-    /// Generates `init/1` for a child supervisor (`ChildSupervisor subclass:`, BT-3366).
-    ///
-    /// Delegates to `beamtalk_supervisor:child_init/2`, which builds a plain
-    /// `one_for_one` supervisor with an empty initial child list (no template —
-    /// unlike `dynamic_init/2`'s `simple_one_for_one`, children are added one at a
-    /// time via `childStartChild/1,2`, each registering its own permanent OTP
-    /// child spec so a crash-triggered restart replays that child's own args).
-    ///
-    /// ```erlang
-    /// init([]) ->
-    ///     beamtalk_supervisor:child_init('bt@monitorsupervisor', 'MonitorSupervisor').
-    /// ```
-    fn generate_child_sup_init(class_name: &str, module_name: &str) -> Document<'static> {
-        docvec![
-            "'init'/1 = fun (_Args) ->",
-            "\n    call 'beamtalk_supervisor':'child_init'(",
             atom(module_name.to_string()),
             ", ",
             atom(class_name.to_string()),

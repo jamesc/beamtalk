@@ -39,7 +39,6 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ChangeEntry"
             | "ChangeLog"
             | "Character"
-            | "ChildSupervisor"
             | "Class"
             | "ClassBuilder"
             | "ClassLoaded"
@@ -952,48 +951,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        },
-    );
-
-    classes.insert(
-        "ChildSupervisor".into(),
-        ClassInfo {
-            name: "ChildSupervisor".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: true,
-            is_typed: false,
-            is_internal: false,
-            package: Some("stdlib".into()),
-            is_value: false,
-            is_native: false,
-            handle_scope: None,
-            surface_incomplete: false,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            methods: vec![
-                MethodInfo { selector: "startChild".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("C"), DeclaredType::simple("Error")])), param_types: vec![], doc: Some("Start a new child with default args.\n\nRegisters a distinct, permanent OTP child spec for this child — a\ncrash-triggered restart replays these (empty) args. Returns\n`Result(C, Error)`. Use `unwrap` when failure should propagate as an\nexception, or `ifOk:ifError:` / `andThen:` for recoverable starts.\nFailures surface as `Result error: #beamtalk_error{kind = child_start_failed}`.".into()) },
-                MethodInfo { selector: "startChild:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("C"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Start a new child with the given initialization args.\n\nRegisters a distinct, permanent OTP child spec carrying these exact\n`args` — a crash-triggered restart of *this* child replays them,\nunaffected by any other child's config. Returns `Result(C, Error)`.\nUse `unwrap` when failure should propagate as an exception, or\n`ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface\nas `Result error: #beamtalk_error{kind = child_start_failed}`.".into()) },
-                MethodInfo { selector: "terminateChild:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("Nil"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("C"))], doc: Some("Terminate the given child process and remove its permanent child spec.\n\nUnlike `DynamicSupervisor terminateChild:` (whose `simple_one_for_one`\ntemplate must never be deleted), this always deletes the terminated\nchild's now-unused OTP child spec afterward — otherwise repeated\n`startChild:`/`terminateChild:` cycles would leak spec entries in the\nsupervisor forever. Returns `Result(Nil, Error)`. Idempotent on\n`not_found` — terminating an already-gone child returns\n`Result ok: nil`. Genuine failures surface as\n`Result error: #beamtalk_error{kind = terminate_failed}`.".into()) },
-                MethodInfo { selector: "count".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the count of currently-running children.".into()) },
-                MethodInfo { selector: "countChildrenResult".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped\n`countChildren/1` call. Keeps `count` pure Beamtalk.".into()) },
-                MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![], doc: Some("Stop this supervisor and all its children.".into()) },
-                MethodInfo { selector: "stopResult".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `stop/1`\ncall. Keeps `stop` pure Beamtalk.".into()) },
-            ],
-            class_methods: vec![
-                MethodInfo { selector: "maxRestarts".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Maximum number of restarts within `restartWindow` seconds.\n\nIf this rate is exceeded, the supervisor itself shuts down.".into()) },
-                MethodInfo { selector: "restartWindow".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Time window in seconds for the `maxRestarts` rate limit.".into()) },
-                MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this class is a supervisor (always true for ChildSupervisor subclasses).\n\nUsed by `SupervisionSpec childSpec` to determine `type` and `shutdown`.".into()) },
-                MethodInfo { selector: "childClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Class")), param_types: vec![], doc: Some("Return the actor class that this supervisor manages.\n\nMust be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.\n\n## Examples\n```beamtalk\nChildSupervisor(Monitor) subclass: MonitorSupervisor\n  class childClass => Monitor\n```".into()) },
-                MethodInfo { selector: "initialize:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![None], doc: Some("Lifecycle hook called after this supervisor has started.\n\nOverride to perform post-start setup (e.g., pre-populating children\nvia `startChild:`). Runs in the caller's process, so supervisor\ncalls will not deadlock.\n\n## Examples\n```beamtalk\nChildSupervisor(Monitor) subclass: MonitorSupervisor\n  class childClass => Monitor\n  class initialize: sup =>\n    sup startChild: #{#check => #diskSpace}\n```".into()) },
-                MethodInfo { selector: "supervise".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![], doc: Some("Start this supervisor (or return the already-running instance).\n\nReturns `Result(Self, Error)`. Use `unwrap` for boot-style\n\"crash on failure\" call sites, or `ifOk:ifError:` / `andThen:` for\nrecoverable starts. Failures surface as\n`Result error: #beamtalk_error{kind = supervisor_start_failed}`.".into()) },
-                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChildSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
-            ],
-            class_variables: vec![],
-            type_params: vec!["C".into()],
-            type_param_bounds: vec![None],
             superclass_type_args: vec![],
         },
     );
