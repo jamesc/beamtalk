@@ -50,10 +50,19 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             // This trusts the current call's `project_path` as authoritative for
             // an existing named workspace, which a later `--workspace <name>`
             // invoked from an unrelated directory (typo, wrong cwd, moved
-            // project) could abuse to silently repoint the stored path. That
-            // can't affect routing — lookup is keyed by `workspace_id`, not this
-            // field — only the informational path `workspace list`/`status`
-            // display, so it's logged rather than blocked outright.
+            // project) could abuse to silently repoint the stored path — not
+            // just the informational path shown by `workspace list`/`status`,
+            // but the value the *next* detached node start for this workspace
+            // reads back (see `process.rs`'s `prepare_workspace_paths`) to set
+            // the runtime's project root, scoping live-reload file loading and
+            // `git` operations. It doesn't affect message routing (that's keyed
+            // by `workspace_id`, not this field), and it carries the exact same
+            // caller-supplied-path trust the pre-existing creation-time fallback
+            // below already has (unchanged since BT-3332) — this just lets that
+            // same trust fire again on a later lookup instead of only once at
+            // creation. Logged rather than blocked outright; narrowing this
+            // further (e.g. requiring the resolved directory to independently
+            // look like the same project) is left as a follow-up.
             if !metadata.project_path.is_absolute() {
                 if let Ok(canonical_project_path) = project_path.canonicalize() {
                     let healed = WorkspaceMetadata {
