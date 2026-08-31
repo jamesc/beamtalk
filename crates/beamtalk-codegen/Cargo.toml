@@ -1,0 +1,48 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-codegen"
+description = "Beamtalk Code Generation bounded context: Core Erlang codegen over beamtalk-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["compiler", "beam", "smalltalk", "erlang"]
+categories = ["compilers", "development-tools"]
+
+[dependencies]
+# why: ADR 0117 step 5 (BT-3362) — the Code Generation bounded context
+# consumes the Compilation context's AST, semantic analysis, source
+# analysis, and unparse (display-signature) types. Never the reverse (see
+# docs/development/architecture-principles.md §1).
+beamtalk-core.workspace = true
+# why: shared leaf for the Core Erlang Document/leaf/docvec! pretty-printing
+# API (ADR 0089), so this crate depends on it directly rather than reaching
+# it through beamtalk-core (see docs/development/architecture-principles.md
+# §6, ADR 0117 step 4).
+beamtalk-cerl-doc.workspace = true
+ecow.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+# why: shares beamtalk-core's `test_helpers::test_support` (near-valid-input
+# generator, proptest config, structural-validity checker) rather than
+# duplicating it (the "No duplicate implementations" rule) — the `test`
+# feature gates that module in beamtalk-core.
+beamtalk-core = { workspace = true, features = ["test"] }
+# why: used in codegen tests to assert on Core Erlang shape without
+# hardcoding fresh-variable counter values.
+regex = "1"
+tempfile = "3.14"
+# why: `selector_mangler`'s shared-corpus conformance test reads the same
+# fixture JSON the Erlang side's `beamtalk_class_dispatch_tests` asserts
+# against.
+serde_json.workspace = true
+
+[lints]
+workspace = true

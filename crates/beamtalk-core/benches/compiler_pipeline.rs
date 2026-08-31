@@ -14,7 +14,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
+use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis::{analyse, lower_module_for_codegen};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 

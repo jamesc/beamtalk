@@ -10,5 +10,6 @@ description = "Snapshot tests for beamtalk compiler"
 
 [dev-dependencies]
 beamtalk-core = { workspace = true }
+beamtalk-codegen = { workspace = true }
 insta = { workspace = true, features = ["glob"] }
 camino = { workspace = true }

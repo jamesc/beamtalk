@@ -122,7 +122,7 @@ impl TypeChecker {
     #[allow(clippy::too_many_lines)] // struct patterns expanded by BT-1569 refactor
     pub fn check_module(&mut self, module: &Module, hierarchy: &ClassHierarchy) {
         // BT-3123 test-only instrumentation — see `CHECK_MODULE_CALL_COUNT`'s doc.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         super::CHECK_MODULE_CALL_COUNT.with(|c| c.set(c.get() + 1));
 
         let mut env = TypeEnv::new();

@@ -17,7 +17,7 @@
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
 };
-use beamtalk_core::codegen::core_erlang::escape_atom_chars;
+use beamtalk_codegen::core_erlang::escape_atom_chars;
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -100,7 +100,7 @@ pub(crate) fn discover_test_classes(
 
     for class in test_case_classes.into_iter().take(1) {
         let class_name = class.name.name.to_string();
-        let stem = beamtalk_core::codegen::core_erlang::to_module_name(&class_name);
+        let stem = beamtalk_codegen::core_erlang::to_module_name(&class_name);
         let module_name = format!("bt@{stem}");
 
         let mut test_methods = Vec::new();
@@ -343,7 +343,7 @@ fn generate_core_file(
         module_name,
         &core_file,
         &options,
-        &beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
         &ctx,
         None,
     )
@@ -597,7 +597,7 @@ fn discover_and_compile_doc_tests(
             continue;
         }
 
-        let class_slug = beamtalk_core::codegen::core_erlang::to_module_name(&class_doc.class_name);
+        let class_slug = beamtalk_codegen::core_erlang::to_module_name(&class_doc.class_name);
         let eunit_module = format!("{class_slug}_doc_tests");
 
         // Compile each expression to a Core Erlang eval module
@@ -1212,11 +1212,11 @@ fn compile_single_test_file(
     if pipeline.discovered_packages.len() > 1 {
         let pkg_name_slug = canonical_package_root(test_file)
             .and_then(|r| pipeline.pkg_root_to_name.get(&r))
-            .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+            .map(|n| beamtalk_codegen::core_erlang::to_module_name(n));
 
         if let Some(ref prefix) = pkg_name_slug {
             for tc in &mut test_classes {
-                let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                let stem = beamtalk_codegen::core_erlang::to_module_name(&tc.class_name);
                 tc.module_name = format!("bt@{prefix}@{stem}");
             }
         }
@@ -2660,11 +2660,11 @@ mod tests {
             // Apply multi-package prefix (mirrors run_tests logic)
             let pkg_name_slug = canonical_package_root(file)
                 .and_then(|r| pkg_root_to_name.get(&r))
-                .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+                .map(|n| beamtalk_codegen::core_erlang::to_module_name(n));
 
             if let Some(ref prefix) = pkg_name_slug {
                 for tc in &mut test_classes {
-                    let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                    let stem = beamtalk_codegen::core_erlang::to_module_name(&tc.class_name);
                     tc.module_name = format!("bt@{prefix}@{stem}");
                 }
             }

@@ -36,21 +36,29 @@ The beamtalk codebase is organized into **layers with unidirectional dependencie
 │ beamtalk-exec (library)             │  ← REPL/execution engine
 │ beamtalk-workspace (library)        │  ← Workspace/session management
 ├─────────────────────────────────────┤
+│ beamtalk-codegen (library)          │  ← Code Generation (Core Erlang gen)
 │ beamtalk-language-service (library) │  ← Language Service (queries, IDE API)
 ├─────────────────────────────────────┤
 │ beamtalk-core (library)             │  ← Compiler core (Compilation, reusable)
 │  ├─ parse/       (Lexer, Parser)    │
-│  ├─ analyse/     (Semantic Analysis)│
-│  └─ codegen/     (Core Erlang gen)  │
+│  └─ analyse/     (Semantic Analysis)│
 └─────────────────────────────────────┘
 ```
 
-`beamtalk-language-service` (BT-3361, ADR 0117 Decision step 5) depends on
+`beamtalk-codegen` (BT-3362, ADR 0117 Decision step 5) and
+`beamtalk-language-service` (BT-3361, same step) each depend on
 `beamtalk-core`, never the reverse — the same downward-only rule as every
-other layer here, now cargo-enforced for this specific boundary instead of
-only convention. `beamtalk-cli`/`beamtalk-lsp`/`beamtalk-mcp`/
-`beamtalk-compiler-port`/`beamtalk-lint` all depend on it directly for
+other layer here, now cargo-enforced for both boundaries instead of only
+convention. They are siblings: neither depends on the other.
+`beamtalk-cli`/`beamtalk-repl`/`beamtalk-compiler-port` depend on
+`beamtalk-codegen` directly for Core Erlang generation;
+`beamtalk-cli`/`beamtalk-lsp`/`beamtalk-mcp`/`beamtalk-compiler-port`/
+`beamtalk-lint` all depend on `beamtalk-language-service` directly for
 `LanguageService`/`SimpleLanguageService` and the `queries` API.
+`beamtalk-lsp` and `beamtalk-lint` have no dependency on `beamtalk-codegen`
+at all — they never generate code, only analyze it. (`beamtalk-mcp` is the
+one exception, transitively via its pre-existing `beamtalk-cli` dependency —
+see the BT-3362 paragraph below.)
 
 ### Rules
 
@@ -58,11 +66,11 @@ only convention. `beamtalk-cli`/`beamtalk-lsp`/`beamtalk-mcp`/
 - `beamtalk-cli` depends on `beamtalk-core`
 - `beamtalk-lsp` depends on `beamtalk-core`
 - `beamtalk-language-service` depends on `beamtalk-core` (`parse`, `analyse`, `compilation`)
-- `codegen` depends on `parse` (needs AST types)
+- `beamtalk-codegen` depends on `beamtalk-core` (needs AST types, `analyse`, `unparse`)
 
 **❌ FORBIDDEN:**
 - `beamtalk-core` importing `beamtalk-cli`
-- `parse` importing `codegen`
+- `beamtalk-core` importing `beamtalk-codegen`
 - `beamtalk-core` importing `beamtalk-language-service`
 
 ### Rationale
@@ -75,10 +83,10 @@ only convention. `beamtalk-cli`/`beamtalk-lsp`/`beamtalk-mcp`/
 ### Examples
 
 ```rust
-// ✅ GOOD - CLI depends on core
+// ✅ GOOD - CLI depends on core and codegen
 // crates/beamtalk-cli/src/main.rs
 use beamtalk_core::parse::{lex, parse};
-use beamtalk_core::codegen::generate_core_erlang;
+use beamtalk_codegen::core_erlang::generate_module;
 
 // ❌ BAD - Core depends on CLI (NEVER DO THIS)
 // crates/beamtalk-core/src/source_analysis/lexer.rs
@@ -108,14 +116,32 @@ boundary above — only for this specific, already-drifted-once edge.
 BT-3361 (ADR 0117 Decision step 5) went a step further: `language_service`
 and its `queries` submodule moved out of `beamtalk-core` entirely into the
 standalone `beamtalk-language-service` crate (`beamtalk-core`'s Compilation
-bounded context — `ast`, `source_analysis`, `unparse`, `codegen`,
-`semantic_analysis`, `compilation` — never depends on it), so this direction
-is now **cargo-enforced** for any cross-crate edge, on top of what
-`check-boundary` already caught for the intra-crate case. `check-boundary`
-keeps `queries`/`language_service` (alongside `lint`, moved out earlier by
+bounded context — `ast`, `source_analysis`, `unparse`, `semantic_analysis`,
+`compilation` — never depends on it), so this direction is now
+**cargo-enforced** for any cross-crate edge, on top of what `check-boundary`
+already caught for the intra-crate case. `check-boundary` keeps
+`queries`/`language_service` (alongside `lint`, moved out earlier by
 BT-3340) in its module list purely as a regression guard — see
 `crates/beamtalk-boundary-check/README.md`. See
 `docs/ADR/0117-beamtalk-core-crate-split.md`.
+
+BT-3362 (ADR 0117 Decision step 5, Wave 2) did the same for `codegen`
+(~88k lines, 35% of `beamtalk-core`): it moved into the standalone
+`beamtalk-codegen` crate, downward-only deps on `beamtalk-core` and
+`beamtalk-cerl-doc`. Unlike `language_service`/`queries`, `codegen` was
+never a *forbidden* edge target — nothing inside `beamtalk-core` ever
+imported from it — so `check-boundary`'s module list simply drops it rather
+than adding it as a regression guard. The measurable win is on the consumer
+side: `beamtalk-lsp` and `beamtalk-lint` never needed `codegen` (they
+analyze code, never generate it) but used to compile all of it anyway as
+part of `beamtalk-core`; now they don't
+(`cargo tree -p beamtalk-lsp -i beamtalk-codegen` and the `beamtalk-lint`
+equivalent both come up empty). `beamtalk-mcp` is the one exception: it
+already depended on `beamtalk-cli` before this split (to reuse its
+manifest/build-layout logic, BT-2823) and `beamtalk-cli` genuinely drives
+codegen (`beamtalk build`/`beamtalk test`), so `beamtalk-mcp` still compiles
+`beamtalk-codegen` transitively — a pre-existing coupling this split doesn't
+change either way, not a new gap it introduces.
 
 ---
 

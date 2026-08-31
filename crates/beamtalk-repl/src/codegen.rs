@@ -20,10 +20,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, var};
+use beamtalk_codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_core::ast::{Expression, Pattern};
-use beamtalk_core::codegen::core_erlang::{
-    CodeGenContext, CodeGenError, CoreErlangGenerator, Result,
-};
 
 // ── Public API ──────────────────────────────────────────────────────────
 
@@ -883,8 +881,8 @@ impl<'a> ReplAssembler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use beamtalk_codegen::core_erlang::CodeGenError;
     use beamtalk_core::ast::{Expression, Identifier, Literal};
-    use beamtalk_core::codegen::core_erlang::CodeGenError;
     use beamtalk_core::source_analysis::Span;
     use ecow::EcoString;
     use std::collections::HashMap;

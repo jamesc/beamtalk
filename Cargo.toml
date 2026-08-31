@@ -39,6 +39,10 @@ beamtalk-home = { path = "crates/beamtalk-home" }
 # beamtalk-cli's manifest/build-layout/dependency-class-resolution logic
 # (BT-2823) via this lib target.
 beamtalk-cli = { path = "crates/beamtalk-cli" }
+# why: ADR 0117 step 5 (BT-3362) — the Code Generation bounded context,
+# extracted from beamtalk-core into its own crate; depends on beamtalk-core,
+# never the reverse (see docs/development/architecture-principles.md §1).
+beamtalk-codegen = { path = "crates/beamtalk-codegen" }
 beamtalk-core = { path = "crates/beamtalk-core" }
 beamtalk-desktop-broker = { path = "crates/beamtalk-desktop-broker" }
 beamtalk-etf = { path = "crates/beamtalk-etf" }
