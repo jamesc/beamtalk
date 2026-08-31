@@ -37,7 +37,7 @@
 use beamtalk_cli::repl_startup;
 use beamtalk_core::source_analysis::is_input_complete;
 use beamtalk_core::unparse::escape_string_literal;
-use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
+use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -580,6 +580,13 @@ struct ReplClient {
 
 impl ReplClient {
     /// Connect to the REPL via WebSocket with cookie auth.
+    ///
+    /// Frame recognition/construction for the auth handshake (`auth-required`
+    /// → `auth` → `auth_ok`/`auth_error` → `session-started`) goes through the
+    /// shared `beamtalk_repl_protocol::handshake` module (BT-3330/BT-3348)
+    /// rather than re-matching JSON fields here — see that module's doc
+    /// comment for why. This is the one caller that exercises the handshake
+    /// against a real, live BEAM node (`just test-repl-protocol`).
     fn connect(port: u16) -> Result<Self, std::io::Error> {
         let tcp = TcpStream::connect(format!("127.0.0.1:{port}"))?;
         tcp.set_read_timeout(Some(repl_timeout()))?;
@@ -593,7 +600,7 @@ impl ReplClient {
         let auth_required = ws.read().map_err(std::io::Error::other)?;
         if let tungstenite::Message::Text(text) = auth_required {
             let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-            if parsed.get("op").and_then(|v| v.as_str()) != Some("auth-required") {
+            if !handshake::is_auth_required(&parsed) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("Expected auth-required, got: {text}"),
@@ -604,11 +611,7 @@ impl ReplClient {
         // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie).
         // `client: repl` mirrors the real CLI repl client so sessions created here
         // carry the same origin metadata (`Session current kind` => "repl").
-        let auth_msg = serde_json::json!({
-            "type": "auth",
-            "cookie": E2E_COOKIE,
-            "client": "repl"
-        });
+        let auth_msg = handshake::auth_request(E2E_COOKIE, "repl", None);
         ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
             .map_err(std::io::Error::other)?;
 
@@ -616,15 +619,15 @@ impl ReplClient {
         let auth_response = ws.read().map_err(std::io::Error::other)?;
         if let tungstenite::Message::Text(text) = auth_response {
             let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-            match parsed.get("type").and_then(|t| t.as_str()) {
-                Some("auth_ok") => {}
-                Some("auth_error") => {
+            match handshake::parse_auth_ack(&parsed) {
+                Some(handshake::AuthAck::Ok) => {}
+                Some(handshake::AuthAck::Error { .. }) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         "Cookie authentication failed",
                     ));
                 }
-                _ => {
+                None => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         format!("Expected auth_ok, got: {text}"),
@@ -637,7 +640,7 @@ impl ReplClient {
         let session_started = ws.read().map_err(std::io::Error::other)?;
         if let tungstenite::Message::Text(text) = &session_started {
             let parsed: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
-            if parsed.get("op").and_then(|v| v.as_str()) != Some("session-started") {
+            if !handshake::is_session_started(&parsed) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("Expected session-started, got: {text}"),
