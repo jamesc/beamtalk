@@ -15,7 +15,7 @@
 //! core codegen through [`CoreErlangGenerator`]'s public API, keeping
 //! the Compilation context domain-agnostic.
 //!
-//! [`CoreErlangGenerator`]: beamtalk_core::codegen::core_erlang::CoreErlangGenerator
+//! [`CoreErlangGenerator`]: beamtalk_codegen::core_erlang::CoreErlangGenerator
 //!
 //! BT-3340 (ADR 0117 Decision step 2): extracted from `beamtalk-core::repl`
 //! into its own crate — `repl` depended only on `codegen`/`ast`/

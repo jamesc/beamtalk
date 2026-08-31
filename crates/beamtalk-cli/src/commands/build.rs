@@ -806,10 +806,7 @@ fn compute_file_module_pairs(
             let relative_module = compute_relative_module(file, env.source_root.as_deref())?;
             format!("bt@{}@{}", pkg.name, relative_module)
         } else {
-            format!(
-                "bt@{}",
-                beamtalk_core::codegen::core_erlang::to_module_name(stem)
-            )
+            format!("bt@{}", beamtalk_codegen::core_erlang::to_module_name(stem))
         };
         let core_file = env.build_dir.join(format!("{module_name}.core"));
         pairs.push((file.clone(), module_name, core_file));
@@ -1622,7 +1619,7 @@ pub(crate) fn compute_relative_module(
                             file
                         );
                     }
-                    Ok(beamtalk_core::codegen::core_erlang::to_module_name(segment))
+                    Ok(beamtalk_codegen::core_erlang::to_module_name(segment))
                 })
                 .collect::<Result<_>>()?;
             return Ok(segments.join("@"));
@@ -1630,7 +1627,7 @@ pub(crate) fn compute_relative_module(
     }
     // Fallback: use file stem
     let stem = file.file_stem().unwrap_or("unknown");
-    Ok(beamtalk_core::codegen::core_erlang::to_module_name(stem))
+    Ok(beamtalk_codegen::core_erlang::to_module_name(stem))
 }
 
 /// Compile a single `.bt` source file to Core Erlang, printing progress.
@@ -1652,7 +1649,7 @@ fn compile_file(
         module_name,
         core_file,
         options,
-        &beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
         ctx,
         cached_ast,
     )?;

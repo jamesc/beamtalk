@@ -7,7 +7,10 @@
 //! - Lexical analysis (tokenization)
 //! - Parsing (AST construction)
 //! - Semantic analysis (type checking, name resolution)
-//! - Code generation (Core Erlang output)
+//!
+//! Code generation (Core Erlang output) lives in the standalone
+//! `beamtalk-codegen` crate (ADR 0117 step 5, BT-3362), which depends on
+//! this crate's Compilation context, never the reverse.
 //!
 //! The compiler is designed as a language service, prioritizing
 //! IDE responsiveness over batch compilation speed.
@@ -27,7 +30,6 @@ pub mod ast;
 // standalone `beamtalk-lint` crate now that `lint` has moved out of this
 // crate (ADR 0117 Decision step 2).
 pub mod ast_walker;
-pub mod codegen;
 pub mod compilation;
 // BT-3361 (ADR 0117 Decision step 5): widened from `pub(crate)` — same
 // rationale as `announce_selectors` above; `erlang_module_of_receiver` is
@@ -43,7 +45,11 @@ pub mod near_miss_divider;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub mod span;
-pub(crate) mod state_threading_selectors;
+// BT-3362 (ADR 0117 Decision step 5): widened from `pub(crate)` — the
+// standalone `beamtalk-codegen` crate's `core_erlang` reaches
+// `is_exception_selector`/`is_conditional_selector` to decide state-threading
+// codegen for exception handlers and conditionals.
+pub mod state_threading_selectors;
 pub mod synthetic_selectors;
 pub mod test_helpers;
 pub mod tool_expr;

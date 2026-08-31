@@ -61,8 +61,13 @@ const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
 
 /// True when `selector` is a class-protocol selector that must not be
 /// intercepted as an Erlang FFI module name (see [`CLASS_PROTOCOL_SELECTORS`]).
+///
+/// BT-3362 (ADR 0117 Decision step 5): widened from `pub(crate)` — reached
+/// from the standalone `beamtalk-codegen` crate's `dispatch_codegen` to
+/// decide whether a bare-Erlang-class send routes through class-protocol
+/// dispatch instead of the FFI bridge.
 #[must_use]
-pub(crate) fn is_class_protocol_selector(selector: &str) -> bool {
+pub fn is_class_protocol_selector(selector: &str) -> bool {
     CLASS_PROTOCOL_SELECTORS.contains(&selector)
 }
 

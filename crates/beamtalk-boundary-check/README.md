@@ -2,8 +2,10 @@
 
 CI lint that enforces the bounded-context dependency direction
 `architecture-principles.md` §1 documents for `beamtalk-core`: the
-**Compilation** context (`ast`, `source_analysis`, `unparse`, `codegen`,
-`semantic_analysis`, `compilation`) may never import from the
+**Compilation** context (`ast`, `source_analysis`, `unparse`,
+`semantic_analysis`, `compilation` — plus `codegen`, extracted into the
+standalone `beamtalk-codegen` crate by BT-3362, no longer scanned here) may
+never import from the
 **Language Service** context (`queries`, `language_service`, `lint`) in
 production code. The reverse direction (Language Service consuming
 Compilation) is expected and allowed.

@@ -97,7 +97,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // This is used during compilation so that @primitive expressions in method bodies
     // can reference the runtime dispatch modules.
     info!("Building primitive binding table from stdlib sources");
-    let bindings = beamtalk_core::codegen::core_erlang::primitive_bindings::load_from_directory(
+    let bindings = beamtalk_codegen::core_erlang::primitive_bindings::load_from_directory(
         lib_dir.as_std_path(),
     );
     info!(
@@ -198,7 +198,7 @@ fn compile_all_stdlib_files(
     temp_path: &Utf8Path,
     quiet: bool,
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
     compile_ctx: &CompileContext<'_>,
 ) -> Result<(Vec<Utf8PathBuf>, Vec<ClassMeta>, Vec<String>)> {
     let mut core_files = Vec::new();
@@ -475,7 +475,7 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
         );
     }
 
-    let snake = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+    let snake = beamtalk_codegen::core_erlang::to_module_name(stem);
 
     // ADR 0016: All stdlib modules use bt@stdlib@ prefix
     Ok(format!("bt@stdlib@{snake}"))
@@ -552,7 +552,7 @@ fn compile_stdlib_file(
     module_name: &str,
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
     ctx: &CompileContext<'_>,
 ) -> Result<()> {
     compile_source_with_bindings(path, module_name, core_file, options, bindings, ctx, None)
@@ -1973,7 +1973,7 @@ mod tests {
 
         let options = stdlib_compiler_options(false);
         let bindings =
-            beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         // Compile B with cross-file class info AND cross-file alias info —
         // should produce no "Argument ... expects" type-mismatch warning.
@@ -2097,7 +2097,7 @@ mod tests {
         // `current_package: Some("stdlib")` matching the stamp above.
         let options = stdlib_compiler_options(false);
         let bindings =
-            beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         let core_file = lib_dir.join("internal_b.core");
         let diagnostics = compile_source_with_bindings(
@@ -2223,7 +2223,7 @@ mod tests {
 
         let options = stdlib_compiler_options(false);
         let bindings =
-            beamtalk_core::codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         // Compile B the way `build_stdlib()` actually does — through
         // `compile_source_with_bindings` with `pre_loaded_protocols` seeded

@@ -675,7 +675,7 @@ mirroring `bench_guard/0`'s own methodology (same tight-loop shape, same
   All hot stdlib arithmetic and `total + delta`-shaped user code (the
   overwhelming majority) is byte-for-byte unchanged and pays nothing,
   asserted by codegen regression tests in
-  `crates/beamtalk-core/src/codegen/core_erlang/tests/expressions.rs`
+  `crates/beamtalk-codegen/src/core_erlang/tests/expressions.rs`
   (`test_number_coercion_bare_bif_unaffected_for_total_plus_delta` and
   siblings).
 

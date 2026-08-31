@@ -5,9 +5,11 @@
 //!
 //! `docs/development/architecture-principles.md` §1 documents an aspirational
 //! layering for `beamtalk-core`: the **Compilation** bounded context (`ast`,
-//! `source_analysis`, `unparse`, `codegen`, `semantic_analysis`,
-//! `compilation`) is consumed by the **Language Service** context
-//! (`queries`, `language_service`, `lint`), never the other way round. ADR
+//! `source_analysis`, `unparse`, `semantic_analysis`, `compilation` — plus
+//! `codegen`, extracted into the standalone `beamtalk-codegen` crate by
+//! BT-3362, so no longer scanned here) is consumed by the **Language
+//! Service** context (`queries`, `language_service`, `lint`), never the
+//! other way round. ADR
 //! 0117's review found that rule had silently gone stale — a
 //! `semantic_analysis -> queries` production edge, plus an extensive
 //! `queries <-> language_service` cycle, existed with nothing to catch them.
@@ -79,11 +81,23 @@ const CORE_SRC: &str = "crates/beamtalk-core/src";
 /// other freely (that's internal cohesion, not a boundary violation; Rust
 /// `mod`s inside one crate are not required to be acyclic), but never on
 /// Language Service.
+///
+/// `codegen` isn't here: BT-3362 (ADR 0117 Decision step 5) extracted it
+/// into the standalone `beamtalk-codegen` crate, which depends on
+/// `beamtalk-core` (never the reverse) — cargo-enforced for any
+/// *cross-crate* edge, same as `language_service`/`queries` (BT-3361)
+/// below. Unlike those two, `codegen` was never a Language-Service-side
+/// target this checker forbade Compilation from importing — nothing inside
+/// `beamtalk-core` imported *from* it — so it isn't added to
+/// `LANGUAGE_SERVICE_MODULES` as a regression guard either; it simply has no
+/// entry here any more; `check_module_list_drift` only flags *new*
+/// unclassified directories, not a listed module whose directory left, so
+/// removing the entry (rather than leaving it to hit `collect_rs_files` on a
+/// now-nonexistent directory) is the correct fix.
 const COMPILATION_MODULES: &[&str] = &[
     "ast",
     "source_analysis",
     "unparse",
-    "codegen",
     "semantic_analysis",
     "compilation",
 ];

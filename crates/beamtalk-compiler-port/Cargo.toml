@@ -25,6 +25,10 @@ beamtalk-core = { workspace = true }
 # references/field-accesses/ffi-sites queries, selector rename) moved out of
 # `beamtalk-core` into their own crate.
 beamtalk-language-service = { workspace = true }
+# why: ADR 0117 step 5 (BT-3362) — the compiler-port protocol's compile
+# commands drive Core Erlang generation directly, so this crate needs the
+# now-standalone codegen crate.
+beamtalk-codegen = { workspace = true }
 # why: BT-3340 (ADR 0117 Decision step 2) — REPL/test expression generation
 # moved out of `beamtalk-core::erlang`'s re-export into a standalone crate.
 beamtalk-repl = { workspace = true }
