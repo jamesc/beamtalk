@@ -110,7 +110,10 @@ defmodule BtAttachWeb.Live.TestRunner do
   # state (not the misleading "No TestCase subclasses" empty-state) until the
   # `handle_async(:test_discover, …)` fold resolves.
   def handle_event("tests_refresh", _params, socket) do
-    {:noreply, socket |> assign(:test_classes, nil) |> discover_test_classes()}
+    {:noreply,
+     socket
+     |> assign(test_classes: nil, tests_error: nil, tests_error_owner: nil)
+     |> discover_test_classes()}
   end
 
   # Run every loaded TestCase subclass (`test-all`).

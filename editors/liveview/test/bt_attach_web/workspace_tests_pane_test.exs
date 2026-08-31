@@ -253,6 +253,29 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       refute render(view) =~ "testOne"
       assert Process.alive?(view.pid)
     end
+
+    test "tests_refresh clears a stale run_load error instead of leaving it stuck",
+         %{conn: conn} do
+      # Review feedback on this PR: the tests_error_owner guard above makes a
+      # :run_load-owned error immune to a *stale* discovery landing late, but
+      # tests_refresh triggers a brand-new, user-requested discovery — that
+      # one must still be able to clear the error and show fresh results.
+      StubWorkspaceClient.set_load_tests({:error, :unauthorized})
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      _ = render_async(view, 2_000)
+
+      render_click(view, "load_tests")
+      assert eventually(fn -> render(view) =~ "Not authorized" end)
+
+      render_click(view, "tests_refresh")
+      html = render_async(view, 2_000)
+
+      refute html =~ "Not authorized"
+      assert html =~ "StubDemoTest"
+      assert Process.alive?(view.pid)
+    end
   end
 
   describe "F4: non-blocking catalogue discovery (start_async, BT-2599)" do
