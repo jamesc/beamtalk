@@ -1283,4 +1283,506 @@ mod tests {
             "read of `count` on the assignment's RHS must survive unchanged"
         );
     }
+
+    /// Parses a full module (class definitions, methods) rather than a
+    /// single top-level expression -- needed for AST shapes (`self.x`,
+    /// `^value`) that only parse inside a method body.
+    fn parse_bt_module(source: &str) -> Module {
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.iter().all(|d| d.severity != Severity::Error),
+            "test fixture failed to parse: {source:?}\n{diagnostics:?}",
+        );
+        module
+    }
+
+    // ------------------------------------------------------------------
+    // fresh_name
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn fresh_name_returns_base_when_unused() {
+        let used = BTreeSet::new();
+        assert_eq!(fresh_name("tmp", &used), "tmp");
+    }
+
+    #[test]
+    fn fresh_name_increments_suffix_until_free() {
+        let used: BTreeSet<EcoString> = ["tmp", "tmp2", "tmp3"]
+            .into_iter()
+            .map(EcoString::from)
+            .collect();
+        assert_eq!(fresh_name("tmp", &used), "tmp4");
+    }
+
+    // ------------------------------------------------------------------
+    // Transform dispatch
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn transform_tag_returns_stable_identifiers() {
+        assert_eq!(Transform::BlockWrap.tag(), "block_wrap");
+        assert_eq!(Transform::RenameLocals.tag(), "rename_locals");
+        assert_eq!(Transform::RedundantTemp.tag(), "redundant_temp");
+        assert_eq!(Transform::ALL.len(), 3);
+    }
+
+    #[test]
+    fn transform_apply_rename_locals_returns_none_without_bindings() {
+        let expr = parse_expr("1 + 2");
+        assert!(
+            Transform::RenameLocals.apply(&expr).is_none(),
+            "nothing is bound in `1 + 2`, rename-locals must not apply"
+        );
+        assert!(Transform::BlockWrap.apply(&expr).is_some());
+        assert!(Transform::RedundantTemp.apply(&expr).is_some());
+    }
+
+    #[test]
+    fn rename_locals_returns_none_when_nothing_bound() {
+        let expr = parse_expr("1 + 2");
+        assert!(rename_locals(&expr).is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // block_wrap / redundant_temp
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn block_wrap_produces_block_value_send_around_expr() {
+        let expr = parse_expr("1 + 2");
+        let wrapped = block_wrap(&expr);
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = &wrapped
+        else {
+            panic!("expected a MessageSend, got {wrapped:?}");
+        };
+        assert!(arguments.is_empty());
+        assert_eq!(*selector, MessageSelector::Unary("value".into()));
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        assert!(block.parameters.is_empty());
+        assert_eq!(block.body.len(), 1);
+        assert!(matches!(
+            &block.body[0].expression,
+            Expression::MessageSend { .. }
+        ));
+    }
+
+    #[test]
+    fn redundant_temp_avoids_colliding_with_existing_mttmp_name() {
+        let expr = parse_expr("mtTmp + 1");
+        let wrapped = redundant_temp(&expr);
+        let Expression::MessageSend { receiver, .. } = &wrapped else {
+            panic!("expected a MessageSend, got {wrapped:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let Expression::Assignment { target, .. } = &block.body[0].expression else {
+            panic!(
+                "expected assignment as first statement, got {:?}",
+                block.body[0].expression
+            );
+        };
+        let Expression::Identifier(tmp_id) = target.as_ref() else {
+            panic!("expected identifier assignment target, got {target:?}");
+        };
+        assert_eq!(
+            tmp_id.name.as_str(),
+            "mtTmp2",
+            "must pick a fresh name that avoids the `mtTmp` already used in the expression"
+        );
+        let Expression::Identifier(read_id) = &block.body[1].expression else {
+            panic!(
+                "expected identifier read as second statement, got {:?}",
+                block.body[1].expression
+            );
+        };
+        assert_eq!(read_id.name, tmp_id.name);
+    }
+
+    // ------------------------------------------------------------------
+    // rename_locals over further AST shapes (destructuring, cascades,
+    // literals, match patterns, method bodies)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn rename_locals_handles_destructure_assignment_tuple_pattern() {
+        let expr = parse_expr("{a, b} := someTuple");
+        let renamed = rename_locals(&expr).expect("tuple pattern binds a and b, should rename");
+
+        let Expression::DestructureAssignment { pattern, value, .. } = &renamed else {
+            panic!("expected DestructureAssignment, got {renamed:?}");
+        };
+        assert!(
+            matches!(value.as_ref(), Expression::Identifier(id) if id.name.as_str() == "someTuple"),
+            "free `someTuple` value must survive unchanged"
+        );
+        let Pattern::Tuple { elements, .. } = pattern else {
+            panic!("expected Tuple pattern, got {pattern:?}");
+        };
+        let [Pattern::Variable(a), Pattern::Variable(b)] = elements.as_slice() else {
+            panic!("expected two variable bindings, got {elements:?}");
+        };
+        assert_ne!(a.name.as_str(), "a");
+        assert_ne!(b.name.as_str(), "b");
+        assert_ne!(a.name, b.name);
+    }
+
+    #[test]
+    fn rename_locals_handles_cascade_receiver_and_message_arguments() {
+        let expr = parse_expr("[:x | x foo: 1; bar: x] value: 5");
+        let renamed = rename_locals(&expr).expect("block parameter is bound, should rename");
+
+        let Expression::MessageSend { receiver, .. } = &renamed else {
+            panic!("expected `[...] value: 5`, got {renamed:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let renamed_x = block.parameters[0].name.clone();
+        assert_ne!(renamed_x.as_str(), "x");
+
+        let Expression::Cascade {
+            receiver: cascade_recv,
+            messages,
+            ..
+        } = &block.body[0].expression
+        else {
+            panic!("expected Cascade body, got {:?}", block.body[0].expression);
+        };
+        let Expression::MessageSend {
+            receiver: foo_recv, ..
+        } = cascade_recv.as_ref()
+        else {
+            panic!("expected `x foo: 1` cascade receiver, got {cascade_recv:?}");
+        };
+        assert!(
+            matches!(foo_recv.as_ref(), Expression::Identifier(id) if id.name == renamed_x),
+            "cascade receiver's `x` must use the renamed parameter"
+        );
+        assert!(
+            matches!(&messages[0].arguments[0], Expression::Identifier(id) if id.name == renamed_x),
+            "cascaded message argument's `x` must use the renamed parameter"
+        );
+    }
+
+    #[test]
+    fn rename_locals_handles_map_literal_parenthesized_and_string_interpolation() {
+        let expr = parse_expr("[:name | (#{#greeting => \"hi {name}!\"})] value: \"x\"");
+        let renamed = rename_locals(&expr).expect("block parameter is bound, should rename");
+
+        let Expression::MessageSend { receiver, .. } = &renamed else {
+            panic!("expected `[...] value: \"x\"`, got {renamed:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let renamed_name = block.parameters[0].name.clone();
+        assert_ne!(renamed_name.as_str(), "name");
+
+        let Expression::Parenthesized { expression, .. } = &block.body[0].expression else {
+            panic!(
+                "expected Parenthesized body, got {:?}",
+                block.body[0].expression
+            );
+        };
+        let Expression::MapLiteral { pairs, .. } = expression.as_ref() else {
+            panic!("expected MapLiteral inside parens, got {expression:?}");
+        };
+        let Expression::StringInterpolation { segments, .. } = &pairs[0].value else {
+            panic!(
+                "expected StringInterpolation map value, got {:?}",
+                pairs[0].value
+            );
+        };
+        let interpolated = segments
+            .iter()
+            .find_map(|seg| match seg {
+                StringSegment::Interpolation(e) => Some(e),
+                StringSegment::Literal(_) => None,
+            })
+            .expect("string literal has one interpolated segment");
+        assert!(
+            matches!(interpolated, Expression::Identifier(id) if id.name == renamed_name),
+            "interpolated `{{name}}` must use the renamed parameter"
+        );
+    }
+
+    #[test]
+    fn rename_locals_handles_list_literal_tail_and_array_literal() {
+        let expr = parse_expr("[:x | #(x | #[x, x])] value: 1");
+        let renamed = rename_locals(&expr).expect("block parameter is bound, should rename");
+
+        let Expression::MessageSend { receiver, .. } = &renamed else {
+            panic!("expected `[...] value: 1`, got {renamed:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let renamed_x = block.parameters[0].name.clone();
+        assert_ne!(renamed_x.as_str(), "x");
+
+        let Expression::ListLiteral { elements, tail, .. } = &block.body[0].expression else {
+            panic!(
+                "expected ListLiteral body, got {:?}",
+                block.body[0].expression
+            );
+        };
+        assert!(matches!(&elements[0], Expression::Identifier(id) if id.name == renamed_x));
+        let tail = tail.as_ref().expect("list literal has a tail");
+        let Expression::ArrayLiteral {
+            elements: arr_elements,
+            ..
+        } = tail.as_ref()
+        else {
+            panic!("expected ArrayLiteral tail, got {tail:?}");
+        };
+        for el in arr_elements {
+            assert!(matches!(el, Expression::Identifier(id) if id.name == renamed_x));
+        }
+    }
+
+    #[test]
+    fn rename_locals_handles_return_and_field_access_inside_block() {
+        let module = parse_bt_module(
+            "Object subclass: C\n  state: value = 0\n  getValue => [:x | ^self.value + x] value: 1\n",
+        );
+        let expr = module.classes[0].methods[0].body[0].expression.clone();
+        let renamed = rename_locals(&expr).expect("block parameter is bound, should rename");
+
+        let Expression::MessageSend { receiver, .. } = &renamed else {
+            panic!("expected `[...] value: 1`, got {renamed:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let renamed_x = block.parameters[0].name.clone();
+        assert_ne!(renamed_x.as_str(), "x");
+
+        let Expression::Return { value, .. } = &block.body[0].expression else {
+            panic!("expected Return body, got {:?}", block.body[0].expression);
+        };
+        let Expression::MessageSend {
+            receiver: sum_recv,
+            arguments: sum_args,
+            ..
+        } = value.as_ref()
+        else {
+            panic!("expected `self.value + x`, got {value:?}");
+        };
+        let Expression::FieldAccess {
+            receiver: self_recv,
+            field,
+            ..
+        } = sum_recv.as_ref()
+        else {
+            panic!("expected `self.value` field access, got {sum_recv:?}");
+        };
+        assert_eq!(
+            field.name.as_str(),
+            "value",
+            "the field name itself is never a renameable local"
+        );
+        assert!(
+            matches!(self_recv.as_ref(), Expression::Identifier(id) if id.name.as_str() == "self"),
+            "`self` must never be renamed"
+        );
+        assert!(matches!(&sum_args[0], Expression::Identifier(id) if id.name == renamed_x));
+    }
+
+    #[test]
+    fn rename_locals_handles_match_arms_across_pattern_kinds() {
+        let expr = parse_expr(
+            "value match: [\n\
+             \x20 {#ok, v} -> v;\n\
+             \x20 #[h, t] -> h + t;\n\
+             \x20 #{#event => evName} -> evName;\n\
+             \x20 Result ok: r -> r;\n\
+             \x20 n :: Integer when: [n > 0] -> n;\n\
+             \x20 nil -> 0;\n\
+             \x20 42 -> 1;\n\
+             \x20 _ -> -1\n\
+             ]",
+        );
+        let renamed = rename_locals(&expr).expect("several match arms bind names, should rename");
+
+        let Expression::Match { value, arms, .. } = &renamed else {
+            panic!("expected Match, got {renamed:?}");
+        };
+        assert!(
+            matches!(value.as_ref(), Expression::Identifier(id) if id.name.as_str() == "value"),
+            "free scrutinee `value` must stay untouched"
+        );
+        assert_eq!(arms.len(), 8);
+
+        // {#ok, v} -> v
+        let Pattern::Tuple { elements, .. } = &arms[0].pattern else {
+            panic!("expected Tuple pattern, got {:?}", arms[0].pattern);
+        };
+        let Pattern::Variable(v_bind) = &elements[1] else {
+            panic!("expected Variable pattern, got {:?}", elements[1]);
+        };
+        assert_ne!(v_bind.name.as_str(), "v");
+        assert!(matches!(&arms[0].body, Expression::Identifier(id) if id.name == v_bind.name));
+
+        // #[h, t] -> h + t
+        let Pattern::Array { elements, .. } = &arms[1].pattern else {
+            panic!("expected Array pattern, got {:?}", arms[1].pattern);
+        };
+        let Pattern::Variable(h_bind) = &elements[0] else {
+            panic!("expected Variable pattern, got {:?}", elements[0]);
+        };
+        let Pattern::Variable(t_bind) = &elements[1] else {
+            panic!("expected Variable pattern, got {:?}", elements[1]);
+        };
+        assert_ne!(h_bind.name.as_str(), "h");
+        assert_ne!(t_bind.name.as_str(), "t");
+        let Expression::MessageSend {
+            receiver: sum_recv,
+            arguments: sum_args,
+            ..
+        } = &arms[1].body
+        else {
+            panic!("expected `h + t` body, got {:?}", arms[1].body);
+        };
+        assert!(matches!(sum_recv.as_ref(), Expression::Identifier(id) if id.name == h_bind.name));
+        assert!(matches!(&sum_args[0], Expression::Identifier(id) if id.name == t_bind.name));
+
+        // #{#event => evName} -> evName
+        let Pattern::Map { pairs, .. } = &arms[2].pattern else {
+            panic!("expected Map pattern, got {:?}", arms[2].pattern);
+        };
+        let Pattern::Variable(ev_bind) = &pairs[0].value else {
+            panic!("expected Variable pattern, got {:?}", pairs[0].value);
+        };
+        assert_ne!(ev_bind.name.as_str(), "evName");
+        assert!(matches!(&arms[2].body, Expression::Identifier(id) if id.name == ev_bind.name));
+
+        // Result ok: r -> r
+        let Pattern::Constructor { keywords, .. } = &arms[3].pattern else {
+            panic!("expected Constructor pattern, got {:?}", arms[3].pattern);
+        };
+        let Pattern::Variable(r_bind) = &keywords[0].1 else {
+            panic!("expected Variable pattern, got {:?}", keywords[0].1);
+        };
+        assert_ne!(r_bind.name.as_str(), "r");
+        assert!(matches!(&arms[3].body, Expression::Identifier(id) if id.name == r_bind.name));
+
+        // n :: Integer when: [n > 0] -> n
+        let Pattern::Type { binding, .. } = &arms[4].pattern else {
+            panic!("expected Type pattern, got {:?}", arms[4].pattern);
+        };
+        assert_ne!(binding.name.as_str(), "n");
+        let guard = arms[4].guard.as_ref().expect("guard present on arm 4");
+        let Expression::MessageSend {
+            receiver: guard_recv,
+            ..
+        } = guard
+        else {
+            panic!("expected `n > 0` guard, got {guard:?}");
+        };
+        assert!(
+            matches!(guard_recv.as_ref(), Expression::Identifier(id) if id.name == binding.name),
+            "guard's `n` must resolve to the renamed type-pattern binding"
+        );
+        assert!(matches!(&arms[4].body, Expression::Identifier(id) if id.name == binding.name));
+
+        // Arms that bind nothing must still round-trip untouched.
+        assert!(matches!(arms[5].pattern, Pattern::Nil(_)));
+        assert!(matches!(arms[6].pattern, Pattern::Literal(_, _)));
+        assert!(matches!(arms[7].pattern, Pattern::Wildcard(_)));
+    }
+
+    // ------------------------------------------------------------------
+    // build_transformed_case
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn build_transformed_case_passes_through_repl_turn_binding_unchanged() {
+        let case = test_stdlib::TestCase {
+            expression: "counter := 5".to_string(),
+            expected: util::Expected::Value("5".to_string()),
+            line: 3,
+        };
+        // Every transform must leave a REPL-turn binding's *shape* alone, so
+        // later units in the same file can still find it via a text match.
+        for transform in Transform::ALL {
+            let result = build_transformed_case(&case, transform)
+                .expect("REPL-turn bindings are passed through, never skipped");
+            assert_eq!(result.expression, "counter := 5");
+            assert_eq!(result.expected, case.expected);
+            assert_eq!(result.line, 3);
+        }
+    }
+
+    #[test]
+    fn build_transformed_case_returns_none_when_transform_not_applicable() {
+        let case = test_stdlib::TestCase {
+            expression: "1 + 2".to_string(),
+            expected: util::Expected::Value("3".to_string()),
+            line: 1,
+        };
+        assert!(build_transformed_case(&case, Transform::RenameLocals).is_none());
+    }
+
+    #[test]
+    fn build_transformed_case_block_wrap_round_trips_and_preserves_expected() {
+        let case = test_stdlib::TestCase {
+            expression: "1 + 2".to_string(),
+            expected: util::Expected::Value("3".to_string()),
+            line: 7,
+        };
+        let result = build_transformed_case(&case, Transform::BlockWrap)
+            .expect("block-wrap always applies and must round-trip");
+        assert!(
+            result.expression.contains("value"),
+            "block-wrap should wrap in a `[...] value` send: {}",
+            result.expression
+        );
+        assert_eq!(result.expected, case.expected);
+        assert_eq!(result.line, 7);
+    }
+
+    #[test]
+    fn build_transformed_case_redundant_temp_round_trips_and_preserves_expected() {
+        let case = test_stdlib::TestCase {
+            expression: "1 + 2".to_string(),
+            expected: util::Expected::Value("3".to_string()),
+            line: 9,
+        };
+        let result = build_transformed_case(&case, Transform::RedundantTemp)
+            .expect("redundant-temp always applies and must round-trip");
+        assert!(
+            result.expression.contains("mtTmp"),
+            "redundant-temp should introduce a `mtTmp` local: {}",
+            result.expression
+        );
+        assert_eq!(result.expected, case.expected);
+        assert_eq!(result.line, 9);
+    }
+
+    #[test]
+    fn build_transformed_case_rename_locals_round_trips_bound_names() {
+        let case = test_stdlib::TestCase {
+            expression: "[:x | x + x] value: 1".to_string(),
+            expected: util::Expected::Value("2".to_string()),
+            line: 2,
+        };
+        let result = build_transformed_case(&case, Transform::RenameLocals)
+            .expect("block parameter is bound, rename-locals applies and must round-trip");
+        assert_ne!(
+            result.expression, case.expression,
+            "rename-locals must actually change the bound parameter's spelling"
+        );
+        assert_eq!(result.expected, case.expected);
+        assert_eq!(result.line, 2);
+    }
 }
