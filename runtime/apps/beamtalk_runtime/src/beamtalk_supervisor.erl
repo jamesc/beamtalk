@@ -50,12 +50,15 @@ functions that call OTP APIs from the caller's process context.
     stop/1,
     build_child_specs/1,
     spec_to_otp/1,
+    spec_to_otp/2,
     is_supervisor/1,
     register_root/1,
     get_root/0,
     clear_root/0,
     run_initialize/1,
-    start_child_via_class_method/4
+    start_child_via_class_method/4,
+    start_dynamic_child/2,
+    start_dynamic_child/3
 ]).
 
 -include("beamtalk.hrl").
@@ -191,7 +194,7 @@ dynamic_init(Module, ClassName) ->
     MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
     MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
     SupFlags = #{strategy => simple_one_for_one, intensity => MaxR, period => MaxT},
-    Specs = build_child_specs([ChildClass]),
+    Specs = build_child_specs([ChildClass], dynamic),
     ?LOG_DEBUG("DynamicSupervisor init", #{
         supervisor => ClassName,
         strategy => simple_one_for_one,
@@ -568,7 +571,24 @@ Converts Beamtalk child spec dicts to OTP-compatible maps.
 """.
 -spec build_child_specs([term()]) -> [map()].
 build_child_specs(Children) ->
-    [build_child_spec(C) || C <- Children].
+    build_child_specs(Children, static).
+
+-doc """
+Build OTP child specs, threading `Mode` through to `spec_to_otp/2`.
+
+`Mode = dynamic` is used only by `dynamic_init/2` (a DynamicSupervisor's
+`simple_one_for_one` template): its default (`#spawn`) worker child spec
+gets a **zero**-static-arg MFA that routes through `start_dynamic_child/2,3`
+instead of baking `[#{}]` directly into `{ChildModule, start_link, _}` —
+see `spec_to_otp/2` and BT-3365. `Mode = static` (the default, used by
+`static_init/2` via `build_child_specs/1`) is unchanged: a static
+Supervisor's children start immediately at supervisor-init time and never
+receive appended `supervisor:start_child/2` args, so the pre-BT-3365
+`[#{}]` shape is still correct there.
+""".
+-spec build_child_specs([term()], static | dynamic) -> [map()].
+build_child_specs(Children, Mode) ->
+    [build_child_spec(C, Mode) || C <- Children].
 
 -doc """
 Check if a class name is a Supervisor or DynamicSupervisor subclass.
@@ -723,8 +743,10 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Ext
     end.
 
 -doc "Build a single OTP child spec from a class object or SupervisionSpec map.".
--spec build_child_spec(term()) -> map().
-build_child_spec(ClassObj) when is_tuple(ClassObj), element(1, ClassObj) =:= beamtalk_object ->
+-spec build_child_spec(term(), static | dynamic) -> map().
+build_child_spec(ClassObj, Mode) when
+    is_tuple(ClassObj), element(1, ClassObj) =:= beamtalk_object
+->
     case beamtalk_class_registry:is_class_object(ClassObj) of
         true ->
             ChildClassPid = element(4, ClassObj),
@@ -746,15 +768,15 @@ build_child_spec(ClassObj) when is_tuple(ClassObj), element(1, ClassObj) =:= bea
                 false ->
                     %% Worker child: call supervisionSpec then childSpec.
                     BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
-                    spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []))
+                    spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []), Mode)
             end;
         false ->
             %% Actor instance passed as spec — treat as SupervisionSpec-like value
-            spec_to_otp(beamtalk_message_dispatch:send(ClassObj, 'childSpec', []))
+            spec_to_otp(beamtalk_message_dispatch:send(ClassObj, 'childSpec', []), Mode)
     end;
-build_child_spec(Spec) when is_map(Spec) ->
+build_child_spec(Spec, Mode) when is_map(Spec) ->
     %% SupervisionSpec value (tagged map): call childSpec directly
-    spec_to_otp(beamtalk_message_dispatch:send(Spec, 'childSpec', [])).
+    spec_to_otp(beamtalk_message_dispatch:send(Spec, 'childSpec', []), Mode).
 
 -doc """
 Translate Beamtalk strategy symbol to OTP supervisor strategy atom.
@@ -882,6 +904,56 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     end.
 
 -doc """
+Start a DynamicSupervisor's default (no per-call args) child (BT-3365).
+
+This is the arity-2 half of the zero-static-arg MFA `spec_to_otp/2` builds
+for a DynamicSupervisor's `simple_one_for_one` template (`{beamtalk_supervisor,
+start_dynamic_child, [ChildModule, DefaultArgs]}`, `DefaultArgs` always `#{}`
+today). OTP applies this function at arity 2 whenever no extra args were
+appended to the template for a given start — i.e. the no-arg `startChild`
+call (`supervisor:start_child(SupPid, [])`).
+
+Automatic OTP restart (`#permanent`/`#transient`) does **not** always land
+here: OTP's `simple_one_for_one` supervisor records, per dynamically-started
+child, the exact args used to start it (`StaticArgs ++ EArgs` from that
+child's own `start_child/2` call — see `supervisor:dyn_store/3` /
+`find_child_and_args/2` in OTP's `supervisor.erl`) and replays those same
+args verbatim on restart, not just the bare static template. So restart
+lands on arity 2 (here) only for a child that was itself started with no
+extra args; a child started via `startChild: args` restarts through
+`start_dynamic_child/3` with that same `Args` — see its doc.
+""".
+-spec start_dynamic_child(module(), map()) -> {ok, pid()} | ignore | {error, term()}.
+start_dynamic_child(ChildModule, DefaultArgs) ->
+    ChildModule:start_link(DefaultArgs).
+
+-doc """
+Start a DynamicSupervisor child with caller-supplied init args (BT-3365).
+
+This is the arity-3 half of the zero-static-arg MFA `spec_to_otp/2` builds
+for a DynamicSupervisor's `simple_one_for_one` template. `startChild: args`
+(`beamtalk_supervisor:startChild/2`) appends `[Args]` to the template via
+`supervisor:start_child(SupPid, [Args])`, landing OTP's `apply/3` here at
+arity 3. `DefaultArgs` (the baked template value) is ignored in favour of
+the caller's `Args` — this is what makes `startChild: args` deliver
+exactly the args the caller passed to `ChildModule:start_link/1`, instead
+of the pre-fix behaviour where OTP concatenated the baked `#{}` and the
+caller's `Args` into a single 2-element arg list that `ChildModule` has no
+matching arity for and OTP misread as its 4-arity named-registration
+`start_link` form, crashing with `badarg`.
+
+Also the entry point automatic OTP restart lands on for a child started
+this way: OTP's `simple_one_for_one` bookkeeping (`supervisor:dyn_store/3`)
+records this exact call's `[ChildModule, DefaultArgs, Args]` and replays it
+verbatim on restart, so a crashed child restarts with the SAME `Args` it
+was originally given — not a blank default. See `start_dynamic_child/2`'s
+doc for the arity-2 (no-args) counterpart.
+""".
+-spec start_dynamic_child(module(), map(), term()) -> {ok, pid()} | ignore | {error, term()}.
+start_dynamic_child(ChildModule, _DefaultArgs, Args) ->
+    ChildModule:start_link(Args).
+
+-doc """
 Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
 
 The Beamtalk dict from `SupervisionSpec childSpec` has keys:
@@ -897,9 +969,17 @@ For worker children, Beamtalk's spawn/0 returns {beamtalk_object,...} which
 OTP supervisor does not accept (it expects {ok, Pid}). The generated
 start_link/1 returns {ok, Pid} directly from gen_server:start_link, so
 worker children use start_link/1 with an init-args map instead of spawn/0.
+
+`Mode` selects between a static Supervisor's immediate-start semantics and
+a DynamicSupervisor's extensible `simple_one_for_one` template — see the
+`spawn` case below and BT-3365.
 """.
 -spec spec_to_otp(map()) -> map().
 spec_to_otp(BtSpec) ->
+    spec_to_otp(BtSpec, static).
+
+-spec spec_to_otp(map(), static | dynamic) -> map().
+spec_to_otp(BtSpec, Mode) ->
     %% `start` is a Beamtalk Array #[ClassObj, StartFn, StartArgs]. Beamtalk
     %% Arrays are tagged maps with a canonical index→value `'data'` map (ADR
     %% 0090); read the elements as an ordered list via beamtalk_tagged_map.
@@ -919,8 +999,28 @@ spec_to_otp(BtSpec) ->
                 %% spawn/0 wraps the pid in {beamtalk_object,...} which OTP rejects.
                 StartFn = lists:nth(2, StartElems),
                 case StartFn of
+                    spawn when Mode =:= dynamic ->
+                        %% BT-3365: a DynamicSupervisor's simple_one_for_one template
+                        %% must NOT bake a static arg here. OTP appends whatever extra
+                        %% args supervisor:start_child/2 was given to this MFA's args —
+                        %% baking `[#{}]` meant `startChild: args` landed as
+                        %% `ChildModule:start_link(#{}, Args)`, a 2-arity call that
+                        %% doesn't exist as start_link/1 and gets misread by OTP as the
+                        %% 4-arity named-registration form, crashing with badarg.
+                        %% Using a zero-static-arg indirection through
+                        %% start_dynamic_child/2,3 instead lets both the no-arg
+                        %% `startChild` (arity 2: DefaultArgs) and `startChild: args`
+                        %% (arity 3: caller's Args wins) resolve to the single correct
+                        %% argument for `ChildModule:start_link/1`. See
+                        %% start_dynamic_child/2,3's docs for how each restarts —
+                        %% OTP's own simple_one_for_one bookkeeping replays each
+                        %% child's own original start args, so this is unaffected
+                        %% either way.
+                        {beamtalk_supervisor, start_dynamic_child, [ChildModule, #{}]};
                     spawn ->
-                        %% No init args — start with empty state map.
+                        %% Static Supervisor: no init args — start with empty state map.
+                        %% Static children start once at supervisor-init time and never
+                        %% have extra args appended, so a single baked arg is correct.
                         {ChildModule, start_link, [#{}]};
                     'spawnWith:' ->
                         %% #(self args) uses list syntax (#(...)) so it compiles to an

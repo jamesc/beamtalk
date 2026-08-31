@@ -2440,6 +2440,167 @@ spec_to_otp_spawnWithAs_translates_to_beamtalk_actor_spawnAs_arity3_test() ->
         bt1990_cleanup_class_obj(ClassObj)
     end.
 
+%%====================================================================
+%% BT-3365: spec_to_otp/2 dynamic-mode #spawn — zero-static-arg MFA
+%%====================================================================
+
+spec_to_otp_dynamic_spawn_uses_zero_static_arg_mfa_test() ->
+    %% BT-3365: for a DynamicSupervisor's simple_one_for_one template
+    %% (Mode = dynamic), the default #spawn startFn must NOT bake `[#{}]`
+    %% directly into `{ChildModule, start_link, _}` — supervisor:start_child/2
+    %% appends whatever extra args the caller passed on top of that fixed
+    %% list, so a baked one-element list plus an appended `startChild: args`
+    %% element produced a 2-arity call that OTP misread as the named-
+    %% registration start_link/4 form and crashed with badarg. Instead the
+    %% MFA must route through the zero-static-arg start_dynamic_child/2,3
+    %% indirection.
+    ClassObj = bt1990_make_counter_class_obj(),
+    try
+        StartArray = #{
+            '$beamtalk_class' => 'Array',
+            data => #{0 => ClassObj, 1 => spawn, 2 => []}
+        },
+        BtSpec = #{
+            id => 'TestCounter',
+            start => StartArray,
+            restart => permanent,
+            shutdown => 5000,
+            type => worker
+        },
+        OtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec, dynamic),
+        ?assertMatch(
+            #{start := {beamtalk_supervisor, start_dynamic_child, [test_counter, #{}]}},
+            OtpSpec
+        ),
+        %% Mode defaults to `static` (spec_to_otp/1) and stays on the
+        %% pre-BT-3365 shape used by static Supervisor children, which start
+        %% once at supervisor-init time and never have extra args appended.
+        StaticOtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec),
+        ?assertMatch(#{start := {test_counter, start_link, [#{}]}}, StaticOtpSpec)
+    after
+        bt1990_cleanup_class_obj(ClassObj)
+    end.
+
+%%====================================================================
+%% BT-3365: DynamicSupervisor(C)>>startChild: with a child needing init args
+%%====================================================================
+
+%% Build a real simple_one_for_one supervisor whose single child template is
+%% the OTP spec `build_child_specs/2` (Mode = dynamic) would produce for a
+%% plain (#spawn) worker child pointing at test_counter — i.e. exactly what
+%% `dynamic_init/2` wires up for a live `DynamicSupervisor(Counter)`.
+%% Also registers ClassObj as the fake `?MODULE:childClass()` (via the
+%% ETS cell startChild/1,2 read through set_child_class/1), so `Self`'s
+%% module field can be ?MODULE — matching how startChild/1,2 re-derive
+%% the child class at call time via `SupMod:'childClass'()`.
+bt3365_start_dynamic_supervisor(ClassObj) ->
+    set_child_class(ClassObj),
+    StartArray = #{
+        '$beamtalk_class' => 'Array',
+        data => #{0 => ClassObj, 1 => spawn, 2 => []}
+    },
+    BtSpec = #{
+        id => 'TestCounter',
+        start => StartArray,
+        restart => permanent,
+        shutdown => 5000,
+        type => worker
+    },
+    OtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec, dynamic),
+    SupFlags = #{strategy => simple_one_for_one, intensity => 3, period => 5},
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [OtpSpec]}),
+    SupPid.
+
+startChild_arity2_with_real_dynamic_spec_delivers_args_test() ->
+    %% BT-3365 regression: startChild: args on a real simple_one_for_one
+    %% supervisor built from the dynamic-mode spec must start the child
+    %% with exactly the caller's args, not crash with badarg.
+    ClassObj = bt1990_make_counter_class_obj(),
+    SupPid = bt3365_start_dynamic_supervisor(ClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3365DynSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self, 42),
+        ?assertMatch({ok, {beamtalk_object, 'Counter', test_counter, _}}, Result),
+        {ok, Child} = Result,
+        ChildPid = element(4, Child),
+        Proxy = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = ChildPid},
+        ?assertEqual(42, beamtalk_message_dispatch:send(Proxy, getValue, []))
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        gen_server:stop(SupPid)
+    end.
+
+startChild_arity1_with_real_dynamic_spec_still_works_test() ->
+    %% BT-3365 regression guard: the no-arg startChild path must keep
+    %% working once #spawn routes through the zero-static-arg
+    %% start_dynamic_child/2,3 indirection instead of a baked [#{}].
+    ClassObj = bt1990_make_counter_class_obj(),
+    SupPid = bt3365_start_dynamic_supervisor(ClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3365DynSup', ?MODULE, SupPid},
+        Result = beamtalk_supervisor:startChild(Self),
+        ?assertMatch({ok, {beamtalk_object, 'Counter', test_counter, _}}, Result),
+        {ok, Child} = Result,
+        ChildPid = element(4, Child),
+        ?assert(is_process_alive(ChildPid))
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        gen_server:stop(SupPid)
+    end.
+
+startChild_arity2_restart_replays_original_call_args_test() ->
+    %% BT-3365: verify (and pin down) OTP's actual simple_one_for_one restart
+    %% semantics for a child started via startChild: args. OTP's supervisor
+    %% stores, per dynamically-started child, the *exact* args used at start
+    %% time (`StaticArgs ++ EArgs` from the `start_child/2` call, see
+    %% `supervisor:dyn_store/3` and `find_child_and_args/2` in OTP's
+    %% supervisor.erl) and replays those same args verbatim on automatic
+    %% restart — not just the bare static template. So a child started with
+    %% `startChild: 42` restarts as `start_dynamic_child(ChildModule, #{}, 42)`
+    %% (arity 3, `Args = 42` wins) again, coming back with the SAME 42, not a
+    %% blank default. (A child started via the plain no-arg `startChild`
+    %% restarts via the arity-2 clause instead, since its stored EArgs was
+    %% `[]` — that one *does* come back with DefaultArgs, because that is
+    %% what it was started with in the first place.)
+    ClassObj = bt1990_make_counter_class_obj(),
+    SupPid = bt3365_start_dynamic_supervisor(ClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3365DynSup', ?MODULE, SupPid},
+        {ok, Child} = beamtalk_supervisor:startChild(Self, 42),
+        ChildPid1 = element(4, Child),
+        Proxy1 = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = ChildPid1},
+        ?assertEqual(42, beamtalk_message_dispatch:send(Proxy1, getValue, [])),
+
+        exit(ChildPid1, kill),
+        ChildPid2 = bt3365_wait_for_restart(SupPid, ChildPid1, 2000),
+        ?assertNotEqual(ChildPid1, ChildPid2),
+        Proxy2 = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = ChildPid2},
+        %% Restarted with the original startChild: 42 call's args, not a
+        %% blank default — OTP's own simple_one_for_one bookkeeping.
+        ?assertEqual(42, beamtalk_message_dispatch:send(Proxy2, getValue, []))
+    after
+        bt1990_cleanup_class_obj(ClassObj),
+        gen_server:stop(SupPid)
+    end.
+
+bt3365_wait_for_restart(SupPid, OldPid, TimeoutMs) ->
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline).
+
+bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline) ->
+    case [Pid || {_, Pid, _, _} <- supervisor:which_children(SupPid), is_pid(Pid)] of
+        [NewPid] when NewPid =/= OldPid ->
+            NewPid;
+        _ ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true ->
+                    error(restart_timeout);
+                false ->
+                    timer:sleep(5),
+                    bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline)
+            end
+    end.
+
 supervisor_restart_re_registers_name_test() ->
     %% The load-bearing restart-survival integration test.
     %%
