@@ -50,7 +50,7 @@ beamtalk-repl-protocol = { workspace = true, features = ["test"] }
 # see `apply_rename_class_move_sends_document_moved_notification` (BT-3285).
 # Already pinned via `tower-lsp`'s own dependency tree (Cargo.lock), so this
 # adds no new resolved version.
-tower = { version = "0.4", default-features = false }
+tower = { version = "0.5", default-features = false }
 
 [lints]
 workspace = true
