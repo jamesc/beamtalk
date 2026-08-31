@@ -23,72 +23,17 @@
 //! no such cross-crate care: it exercises only `beamtalk-core`'s own
 //! `generate_module`, so this could be a plain unit test, but it stays a
 //! Cargo integration test for consistency with its sibling file above.
+//!
+//! The near-valid-input generator and proptest config (below, via
+//! `test_helpers::test_support`) are shared with that sibling file rather
+//! than duplicated — see `test_support::near_valid_beamtalk`'s own doc
+//! comment for why (code review on BT-3344's PR).
 
 use beamtalk_core::ast::Module;
 use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_core::test_helpers::test_support::{near_valid_beamtalk, proptest_config_default};
 use proptest::prelude::*;
-
-// ============================================================================
-// Generators
-// ============================================================================
-
-/// Near-valid Beamtalk fragments for codegen testing.
-const FRAGMENTS: &[&str] = &[
-    "42",
-    "\"hello\"",
-    "true",
-    "false",
-    "nil",
-    "x := 42",
-    "x + y",
-    "[:x | x + 1]",
-    "Object subclass: Foo\n  state: x = 0\n  bar => x",
-    "Actor subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
-    "#(1, 2, 3)",
-    "#{#a => 1}",
-    "self",
-    "^42",
-    "3 timesRepeat: [x := x + 1]",
-    "#[first, ...rest] := #[1, 2, 3]",
-    "[1] ensure: [nil]",
-    "x match: { 1 => \"one\", _ => \"other\" }",
-];
-
-fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
-}
-
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    prop_oneof![
-        valid_fragment(),
-        // Truncated
-        valid_fragment().prop_flat_map(|s| {
-            let len = s.len();
-            if len <= 1 {
-                Just(s).boxed()
-            } else {
-                (1..len)
-                    .prop_map(move |cut| {
-                        // MSRV-1.85-compatible stand-in for `str::floor_char_boundary`
-                        // (stable since 1.91, past this crate's pinned MSRV).
-                        let mut safe_cut = cut;
-                        while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
-                            safe_cut -= 1;
-                        }
-                        if safe_cut == 0 {
-                            s.clone()
-                        } else {
-                            s[..safe_cut].to_string()
-                        }
-                    })
-                    .boxed()
-            }
-        }),
-        // Multiple fragments
-        (valid_fragment(), valid_fragment()).prop_map(|(a, b)| format!("{a}\n{b}")),
-    ]
-}
 
 // ============================================================================
 // Helpers
@@ -100,26 +45,12 @@ fn parse_source(source: &str) -> Module {
     module
 }
 
-/// Standard proptest configuration for this suite: at least 512 cases
-/// (overridable via `PROPTEST_CASES`), matching
-/// `beamtalk_core::test_helpers::test_support::proptest_config_default` —
-/// that helper is `#[cfg(test)]`-gated (deliberately unavailable to
-/// dependent crates, including this integration test binary), so it's
-/// reproduced here rather than imported.
-fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    ProptestConfig {
-        cases: default.cases.max(512),
-        ..default
-    }
-}
-
 // ============================================================================
 // Property tests
 // ============================================================================
 
 proptest! {
-    #![proptest_config(proptest_config())]
+    #![proptest_config(proptest_config_default())]
 
     /// Property 1: `generate_module` never panics on arbitrary parsed input.
     ///

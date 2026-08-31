@@ -30,6 +30,16 @@ ecow.workspace = true
 # `codegen::generate_repl_expression`, moved here from
 # `beamtalk-core/tests/codegen_property_tests.rs`.
 proptest.workspace = true
+# why: BT-3344 code review — the moved property tests need
+# `beamtalk_core::test_helpers::test_support::{near_valid_beamtalk,
+# proptest_config_default}`, shared rather than duplicated locally (the "No
+# duplicate implementations" rule), the same `test`-feature mechanism
+# `beamtalk-compiler-port` already uses for `test_support::arb_declared_type`
+# (BT-3100). This is a *second*, feature-qualified requirement on top of the
+# plain `beamtalk-core.workspace = true` production dependency above; Cargo
+# unifies them into one built instance with `test` enabled only for dev/test
+# builds of this crate, never for its production library.
+beamtalk-core = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true
