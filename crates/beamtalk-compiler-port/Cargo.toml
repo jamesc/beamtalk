@@ -20,6 +20,11 @@ path = "src/main.rs"
 
 [dependencies]
 beamtalk-core = { workspace = true }
+# why: ADR 0117 step 5 (BT-3361) — the compiler-port protocol's `queries`
+# commands (diagnostics, completions, senders/sends/announce-sites/
+# references/field-accesses/ffi-sites queries, selector rename) moved out of
+# `beamtalk-core` into their own crate.
+beamtalk-language-service = { workspace = true }
 # why: BT-3340 (ADR 0117 Decision step 2) — REPL/test expression generation
 # moved out of `beamtalk-core::erlang`'s re-export into a standalone crate.
 beamtalk-repl = { workspace = true }

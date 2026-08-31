@@ -49,8 +49,8 @@
 //! - BT-2215 (delegate-nav epic), BT-2239 (foundation)
 //! - ADR 0066 (open-class extension methods)
 
-use crate::ast::Module;
-use crate::language_service::Location;
+use crate::Location;
+use beamtalk_core::ast::Module;
 use camino::Utf8PathBuf;
 
 /// Find every class that locally defines `selector_name`, returning one
@@ -95,7 +95,7 @@ pub fn find_implementors<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     fn parse_source(source: &str) -> Module {
         let tokens = lex_with_eof(source);

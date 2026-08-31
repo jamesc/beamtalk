@@ -32,11 +32,16 @@ serde_json.workspace = true
 # CLI
 clap.workspace = true
 
-# Core compiler for lint passes in the lint MCP tool. `serde` feature
-# enables Deserialize on NavSymbolsResponse/NavSymbolClass (BT-3239's `docs`
-# tool decodes the `nav-symbols` reply to locate a class's source file),
-# same feature beamtalk-lsp already enables for the identical struct.
+# Core compiler for lint passes in the lint MCP tool.
 beamtalk-core = { workspace = true, features = ["serde"] }
+
+# why: ADR 0117 step 5 (BT-3361) — NavSymbolsResponse/NavSymbolClass
+# (BT-3239's `docs` tool decodes the `nav-symbols` reply to locate a class's
+# source file) moved out of `beamtalk-core` into this crate along with the
+# rest of `runtime_delegate`/`queries`. `serde` feature enables Deserialize
+# on them, same feature beamtalk-lsp already enables for the identical
+# structs.
+beamtalk-language-service = { workspace = true, features = ["serde"] }
 
 # why: BT-3340 (ADR 0117 Decision step 2) — `lint`/`project` moved out of
 # `beamtalk-core` into standalone crates; the lint/diagnostic_summary MCP

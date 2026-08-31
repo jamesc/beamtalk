@@ -30,13 +30,13 @@
 //! - ADR 0024: Static-First, Live-Augmented IDE Tooling
 //! - LSP specification: Language Server Protocol textDocument/references
 
-use crate::ast::{
+use crate::Location;
+use beamtalk_core::ast::{
     ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
     TypeAnnotation, TypeParamDecl,
 };
-use crate::language_service::Location;
-use crate::source_analysis::Span;
+use beamtalk_core::source_analysis::Span;
 use camino::Utf8PathBuf;
 
 /// Find all references to a class or protocol name across files.
@@ -391,7 +391,7 @@ fn collect_class_refs(
         }
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                     collect_class_refs(expr, class_name, file_path, results);
                 }
             }
@@ -420,7 +420,7 @@ fn collect_class_refs(
 /// `Result ok: v`). All other variants just host nested patterns, which we walk
 /// so a constructor nested inside a tuple, list, array, map, or binary pattern
 /// is still reported. Mirrors `find_identifier_in_pattern` in
-/// `crate::language_service` so goto-definition and find-references see the
+/// `crate` so goto-definition and find-references see the
 /// same set of sites.
 fn collect_pattern_class_refs(
     pattern: &Pattern,
@@ -580,7 +580,7 @@ pub fn find_selector_references<'a>(
 
 /// Collect method definition references with matching selector.
 fn collect_method_def_refs(
-    methods: &[crate::ast::MethodDefinition],
+    methods: &[beamtalk_core::ast::MethodDefinition],
     selector_name: &str,
     file_path: &Utf8PathBuf,
     results: &mut Vec<Location>,
@@ -599,7 +599,7 @@ fn collect_method_def_refs(
 /// (full method `span`, matching the AST-walker's call-site contract), but
 /// **without** the call/cascade sites.
 ///
-/// Used by [`crate::language_service`] to overlay declaration sites onto
+/// Used by [`crate`] to overlay declaration sites onto
 /// runtime-attached `textDocument/references` results (BT-2240). The
 /// runtime path returns `senders_of/1` (call sites only); merging this
 /// helper's output back in restores parity with the cold-file walker
@@ -630,7 +630,7 @@ pub fn find_selector_declarations<'a>(
 /// matches — pointing at the declared name token only (not superclass
 /// references, type-annotation occurrences, or other reference sites).
 ///
-/// Used by [`crate::language_service`] to overlay class declaration sites
+/// Used by [`crate`] to overlay class declaration sites
 /// onto runtime-attached `textDocument/references` results (BT-2240). The
 /// runtime path's `references_to/1` returns sites that *use* the class
 /// (type annotations, class literals, etc.) but never the declaration site
@@ -734,7 +734,7 @@ fn collect_selector_refs(
         }
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                     collect_selector_refs(expr, selector_name, file_path, results);
                 }
             }
@@ -759,9 +759,9 @@ fn collect_selector_refs(
 
 /// Get the span covering a selector's keywords (for keyword messages)
 /// or None for unary/binary selectors (whose span is part of the message send).
-fn selector_reference_span(selector: &crate::ast::MessageSelector) -> Option<Span> {
+fn selector_reference_span(selector: &beamtalk_core::ast::MessageSelector) -> Option<Span> {
     match selector {
-        crate::ast::MessageSelector::Keyword(parts) if !parts.is_empty() => {
+        beamtalk_core::ast::MessageSelector::Keyword(parts) if !parts.is_empty() => {
             let first = parts.first().unwrap().span;
             let last = parts.last().unwrap().span;
             Some(first.merge(last))
@@ -773,7 +773,7 @@ fn selector_reference_span(selector: &crate::ast::MessageSelector) -> Option<Spa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     fn parse_source(source: &str) -> Module {
         let tokens = lex_with_eof(source);

@@ -17,15 +17,15 @@
 //! divider, its methods are nested one level deeper under a
 //! [`DocumentSymbolKind::Category`] container per divider (Outline nesting +
 //! breadcrumbs + sticky-scroll fall out of this for free in VS Code) — see
-//! [`crate::source_analysis::method_category`] for the divider-recognition
+//! [`beamtalk_core::source_analysis::method_category`] for the divider-recognition
 //! and method-association rules. Classes with **no** dividers are unaffected:
 //! their methods stay flat children of the class symbol, instance methods
 //! before class-side methods, exactly as before this feature — a divider-free
 //! class's outline never changes shape.
 
-use crate::ast::Module;
-use crate::language_service::{DocumentSymbol, DocumentSymbolKind};
-use crate::source_analysis::{self, CategorizedMethod, MethodSide};
+use crate::{DocumentSymbol, DocumentSymbolKind};
+use beamtalk_core::ast::Module;
+use beamtalk_core::source_analysis::{self, CategorizedMethod, MethodSide};
 
 /// Computes document symbols for a module.
 ///
@@ -135,7 +135,7 @@ fn method_symbol(method: &CategorizedMethod) -> DocumentSymbol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     #[test]
     fn empty_module_returns_no_symbols() {

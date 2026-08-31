@@ -18,12 +18,12 @@
 //!
 //! # Implementation
 //!
-//! The implementation lives in [`crate::method_source_walker`], a shared leaf
+//! The implementation lives in [`beamtalk_core::method_source_walker`], a shared leaf
 //! module below both this Language Service context and the Code Generation
 //! context that also needs these results for xref codegen (ADR 0087 Phase 2).
 //! See `docs/development/architecture-principles.md` §6.
 
-pub use crate::method_source_walker::{ReceiverKind, SendHit, find_all_sends_in_source};
+pub use beamtalk_core::method_source_walker::{ReceiverKind, SendHit, find_all_sends_in_source};
 
 #[cfg(test)]
 mod tests {

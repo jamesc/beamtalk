@@ -49,9 +49,9 @@
 //! contribute results. A completely unparseable source returns an empty list.
 
 use super::selector_span;
-use crate::announce_selectors::is_announce_selector;
-use crate::ast::{Expression, Pattern, StringSegment};
-use crate::source_analysis::{Span, lex_with_eof, parse};
+use beamtalk_core::announce_selectors::is_announce_selector;
+use beamtalk_core::ast::{Expression, Pattern, StringSegment};
+use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
 /// Used to translate line numbers from wrapped-source to input-source space.
@@ -94,7 +94,7 @@ pub fn find_announce_sites_in_source(method_source: &str) -> Vec<AnnounceHit> {
 
     let mut hits = Vec::new();
 
-    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+    beamtalk_core::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
             collect_announce_sites(&stmt.expression, &wrapped, &mut hits);
         }
@@ -145,7 +145,7 @@ fn class_reference_name(expr: &Expression) -> Option<String> {
 /// ignored). A keyword send with no arguments cannot be an announce site, but is
 /// handled defensively as unresolvable.
 fn push_announce(
-    selector: &crate::ast::MessageSelector,
+    selector: &beamtalk_core::ast::MessageSelector,
     arguments: &[Expression],
     span: Span,
     source: &str,
@@ -314,7 +314,11 @@ fn collect_pattern_announce_sites(pattern: &Pattern, source: &str, hits: &mut Ve
 /// selector keywords when available (so the line points at the selector token
 /// rather than the receiver, for multi-line sends) and falls back to the
 /// enclosing message-send span otherwise.
-fn selector_line(selector: &crate::ast::MessageSelector, fallback: Span, source: &str) -> u32 {
+fn selector_line(
+    selector: &beamtalk_core::ast::MessageSelector,
+    fallback: Span,
+    source: &str,
+) -> u32 {
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)

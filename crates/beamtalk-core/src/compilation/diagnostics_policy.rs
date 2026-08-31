@@ -15,7 +15,9 @@
 //! downward only; `beamtalk-lsp` may depend on `beamtalk-core`, never on
 //! `beamtalk-cli`). BT-2800 is the surface-parity fix that moved this here.
 
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity};
+use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
+use ecow::EcoString;
 use std::collections::BTreeMap;
 
 /// A per-category diagnostic severity override (ADR 0100 Rule 3).
@@ -382,6 +384,361 @@ pub fn apply_diagnostics_table(
             }
         })
         .collect()
+}
+
+// BT-3361 (ADR 0117 Decision step 5): `compute_diagnostics`,
+// `compute_diagnostics_with_known_vars`, `apply_expect_directives`, and its
+// private helpers moved here from `beamtalk-language-service`'s
+// `queries::diagnostic_provider` (which re-exports them under their
+// original names/paths for existing call sites). They were always pure
+// Compilation-context diagnostics post-processing — like
+// `apply_diagnostics_table` above, their new neighbor — with zero
+// Language-Service-specific types (no `Position`, `Completion`, ...); moving
+// them here is what lets `beamtalk-core`'s own extensive
+// `semantic_analysis::type_checker` unit-test suite (67+ call sites across
+// its `tests/` submodule) keep computing full-pipeline `@expect`-suppressed
+// diagnostics without `beamtalk-core` taking a dev-dependency on
+// `beamtalk-language-service` — which would be a cyclic self-dependency for
+// its own unit tests specifically (unlike the crate's existing self-`path`
+// dev-dependency for `test_support`, which only integration tests under
+// `tests/` exercise — see that entry's own comment in `Cargo.toml` — a unit
+// test compiles as part of the same `--cfg test` compilation as the library
+// itself, so an external crate it depends on would link a *different*,
+// non-test-cfg build of this same library, and the two builds' otherwise-
+// identical types are not interchangeable to rustc).
+
+/// Computes diagnostics for a module.
+///
+/// This runs both parse-time and semantic analysis diagnostics.
+///
+/// # Arguments
+///
+/// * `module` - The parsed AST
+/// * `parse_diagnostics` - Diagnostics from the parser
+///
+/// # Returns
+///
+/// A list of all diagnostics (errors and warnings).
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::compilation::diagnostics_policy::compute_diagnostics;
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, parse_diags) = parse(tokens);
+///
+/// let diagnostics = compute_diagnostics(&module, parse_diags);
+/// assert!(diagnostics.is_empty()); // Valid code has no errors
+/// ```
+#[must_use]
+pub fn compute_diagnostics(module: &Module, parse_diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    compute_diagnostics_with_known_vars(module, parse_diagnostics, &[])
+}
+
+/// Computes diagnostics with pre-defined REPL variables.
+///
+/// Variables in `known_vars` are treated as already defined, preventing
+/// "Undefined variable" errors for REPL session variables.
+#[must_use]
+pub fn compute_diagnostics_with_known_vars(
+    module: &Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    known_vars: &[&str],
+) -> Vec<Diagnostic> {
+    let mut all_diagnostics = parse_diagnostics;
+
+    // Run semantic analysis with known variables
+    let analysis_result = crate::semantic_analysis::analyse_full(
+        module,
+        crate::semantic_analysis::AnalysisContext::default().with_known_vars(known_vars),
+    );
+    all_diagnostics.extend(analysis_result.diagnostics);
+
+    apply_expect_directives(module, &mut all_diagnostics);
+
+    all_diagnostics
+}
+
+/// Applies `@expect` directives to suppress matching diagnostics.
+///
+/// For each `@expect category` directive in the module, any diagnostic
+/// whose span is contained within the *following* expression's span and
+/// whose category matches is removed from `diagnostics`. If no matching
+/// diagnostic is found, the directive itself becomes an error ("stale @expect").
+///
+/// This is called by both the language service (LSP/diagnostic provider) and
+/// the CLI compiler after all diagnostics have been collected.
+pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    // (cat, reason, directive_span, target_span)
+    let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span)> = Vec::new();
+
+    collect_directives_from_exprs(&module.expressions, &mut directives);
+    for class in &module.classes {
+        // BT-1856: Collect declaration-level @expect from state declarations.
+        // directive_span = the @expect token span (for stale warnings),
+        // target_span = the declaration span (for matching diagnostics).
+        for state_decl in class.state.iter().chain(class.class_variables.iter()) {
+            if let Some((cat, ref reason, expect_span)) = state_decl.expect {
+                directives.push((cat, reason.clone(), expect_span, state_decl.span));
+            }
+        }
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            // BT-1856: Collect declaration-level @expect from method declarations
+            if let Some((cat, ref reason, expect_span)) = method.expect {
+                directives.push((cat, reason.clone(), expect_span, method.span));
+            }
+            collect_directives_from_exprs(&method.body, &mut directives);
+        }
+    }
+    for standalone in &module.method_definitions {
+        if let Some((cat, ref reason, expect_span)) = standalone.method.expect {
+            directives.push((cat, reason.clone(), expect_span, standalone.method.span));
+        }
+        collect_directives_from_exprs(&standalone.method.body, &mut directives);
+    }
+
+    if directives.is_empty() {
+        return;
+    }
+
+    let mut suppressed_indices: Vec<usize> = Vec::new();
+    let mut stale_directives: Vec<(ExpectCategory, Option<EcoString>, Span)> = Vec::new();
+
+    for (cat, reason, directive_span, target_span) in &directives {
+        let mut matched = false;
+        for (i, diag) in diagnostics.iter().enumerate() {
+            if target_span.contains(diag.span) && category_matches(*cat, diag.category) {
+                suppressed_indices.push(i);
+                matched = true;
+            }
+        }
+        if !matched {
+            stale_directives.push((*cat, reason.clone(), *directive_span));
+        }
+    }
+
+    // Remove suppressed diagnostics (in reverse order to preserve indices)
+    suppressed_indices.sort_unstable();
+    suppressed_indices.dedup();
+    for i in suppressed_indices.into_iter().rev() {
+        diagnostics.remove(i);
+    }
+
+    // Emit warnings for stale directives (BT-1412: warning, not error, so
+    // compilation can proceed — the annotation is just unnecessary).
+    for (cat, reason, span) in stale_directives {
+        let message = if let Some(reason) = reason {
+            format!(
+                "stale @expect {} \"{reason}\": no matching diagnostic found on the following expression — consider removing it",
+                cat.as_str()
+            )
+        } else {
+            format!(
+                "stale @expect {}: no matching diagnostic found on the following expression — consider removing it",
+                cat.as_str()
+            )
+        };
+        diagnostics.push(
+            Diagnostic::warning(message, span)
+                .with_hint("Remove the `@expect` directive if the diagnostic was fixed"),
+        );
+    }
+}
+
+/// Returns true if the `@expect` category matches a diagnostic category.
+///
+/// `@expect type` matches both type-mismatch warnings (`DiagnosticCategory::Type`)
+/// and method-not-found hints (`DiagnosticCategory::Dnu`).  A common motivation
+/// for the latter is type-erasure boundaries — e.g. `Result.unwrap` returns
+/// `Object`, so any method call on the result produces a DNU hint — but the
+/// suppression applies unconditionally whenever `@expect type` is written.
+fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
+    expect_cat == ExpectCategory::All
+        || matches!(
+            (expect_cat, diag_cat),
+            // BT-1273: @expect type also covers method-not-found (Dnu) hints so that
+            // callers can use a single annotation for all type-related suppressions.
+            // BT-1918: @expect type also covers missing type-annotation warnings
+            // (TypeAnnotation) for backward compatibility.
+            (
+                ExpectCategory::Dnu | ExpectCategory::Type,
+                Some(DiagnosticCategory::Dnu)
+            ) | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
+                | (
+                    ExpectCategory::Type | ExpectCategory::TypeAnnotation,
+                    Some(DiagnosticCategory::TypeAnnotation)
+                )
+                | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
+                | (
+                    ExpectCategory::DeadAssignment,
+                    Some(DiagnosticCategory::DeadAssignment)
+                )
+                | (
+                    ExpectCategory::Deprecation,
+                    Some(DiagnosticCategory::Deprecation)
+                )
+                | (ExpectCategory::ActorNew, Some(DiagnosticCategory::ActorNew))
+                | (
+                    ExpectCategory::Visibility,
+                    Some(DiagnosticCategory::Visibility)
+                )
+                | (
+                    ExpectCategory::UnresolvedClass,
+                    Some(DiagnosticCategory::UnresolvedClass)
+                )
+                | (
+                    ExpectCategory::UnresolvedFfi,
+                    Some(DiagnosticCategory::UnresolvedFfi)
+                )
+                | (
+                    ExpectCategory::ArityMismatch,
+                    Some(DiagnosticCategory::ArityMismatch)
+                )
+                | (
+                    ExpectCategory::ShadowedClass,
+                    Some(DiagnosticCategory::ShadowedClass)
+                )
+                | (
+                    ExpectCategory::Inheritance,
+                    Some(DiagnosticCategory::Inheritance)
+                )
+                | (
+                    ExpectCategory::Sendability,
+                    Some(DiagnosticCategory::Sendability)
+                )
+        )
+}
+
+/// Collects `@expect` directives from an expression list.
+///
+/// For each `ExpectDirective` at index `i`, the target span is the span of
+/// the expression at index `i + 1` (if present).
+///
+/// After scanning the flat statement list, recurses into expression subtrees
+/// to find `@expect` directives inside block bodies (BT-2010).
+fn collect_directives_from_exprs(
+    exprs: &[ExpressionStatement],
+    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
+) {
+    for (i, stmt) in exprs.iter().enumerate() {
+        if let Expression::ExpectDirective {
+            category,
+            reason,
+            span,
+        } = &stmt.expression
+        {
+            if let Some(next) = exprs.get(i + 1) {
+                directives.push((*category, reason.clone(), *span, next.expression.span()));
+            } else {
+                // Trailing @expect with no following expression — treat as stale.
+                // Use the directive's own span as the target span so it will
+                // never match any real diagnostic and will always be reported stale.
+                directives.push((*category, reason.clone(), *span, *span));
+            }
+        }
+        // BT-2010: Recurse into expression subtrees to find block bodies
+        // containing @expect directives.
+        collect_directives_from_expr(&stmt.expression, directives);
+    }
+}
+
+/// Recursively walks an expression tree to find nested `Block` bodies and
+/// collects `@expect` directives from them (BT-2010).
+///
+/// This handles `@expect` inside `ifTrue: [...]`, `collect: [:x | ...]`,
+/// nested blocks, match arms, and any other expression that contains
+/// sub-expressions with block bodies.
+fn collect_directives_from_expr(
+    expr: &Expression,
+    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
+) {
+    match expr {
+        Expression::Block(block) => {
+            // Found a block body — scan it for @expect directives using the
+            // same (i, i+1) semantics, then recurse into its children.
+            collect_directives_from_exprs(&block.body, directives);
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_directives_from_expr(receiver, directives);
+            for arg in arguments {
+                collect_directives_from_expr(arg, directives);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_directives_from_expr(target, directives);
+            collect_directives_from_expr(value, directives);
+        }
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+            collect_directives_from_expr(value, directives);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            collect_directives_from_expr(receiver, directives);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    collect_directives_from_expr(arg, directives);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            collect_directives_from_expr(expression, directives);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            collect_directives_from_expr(receiver, directives);
+        }
+        Expression::Match { value, arms, .. } => {
+            collect_directives_from_expr(value, directives);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_directives_from_expr(guard, directives);
+                }
+                collect_directives_from_expr(&arm.body, directives);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_directives_from_expr(&pair.key, directives);
+                collect_directives_from_expr(&pair.value, directives);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                collect_directives_from_expr(elem, directives);
+            }
+            if let Some(t) = tail {
+                collect_directives_from_expr(t, directives);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                collect_directives_from_expr(elem, directives);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                    collect_directives_from_expr(e, directives);
+                }
+            }
+        }
+        // Leaf nodes — nothing to recurse into.
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Error { .. }
+        | Expression::Spread { .. } => {}
+    }
 }
 
 #[cfg(test)]

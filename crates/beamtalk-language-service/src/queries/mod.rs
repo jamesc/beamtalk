@@ -47,14 +47,14 @@ pub mod selector_rename_query;
 pub mod senders_query;
 pub mod signature_help_provider;
 
-use crate::ast::Module;
-use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, infer_types_and_returns};
+use beamtalk_core::ast::Module;
+use beamtalk_core::semantic_analysis::type_checker::TypeMap;
+use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, infer_types_and_returns};
 
-/// Re-exported from [`crate::method_source_walker`] so sibling query modules
+/// Re-exported from [`beamtalk_core::method_source_walker`] so sibling query modules
 /// (`senders_query`, `all_sends_query`, `announce_sites_query`, `ffi_sites_query`)
 /// can reach it via `super::selector_span` without importing across layers.
-pub(crate) use crate::method_source_walker::selector_span;
+pub(crate) use beamtalk_core::method_source_walker::selector_span;
 
 /// Enriches a class hierarchy with method return types inferred from a module's source,
 /// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass (BT-1047).
@@ -83,11 +83,13 @@ pub(crate) use crate::method_source_walker::selector_span;
 /// [`enrich_hierarchy_with_inferred_returns_and_aliases`] directly instead of
 /// this function when a caller has one to offer.
 ///
-/// [`ProjectIndex`]: crate::language_service::project_index::ProjectIndex
+/// [`ProjectIndex`]: crate::project_index::ProjectIndex
 pub(crate) fn enrich_hierarchy_with_inferred_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
-    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+    native_type_registry: Option<
+        &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    >,
 ) -> (Option<ClassHierarchy>, TypeMap) {
     let (type_map, inferred) = infer_types_and_returns(module, hierarchy, native_type_registry);
     let enriched = if inferred.is_empty() {
@@ -107,15 +109,17 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns(
 /// `alias_registry = None` is identical to
 /// [`enrich_hierarchy_with_inferred_returns`].
 ///
-/// [`TypeProvenance::Aliased`]: crate::semantic_analysis::type_checker::TypeProvenance
+/// [`TypeProvenance::Aliased`]: beamtalk_core::semantic_analysis::type_checker::TypeProvenance
 pub(crate) fn enrich_hierarchy_with_inferred_returns_and_aliases(
     module: &Module,
     hierarchy: &ClassHierarchy,
-    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+    native_type_registry: Option<
+        &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    >,
     alias_registry: Option<&AliasRegistry>,
 ) -> (Option<ClassHierarchy>, TypeMap) {
     let (type_map, inferred) =
-        crate::semantic_analysis::type_checker::infer_types_and_returns_with_aliases(
+        beamtalk_core::semantic_analysis::type_checker::infer_types_and_returns_with_aliases(
             module,
             hierarchy,
             native_type_registry,

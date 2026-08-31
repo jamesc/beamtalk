@@ -18,10 +18,10 @@
 //!
 //! # Implementation
 //!
-//! The implementation lives in [`crate::method_source_walker`], the same
+//! The implementation lives in [`beamtalk_core::method_source_walker`], the same
 //! shared leaf module [`super::all_sends_query`] re-exports from — see that
 //! module's own doc for why this lives below both consuming contexts.
 
-pub use crate::method_source_walker::{
+pub use beamtalk_core::method_source_walker::{
     SelectorSendSpan, find_definition_selector_spans, find_selector_send_spans,
 };

@@ -93,8 +93,13 @@ pub(crate) fn is_erlang_class_reference(expr: &Expression) -> bool {
 /// - the `Erlang` reference is package-qualified (`json@Erlang lists`); or
 /// - the unary selector is a class-protocol selector (`Erlang class`,
 ///   `Erlang new`, …) — those dispatch to the class protocol instead of FFI.
+///
+/// BT-3361: widened from `pub(crate)` to `pub` — `queries::ffi_sites_query`
+/// (Language Service) reaches this from the standalone
+/// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
+/// longer reachable.
 #[must_use]
-pub(crate) fn erlang_module_of_receiver(expr: &Expression) -> Option<&str> {
+pub fn erlang_module_of_receiver(expr: &Expression) -> Option<&str> {
     if let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Unary(module_name),

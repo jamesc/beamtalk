@@ -107,7 +107,7 @@ fn file_id() -> Utf8PathBuf {
 // Property tests
 // ============================================================================
 
-use crate::test_helpers::test_support::proptest_config_default as proptest_config;
+use beamtalk_core::test_helpers::test_support::proptest_config_default as proptest_config;
 
 proptest! {
     #![proptest_config(proptest_config())]

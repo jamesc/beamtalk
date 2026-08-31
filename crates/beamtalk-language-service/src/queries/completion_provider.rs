@@ -25,15 +25,15 @@
 //!
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
-use crate::ast::{ClassDefinition, ClassKind, Expression, MethodDefinition, Module};
-use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
-use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
-use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
-use crate::source_analysis::Span;
+use crate::{Completion, CompletionKind, Position};
+use beamtalk_core::ast::{ClassDefinition, ClassKind, Expression, MethodDefinition, Module};
+use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+use beamtalk_core::semantic_analysis::type_checker::TypeMap;
+use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
+use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
+use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -107,8 +107,8 @@ enum ClassContext<'a> {
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::queries::completion_provider::compute_completions;
-/// use beamtalk_core::language_service::Position;
+/// use beamtalk_language_service::queries::completion_provider::compute_completions;
+/// use beamtalk_language_service::Position;
 /// use beamtalk_core::semantic_analysis::ClassHierarchy;
 /// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
@@ -304,14 +304,14 @@ fn compute_erlang_completions(
 }
 /// Returns `true` if `b` is a completion word-boundary character.
 ///
-/// Delegates to [`crate::source_analysis::is_completion_word_char`], the
+/// Delegates to [`beamtalk_core::source_analysis::is_completion_word_char`], the
 /// canonical (char-based) definition shared with the CLI REPL's
 /// tab-completer — this module works with raw source bytes, so it re-wraps
 /// each byte as a `char` (safe here: every caller only ever tests ASCII
 /// bytes, and non-ASCII UTF-8 continuation bytes correctly fall through as
 /// "not a word char" either way). See BT-3083.
 fn is_identifier_char(b: u8) -> bool {
-    crate::source_analysis::is_completion_word_char(b as char)
+    beamtalk_core::source_analysis::is_completion_word_char(b as char)
 }
 /// Detects if the text before cursor ends with `Erlang <module_name>`.
 ///
@@ -720,7 +720,7 @@ fn add_alias_name_completions(
         if seen.insert(name.clone()) {
             let mut doc = format!(
                 "type alias: {name} = {}",
-                crate::unparse::unparse_type_annotation_display(&alias.annotation)
+                beamtalk_core::unparse::unparse_type_annotation_display(&alias.annotation)
             );
             if let Some(doc_comment) = alias
                 .doc_comment
@@ -743,7 +743,7 @@ fn add_alias_name_completions(
         if seen.insert(name.clone()) {
             let doc = format!(
                 "type alias: {name} = {}",
-                crate::unparse::unparse_type_annotation_display(&info.annotation)
+                beamtalk_core::unparse::unparse_type_annotation_display(&info.annotation)
             );
             completions.push(
                 Completion::new(name.as_str(), CompletionKind::Class).with_documentation(doc),
@@ -759,7 +759,7 @@ fn add_alias_name_completions(
 /// collision, matching `AliasRegistry::add_pre_loaded`'s own conservative
 /// seeding-boundary rule).
 fn is_cross_package_internal_alias(
-    info: &crate::semantic_analysis::AliasInfo,
+    info: &beamtalk_core::semantic_analysis::AliasInfo,
     current_package: Option<&str>,
 ) -> bool {
     if !info.is_internal {
@@ -831,7 +831,7 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
         }
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                     collect_identifiers_from_expr(expr, identifiers);
                 }
             }
@@ -1055,7 +1055,7 @@ fn add_receiver_type_completions(
 ///
 /// Example: `on Counter -> Integer` or `on Integer (other: Number) -> Number`
 fn method_completion_detail(
-    method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
+    method: &beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo,
     class_name: &str,
 ) -> String {
     let mut detail = format!("on {class_name}");
@@ -1082,7 +1082,7 @@ fn method_completion_detail(
 /// Uses the generated `doc` string if present; otherwise falls back to the
 /// `DefinedIn#selector` format used for user-written methods.
 fn method_completion_doc(
-    method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
+    method: &beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo,
     class_side: bool,
 ) -> String {
     if let Some(doc) = &method.doc {
@@ -1269,7 +1269,7 @@ fn add_hierarchy_completions(
 /// and internal methods from other packages (ADR 0071, BT-1703).
 #[allow(clippy::too_many_arguments)]
 fn collect_method_completions(
-    methods: impl IntoIterator<Item = crate::semantic_analysis::class_hierarchy::MethodInfo>,
+    methods: impl IntoIterator<Item = beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo>,
     is_class_side: bool,
     context: &ClassContext<'_>,
     receiver_class: Option<&str>,
@@ -1339,11 +1339,12 @@ pub fn resolve_expression_type(
     hierarchy: &ClassHierarchy,
     native_type_registry: Option<&NativeTypeRegistry>,
 ) -> Option<String> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
     let last_expr = module.expressions.last()?;
     let span = last_expr.expression.span();
-    let type_map = crate::semantic_analysis::infer_types(&module, hierarchy, native_type_registry);
+    let type_map =
+        beamtalk_core::semantic_analysis::infer_types(&module, hierarchy, native_type_registry);
     match type_map.get(span) {
         Some(InferredType::Known { class_name, .. }) => Some(class_name.to_string()),
         _ => None,
@@ -1361,7 +1362,7 @@ mod tests {
     //! - Handle edge cases (invalid positions, empty source, block parameters)
     //! - Provide appropriate documentation and completion kinds
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
     /// Parse source and compute completions with a fresh hierarchy.
     fn completions_at(source: &str, position: Position) -> Vec<Completion> {
         completions_at_with_package(source, position, None)
@@ -2007,10 +2008,10 @@ mod tests {
     #[test]
     fn erlang_completions_show_types_from_native_registry() {
         // ADR 0075: verify typed completions when NativeTypeRegistry is provided
-        use crate::semantic_analysis::type_checker::native_type_registry::{
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
-        use crate::semantic_analysis::type_checker::{InferredType, TypeProvenance};
+        use beamtalk_core::semantic_analysis::type_checker::{InferredType, TypeProvenance};
         let source = "Erlang lists ";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -2312,8 +2313,8 @@ mod tests {
     fn resolve_expression_type_with_native_registry_resolves_ffi_call() {
         // BT-2887: with a NativeTypeRegistry, an FFI call's typed return
         // resolves instead of staying Dynamic.
-        use crate::semantic_analysis::type_checker::TypeProvenance;
-        use crate::semantic_analysis::type_checker::native_type_registry::{
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
 
@@ -2400,28 +2401,30 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Inject an internal class from package "other_pkg"
-        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            name: EcoString::from("SecretHelper"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: true,
-            package: Some(EcoString::from("other_pkg")),
-            is_value: false,
-            is_native: false,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        }]);
+        hierarchy.add_from_beam_meta(vec![
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
+                name: EcoString::from("SecretHelper"),
+                superclass: Some(EcoString::from("Object")),
+                is_sealed: false,
+                is_abstract: false,
+                is_typed: false,
+                is_internal: true,
+                package: Some(EcoString::from("other_pkg")),
+                is_value: false,
+                is_native: false,
+                handle_scope: None,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        ]);
         // From a different package: internal class should be filtered out
         let completions = compute_completions(
             &module,
@@ -2443,28 +2446,30 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            name: EcoString::from("InternalHelper"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: true,
-            package: Some(EcoString::from("my_pkg")),
-            is_value: false,
-            is_native: false,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        }]);
+        hierarchy.add_from_beam_meta(vec![
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
+                name: EcoString::from("InternalHelper"),
+                superclass: Some(EcoString::from("Object")),
+                is_sealed: false,
+                is_abstract: false,
+                is_typed: false,
+                is_internal: true,
+                package: Some(EcoString::from("my_pkg")),
+                is_value: false,
+                is_native: false,
+                handle_scope: None,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        ]);
         // From the same package: internal class should be visible
         let completions = compute_completions(
             &module,
@@ -2486,28 +2491,30 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            name: EcoString::from("InternalHelper"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: true,
-            package: Some(EcoString::from("some_pkg")),
-            is_value: false,
-            is_native: false,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        }]);
+        hierarchy.add_from_beam_meta(vec![
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
+                name: EcoString::from("InternalHelper"),
+                superclass: Some(EcoString::from("Object")),
+                is_sealed: false,
+                is_abstract: false,
+                is_typed: false,
+                is_internal: true,
+                package: Some(EcoString::from("some_pkg")),
+                is_value: false,
+                is_native: false,
+                handle_scope: None,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        ]);
         // No package context (REPL/script): internal classes still visible
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
@@ -2518,57 +2525,59 @@ mod tests {
     }
     #[test]
     fn cross_package_internal_method_helper() {
-        use crate::ast::MethodKind;
+        use beamtalk_core::ast::MethodKind;
         use std::collections::HashMap;
         let mut hierarchy = ClassHierarchy::with_builtins();
         // Inject a class with both public and internal methods from "other_pkg"
-        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            name: EcoString::from("RemoteService"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: Some(EcoString::from("other_pkg")),
-            is_value: false,
-            is_native: false,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            methods: vec![
-                MethodInfo {
-                    selector: EcoString::from("publicMethod"),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: EcoString::from("RemoteService"),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: None,
-                    param_types: vec![],
-                    doc: None,
-                },
-                MethodInfo {
-                    selector: EcoString::from("internalHelper"),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: EcoString::from("RemoteService"),
-                    is_sealed: false,
-                    is_internal: true,
-                    spawns_block: false,
-                    return_type: None,
-                    param_types: vec![],
-                    doc: None,
-                },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        }]);
+        hierarchy.add_from_beam_meta(vec![
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
+                name: EcoString::from("RemoteService"),
+                superclass: Some(EcoString::from("Object")),
+                is_sealed: false,
+                is_abstract: false,
+                is_typed: false,
+                is_internal: false,
+                package: Some(EcoString::from("other_pkg")),
+                is_value: false,
+                is_native: false,
+                handle_scope: None,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![
+                    MethodInfo {
+                        selector: EcoString::from("publicMethod"),
+                        arity: 0,
+                        kind: MethodKind::Primary,
+                        defined_in: EcoString::from("RemoteService"),
+                        is_sealed: false,
+                        is_internal: false,
+                        spawns_block: false,
+                        return_type: None,
+                        param_types: vec![],
+                        doc: None,
+                    },
+                    MethodInfo {
+                        selector: EcoString::from("internalHelper"),
+                        arity: 0,
+                        kind: MethodKind::Primary,
+                        defined_in: EcoString::from("RemoteService"),
+                        is_sealed: false,
+                        is_internal: true,
+                        spawns_block: false,
+                        return_type: None,
+                        param_types: vec![],
+                        doc: None,
+                    },
+                ],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        ]);
         let public_method = hierarchy
             .find_method("RemoteService", "publicMethod")
             .unwrap();
@@ -2599,7 +2608,7 @@ mod tests {
     #[test]
     fn cross_package_internal_class_helper() {
         use std::collections::HashMap;
-        let internal_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
+        let internal_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
             surface_incomplete: false,
             name: EcoString::from("InternalClass"),
             superclass: Some(EcoString::from("Object")),
@@ -2636,7 +2645,7 @@ mod tests {
             !is_cross_package_internal_class(&internal_class, None),
             "Internal class should not be filtered when no package context"
         );
-        let public_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
+        let public_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
             surface_incomplete: false,
             name: EcoString::from("PublicClass"),
             is_internal: false,
@@ -2651,7 +2660,7 @@ mod tests {
     }
     #[test]
     fn internal_method_excluded_from_typed_receiver_completions() {
-        use crate::ast::MethodKind;
+        use beamtalk_core::ast::MethodKind;
         use std::collections::HashMap;
         // Use source that references RemoteService with a typed variable
         let source = "Object subclass: Client\n  doWork: svc :: RemoteService =>\n    svc pub";
@@ -2659,53 +2668,55 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Inject RemoteService with both public and internal methods
-        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            name: EcoString::from("RemoteService"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: Some(EcoString::from("other_pkg")),
-            is_value: false,
-            is_native: false,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            methods: vec![
-                MethodInfo {
-                    selector: EcoString::from("publicMethod"),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: EcoString::from("RemoteService"),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: None,
-                    param_types: vec![],
-                    doc: None,
-                },
-                MethodInfo {
-                    selector: EcoString::from("internalHelper"),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: EcoString::from("RemoteService"),
-                    is_sealed: false,
-                    is_internal: true,
-                    spawns_block: false,
-                    return_type: None,
-                    param_types: vec![],
-                    doc: None,
-                },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
-        }]);
+        hierarchy.add_from_beam_meta(vec![
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
+                name: EcoString::from("RemoteService"),
+                superclass: Some(EcoString::from("Object")),
+                is_sealed: false,
+                is_abstract: false,
+                is_typed: false,
+                is_internal: false,
+                package: Some(EcoString::from("other_pkg")),
+                is_value: false,
+                is_native: false,
+                handle_scope: None,
+                state: vec![],
+                state_types: HashMap::new(),
+                state_has_default: HashMap::new(),
+                methods: vec![
+                    MethodInfo {
+                        selector: EcoString::from("publicMethod"),
+                        arity: 0,
+                        kind: MethodKind::Primary,
+                        defined_in: EcoString::from("RemoteService"),
+                        is_sealed: false,
+                        is_internal: false,
+                        spawns_block: false,
+                        return_type: None,
+                        param_types: vec![],
+                        doc: None,
+                    },
+                    MethodInfo {
+                        selector: EcoString::from("internalHelper"),
+                        arity: 0,
+                        kind: MethodKind::Primary,
+                        defined_in: EcoString::from("RemoteService"),
+                        is_sealed: false,
+                        is_internal: true,
+                        spawns_block: false,
+                        return_type: None,
+                        param_types: vec![],
+                        doc: None,
+                    },
+                ],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            },
+        ]);
         // Completions from "my_pkg" — internal method should be excluded
         let completions = compute_completions(
             &module,
@@ -2855,7 +2866,7 @@ mod tests {
 
     fn alias_registry_for(module: &Module, hierarchy: &ClassHierarchy) -> AliasRegistry {
         let protocol_registry =
-            crate::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         let diags = registry.register_module(module, hierarchy, &protocol_registry);
         assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
@@ -2949,26 +2960,30 @@ mod tests {
         // must not leak into completions across the package boundary — the
         // alias-namespace counterpart to `add_class_name_completions`'s
         // existing `is_cross_package_internal_class` filter.
-        use crate::semantic_analysis::AliasInfo;
-        use crate::source_analysis::Span;
+        use beamtalk_core::semantic_analysis::AliasInfo;
+        use beamtalk_core::source_analysis::Span;
 
         let mut alias_registry = AliasRegistry::new();
         alias_registry.register_test_alias(AliasInfo {
             name: "SecretKey".into(),
-            annotation: crate::ast::TypeAnnotation::Simple(crate::ast::Identifier {
-                name: "String".into(),
-                span: Span::new(0, 1),
-            }),
+            annotation: beamtalk_core::ast::TypeAnnotation::Simple(
+                beamtalk_core::ast::Identifier {
+                    name: "String".into(),
+                    span: Span::new(0, 1),
+                },
+            ),
             is_internal: true,
             package: Some("other_pkg".into()),
             span: Span::new(0, 1),
         });
         alias_registry.register_test_alias(AliasInfo {
             name: "LocalKey".into(),
-            annotation: crate::ast::TypeAnnotation::Simple(crate::ast::Identifier {
-                name: "String".into(),
-                span: Span::new(0, 1),
-            }),
+            annotation: beamtalk_core::ast::TypeAnnotation::Simple(
+                beamtalk_core::ast::Identifier {
+                    name: "String".into(),
+                    span: Span::new(0, 1),
+                },
+            ),
             is_internal: true,
             package: Some("my_pkg".into()),
             span: Span::new(0, 1),

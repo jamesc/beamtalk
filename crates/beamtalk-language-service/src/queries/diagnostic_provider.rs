@@ -27,9 +27,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol publishDiagnostics notification
 
-use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
-use crate::semantic_analysis;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use beamtalk_core::ast::Module;
+use beamtalk_core::semantic_analysis;
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
 /// Project-level context for the unified diagnostic pipeline (BT-2009).
@@ -44,13 +44,14 @@ use ecow::EcoString;
 #[derive(Debug, Default)]
 pub struct ProjectDiagnosticContext<'a> {
     /// Compiler options (`stdlib_mode`, `warnings_as_errors`, etc.).
-    pub options: crate::CompilerOptions,
+    pub options: beamtalk_core::CompilerOptions,
     /// Cross-file class metadata from other compilation units.
     /// Injected into the class hierarchy before type checking so that
     /// cross-file method resolution works.
-    pub cross_file_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    pub cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Pre-loaded protocol definitions from other source files.
-    pub pre_loaded_protocols: Vec<crate::semantic_analysis::protocol_registry::ProtocolInfo>,
+    pub pre_loaded_protocols:
+        Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Pre-loaded type alias definitions from other source files in the same
     /// package (BT-2928, ADR 0108). Mirrors `pre_loaded_protocols` — seeded
     /// into the `AliasRegistry` before the current module's own aliases are
@@ -58,18 +59,18 @@ pub struct ProjectDiagnosticContext<'a> {
     /// resolves cross-file the same way a cross-file class reference already
     /// does. Empty for callers that don't (yet) supply project-wide alias
     /// metadata — the pipeline degrades to today's same-file-only resolution.
-    pub pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
+    pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
     /// Registered into the class hierarchy so cross-file
     /// `ClassName >> selector` extensions resolve instead of producing
     /// false `Dnu` hints. May include the current file's own entries —
     /// duplicates are skipped during registration.
-    pub cross_file_extensions: crate::compilation::extension_index::ExtensionIndex,
+    pub cross_file_extensions: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Native type registry for FFI call inference (ADR 0075).
     pub native_type_registry:
-        Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
+        Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
     /// Optional dependency registry for cross-package collision detection.
-    pub dep_registry: Option<&'a crate::semantic_analysis::DependencyRegistry>,
+    pub dep_registry: Option<&'a beamtalk_core::semantic_analysis::DependencyRegistry>,
     /// Whether to promote transitive dependency usage warnings to errors.
     pub strict_deps: bool,
     /// Per-category diagnostic severity overrides from `beamtalk.toml`'s
@@ -78,8 +79,8 @@ pub struct ProjectDiagnosticContext<'a> {
     /// preserves today's Rule 1 completeness-ladder defaults. Applied here,
     /// inside the shared pipeline, so the CLI (`beamtalk build`) and the LSP
     /// can never disagree about the resulting severity — see
-    /// `crate::compilation::diagnostics_policy::apply_diagnostics_table`.
-    pub diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable,
+    /// `beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table`.
+    pub diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 }
 
 /// Unified post-analysis diagnostic pipeline (BT-2009).
@@ -95,7 +96,7 @@ pub struct ProjectDiagnosticContext<'a> {
 /// * `module` - The parsed AST
 /// * `source` - The module's raw source text (BT-3240: needed to give the
 ///   near-miss-divider check an accurate comment span — see
-///   `crate::near_miss_divider::scan_source`'s doc)
+///   `beamtalk_core::near_miss_divider::scan_source`'s doc)
 /// * `initial_diagnostics` - Pre-analysis diagnostics (parse + any earlier passes,
 ///   e.g. `@primitive` validation from the CLI compiler); the function appends
 ///   semantic and post-analysis diagnostics to this list.
@@ -115,7 +116,7 @@ pub fn compute_project_diagnostics(
 }
 
 /// [`compute_project_diagnostics`], additionally returning the
-/// [`AnalysisResult`](crate::semantic_analysis::AnalysisResult) the pipeline's
+/// [`AnalysisResult`](beamtalk_core::semantic_analysis::AnalysisResult) the pipeline's
 /// `analyse_full` call produced (BT-3123).
 ///
 /// Callers that go on to run codegen for the same module (e.g. the CLI build
@@ -137,14 +138,14 @@ pub fn compute_project_diagnostics_with_analysis(
     // BT-2928: thread `pre_loaded_aliases` through so a cross-file/package
     // type alias resolves the same way a cross-file class reference already
     // does — see `AnalysisContext::pre_loaded_aliases`'s doc.
-    let analysis_ctx = crate::semantic_analysis::AnalysisContext::default()
+    let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_options(&ctx.options)
         .with_pre_loaded_classes(ctx.cross_file_classes.clone())
         .with_pre_loaded_protocols(ctx.pre_loaded_protocols.clone())
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
         .with_cross_file_extensions(&ctx.cross_file_extensions);
-    let mut analysis_result = crate::semantic_analysis::analyse_full(module, analysis_ctx);
+    let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     // BT-3123: diagnostics are consumed below (and by every downstream pass
     // in this pipeline); take them out of `analysis_result` so the rest of
     // `AnalysisResult` (hierarchy, semantic facts, inferred return types,
@@ -180,15 +181,22 @@ pub fn compute_project_diagnostics_with_analysis(
     // BT-738: Warn when user code shadows a stdlib class name.
     if !ctx.options.stdlib_mode {
         let mut stdlib_shadow_diags = Vec::new();
-        crate::semantic_analysis::check_stdlib_name_shadowing(module, &mut stdlib_shadow_diags);
+        beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
+            module,
+            &mut stdlib_shadow_diags,
+        );
         diagnostics.extend(stdlib_shadow_diags);
     }
 
     // BT-1653 / ADR 0070 Phase 3: Cross-package class collision detection
     // and BT-1654: transitive dependency usage warnings.
     if let Some(registry) = ctx.dep_registry {
-        crate::semantic_analysis::check_collision_at_use_sites(module, registry, &mut diagnostics);
-        crate::semantic_analysis::check_transitive_dep_usage(
+        beamtalk_core::semantic_analysis::check_collision_at_use_sites(
+            module,
+            registry,
+            &mut diagnostics,
+        );
+        beamtalk_core::semantic_analysis::check_transitive_dep_usage(
             module,
             registry,
             ctx.strict_deps,
@@ -207,7 +215,7 @@ pub fn compute_project_diagnostics_with_analysis(
     // pipeline both the CLI compiler and the LSP call — is what makes
     // `beamtalk build` and the LSP agree on severity for every diagnostic
     // category by construction, closing the BT-2800 surface-parity gap.
-    diagnostics = crate::compilation::diagnostics_policy::apply_diagnostics_table(
+    diagnostics = beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
         diagnostics,
         &ctx.diagnostics_overrides,
     );
@@ -219,7 +227,7 @@ pub fn compute_project_diagnostics_with_analysis(
     // methods below are mis-categorized with no diagnostic. Unlike every
     // lint pass in the standalone `beamtalk-lint` crate (`beamtalk
     // lint`-only), this one check also runs here so it reaches the LSP's
-    // live diagnostics too — see `crate::near_miss_divider::check_near_miss_dividers`'s
+    // live diagnostics too — see `beamtalk_core::near_miss_divider::check_near_miss_dividers`'s
     // doc (BT-3340: this check stays a `beamtalk-core` leaf module rather
     // than moving to `beamtalk-lint` with the rest, precisely so this call
     // doesn't need a new crate dependency) for why. Scans
@@ -249,65 +257,30 @@ pub fn compute_project_diagnostics_with_analysis(
     //   unaffected while still guaranteeing *this* check's diagnostics can
     //   never be promoted to a build-breaking severity by any project
     //   config, by construction rather than by coincidence.
-    crate::near_miss_divider::check_near_miss_dividers(source, &mut diagnostics);
+    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut diagnostics);
 
     (diagnostics, analysis_result)
 }
 
-/// Computes diagnostics for a module.
-///
-/// This runs both parse-time and semantic analysis diagnostics.
-///
-/// # Arguments
-///
-/// * `module` - The parsed AST
-/// * `parse_diagnostics` - Diagnostics from the parser
-///
-/// # Returns
-///
-/// A list of all diagnostics (errors and warnings).
-///
-/// # Examples
-///
-/// ```
-/// use beamtalk_core::queries::diagnostic_provider::compute_diagnostics;
-/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
-///
-/// let source = "x := 42";
-/// let tokens = lex_with_eof(source);
-/// let (module, parse_diags) = parse(tokens);
-///
-/// let diagnostics = compute_diagnostics(&module, parse_diags);
-/// assert!(diagnostics.is_empty()); // Valid code has no errors
-/// ```
-#[must_use]
-pub fn compute_diagnostics(module: &Module, parse_diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    compute_diagnostics_with_known_vars(module, parse_diagnostics, &[])
-}
-
-/// Computes diagnostics with pre-defined REPL variables.
-///
-/// Variables in `known_vars` are treated as already defined, preventing
-/// "Undefined variable" errors for REPL session variables.
-#[must_use]
-pub fn compute_diagnostics_with_known_vars(
-    module: &Module,
-    parse_diagnostics: Vec<Diagnostic>,
-    known_vars: &[&str],
-) -> Vec<Diagnostic> {
-    let mut all_diagnostics = parse_diagnostics;
-
-    // Run semantic analysis with known variables
-    let analysis_result = semantic_analysis::analyse_full(
-        module,
-        semantic_analysis::AnalysisContext::default().with_known_vars(known_vars),
-    );
-    all_diagnostics.extend(analysis_result.diagnostics);
-
-    apply_expect_directives(module, &mut all_diagnostics);
-
-    all_diagnostics
-}
+// BT-3361 (ADR 0117 Decision step 5): `compute_diagnostics`,
+// `compute_diagnostics_with_known_vars`, `apply_expect_directives`, and
+// `apply_expect_directives`'s private helpers moved to
+// `beamtalk_core::compilation::diagnostics_policy` and are re-exported here
+// under their original names/paths — every existing call site (inside this
+// module's own tests, and external callers like `beamtalk-mcp`/`beamtalk-cli`)
+// keeps compiling unchanged. They're pure Compilation-context diagnostics
+// post-processing with zero Language-Service-specific types (no `Position`,
+// `Completion`, ...) — like `apply_diagnostics_table`, their existing
+// neighbor in that module — so this isn't a Language-Service item reaching
+// backward into Compilation; it's recognizing they were always Compilation's
+// and relocating them somewhere both `beamtalk-core`'s own unit tests and
+// this crate can reach without a dev-dependency cycle: `beamtalk-core`'s
+// unit tests (compiled as part of the same `--cfg test` build as the
+// library) cannot depend on this crate, which itself depends on
+// `beamtalk-core`, without one.
+pub use beamtalk_core::compilation::diagnostics_policy::{
+    apply_expect_directives, compute_diagnostics, compute_diagnostics_with_known_vars,
+};
 
 /// Computes diagnostics with native type registry for FFI type warnings (ADR 0075).
 ///
@@ -315,23 +288,23 @@ pub fn compute_diagnostics_with_known_vars(
 /// keyword mismatch / argument type warnings from the registry.
 #[must_use]
 pub fn compute_diagnostics_with_native_types(
-    module: &crate::ast::Module,
+    module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     native_types: Option<
-        std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
 
     if native_types.is_some() {
-        let options = crate::CompilerOptions::default();
-        let ctx = crate::semantic_analysis::AnalysisContext::default()
+        let options = beamtalk_core::CompilerOptions::default();
+        let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
             .with_options(&options)
             .with_native_type_registry(native_types);
-        let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
+        let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
         all_diagnostics.extend(analysis_result.diagnostics);
     } else {
-        let analysis_result = crate::semantic_analysis::analyse(module);
+        let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
         all_diagnostics.extend(analysis_result.diagnostics);
     }
 
@@ -347,15 +320,15 @@ pub fn compute_diagnostics_with_native_types(
 /// applies the per-package severity-override table — in that fixed order,
 /// matching [`compute_project_diagnostics`].
 fn run_diagnostic_pipeline(
-    module: &crate::ast::Module,
+    module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     analysis_diagnostics: Vec<Diagnostic>,
-    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
     all_diagnostics.extend(analysis_diagnostics);
     apply_expect_directives(module, &mut all_diagnostics);
-    crate::compilation::diagnostics_policy::apply_diagnostics_table(
+    beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
         all_diagnostics,
         diagnostics_overrides,
     )
@@ -379,16 +352,16 @@ fn run_diagnostic_pipeline(
 /// for callers with no manifest context, which is a complete no-op.
 #[must_use]
 pub fn compute_diagnostics_with_known_vars_and_classes(
-    module: &crate::ast::Module,
+    module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
-    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
-    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
-    let ctx = crate::semantic_analysis::AnalysisContext::default()
+    let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes);
-    let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     run_diagnostic_pipeline(
         module,
         parse_diagnostics,
@@ -408,18 +381,18 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
 /// producing an unresolved-type diagnostic.
 #[must_use]
 pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
-    module: &crate::ast::Module,
+    module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
-    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
-    pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
-    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
-    let ctx = crate::semantic_analysis::AnalysisContext::default()
+    let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
         .with_pre_loaded_aliases(pre_loaded_aliases);
-    let analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     run_diagnostic_pipeline(
         module,
         parse_diagnostics,
@@ -441,12 +414,12 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
 /// signature is left unchanged rather than widened for this one consumer.
 #[must_use]
 pub fn compute_diagnostics_and_referenced_aliases(
-    module: &crate::ast::Module,
+    module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
-    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
-    pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
-    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, Vec<EcoString>) {
     let (diagnostics, analysis_result) = compute_diagnostics_and_analysis(
         module,
@@ -473,18 +446,18 @@ pub fn compute_diagnostics_and_referenced_aliases(
 /// [`compute_diagnostics_and_referenced_aliases`].
 #[must_use]
 pub fn compute_diagnostics_and_analysis(
-    module: &crate::ast::Module,
+    module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
-    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
-    pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
-    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
-    let ctx = crate::semantic_analysis::AnalysisContext::default()
+    let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
         .with_pre_loaded_aliases(pre_loaded_aliases);
-    let mut analysis_result = crate::semantic_analysis::analyse_full(module, ctx);
+    let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     // BT-3123: diagnostics are consumed by `run_diagnostic_pipeline` below;
     // take them out so the rest of `analysis_result` can be returned for
     // codegen without cloning it.
@@ -498,289 +471,10 @@ pub fn compute_diagnostics_and_analysis(
     (diagnostics, analysis_result)
 }
 
-/// Applies `@expect` directives to suppress matching diagnostics.
-///
-/// For each `@expect category` directive in the module, any diagnostic
-/// whose span is contained within the *following* expression's span and
-/// whose category matches is removed from `diagnostics`. If no matching
-/// diagnostic is found, the directive itself becomes an error ("stale @expect").
-///
-/// This is called by both the language service (LSP/diagnostic provider) and
-/// the CLI compiler after all diagnostics have been collected.
-pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    // (cat, reason, directive_span, target_span)
-    let mut directives: Vec<(ExpectCategory, Option<EcoString>, Span, Span)> = Vec::new();
-
-    collect_directives_from_exprs(&module.expressions, &mut directives);
-    for class in &module.classes {
-        // BT-1856: Collect declaration-level @expect from state declarations.
-        // directive_span = the @expect token span (for stale warnings),
-        // target_span = the declaration span (for matching diagnostics).
-        for state_decl in class.state.iter().chain(class.class_variables.iter()) {
-            if let Some((cat, ref reason, expect_span)) = state_decl.expect {
-                directives.push((cat, reason.clone(), expect_span, state_decl.span));
-            }
-        }
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            // BT-1856: Collect declaration-level @expect from method declarations
-            if let Some((cat, ref reason, expect_span)) = method.expect {
-                directives.push((cat, reason.clone(), expect_span, method.span));
-            }
-            collect_directives_from_exprs(&method.body, &mut directives);
-        }
-    }
-    for standalone in &module.method_definitions {
-        if let Some((cat, ref reason, expect_span)) = standalone.method.expect {
-            directives.push((cat, reason.clone(), expect_span, standalone.method.span));
-        }
-        collect_directives_from_exprs(&standalone.method.body, &mut directives);
-    }
-
-    if directives.is_empty() {
-        return;
-    }
-
-    let mut suppressed_indices: Vec<usize> = Vec::new();
-    let mut stale_directives: Vec<(ExpectCategory, Option<EcoString>, Span)> = Vec::new();
-
-    for (cat, reason, directive_span, target_span) in &directives {
-        let mut matched = false;
-        for (i, diag) in diagnostics.iter().enumerate() {
-            if target_span.contains(diag.span) && category_matches(*cat, diag.category) {
-                suppressed_indices.push(i);
-                matched = true;
-            }
-        }
-        if !matched {
-            stale_directives.push((*cat, reason.clone(), *directive_span));
-        }
-    }
-
-    // Remove suppressed diagnostics (in reverse order to preserve indices)
-    suppressed_indices.sort_unstable();
-    suppressed_indices.dedup();
-    for i in suppressed_indices.into_iter().rev() {
-        diagnostics.remove(i);
-    }
-
-    // Emit warnings for stale directives (BT-1412: warning, not error, so
-    // compilation can proceed — the annotation is just unnecessary).
-    for (cat, reason, span) in stale_directives {
-        let message = if let Some(reason) = reason {
-            format!(
-                "stale @expect {} \"{reason}\": no matching diagnostic found on the following expression — consider removing it",
-                cat.as_str()
-            )
-        } else {
-            format!(
-                "stale @expect {}: no matching diagnostic found on the following expression — consider removing it",
-                cat.as_str()
-            )
-        };
-        diagnostics.push(
-            Diagnostic::warning(message, span)
-                .with_hint("Remove the `@expect` directive if the diagnostic was fixed"),
-        );
-    }
-}
-
-/// Returns true if the `@expect` category matches a diagnostic category.
-///
-/// `@expect type` matches both type-mismatch warnings (`DiagnosticCategory::Type`)
-/// and method-not-found hints (`DiagnosticCategory::Dnu`).  A common motivation
-/// for the latter is type-erasure boundaries — e.g. `Result.unwrap` returns
-/// `Object`, so any method call on the result produces a DNU hint — but the
-/// suppression applies unconditionally whenever `@expect type` is written.
-fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
-    expect_cat == ExpectCategory::All
-        || matches!(
-            (expect_cat, diag_cat),
-            // BT-1273: @expect type also covers method-not-found (Dnu) hints so that
-            // callers can use a single annotation for all type-related suppressions.
-            // BT-1918: @expect type also covers missing type-annotation warnings
-            // (TypeAnnotation) for backward compatibility.
-            (
-                ExpectCategory::Dnu | ExpectCategory::Type,
-                Some(DiagnosticCategory::Dnu)
-            ) | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
-                | (
-                    ExpectCategory::Type | ExpectCategory::TypeAnnotation,
-                    Some(DiagnosticCategory::TypeAnnotation)
-                )
-                | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
-                | (
-                    ExpectCategory::DeadAssignment,
-                    Some(DiagnosticCategory::DeadAssignment)
-                )
-                | (
-                    ExpectCategory::Deprecation,
-                    Some(DiagnosticCategory::Deprecation)
-                )
-                | (ExpectCategory::ActorNew, Some(DiagnosticCategory::ActorNew))
-                | (
-                    ExpectCategory::Visibility,
-                    Some(DiagnosticCategory::Visibility)
-                )
-                | (
-                    ExpectCategory::UnresolvedClass,
-                    Some(DiagnosticCategory::UnresolvedClass)
-                )
-                | (
-                    ExpectCategory::UnresolvedFfi,
-                    Some(DiagnosticCategory::UnresolvedFfi)
-                )
-                | (
-                    ExpectCategory::ArityMismatch,
-                    Some(DiagnosticCategory::ArityMismatch)
-                )
-                | (
-                    ExpectCategory::ShadowedClass,
-                    Some(DiagnosticCategory::ShadowedClass)
-                )
-                | (
-                    ExpectCategory::Inheritance,
-                    Some(DiagnosticCategory::Inheritance)
-                )
-                | (
-                    ExpectCategory::Sendability,
-                    Some(DiagnosticCategory::Sendability)
-                )
-        )
-}
-
-/// Collects `@expect` directives from an expression list.
-///
-/// For each `ExpectDirective` at index `i`, the target span is the span of
-/// the expression at index `i + 1` (if present).
-///
-/// After scanning the flat statement list, recurses into expression subtrees
-/// to find `@expect` directives inside block bodies (BT-2010).
-fn collect_directives_from_exprs(
-    exprs: &[ExpressionStatement],
-    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
-) {
-    for (i, stmt) in exprs.iter().enumerate() {
-        if let Expression::ExpectDirective {
-            category,
-            reason,
-            span,
-        } = &stmt.expression
-        {
-            if let Some(next) = exprs.get(i + 1) {
-                directives.push((*category, reason.clone(), *span, next.expression.span()));
-            } else {
-                // Trailing @expect with no following expression — treat as stale.
-                // Use the directive's own span as the target span so it will
-                // never match any real diagnostic and will always be reported stale.
-                directives.push((*category, reason.clone(), *span, *span));
-            }
-        }
-        // BT-2010: Recurse into expression subtrees to find block bodies
-        // containing @expect directives.
-        collect_directives_from_expr(&stmt.expression, directives);
-    }
-}
-
-/// Recursively walks an expression tree to find nested `Block` bodies and
-/// collects `@expect` directives from them (BT-2010).
-///
-/// This handles `@expect` inside `ifTrue: [...]`, `collect: [:x | ...]`,
-/// nested blocks, match arms, and any other expression that contains
-/// sub-expressions with block bodies.
-fn collect_directives_from_expr(
-    expr: &Expression,
-    directives: &mut Vec<(ExpectCategory, Option<EcoString>, Span, Span)>,
-) {
-    match expr {
-        Expression::Block(block) => {
-            // Found a block body — scan it for @expect directives using the
-            // same (i, i+1) semantics, then recurse into its children.
-            collect_directives_from_exprs(&block.body, directives);
-        }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            collect_directives_from_expr(receiver, directives);
-            for arg in arguments {
-                collect_directives_from_expr(arg, directives);
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_directives_from_expr(target, directives);
-            collect_directives_from_expr(value, directives);
-        }
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            collect_directives_from_expr(value, directives);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_directives_from_expr(receiver, directives);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_directives_from_expr(arg, directives);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_directives_from_expr(expression, directives);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_directives_from_expr(receiver, directives);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_directives_from_expr(value, directives);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    collect_directives_from_expr(guard, directives);
-                }
-                collect_directives_from_expr(&arm.body, directives);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_directives_from_expr(&pair.key, directives);
-                collect_directives_from_expr(&pair.value, directives);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                collect_directives_from_expr(elem, directives);
-            }
-            if let Some(t) = tail {
-                collect_directives_from_expr(t, directives);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } => {
-            for elem in elements {
-                collect_directives_from_expr(elem, directives);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    collect_directives_from_expr(e, directives);
-                }
-            }
-        }
-        // Leaf nodes — nothing to recurse into.
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. }
-        | Expression::Spread { .. } => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
     #[test]
     fn compute_diagnostics_returns_parse_errors() {
@@ -939,10 +633,10 @@ mod tests {
     /// `Error`, and an empty table (no manifest) is a complete no-op.
     #[test]
     fn compute_diagnostics_with_known_vars_and_classes_applies_severity_overrides() {
-        use crate::compilation::diagnostics_policy::{
+        use beamtalk_core::compilation::diagnostics_policy::{
             DiagnosticSeverityOverride, DiagnosticsTable,
         };
-        use crate::source_analysis::{DiagnosticCategory, Severity};
+        use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
 
         let source = "\"hello\" frobnicate";
         let tokens = lex_with_eof(source);
@@ -994,7 +688,7 @@ mod tests {
         let has_error = diagnostics.iter().any(|d| {
             d.message.contains("Actor subclass")
                 && d.message.contains("spawn")
-                && d.severity == crate::source_analysis::Severity::Error
+                && d.severity == beamtalk_core::source_analysis::Severity::Error
         });
         assert!(has_error, "Expected actor new error, got: {diagnostics:?}");
     }
@@ -1010,7 +704,7 @@ mod tests {
             d.message.contains("Actor subclass")
                 && d.message.contains("spawn")
                 && d.message.contains("new:")
-                && d.severity == crate::source_analysis::Severity::Error
+                && d.severity == beamtalk_core::source_analysis::Severity::Error
         });
         assert!(has_error, "Expected actor new: error, got: {diagnostics:?}");
     }
@@ -1024,7 +718,7 @@ mod tests {
 
         let has_warning = diagnostics.iter().any(|d| {
             d.message.contains("Actor subclass")
-                && d.severity == crate::source_analysis::Severity::Warning
+                && d.severity == beamtalk_core::source_analysis::Severity::Warning
         });
         assert!(
             !has_warning,
@@ -1185,7 +879,7 @@ mod tests {
         let has_error = diagnostics.iter().any(|d| {
             d.message.contains("Actor subclass")
                 && d.message.contains("spawn")
-                && d.severity == crate::source_analysis::Severity::Error
+                && d.severity == beamtalk_core::source_analysis::Severity::Error
         });
         assert!(
             has_error,
@@ -1229,7 +923,7 @@ mod tests {
 
     #[test]
     fn type_checker_dnu_severity_is_hint() {
-        use crate::source_analysis::Severity;
+        use beamtalk_core::source_analysis::Severity;
 
         let source = "42 foo";
         let tokens = lex_with_eof(source);
@@ -1262,7 +956,7 @@ mod tests {
         let has_error = diagnostics.iter().any(|d| {
             d.message.contains("doNothing")
                 && d.message.contains("empty body")
-                && d.severity == crate::source_analysis::Severity::Error
+                && d.severity == beamtalk_core::source_analysis::Severity::Error
         });
         assert!(has_error, "Expected empty body error, got: {diagnostics:?}");
     }
@@ -1277,7 +971,7 @@ mod tests {
         let has_error = diagnostics.iter().any(|d| {
             d.message.contains("reset")
                 && d.message.contains("empty body")
-                && d.severity == crate::source_analysis::Severity::Error
+                && d.severity == beamtalk_core::source_analysis::Severity::Error
         });
         assert!(
             has_error,
@@ -1584,7 +1278,7 @@ Actor subclass: MyActor
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
 
-        let output = crate::unparse::unparse_module(&module);
+        let output = beamtalk_core::unparse::unparse_module(&module);
         assert!(
             output.contains("@expect type"),
             "Unparsed output should contain @expect type, got: {output}"
@@ -1606,7 +1300,7 @@ typed Object subclass: MyTyped
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
 
-        let output = crate::unparse::unparse_module(&module);
+        let output = beamtalk_core::unparse::unparse_module(&module);
         assert!(
             output.contains("@expect type"),
             "Unparsed output should contain @expect type, got: {output}"
@@ -1760,7 +1454,7 @@ typed Object subclass: MyTyped
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
 
-        let output = crate::unparse::unparse_module(&module);
+        let output = beamtalk_core::unparse::unparse_module(&module);
         assert!(
             output.contains("@expect dnu \"FFI boundary\""),
             "Unparsed output should contain reason string, got: {output}"
@@ -1778,7 +1472,7 @@ typed Object subclass: MyTyped
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
 
-        let output = crate::unparse::unparse_module(&module);
+        let output = beamtalk_core::unparse::unparse_module(&module);
         assert!(
             output.contains("@expect type_annotation \"migrating\""),
             "Unparsed output should contain reason string, got: {output}"
@@ -1796,9 +1490,9 @@ typed Object subclass: MyTyped
             .filter(|d| {
                 matches!(
                     d.severity,
-                    crate::source_analysis::Severity::Warning
-                        | crate::source_analysis::Severity::Hint
-                        | crate::source_analysis::Severity::Lint
+                    beamtalk_core::source_analysis::Severity::Warning
+                        | beamtalk_core::source_analysis::Severity::Hint
+                        | beamtalk_core::source_analysis::Severity::Lint
                 )
             })
             .collect()
@@ -2129,7 +1823,7 @@ Object subclass: Helper
         let helper_tokens = lex_with_eof(helper_source);
         let (helper_module, _) = parse(helper_tokens);
         let helper_infos =
-            crate::semantic_analysis::ClassHierarchy::extract_class_infos(&helper_module);
+            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&helper_module);
 
         // Parse a "user" module that references the helper class.
         // With cross-file classes, the type checker knows about Helper
@@ -2190,10 +1884,10 @@ Object subclass: Helper
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
 
-        let mut overrides = crate::compilation::diagnostics_policy::DiagnosticsTable::new();
+        let mut overrides = beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new();
         overrides.insert(
             DiagnosticCategory::Lint,
-            crate::compilation::diagnostics_policy::DiagnosticSeverityOverride::Error,
+            beamtalk_core::compilation::diagnostics_policy::DiagnosticSeverityOverride::Error,
         );
         let ctx = ProjectDiagnosticContext {
             diagnostics_overrides: overrides,
@@ -2225,7 +1919,7 @@ Object subclass: Helper
         let (module, parse_diags) = parse(tokens);
 
         let ctx = ProjectDiagnosticContext {
-            options: crate::CompilerOptions {
+            options: beamtalk_core::CompilerOptions {
                 stdlib_mode: false,
                 ..Default::default()
             },
@@ -2251,7 +1945,7 @@ Object subclass: Helper
         let (module, parse_diags) = parse(tokens);
 
         let ctx = ProjectDiagnosticContext {
-            options: crate::CompilerOptions {
+            options: beamtalk_core::CompilerOptions {
                 stdlib_mode: true,
                 ..Default::default()
             },

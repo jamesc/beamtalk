@@ -825,7 +825,9 @@ Object subclass: Foo
         let mut diags = Vec::new();
         DeadBlockAssignmentPass.check(&module, &mut diags);
         // Apply @expect directives
-        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diags);
+        beamtalk_core::compilation::diagnostics_policy::apply_expect_directives(
+            &module, &mut diags,
+        );
         let lint_diags: Vec<_> = diags
             .iter()
             .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Lint)

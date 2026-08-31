@@ -353,8 +353,12 @@ fn tier_of_known(
 /// silent tiers are deliberately not shown: `Sendable` is the unremarkable
 /// default (rendering it on every `Integer` would be noise) and `Unknown`
 /// means the checker has nothing to say.
+/// BT-3361: widened from `pub(crate)` to `pub` — `queries::hover_provider`
+/// (Language Service) reaches this from the standalone
+/// `beamtalk-language-service` crate now, so `pub(crate)` visibility is no
+/// longer reachable.
 #[must_use]
-pub(crate) fn hover_tier_label(
+pub fn hover_tier_label(
     ty: &InferredType,
     hierarchy: &ClassHierarchy,
     alias_registry: Option<&AliasRegistry>,

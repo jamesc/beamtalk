@@ -25,11 +25,11 @@
 //! - ADR 0024: Static-First, Live-Augmented IDE Tooling
 //! - LSP specification: Language Server Protocol textDocument/definition
 
-use crate::ast::{Expression, MessageSelector, Module};
-use crate::language_service::{Location, ProjectIndex};
-use crate::semantic_analysis::type_checker::NativeTypeRegistry;
-use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
-use crate::source_analysis::Span;
+use crate::{Location, ProjectIndex};
+use beamtalk_core::ast::{Expression, MessageSelector, Module};
+use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
+use beamtalk_core::source_analysis::Span;
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -694,7 +694,7 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
             None
         }
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-            if let crate::ast::StringSegment::Interpolation(expr) = seg {
+            if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
                 find_selector_lookup_in_expr(expr, offset)
             } else {
                 None
@@ -749,7 +749,7 @@ fn find_selector_lookup_in_message_send(
 
 fn find_selector_lookup_in_cascade(
     receiver: &Expression,
-    messages: &[crate::ast::CascadeMessage],
+    messages: &[beamtalk_core::ast::CascadeMessage],
     offset: u32,
 ) -> Option<SelectorLookup> {
     if let Some(result) = find_selector_lookup_in_expr(receiver, offset) {
@@ -1094,7 +1094,7 @@ fn find_ffi_call_in_expr(expr: &Expression, offset: u32) -> Option<FfiCallInfo> 
             None
         }
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-            if let crate::ast::StringSegment::Interpolation(expr) = seg {
+            if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
                 find_ffi_call_in_expr(expr, offset)
             } else {
                 None
@@ -1198,8 +1198,8 @@ fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_analysis::ClassHierarchy;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     fn parse_source(source: &str) -> Module {
         let tokens = lex_with_eof(source);
@@ -1540,7 +1540,7 @@ mod tests {
     /// Registers `module`'s type aliases into `index` for `file` — mirrors
     /// `hierarchy_with_protocols`'s role for the class/protocol tests above.
     fn index_with_aliases(index: &mut ProjectIndex, file: Utf8PathBuf, module: &Module) {
-        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(module);
+        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(module);
         index.update_file_aliases(file, infos);
     }
 
@@ -1614,8 +1614,8 @@ mod tests {
     fn resolve_receiver_class_context_with_native_registry_resolves_ffi_typed_receiver() {
         // BT-2887: a receiver whose type came from an FFI call only resolves
         // when a NativeTypeRegistry is supplied.
-        use crate::semantic_analysis::type_checker::TypeProvenance;
-        use crate::semantic_analysis::type_checker::native_type_registry::{
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
 

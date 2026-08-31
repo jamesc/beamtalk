@@ -20,12 +20,12 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: `textDocument/signatureHelp`
 
-use crate::ast::{ClassDefinition, Expression, MessageSelector, Module};
-use crate::language_service::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
-use crate::semantic_analysis::class_hierarchy::MethodInfo;
-use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
+use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
+use beamtalk_core::ast::{ClassDefinition, Expression, MessageSelector, Module};
+use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
+use beamtalk_core::semantic_analysis::type_checker::TypeMap;
+use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
+use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
 
 /// The class context for resolving receiver types.
@@ -311,7 +311,7 @@ fn find_signature_in_expr(
                 })
             }),
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-            if let crate::ast::StringSegment::Interpolation(expr) = seg {
+            if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
                 find_signature_in_expr(expr, offset, context, hierarchy, type_map, native_types)
             } else {
                 None
@@ -334,7 +334,7 @@ fn resolve_ffi_signature_help(
     type_map: &TypeMap,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<SignatureHelp> {
-    use crate::unparse::{
+    use beamtalk_core::unparse::{
         SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
     };
 
@@ -446,7 +446,7 @@ fn resolve_ffi_signature_help(
 
 /// Determines which parameter is active based on cursor position relative to keyword parts.
 fn determine_active_parameter(
-    parts: &[crate::ast::KeywordPart],
+    parts: &[beamtalk_core::ast::KeywordPart],
     arguments: &[Expression],
     offset: u32,
 ) -> u32 {
@@ -547,10 +547,10 @@ fn resolve_receiver_class(
 /// (BT-3097). Like [`crate::queries::hover_provider`]'s resolved-call
 /// display, `MethodInfo` has no parameter names — only types — so each
 /// parameter renders as `keyword: Type` via the shared
-/// [`crate::unparse::render_signature_text`] core (`SignatureParam { name:
+/// [`beamtalk_core::unparse::render_signature_text`] core (`SignatureParam { name:
 /// None, .. }`), not the declaration's `keyword name :: Type`.
 fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> SignatureHelp {
-    use crate::unparse::{
+    use beamtalk_core::unparse::{
         SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
     };
 
@@ -618,8 +618,8 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_analysis::ClassHierarchy;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
     fn sig_help_at(source: &str, position: Position) -> Option<SignatureHelp> {
         let tokens = lex_with_eof(source);
@@ -704,9 +704,9 @@ mod tests {
 
     #[test]
     fn ffi_signature_help_shows_typed_params() {
-        use crate::semantic_analysis::InferredType;
-        use crate::semantic_analysis::type_checker::TypeProvenance;
-        use crate::semantic_analysis::type_checker::native_type_registry::{
+        use beamtalk_core::semantic_analysis::InferredType;
+        use beamtalk_core::semantic_analysis::type_checker::TypeProvenance;
+        use beamtalk_core::semantic_analysis::type_checker::native_type_registry::{
             FunctionSignature, NativeTypeRegistry, ParamType,
         };
 

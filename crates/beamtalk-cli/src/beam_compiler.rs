@@ -861,32 +861,33 @@ pub(crate) fn compile_source_with_bindings(
             &ctx.hierarchy.pre_loaded_classes,
             &module,
         );
-    let diag_ctx = beamtalk_core::queries::diagnostic_provider::ProjectDiagnosticContext {
-        options: options.clone(),
-        cross_file_classes: cross_file_classes.clone(),
-        pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
-        // BT-2928: cross-file/package type aliases from Pass 1 — see
-        // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
-        // filters out any name the current module redeclares itself, so no
-        // "current file's own aliases" pre-filter is needed here (mirrors
-        // `pre_loaded_protocols` immediately above).
-        pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
-        cross_file_extensions: ctx.hierarchy.extension_index.clone(),
-        native_type_registry: ctx.native_type_registry.clone(),
-        dep_registry: ctx.dep_registry,
-        strict_deps: ctx.strict_deps,
-        // ADR 0100 Rule 3 (BT-2793) / BT-2800: `compute_project_diagnostics`
-        // applies this table itself (after `@expect` suppression, before
-        // returning) — the single shared pipeline both the CLI and the LSP
-        // call, so severity can never drift between the two surfaces.
-        diagnostics_overrides: ctx.diagnostics_overrides.clone(),
-    };
+    let diag_ctx =
+        beamtalk_language_service::queries::diagnostic_provider::ProjectDiagnosticContext {
+            options: options.clone(),
+            cross_file_classes: cross_file_classes.clone(),
+            pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
+            // BT-2928: cross-file/package type aliases from Pass 1 — see
+            // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
+            // filters out any name the current module redeclares itself, so no
+            // "current file's own aliases" pre-filter is needed here (mirrors
+            // `pre_loaded_protocols` immediately above).
+            pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
+            cross_file_extensions: ctx.hierarchy.extension_index.clone(),
+            native_type_registry: ctx.native_type_registry.clone(),
+            dep_registry: ctx.dep_registry,
+            strict_deps: ctx.strict_deps,
+            // ADR 0100 Rule 3 (BT-2793) / BT-2800: `compute_project_diagnostics`
+            // applies this table itself (after `@expect` suppression, before
+            // returning) — the single shared pipeline both the CLI and the LSP
+            // call, so severity can never drift between the two surfaces.
+            diagnostics_overrides: ctx.diagnostics_overrides.clone(),
+        };
     // BT-3123: capture the `AnalysisResult` this pipeline's `analyse_full`
     // call already produced, so it can be handed to codegen below instead of
     // codegen re-deriving the class hierarchy, semantic facts, and inferred
     // method return types from scratch (a second full type-checking pass).
     let (new_diagnostics, analysis_result) =
-        beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
+        beamtalk_language_service::queries::diagnostic_provider::compute_project_diagnostics_with_analysis(
             &module,
             &source,
             diagnostics,

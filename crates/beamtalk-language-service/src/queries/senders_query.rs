@@ -29,8 +29,8 @@
 //! Callers treat "no senders found" identically to "could not parse".
 
 use super::selector_span;
-use crate::ast::{Expression, Pattern, StringSegment};
-use crate::source_analysis::{Span, lex_with_eof, parse};
+use beamtalk_core::ast::{Expression, Pattern, StringSegment};
+use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
 /// Used to translate line numbers from wrapped-source to input-source space.
@@ -58,7 +58,7 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
 
     let mut wrapped_lines = Vec::new();
 
-    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+    beamtalk_core::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
             collect_send_lines(
                 &stmt.expression,
@@ -241,7 +241,11 @@ fn collect_pattern_send_lines(
 /// the selector keywords when available (so the line points at the selector
 /// token rather than the receiver, for multi-line sends) and falls back to
 /// the enclosing message-send span otherwise.
-fn selector_line(selector: &crate::ast::MessageSelector, fallback: Span, source: &str) -> u32 {
+fn selector_line(
+    selector: &beamtalk_core::ast::MessageSelector,
+    fallback: Span,
+    source: &str,
+) -> u32 {
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)

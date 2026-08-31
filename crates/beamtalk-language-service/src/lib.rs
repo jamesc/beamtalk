@@ -3,7 +3,9 @@
 
 //! Language service API for IDE integration.
 //!
-//! **DDD Context:** Language Service
+//! **DDD Context:** Language Service (ADR 0117 step 5, BT-3361 — its own
+//! crate, depending on `beamtalk-core`'s Compilation context, never the
+//! reverse; see `docs/development/architecture-principles.md` §1)
 //!
 //! Following the TypeScript approach: the compiler IS the language service.
 //! All compiler phases are designed to answer IDE queries efficiently.
@@ -33,7 +35,7 @@
 //! # Usage
 //!
 //! ```
-//! use beamtalk_core::language_service::{LanguageService, SimpleLanguageService};
+//! use beamtalk_language_service::{LanguageService, SimpleLanguageService};
 //! use camino::Utf8PathBuf;
 //!
 //! // Create a language service instance
@@ -57,8 +59,12 @@ mod project_index;
 // modules with a two-way, previously-unenforced cycle between them (this
 // orchestrator called into the providers for query behavior; the providers
 // imported result/protocol types — `Position`, `Location`, `Completion`, ...
-// — defined below). Re-exported at the crate root under its old name
-// (`crate::queries`, see `lib.rs`) so existing call sites are unaffected.
+// — defined below). BT-3361 (ADR 0117 Decision step 5) moved this whole
+// module tree — `language_service` and its `queries` submodule — out of
+// `beamtalk-core` verbatim into this crate; call sites across the workspace
+// were updated from `beamtalk_core::language_service::`/
+// `beamtalk_core::queries::` to `beamtalk_language_service::`/
+// `beamtalk_language_service::queries::`.
 pub mod queries;
 pub mod runtime_delegate;
 mod value_objects;
@@ -79,11 +85,11 @@ pub use value_objects::{
 #[cfg(test)]
 mod property_tests;
 
-use crate::ast::{
+use beamtalk_core::ast::{
     Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern, TypeAnnotation,
 };
-use crate::semantic_analysis::type_checker::NativeTypeRegistry;
-use crate::source_analysis::{Lexer, Span, Token, TokenKind};
+use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+use beamtalk_core::source_analysis::{Lexer, Span, Token, TokenKind};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -186,7 +192,7 @@ pub struct SimpleLanguageService {
     /// defaults — the same behaviour as before this field existed. Set by
     /// the LSP server after loading `beamtalk.toml` from each workspace
     /// root, so the LSP agrees with `beamtalk build` on diagnostic severity.
-    diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable,
+    diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 }
 
 #[derive(Debug, Clone)]
@@ -228,7 +234,8 @@ impl SimpleLanguageService {
             native_types: None,
             project_complete: false,
             has_package_dependencies: false,
-            diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable::new(),
+            diagnostics_overrides:
+                beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         }
     }
 
@@ -244,7 +251,8 @@ impl SimpleLanguageService {
             native_types: None,
             project_complete: false,
             has_package_dependencies: false,
-            diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable::new(),
+            diagnostics_overrides:
+                beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         }
     }
 
@@ -288,7 +296,7 @@ impl SimpleLanguageService {
     /// diagnostics keep today's Rule 1 completeness-ladder severities.
     pub fn set_diagnostics_overrides(
         &mut self,
-        table: crate::compilation::diagnostics_policy::DiagnosticsTable,
+        table: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
     ) {
         self.diagnostics_overrides = table;
     }
@@ -1161,7 +1169,7 @@ impl SimpleLanguageService {
     /// class-variable type annotations, and method bodies (parameters, return
     /// type, body statements).
     fn find_identifier_in_class(
-        class: &crate::ast::ClassDefinition,
+        class: &beamtalk_core::ast::ClassDefinition,
         offset: ByteOffset,
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
@@ -1212,7 +1220,7 @@ impl SimpleLanguageService {
     /// Covers: protocol name, `extending:` target, type-parameter bounds, and
     /// method signature type annotations (both instance and class-side). (BT-1936)
     fn find_identifier_in_protocol(
-        protocol: &crate::ast::ProtocolDefinition,
+        protocol: &beamtalk_core::ast::ProtocolDefinition,
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
         if offset_val >= protocol.name.span.start() && offset_val < protocol.name.span.end() {
@@ -1262,7 +1270,7 @@ impl SimpleLanguageService {
 
     /// Walk a Tonel-style standalone method definition for an identifier at `offset`.
     fn find_identifier_in_standalone_method(
-        smd: &crate::ast::StandaloneMethodDefinition,
+        smd: &beamtalk_core::ast::StandaloneMethodDefinition,
         offset: ByteOffset,
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
@@ -1285,9 +1293,9 @@ impl SimpleLanguageService {
     /// Walk a method's parameter types, return type, and body for an identifier
     /// at the given offset. Shared by class methods and standalone methods.
     fn find_identifier_in_method_signature_and_body(
-        parameters: &[crate::ast::ParameterDefinition],
+        parameters: &[beamtalk_core::ast::ParameterDefinition],
         return_type: Option<&TypeAnnotation>,
-        body: &[crate::ast::ExpressionStatement],
+        body: &[beamtalk_core::ast::ExpressionStatement],
         offset: ByteOffset,
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
@@ -1321,7 +1329,7 @@ impl SimpleLanguageService {
     /// type-parameter names are local to their declaration and have no global
     /// definition to navigate to. (BT-1936)
     fn find_identifier_in_type_params(
-        type_params: &[crate::ast::TypeParamDecl],
+        type_params: &[beamtalk_core::ast::TypeParamDecl],
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
         for param in type_params {
@@ -1475,7 +1483,7 @@ impl SimpleLanguageService {
                     })
                 }),
             Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-                if let crate::ast::StringSegment::Interpolation(expr) = seg {
+                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
                     Self::find_identifier_in_expr(expr, offset)
                 } else {
                     None
@@ -1616,7 +1624,7 @@ impl SimpleLanguageService {
             }
             Expression::StringInterpolation { segments, .. } => {
                 for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                    if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                         Self::collect_identifiers(expr, name, results);
                     }
                 }
@@ -1628,7 +1636,7 @@ impl SimpleLanguageService {
 
 impl LanguageService for SimpleLanguageService {
     fn update_file(&mut self, file: Utf8PathBuf, content: String) {
-        use crate::source_analysis::{lex_with_eof, parse};
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
         let (module, diagnostics) = parse(tokens);
@@ -1638,7 +1646,7 @@ impl LanguageService for SimpleLanguageService {
         // analyse()) since diagnostic_provider lazily runs full semantic analysis
         // when diagnostics are requested, avoiding duplicate work.
         let (class_hierarchy_result, hierarchy_diags) =
-            crate::semantic_analysis::ClassHierarchy::build(&module);
+            beamtalk_core::semantic_analysis::ClassHierarchy::build(&module);
         if let Ok(mut class_hierarchy) = class_hierarchy_result {
             // BT-1933: Register protocol definitions as synthetic class entries
             // so LSP features (completions, has_class) work with protocol names.
@@ -1651,7 +1659,7 @@ impl LanguageService for SimpleLanguageService {
             // surface the parser never fully saw.
             let has_parse_errors = diagnostics
                 .iter()
-                .any(|d| d.severity == crate::source_analysis::Severity::Error);
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
             if has_parse_errors {
                 class_hierarchy.mark_module_classes_surface_incomplete(&module);
             }
@@ -1663,7 +1671,7 @@ impl LanguageService for SimpleLanguageService {
             // BT-2795: Track this file's standalone extension definitions so
             // other files' diagnostics see them (cross-file extension
             // visibility, ADR 0066 / ADR 0100 Rule 2 WS1).
-            let mut extensions = crate::compilation::extension_index::ExtensionIndex::new();
+            let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
             extensions.add_module(&module, file.as_std_path());
             self.project_index
                 .set_file_extensions(file.clone(), extensions);
@@ -1672,7 +1680,8 @@ impl LanguageService for SimpleLanguageService {
             // declarations in the project-wide alias registry, so
             // completions/goto-definition/find-references/hover can resolve
             // alias names cross-file the same way they resolve classes.
-            let alias_infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+            let alias_infos =
+                beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
             self.project_index
                 .update_file_aliases(file.clone(), alias_infos);
 
@@ -1683,7 +1692,7 @@ impl LanguageService for SimpleLanguageService {
             // immediately above (BT-2910 already wired the CLI `build`/`lint`
             // side of this; this closes the LSP parity gap).
             let protocol_infos =
-                crate::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
+                beamtalk_core::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
             self.project_index
                 .update_file_protocols(file.clone(), protocol_infos);
         } else {
@@ -1729,7 +1738,7 @@ impl LanguageService for SimpleLanguageService {
                 // `stdlib_mode = true` so the "conflicts with a stdlib class"
                 // shadowing check (BT-738) doesn't flag every class the file
                 // legitimately defines.
-                let mut options = crate::CompilerOptions::default();
+                let mut options = beamtalk_core::CompilerOptions::default();
                 if self.project_index.is_stdlib_file(file) {
                     options.stdlib_mode = true;
                 }
@@ -1738,7 +1747,7 @@ impl LanguageService for SimpleLanguageService {
                 // injected knowledge is project-complete.
                 if self.project_complete {
                     options.knowledge_scope =
-                        crate::semantic_analysis::KnowledgeScope::ProjectComplete;
+                        beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
                 options.has_package_dependencies = self.has_package_dependencies;
                 // BT-2951: `current_package` so `AliasRegistry::add_pre_loaded`'s
@@ -2046,7 +2055,7 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        let inferred = crate::semantic_analysis::type_checker::infer_method_return_types(
+        let inferred = beamtalk_core::semantic_analysis::type_checker::infer_method_return_types(
             &file_data.module,
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
@@ -3594,8 +3603,8 @@ mod tests {
 
     #[test]
     fn check_ffi_call_enriches_line_from_registry() {
-        use crate::semantic_analysis::InferredType;
-        use crate::semantic_analysis::type_checker::{
+        use beamtalk_core::semantic_analysis::InferredType;
+        use beamtalk_core::semantic_analysis::type_checker::{
             FunctionSignature, NativeTypeRegistry, ParamType, TypeProvenance,
         };
 
@@ -3807,7 +3816,7 @@ mod tests {
 
     #[test]
     fn find_body_open_offset_finds_fat_arrow() {
-        use crate::source_analysis::Span;
+        use beamtalk_core::source_analysis::Span;
         // `count => 42` — the `=>` is at byte 6 within "count => 42"
         let source = "count => 42";
         let span = Span::new(0, len32(source));
@@ -3817,7 +3826,7 @@ mod tests {
 
     #[test]
     fn find_body_open_offset_with_keyword_selector() {
-        use crate::source_analysis::Span;
+        use beamtalk_core::source_analysis::Span;
         // keyword method: `add: x => x + 1`
         let source = "add: x => x + 1";
         let span = Span::new(0, len32(source));
@@ -3827,7 +3836,7 @@ mod tests {
 
     #[test]
     fn find_body_open_offset_returns_none_without_fat_arrow() {
-        use crate::source_analysis::Span;
+        use beamtalk_core::source_analysis::Span;
         let source = "no body opener here";
         let span = Span::new(0, len32(source));
         assert!(find_body_open_offset(source, span).is_none());
@@ -3858,7 +3867,7 @@ mod tests {
 
     #[test]
     fn completions_use_native_type_registry() {
-        use crate::semantic_analysis::type_checker::{
+        use beamtalk_core::semantic_analysis::type_checker::{
             FunctionSignature, InferredType, ParamType, TypeProvenance,
         };
 
@@ -4327,7 +4336,7 @@ mod tests {
     /// not produce a spurious `UnresolvedClass` diagnostic.
     #[test]
     fn diagnostics_resolve_cross_file_class_via_project_index() {
-        use crate::source_analysis::DiagnosticCategory;
+        use beamtalk_core::source_analysis::DiagnosticCategory;
 
         let mut service = SimpleLanguageService::new();
         let src_file = Utf8PathBuf::from("src/Foo.bt");
@@ -4509,10 +4518,10 @@ mod tests {
     /// promotes the default `Hint` on an unresolved selector to `Error`.
     #[test]
     fn diagnostics_applies_severity_overrides() {
-        use crate::compilation::diagnostics_policy::{
+        use beamtalk_core::compilation::diagnostics_policy::{
             DiagnosticSeverityOverride, DiagnosticsTable,
         };
-        use crate::source_analysis::{DiagnosticCategory, Severity};
+        use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
 
         let mut service = SimpleLanguageService::new();
         let file = Utf8PathBuf::from("src/Dnu.bt");
@@ -4604,7 +4613,7 @@ mod tests {
     /// stdlib in the `ProjectIndex`.
     #[test]
     fn diagnostics_skip_stdlib_shadowing_for_stdlib_files() {
-        use crate::language_service::project_index::ProjectIndex;
+        use crate::project_index::ProjectIndex;
 
         // Pre-index a stdlib file defining `Counter`.
         let stdlib_path = Utf8PathBuf::from("stdlib/src/Counter.bt");

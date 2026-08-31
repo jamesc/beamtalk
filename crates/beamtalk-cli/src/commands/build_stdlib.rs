@@ -2057,12 +2057,12 @@ mod tests {
         // only one of them would seed `internal` aliases.
         assert_eq!(
             pre_loaded_aliases[0].package.as_deref(),
-            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            Some(beamtalk_language_service::STDLIB_PACKAGE_MARKER),
             "stdlib_pre_loaded_aliases' stamp must match STDLIB_PACKAGE_MARKER"
         );
         assert_eq!(
             stdlib_compiler_options(false).current_package.as_deref(),
-            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            Some(beamtalk_language_service::STDLIB_PACKAGE_MARKER),
             "stdlib_compiler_options' current_package must match STDLIB_PACKAGE_MARKER"
         );
 

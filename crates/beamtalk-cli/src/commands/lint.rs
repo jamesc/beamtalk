@@ -110,7 +110,10 @@ fn collect_diagnostics(
     // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
     // Note: apply_expect_directives may inject Severity::Warning for stale
     // @expect annotations, so we include those in the output.
-    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut lint_diags);
+    beamtalk_language_service::queries::diagnostic_provider::apply_expect_directives(
+        module,
+        &mut lint_diags,
+    );
 
     // BT-3257: mirrors `compute_project_diagnostics_with_analysis`'s
     // placement — appended after `apply_expect_directives` because a
