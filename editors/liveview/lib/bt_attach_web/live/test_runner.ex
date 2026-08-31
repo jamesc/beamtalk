@@ -108,7 +108,12 @@ defmodule BtAttachWeb.Live.TestRunner do
   # BT-2599) rather than stalling the LiveView process against a slow node. We
   # reset `test_classes` to the nil sentinel so the pane shows its "discovering"
   # state (not the misleading "No TestCase subclasses" empty-state) until the
-  # `handle_async(:test_discover, …)` fold resolves.
+  # `handle_async(:test_discover, …)` fold resolves. We also reset `tests_error`/
+  # `tests_error_owner` here (BT-3358): a `:run_load`-owned error is deliberately
+  # immune to a *stale* discovery landing late (see `apply_test_classes/3`), but
+  # this refresh is a fresh, user-requested discovery, not a stale one — it must
+  # still be able to clear a standing error rather than being blocked by its own
+  # owner guard forever.
   def handle_event("tests_refresh", _params, socket) do
     {:noreply,
      socket
