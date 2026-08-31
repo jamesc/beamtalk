@@ -36,6 +36,7 @@
     'ChangeEntry',
     'ChangeLog',
     'Character',
+    'ChildSupervisor',
     'Class',
     'ClassBuilder',
     'ClassLoaded',

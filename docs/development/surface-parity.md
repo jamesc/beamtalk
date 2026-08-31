@@ -330,8 +330,9 @@ text across surfaces:
   lines** (runtime logging, `Transcript show:`), **LSP hovers / tooling** that
   echo a value, and any nested rendering inside another `printString`. Default
   forms: `ClassName(field: value, ...)` for `Value`, `Actor(ClassName, pid)` /
-  `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` for live
-  processes, bare `ClassName` for plain objects. The old `a ClassName` article
+  `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` /
+  `ChildSupervisor(ClassName, pid)` (ADR 0118) for live processes, bare
+  `ClassName` for plain objects. The old `a ClassName` article
   form is gone. This is **not surface-specific** — REPL, logs, and tooling must
   show the same text for the same value.
 - **`displayString` (Display)** is the **string-interpolation hook**: every

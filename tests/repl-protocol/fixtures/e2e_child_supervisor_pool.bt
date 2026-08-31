@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: ChildSupervisor subclass for the startChild/count/terminateChild
+// lifecycle test in child_supervisor.btscript (BT-3366).
+
+ChildSupervisor(E2EChildSupWorker) subclass: E2EChildSupPool
+
+  class childClass -> Class => E2EChildSupWorker

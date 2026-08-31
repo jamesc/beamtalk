@@ -1,0 +1,132 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for ChildSupervisor (BT-3366, ADR 0118).
+//
+// These tests require E2E because they manage live OTP processes and (for
+// the config-preserving-restart regression) drive a kill → poll → verify
+// lifecycle across REPL turns — BUnit's single-method-body execution model
+// cannot express the wait-for-restart step as cleanly. Per project policy
+// (see feedback_epic_repl_validation), user-facing features must have at
+// least one e2e btscript covering the whole end-to-end flow.
+//
+// ADR: docs/ADR/0118-child-supervisor.md
+
+// @load tests/repl-protocol/fixtures/e2e_child_supervisor_worker.bt
+// @load tests/repl-protocol/fixtures/e2e_child_supervisor_pool.bt
+// @load tests/repl-protocol/fixtures/e2e_child_supervisor_named_worker.bt
+// @load tests/repl-protocol/fixtures/e2e_child_supervisor_restart_pool.bt
+
+// ===========================================================================
+// START AND DISPLAY
+// ===========================================================================
+
+// supervise returns a human-readable ChildSupervisor(ClassName, Pid) object
+// (not a raw tuple, and not mislabeled as plain Supervisor)
+sup := (E2EChildSupPool supervise) unwrap
+// => ChildSupervisor(E2EChildSupPool, _)
+
+// count starts at 0 — no children yet
+sup count
+// => 0
+
+// ===========================================================================
+// startChild / startChild: — each call gets its own persistent config
+// ===========================================================================
+
+// startChild: passes per-child args, just like DynamicSupervisor's
+w1 := (sup startChild: #{#value => 10}) unwrap
+// => Actor(E2EChildSupWorker, _)
+
+w1 getValue
+// => 10
+
+// A second child of the SAME class gets a distinct OTP child id and its
+// own independent config — this is exactly what simple_one_for_one cannot
+// provide (only one shared template).
+w2 := (sup startChild: #{#value => 20}) unwrap
+// => Actor(E2EChildSupWorker, _)
+
+w2 getValue
+// => 20
+
+sup count
+// => 2
+
+// startChild (no args) uses defaults
+w3 := sup startChild unwrap
+// => Actor(E2EChildSupWorker, _)
+
+w3 getValue
+// => 0
+
+sup count
+// => 3
+
+// ===========================================================================
+// terminateChild: removes the child AND its permanent OTP child spec
+// ===========================================================================
+
+(sup terminateChild: w3) unwrap
+// => nil
+
+sup count
+// => 2
+
+// terminateChild: is idempotent — terminating an already-gone child succeeds
+(sup terminateChild: w3) unwrap
+// => nil
+
+sup stop
+// => nil
+
+// ===========================================================================
+// CONFIG-PRESERVING RESTART — the feature's core guarantee (BT-3366)
+// ===========================================================================
+// Kill a child started with value: 99. Under OTP one_for_one with a
+// permanent, per-child spec, the supervisor restarts it with the SAME
+// args automatically — unlike DynamicSupervisor's simple_one_for_one,
+// which can only ever replay the *shared template's* args (a fresh
+// default), never a specific child's own original config.
+
+restartSup := (E2EChildSupRestartPool supervise) unwrap
+// => ChildSupervisor(E2EChildSupRestartPool, _)
+
+worker := (restartSup startChild: #{#value => 99}) unwrap
+// => Actor(E2EChildSupNamedWorker, _)
+
+// initialize registered it under a fixed name
+lookup1 := (Actor named: #e2eChildSupRestartWorker) unwrap
+// => Actor(E2EChildSupNamedWorker, _)
+
+lookup1 getValue
+// => 99
+
+restartSup count
+// => 1
+
+// Kill the child. one_for_one + permanent restart replays the ORIGINAL
+// #{#value => 99} args — not the state-declared default of 0.
+worker kill
+// => ok
+
+// Poll until the supervisor has restarted the child and it has
+// re-registered under the fixed name. Bounded at ~1s (50 x 20ms) to fail
+// fast rather than hang on wall-clock time.
+attempts := 0. [(Actor named: #e2eChildSupRestartWorker) isError and: [attempts < 50]] whileTrue: [Timer sleep: 20. attempts := attempts + 1]. attempts < 50
+// => true
+
+restartSup count
+// => 1
+
+// The restarted replacement is a NEW process (different pid), but the
+// supervisor replayed its own permanent child spec's original args —
+// value is 99 again, not the fresh-spawn default of 0.
+lookup2 := (Actor named: #e2eChildSupRestartWorker) unwrap
+// => Actor(E2EChildSupNamedWorker, _)
+
+lookup2 getValue
+// => 99
+
+restartSup stop
+// => nil

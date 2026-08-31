@@ -1,0 +1,150 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ChildSupervisor — Abstract base class for OTP-native config-preserving
+/// dynamic supervision (BT-3366, ADR 0118).
+///
+/// Subclass `ChildSupervisor` when you need runtime-added children that each
+/// carry their own, differing startup configuration — and want a
+/// crash-triggered restart to replay that specific child's own original
+/// args, automatically, the way plain OTP `one_for_one` supervision does.
+///
+/// This is different from `DynamicSupervisor`, which wraps OTP
+/// `simple_one_for_one`: a single shared, anonymous child template. Under
+/// `simple_one_for_one`, a crash restart always replays the *template's*
+/// args, never the specific args a particular `startChild:` call passed —
+/// there is no way to get per-child config-preserving restart from
+/// `DynamicSupervisor`, regardless of what args were passed at start time.
+///
+/// `ChildSupervisor` instead runs a plain `one_for_one` supervisor. Each
+/// `startChild:` call registers a distinct, permanent OTP child spec (its
+/// own id, its own args) via `supervisor:start_child/2` — the traditional
+/// OTP dynamic-child pattern that predates `simple_one_for_one`. OTP
+/// remembers each child's own spec and replays those exact original args on
+/// restart, so `supervisionPolicy` (`#permanent`/`#transient`/`#temporary`)
+/// on the child class works exactly as documented.
+///
+/// Override `class childClass` to declare which actor class this supervisor
+/// manages.
+///
+/// ## Examples
+/// ```beamtalk
+/// ChildSupervisor(Monitor) subclass: MonitorSupervisor
+///   class childClass => Monitor
+///
+/// sup := (MonitorSupervisor supervise) unwrap
+/// m := (sup startChild: #{#check => aCheck, #interval => 30}) unwrap
+/// // crash → OTP restarts `m`'s replacement with the *same* args
+/// // automatically, no onExit:/manual-respawn needed.
+/// ```
+///
+/// @see DynamicSupervisor (for a homogeneous, anonymous runtime-added pool)
+/// @see Supervisor (for static children declared at startup)
+/// @see Actor (base class for supervised processes)
+abstract Object subclass: ChildSupervisor(C)
+
+  // === Class-side configuration (override in concrete subclasses) ===
+
+  /// Maximum number of restarts within `restartWindow` seconds.
+  ///
+  /// If this rate is exceeded, the supervisor itself shuts down.
+  class maxRestarts -> Integer => 10
+
+  /// Time window in seconds for the `maxRestarts` rate limit.
+  class restartWindow -> Integer => 60
+
+  /// Whether this class is a supervisor (always true for ChildSupervisor subclasses).
+  ///
+  /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
+  class isSupervisor -> Boolean => true
+
+  /// Return the actor class that this supervisor manages.
+  ///
+  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ChildSupervisor(Monitor) subclass: MonitorSupervisor
+  ///   class childClass => Monitor
+  /// ```
+  class childClass -> Class => self subclassResponsibility
+
+  /// Lifecycle hook called after this supervisor has started.
+  ///
+  /// Override to perform post-start setup (e.g., pre-populating children
+  /// via `startChild:`). Runs in the caller's process, so supervisor
+  /// calls will not deadlock.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ChildSupervisor(Monitor) subclass: MonitorSupervisor
+  ///   class childClass => Monitor
+  ///   class initialize: sup =>
+  ///     sup startChild: #{#check => #diskSpace}
+  /// ```
+  class initialize: _supervisor -> Nil => nil
+
+  // === Class-side lifecycle ===
+
+  /// Start this supervisor (or return the already-running instance).
+  ///
+  /// Returns `Result(Self, Error)`. Use `unwrap` for boot-style
+  /// "crash on failure" call sites, or `ifOk:ifError:` / `andThen:` for
+  /// recoverable starts. Failures surface as
+  /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  class supervise -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) startLink: self
+
+  /// Return the running supervisor instance, or nil if not started.
+  class current => (Erlang beamtalk_supervisor) current: self
+
+  // === Instance-side child management ===
+
+  /// Start a new child with default args.
+  ///
+  /// Registers a distinct, permanent OTP child spec for this child — a
+  /// crash-triggered restart replays these (empty) args. Returns
+  /// `Result(C, Error)`. Use `unwrap` when failure should propagate as an
+  /// exception, or `ifOk:ifError:` / `andThen:` for recoverable starts.
+  /// Failures surface as `Result error: #beamtalk_error{kind = child_start_failed}`.
+  startChild -> Result(C, Error) =>
+    (Erlang beamtalk_supervisor) childStartChild: self
+
+  /// Start a new child with the given initialization args.
+  ///
+  /// Registers a distinct, permanent OTP child spec carrying these exact
+  /// `args` — a crash-triggered restart of *this* child replays them,
+  /// unaffected by any other child's config. Returns `Result(C, Error)`.
+  /// Use `unwrap` when failure should propagate as an exception, or
+  /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
+  /// as `Result error: #beamtalk_error{kind = child_start_failed}`.
+  startChild: args :: Object -> Result(C, Error) =>
+    (Erlang beamtalk_supervisor) childStartChild: self with: args
+
+  /// Terminate the given child process and remove its permanent child spec.
+  ///
+  /// Unlike `DynamicSupervisor terminateChild:` (whose `simple_one_for_one`
+  /// template must never be deleted), this always deletes the terminated
+  /// child's now-unused OTP child spec afterward — otherwise repeated
+  /// `startChild:`/`terminateChild:` cycles would leak spec entries in the
+  /// supervisor forever. Returns `Result(Nil, Error)`. Idempotent on
+  /// `not_found` — terminating an already-gone child returns
+  /// `Result ok: nil`. Genuine failures surface as
+  /// `Result error: #beamtalk_error{kind = terminate_failed}`.
+  terminateChild: child :: C -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) childTerminateChild: self child: child
+
+  /// Return the count of currently-running children.
+  count -> Integer => self countChildrenResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
+  /// `countChildren/1` call. Keeps `count` pure Beamtalk.
+  internal countChildrenResult =>
+    (Erlang beamtalk_supervisor) countChildren: self
+
+  /// Stop this supervisor and all its children.
+  stop -> Nil => self stopResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `stop/1`
+  /// call. Keeps `stop` pure Beamtalk.
+  internal stopResult => (Erlang beamtalk_supervisor) stop: self

@@ -77,6 +77,42 @@ fn make_dynamic_supervisor_module() -> Module {
     }
 }
 
+/// Build a minimal `ChildSupervisor subclass: MonitorSupervisor` module (BT-3366).
+fn make_child_supervisor_module() -> Module {
+    let class = ClassDefinition {
+        name: Identifier::new("MonitorSupervisor", Span::new(0, 0)),
+        superclass: Some(Identifier::new("ChildSupervisor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Object,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: Some(SupervisorKind::Child),
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    Module {
+        classes: vec![class],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        expressions: vec![],
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: vec![],
+    }
+}
+
 #[test]
 fn test_static_supervisor_has_supervisor_behaviour() {
     let module = make_static_supervisor_module();
@@ -253,6 +289,66 @@ fn test_dynamic_supervisor_exports_and_defines_child_class() {
     assert!(
         code.contains("'childClass'/0"),
         "Dynamic supervisor must export/define 'childClass'/0 (called by beamtalk_supervisor:startChild). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_child_supervisor_has_supervisor_behaviour() {
+    let module = make_child_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@monitorsupervisor"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("'behaviour' = ['supervisor']"),
+        "Child supervisor must have supervisor behaviour. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_child_supervisor_init_delegates_to_child_init() {
+    let module = make_child_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@monitorsupervisor"))
+        .expect("codegen should succeed");
+    // one_for_one with an empty initial child list is set inside
+    // beamtalk_supervisor:child_init/2 (runtime), not in the generated init/1.
+    assert!(
+        code.contains(
+            "call 'beamtalk_supervisor':'child_init'('bt@monitorsupervisor', 'MonitorSupervisor')"
+        ),
+        "Child supervisor init/1 must delegate to beamtalk_supervisor:child_init/2 with module and class atoms. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_child_supervisor_init_does_not_fetch_children() {
+    let module = make_child_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@monitorsupervisor"))
+        .expect("codegen should succeed");
+    assert!(
+        !code.contains("'children'"),
+        "Child supervisor init/1 must NOT call 'children'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_child_supervisor_exports_and_defines_child_class() {
+    // beamtalk_supervisor:childStartChild/1,2 calls SupMod:'childClass'() directly at runtime.
+    let module = make_child_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@monitorsupervisor"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("'childClass'/0"),
+        "Child supervisor must export/define 'childClass'/0 (called by beamtalk_supervisor:childStartChild). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_is_actor_class_returns_true_for_child_supervisor_subclass() {
+    let module = make_child_supervisor_module();
+    let (hierarchy, _) = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
+    let hierarchy = hierarchy.unwrap();
+    assert!(
+        CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+        "ChildSupervisor subclass must be routed through generate_actor_module. Got false."
     );
 }
 

@@ -203,6 +203,20 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "DynamicSupervisor")
     }
 
+    /// Returns true if the named class is `ChildSupervisor` or a subclass (BT-3366, ADR 0118).
+    ///
+    /// BT-2882: same cross-file-stub-chain invariant as
+    /// [`Self::is_actor_subclass`] — see its doc comment.
+    #[must_use]
+    pub fn is_child_supervisor_subclass(&self, class_name: &str) -> bool {
+        if class_name == "ChildSupervisor" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "ChildSupervisor")
+    }
+
     /// Returns true if the named class is declared `native:` (ADR 0056, ADR 0101).
     ///
     /// Native classes are declared with `native: module_name` and delegate to a

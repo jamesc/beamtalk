@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3366: Concrete ChildSupervisor subclass with overridden config — fixture
+// for child_supervisor_defaults_test.bt.
+
+ChildSupervisor(Counter) subclass: TestChildSupervisorCustom
+
+  class childClass => Counter
+
+  class maxRestarts -> Integer => 5
+
+  class restartWindow -> Integer => 120

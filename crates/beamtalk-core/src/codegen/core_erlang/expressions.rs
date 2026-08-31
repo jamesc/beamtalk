@@ -3137,13 +3137,15 @@ impl CoreErlangGenerator {
                     .class_hierarchy
                     .as_ref()
                     .is_some_and(|h| h.is_actor_subclass(other));
-                // BT-2870: a Supervisor/DynamicSupervisor subclass reference
-                // is a *different* 4-tuple, tagged `'beamtalk_supervisor'`
+                // BT-2870: a Supervisor/DynamicSupervisor/ChildSupervisor subclass
+                // reference is a *different* 4-tuple, tagged `'beamtalk_supervisor'`
                 // (or transiently `'beamtalk_supervisor_new'`) rather than
                 // `'beamtalk_object'` — same reasoning as the actor case
                 // above, just a different reserved tag.
                 let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
-                    h.is_supervisor_subclass(other) || h.is_dynamic_supervisor_subclass(other)
+                    h.is_supervisor_subclass(other)
+                        || h.is_dynamic_supervisor_subclass(other)
+                        || h.is_child_supervisor_subclass(other)
                 });
                 if is_actor {
                     self.wrap_actor_class_tag_test(match_var, other, bound_success, rest_doc)
