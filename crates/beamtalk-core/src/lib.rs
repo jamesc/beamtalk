@@ -29,7 +29,14 @@ pub mod file_walker;
 pub mod language_service;
 pub(crate) mod method_source_walker;
 pub mod near_miss_divider;
-pub mod queries;
+// BT-3342 (ADR 0117 Decision step 3): `queries` merged into `language_service`
+// as a submodule — both were the Language Service DDD context split into two
+// Rust modules with an unenforced (and, until this issue, unnoticed) cycle
+// between them. Re-exported here under its old top-level name so every
+// existing `beamtalk_core::queries::...` / `crate::queries::...` call site
+// (inside this crate and in `beamtalk-lsp`/`beamtalk-mcp`/`beamtalk-cli`/
+// `beamtalk-compiler-port`/`beamtalk-lint`) keeps compiling unchanged.
+pub use language_service::queries;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub mod span;

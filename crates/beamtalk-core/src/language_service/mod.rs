@@ -50,6 +50,16 @@
 //! ```
 
 mod project_index;
+// BT-3342 (ADR 0117 Decision step 3): the query-provider modules
+// (`completion_provider`, `definition_provider`, `hover_provider`, ...) that
+// used to be the sibling top-level `queries` module — merged in here because
+// both were the single Language Service DDD context split into two Rust
+// modules with a two-way, previously-unenforced cycle between them (this
+// orchestrator called into the providers for query behavior; the providers
+// imported result/protocol types — `Position`, `Location`, `Completion`, ...
+// — defined below). Re-exported at the crate root under its old name
+// (`crate::queries`, see `lib.rs`) so existing call sites are unaffected.
+pub mod queries;
 pub mod runtime_delegate;
 mod value_objects;
 
