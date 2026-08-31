@@ -30,6 +30,7 @@ mod cli_logs;
 mod cli_new;
 mod cli_run;
 mod cli_test;
+mod cli_test_metamorphic;
 mod cli_transcript;
 mod cli_workspace;
 mod gen_native;
