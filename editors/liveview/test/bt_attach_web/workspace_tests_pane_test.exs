@@ -85,7 +85,16 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
 
     test "Load tests resolves off-socket and refreshes the catalogue", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Await the tab-open's own `:test_discover` catalogue read (BT-3322's
+      # pattern, same as "Run all" above) before firing `load_tests`: its
+      # `:test_op` async could otherwise complete and fold `tests_error` (or
+      # its absence) before the still-in-flight tab-open discovery's own fold
+      # runs, and `apply_test_classes/3`'s unconditional `tests_error: nil`
+      # reset on that later-processed discovery would then clobber whatever
+      # `load_tests` just set (BT-3328).
       render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
       render_click(view, "load_tests")
       html = render_async(view, 2_000)
@@ -117,7 +126,13 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       StubWorkspaceClient.set_run_tests(:bogus)
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Await the tab-open's own discovery first (BT-3328): `apply_test_result/2`
+      # writes `tests_error` on this path too (not just `load_tests`'s), so an
+      # unawaited discovery landing AFTER this fold could clobber it the same
+      # way — see the "Load tests resolves off-socket..." test above.
       render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
       render_click(view, "run_tests")
       html = render_async(view, 2_000)
@@ -132,7 +147,11 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       StubWorkspaceClient.set_load_tests({:error, :unauthorized})
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Await the tab-open's own discovery first — see the "Load tests
+      # resolves off-socket..." test above for why (BT-3328).
       render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
       render_click(view, "load_tests")
       html = render_async(view, 2_000)
@@ -147,7 +166,11 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       StubWorkspaceClient.set_load_tests(:bogus)
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Await the tab-open's own discovery first — see the "Load tests
+      # resolves off-socket..." test above for why (BT-3328).
       render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view, 2_000) =~ "StubDemoTest"
 
       render_click(view, "load_tests")
       html = render_async(view, 2_000)
