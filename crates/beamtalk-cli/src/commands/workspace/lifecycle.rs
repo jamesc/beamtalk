@@ -45,16 +45,35 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             // creation time, see below) and metadata is never otherwise rewritten.
             // Once the directory exists, this — the next successful lookup by
             // name — can canonicalize it for free using the caller's own
-            // `project_path`, so the workspace doesn't carry a stale relative
-            // path forever.
+            // `project_path`.
+            //
+            // This trusts the current call's `project_path` as authoritative for
+            // an existing named workspace, which a later `--workspace <name>`
+            // invoked from an unrelated directory (typo, wrong cwd, moved
+            // project) could abuse to silently repoint the stored path. That
+            // can't affect routing — lookup is keyed by `workspace_id`, not this
+            // field — only the informational path `workspace list`/`status`
+            // display, so it's logged rather than blocked outright.
             if !metadata.project_path.is_absolute() {
                 if let Ok(canonical_project_path) = project_path.canonicalize() {
                     let healed = WorkspaceMetadata {
                         project_path: canonical_project_path,
-                        ..metadata
+                        ..metadata.clone()
                     };
-                    save_workspace_metadata(&healed)?;
-                    return Ok(healed);
+                    // Best-effort: a failed heal write (disk full, permissions)
+                    // must not fail workspace creation over a `project_path` that
+                    // was already valid and usable — matches this function's
+                    // no-error-on-`project_path` contract above.
+                    if save_workspace_metadata(&healed).is_ok() {
+                        eprintln!(
+                            "Updated workspace '{workspace_id}' project_path: '{}' -> '{}' \
+                             (run from the wrong directory? re-run from the workspace's \
+                             actual project directory to correct it)",
+                            metadata.project_path.display(),
+                            healed.project_path.display()
+                        );
+                        return Ok(healed);
+                    }
                 }
             }
             return Ok(metadata);
