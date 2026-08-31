@@ -76,31 +76,6 @@ pub(super) fn ext_var(idx: usize) -> String {
     s
 }
 
-/// Escapes special characters for embedding in an Erlang string literal.
-///
-/// Handles `\`, `"`, `\n`, `\r`, `\t`, and `\0` so the result is safe to
-/// embed between `"..."` in generated Erlang source (e.g. `-eval` arguments,
-/// path strings passed to `erlc`, `.app` descriptions).
-///
-/// This is distinct from `beamtalk_cerl_doc::escape::escape_core_erlang_string`,
-/// which is a lighter variant for Core Erlang `.core` output.
-#[must_use]
-pub fn escape_erlang_string(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => result.push_str("\\\\"),
-            '"' => result.push_str("\\\""),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            '\0' => result.push_str("\\0"),
-            _ => result.push(c),
-        }
-    }
-    result
-}
-
 /// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
 /// module attributes section. Returns `Document::Nil` when classes is empty.
 pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
@@ -624,54 +599,6 @@ mod tests {
     #[test]
     fn test_user_package_prefix_bt_only() {
         assert_eq!(user_package_prefix("bt@counter"), None);
-    }
-
-    #[test]
-    fn test_escape_erlang_string_empty() {
-        assert_eq!(escape_erlang_string(""), "");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_no_special_chars() {
-        assert_eq!(escape_erlang_string("hello"), "hello");
-        assert_eq!(escape_erlang_string("foo_bar"), "foo_bar");
-        assert_eq!(escape_erlang_string("path/to/file"), "path/to/file");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_backslashes() {
-        assert_eq!(escape_erlang_string("a\\b"), "a\\\\b");
-        assert_eq!(escape_erlang_string("\\\\"), "\\\\\\\\");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_quotes() {
-        assert_eq!(escape_erlang_string("a\"b"), "a\\\"b");
-        assert_eq!(escape_erlang_string("\"test\""), "\\\"test\\\"");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_newlines() {
-        assert_eq!(escape_erlang_string("line1\nline2"), "line1\\nline2");
-        assert_eq!(escape_erlang_string("\r\n"), "\\r\\n");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_tabs() {
-        assert_eq!(escape_erlang_string("col1\tcol2"), "col1\\tcol2");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_null_byte() {
-        assert_eq!(escape_erlang_string("\0"), "\\0");
-    }
-
-    #[test]
-    fn test_escape_erlang_string_combined() {
-        assert_eq!(
-            escape_erlang_string("path\\to\\\"file\"\n"),
-            "path\\\\to\\\\\\\"file\\\"\\n"
-        );
     }
 
     #[test]

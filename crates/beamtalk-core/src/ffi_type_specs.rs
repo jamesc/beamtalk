@@ -26,10 +26,10 @@
 //! [`collect_project_dependency_ebin_dirs`] to resolve those directories from
 //! a project root; `beamtalk-cli` additionally wraps this via `BuildLayout`.
 
-use crate::codegen::core_erlang::escape_erlang_string;
 use crate::semantic_analysis::type_checker::{
     NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
 };
+use beamtalk_cerl_doc::escape::escape_erlang_string;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
