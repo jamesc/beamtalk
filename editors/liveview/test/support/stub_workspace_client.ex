@@ -439,7 +439,22 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   # ── New File + Revert ────────────────────────────────────────────────────
 
-  def new_class(_source, path), do: {:ok, path}
+  @doc """
+  BT-3329: tracks the created class into `:defined_classes` (mirroring
+  `eval/2`'s `subclass:` extraction) so a subsequent `browse_classes` reflects
+  it — needed for a test to reproduce the `ClassModals`/`new_class`
+  direct-write race against the mount-load fold's `browser_classes` read the
+  same way the `eval`-driven push tests above already do.
+  """
+  def new_class(source, path) do
+    case extract_class_name(source) do
+      {:ok, class_name} -> update(:defined_classes, &MapSet.put(&1, class_name))
+      :error -> :ok
+    end
+
+    {:ok, path}
+  end
+
   # `side` (ADR 0112, BT-3187): the entry's disambiguating side, unused by the stub.
   def revert(class, _selector, _side), do: {:ok, class}
 

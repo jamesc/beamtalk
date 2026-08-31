@@ -320,6 +320,68 @@ defmodule BtAttachWeb.WorkspaceMountLoadTest do
       assert render(view) =~ changes_row
       assert Process.alive?(view.pid)
     end
+
+    test "a new-class creation landing before the fold is not clobbered by the mount read",
+         %{conn: conn} do
+      # BT-3329: the `changes`/`save_method` race above has a regression test;
+      # this is the equivalent for `browser_classes`/`ClassModals` — the other
+      # direct-write caller `apply_browser_classes/2`'s BT-3321 doc comment
+      # names. `ClassModals`'s New Class modal (`new_class/3`) writes
+      # `browser_classes` directly via `SystemBrowser.assign_browser_classes/1`,
+      # never touching `:do_source_refresh`/`:ClassLoaded` (the push already
+      # covered by "a source (ClassLoaded) push landing before the fold is not
+      # clobbered" above).
+      :ok = StubWorkspaceClient.arm_mount_gate()
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # The mount-load task is blocked on browse_classes (its first read, one-
+      # shot — see `StubWorkspaceClient.await_mount_gate/0`). Create a class via
+      # the New Class modal while it's pending: a direct write to
+      # `browser_classes` via `SystemBrowser.assign_browser_classes/1`, which
+      # itself calls `browse_classes` — safe from the gate because that first
+      # read was already consumed by the mount task the moment `live/2` started
+      # it, before this synchronous `render_click`/`render_submit` pair runs
+      # (the same ordering "a source (ClassLoaded) push..." above already
+      # relies on for its push refresh). With the fix this sets
+      # `browser_classes_loaded` immediately, before the fold ever runs.
+      class = "RaceCreatedClass#{System.unique_integer([:positive])}"
+      render_click(view, "toggle_new_class", %{})
+
+      html =
+        view
+        |> form("#new-class-form")
+        |> render_submit(%{"name" => class, "superclass" => "Object"})
+
+      # Matched by the class TREE row's own `<span class="cls">` element
+      # (`class_rows/1` in `workspace_live.ex`), not a bare `class` substring
+      # or even a `phx-value-class="#{class}"` attribute — the newly-created
+      # class is also the active tab's `@selected_class`, and its "Remove
+      # Class"/"Rename Class" buttons carry that exact same
+      # `phx-value-class` value regardless of whether the tree itself
+      # reflects the create, so only the tree row's own markup proves the
+      # `browser_classes` assign (not just the active tab) survived the fold
+      # — mirroring the `changes_row` note in the `save_method` race test
+      # above.
+      tree_row = ~s(<span class="cls">#{class}</span>)
+      assert html =~ tree_row
+
+      # Manufacture a staler mount snapshot: the gate only delays the task's
+      # FIRST read, so its later `browse_classes` read genuinely happens after
+      # the create, not before it. Dropping the just-created class from the
+      # stub's tracked set now makes that read omit it regardless, which
+      # exercises the same fold-vs-flag branch: without the loaded-flag guard
+      # the fold would revert the class tree to the staler snapshot; with the
+      # guard (`browser_classes_loaded` set true by the create) the fold skips
+      # this surface.
+      StubWorkspaceClient.clear_defined_classes()
+
+      :ok = StubWorkspaceClient.release_mount_gate()
+      _ = render_async(view, 5_000)
+
+      assert render(view) =~ tree_row
+      assert Process.alive?(view.pid)
+    end
   end
 
   describe "BT-2619 empty workspace + autoflush" do
